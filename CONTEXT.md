@@ -22,11 +22,19 @@ _Avoid_: project, target repo
 
 **Selector**:
 A loop's optional narrowing of which managed repos it applies to, by name or tag; without one, a loop applies to every managed repo.
-_Avoid_: filter (a filter selects matched items within a trigger; a selector selects repos)
+_Avoid_: filter (the trigger's selection expression matches items within a trigger; a selector selects repos)
 
 **Trigger**:
-The standing condition that fires a loop — polled state (e.g. a PR reaching a status) or a schedule. What it produces when it fires is an Event.
-_Avoid_: event (that's one deduplicated match, not the condition), watcher
+The standing condition that fires a loop — a watched stream narrowed by a selection expression over item payloads, or a schedule. What it produces when it fires is an Event.
+_Avoid_: event (that's one deduplicated match, not the condition), watcher, filter (the selection expression plays the filter role; there is no separate filter construct)
+
+**Stream**:
+The class of software-work state a trigger watches — issues or pull requests in managed repos, or the clock for schedules. A trigger names exactly one; the catalog is engine-owned and deliberately small.
+_Avoid_: source, feed, event type
+
+**Payload slice**:
+The defined portion of GitHub's object graph fetched as an item's payload for one stream — GitHub's shapes and names throughout, the slice choosing only which graph edges come along. Selection expressions and prompt interpolation both range over it.
+_Avoid_: event shape, custom schema
 
 **Event**:
 One deduplicated fact the engine may react to, carrying a dedup key and payload — a trigger matching GitHub state, or an operator approval. The dedup key is derived by the engine per trigger type, never authored in the loop file.
