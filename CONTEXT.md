@@ -71,3 +71,11 @@ _Avoid_: daemon, app, backend
 **Worker**:
 The place an agent run executes — a machine with a checkout. Local process first; remote executors (e.g. exe.dev) behind the same seam.
 _Avoid_: runner, sandbox, executor (the seam may be named executor in code, but the concept is Worker)
+
+**Agent**:
+A named member of the factory's team — a persona with standing instructions plus the brain spec that runs it (harness, model, reasoning effort). Defined as a file in the instance repo, filename as identity; every loop names the agent that owns its runs.
+_Avoid_: profile, bot, teammate, persona (the body text is the persona; the entity is the Agent)
+
+**Harness**:
+The coding-agent runtime an agent's brain spec names — Claude Code, Codex CLI, or Pi — driven as a child of the run's Pi parent session. Swapping an agent's harness is editing that one field, never rewriting the agent or its loops.
+_Avoid_: backend, adapter (the usine code that drives a harness, not the concept), runner, agent (a named team member, not the runtime)
