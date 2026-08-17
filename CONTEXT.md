@@ -17,8 +17,20 @@ The declaration, inside the instance repo, of which repos the factory manages, w
 _Avoid_: repo list, inventory
 
 **Managed repo**:
-A repo declared in the registry — what loops watch and act on. The factory needs no write access to it for configuration.
-_Avoid_: project, target repo
+A repo declared in the registry — what loops watch and act on. The factory needs no write access to it for configuration. The registry-level mechanism beneath a Project.
+_Avoid_: target repo
+
+**Project**:
+A managed repo as the operator sees it — the repo plus its board, runs, and factory activity. The home surface lists the factory's projects.
+_Avoid_: repo (for the operator-facing surface; the registry declares managed repos, the operator works in projects)
+
+**Board**:
+A project's kanban view — its items grouped into lanes, with each item's live run on the card. Dragging a card between lanes writes the label swap to GitHub, so the board doubles as a trigger surface.
+_Avoid_: kanban (the form, not the name), pipeline
+
+**Lane**:
+One column of a board, mapping one or more GitHub labels or state sources. Configured per repo; defaults are proposed from the repo's existing labels, two-way synced — usine never deletes a label.
+_Avoid_: column, status, stage
 
 **Selector**:
 A loop's optional narrowing of which managed repos it applies to, by name or tag; without one, a loop applies to every managed repo.
@@ -71,6 +83,10 @@ _Avoid_: preempt, replace
 **Revoke**:
 The engine canceling a run no attempt has started because its Item no longer matches the loop's trigger. Never touches a running attempt; distinct from operator cancel and from supersede.
 _Avoid_: cancel (the operator's act), expire
+
+**Pause**:
+The operator's loop-level switch: a paused loop opens no new runs. Runtime state in the orchestrator, never written to the loop file; existing runs are untouched.
+_Avoid_: disable (deleting/renaming the file is how a loop retires), stop
 
 **Orchestrator**:
 The long-running headless server that evaluates triggers, schedules work, holds state, and serves the UI. Runs locally or in the cloud; where it runs never changes what it is.
