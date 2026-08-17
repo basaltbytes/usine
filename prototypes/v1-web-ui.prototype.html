@@ -1,0 +1,788 @@
+<!--
+  PROTOTYPE — throwaway. Do not productionize.
+  Four variants of the usine v1 web UI (observe + intervene), switchable via
+  ?variant=D|A|B|C or the ←/→ keys / bottom bar. D (default): projects home +
+  per-repo kanban, lanes synced to GitHub labels, drag = label swap that can
+  fire a loop (stubbed). One shared fake dataset dry-runs the acceptance loops
+  (dev-on-ready, review-prs, apply-review-findings) through the settled run
+  model. Wayfinder ticket: basaltbytes/usine#12.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>usine v1 UI — prototype</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#151b23; --panel2:#1b222c; --border:#242e3a;
+    --fg:#dce3ec; --dim:#8b98a9; --dimmer:#5f6b7c;
+    --running:#4da3ff; --waiting:#e8b93e; --failed:#ef6b6b; --ok:#3ecf8e;
+    --canceled:#7b8494; --pending:#9aa7b8; --accent:#7c5cff;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,sans-serif}
+  a{color:var(--running);text-decoration:none}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12.5px}
+  .dim{color:var(--dim)} .dimmer{color:var(--dimmer)} .small{font-size:12px}
+
+  .badge{display:inline-flex;align-items:center;gap:6px;padding:1px 9px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid transparent;white-space:nowrap}
+  .badge::before{content:"";width:7px;height:7px;border-radius:99px;background:currentColor}
+  .b-running{color:var(--running);border-color:#274b73;background:#14263c}
+  .b-waiting{color:var(--waiting);border-color:#6d5a1e;background:#302811}
+  .b-failed{color:var(--failed);border-color:#6d2e2e;background:#331717}
+  .b-succeeded{color:var(--ok);border-color:#1f5c42;background:#0f2a1f}
+  .b-canceled{color:var(--canceled);border-color:#3a4350;background:#1a2029}
+  .b-pending{color:var(--pending);border-color:#3a4350;background:#1a2029}
+
+  .chip{display:inline-flex;align-items:center;gap:6px;padding:1px 8px;border-radius:6px;background:var(--panel2);border:1px solid var(--border);font-size:12px;white-space:nowrap}
+  .chip .dot{width:8px;height:8px;border-radius:3px}
+
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:7px;border:1px solid var(--border);background:var(--panel2);color:var(--fg);font:600 13px system-ui;cursor:pointer}
+  .btn:hover{border-color:#3a4757}
+  .btn-approve{background:#123626;border-color:#1f5c42;color:var(--ok)}
+  .btn-danger{background:#331717;border-color:#6d2e2e;color:var(--failed)}
+  .btn-retry{background:#14263c;border-color:#274b73;color:var(--running)}
+  .btn:disabled{opacity:.4;cursor:default}
+
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:10px}
+  h1,h2,h3{margin:0;font-weight:650}
+
+  /* ---------- Variant A: runs console ---------- */
+  .a-wrap{display:grid;grid-template-columns:230px minmax(0,1fr);height:100vh}
+  .a-side{border-right:1px solid var(--border);background:var(--panel);padding:14px;display:flex;flex-direction:column;gap:4px;overflow-y:auto}
+  .a-side .f{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:7px;cursor:pointer;color:var(--dim);font-weight:550}
+  .a-side .f:hover{background:var(--panel2)}
+  .a-side .f.on{background:var(--panel2);color:var(--fg)}
+  .a-side .cnt{font-size:11.5px;color:var(--dimmer)}
+  .a-main{overflow-y:auto}
+  .a-top{display:flex;align-items:center;gap:14px;padding:10px 18px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:5}
+  table.runs{width:100%;border-collapse:collapse}
+  table.runs td{padding:9px 12px;border-bottom:1px solid #1b222c;vertical-align:middle;white-space:nowrap}
+  table.runs td.grow{white-space:normal}
+  table.runs tr.row{cursor:pointer}
+  table.runs tr.row:hover{background:#131922}
+  table.runs tr.row.sel{background:#17202c}
+  .attn{color:var(--waiting);font-weight:700}
+  .drawer{position:fixed;top:0;right:0;bottom:0;width:min(56vw,780px);background:var(--panel);border-left:1px solid var(--border);box-shadow:-18px 0 40px #0009;z-index:20;display:flex;flex-direction:column}
+  .drawer .dhead{padding:14px 18px;border-bottom:1px solid var(--border)}
+  .drawer .dbody{overflow-y:auto;padding:16px 18px;flex:1}
+  .tabs{display:flex;gap:2px;margin-top:12px}
+  .tabs .t{padding:6px 13px;border-radius:7px 7px 0 0;cursor:pointer;color:var(--dim);font-weight:600;font-size:13px}
+  .tabs .t.on{background:var(--bg);color:var(--fg);border:1px solid var(--border);border-bottom-color:var(--bg)}
+
+  /* ---------- Variant B: factory floor ---------- */
+  .b-wrap{max-width:1180px;margin:0 auto;padding:20px 22px 90px}
+  .b-attn{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 20px}
+  .b-attn .card{flex:1;min-width:240px;padding:10px 14px;display:flex;flex-direction:column;gap:6px}
+  .loopgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:14px}
+  .loopcard{padding:14px 16px;cursor:pointer;display:flex;flex-direction:column;gap:8px}
+  .loopcard:hover{border-color:#3a4757}
+  .counts{display:flex;gap:8px;flex-wrap:wrap}
+  .b-loop{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start}
+  .src{padding:14px 16px;white-space:pre-wrap;overflow-x:auto}
+  .b-runrow{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:9px 12px;border-bottom:1px solid #1b222c;cursor:pointer}
+  .b-runrow:hover{background:#131922}
+
+  /* ---------- Variant C: inbox ---------- */
+  .c-wrap{max-width:780px;margin:0 auto;padding:22px 18px 110px}
+  .c-card{padding:16px 18px;margin-bottom:14px;display:flex;flex-direction:column;gap:10px}
+  .c-kind{font-size:11px;font-weight:800;letter-spacing:.09em;text-transform:uppercase}
+  .c-actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .c-actions .btn{padding:8px 16px;font-size:14px}
+  .feeditem{display:flex;gap:10px;padding:7px 4px;border-bottom:1px solid #1b222c;color:var(--dim);font-size:13px}
+  .feeditem .when{color:var(--dimmer);min-width:64px}
+
+  /* ---------- shared: transcript, misc ---------- */
+  .tr-item{border-left:3px solid var(--border);padding:6px 12px;margin:8px 0}
+  .tr-parent{border-left-color:var(--accent)}
+  .tr-tool{border-left-color:#3a4757;color:var(--dim)}
+  .tr-steer{border-left-color:var(--waiting);background:#2a230f;border-radius:0 7px 7px 0}
+  .tr-result{border-left-color:var(--ok);background:#0f2a1f;border-radius:0 7px 7px 0}
+  details.child{border:1px solid var(--border);border-radius:8px;margin:8px 0;background:var(--panel2)}
+  details.child>summary{padding:8px 12px;cursor:pointer;display:flex;gap:10px;align-items:center;list-style:none}
+  details.child>summary::before{content:"▸";color:var(--dimmer)}
+  details.child[open]>summary::before{content:"▾"}
+  details.child .inner{padding:2px 12px 10px;border-top:1px solid var(--border)}
+  .who{font-size:11px;font-weight:800;letter-spacing:.07em;text-transform:uppercase;color:var(--dimmer)}
+  .kv{display:grid;grid-template-columns:130px 1fr;gap:4px 14px;font-size:13px}
+  .kv .k{color:var(--dimmer)}
+  .box{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px 14px;margin:10px 0}
+  .attempts td{padding:6px 10px;border-bottom:1px solid #1b222c;font-size:13px;vertical-align:top}
+  .err{color:var(--failed)}
+  .diff{background:#10151c;border:1px solid var(--border);border-radius:8px;padding:10px 14px;overflow-x:auto;margin:8px 0}
+  .diff .add{color:var(--ok)} .diff .del{color:var(--failed)}
+  .steerbox{display:flex;gap:8px;margin-top:6px}
+  .steerbox input{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:7px;padding:7px 11px;color:var(--fg);font:13px system-ui}
+
+  /* ---------- Variant D: projects + kanban ---------- */
+  .d-nav{display:flex;align-items:center;gap:18px;padding:12px 22px;border-bottom:1px solid var(--border);position:sticky;top:0;background:var(--bg);z-index:5}
+  .d-nav .navlink{color:var(--dim);font-weight:600;cursor:pointer}
+  .d-nav .navlink:hover{color:var(--fg)}
+  .d-nav .navlink.on{color:var(--fg)}
+  .d-wrap{max-width:1320px;margin:0 auto;padding:20px 22px 100px}
+  .projgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+  .projcard{padding:16px 18px;cursor:pointer;display:flex;flex-direction:column;gap:8px}
+  .projcard:hover{border-color:#3a4757}
+  .board{display:flex;gap:12px;align-items:flex-start;overflow-x:auto;padding-bottom:20px}
+  .col{min-width:236px;flex:1;background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;min-height:180px}
+  .col-head{display:flex;flex-direction:column;gap:2px;padding:2px 4px 10px}
+  .lanecap{font-size:10.5px;color:var(--dimmer)}
+  .kcard{background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:9px 11px;margin-bottom:8px;cursor:grab;display:flex;flex-direction:column;gap:5px}
+  .kcard:hover{border-color:#3a4757}
+  .klabel{display:inline-block;padding:0 7px;border-radius:99px;font-size:10.5px;background:#22303f;color:#9fb3c8}
+
+  /* ---------- switcher + toast ---------- */
+  #switcher{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:99;display:flex;align-items:center;gap:2px;background:#000c;border:1px solid #4a5568;border-radius:99px;padding:5px 8px;backdrop-filter:blur(8px);box-shadow:0 6px 24px #000a}
+  #switcher .arrow{cursor:pointer;padding:2px 10px;font-size:15px;color:#cbd5e1;border-radius:99px}
+  #switcher .arrow:hover{background:#ffffff22}
+  #switcher .lbl{padding:0 10px;font:600 13px system-ui;color:#fff;min-width:210px;text-align:center}
+  #switcher .note{position:absolute;top:-18px;left:0;right:0;text-align:center;font-size:10px;color:#64748b;letter-spacing:.05em}
+  #toast{position:fixed;bottom:66px;left:50%;transform:translateX(-50%);z-index:98;background:#1c2733;border:1px solid #3a4757;color:var(--fg);padding:9px 16px;border-radius:9px;font-size:13px;box-shadow:0 6px 24px #000a;opacity:0;transition:opacity .2s;pointer-events:none;max-width:640px;text-align:center}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="switcher">
+  <div class="note">PROTOTYPE SWITCHER — not part of the design</div>
+  <div class="arrow" data-action="prev">◀</div>
+  <div class="lbl" id="swlbl"></div>
+  <div class="arrow" data-action="next">▶</div>
+</div>
+<div id="toast"></div>
+
+<script>
+/* =============================== fake data =============================== */
+const AGENTS = {
+  "codex-max": {harness:"codex",       model:"gpt-5.4-codex", effort:"high",   color:"#7c5cff"},
+  "claudine":  {harness:"claude-code", model:"claude-opus-5", effort:"medium", color:"#ff8a3d"},
+  "pi-solo":   {harness:"pi",          model:"claude-sonnet-5", effort:"medium", color:"#2dd4a7"},
+};
+const WORKERS = [
+  {name:"local",     cap:1, busy:1, status:"ready"},
+  {name:"exe-dev-1", cap:1, busy:1, status:"ready"},
+  {name:"exe-dev-2", cap:4, busy:0, status:"down", error:"PreflightError: codex CLI login expired"},
+];
+const LOOPS = [
+  {file:"dev-on-ready.md", on:"issue",
+   ifExpr:'labels.exists(l, l.name == "ready") && assignees.size() == 0',
+   agent:"codex-max", selector:"(all repos)", approval:false,
+   body:"Take the issue, implement it on a branch, open a PR that closes it.\nWhen the PR is up, swap the label ready -> in-progress on the issue."},
+  {file:"review-prs.md", on:"pr",
+   ifExpr:'state == "OPEN" && !isDraft && author.login != "usine[bot]"',
+   agent:"claudine", selector:"(all repos)", approval:false,
+   body:"Review the PR against the repo charter. Leave findings as a review;\nrequest changes if anything blocks, approve otherwise."},
+  {file:"apply-review-findings.md", on:"pr",
+   ifExpr:'reviews.exists(r, r.state == "CHANGES_REQUESTED")',
+   agent:"codex-max", selector:"tag: active", approval:true,
+   body:"Address every finding from the latest changes-requested review.\nPush to the PR branch; reply to each review thread with what changed."},
+  {file:"weekly-deps.md", on:"schedule",
+   ifExpr:'cron: 0 9 * * MON  tz: Europe/Paris',
+   agent:"pi-solo", selector:"balade", approval:true,
+   body:"Bump dependencies, run the full test suite, open a PR with the diff\nand the changelog of every bumped package."},
+];
+
+const RUNS = [
+  {id:"r1", loop:"dev-on-ready.md", repo:"basaltbytes/balade", state:"running",
+   item:{kind:"issue", num:142, title:"Add CSV export to walk stats"},
+   agent:"codex-max", updated:"6m ago", opened:"14m ago",
+   event:{key:"issue/balade#142 @ a1f39c", gist:'labels: [ready] · assignees: [] · body hash a1f39c', at:"14m ago"},
+   attempts:[{n:1, state:"running", worker:"exe-dev-1", started:"13m ago", error:null}],
+   transcript:[
+     {t:"parent", text:"Reading issue #142 and the repo charter. The stats module lives in src/stats/; I'll implement export there, test-first, then open the PR and swap the label."},
+     {t:"tool", line:'read balade/AGENTS.md, src/stats/summary.ts'},
+     {t:"child", harness:"codex", label:"implement CSV export", usage:"41.2k↑ 6.8k↓", state:"running", events:[
+       {t:"tool", line:"read src/stats/summary.ts, src/stats/types.ts"},
+       {t:"tool", line:"write src/stats/export.test.ts  (+64)"},
+       {t:"tool", line:"bash pnpm vitest run src/stats — 2 failed (red, as expected)"},
+       {t:"tool", line:"write src/stats/export.ts  (+82)"},
+       {t:"tool", line:"bash pnpm vitest run src/stats — 14 passed"},
+     ]},
+     {t:"parent", text:"Child finished the module with tests green. Now wiring the export button into the stats page, then branch + PR."},
+   ],
+   changes:[
+     {file:"src/stats/export.ts", plus:82, minus:0, hunk:"+export function toCsv(rows: WalkStat[]): string {\n+  const header = COLUMNS.join(',')\n+  ..."},
+     {file:"src/stats/export.test.ts", plus:64, minus:0, hunk:"+it('escapes commas in walk names', () => {\n+  ..."},
+   ]},
+
+  {id:"r2", loop:"apply-review-findings.md", repo:"basaltbytes/atoly", state:"waiting",
+   item:{kind:"pr", num:88, title:"Refactor sync engine"},
+   agent:"codex-max", updated:"22m ago", opened:"22m ago", needs:"approval",
+   event:{key:"pr/atoly#88 @ 9c22e1", gist:"review: CHANGES_REQUESTED by PhilDL · 4 findings", at:"22m ago"},
+   plan:"codex-max will address the 4 findings from PhilDL's review and push to the PR branch.",
+   attempts:[], transcript:[], changes:[]},
+
+  {id:"r3", loop:"review-prs.md", repo:"basaltbytes/manywalls", state:"failed",
+   item:{kind:"pr", num:57, title:"Migrate tile cache to IndexedDB"},
+   agent:"claudine", updated:"41m ago", opened:"1h ago", needs:"retry",
+   event:{key:"pr/manywalls#57 @ 55d0ab", gist:"state: OPEN · draft: false · 38 files changed", at:"1h ago"},
+   attempts:[{n:1, state:"failed", worker:"local", started:"58m ago",
+              error:"AgentError: claude-code child exited 1 — context window exhausted on 38-file diff. Agent failures wait for the operator (no auto-retry)."}],
+   transcript:[
+     {t:"parent", text:"Large PR — 38 files. Spawning a review child over the full diff."},
+     {t:"child", harness:"claude-code", label:"review diff", usage:"188k↑ 2.1k↓", state:"failed", events:[
+       {t:"tool", line:"bash gh pr diff 57"},
+       {t:"tool", line:"read src/cache/*.ts (14 files)"},
+       {t:"text", line:"⚠ exited 1: prompt exceeded context window"},
+     ]},
+   ], changes:[]},
+
+  {id:"r4", loop:"review-prs.md", repo:"basaltbytes/balade", state:"running",
+   item:{kind:"pr", num:141, title:"Fix elevation profile flicker"},
+   agent:"claudine", updated:"1m ago", opened:"9m ago",
+   event:{key:"pr/balade#141 @ 07bd4e", gist:"state: OPEN · draft: false · opened by usine run r5", at:"9m ago"},
+   attempts:[
+     {n:1, state:"failed", worker:"exe-dev-1", started:"9m ago",
+      error:"ChannelLost: SSH stream to exe-dev-1 dropped mid-attempt. Typed infra error — retried automatically (1/3)."},
+     {n:2, state:"running", worker:"local", started:"4m ago", error:null},
+   ],
+   transcript:[
+     {t:"parent", text:"Attempt 2 (attempt 1 lost its channel). Reviewing PR #141 against the charter."},
+     {t:"child", harness:"claude-code", label:"review diff", usage:"32.9k↑ 1.4k↓", state:"running", events:[
+       {t:"tool", line:"bash gh pr diff 141"},
+       {t:"tool", line:"read src/profile/ElevationProfile.tsx"},
+     ]},
+   ], changes:[]},
+
+  {id:"r5", loop:"dev-on-ready.md", repo:"basaltbytes/balade", state:"succeeded",
+   item:{kind:"issue", num:137, title:"Fix elevation profile flicker"},
+   agent:"codex-max", updated:"11m ago", opened:"52m ago",
+   event:{key:"issue/balade#137 @ c81f22", gist:"labels: [ready] · assignees: [] · body hash c81f22", at:"52m ago"},
+   result:{text:"Opened basaltbytes/balade#141 · swapped label ready → in-progress on #137", usage:"128k↑ 14.2k↓ · 11m", pr:"basaltbytes/balade#141"},
+   attempts:[{n:1, state:"succeeded", worker:"exe-dev-1", started:"51m ago", error:null}],
+   transcript:[
+     {t:"parent", text:"Issue #137: flicker on elevation profile redraw. Reproducing first, then fixing test-first."},
+     {t:"child", harness:"codex", label:"implement fix", usage:"96k↑ 9.8k↓", state:"done", events:[
+       {t:"tool", line:"read src/profile/ElevationProfile.tsx"},
+       {t:"tool", line:"edit src/profile/ElevationProfile.tsx  (+9 −14)"},
+       {t:"tool", line:"bash pnpm vitest run — 231 passed"},
+     ]},
+     {t:"parent", text:"Fix verified. Opening PR and swapping the label."},
+     {t:"tool", line:'bash gh pr create --title "Fix elevation profile flicker" · gh issue edit 137 --add-label in-progress --remove-label ready'},
+     {t:"result", text:"Step result (final envelope): PR basaltbytes/balade#141 opened · label swapped on #137"},
+   ],
+   changes:[{file:"src/profile/ElevationProfile.tsx", plus:9, minus:14, hunk:"-  useEffect(() => redraw(), [points, width, theme])\n+  const redraw = useMemo(() => throttleFrame(draw), [draw])"}]},
+
+  {id:"r6", loop:"dev-on-ready.md", repo:"basaltbytes/balade", state:"canceled",
+   item:{kind:"issue", num:142, title:"Add CSV export to walk stats"},
+   agent:"codex-max", updated:"14m ago", opened:"31m ago",
+   event:{key:"issue/balade#142 @ 88e04d", gist:"labels: [ready] · body hash 88e04d (before edit)", at:"31m ago"},
+   reason:"Superseded: issue body edited → newer Event a1f39c took the run's place before any attempt started.",
+   attempts:[], transcript:[], changes:[]},
+
+  {id:"r7", loop:"dev-on-ready.md", repo:"basaltbytes/atoly", state:"canceled",
+   item:{kind:"issue", num:61, title:"Spike: offline map tiles"},
+   agent:"codex-max", updated:"2h ago", opened:"3h ago",
+   reason:"Revoked: label 'ready' was removed — Item no longer matches the trigger; no attempt had started.",
+   event:{key:"issue/atoly#61 @ 3d91b0", gist:"labels: [ready] · assignees: []", at:"3h ago"},
+   attempts:[], transcript:[], changes:[]},
+
+  {id:"r8", loop:"dev-on-ready.md", repo:"basaltbytes/manywalls", state:"pending",
+   item:{kind:"issue", num:63, title:"Dark mode for embeds"},
+   agent:"codex-max", updated:"3m ago", opened:"3m ago",
+   note:"Queued — local 1/1 and exe-dev-1 1/1 busy; exe-dev-2 failed preflight.",
+   event:{key:"issue/manywalls#63 @ f00c11", gist:"labels: [ready] · assignees: []", at:"3m ago"},
+   attempts:[], transcript:[], changes:[]},
+
+  {id:"r9", loop:"weekly-deps.md", repo:"basaltbytes/balade", state:"succeeded",
+   item:{kind:"tick", num:null, title:"Mon 09:00 Europe/Paris"},
+   agent:"pi-solo", updated:"6h ago", opened:"6h ago",
+   event:{key:"schedule/weekly-deps@2026-08-17T09:00+02:00", gist:"tick — approval consumed at 09:12", at:"6h ago"},
+   result:{text:"Opened basaltbytes/balade#139 — 11 deps bumped, tests green", usage:"54k↑ 5.1k↓ · 7m", pr:"basaltbytes/balade#139"},
+   attempts:[{n:1, state:"succeeded", worker:"local", started:"6h ago", error:null}],
+   transcript:[{t:"result", text:"Step result: PR basaltbytes/balade#139 opened"}], changes:[]},
+];
+
+const FEED = [
+  {when:"1m ago",  text:"review-prs · attempt 2 running on local (balade#141)"},
+  {when:"3m ago",  text:"Event detected → run opened: dev-on-ready · manywalls#63 (pending)"},
+  {when:"4m ago",  text:"ChannelLost on exe-dev-1 — attempt 1 auto-retried as attempt 2 (balade#141)"},
+  {when:"11m ago", text:"✓ dev-on-ready succeeded: PR balade#141 opened, label swapped (balade#137)"},
+  {when:"14m ago", text:"Run superseded: balade#142 body edited, newer Event replaced open run"},
+  {when:"22m ago", text:"apply-review-findings waiting for approval (atoly#88)"},
+  {when:"41m ago", text:"✗ review-prs failed: agent error, waiting for operator (manywalls#57)"},
+  {when:"2h ago",  text:"Run revoked: 'ready' removed from atoly#61 before any attempt"},
+];
+
+const REPOS = [
+  {name:"basaltbytes/balade",    tags:["active"]},
+  {name:"basaltbytes/atoly",     tags:["active"]},
+  {name:"basaltbytes/manywalls", tags:[]},
+];
+/* per-repo lane config — defaults proposed from the repo's GitHub labels; two-way
+   sync (usine never deletes a label). Each lane maps one or more labels or state sources. */
+const LANES = [
+  {key:"backlog",    name:"Backlog",     map:"(no lane label)"},
+  {key:"ready",      name:"Ready",       map:"label: ready"},
+  {key:"inprogress", name:"In progress", map:"label: in-progress"},
+  {key:"inreview",   name:"In review",   map:"state: pr open ∪ label: in-review"},
+  {key:"done",       name:"Done",        map:"state: merged ∪ closed"},
+];
+const ITEMS = [
+  {id:"i1",  repo:"basaltbytes/balade",    kind:"issue", num:143, title:"Offline route cache",            labels:[],              lane:"backlog"},
+  {id:"i2",  repo:"basaltbytes/balade",    kind:"issue", num:142, title:"Add CSV export to walk stats",   labels:["in-progress"], lane:"inprogress", runId:"r1"},
+  {id:"i3",  repo:"basaltbytes/balade",    kind:"pr",    num:141, title:"Fix elevation profile flicker",  labels:[],              lane:"inreview",   runId:"r4"},
+  {id:"i4",  repo:"basaltbytes/balade",    kind:"pr",    num:139, title:"Weekly deps bump",               labels:[],              lane:"done",       runId:"r9"},
+  {id:"i5",  repo:"basaltbytes/atoly",     kind:"issue", num:61,  title:"Spike: offline map tiles",       labels:[],              lane:"backlog",    runId:"r7"},
+  {id:"i6",  repo:"basaltbytes/atoly",     kind:"pr",    num:88,  title:"Refactor sync engine",           labels:["in-review"],   lane:"inreview",   runId:"r2"},
+  {id:"i7",  repo:"basaltbytes/atoly",     kind:"issue", num:54,  title:"Sync conflict banner",           labels:[],              lane:"done"},
+  {id:"i8",  repo:"basaltbytes/manywalls", kind:"issue", num:66,  title:"Wall sharing links",             labels:[],              lane:"backlog"},
+  {id:"i9",  repo:"basaltbytes/manywalls", kind:"issue", num:63,  title:"Dark mode for embeds",           labels:["ready"],       lane:"ready",      runId:"r8"},
+  {id:"i10", repo:"basaltbytes/manywalls", kind:"pr",    num:57,  title:"Migrate tile cache to IndexedDB",labels:[],              lane:"inreview",   runId:"r3"},
+  {id:"i11", repo:"basaltbytes/manywalls", kind:"issue", num:51,  title:"Embed API v2",                   labels:[],              lane:"done"},
+];
+
+/* =============================== state =============================== */
+const VARIANTS = [
+  {key:"D", name:"Projects home — kanban per repo"},
+  {key:"A", name:"Runs console — one queue, drawer detail"},
+  {key:"B", name:"Factory floor — loops as the spine"},
+  {key:"C", name:"Operator inbox — needs-you first"},
+];
+const S = { variant:"D", sel:null, loopSel:null, tab:"overview", filter:"all", feedOpen:false, page:"home", repoSel:null };
+
+/* =============================== helpers =============================== */
+const $ = s => document.querySelector(s);
+const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const run = id => RUNS.find(r => r.id === id);
+const loop = f => LOOPS.find(l => l.file === f);
+const itemRef = r => r.item.kind === "tick" ? "tick" : `${r.repo.split("/")[1]}#${r.item.num}`;
+const badge = st => `<span class="badge b-${st}">${st}</span>`;
+const agentChip = name => { const a = AGENTS[name];
+  return `<span class="chip"><span class="dot" style="background:${a.color}"></span>${esc(name)} <span class="dimmer">· ${a.harness}</span></span>`; };
+const needsMe = r => r.state === "waiting" || (r.state === "failed" && r.needs === "retry");
+
+function toast(msg){ const t = $("#toast"); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.opacity = 0, 3800); }
+
+/* ---- interventions (in-memory stubs) ---- */
+function doApprove(id){ const r = run(id);
+  r.state = "running"; r.needs = null; r.updated = "now";
+  r.attempts.push({n:1, state:"running", worker:"local", started:"now", error:null});
+  r.transcript.push({t:"parent", text:"Approval consumed — starting on the review findings."});
+  toast("Approval recorded as an Event — the waiting run consumed it and attempt 1 started (stub)."); render(); }
+function doRetry(id){ const r = run(id);
+  const n = r.attempts.length + 1;
+  r.state = "running"; r.needs = null; r.updated = "now";
+  r.attempts.push({n, state:"running", worker:"local", started:"now", error:null});
+  toast(`Operator retry → attempt ${n} under the same step (stub).`); render(); }
+function doCancel(id){ const r = run(id);
+  r.state = "canceled"; r.needs = null; r.updated = "now";
+  r.reason = "Canceled by operator.";
+  r.attempts.forEach(a => { if(a.state === "running") a.state = "canceled"; });
+  toast("Run canceled by operator (stub)."); render(); }
+function doSteer(id){ const inp = document.getElementById("steer-" + id);
+  if(!inp || !inp.value.trim()) { toast("Type a steer message first."); return; }
+  const r = run(id); r.transcript.push({t:"steer", text:inp.value.trim()}); r.updated = "now";
+  toast("Steer delivered to the Pi parent session over the attempt channel (stub)."); render(); }
+function doInterrupt(id){ const r = run(id);
+  r.transcript.push({t:"steer", text:"⏸ Interrupt — parent paused at the next tool boundary, waiting for a steer."});
+  toast("Interrupt sent — parent pauses and waits for a steer (stub)."); render(); }
+
+/* ---- shared fragments ---- */
+function actionsHTML(r, ctx){
+  const A = [];
+  if(r.state === "waiting")  A.push(`<button class="btn btn-approve" data-action="approve" data-id="${r.id}">✓ Approve</button>`);
+  if(r.state === "failed" && r.needs === "retry") A.push(`<button class="btn btn-retry" data-action="retry" data-id="${r.id}">↻ Retry</button>`);
+  if(r.state === "running"){ A.push(`<button class="btn" data-action="interrupt" data-id="${r.id}">⏸ Interrupt</button>`); }
+  if(["running","waiting","pending","failed"].includes(r.state))
+    A.push(`<button class="btn btn-danger" data-action="cancel" data-id="${r.id}">✕ Cancel</button>`);
+  let steer = "";
+  if(r.state === "running")
+    steer = `<div class="steerbox"><input id="steer-${r.id}" placeholder="Steer the parent session… (e.g. 'skip the e2e suite, it is flaky')">
+             <button class="btn" data-action="steer" data-id="${r.id}">Steer ➤</button></div>`;
+  return `<div class="c-actions">${A.join("")}</div>${steer}`;
+}
+
+function transcriptHTML(r){
+  if(!r.transcript.length) return `<div class="dim small">No transcript yet — no attempt has started.</div>`;
+  return r.transcript.map(e => {
+    if(e.t === "parent") return `<div class="tr-item tr-parent"><div class="who">pi parent</div>${esc(e.text)}</div>`;
+    if(e.t === "tool")   return `<div class="tr-item tr-tool mono">⚙ ${esc(e.line)}</div>`;
+    if(e.t === "steer")  return `<div class="tr-item tr-steer"><div class="who">operator steer</div>${esc(e.text)}</div>`;
+    if(e.t === "result") return `<div class="tr-item tr-result"><div class="who">step result</div>${esc(e.text)}</div>`;
+    if(e.t === "child")  return `<details class="child" ${e.state==="running"?"open":""}><summary>
+        <span class="who">child · ${esc(e.harness)}</span> <span>${esc(e.label)}</span>
+        <span class="dimmer small mono" style="margin-left:auto">${esc(e.usage)} · ${esc(e.state)}</span></summary>
+      <div class="inner">${e.events.map(c => `<div class="tr-item tr-tool mono">${c.t==="tool"?"⚙":"⚠"} ${esc(c.line)}</div>`).join("")}</div>
+      </details>`;
+    return "";
+  }).join("");
+}
+
+function attemptsHTML(r){
+  if(!r.attempts.length) return `<div class="dim small">No attempts yet.</div>`;
+  return `<table class="attempts" style="width:100%;border-collapse:collapse">${r.attempts.map(a => `
+    <tr><td class="mono">#${a.n}</td><td>${badge(a.state)}</td>
+        <td class="mono dim">${esc(a.worker)}</td><td class="dim small">${esc(a.started)}</td>
+        <td class="small ${a.error?"err":""}" style="white-space:normal">${esc(a.error||"")}</td></tr>`).join("")}</table>`;
+}
+
+function overviewHTML(r){
+  const l = loop(r.loop);
+  return `
+    <div class="box"><div class="who" style="margin-bottom:6px">event</div>
+      <div class="kv">
+        <div class="k">dedup key</div><div class="mono">${esc(r.event.key)}</div>
+        <div class="k">payload gist</div><div class="mono dim">${esc(r.event.gist)}</div>
+        <div class="k">detected</div><div>${esc(r.event.at)}</div>
+        <div class="k">loop</div><div class="mono">${esc(r.loop)} <span class="dimmer">· agent ${esc(r.agent)} · approval ${l.approval?"required":"none"}</span></div>
+      </div></div>
+    ${r.plan ? `<div class="box"><div class="who" style="margin-bottom:6px">waiting for approval</div>${esc(r.plan)}</div>` : ""}
+    ${r.note ? `<div class="box dim small">${esc(r.note)}</div>` : ""}
+    ${r.reason ? `<div class="box" style="border-color:#3a4350"><div class="who" style="margin-bottom:6px">closed</div>${esc(r.reason)}</div>` : ""}
+    <div class="box"><div class="who" style="margin-bottom:6px">attempts</div>${attemptsHTML(r)}</div>
+    ${r.result ? `<div class="box" style="border-color:#1f5c42"><div class="who" style="margin-bottom:6px">result</div>
+       ${esc(r.result.text)}<div class="dim small mono" style="margin-top:4px">${esc(r.result.usage)}</div></div>` : ""}`;
+}
+
+function changesHTML(r){
+  if(!r.changes.length) return `<div class="dim small">No file changes captured for this run.</div>`;
+  return `<div class="dim small" style="margin-bottom:8px">Reconstructed from edit/write tool-calls in the transcript — the workspace itself is destroyed after the attempt. Is this view worth having, or is the PR link enough?</div>`
+    + r.changes.map(c => `<div class="mono small" style="margin-top:8px">${esc(c.file)} <span class="add">+${c.plus}</span> <span class="del">−${c.minus}</span></div>
+      <div class="diff mono small">${c.hunk.split("\n").map(l =>
+        `<div class="${l.startsWith("+")?"add":l.startsWith("-")?"del":"dim"}">${esc(l)}</div>`).join("")}</div>`).join("");
+}
+
+/* =============================== variant A =============================== */
+function renderA(){
+  const filters = [
+    {k:"all", label:"All runs"}, {k:"me", label:"Needs you"}, {k:"running", label:"Running"},
+    {k:"waiting", label:"Waiting"}, {k:"failed", label:"Failed"}, {k:"closed", label:"Closed"}];
+  const match = r =>
+    S.filter === "all" ? true :
+    S.filter === "me" ? needsMe(r) :
+    S.filter === "closed" ? ["succeeded","canceled"].includes(r.state) : r.state === S.filter;
+  const rows = RUNS.filter(match);
+  const cnt = k => RUNS.filter(r => (S.filter, k === "all" ? true : k === "me" ? needsMe(r) : k === "closed" ? ["succeeded","canceled"].includes(r.state) : r.state === k)).length;
+
+  const workers = WORKERS.map(w => w.status === "down"
+    ? `<span class="chip" title="${esc(w.error)}"><span class="dot" style="background:var(--failed)"></span>${w.name} <span class="err small">preflight ✗</span></span>`
+    : `<span class="chip"><span class="dot" style="background:var(--ok)"></span>${w.name} <span class="dimmer">${w.busy}/${w.cap}</span></span>`).join(" ");
+
+  const r = S.sel ? run(S.sel) : null;
+  const tabs = ["overview","transcript","changes"];
+  return `
+  <div class="a-wrap">
+    <div class="a-side">
+      <h2 style="padding:2px 10px 10px">usine <span class="dimmer small">· phildl/usine-instance</span></h2>
+      ${filters.map(f => `<div class="f ${S.filter===f.k?"on":""}" data-action="filter" data-id="${f.k}">
+         <span>${f.label}${f.k==="me"&&cnt("me")?` <span class="attn">●</span>`:""}</span><span class="cnt">${cnt(f.k)}</span></div>`).join("")}
+      <div style="margin-top:auto;padding:10px"><div class="who" style="margin-bottom:8px">workers</div>
+        <div style="display:flex;flex-direction:column;gap:6px;align-items:flex-start">${workers}</div></div>
+    </div>
+    <div class="a-main">
+      <div class="a-top"><h3>${filters.find(f=>f.k===S.filter).label}</h3>
+        <span class="dim small">${rows.length} runs · newest first</span></div>
+      <table class="runs"><tbody>
+        ${rows.map(x => `<tr class="row ${S.sel===x.id?"sel":""}" data-action="sel" data-id="${x.id}">
+          <td>${badge(x.state)}</td>
+          <td class="grow"><b>${esc(x.loop.replace(".md",""))}</b> <span class="dim">·</span> <span class="mono">${esc(itemRef(x))}</span>
+              <span class="dim">${esc(x.item.title)}</span>
+              ${needsMe(x)?`<span class="attn small"> ← needs you</span>`:""}</td>
+          <td>${agentChip(x.agent)}</td>
+          <td class="dim small">${x.attempts.length ? "attempt "+x.attempts[x.attempts.length-1].n : "—"}</td>
+          <td class="dim small">${esc(x.updated)}</td></tr>`).join("")}
+      </tbody></table>
+    </div>
+  </div>
+  ${r ? drawerHTML(r) : ""}`;
+}
+
+function drawerHTML(r){
+  const tabs = ["overview","transcript","changes"];
+  return `<div class="drawer">
+    <div class="dhead">
+      <div style="display:flex;align-items:center;gap:10px">
+        ${badge(r.state)} <h3>${esc(r.loop.replace(".md",""))} · ${esc(itemRef(r))}</h3>
+        <span class="dim">${esc(r.item.title)}</span>
+        <span style="margin-left:auto" class="btn" data-action="close">✕</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center">${agentChip(r.agent)}
+        <span class="dim small">opened ${esc(r.opened)} · updated ${esc(r.updated)}</span></div>
+      <div style="margin-top:12px">${actionsHTML(r)}</div>
+      <div class="tabs">${tabs.map(t => `<div class="t ${S.tab===t?"on":""}" data-action="tab" data-id="${t}">${t}</div>`).join("")}</div>
+    </div>
+    <div class="dbody">
+      ${S.tab==="overview" ? overviewHTML(r) : S.tab==="transcript" ? transcriptHTML(r) : changesHTML(r)}
+    </div>
+  </div>`;
+}
+
+/* =============================== variant B =============================== */
+function loopYaml(l){
+  return `---\non: ${l.on}\nif: ${l.ifExpr}\nagent: ${l.agent}${l.approval?"\napproval: required":""}\nselector: ${l.selector}\n---\n\n${l.body}`;
+}
+function renderB(){
+  const attn = RUNS.filter(needsMe);
+  if(S.loopSel){
+    const l = loop(S.loopSel);
+    const lruns = RUNS.filter(r => r.loop === l.file);
+    const r = S.sel ? run(S.sel) : null;
+    return `<div class="b-wrap">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+        <span class="btn" data-action="back">← floor</span>
+        <h2 class="mono">loops/${esc(l.file)}</h2>${agentChip(l.agent)}
+        <span class="dim small">committed on main · UI edits round-trip through this file</span></div>
+      <div class="b-loop">
+        <div class="panel src mono small">${esc(loopYaml(l))}</div>
+        <div class="panel">${lruns.map(x => `
+          <div class="b-runrow" data-action="sel" data-id="${x.id}">
+            <span>${badge(x.state)} <span class="mono">${esc(itemRef(x))}</span> <span class="dim">${esc(x.item.title)}</span></span>
+            <span class="dim small">${esc(x.updated)}</span></div>`).join("") || `<div class="dim" style="padding:14px">No runs yet.</div>`}
+        </div>
+      </div>
+      ${r ? `<div class="panel" style="margin-top:16px;padding:16px 18px">
+        <div style="display:flex;align-items:center;gap:10px">${badge(r.state)}<h3>${esc(itemRef(r))} ${esc(r.item.title)}</h3>
+          <span style="margin-left:auto" class="btn" data-action="close">✕</span></div>
+        <div style="margin:12px 0">${actionsHTML(r)}</div>
+        ${overviewHTML(r)}
+        <div class="who" style="margin:14px 0 4px">transcript</div>${transcriptHTML(r)}
+        ${r.result?.pr ? `<div class="box">Changes → <a href="#">${esc(r.result.pr)}</a> <span class="dimmer small">(PR link only in this variant — no diff view)</span></div>` : ""}
+      </div>` : ""}
+    </div>`;
+  }
+  return `<div class="b-wrap">
+    <div style="display:flex;align-items:baseline;gap:12px"><h2>Factory floor</h2>
+      <span class="dim small">phildl/usine-instance · 3 managed repos</span>
+      <span style="margin-left:auto" class="small dim">workers: ${WORKERS.map(w => w.status==="down"?`<span class="err">${w.name} ✗</span>`:`${w.name} ${w.busy}/${w.cap}`).join(" · ")}</span></div>
+    ${attn.length ? `<div class="b-attn">${attn.map(r => `<div class="panel card">
+        <div class="c-kind" style="color:var(--waiting)">${r.state==="waiting"?"approval waiting":"failed — your call"}</div>
+        <div><b>${esc(r.loop.replace(".md",""))}</b> · <span class="mono">${esc(itemRef(r))}</span> <span class="dim">${esc(r.item.title)}</span></div>
+        <div>${actionsHTML(r)}</div></div>`).join("")}</div>` : ""}
+    <div class="loopgrid">
+      ${LOOPS.map(l => { const lr = RUNS.filter(r => r.loop === l.file);
+        const c = st => lr.filter(r => r.state === st).length;
+        return `<div class="panel loopcard" data-action="sel-loop" data-id="${esc(l.file)}">
+          <div style="display:flex;align-items:center;gap:10px"><h3 class="mono">${esc(l.file)}</h3>
+            <span style="margin-left:auto">${agentChip(l.agent)}</span></div>
+          <div class="mono small dim">on: ${esc(l.on)} · if: ${esc(l.ifExpr.length > 46 ? l.ifExpr.slice(0,46) + "…" : l.ifExpr)}</div>
+          <div class="small dimmer">selector: ${esc(l.selector)}${l.approval ? " · approval required" : ""}</div>
+          <div class="counts">
+            ${c("running")?`<span class="badge b-running">${c("running")} running</span>`:""}
+            ${c("pending")?`<span class="badge b-pending">${c("pending")} pending</span>`:""}
+            ${c("waiting")?`<span class="badge b-waiting">${c("waiting")} waiting</span>`:""}
+            ${c("failed")?`<span class="badge b-failed">${c("failed")} failed</span>`:""}
+            ${c("succeeded")?`<span class="badge b-succeeded">${c("succeeded")} ok</span>`:""}
+            ${c("canceled")?`<span class="badge b-canceled">${c("canceled")} canceled</span>`:""}
+          </div></div>`; }).join("")}
+    </div>
+  </div>`;
+}
+
+/* =============================== variant C =============================== */
+function renderC(){
+  const need = RUNS.filter(r => needsMe(r) || r.state === "running");
+  const closedRecent = RUNS.filter(r => ["succeeded","canceled"].includes(r.state)).slice(0,4);
+  const kind = r => r.state === "waiting" ? ["approval", "var(--waiting)"] :
+                    r.state === "failed" ? ["failed — your call", "var(--failed)"] :
+                    ["running — steerable", "var(--running)"];
+  return `<div class="c-wrap">
+    <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:16px">
+      <h2>${RUNS.filter(needsMe).length} need you</h2>
+      <span class="dim small">everything else is the factory working</span></div>
+    ${need.map(r => { const [k, col] = kind(r); const l = loop(r.loop); return `
+      <div class="panel c-card">
+        <div style="display:flex;align-items:center;gap:10px">
+          <span class="c-kind" style="color:${col}">${k}</span>
+          <span style="margin-left:auto" class="dim small">${esc(r.updated)}</span></div>
+        <div><b>${esc(r.loop.replace(".md",""))}</b> · <span class="mono">${esc(itemRef(r))}</span> ${esc(r.item.title)}
+          <span class="dim small">· ${esc(r.agent)}</span></div>
+        ${r.plan ? `<div class="dim small">Will do: ${esc(r.plan)}</div>` : ""}
+        ${r.state === "failed" ? `<div class="err small">${esc(r.attempts[r.attempts.length-1].error)}</div>` : ""}
+        ${r.state === "running" ? `<div class="dim small mono">latest: ${esc(lastLine(r))}</div>` : ""}
+        ${actionsHTML(r)}
+        <details><summary class="dim small" style="cursor:pointer">run detail</summary>
+          <div style="margin-top:10px">${overviewHTML(r)}<div class="who" style="margin:12px 0 4px">transcript</div>${transcriptHTML(r)}</div>
+        </details>
+      </div>`; }).join("")}
+    <details class="panel" style="padding:12px 16px" ${S.feedOpen?"open":""}>
+      <summary style="cursor:pointer" data-action="feed"><b>Factory activity</b> <span class="dim small">· ${FEED.length} events · the healthy stuff</span></summary>
+      <div style="margin-top:8px">${FEED.map(f => `<div class="feeditem"><span class="when">${esc(f.when)}</span><span>${esc(f.text)}</span></div>`).join("")}</div>
+    </details>
+    <div class="who" style="margin:18px 0 8px">recently closed</div>
+    ${closedRecent.map(r => `<div class="feeditem"><span class="when">${esc(r.updated)}</span>
+      <span>${badge(r.state)} <b>${esc(r.loop.replace(".md",""))}</b> · <span class="mono">${esc(itemRef(r))}</span>
+      ${r.result ? esc(" — " + r.result.text) : ""}${r.reason ? `<span class="dim"> — ${esc(r.reason)}</span>` : ""}</span></div>`).join("")}
+  </div>`;
+}
+function lastLine(r){
+  for(let i = r.transcript.length - 1; i >= 0; i--){ const e = r.transcript[i];
+    if(e.t === "child" && e.events.length) return e.events[e.events.length-1].line;
+    if(e.t === "tool") return e.line; if(e.t === "parent") return e.text.slice(0, 90); }
+  return "…"; }
+
+/* =============================== variant D =============================== */
+function kcardHTML(it){
+  const r = it.runId ? run(it.runId) : null;
+  const needCol = r && r.state === "waiting" ? "var(--waiting)"
+    : r && r.state === "failed" && r.needs === "retry" ? "var(--failed)" : null;
+  return `<div class="kcard" draggable="true" data-item="${it.id}" ${r ? `data-action="sel" data-id="${r.id}"` : ""}
+      ${needCol ? `style="border-color:${needCol}"` : ""}>
+    <div class="small mono dim">${it.kind === "pr" ? "⇄ PR" : "◎"} #${it.num}
+      ${it.labels.map(l => `<span class="klabel">${esc(l)}</span>`).join(" ")}</div>
+    <div style="font-size:13px">${esc(it.title)}</div>
+    ${r ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${agentChip(r.agent)} ${badge(r.state)}</div>
+      ${r.state === "failed" ? `<div class="err small">${esc((r.attempts[r.attempts.length-1]?.error || "").slice(0,64))}…</div>` : ""}
+      ${r.state === "waiting" ? `<div class="small" style="color:var(--waiting)">waiting for your approval</div>` : ""}` : ""}
+  </div>`;
+}
+function projBoard(repoName){
+  const items = ITEMS.filter(i => i.repo === repoName);
+  return `
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px;flex-wrap:wrap">
+      <span class="btn" data-action="back-d">← projects</span>
+      <h2>${esc(repoName.split("/")[1])}</h2>
+      <span class="dim small">lanes ⇄ GitHub labels · two-way sync, usine never deletes a label · drag a card to swap its lane label</span></div>
+    <div class="board">
+      ${LANES.map(l => { const cards = items.filter(i => i.lane === l.key);
+        return `<div class="col" data-lane="${l.key}">
+          <div class="col-head"><b>${l.name} <span class="dimmer small">${cards.length || ""}</span></b>
+            <span class="lanecap mono">${esc(l.map)}</span></div>
+          ${cards.map(kcardHTML).join("") || `<div class="dimmer small" style="padding:6px 4px">—</div>`}
+        </div>`; }).join("")}
+    </div>`;
+}
+function projHome(){
+  const attn = RUNS.filter(needsMe);
+  return `
+    ${attn.length ? `<div class="b-attn">${attn.map(r => `<div class="panel card">
+        <div class="c-kind" style="color:${r.state === "waiting" ? "var(--waiting)" : "var(--failed)"}">${r.state === "waiting" ? "approval waiting" : "failed — your call"}</div>
+        <div><b>${esc(r.loop.replace(".md",""))}</b> · <span class="mono">${esc(itemRef(r))}</span> <span class="dim">${esc(r.item.title)}</span></div>
+        <div>${actionsHTML(r)}</div></div>`).join("")}</div>` : ""}
+    <div class="projgrid">
+      ${REPOS.map(p => { const pr = RUNS.filter(r => r.repo === p.name);
+        const c = st => pr.filter(r => r.state === st).length;
+        const need = pr.filter(needsMe).length;
+        const working = [...new Set(pr.filter(r => r.state === "running").map(r => r.agent))];
+        return `<div class="panel projcard" data-action="open-project" data-id="${esc(p.name)}">
+          <div style="display:flex;align-items:center;gap:8px"><h3>${esc(p.name.split("/")[1])}</h3>
+            ${p.tags.map(t => `<span class="chip small">${esc(t)}</span>`).join("")}
+            ${need ? `<span style="margin-left:auto" class="badge b-waiting">${need} need you</span>` : ""}</div>
+          <div class="dim small mono">${esc(p.name)}</div>
+          <div class="counts">
+            ${c("running") ? `<span class="badge b-running">${c("running")} running</span>` : ""}
+            ${c("pending") ? `<span class="badge b-pending">${c("pending")} pending</span>` : ""}
+            ${c("waiting") ? `<span class="badge b-waiting">${c("waiting")} waiting</span>` : ""}
+            ${c("failed") ? `<span class="badge b-failed">${c("failed")} failed</span>` : ""}
+            ${c("succeeded") ? `<span class="badge b-succeeded">${c("succeeded")} ok</span>` : ""}
+          </div>
+          <div class="dim small">${working.length ? "working now: " + working.map(esc).join(", ") : "quiet"}</div>
+        </div>`; }).join("")}
+    </div>`;
+}
+function projConfig(){
+  return `<h2 style="margin-bottom:14px">Configuration <span class="dim small" style="font-weight:400">— loops, agents, workers, lanes. Edits round-trip through files in phildl/usine-instance.</span></h2>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px">
+    <div class="panel" style="padding:14px 16px"><div class="who" style="margin-bottom:6px">loops</div>
+      ${LOOPS.map(l => `<div style="padding:7px 0;border-bottom:1px solid #1b222c"><span class="mono">${esc(l.file)}</span>
+        <div class="dim small mono">on: ${esc(l.on)} · agent: ${esc(l.agent)}${l.approval ? " · approval required" : ""}</div></div>`).join("")}</div>
+    <div class="panel" style="padding:14px 16px"><div class="who" style="margin-bottom:6px">agents</div>
+      ${Object.entries(AGENTS).map(([n,a]) => `<div style="padding:7px 0;border-bottom:1px solid #1b222c">
+        ${agentChip(n)}<div class="dim small mono">${esc(a.model)} · effort ${esc(a.effort)}</div></div>`).join("")}</div>
+    <div class="panel" style="padding:14px 16px"><div class="who" style="margin-bottom:6px">workers</div>
+      ${WORKERS.map(w => `<div style="padding:5px 0" class="small">${w.status === "down" ? `<span class="err">${w.name} — ${esc(w.error)}</span>` : `${w.name} · ${w.busy}/${w.cap} busy`}</div>`).join("")}
+      <div class="who" style="margin:12px 0 6px">lane map (per repo)</div>
+      <div class="mono small dim">${LANES.map(l => `${l.name} ← ${esc(l.map)}`).join("<br>")}</div>
+      <div class="dimmer small" style="margin-top:8px">Defaults proposed from the repo's GitHub labels. Two-way sync — usine never deletes a label.</div></div>
+  </div>`;
+}
+function renderD(){
+  const needCount = RUNS.filter(needsMe).length;
+  const page = S.page || "home";
+  const body = page === "config" ? projConfig() : S.repoSel ? projBoard(S.repoSel) : projHome();
+  const r = S.sel ? run(S.sel) : null;
+  return `
+  <div class="d-nav"><h2>usine</h2>
+    <span class="navlink ${page === "home" && !S.repoSel ? "on" : ""}" data-action="back-d">Projects</span>
+    <span class="navlink ${page === "config" ? "on" : ""}" data-action="config-d">Configuration</span>
+    <span style="margin-left:auto">${needCount ? `<span class="badge b-waiting" style="cursor:pointer" data-action="back-d">${needCount} need you</span>` : `<span class="dim small">all quiet</span>`}</span>
+  </div>
+  <div class="d-wrap">${body}</div>
+  ${r ? drawerHTML(r) : ""}`;
+}
+
+/* ---- kanban drag = label swap (stub) ---- */
+const LANE_LABEL = {ready:"ready", inprogress:"in-progress", inreview:"in-review"};
+document.addEventListener("dragstart", e => {
+  const c = e.target.closest?.("[data-item]"); if(!c) return;
+  e.dataTransfer.setData("text/plain", c.dataset.item);
+  e.dataTransfer.effectAllowed = "move";
+});
+document.addEventListener("dragover", e => { if(e.target.closest?.("[data-lane]")) e.preventDefault(); });
+document.addEventListener("drop", e => {
+  const col = e.target.closest?.("[data-lane]"); if(!col) return;
+  e.preventDefault();
+  const it = ITEMS.find(x => x.id === e.dataTransfer.getData("text/plain")); if(!it) return;
+  const to = col.dataset.lane; if(to === it.lane) return;
+  const toName = LANES.find(l => l.key === to).name;
+  it.labels = it.labels.filter(l => !Object.values(LANE_LABEL).includes(l));
+  if(LANE_LABEL[to]) it.labels.push(LANE_LABEL[to]);
+  it.lane = to;
+  if(to === "ready" && it.kind === "issue" && !it.runId){
+    const rid = "r" + (RUNS.length + 1);
+    RUNS.unshift({id:rid, loop:"dev-on-ready.md", repo:it.repo, state:"pending",
+      item:{kind:it.kind, num:it.num, title:it.title}, agent:"codex-max", updated:"now", opened:"now",
+      note:"Queued — your drag swapped the label to 'ready'; the trigger matched and opened this run.",
+      event:{key:`issue/${it.repo.split("/")[1]}#${it.num} @ drag01`, gist:"labels: [ready] — swapped via board drag", at:"now"},
+      attempts:[], transcript:[], changes:[]});
+    it.runId = rid;
+    FEED.unshift({when:"now", text:`Event detected → run opened: dev-on-ready · ${it.repo.split("/")[1]}#${it.num} (label swapped via board drag)`});
+    toast("Label swap written to GitHub → 'ready' (two-way sync, nothing deleted). dev-on-ready matched — Event detected, run opened (stub).");
+  } else {
+    toast(`Card moved to ${toName}: label swap written to GitHub (stub) — no loop matched.`);
+  }
+  render();
+});
+
+/* =============================== shell =============================== */
+function render(){
+  const v = S.variant;
+  $("#app").innerHTML = v === "D" ? renderD() : v === "A" ? renderA() : v === "B" ? renderB() : renderC();
+  const def = VARIANTS.find(x => x.key === v);
+  $("#swlbl").textContent = `${def.key} — ${def.name.split(" — ")[1] ? def.name.split(" — ")[0] + ": " + def.name.split(" — ")[1] : def.name}`;
+}
+function setVariant(key){
+  S.variant = key; S.sel = null; S.loopSel = null; S.tab = "overview"; S.page = "home"; S.repoSel = null;
+  const u = new URL(location.href); u.searchParams.set("variant", key);
+  history.replaceState(null, "", u); render();
+}
+function cycle(d){
+  const i = VARIANTS.findIndex(v => v.key === S.variant);
+  setVariant(VARIANTS[(i + d + VARIANTS.length) % VARIANTS.length].key);
+}
+
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-action]");
+  if(!el) return;
+  const act = el.dataset.action, id = el.dataset.id;
+  if(act === "prev") return cycle(-1);
+  if(act === "next") return cycle(1);
+  if(act === "sel"){ S.sel = id; S.tab = "overview"; return render(); }
+  if(act === "close"){ S.sel = null; return render(); }
+  if(act === "tab"){ S.tab = id; return render(); }
+  if(act === "filter"){ S.filter = id; S.sel = null; return render(); }
+  if(act === "sel-loop"){ S.loopSel = id; S.sel = null; return render(); }
+  if(act === "back"){ S.loopSel = null; S.sel = null; return render(); }
+  if(act === "open-project"){ S.repoSel = id; S.page = "home"; S.sel = null; return render(); }
+  if(act === "back-d"){ S.page = "home"; S.repoSel = null; S.sel = null; return render(); }
+  if(act === "config-d"){ S.page = "config"; S.repoSel = null; S.sel = null; return render(); }
+  if(act === "approve") return doApprove(id);
+  if(act === "retry") return doRetry(id);
+  if(act === "cancel") return doCancel(id);
+  if(act === "steer") return doSteer(id);
+  if(act === "interrupt") return doInterrupt(id);
+  if(act === "feed"){ S.feedOpen = !S.feedOpen; }
+});
+document.addEventListener("keydown", e => {
+  if(["INPUT","TEXTAREA"].includes(document.activeElement.tagName)) return;
+  if(e.key === "ArrowLeft") cycle(-1);
+  if(e.key === "ArrowRight") cycle(1);
+});
+
+const qv = new URL(location.href).searchParams.get("variant");
+if(qv && VARIANTS.some(v => v.key === qv)) S.variant = qv;
+render();
+</script>
+</body>
+</html>
