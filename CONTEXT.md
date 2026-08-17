@@ -104,6 +104,10 @@ _Avoid_: runner, daemon, worker process
 The duplex channel between orchestrator and run host for one attempt — normalized events flowing out, steer/interrupt flowing in, as attempt-scoped framed messages. The byte transport underneath (stdio, SSH) never changes the messages.
 _Avoid_: stream (reserved for what a trigger watches), pipe, socket
 
+**Transcript**:
+The persisted flow of one attempt's channel events — the attempt's durable record, which the run drawer replays live or after the fact. Stored by the orchestrator; outlives the worker and the run host.
+_Avoid_: log, session history, output
+
 **Preflight**:
 The executor's verify-only readiness check of a worker — toolchain, run-host version, login state, attached credentials — failing with typed capability errors. It never installs; making a worker ready is out-of-band.
 _Avoid_: bootstrap, provisioning (that's the out-of-band act), health check
