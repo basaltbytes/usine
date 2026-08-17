@@ -72,6 +72,18 @@ _Avoid_: daemon, app, backend
 The place an agent run executes — a machine with a checkout. Local process first; remote executors (e.g. exe.dev) behind the same seam.
 _Avoid_: runner, sandbox, executor (the seam may be named executor in code, but the concept is Worker)
 
+**Run host**:
+The one-shot usine process an executor launches on a worker for a single attempt — it hosts the run's Pi parent session and exits when the attempt ends. Its final message is the step result.
+_Avoid_: runner, daemon, worker process
+
+**Attempt channel**:
+The duplex channel between orchestrator and run host for one attempt — normalized events flowing out, steer/interrupt flowing in, as attempt-scoped framed messages. The byte transport underneath (stdio, SSH) never changes the messages.
+_Avoid_: stream (reserved for what a trigger watches), pipe, socket
+
+**Preflight**:
+The executor's verify-only readiness check of a worker — toolchain, run-host version, login state, attached credentials — failing with typed capability errors. It never installs; making a worker ready is out-of-band.
+_Avoid_: bootstrap, provisioning (that's the out-of-band act), health check
+
 **Agent**:
 A named member of the factory's team — a persona with standing instructions plus the brain spec that runs it (harness, model, reasoning effort). Defined as a file in the instance repo, filename as identity; every loop names the agent that owns its runs.
 _Avoid_: profile, bot, teammate, persona (the body text is the persona; the entity is the Agent)
