@@ -29,15 +29,19 @@ The standing condition that fires a loop — a watched stream narrowed by a sele
 _Avoid_: event (that's one deduplicated match, not the condition), watcher, filter (the selection expression plays the filter role; there is no separate filter construct)
 
 **Stream**:
-The class of software-work state a trigger watches — issues or pull requests in managed repos, or the clock for schedules. A trigger names exactly one; the catalog is engine-owned and deliberately small.
+The class of software-work state a trigger watches — issues or pull requests in managed repos, or the clock for schedules. A trigger names exactly one; the catalog — `issue`, `pr`, `schedule` — is engine-owned and deliberately small.
 _Avoid_: source, feed, event type
+
+**Tick**:
+One scheduled firing instant of a schedule trigger, identified by the time it was scheduled for — not when it actually ran. After downtime, only the latest missed tick fires.
+_Avoid_: cron job, firing, interval
 
 **Payload slice**:
 The defined portion of GitHub's object graph fetched as an item's payload for one stream — GitHub's shapes and names throughout, the slice choosing only which graph edges come along. Selection expressions and prompt interpolation both range over it.
 _Avoid_: event shape, custom schema
 
 **Event**:
-One deduplicated fact the engine may react to, carrying a dedup key and payload — a trigger matching GitHub state, or an operator approval. The dedup key is derived by the engine per trigger type, never authored in the loop file.
+One deduplicated fact the engine may react to, carrying a dedup key and payload — a trigger matching GitHub state, or an operator approval. The dedup key is derived by the engine per trigger type from the event's content — timestamps aside, the same state is the same Event, forever — never authored in the loop file.
 _Avoid_: firing, occurrence, message
 
 **Item**:
@@ -61,8 +65,12 @@ An operator's go-ahead for a run gated by its loop — recorded as an Event the 
 _Avoid_: confirmation, sign-off
 
 **Supersede**:
-What a newer Event does to the same Item's open run: cancels it (reason recorded) and takes its place. Engine behavior per trigger type, never a loop-file setting.
+What a newer Event does to the same Item's open run before any attempt starts: cancels it (reason recorded) and takes its place. A running attempt always finishes — the newer state is judged again once it ends. Engine behavior, never a loop-file setting.
 _Avoid_: preempt, replace
+
+**Revoke**:
+The engine canceling a run no attempt has started because its Item no longer matches the loop's trigger. Never touches a running attempt; distinct from operator cancel and from supersede.
+_Avoid_: cancel (the operator's act), expire
 
 **Orchestrator**:
 The long-running headless server that evaluates triggers, schedules work, holds state, and serves the UI. Runs locally or in the cloud; where it runs never changes what it is.

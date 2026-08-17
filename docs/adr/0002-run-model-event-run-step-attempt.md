@@ -15,3 +15,4 @@ usine adapts Inngest's run model rather than n8n's or Temporal's (see [run-model
 - Loop-authored step names are step identity (mirroring filename = loop identity, [ADR 0001](./0001-loops-live-in-the-instance-repo.md)): renaming a step retires it; prior results stay under the old name.
 - Auto-retry applies only to typed infra errors, capped at 2–3 attempts; agent-level failures always wait for the operator.
 - Polling cursors are an efficiency detail only — the dedup key is the guarantee.
+- **Revised by [ADR 0007](./0007-polling-triggers-content-hashed-events.md)**: supersede acts only on runs with no started attempt; a running attempt always finishes, the newer state re-judged when it ends.
