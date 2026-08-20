@@ -120,6 +120,14 @@ _Avoid_: profile, bot, teammate, persona (the body text is the persona; the enti
 The coding-agent runtime an agent's brain spec names — Claude Code, Codex CLI, or Pi — driven as a child of the run's Pi parent session. Swapping an agent's harness is editing that one field, never rewriting the agent or its loops.
 _Avoid_: backend, adapter (the usine code that drives a harness, not the concept), runner, agent (a named team member, not the runtime)
 
+**Pool**:
+The billing source an attempt's usage draws from — API keys (Pi parent and Pi children), the Claude plan (Claude Code children), or the ChatGPT plan (Codex children). Each pool keeps its native meter; a pool is not a harness — two harnesses can share one pool.
+_Avoid_: budget (an amount, not a source), account, quota
+
+**Runaway guard**:
+The per-attempt ceiling — wall-clock and total tokens — that interrupts an attempt burning without progress. Tripping it fails the attempt with its own error class, which never auto-retries; only the operator restarts a runaway.
+_Avoid_: budget, timeout (the wall-clock half only), kill switch
+
 **Block**:
 A standalone piece of the engine, published on its own so a factory can be assembled from parts — usine's orchestrator is the first composition, not the only intended one.
 _Avoid_: module (any code unit; a block is published), component, plugin
