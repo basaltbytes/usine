@@ -56,6 +56,10 @@ _Avoid_: event shape, custom schema
 One deduplicated fact the engine may react to, carrying a dedup key and payload — a trigger matching GitHub state, or an operator approval. The dedup key is derived by the engine per trigger type from the event's content — timestamps aside, the same state is the same Event, forever — never authored in the loop file.
 _Avoid_: firing, occurrence, message
 
+**Hint**:
+A droppable nudge telling the engine to fetch a repo's or an item's state sooner than the next poll — produced by usine's own GitHub writes and, when enabled, by webhook deliveries. Latency only, never a correctness source: polling remains the backstop that sees every change, and the dedup ledger absorbs double-sees.
+_Avoid_: webhook event (a delivery is one hint source, not the concept), push, notification
+
 **Item**:
 The piece of software-work state a loop acts on — an issue or PR in a managed repo, identified apart from its changing content. Coarser than an Event: many Events can concern one Item.
 _Avoid_: matched item (long form), target, resource
