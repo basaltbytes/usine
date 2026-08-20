@@ -1,0 +1,20 @@
+# The engine ships as published blocks from a pnpm + turbo monorepo
+
+usine is a monorepo in the manywalls/atoly shape — pnpm workspaces + turbo, `apps/` + `packages/`, shared tsconfig package, changesets, knip, renovate — and the engine's blocks are **published npm packages from day one**, at 0.x, under the `@usine` scope (claim the npm `usine` org first; `@usine-dev`, matching the domain, is the recorded fallback — the bare `usine` package name is squatted by an unrelated dead package). Nine packages publish, carved along the seams the map's decisions already drew: `core` (domain model — Event/Run/Step/Attempt — typed errors, ids, and the versioned attempt-channel envelope schema), `expression` (CEL check + eval seam), `loop-file` (loop/agent file schemas, frontmatter validation, surgical YAML-AST writer, instance-repo loader), `github` (polling change detection, per-stream GraphQL slice fetchers, App auth + token minting), `engine` (event ledger, dedup/supersede/revoke, run scheduling, durable-execution seam, SQLite store), `agents` (Pi parent adapter, subagents extension, roster + brain specs), `executor` (the five-operation contract, local + exe.dev executors), `orchestrator` (the embeddable composition), and `run-host` (the worker-side one-shot CLI — published because workers install it and preflight checks its version). `orchestrator` is a **library** exporting the full Effect-layer composition, startable in-process; `apps/server` is a thin CLI that runs it headless and serves `apps/web` (the web UI, internal, never published). Packages version **independently** via changesets — orchestrator↔run-host compatibility rides the envelope schema version ([ADR 0006](./0006-executor-contract-run-host-attempt-channel.md)), never matching version numbers. `effect` and the `@effect/*` packages each block uses are **peerDependencies** in every published package, exact-pinned once at the workspace root. v1 signs up for publish discipline — exports maps, no cross-package deep imports, a README per package — and explicitly not for API stability, a docs site, or support: 0.x is the honest contract while the APIs churn.
+
+## Considered Options
+
+- **Internal-only packages** — no publish machinery at all; rejected as contradicting the assemble-your-own-factory goal when changesets makes publishing nearly free.
+- **Publishable shape, publish later** — same discipline, npm deferred until APIs settle; rejected because "later" reliably never comes and the scope sits unclaimed.
+- **Coarser carve (4 packages)** — less version surface, but a third party takes the engine wholesale or not at all; the seams the map fought for would be invisible from outside.
+- **Finer carve** — the surgical YAML writer, the Pi subagents extension, and GitHub App auth as their own packages; deferred until an outside consumer actually materializes — each stays a module inside its seam package, extractable later without breaking anyone.
+- **App-only orchestrator** — simpler now, but the desktop all-in-one hope would then require carving a library out of an app under pressure.
+- **Lockstep versioning** — "usine 0.4" as one number across everything; rejected as duplicating what the envelope version already guarantees, at the cost of empty bumps.
+
+## Consequences
+
+- The post-v1 desktop hope stays additive: a shell wraps the served web UI, and an all-in-one app embeds `@usine/orchestrator` in-process — neither needs a new seam.
+- **How `apps/server` ships** (npx, binary, container) is deliberately not decided here — it belongs to the distribution-and-bootstrap decision.
+- Claiming the npm `usine` org is a first implementation act; if it's taken, everything above proceeds under `@usine-dev` unchanged.
+- `core` carries the attempt-channel envelope schema so `run-host` never depends on orchestrator-side packages.
+- Consumers of any published block must supply `effect` themselves at a compatible version — the peer-dependency posture trades install convenience for a single runtime in every tree.

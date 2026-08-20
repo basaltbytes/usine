@@ -119,3 +119,7 @@ _Avoid_: profile, bot, teammate, persona (the body text is the persona; the enti
 **Harness**:
 The coding-agent runtime an agent's brain spec names — Claude Code, Codex CLI, or Pi — driven as a child of the run's Pi parent session. Swapping an agent's harness is editing that one field, never rewriting the agent or its loops.
 _Avoid_: backend, adapter (the usine code that drives a harness, not the concept), runner, agent (a named team member, not the runtime)
+
+**Block**:
+A standalone piece of the engine, published on its own so a factory can be assembled from parts — usine's orchestrator is the first composition, not the only intended one.
+_Avoid_: module (any code unit; a block is published), component, plugin
