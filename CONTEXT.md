@@ -89,7 +89,7 @@ The engine canceling a run no attempt has started because its Item no longer mat
 _Avoid_: cancel (the operator's act), expire
 
 **Pause**:
-The operator's loop-level switch: a paused loop opens no new runs. Runtime state in the orchestrator, never written to the loop file; existing runs are untouched.
+The operator's loop-level switch: a paused loop opens no new runs. Runtime state in the orchestrator, never written to the loop file; existing runs are untouched. Loops created in the UI are born paused — unpausing is the arming act; a loop arriving by git is born unpaused.
 _Avoid_: disable (deleting/renaming the file is how a loop retires), stop
 
 **Orchestrator**:

@@ -16,4 +16,4 @@ A loop file is `loops/<name>.md` in the instance repo: YAML frontmatter for the 
 - The selector stays declarative (names/tags, intersection when both given) because the engine prunes polling by it; an expression would make repo scope opaque until evaluation.
 - UI writes are surgical YAML-AST edits — comments, key order, and formatting survive; hand-authored files are never rewritten in the background.
 - Strict validation with per-loop quarantine; an invalid `usine.yaml` (which carries the single factory-wide `version:`, the registry, and settings) is a factory-level error state.
-- Field defaults keep ceremony out of v1 files: `enabled: true`, `step: run`, `approval: none`.
+- Field defaults keep ceremony out of v1 files: `step: run`, `approval: none`. (`enabled:` was dropped from the schema by [ADR 0016](./0016-config-editing-forms-first-preview-before-arming.md) — pause is runtime state per [ADR 0009](./0009-instance-repo-remote-optional-runtime-state.md), never a file field.)
