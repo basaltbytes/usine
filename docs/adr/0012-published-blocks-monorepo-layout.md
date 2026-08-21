@@ -14,7 +14,7 @@ usine is a monorepo in the manywalls/atoly shape — pnpm workspaces + turbo, `a
 ## Consequences
 
 - The post-v1 desktop hope stays additive: a shell wraps the served web UI, and an all-in-one app embeds `@usine/orchestrator` in-process — neither needs a new seam.
-- **How `apps/server` ships** (npx, binary, container) is deliberately not decided here — it belongs to the distribution-and-bootstrap decision.
+- **How `apps/server` ships** (npx, binary, container) is deliberately not decided here — it belongs to the distribution-and-bootstrap decision. **Settled by [ADR 0019](./0019-npm-instance-pinned-first-run-onboarding.md)**: `apps/server` publishes as `@usine/server` (bin `usine`, web build bundled), exact-pinned per instance by `create-usine`.
 - Claiming the npm `usine` org is a first implementation act; if it's taken, everything above proceeds under `@usine-dev` unchanged.
 - `core` carries the attempt-channel envelope schema so `run-host` never depends on orchestrator-side packages.
 - Consumers of any published block must supply `effect` themselves at a compatible version — the peer-dependency posture trades install convenience for a single runtime in every tree.
