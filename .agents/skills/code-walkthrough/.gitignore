@@ -1,0 +1,4 @@
+# Examples are INPUTS (*.content.mjs). The HTML is a deterministic build
+# artifact — never commit it; build on demand:
+#   node scripts/build.mjs examples/pr-96.content.mjs /tmp/preview.html
+examples/*.html

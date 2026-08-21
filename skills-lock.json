@@ -13,11 +13,23 @@
       "skillPath": "skills/engineering/ask-matt/SKILL.md",
       "computedHash": "b2e8ef5ffc2f142022c1e1e1bba68073f0821356a8e1cf1b23670f61d13fe50b"
     },
+    "bro": {
+      "source": "cursor/plugins",
+      "sourceType": "github",
+      "skillPath": "pstack/skills/bro/SKILL.md",
+      "computedHash": "b651827a1c11465d79500780e53414fdccffd12ce3b640138dee2d04133a9a33"
+    },
     "code-review": {
       "source": "mattpocock/skills",
       "sourceType": "github",
       "skillPath": "skills/engineering/code-review/SKILL.md",
       "computedHash": "1d5e7242a98674635be79ab310cdda0e555d36a9903d2526ebf4263d0b7997ca"
+    },
+    "code-walkthrough": {
+      "source": "basaltbytes/skills",
+      "sourceType": "github",
+      "skillPath": "skills/code-walkthrough/SKILL.md",
+      "computedHash": "61c55f69735dd670c467aa8b9743178a3e20c68cea52de281410df7832ccecae"
     },
     "codebase-design": {
       "source": "mattpocock/skills",
@@ -31,6 +43,12 @@
       "skillPath": "skills/coding-guidelines/SKILL.md",
       "computedHash": "bc261f9ef04372e4989f643a8f0e8a7b7e4ddba52859f467698b0b44ff8c31c3"
     },
+    "deslop": {
+      "source": "cursor/plugins",
+      "sourceType": "github",
+      "skillPath": "cursor-team-kit/skills/deslop/SKILL.md",
+      "computedHash": "8883a7d459c07a0b2ee06972e79baa634009aa3bab969a6650acbefac394ad41"
+    },
     "diagnosing-bugs": {
       "source": "mattpocock/skills",
       "sourceType": "github",
@@ -42,6 +60,12 @@
       "sourceType": "github",
       "skillPath": "skills/engineering/domain-modeling/SKILL.md",
       "computedHash": "683744795bdc9fbfb6c0c2122c4b8119c950e2fe5bcbbf44237dd28aaea34b67"
+    },
+    "effect-ts": {
+      "source": "joelhooks/effectts-skills",
+      "sourceType": "github",
+      "skillPath": "skills/effect-ts/SKILL.md",
+      "computedHash": "0595f94396beec1485757779cc93472030324013c85bbe04fa5e6a43b1d7d60b"
     },
     "grill-me": {
       "source": "mattpocock/skills",
