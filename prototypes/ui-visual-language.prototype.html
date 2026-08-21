@@ -1,0 +1,789 @@
+<!--
+  PROTOTYPE — throwaway. Do not productionize.
+  Four VISUAL treatments of the settled v1 UI structure (ADR 0008: projects home
+  + needs-you strip, board with label-mapped lanes, run drawer, Configuration),
+  switchable via ?skin=A|B|C|D, the ←/→ keys, or the bottom bar. Structure and
+  fake dataset are identical across skins — only the design language changes:
+    A "Atelier"     industrial light   — concrete paper, ink, safety orange, Archivo
+    B "Studio"      soft product       — warm white, iris, tinted lanes, Manrope
+    C "Blueprint"   technical drawing  — drafting grid, Prussian blue, IBM Plex
+    D "Night shift" warm dark          — charcoal + brass, Newsreader italic display
+  Wayfinder ticket: basaltbytes/usine#19.
+-->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>usine — visual language prototype</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Sans+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;1,6..72,400;1,6..72,500&family=Schibsted+Grotesk:wght@400;500;600;700&family=Fragment+Mono&display=swap" rel="stylesheet">
+<style>
+/* ============================ base geometry ============================ */
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:400 var(--fs)/1.55 var(--ui);-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.mono{font-family:var(--mono);font-size:calc(var(--fs) - 1.5px)}
+.dim{color:var(--dim)} .faint{color:var(--faint)}
+.small{font-size:var(--fs-s)} .tiny{font-size:var(--fs-t)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.eyebrow{font-family:var(--disp-label,var(--ui));font-size:var(--fs-t);font-weight:700;
+  letter-spacing:var(--track);text-transform:uppercase;color:var(--faint)}
+
+/* nav */
+.nav{display:flex;align-items:center;gap:22px;padding:var(--nav-pad);position:sticky;top:0;
+  background:var(--nav-bg,var(--bg));z-index:5;border-bottom:1px solid var(--line)}
+.brand{font-family:var(--disp,var(--ui));font-weight:var(--brand-w,800);font-size:19px;letter-spacing:var(--brand-track,0)}
+.navlink{color:var(--dim);font-weight:600;cursor:pointer;font-size:var(--fs-s)}
+.navlink.on,.navlink:hover{color:var(--ink)}
+.nav-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+
+.wrap{max-width:1380px;margin:0 auto;padding:26px 26px 120px}
+h1.page{font-family:var(--disp,var(--ui));font-size:var(--fs-h1);font-weight:var(--h-w,700);
+  margin:0 0 6px;letter-spacing:var(--h-track,0)}
+.pagesub{margin:0 0 22px;color:var(--dim);font-size:var(--fs-s)}
+
+/* panels */
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);box-shadow:var(--shadow-card)}
+
+/* needs-you strip */
+.strip{margin-bottom:26px}
+.strip-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:var(--gap);margin-top:10px}
+.strip-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);
+  padding:var(--pad);box-shadow:var(--shadow-card);display:flex;flex-direction:column;gap:9px}
+
+/* project grid */
+.projects{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:var(--gap)}
+.proj{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius-lg);
+  padding:var(--pad);box-shadow:var(--shadow-card);cursor:pointer;display:flex;flex-direction:column;gap:9px;
+  transition:border-color .12s, box-shadow .12s, transform .12s}
+.proj:hover{border-color:var(--hover-line,var(--accent))}
+.proj h3{margin:0;font-family:var(--disp,var(--ui));font-size:var(--fs-h3);font-weight:var(--h-w,700)}
+.counts{display:flex;gap:7px;flex-wrap:wrap}
+
+/* board */
+.board{display:flex;gap:var(--lane-gap);align-items:flex-start;overflow-x:auto;padding-bottom:26px}
+.lane{min-width:242px;flex:1;background:var(--lane-bg,var(--surface));border:1px solid var(--lane-line,var(--line));
+  border-radius:var(--radius-lg);padding:var(--lane-pad);min-height:220px}
+.lane-head{padding:4px 6px 12px;display:flex;flex-direction:column;gap:3px}
+.lane-name{font-weight:700;font-size:var(--fs-s);display:flex;align-items:baseline;gap:8px}
+.lane-count{color:var(--faint);font-weight:600;font-size:var(--fs-t)}
+.lane-map{font-family:var(--mono);font-size:var(--fs-t);color:var(--faint)}
+.kcard{background:var(--card-bg,var(--surface));border:1px solid var(--card-line,var(--line));border-radius:var(--radius);
+  padding:var(--card-pad);margin-bottom:10px;cursor:grab;display:flex;flex-direction:column;gap:6px;
+  box-shadow:var(--shadow-kcard,none);transition:border-color .12s, box-shadow .12s}
+.kcard:hover{border-color:var(--hover-line,var(--accent))}
+.kcard-title{font-size:var(--fs-s);font-weight:var(--card-title-w,500)}
+.klabel{display:inline-block;padding:0 7px;border-radius:var(--badge-r);font-size:var(--fs-t);
+  background:var(--klabel-bg);color:var(--klabel-ink)}
+.backlink{cursor:pointer;color:var(--dim);font-weight:600;font-size:var(--fs-s)}
+.backlink:hover{color:var(--ink)}
+
+/* badges */
+.badge{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:var(--badge-r);
+  font-size:var(--fs-t);font-weight:700;letter-spacing:var(--badge-track,0);border:1px solid;white-space:nowrap;
+  text-transform:var(--badge-case,none);font-family:var(--badge-font,var(--ui))}
+.badge::before{content:"";width:7px;height:7px;border-radius:var(--dot-r,99px);background:currentColor;flex:none}
+.b-running{color:var(--running);border-color:color-mix(in srgb,var(--running) 45%,transparent);background:color-mix(in srgb,var(--running) var(--tint),transparent)}
+.b-waiting{color:var(--waiting-ink,var(--waiting));border-color:color-mix(in srgb,var(--waiting) 55%,transparent);background:color-mix(in srgb,var(--waiting) var(--tint),transparent)}
+.b-failed{color:var(--failed);border-color:color-mix(in srgb,var(--failed) 45%,transparent);background:color-mix(in srgb,var(--failed) var(--tint),transparent)}
+.b-succeeded{color:var(--ok);border-color:color-mix(in srgb,var(--ok) 45%,transparent);background:color-mix(in srgb,var(--ok) var(--tint),transparent)}
+.b-canceled{color:var(--canceled);border-color:color-mix(in srgb,var(--canceled) 45%,transparent);background:color-mix(in srgb,var(--canceled) var(--tint),transparent)}
+.b-pending{color:var(--canceled);border-color:color-mix(in srgb,var(--canceled) 45%,transparent);background:color-mix(in srgb,var(--canceled) var(--tint),transparent)}
+
+/* chips (agents, workers) */
+.chip{display:inline-flex;align-items:center;gap:6px;padding:2px 9px;border-radius:var(--chip-r,var(--badge-r));
+  background:var(--chip-bg,var(--surface2,transparent));border:1px solid var(--line);font-size:var(--fs-t);white-space:nowrap}
+.chip .dot{width:var(--dot,8px);height:var(--dot,8px);border-radius:var(--dot-r,99px);font-size:0;color:#fff;
+  display:inline-flex;align-items:center;justify-content:center;font-weight:700;flex:none;font-family:var(--ui)}
+
+/* buttons */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:var(--btn-pad);border-radius:var(--btn-r);
+  border:1px solid var(--line);background:var(--btn-bg,var(--surface));color:var(--ink);
+  font:600 var(--fs-s) var(--ui);cursor:pointer;letter-spacing:var(--btn-track,0);text-transform:var(--btn-case,none)}
+.btn:hover{border-color:var(--ink)}
+.btn-approve{background:color-mix(in srgb,var(--ok) var(--tint),transparent);border-color:color-mix(in srgb,var(--ok) 50%,transparent);color:var(--ok)}
+.btn-danger{background:color-mix(in srgb,var(--failed) var(--tint),transparent);border-color:color-mix(in srgb,var(--failed) 50%,transparent);color:var(--failed)}
+.btn-retry{background:color-mix(in srgb,var(--running) var(--tint),transparent);border-color:color-mix(in srgb,var(--running) 50%,transparent);color:var(--running)}
+.actions{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.steerbox{display:flex;gap:8px;margin-top:8px}
+.steerbox input{flex:1;background:var(--field-bg,var(--bg));border:1px solid var(--line);border-radius:var(--btn-r);
+  padding:8px 12px;color:var(--ink);font:400 var(--fs-s) var(--ui)}
+.steerbox input::placeholder{color:var(--faint)}
+
+/* drawer */
+.scrim{position:fixed;inset:0;background:var(--scrim,transparent);z-index:19}
+.drawer{position:fixed;top:var(--drawer-inset,0);right:var(--drawer-inset,0);bottom:var(--drawer-inset,0);
+  width:min(620px,94vw);background:var(--drawer-bg,var(--surface));border-left:1px solid var(--line);
+  box-shadow:var(--shadow-drawer);z-index:20;display:flex;flex-direction:column;border-radius:var(--drawer-r,0);
+  border:var(--drawer-border,none);border-left:1px solid var(--line)}
+.dhead{padding:18px 22px 14px;border-bottom:1px solid var(--line)}
+.dtitle{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dtitle h3{margin:0;font-family:var(--disp,var(--ui));font-weight:var(--h-w,700);font-size:var(--fs-h3)}
+.dclose{margin-left:auto;cursor:pointer;color:var(--dim);font-size:16px;padding:2px 8px;border-radius:var(--btn-r)}
+.dclose:hover{color:var(--ink);background:var(--surface2,transparent)}
+.dbody{overflow-y:auto;padding:18px 22px;flex:1}
+.tabs{display:flex;gap:4px;margin-top:14px}
+.tab{padding:6px 13px;cursor:pointer;color:var(--dim);font-weight:600;font-size:var(--fs-s);border-radius:var(--tab-r,8px)}
+.tab.on{color:var(--ink);background:var(--tab-on-bg,var(--bg))}
+
+/* drawer content */
+.box{background:var(--box-bg,var(--bg));border:1px solid var(--line);border-radius:var(--radius);padding:13px 15px;margin:12px 0}
+.kv{display:grid;grid-template-columns:118px 1fr;gap:5px 16px;font-size:var(--fs-s)}
+.kv .k{color:var(--faint)}
+table.attempts{width:100%;border-collapse:collapse}
+table.attempts td{padding:7px 10px;border-bottom:1px solid var(--line);font-size:var(--fs-s);vertical-align:top}
+table.attempts tr:last-child td{border-bottom:none}
+.err{color:var(--failed)}
+
+/* transcript */
+.tr-item{border-left:3px solid var(--line);padding:7px 13px;margin:10px 0;font-size:var(--fs-s)}
+.tr-parent{border-left-color:var(--accent)}
+.tr-tool{border-left-color:var(--line);color:var(--dim)}
+.tr-steer{border-left-color:var(--waiting);background:color-mix(in srgb,var(--waiting) 9%,transparent);border-radius:0 var(--radius) var(--radius) 0}
+.tr-result{border-left-color:var(--ok);background:color-mix(in srgb,var(--ok) 9%,transparent);border-radius:0 var(--radius) var(--radius) 0}
+details.child{border:1px solid var(--line);border-radius:var(--radius);margin:10px 0;background:var(--box-bg,var(--bg))}
+details.child>summary{padding:9px 13px;cursor:pointer;display:flex;gap:10px;align-items:center;list-style:none;font-size:var(--fs-s)}
+details.child>summary::-webkit-details-marker{display:none}
+details.child>summary::before{content:"▸";color:var(--faint)}
+details.child[open]>summary::before{content:"▾"}
+details.child .inner{padding:2px 13px 10px;border-top:1px solid var(--line)}
+.usage{margin-left:auto;color:var(--faint);font-family:var(--mono);font-size:var(--fs-t)}
+
+/* config */
+.cfg{display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:var(--gap)}
+.cfg .panel{padding:var(--pad)}
+.cfg-row{padding:8px 0;border-bottom:1px solid var(--line)}
+.cfg-row:last-child{border-bottom:none}
+
+/* prototype chrome — deliberately neutral, not part of any skin */
+#switcher{position:fixed;bottom:14px;left:50%;transform:translateX(-50%);z-index:99;display:flex;align-items:center;gap:2px;
+  background:#111c;border:1px solid #555;border-radius:99px;padding:5px 8px;backdrop-filter:blur(8px);
+  box-shadow:0 6px 24px #0009;font-family:system-ui}
+#switcher .arrow{cursor:pointer;padding:2px 10px;font-size:15px;color:#ddd;border-radius:99px}
+#switcher .arrow:hover{background:#ffffff22}
+#switcher .lbl{padding:0 10px;font:600 13px system-ui;color:#fff;min-width:230px;text-align:center}
+#switcher .note{position:absolute;top:-18px;left:0;right:0;text-align:center;font-size:10px;color:#888;letter-spacing:.05em}
+#toast{position:fixed;bottom:70px;left:50%;transform:translateX(-50%);z-index:98;background:#222;border:1px solid #555;
+  color:#eee;padding:9px 16px;border-radius:9px;font:13px system-ui;box-shadow:0 6px 24px #0009;opacity:0;
+  transition:opacity .2s;pointer-events:none;max-width:640px;text-align:center}
+
+@media (prefers-reduced-motion: reduce){*{transition:none !important}}
+
+/* ======================= SKIN A — Atelier ======================= */
+/* Industrial modernism, light. Concrete paper, ink, safety orange.  */
+body[data-skin=A]{
+  --ui:"Archivo",ui-sans-serif,system-ui,sans-serif; --disp:"Archivo",sans-serif;
+  --mono:"Space Mono",ui-monospace,monospace; --disp-label:"Archivo",sans-serif;
+  --bg:#ECEDE8; --surface:#FBFBF8; --surface2:#F2F2ED; --line:#C6C8BD; --box-bg:#F4F4EF;
+  --ink:#191A15; --dim:#585B50; --faint:#8B8E81;
+  --accent:#D9520A; --hover-line:#191A15;
+  --running:#155FA8; --waiting:#B57E06; --failed:#B32D2D; --ok:#2B7A44; --canceled:#787D71;
+  --tint:9%;
+  --fs:13.5px; --fs-s:12.5px; --fs-t:11px; --fs-h1:24px; --fs-h3:15.5px;
+  --radius:3px; --radius-lg:4px; --badge-r:3px; --btn-r:3px; --tab-r:3px; --dot-r:1px;
+  --gap:14px; --pad:15px 17px; --lane-gap:12px; --lane-pad:10px; --card-pad:10px 12px;
+  --nav-pad:13px 26px; --track:.11em; --h-track:.02em; --h-w:800; --brand-w:800;
+  --btn-pad:6px 13px; --btn-case:uppercase; --btn-track:.06em;
+  --badge-case:uppercase; --badge-track:.05em;
+  --shadow-card:none; --shadow-drawer:-14px 0 34px #0003;
+  --lane-bg:#E4E5DF; --lane-line:#C6C8BD; --card-bg:#FBFBF8;
+  --klabel-bg:#E0E1DA; --klabel-ink:#585B50; --field-bg:#FBFBF8;
+}
+body[data-skin=A] h1.page{text-transform:uppercase;letter-spacing:.05em}
+body[data-skin=A] .brand{text-transform:lowercase;letter-spacing:.02em}
+body[data-skin=A] .strip::before{content:"";display:block;height:8px;margin-bottom:12px;border-radius:2px;
+  background:repeating-linear-gradient(-45deg,#191A15 0 12px,#D9520A 12px 24px)}
+body[data-skin=A] .lane-name{text-transform:uppercase;letter-spacing:.1em;font-size:var(--fs-t);font-weight:800}
+body[data-skin=A] .kcard:hover{box-shadow:2px 2px 0 #191A1533}
+body[data-skin=A] .proj:hover{box-shadow:3px 3px 0 #191A1533}
+body[data-skin=A] .navlink{text-transform:uppercase;letter-spacing:.08em;font-size:var(--fs-t);font-weight:700}
+body[data-skin=A] .tab{text-transform:uppercase;letter-spacing:.07em;font-size:var(--fs-t)}
+body[data-skin=A] .tab.on{background:#191A15;color:#FBFBF8}
+
+/* ======================= SKIN B — Studio ======================= */
+/* Humane product tool. Warm white, iris, tinted lanes, avatars.    */
+body[data-skin=B]{
+  --ui:"Manrope",ui-sans-serif,system-ui,sans-serif; --disp:"Manrope",sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,monospace;
+  --bg:#F7F6F3; --surface:#FFFFFF; --surface2:#F3F2EE; --line:#E4E2DC; --box-bg:#FAF9F6;
+  --ink:#26241F; --dim:#6E6B62; --faint:#9C9890;
+  --accent:#5B5BD6; --hover-line:#C9C9EE;
+  --running:#3B82D6; --waiting:#C08A0A; --failed:#CC4E42; --ok:#399460; --canceled:#8A867D;
+  --tint:10%;
+  --fs:14px; --fs-s:13px; --fs-t:11.5px; --fs-h1:24px; --fs-h3:16px;
+  --radius:10px; --radius-lg:14px; --badge-r:99px; --btn-r:9px; --tab-r:8px;
+  --gap:16px; --pad:17px 19px; --lane-gap:14px; --lane-pad:12px; --card-pad:12px 14px;
+  --nav-pad:13px 26px; --track:.09em; --h-w:800; --brand-w:800;
+  --btn-pad:7px 14px; --dot:18px;
+  --shadow-card:0 1px 2px #26241F0A,0 4px 14px #26241F08;
+  --shadow-kcard:0 1px 2px #26241F0A,0 3px 10px #26241F07;
+  --shadow-drawer:-8px 0 40px #26241F26;
+  --drawer-inset:12px; --drawer-r:16px; --drawer-border:1px solid var(--line);
+  --scrim:#26241F14;
+  --lane-line:transparent; --card-line:#E9E7E1;
+  --klabel-bg:#EEEDF9; --klabel-ink:#5B5BD6; --field-bg:#F7F6F3; --chip-bg:#F7F6F3;
+}
+body[data-skin=B] .chip .dot{font-size:9px}
+body[data-skin=B] .lane{--lane-bg:#F1F0EC}
+body[data-skin=B] .lane[data-lane=ready]{--lane-bg:#EAF4EE}
+body[data-skin=B] .lane[data-lane=inprogress]{--lane-bg:#EAF1FA}
+body[data-skin=B] .lane[data-lane=inreview]{--lane-bg:#EFEDFA}
+body[data-skin=B] .lane[data-lane=done]{--lane-bg:#F0EFE8}
+body[data-skin=B] .lane-name{font-size:var(--fs-s);font-weight:800}
+body[data-skin=B] .nav{border-bottom-color:transparent;background:#F7F6F3E8;backdrop-filter:blur(10px)}
+body[data-skin=B] .kcard:hover{box-shadow:0 2px 4px #26241F0F,0 8px 22px #26241F0F}
+body[data-skin=B] .proj:hover{transform:translateY(-1px);box-shadow:0 2px 4px #26241F0F,0 10px 26px #26241F10}
+
+/* ======================= SKIN C — Blueprint ======================= */
+/* Engineering drawing. Drafting grid, Prussian blue ink, title block. */
+body[data-skin=C]{
+  --ui:"IBM Plex Sans",ui-sans-serif,system-ui,sans-serif;
+  --disp:"IBM Plex Sans Condensed",sans-serif; --disp-label:"IBM Plex Mono",monospace;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --bg:#F3F5F7; --surface:#FCFDFE; --surface2:#EDF1F5; --line:#A9BACB; --box-bg:#F6F8FA;
+  --ink:#1E3A5F; --dim:#4E6883; --faint:#7C90A5;
+  --accent:#1C6AB8; --hover-line:#1E3A5F;
+  --running:#1C6AB8; --waiting:#A87A08; --failed:#B03A30; --ok:#2A7350; --canceled:#7C90A5;
+  --tint:8%;
+  --fs:13px; --fs-s:12px; --fs-t:10.5px; --fs-h1:22px; --fs-h3:15px;
+  --radius:0px; --radius-lg:0px; --badge-r:0px; --btn-r:0px; --tab-r:0px; --dot-r:0px;
+  --gap:14px; --pad:14px 16px; --lane-gap:0px; --lane-pad:10px 12px; --card-pad:9px 11px;
+  --nav-pad:0; --track:.1em; --h-track:.04em; --h-w:700; --brand-w:700; --brand-track:.06em;
+  --btn-pad:5px 12px; --btn-case:uppercase; --btn-track:.05em;
+  --badge-case:uppercase; --badge-track:.04em; --badge-font:var(--mono);
+  --shadow-card:none; --shadow-drawer:-10px 0 30px #1E3A5F22;
+  --lane-bg:transparent; --lane-line:transparent; --card-bg:#FCFDFE; --card-line:#8FA6BC;
+  --klabel-bg:#E3EAF1; --klabel-ink:#4E6883; --field-bg:#FCFDFE;
+}
+body[data-skin=C]{background-image:
+  linear-gradient(#1E3A5F0A 1px,transparent 1px),
+  linear-gradient(90deg,#1E3A5F0A 1px,transparent 1px);
+  background-size:24px 24px}
+body[data-skin=C] .nav{border:1.5px solid #1E3A5F;border-top:none;background:#FCFDFE;gap:0;margin:0 26px;
+  max-width:1380px}
+body[data-skin=C] .nav>*{padding:11px 18px;border-right:1px solid #A9BACB;margin:0}
+body[data-skin=C] .nav .nav-right{margin-left:auto;border-right:none;border-left:1px solid #A9BACB;gap:10px}
+body[data-skin=C] .brand{text-transform:uppercase}
+body[data-skin=C] .navlink{text-transform:uppercase;letter-spacing:.08em;font-size:var(--fs-t);font-family:var(--mono)}
+body[data-skin=C] h1.page{text-transform:uppercase}
+body[data-skin=C] .board{border-top:1.5px solid #1E3A5F;border-bottom:1.5px solid #1E3A5F}
+body[data-skin=C] .lane{border-left:1px solid #A9BACB;padding-top:12px}
+body[data-skin=C] .lane:first-child{border-left:none}
+body[data-skin=C] .lane-name{text-transform:uppercase;letter-spacing:.09em;font-size:var(--fs-t);font-family:var(--mono);font-weight:600}
+body[data-skin=C] .lane-name::before{content:"⌖ ";color:var(--faint)}
+body[data-skin=C] .tab.on{background:none;border-bottom:2px solid var(--accent);border-radius:0}
+body[data-skin=C] .panel,body[data-skin=C] .strip-card,body[data-skin=C] .proj{border-color:#8FA6BC}
+
+/* ======================= SKIN D — Night shift ======================= */
+/* Warm dark. Charcoal + brass, editorial serif display, jewel states. */
+body[data-skin=D]{
+  --ui:"Schibsted Grotesk",ui-sans-serif,system-ui,sans-serif;
+  --disp:"Newsreader",Georgia,serif;
+  --mono:"Fragment Mono",ui-monospace,monospace;
+  --bg:#161412; --surface:#1E1B17; --surface2:#28241E; --line:#37322A; --box-bg:#191713;
+  --ink:#EDE7DC; --dim:#A79E90; --faint:#7A7264;
+  --accent:#D9A441; --hover-line:#D9A44166;
+  --running:#7AA5D2; --waiting:#E5C15C; --waiting-ink:#E5C15C; --failed:#E0705C; --ok:#6FAF7C; --canceled:#8D8578;
+  --tint:14%;
+  --fs:14px; --fs-s:13px; --fs-t:11.5px; --fs-h1:27px; --fs-h3:17px;
+  --radius:7px; --radius-lg:10px; --badge-r:99px; --btn-r:7px; --tab-r:7px;
+  --gap:16px; --pad:17px 19px; --lane-gap:14px; --lane-pad:11px; --card-pad:11px 13px;
+  --nav-pad:14px 26px; --track:.12em; --h-w:500; --brand-w:500;
+  --btn-pad:7px 14px;
+  --shadow-card:0 1px 0 #FFFFFF08 inset,0 4px 16px #00000040;
+  --shadow-kcard:0 1px 0 #FFFFFF06 inset,0 3px 10px #00000038;
+  --shadow-drawer:-14px 0 50px #000000A0;
+  --nav-bg:#161412F0;
+  --lane-bg:#1B1916; --lane-line:#2E2A23; --card-bg:#242019; --card-line:#3A342B;
+  --klabel-bg:#2E2A23; --klabel-ink:#A79E90; --field-bg:#161412; --chip-bg:#242019;
+  --scrim:#00000055;
+}
+body[data-skin=D]{background-image:radial-gradient(1100px 500px at 18% -8%,#221E18 0%,transparent 60%)}
+body[data-skin=D] h1.page,body[data-skin=D] .brand,body[data-skin=D] .proj h3,body[data-skin=D] .dtitle h3{
+  font-style:italic;letter-spacing:.005em}
+body[data-skin=D] h1.page{color:var(--accent)}
+body[data-skin=D] .eyebrow{color:var(--accent);opacity:.85}
+body[data-skin=D] a{color:var(--accent)}
+body[data-skin=D] .tab.on{background:#2E2A23}
+body[data-skin=D] .btn:hover{border-color:var(--accent)}
+body[data-skin=D] .kcard:hover{border-color:#D9A44155}
+</style>
+</head>
+<body data-skin="A">
+<div id="app"></div>
+<div id="switcher">
+  <div class="note">PROTOTYPE SWITCHER — not part of the design</div>
+  <div class="arrow" data-action="prev">◀</div>
+  <div class="lbl" id="swlbl"></div>
+  <div class="arrow" data-action="next">▶</div>
+</div>
+<div id="toast"></div>
+
+<script>
+/* ============================ fake data (from the #12 prototype) ============================ */
+const AGENTS = {
+  "codex-max": {harness:"codex",       model:"gpt-5.4-codex",   effort:"high",   color:"#7c5cff", init:"CM"},
+  "claudine":  {harness:"claude-code", model:"claude-opus-5",   effort:"medium", color:"#e07038", init:"CL"},
+  "pi-solo":   {harness:"pi",          model:"claude-sonnet-5", effort:"medium", color:"#1fa387", init:"PS"},
+};
+const WORKERS = [
+  {name:"local",     cap:1, busy:1, status:"ready"},
+  {name:"exe-dev-1", cap:1, busy:1, status:"ready"},
+  {name:"exe-dev-2", cap:4, busy:0, status:"down", error:"PreflightError: codex CLI login expired"},
+];
+const LOOPS = [
+  {file:"dev-on-ready.md", on:"issue", ifExpr:'labels.exists(l, l.name == "ready") && assignees.size() == 0',
+   agent:"codex-max", selector:"(all repos)", approval:false},
+  {file:"review-prs.md", on:"pr", ifExpr:'state == "OPEN" && !isDraft && author.login != "usine[bot]"',
+   agent:"claudine", selector:"(all repos)", approval:false},
+  {file:"apply-review-findings.md", on:"pr", ifExpr:'reviews.exists(r, r.state == "CHANGES_REQUESTED")',
+   agent:"codex-max", selector:"tag: active", approval:true},
+  {file:"weekly-deps.md", on:"schedule", ifExpr:'cron: 0 9 * * MON  tz: Europe/Paris',
+   agent:"pi-solo", selector:"balade", approval:true},
+];
+
+const RUNS = [
+  {id:"r1", loop:"dev-on-ready.md", repo:"basaltbytes/balade", state:"running",
+   item:{kind:"issue", num:142, title:"Add CSV export to walk stats"},
+   agent:"codex-max", updated:"6m ago", opened:"14m ago",
+   event:{key:"issue/balade#142 @ a1f39c", gist:'labels: [ready] · assignees: [] · body hash a1f39c', at:"14m ago"},
+   attempts:[{n:1, state:"running", worker:"exe-dev-1", started:"13m ago", error:null}],
+   transcript:[
+     {t:"parent", text:"Reading issue #142 and the repo charter. The stats module lives in src/stats/; I'll implement export there, test-first, then open the PR and swap the label."},
+     {t:"tool", line:'read balade/AGENTS.md, src/stats/summary.ts'},
+     {t:"child", harness:"codex", label:"implement CSV export", usage:"41.2k↑ 6.8k↓", state:"running", events:[
+       {t:"tool", line:"read src/stats/summary.ts, src/stats/types.ts"},
+       {t:"tool", line:"write src/stats/export.test.ts  (+64)"},
+       {t:"tool", line:"bash pnpm vitest run src/stats — 2 failed (red, as expected)"},
+       {t:"tool", line:"write src/stats/export.ts  (+82)"},
+       {t:"tool", line:"bash pnpm vitest run src/stats — 14 passed"},
+     ]},
+     {t:"parent", text:"Child finished the module with tests green. Now wiring the export button into the stats page, then branch + PR."},
+   ]},
+  {id:"r2", loop:"apply-review-findings.md", repo:"basaltbytes/atoly", state:"waiting",
+   item:{kind:"pr", num:88, title:"Refactor sync engine"},
+   agent:"codex-max", updated:"22m ago", opened:"22m ago", needs:"approval",
+   event:{key:"pr/atoly#88 @ 9c22e1", gist:"review: CHANGES_REQUESTED by PhilDL · 4 findings", at:"22m ago"},
+   plan:"codex-max will address the 4 findings from PhilDL's review and push to the PR branch.",
+   attempts:[], transcript:[]},
+  {id:"r3", loop:"review-prs.md", repo:"basaltbytes/manywalls", state:"failed",
+   item:{kind:"pr", num:57, title:"Migrate tile cache to IndexedDB"},
+   agent:"claudine", updated:"41m ago", opened:"1h ago", needs:"retry",
+   event:{key:"pr/manywalls#57 @ 55d0ab", gist:"state: OPEN · draft: false · 38 files changed", at:"1h ago"},
+   attempts:[{n:1, state:"failed", worker:"local", started:"58m ago",
+              error:"AgentError: claude-code child exited 1 — context window exhausted on 38-file diff. Agent failures wait for the operator (no auto-retry)."}],
+   transcript:[
+     {t:"parent", text:"Large PR — 38 files. Spawning a review child over the full diff."},
+     {t:"child", harness:"claude-code", label:"review diff", usage:"188k↑ 2.1k↓", state:"failed", events:[
+       {t:"tool", line:"bash gh pr diff 57"},
+       {t:"tool", line:"read src/cache/*.ts (14 files)"},
+       {t:"text", line:"⚠ exited 1: prompt exceeded context window"},
+     ]},
+   ]},
+  {id:"r4", loop:"review-prs.md", repo:"basaltbytes/balade", state:"running",
+   item:{kind:"pr", num:141, title:"Fix elevation profile flicker"},
+   agent:"claudine", updated:"1m ago", opened:"9m ago",
+   event:{key:"pr/balade#141 @ 07bd4e", gist:"state: OPEN · draft: false · opened by usine run r5", at:"9m ago"},
+   attempts:[
+     {n:1, state:"failed", worker:"exe-dev-1", started:"9m ago",
+      error:"ChannelLost: SSH stream to exe-dev-1 dropped mid-attempt. Typed infra error — retried automatically (1/3)."},
+     {n:2, state:"running", worker:"local", started:"4m ago", error:null},
+   ],
+   transcript:[
+     {t:"parent", text:"Attempt 2 (attempt 1 lost its channel). Reviewing PR #141 against the charter."},
+     {t:"child", harness:"claude-code", label:"review diff", usage:"32.9k↑ 1.4k↓", state:"running", events:[
+       {t:"tool", line:"bash gh pr diff 141"},
+       {t:"tool", line:"read src/profile/ElevationProfile.tsx"},
+     ]},
+   ]},
+  {id:"r5", loop:"dev-on-ready.md", repo:"basaltbytes/balade", state:"succeeded",
+   item:{kind:"issue", num:137, title:"Fix elevation profile flicker"},
+   agent:"codex-max", updated:"11m ago", opened:"52m ago",
+   event:{key:"issue/balade#137 @ c81f22", gist:"labels: [ready] · assignees: [] · body hash c81f22", at:"52m ago"},
+   result:{text:"Opened basaltbytes/balade#141 · swapped label ready → in-progress on #137", usage:"128k↑ 14.2k↓ · 11m", pr:"basaltbytes/balade#141"},
+   attempts:[{n:1, state:"succeeded", worker:"exe-dev-1", started:"51m ago", error:null}],
+   transcript:[
+     {t:"parent", text:"Issue #137: flicker on elevation profile redraw. Reproducing first, then fixing test-first."},
+     {t:"child", harness:"codex", label:"implement fix", usage:"96k↑ 9.8k↓", state:"done", events:[
+       {t:"tool", line:"read src/profile/ElevationProfile.tsx"},
+       {t:"tool", line:"edit src/profile/ElevationProfile.tsx  (+9 −14)"},
+       {t:"tool", line:"bash pnpm vitest run — 231 passed"},
+     ]},
+     {t:"parent", text:"Fix verified. Opening PR and swapping the label."},
+     {t:"tool", line:'bash gh pr create --title "Fix elevation profile flicker" · gh issue edit 137 --add-label in-progress --remove-label ready'},
+     {t:"result", text:"Step result (final envelope): PR basaltbytes/balade#141 opened · label swapped on #137"},
+   ]},
+  {id:"r6", loop:"dev-on-ready.md", repo:"basaltbytes/balade", state:"canceled",
+   item:{kind:"issue", num:142, title:"Add CSV export to walk stats"},
+   agent:"codex-max", updated:"14m ago", opened:"31m ago",
+   event:{key:"issue/balade#142 @ 88e04d", gist:"labels: [ready] · body hash 88e04d (before edit)", at:"31m ago"},
+   reason:"Superseded: issue body edited → newer Event a1f39c took the run's place before any attempt started.",
+   attempts:[], transcript:[]},
+  {id:"r7", loop:"dev-on-ready.md", repo:"basaltbytes/atoly", state:"canceled",
+   item:{kind:"issue", num:61, title:"Spike: offline map tiles"},
+   agent:"codex-max", updated:"2h ago", opened:"3h ago",
+   reason:"Revoked: label 'ready' was removed — Item no longer matches the trigger; no attempt had started.",
+   event:{key:"issue/atoly#61 @ 3d91b0", gist:"labels: [ready] · assignees: []", at:"3h ago"},
+   attempts:[], transcript:[]},
+  {id:"r8", loop:"dev-on-ready.md", repo:"basaltbytes/manywalls", state:"pending",
+   item:{kind:"issue", num:63, title:"Dark mode for embeds"},
+   agent:"codex-max", updated:"3m ago", opened:"3m ago",
+   note:"Queued — local 1/1 and exe-dev-1 1/1 busy; exe-dev-2 failed preflight.",
+   event:{key:"issue/manywalls#63 @ f00c11", gist:"labels: [ready] · assignees: []", at:"3m ago"},
+   attempts:[], transcript:[]},
+  {id:"r9", loop:"weekly-deps.md", repo:"basaltbytes/balade", state:"succeeded",
+   item:{kind:"tick", num:null, title:"Mon 09:00 Europe/Paris"},
+   agent:"pi-solo", updated:"6h ago", opened:"6h ago",
+   event:{key:"schedule/weekly-deps@2026-08-17T09:00+02:00", gist:"tick — approval consumed at 09:12", at:"6h ago"},
+   result:{text:"Opened basaltbytes/balade#139 — 11 deps bumped, tests green", usage:"54k↑ 5.1k↓ · 7m", pr:"basaltbytes/balade#139"},
+   attempts:[{n:1, state:"succeeded", worker:"local", started:"6h ago", error:null}],
+   transcript:[{t:"result", text:"Step result: PR basaltbytes/balade#139 opened"}]},
+];
+
+const REPOS = [
+  {name:"basaltbytes/balade",    tags:["active"]},
+  {name:"basaltbytes/atoly",     tags:["active"]},
+  {name:"basaltbytes/manywalls", tags:[]},
+];
+const LANES = [
+  {key:"backlog",    name:"Backlog",     map:"(no lane label)"},
+  {key:"ready",      name:"Ready",       map:"label: ready"},
+  {key:"inprogress", name:"In progress", map:"label: in-progress"},
+  {key:"inreview",   name:"In review",   map:"state: pr open ∪ label: in-review"},
+  {key:"done",       name:"Done",        map:"state: merged ∪ closed"},
+];
+const ITEMS = [
+  {id:"i1",  repo:"basaltbytes/balade",    kind:"issue", num:143, title:"Offline route cache",            labels:[],              lane:"backlog"},
+  {id:"i2",  repo:"basaltbytes/balade",    kind:"issue", num:142, title:"Add CSV export to walk stats",   labels:["in-progress"], lane:"inprogress", runId:"r1"},
+  {id:"i3",  repo:"basaltbytes/balade",    kind:"pr",    num:141, title:"Fix elevation profile flicker",  labels:[],              lane:"inreview",   runId:"r4"},
+  {id:"i4",  repo:"basaltbytes/balade",    kind:"pr",    num:139, title:"Weekly deps bump",               labels:[],              lane:"done",       runId:"r9"},
+  {id:"i5",  repo:"basaltbytes/atoly",     kind:"issue", num:61,  title:"Spike: offline map tiles",       labels:[],              lane:"backlog",    runId:"r7"},
+  {id:"i6",  repo:"basaltbytes/atoly",     kind:"pr",    num:88,  title:"Refactor sync engine",           labels:["in-review"],   lane:"inreview",   runId:"r2"},
+  {id:"i7",  repo:"basaltbytes/atoly",     kind:"issue", num:54,  title:"Sync conflict banner",           labels:[],              lane:"done"},
+  {id:"i8",  repo:"basaltbytes/manywalls", kind:"issue", num:66,  title:"Wall sharing links",             labels:[],              lane:"backlog"},
+  {id:"i9",  repo:"basaltbytes/manywalls", kind:"issue", num:63,  title:"Dark mode for embeds",           labels:["ready"],       lane:"ready",      runId:"r8"},
+  {id:"i10", repo:"basaltbytes/manywalls", kind:"pr",    num:57,  title:"Migrate tile cache to IndexedDB",labels:[],              lane:"inreview",   runId:"r3"},
+  {id:"i11", repo:"basaltbytes/manywalls", kind:"issue", num:51,  title:"Embed API v2",                   labels:[],              lane:"done"},
+];
+
+/* ============================ state ============================ */
+const SKINS = [
+  {key:"A", name:"Atelier",     blurb:"industrial light"},
+  {key:"B", name:"Studio",      blurb:"soft product"},
+  {key:"C", name:"Blueprint",   blurb:"technical drawing"},
+  {key:"D", name:"Night shift", blurb:"warm dark"},
+];
+const S = { skin:"A", page:"home", repoSel:null, sel:null, tab:"overview" };
+
+/* ============================ helpers ============================ */
+const $ = s => document.querySelector(s);
+const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const run = id => RUNS.find(r => r.id === id);
+const loop = f => LOOPS.find(l => l.file === f);
+const itemRef = r => r.item.kind === "tick" ? "tick" : `${r.repo.split("/")[1]}#${r.item.num}`;
+const badge = st => `<span class="badge b-${st}">${st}</span>`;
+const agentChip = name => { const a = AGENTS[name];
+  return `<span class="chip"><span class="dot" style="background:${a.color}">${a.init}</span>${esc(name)} <span class="faint">· ${a.harness}</span></span>`; };
+const needsMe = r => r.state === "waiting" || (r.state === "failed" && r.needs === "retry");
+
+function toast(msg){ const t = $("#toast"); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(t._h); t._h = setTimeout(() => t.style.opacity = 0, 3800); }
+
+/* ---- interventions (in-memory stubs) ---- */
+function doApprove(id){ const r = run(id);
+  r.state = "running"; r.needs = null; r.updated = "now";
+  r.attempts.push({n:1, state:"running", worker:"local", started:"now", error:null});
+  r.transcript.push({t:"parent", text:"Approval consumed — starting on the review findings."});
+  toast("Approval recorded as an Event — the waiting run consumed it and attempt 1 started (stub)."); render(); }
+function doRetry(id){ const r = run(id);
+  const n = r.attempts.length + 1;
+  r.state = "running"; r.needs = null; r.updated = "now";
+  r.attempts.push({n, state:"running", worker:"local", started:"now", error:null});
+  toast(`Operator retry → attempt ${n} under the same step (stub).`); render(); }
+function doCancel(id){ const r = run(id);
+  r.state = "canceled"; r.needs = null; r.updated = "now";
+  r.reason = "Canceled by operator.";
+  r.attempts.forEach(a => { if(a.state === "running") a.state = "canceled"; });
+  toast("Run canceled by operator (stub)."); render(); }
+function doSteer(id){ const inp = document.getElementById("steer-" + id);
+  if(!inp || !inp.value.trim()) { toast("Type a steer message first."); return; }
+  const r = run(id); r.transcript.push({t:"steer", text:inp.value.trim()}); r.updated = "now";
+  toast("Steer delivered to the Pi parent session over the attempt channel (stub)."); render(); }
+function doInterrupt(id){ const r = run(id);
+  r.transcript.push({t:"steer", text:"⏸ Interrupt — parent paused at the next tool boundary, waiting for a steer."});
+  toast("Interrupt sent — parent pauses and waits for a steer (stub)."); render(); }
+
+/* ---- shared fragments ---- */
+function actionsHTML(r){
+  const A = [];
+  if(r.state === "waiting")  A.push(`<button class="btn btn-approve" data-action="approve" data-id="${r.id}">✓ Approve</button>`);
+  if(r.state === "failed" && r.needs === "retry") A.push(`<button class="btn btn-retry" data-action="retry" data-id="${r.id}">↻ Retry</button>`);
+  if(r.state === "running") A.push(`<button class="btn" data-action="interrupt" data-id="${r.id}">⏸ Interrupt</button>`);
+  if(["running","waiting","pending","failed"].includes(r.state))
+    A.push(`<button class="btn btn-danger" data-action="cancel" data-id="${r.id}">✕ Cancel</button>`);
+  let steer = "";
+  if(r.state === "running")
+    steer = `<div class="steerbox"><input id="steer-${r.id}" placeholder="Steer the parent session…">
+             <button class="btn" data-action="steer" data-id="${r.id}">Steer ➤</button></div>`;
+  return `<div class="actions">${A.join("")}</div>${steer}`;
+}
+
+function transcriptHTML(r){
+  if(!r.transcript.length) return `<div class="dim small">No transcript yet — no attempt has started.</div>`;
+  return r.transcript.map(e => {
+    if(e.t === "parent") return `<div class="tr-item tr-parent"><div class="eyebrow">pi parent</div>${esc(e.text)}</div>`;
+    if(e.t === "tool")   return `<div class="tr-item tr-tool mono">⚙ ${esc(e.line)}</div>`;
+    if(e.t === "steer")  return `<div class="tr-item tr-steer"><div class="eyebrow">operator steer</div>${esc(e.text)}</div>`;
+    if(e.t === "result") return `<div class="tr-item tr-result"><div class="eyebrow">step result</div>${esc(e.text)}</div>`;
+    if(e.t === "child")  return `<details class="child" ${e.state==="running"?"open":""}><summary>
+        <span class="eyebrow">child · ${esc(e.harness)}</span> <span>${esc(e.label)}</span>
+        <span class="usage">${esc(e.usage)} · ${esc(e.state)}</span></summary>
+      <div class="inner">${e.events.map(c => `<div class="tr-item tr-tool mono">${c.t==="tool"?"⚙":"⚠"} ${esc(c.line)}</div>`).join("")}</div>
+      </details>`;
+    return "";
+  }).join("");
+}
+
+function attemptsHTML(r){
+  if(!r.attempts.length) return `<div class="dim small">No attempts yet.</div>`;
+  return `<table class="attempts">${r.attempts.map(a => `
+    <tr><td class="mono">#${a.n}</td><td>${badge(a.state)}</td>
+        <td class="mono dim">${esc(a.worker)}</td><td class="dim small">${esc(a.started)}</td>
+        <td class="small ${a.error?"err":""}" style="white-space:normal">${esc(a.error||"")}</td></tr>`).join("")}</table>`;
+}
+
+function overviewHTML(r){
+  const l = loop(r.loop);
+  return `
+    <div class="box"><div class="eyebrow" style="margin-bottom:7px">event</div>
+      <div class="kv">
+        <div class="k">dedup key</div><div class="mono">${esc(r.event.key)}</div>
+        <div class="k">payload gist</div><div class="mono dim">${esc(r.event.gist)}</div>
+        <div class="k">detected</div><div>${esc(r.event.at)}</div>
+        <div class="k">loop</div><div class="mono">${esc(r.loop)} <span class="faint">· agent ${esc(r.agent)} · approval ${l.approval?"required":"none"}</span></div>
+      </div></div>
+    ${r.plan ? `<div class="box"><div class="eyebrow" style="margin-bottom:7px">waiting for approval</div>${esc(r.plan)}</div>` : ""}
+    ${r.note ? `<div class="box dim small">${esc(r.note)}</div>` : ""}
+    ${r.reason ? `<div class="box"><div class="eyebrow" style="margin-bottom:7px">closed</div>${esc(r.reason)}</div>` : ""}
+    <div class="box"><div class="eyebrow" style="margin-bottom:7px">attempts</div>${attemptsHTML(r)}</div>
+    ${r.result ? `<div class="box" style="border-color:color-mix(in srgb,var(--ok) 45%,transparent)">
+       <div class="eyebrow" style="margin-bottom:7px">result</div>
+       ${esc(r.result.text)}<div class="faint small mono" style="margin-top:5px">${esc(r.result.usage)}</div>
+       ${r.result.pr ? `<div class="small" style="margin-top:5px">Changes → <a href="#">${esc(r.result.pr)}</a></div>` : ""}</div>` : ""}`;
+}
+
+/* ============================ surfaces ============================ */
+function navHTML(){
+  const needCount = RUNS.filter(needsMe).length;
+  return `<div class="nav">
+    <span class="brand">usine</span>
+    <span class="navlink ${S.page==="home"?"on":""}" data-action="go-home">Projects</span>
+    <span class="navlink ${S.page==="config"?"on":""}" data-action="go-config">Configuration</span>
+    <span class="nav-right">${needCount
+      ? `<span class="badge b-waiting" style="cursor:pointer" data-action="go-home">${needCount} need you</span>`
+      : `<span class="faint small">all quiet</span>`}</span>
+  </div>`;
+}
+
+function stripHTML(){
+  const attn = RUNS.filter(needsMe);
+  if(!attn.length) return "";
+  return `<div class="strip">
+    <div class="eyebrow">Needs you</div>
+    <div class="strip-cards">${attn.map(r => `<div class="strip-card">
+      <div style="display:flex;align-items:center;gap:10px">
+        <span class="eyebrow" style="color:${r.state==="waiting"?"var(--waiting-ink,var(--waiting))":"var(--failed)"}">
+          ${r.state==="waiting"?"approval waiting":"failed — your call"}</span>
+        <span style="margin-left:auto" class="faint small">${esc(r.updated)}</span></div>
+      <div><b>${esc(r.loop.replace(".md",""))}</b> · <span class="mono">${esc(itemRef(r))}</span>
+        <span class="dim">${esc(r.item.title)}</span></div>
+      ${actionsHTML(r)}</div>`).join("")}</div>
+  </div>`;
+}
+
+function homeHTML(){
+  return `${stripHTML()}
+    <h1 class="page">Projects</h1>
+    <p class="pagesub">3 managed repos · phildl/usine-instance</p>
+    <div class="projects">
+      ${REPOS.map(p => { const pr = RUNS.filter(r => r.repo === p.name);
+        const c = st => pr.filter(r => r.state === st).length;
+        const need = pr.filter(needsMe).length;
+        const working = [...new Set(pr.filter(r => r.state === "running").map(r => r.agent))];
+        return `<div class="proj" data-action="open-project" data-id="${esc(p.name)}">
+          <div style="display:flex;align-items:center;gap:8px"><h3>${esc(p.name.split("/")[1])}</h3>
+            ${p.tags.map(t => `<span class="klabel">${esc(t)}</span>`).join("")}
+            ${need ? `<span style="margin-left:auto" class="badge b-waiting">${need} need you</span>` : ""}</div>
+          <div class="faint small mono">${esc(p.name)}</div>
+          <div class="counts">
+            ${c("running") ? `<span class="badge b-running">${c("running")} running</span>` : ""}
+            ${c("pending") ? `<span class="badge b-pending">${c("pending")} pending</span>` : ""}
+            ${c("waiting") ? `<span class="badge b-waiting">${c("waiting")} waiting</span>` : ""}
+            ${c("failed") ? `<span class="badge b-failed">${c("failed")} failed</span>` : ""}
+            ${c("succeeded") ? `<span class="badge b-succeeded">${c("succeeded")} ok</span>` : ""}
+          </div>
+          <div class="dim small">${working.length ? "Working now: " + working.map(esc).join(", ") : "Quiet"}</div>
+        </div>`; }).join("")}
+    </div>`;
+}
+
+function kcardHTML(it){
+  const r = it.runId ? run(it.runId) : null;
+  const needCol = r && r.state === "waiting" ? "var(--waiting)"
+    : r && r.state === "failed" && r.needs === "retry" ? "var(--failed)" : null;
+  return `<div class="kcard" draggable="true" data-item="${it.id}" ${r ? `data-action="sel" data-id="${r.id}"` : ""}
+      ${needCol ? `style="border-color:${needCol}"` : ""}>
+    <div class="tiny mono faint">${it.kind === "pr" ? "⇄ PR" : "◎"} #${it.num}
+      ${it.labels.map(l => `<span class="klabel">${esc(l)}</span>`).join(" ")}</div>
+    <div class="kcard-title">${esc(it.title)}</div>
+    ${r ? `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">${agentChip(r.agent)} ${badge(r.state)}</div>
+      ${r.state === "failed" ? `<div class="err tiny">${esc((r.attempts[r.attempts.length-1]?.error || "").slice(0,64))}…</div>` : ""}
+      ${r.state === "waiting" ? `<div class="tiny" style="color:var(--waiting-ink,var(--waiting))">waiting for your approval</div>` : ""}` : ""}
+  </div>`;
+}
+
+function boardHTML(repoName){
+  const items = ITEMS.filter(i => i.repo === repoName);
+  return `
+    <div style="display:flex;align-items:baseline;gap:14px;margin-bottom:4px;flex-wrap:wrap">
+      <span class="backlink" data-action="go-home">← Projects</span>
+      <h1 class="page" style="margin:0">${esc(repoName.split("/")[1])}</h1></div>
+    <p class="pagesub">Lanes sync with GitHub labels — drag a card to move it; usine writes the label swap.</p>
+    <div class="board">
+      ${LANES.map(l => { const cards = items.filter(i => i.lane === l.key);
+        return `<div class="lane" data-lane="${l.key}">
+          <div class="lane-head">
+            <span class="lane-name">${l.name} <span class="lane-count">${cards.length || ""}</span></span>
+            <span class="lane-map">${esc(l.map)}</span></div>
+          ${cards.map(kcardHTML).join("") || `<div class="faint small" style="padding:6px 4px">—</div>`}
+        </div>`; }).join("")}
+    </div>`;
+}
+
+function configHTML(){
+  return `<h1 class="page">Configuration</h1>
+  <p class="pagesub">Loops, agents, workers, lanes. Edits round-trip through files in phildl/usine-instance.</p>
+  <div class="cfg">
+    <div class="panel"><div class="eyebrow" style="margin-bottom:8px">loops</div>
+      ${LOOPS.map(l => `<div class="cfg-row"><span class="mono">${esc(l.file)}</span>
+        <div class="faint tiny mono">on: ${esc(l.on)} · agent: ${esc(l.agent)}${l.approval ? " · approval required" : ""}</div></div>`).join("")}</div>
+    <div class="panel"><div class="eyebrow" style="margin-bottom:8px">agents</div>
+      ${Object.entries(AGENTS).map(([n,a]) => `<div class="cfg-row">
+        ${agentChip(n)}<div class="faint tiny mono" style="margin-top:4px">${esc(a.model)} · effort ${esc(a.effort)}</div></div>`).join("")}</div>
+    <div class="panel"><div class="eyebrow" style="margin-bottom:8px">workers</div>
+      ${WORKERS.map(w => `<div class="cfg-row small">${w.status === "down"
+        ? `<span class="err">${w.name} — ${esc(w.error)}</span>`
+        : `${w.name} · ${w.busy}/${w.cap} busy`}</div>`).join("")}
+      <div class="eyebrow" style="margin:14px 0 6px">lanes (per repo)</div>
+      <div class="mono tiny dim">${LANES.map(l => `${l.name} ← ${esc(l.map)}`).join("<br>")}</div>
+      <div class="faint tiny" style="margin-top:8px">Defaults proposed from the repo's GitHub labels. Two-way sync — usine never deletes a label.</div></div>
+  </div>`;
+}
+
+function drawerHTML(r){
+  return `<div class="scrim" data-action="close"></div><div class="drawer">
+    <div class="dhead">
+      <div class="dtitle">
+        ${badge(r.state)} <h3>${esc(r.loop.replace(".md",""))} · ${esc(itemRef(r))}</h3>
+        <span class="dim small">${esc(r.item.title)}</span>
+        <span class="dclose" data-action="close">✕</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">${agentChip(r.agent)}
+        <span class="faint small">opened ${esc(r.opened)} · updated ${esc(r.updated)}</span></div>
+      <div style="margin-top:13px">${actionsHTML(r)}</div>
+      <div class="tabs">
+        <div class="tab ${S.tab==="overview"?"on":""}" data-action="tab" data-id="overview">Overview</div>
+        <div class="tab ${S.tab==="transcript"?"on":""}" data-action="tab" data-id="transcript">Transcript</div>
+      </div>
+    </div>
+    <div class="dbody">${S.tab==="overview" ? overviewHTML(r) : transcriptHTML(r)}</div>
+  </div>`;
+}
+
+/* ============================ shell ============================ */
+function render(){
+  const body = S.page === "config" ? configHTML() : S.repoSel ? boardHTML(S.repoSel) : homeHTML();
+  const r = S.sel ? run(S.sel) : null;
+  $("#app").innerHTML = navHTML() + `<div class="wrap">${body}</div>` + (r ? drawerHTML(r) : "");
+  const def = SKINS.find(x => x.key === S.skin);
+  $("#swlbl").textContent = `${def.key} — ${def.name} · ${def.blurb}`;
+}
+function setSkin(key){
+  S.skin = key;
+  document.body.dataset.skin = key;
+  const u = new URL(location.href); u.searchParams.set("skin", key);
+  history.replaceState(null, "", u); render();
+}
+function cycle(d){
+  const i = SKINS.findIndex(v => v.key === S.skin);
+  setSkin(SKINS[(i + d + SKINS.length) % SKINS.length].key);
+}
+
+/* ---- kanban drag = label swap (stub) ---- */
+const LANE_LABEL = {ready:"ready", inprogress:"in-progress", inreview:"in-review"};
+document.addEventListener("dragstart", e => {
+  const c = e.target.closest?.("[data-item]"); if(!c) return;
+  e.dataTransfer.setData("text/plain", c.dataset.item);
+  e.dataTransfer.effectAllowed = "move";
+});
+document.addEventListener("dragover", e => { if(e.target.closest?.("[data-lane]")) e.preventDefault(); });
+document.addEventListener("drop", e => {
+  const col = e.target.closest?.("[data-lane]"); if(!col) return;
+  e.preventDefault();
+  const it = ITEMS.find(x => x.id === e.dataTransfer.getData("text/plain")); if(!it) return;
+  const to = col.dataset.lane; if(to === it.lane) return;
+  const toName = LANES.find(l => l.key === to).name;
+  it.labels = it.labels.filter(l => !Object.values(LANE_LABEL).includes(l));
+  if(LANE_LABEL[to]) it.labels.push(LANE_LABEL[to]);
+  it.lane = to;
+  if(to === "ready" && it.kind === "issue" && !it.runId){
+    const rid = "r" + (RUNS.length + 1);
+    RUNS.unshift({id:rid, loop:"dev-on-ready.md", repo:it.repo, state:"pending",
+      item:{kind:it.kind, num:it.num, title:it.title}, agent:"codex-max", updated:"now", opened:"now",
+      note:"Queued — your drag swapped the label to 'ready'; the trigger matched and opened this run.",
+      event:{key:`issue/${it.repo.split("/")[1]}#${it.num} @ drag01`, gist:"labels: [ready] — swapped via board drag", at:"now"},
+      attempts:[], transcript:[]});
+    it.runId = rid;
+    toast("Label swap written to GitHub → 'ready'. dev-on-ready matched — Event detected, run opened (stub).");
+  } else {
+    toast(`Card moved to ${toName}: label swap written to GitHub (stub) — no loop matched.`);
+  }
+  render();
+});
+
+document.addEventListener("click", e => {
+  const el = e.target.closest("[data-action]");
+  if(!el) return;
+  const act = el.dataset.action, id = el.dataset.id;
+  if(act === "prev") return cycle(-1);
+  if(act === "next") return cycle(1);
+  if(act === "sel"){ S.sel = id; S.tab = "overview"; return render(); }
+  if(act === "close"){ S.sel = null; return render(); }
+  if(act === "tab"){ S.tab = id; return render(); }
+  if(act === "open-project"){ S.repoSel = id; S.page = "home"; S.sel = null; return render(); }
+  if(act === "go-home"){ S.page = "home"; S.repoSel = null; S.sel = null; return render(); }
+  if(act === "go-config"){ S.page = "config"; S.repoSel = null; S.sel = null; return render(); }
+  if(act === "approve") return doApprove(id);
+  if(act === "retry") return doRetry(id);
+  if(act === "cancel") return doCancel(id);
+  if(act === "steer") return doSteer(id);
+  if(act === "interrupt") return doInterrupt(id);
+});
+document.addEventListener("keydown", e => {
+  if(["INPUT","TEXTAREA"].includes(document.activeElement.tagName)) return;
+  if(e.key === "ArrowLeft") cycle(-1);
+  if(e.key === "ArrowRight") cycle(1);
+});
+
+const qs = new URL(location.href).searchParams.get("skin");
+if(qs && SKINS.some(v => v.key === qs)) S.skin = qs;
+document.body.dataset.skin = S.skin;
+render();
+</script>
+</body>
+</html>
