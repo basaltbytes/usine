@@ -1,6 +1,6 @@
 # usine
 
-An agent-agnostic software factory: an engine on which loops — trigger → agent-run automations authored as files in git — run against many repos from one headless orchestrator. Planning phase: the active wayfinder map is [#1](https://github.com/basaltbytes/usine/issues/1).
+An agent-agnostic software factory: an engine on which loops — trigger → agent-run automations authored as files in git — run against many repos from one headless orchestrator. Planning is complete (2026-08-21): the spec is `CONTEXT.md` + ADRs 0001–0019 in `docs/adr/`, indexed by the closed wayfinder map [#1](https://github.com/basaltbytes/usine/issues/1).
 
 Read `CONTEXT.md` for the domain glossary before naming concepts.
 
