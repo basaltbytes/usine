@@ -6,7 +6,10 @@
       "entry": [],
       "project": []
     },
-    "tooling/*": {
+    "tooling/oxlint": {
+      "project": ["**/*.ts"]
+    },
+    "tooling/tsconfig": {
       "entry": [],
       "project": []
     }
