@@ -84,6 +84,18 @@ _Avoid_: confirmation, sign-off
 The factory's request for an operator answer on a blocked run, posted where the operator will see it. Two shapes: yes/no — approve, retry, restart, or cancel, closed by a reaction — and question — an agent's clarification request, answered in prose by a reply addressing the factory. A question parks its live attempt until the answer arrives; only the operator's own login can answer either shape.
 _Avoid_: notification (how an ask travels, not what it is), prompt, request, question (one shape of ask, not the concept)
 
+**Takeover**:
+The operator stepping into a live session of a running attempt — operator messages join the session as user turns, Pi parent and harness children alike. Taking over a child places a Hold. Lives in the transcript, never the Event ledger.
+_Avoid_: attach (the mechanism, not the concept), remote control, child takeover (long form)
+
+**Hold**:
+The per-child state a takeover creates — an idle held child defers returning its result to the awaiting parent until the operator releases it. Implicit on the first operator message to the child, ended by an explicit release; several children can be held at once.
+_Avoid_: claim, lock, pause (the loop-level switch)
+
+**Edit-and-retry**:
+The operator amending a failed run before retrying it — the task text (the interpolated loop-body result), the agent, or both. Sticky: the amendment rewrites the run's effective context and every later attempt runs it until amended again; each attempt records what it actually ran.
+_Avoid_: modify-and-rerun, edit-and-restart
+
 **Supersede**:
 What a newer Event does to the same Item's open run before any attempt starts: cancels it (reason recorded) and takes its place. A running attempt always finishes — the newer state is judged again once it ends. Engine behavior, never a loop-file setting.
 _Avoid_: preempt, replace
@@ -109,7 +121,7 @@ The one-shot usine process an executor launches on a worker for a single attempt
 _Avoid_: runner, daemon, worker process
 
 **Attempt channel**:
-The duplex channel between orchestrator and run host for one attempt — normalized events flowing out, steer/interrupt flowing in, as attempt-scoped framed messages. The byte transport underneath (stdio, SSH) never changes the messages.
+The duplex channel between orchestrator and run host for one attempt — normalized events flowing out, session-addressed operator input (steer, interrupt, takeover messages) flowing in, as attempt-scoped framed messages. The byte transport underneath (stdio, SSH) never changes the messages.
 _Avoid_: stream (reserved for what a trigger watches), pipe, socket
 
 **Transcript**:
@@ -133,7 +145,7 @@ The billing source an attempt's usage draws from — API keys (Pi parent and Pi 
 _Avoid_: budget (an amount, not a source), account, quota
 
 **Runaway guard**:
-The per-attempt ceiling — wall-clock and total tokens — that interrupts an attempt burning without progress. The wall-clock pauses while an ask is open: waiting on the operator is never runaway. Tripping it fails the attempt with its own error class, which never auto-retries; only the operator restarts a runaway.
+The per-attempt ceiling — wall-clock and total tokens — that interrupts an attempt burning without progress. The wall-clock pauses while an ask or a hold is open: waiting on — or supervised by — the operator is never runaway; the token ceiling stays armed throughout. Tripping it fails the attempt with its own error class, which never auto-retries; only the operator restarts a runaway.
 _Avoid_: budget, timeout (the wall-clock half only), kill switch
 
 **Block**:
