@@ -80,6 +80,10 @@ _Avoid_: retry (the act; the record is an attempt)
 An operator's go-ahead for a run gated by its loop — recorded as an Event the waiting run consumes, not a flag.
 _Avoid_: confirmation, sign-off
 
+**Ask**:
+The factory's request for an operator answer on a blocked run, posted where the operator will see it. Two shapes: yes/no — approve, retry, restart, or cancel, closed by a reaction — and question — an agent's clarification request, answered in prose by a reply addressing the factory. A question parks its live attempt until the answer arrives; only the operator's own login can answer either shape.
+_Avoid_: notification (how an ask travels, not what it is), prompt, request, question (one shape of ask, not the concept)
+
 **Supersede**:
 What a newer Event does to the same Item's open run before any attempt starts: cancels it (reason recorded) and takes its place. A running attempt always finishes — the newer state is judged again once it ends. Engine behavior, never a loop-file setting.
 _Avoid_: preempt, replace
@@ -129,7 +133,7 @@ The billing source an attempt's usage draws from — API keys (Pi parent and Pi 
 _Avoid_: budget (an amount, not a source), account, quota
 
 **Runaway guard**:
-The per-attempt ceiling — wall-clock and total tokens — that interrupts an attempt burning without progress. Tripping it fails the attempt with its own error class, which never auto-retries; only the operator restarts a runaway.
+The per-attempt ceiling — wall-clock and total tokens — that interrupts an attempt burning without progress. The wall-clock pauses while an ask is open: waiting on the operator is never runaway. Tripping it fails the attempt with its own error class, which never auto-retries; only the operator restarts a runaway.
 _Avoid_: budget, timeout (the wall-clock half only), kill switch
 
 **Block**:
