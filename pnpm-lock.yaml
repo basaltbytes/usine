@@ -96,6 +96,18 @@ importers:
         specifier: 'catalog:'
         version: 7.0.2
 
+  packages/config:
+    devDependencies:
+      '@usine/tsconfig':
+        specifier: workspace:*
+        version: link:../../tooling/tsconfig
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
+      typescript:
+        specifier: 'catalog:'
+        version: 7.0.2
+
   packages/core:
     devDependencies:
       '@effect/vitest':
@@ -151,18 +163,6 @@ importers:
         version: 7.0.2
 
   packages/github:
-    devDependencies:
-      '@usine/tsconfig':
-        specifier: workspace:*
-        version: link:../../tooling/tsconfig
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
-      typescript:
-        specifier: 'catalog:'
-        version: 7.0.2
-
-  packages/loop-file:
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*

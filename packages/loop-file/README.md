@@ -1,5 +1,0 @@
-# @usine/loop-file
-
-Loop and agent file schemas for usine: frontmatter validation, surgical YAML writing, instance-repo loading.
-
-Part of [usine](https://github.com/basaltbytes/usine), an agent-agnostic software factory. This block is not implemented yet — its 0.0.x releases reserve the seam while the engine grows. Everything here is 0.x: APIs change without notice.

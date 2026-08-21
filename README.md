@@ -10,7 +10,7 @@ The spec lives in [CONTEXT.md](./CONTEXT.md) (domain glossary) and [docs/adr/](.
 | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
 | [`@usine/core`](./packages/core)                 | Domain model: Event → Run → Step → Attempt, branded ids, the run state machine, the attempt-failure taxonomy                    |
 | [`@usine/expression`](./packages/expression)     | CEL expression seam: check and evaluate selection expressions                                                                   |
-| [`@usine/loop-file`](./packages/loop-file)       | Loop and agent file schemas, frontmatter validation, surgical YAML writing, instance-repo loading                               |
+| [`@usine/config`](./packages/config)             | Config file machinery: parse, validate, and surgically rewrite the instance repo's files (usine.yaml, loop files, agent files)  |
 | [`@usine/github`](./packages/github)             | Polling change detection, per-stream GraphQL slice fetchers, GitHub App auth and token minting                                  |
 | [`@usine/engine`](./packages/engine)             | Event ledger, dedup/supersede/revoke, run scheduling, durable-execution seam, SQLite store                                      |
 | [`@usine/agents`](./packages/agents)             | Pi parent adapter, subagents extension, team roster and brain specs                                                             |

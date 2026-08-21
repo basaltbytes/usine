@@ -13,6 +13,7 @@ usine is a monorepo in the manywalls/atoly shape — pnpm workspaces + turbo, `a
 
 ## Consequences
 
+- **Revised 2026-08-21** (operator direction, implementation of [#24](https://github.com/basaltbytes/usine/issues/24)): the `loop-file` block is renamed **`config`** — the name describes the machinery (parse, validate, and surgically rewrite the instance repo's config files: `usine.yaml`, `loops/*.md`, `agents/*.md`) rather than one file kind it happens to parse. Contents unchanged; the carve stands.
 - The post-v1 desktop hope stays additive: a shell wraps the served web UI, and an all-in-one app embeds `@usine/orchestrator` in-process — neither needs a new seam.
 - **How `apps/server` ships** (npx, binary, container) is deliberately not decided here — it belongs to the distribution-and-bootstrap decision. **Settled by [ADR 0019](./0019-npm-instance-pinned-first-run-onboarding.md)**: `apps/server` publishes as `@usine/server` (bin `usine`, web build bundled), exact-pinned per instance by `create-usine`.
 - Claiming the npm `usine` org is a first implementation act; if it's taken, everything above proceeds under `@usine-dev` unchanged.

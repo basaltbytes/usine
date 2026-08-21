@@ -1,7 +1,7 @@
 ---
 "@usine/core": patch
 "@usine/expression": patch
-"@usine/loop-file": patch
+"@usine/config": patch
 "@usine/github": patch
 "@usine/engine": patch
 "@usine/agents": patch

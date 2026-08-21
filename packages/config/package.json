@@ -1,12 +1,12 @@
 {
-  "name": "@usine/loop-file",
+  "name": "@usine/config",
   "version": "0.0.0",
-  "description": "Loop and agent file schemas for usine: frontmatter validation, surgical YAML writing, instance-repo loading.",
+  "description": "Config file machinery for usine: parse, validate, and surgically rewrite the instance repo's files — usine.yaml, loop files, agent files.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/basaltbytes/usine.git",
-    "directory": "packages/loop-file"
+    "directory": "packages/config"
   },
   "files": [
     "dist"
