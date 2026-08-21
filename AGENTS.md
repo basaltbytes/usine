@@ -17,3 +17,5 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 ### Coding
 
 Before writing or reviewing code, load the `coding-guidelines` skill — the Basaltbytes charter every line of usine follows.
+
+The monorepo is Effect v4 end to end — services, layers, typed errors, Schema at every boundary. Load the `effect-ts` skill alongside it whenever you touch TypeScript here.
