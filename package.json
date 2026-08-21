@@ -1,13 +1,35 @@
 {
-  "name": "usine.dev",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+  "name": "usine",
+  "private": true,
+  "description": "An agent-agnostic software factory: an engine where loops — trigger → agent-run automations authored as files in git — run against many repos from one headless orchestrator.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/basaltbytes/usine.git"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "scripts": {
+    "build": "turbo run build",
+    "check": "turbo run check",
+    "test": "turbo run test",
+    "lint": "oxlint",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "knip": "knip",
+    "changeset": "changeset",
+    "changeset:version": "changeset version && pnpm install --lockfile-only",
+    "changeset:publish": "pnpm build && pnpm -r publish --access public --no-git-checks && changeset tag && git push origin --tags"
+  },
+  "devDependencies": {
+    "@changesets/cli": "catalog:",
+    "@effect/language-service": "catalog:",
+    "knip": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "turbo": "catalog:",
+    "typescript": "catalog:"
+  },
+  "engines": {
+    "node": ">=22"
+  },
   "packageManager": "pnpm@10.32.1"
 }

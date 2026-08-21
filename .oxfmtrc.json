@@ -1,0 +1,10 @@
+{
+  "ignorePatterns": [
+    "**/dist/**",
+    ".agent-sources/**",
+    ".agents/**",
+    ".claude/**",
+    "docs/**",
+    "pnpm-lock.yaml"
+  ]
+}
