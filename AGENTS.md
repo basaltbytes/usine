@@ -13,3 +13,7 @@ Issues live in GitHub Issues on `basaltbytes/usine` (via the `gh` CLI). See `doc
 ### Domain docs
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+### Coding
+
+Before writing or reviewing code, load the `coding-guidelines` skill — the Basaltbytes charter every line of usine follows.
