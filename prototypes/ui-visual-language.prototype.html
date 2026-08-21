@@ -2,8 +2,11 @@
   PROTOTYPE — throwaway. Do not productionize.
   Four VISUAL treatments of the settled v1 UI structure (ADR 0008: projects home
   + needs-you strip, board with label-mapped lanes, run drawer, Configuration),
-  switchable via ?skin=A|B|C|D, the ←/→ keys, or the bottom bar. Structure and
+  switchable via ?skin=E|A|B|C|D, the ←/→ keys, or the bottom bar. Structure and
   fake dataset are identical across skins — only the design language changes:
+    E "Salle de contrôle" (default) — operator's pick, round 2: A × C graft in
+        dark — Catppuccin Mocha, Archivo signage caps, drafting rules, flat
+        ruled sections instead of boxed cards, high contrast
     A "Atelier"     industrial light   — concrete paper, ink, safety orange, Archivo
     B "Studio"      soft product       — warm white, iris, tinted lanes, Manrope
     C "Blueprint"   technical drawing  — drafting grid, Prussian blue, IBM Plex
@@ -279,6 +282,70 @@ body[data-skin=C] .lane-name::before{content:"⌖ ";color:var(--faint)}
 body[data-skin=C] .tab.on{background:none;border-bottom:2px solid var(--accent);border-radius:0}
 body[data-skin=C] .panel,body[data-skin=C] .strip-card,body[data-skin=C] .proj{border-color:#8FA6BC}
 
+/* ======================= SKIN E — Salle de contrôle ======================= */
+/* A × C graft, dark: Catppuccin Mocha, Archivo signage caps, drafting rules,
+   flat ruled sections instead of boxed cards, high contrast. */
+body[data-skin=E]{
+  --ui:"Archivo",ui-sans-serif,system-ui,sans-serif; --disp:"Archivo",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace; --disp-label:"IBM Plex Mono",monospace;
+  --bg:#11111B; --surface:#181825; --surface2:#1E1E2E; --line:#313244; --box-bg:#181825;
+  --ink:#CDD6F4; --dim:#A6ADC8; --faint:#6C7086;
+  --accent:#FAB387; --hover-line:#FAB387;
+  --running:#89B4FA; --waiting:#F9E2AF; --waiting-ink:#F9E2AF; --failed:#F38BA8; --ok:#A6E3A1; --canceled:#7F849C;
+  --tint:13%;
+  --fs:13.5px; --fs-s:12.5px; --fs-t:11px; --fs-h1:24px; --fs-h3:15.5px;
+  --radius:3px; --radius-lg:4px; --badge-r:3px; --btn-r:3px; --tab-r:3px; --dot-r:1px;
+  --gap:14px; --pad:15px 17px; --lane-gap:0px; --lane-pad:10px 12px; --card-pad:10px 12px;
+  --nav-pad:13px 26px; --track:.11em; --h-track:.05em; --h-w:800; --brand-w:800;
+  --btn-pad:6px 13px; --btn-case:uppercase; --btn-track:.06em;
+  --badge-case:uppercase; --badge-track:.05em; --badge-font:var(--mono);
+  --shadow-card:none; --shadow-drawer:-16px 0 44px #000000B0;
+  --nav-bg:#11111BF2;
+  --lane-bg:transparent; --lane-line:transparent; --card-bg:#181825; --card-line:#313244;
+  --klabel-bg:#313244; --klabel-ink:#A6ADC8; --field-bg:#181825; --chip-bg:#181825;
+  --btn-bg:#181825; --tab-on-bg:#FAB387;
+}
+body[data-skin=E]{background-image:
+  linear-gradient(#CDD6F408 1px,transparent 1px),
+  linear-gradient(90deg,#CDD6F408 1px,transparent 1px);
+  background-size:24px 24px}
+body[data-skin=E] .nav{border-bottom:1.5px solid #45475A;backdrop-filter:blur(8px)}
+body[data-skin=E] .brand{text-transform:lowercase;color:#FAB387}
+body[data-skin=E] .navlink{text-transform:uppercase;letter-spacing:.08em;font-size:var(--fs-t);font-weight:700}
+body[data-skin=E] h1.page{text-transform:uppercase;letter-spacing:.05em}
+body[data-skin=E] .eyebrow{color:#FAB387}
+body[data-skin=E] .strip::before{content:"";display:block;height:6px;margin-bottom:12px;border-radius:2px;
+  background:repeating-linear-gradient(-45deg,#FAB387 0 7px,#1E1E2E 7px 14px)}
+/* less card: needs-you entries and projects become ruled rows */
+body[data-skin=E] .strip-cards{display:block;margin-top:0}
+body[data-skin=E] .strip-card{display:grid;grid-template-columns:minmax(200px,auto) 1fr auto;gap:8px 20px;
+  align-items:center;background:transparent;border:none;border-bottom:1px solid #313244;border-radius:0;
+  padding:13px 4px;box-shadow:none}
+body[data-skin=E] .projects{display:block;border-top:1px solid #313244}
+body[data-skin=E] .proj{display:grid;grid-template-columns:minmax(250px,1.2fr) minmax(190px,1fr) minmax(240px,auto) 1fr;
+  gap:8px 22px;align-items:center;background:transparent;border:none;border-bottom:1px solid #313244;border-radius:0;
+  padding:15px 4px;box-shadow:none}
+body[data-skin=E] .proj:hover{background:#181825}
+body[data-skin=E] .proj .badge{margin-left:0 !important}
+body[data-skin=E] .counts{flex-wrap:nowrap}
+/* drafting board: ruled columns, minimal cards */
+body[data-skin=E] .board{border-top:1.5px solid #45475A;border-bottom:1.5px solid #45475A}
+body[data-skin=E] .lane{border-left:1px solid #313244;padding-top:12px}
+body[data-skin=E] .lane:first-child{border-left:none}
+body[data-skin=E] .lane-name{text-transform:uppercase;letter-spacing:.1em;font-size:var(--fs-t);font-weight:800}
+body[data-skin=E] .kcard:hover{box-shadow:2px 2px 0 #FAB38726}
+/* flat drawer sections instead of boxes */
+body[data-skin=E] .drawer{background:#181825}
+body[data-skin=E] .box{background:transparent;border:none;border-top:1px solid #313244;border-radius:0;
+  padding:13px 2px;margin:14px 0}
+body[data-skin=E] .dbody .box:first-child{border-top:none;padding-top:2px}
+body[data-skin=E] .tab{text-transform:uppercase;letter-spacing:.07em;font-size:var(--fs-t)}
+body[data-skin=E] .tab.on{background:#FAB387;color:#11111B}
+body[data-skin=E] .tr-parent{border-left-color:#B4BEFE}
+body[data-skin=E] .cfg{gap:0;display:block;border-top:1px solid #313244}
+body[data-skin=E] .cfg .panel{background:transparent;border:none;border-bottom:1px solid #313244;border-radius:0;
+  box-shadow:none;padding:16px 4px}
+
 /* ======================= SKIN D — Night shift ======================= */
 /* Warm dark. Charcoal + brass, editorial serif display, jewel states. */
 body[data-skin=D]{
@@ -314,7 +381,7 @@ body[data-skin=D] .btn:hover{border-color:var(--accent)}
 body[data-skin=D] .kcard:hover{border-color:#D9A44155}
 </style>
 </head>
-<body data-skin="A">
+<body data-skin="E">
 <div id="app"></div>
 <div id="switcher">
   <div class="note">PROTOTYPE SWITCHER — not part of the design</div>
@@ -473,12 +540,13 @@ const ITEMS = [
 
 /* ============================ state ============================ */
 const SKINS = [
+  {key:"E", name:"Salle de contrôle", blurb:"A × C dark · Catppuccin"},
   {key:"A", name:"Atelier",     blurb:"industrial light"},
   {key:"B", name:"Studio",      blurb:"soft product"},
   {key:"C", name:"Blueprint",   blurb:"technical drawing"},
   {key:"D", name:"Night shift", blurb:"warm dark"},
 ];
-const S = { skin:"A", page:"home", repoSel:null, sel:null, tab:"overview" };
+const S = { skin:"E", page:"home", repoSel:null, sel:null, tab:"overview" };
 
 /* ============================ helpers ============================ */
 const $ = s => document.querySelector(s);
