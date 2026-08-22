@@ -1,7 +1,9 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Schema } from "effect";
-import { EventId } from "../src/Event.ts";
-import * as RunState from "../src/RunState.ts";
+import { EventId } from "../src/lifecycle/event.ts";
+import * as RunState from "../src/lifecycle/run-state.ts";
+
+const decodeRunState = Schema.decodeUnknownSync(RunState.RunState);
 
 describe("run state machine (ADR 0002)", () => {
   it("a gated run reaches running only through waiting", () => {
@@ -32,7 +34,7 @@ describe("run state machine (ADR 0002)", () => {
       new RunState.Running(),
     ];
     for (const state of open) {
-      const canceled = RunState.cancel(state);
+      const canceled = RunState.cancelByOperator(state);
       expect(canceled._tag).toBe("Canceled");
       expect(canceled.reason._tag).toBe("OperatorCanceled");
     }
@@ -56,7 +58,7 @@ describe("run state machine (ADR 0002)", () => {
     expect(RunState.isOpen(new RunState.Running())).toBe(true);
     expect(RunState.isOpen(new RunState.Succeeded())).toBe(false);
     expect(RunState.isOpen(new RunState.Failed())).toBe(false);
-    expect(RunState.isOpen(RunState.cancel(new RunState.Pending()))).toBe(false);
+    expect(RunState.isOpen(RunState.cancelByOperator(new RunState.Pending()))).toBe(false);
   });
 
   // The transitions are typestate: illegality is a compile error, enforced by
@@ -70,7 +72,7 @@ describe("run state machine (ADR 0002)", () => {
     const running = new RunState.Running();
     const succeeded = new RunState.Succeeded();
     const failed = new RunState.Failed();
-    const canceled = RunState.cancel(pending);
+    const canceled = RunState.cancelByOperator(pending);
 
     // Only a running attempt can finish.
     // @ts-expect-error a pending run has no attempt to succeed
@@ -86,9 +88,9 @@ describe("run state machine (ADR 0002)", () => {
     // @ts-expect-error only a failed run can be retried
     RunState.retry(running);
     // @ts-expect-error a succeeded run cannot be canceled
-    RunState.cancel(succeeded);
+    RunState.cancelByOperator(succeeded);
     // @ts-expect-error a failed run cannot be canceled — retry it or leave it closed
-    RunState.cancel(failed);
+    RunState.cancelByOperator(failed);
     // @ts-expect-error a closed run cannot start again
     RunState.start(canceled);
 
@@ -109,11 +111,10 @@ describe("run state machine (ADR 0002)", () => {
   it("a stored state row parses back into the same state", () => {
     const canceled = RunState.supersede(new RunState.Waiting(), EventId.make("evt-9"));
     const encoded = Schema.encodeSync(RunState.RunState)(canceled);
-    const decoded = Schema.decodeUnknownSync(RunState.RunState)(encoded);
-    expect(decoded).toEqual(canceled);
+    expect(decodeRunState(encoded)).toEqual(canceled);
   });
 
   it("a state row with an unknown tag is rejected", () => {
-    expect(() => Schema.decodeUnknownSync(RunState.RunState)({ _tag: "Paused" })).toThrow();
+    expect(() => decodeRunState({ _tag: "Paused" })).toThrow();
   });
 });

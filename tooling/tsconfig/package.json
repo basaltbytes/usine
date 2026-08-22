@@ -2,8 +2,10 @@
   "name": "@usine/tsconfig",
   "version": "0.0.0",
   "private": true,
-  "description": "Shared TypeScript configuration for the usine monorepo.",
+  "description": "Shared TypeScript configuration for the usine monorepo: base (language + strictness), build (emit + layout), check (typecheck incl. tests).",
   "exports": {
-    "./base.json": "./base.json"
+    "./base.json": "./base.json",
+    "./build.json": "./build.json",
+    "./check.json": "./check.json"
   }
 }

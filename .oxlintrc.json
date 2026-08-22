@@ -5,6 +5,7 @@
   "categories": { "correctness": "error" },
   "rules": {
     "import/no-cycle": "error",
+    "unicorn/filename-case": ["error", { "case": "kebabCase" }],
     "usine/no-chained-type-assertions": "error",
     "usine/no-conditional-empty-object-spread": "error",
     "usine/no-known-value-widening": "error",

@@ -180,8 +180,7 @@ finish() {
 }
 
 # ──────────────────────────────────────────────────────────────────────────
-# STAGES — author this section. One stage() per step the human takes.
-# Replace the example below. Set TOTAL_STAGES to match the stages you write.
+# STAGES
 # ──────────────────────────────────────────────────────────────────────────
 
 TOTAL_STAGES=3
@@ -224,7 +223,7 @@ set_secret NPM_TOKEN "$NPM_TOKEN_VALUE"
 stage "First publish via the release PR"
 say "Nothing left to configure — the first 0.0.1 publish now rides the normal"
 say "changesets flow:"
-step "Merge the feat/24-monorepo-core-domain PR into main (CI must be green)."
+step "Merge the foundation PR (#43) into main (CI must be green)."
 step "The Release workflow opens a 'Version Packages' PR bumping all nine blocks to 0.0.1."
 step "Merge that PR — the workflow builds and publishes every block to npm."
 step "Verify with: npm view @$NPM_ORG/core version   (expect 0.0.1)"

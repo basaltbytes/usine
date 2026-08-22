@@ -23,12 +23,10 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b",
-    "check": "tsc -p tsconfig.check.json"
+    "build": "tsc -b"
   },
   "devDependencies": {
     "@usine/tsconfig": "workspace:*",
-    "effect": "catalog:",
     "typescript": "catalog:"
   },
   "peerDependencies": {

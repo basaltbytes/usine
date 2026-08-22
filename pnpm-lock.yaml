@@ -85,25 +85,27 @@ importers:
         version: 7.0.2
 
   packages/agents:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
 
   packages/config:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -127,73 +129,79 @@ importers:
         version: 4.1.11(vite@8.2.2(jiti@2.7.0)(yaml@2.9.0))
 
   packages/engine:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
 
   packages/executor:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
 
   packages/expression:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
 
   packages/github:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
 
   packages/orchestrator:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
 
   packages/run-host:
+    dependencies:
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2

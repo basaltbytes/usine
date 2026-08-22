@@ -1,12 +1,18 @@
 /**
- * @usine/core — domain model for usine: the Event → Run → Step → Attempt
- * vocabulary, branded ids, the run state machine, and the typed
- * attempt-failure taxonomy (ADR 0002, ADR 0013).
+ * @usine/core — domain model for usine (ADR 0002, ADR 0013).
+ *
+ * `lifecycle/` is the run-lifecycle cluster: how one piece of work moves
+ * through the engine — a deduplicated Event opens a Run, the Run's named Step
+ * is tried as Attempts, and the state machine closes it. Entities are the
+ * ledger rows (Event, Run, Step, Attempt); everything else is value objects,
+ * typed errors, and pure derivers — each module docblock names its kind.
+ * The attempt-channel envelope schema (ADR 0012) will arrive as a sibling
+ * cluster.
  */
-export * as Attempt from "./Attempt.ts";
-export * as AttemptFailure from "./AttemptFailure.ts";
-export * as Event from "./Event.ts";
-export * as Loop from "./Loop.ts";
-export * as Run from "./Run.ts";
-export * as RunState from "./RunState.ts";
-export * as Step from "./Step.ts";
+export * as Attempt from "./lifecycle/attempt.ts";
+export * as AttemptFailure from "./lifecycle/attempt-failure.ts";
+export * as Event from "./lifecycle/event.ts";
+export * as Loop from "./lifecycle/loop.ts";
+export * as Run from "./lifecycle/run.ts";
+export * as RunState from "./lifecycle/run-state.ts";
+export * as Step from "./lifecycle/step.ts";

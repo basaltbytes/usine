@@ -10,22 +10,23 @@
  *   pending | waiting           ──► canceled   (supersede, revoke — a started
  *                                               attempt always finishes, ADR 0007)
  *
- * Transitions are typestate: each function accepts only the states it is legal
- * on, so an illegal transition is a compile error. Construct states through
- * these transitions (or by parsing a stored row via the `RunState` union) —
- * they are the state machine.
+ * States are value objects (a discriminated union, each state carrying exactly
+ * its own data). Transitions are typestate derivers: each function accepts
+ * only the states it is legal on, so an illegal transition is a compile
+ * error. Construct states through these transitions (or by parsing a stored
+ * row via the `RunState` union) — they are the state machine.
  */
 import { Schema } from "effect";
-import { EventId } from "./Event.ts";
+import { EventId } from "./event.ts";
 
-/** The operator closed the run by hand. */
+/** Cancel reason — value object: the operator closed the run by hand. */
 export class OperatorCanceled extends Schema.TaggedClass<OperatorCanceled>(
   "CancelReason/OperatorCanceled",
 )("OperatorCanceled", {}) {}
 
 /**
- * A newer Event for the same Item took the run's place before any attempt
- * started.
+ * Cancel reason — value object: a newer Event for the same Item took the
+ * run's place before any attempt started.
  */
 export class Superseded extends Schema.TaggedClass<Superseded>("CancelReason/Superseded")(
   "Superseded",
@@ -33,8 +34,9 @@ export class Superseded extends Schema.TaggedClass<Superseded>("CancelReason/Sup
 ) {}
 
 /**
- * The run's Item stopped matching its loop's trigger before any attempt
- * started. Distinct from operator cancel and from supersede.
+ * Cancel reason — value object: the run's Item stopped matching its loop's
+ * trigger before any attempt started. Distinct from operator cancel and from
+ * supersede.
  */
 export class Revoked extends Schema.TaggedClass<Revoked>("CancelReason/Revoked")("Revoked", {}) {}
 
@@ -70,14 +72,17 @@ export class Canceled extends Schema.TaggedClass<Canceled>("RunState/Canceled")(
   reason: CancelReason,
 }) {}
 
-export const RunState = Schema.Union([Pending, Waiting, Running, Succeeded, Failed, Canceled]);
+/**
+ * The open half of the machine — the single statement of the open/closed
+ * partition; the alias, the guard, and the full union all derive from it.
+ */
+export const Open = Schema.Union([Pending, Waiting, Running]);
+export type Open = typeof Open.Type;
+
+export const RunState = Schema.Union([...Open.members, Succeeded, Failed, Canceled]);
 export type RunState = typeof RunState.Type;
 
-export type Open = Pending | Waiting | Running;
-export type Closed = Succeeded | Failed | Canceled;
-
-export const isOpen = (state: RunState): state is Open =>
-  state._tag === "Pending" || state._tag === "Waiting" || state._tag === "Running";
+export const isOpen = Schema.is(Open);
 
 /** pending → waiting: park the run on its loop's approval gate. */
 export const awaitApproval = (_state: Pending): Waiting => new Waiting();
@@ -91,7 +96,11 @@ export const start = (_state: Pending | Waiting): Running => new Running();
 /** running → succeeded: the attempt finished and the step result is stored. */
 export const succeed = (_state: Running): Succeeded => new Succeeded();
 
-/** running → failed: the attempt failed and no auto-retry applies. */
+/**
+ * running → failed: the attempt failed and no auto-retry applies — the engine
+ * discharges that precondition with `Attempt.shouldAutoRetry`, the one owner
+ * of the auto-retry law.
+ */
 export const fail = (_state: Running): Failed => new Failed();
 
 /**
@@ -100,8 +109,13 @@ export const fail = (_state: Running): Failed => new Failed();
  */
 export const retry = (_state: Failed): Running => new Running();
 
-/** open → canceled: the operator's act, reachable from every open state. */
-export const cancel = (_state: Open): Canceled => new Canceled({ reason: new OperatorCanceled() });
+/**
+ * open → canceled: the operator's act, reachable from every open state —
+ * named by cause like its siblings; supersede and revoke are the other two
+ * roads into Canceled.
+ */
+export const cancelByOperator = (_state: Open): Canceled =>
+  new Canceled({ reason: new OperatorCanceled() });
 
 /**
  * pending | waiting → canceled: a newer Event for the same Item takes this

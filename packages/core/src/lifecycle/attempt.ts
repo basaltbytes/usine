@@ -1,30 +1,31 @@
 import { Schema } from "effect";
-import { AttemptFailure, isAutoRetryable } from "./AttemptFailure.ts";
-import { RunId } from "./Run.ts";
-import { StepName } from "./Step.ts";
+import { AttemptFailure, isAutoRetryable } from "./attempt-failure.ts";
+import { RunId } from "./run.ts";
+import { StepName } from "./step.ts";
 
 /**
- * Identity of one Attempt.
+ * Value object (branded id): identity of one Attempt.
  */
 export const AttemptId = Schema.NonEmptyString.pipe(Schema.brand("AttemptId"));
 export type AttemptId = typeof AttemptId.Type;
 
 /**
- * 1-based position of a try under its step: retries are attempt N+1 under the
- * same step, never new runs.
+ * Value object: 1-based position of a try under its step — retries are
+ * attempt N+1 under the same step, never new runs. Also the unit of the
+ * auto-retry cap: a cap of 3 means at most three attempts in total.
  */
 export const AttemptNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("AttemptNumber"),
 );
 export type AttemptNumber = typeof AttemptNumber.Type;
 
-/** The attempt finished; the step result is stored on the Step. */
+/** Outcome — value object: the attempt finished; the step result is stored on the Step. */
 export class Succeeded extends Schema.TaggedClass<Succeeded>("AttemptOutcome/Succeeded")(
   "Succeeded",
   {},
 ) {}
 
-/** The attempt failed, with the typed failure that closed it. */
+/** Outcome — value object: the attempt failed, with the typed failure that closed it. */
 export class Failed extends Schema.TaggedClass<Failed>("AttemptOutcome/Failed")("Failed", {
   failure: AttemptFailure,
 }) {}
@@ -33,8 +34,8 @@ export const Outcome = Schema.Union([Succeeded, Failed]);
 export type Outcome = typeof Outcome.Type;
 
 /**
- * One try of a step on a worker. `outcome` is none while the attempt is in
- * flight.
+ * Entity — ledger row: one try of a step on a worker. `outcome` is none while
+ * the attempt is in flight.
  */
 export class Attempt extends Schema.Class<Attempt>("Attempt")({
   id: AttemptId,
@@ -46,9 +47,10 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
 }) {}
 
 /**
- * The auto-retry law over one failed attempt (ADR 0002, ADR 0013): only infra
- * failures retry automatically, and only while the attempt count is under the
- * cap. Everything else waits for the operator.
+ * Deriver — the full auto-retry law over one failed attempt (ADR 0002,
+ * ADR 0013): the class rule (`AttemptFailure.isAutoRetryable` — infra only)
+ * capped by the attempt count. `maxAutoAttempts` counts total attempts:
+ * attempt N may auto-retry into attempt N+1 only while N < maxAutoAttempts.
  */
 export const shouldAutoRetry = (options: {
   readonly failure: AttemptFailure;

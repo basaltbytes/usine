@@ -1,8 +1,8 @@
 import { Schema } from "effect";
-import { RunId } from "./Run.ts";
+import { RunId } from "./run.ts";
 
 /**
- * Step identity within its run: the loop-authored name (ADR 0002). Renaming a
+ * Value object (branded id): step identity within its run — the loop-authored name (ADR 0002). Renaming a
  * step in the loop file retires it — prior results stay under the old name.
  * There is deliberately no synthetic step id.
  */
@@ -10,7 +10,7 @@ export const StepName = Schema.NonEmptyString.pipe(Schema.brand("StepName"));
 export type StepName = typeof StepName.Type;
 
 /**
- * A named unit of work inside a run, its stored result addressable by name;
+ * Entity — ledger row: a named unit of work inside a run, its stored result addressable by name;
  * exactly one per run in v1 (the agent action). The result is the run host's
  * final message, stored when an attempt succeeds — none until then.
  */

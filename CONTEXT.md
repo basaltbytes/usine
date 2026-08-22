@@ -64,6 +64,10 @@ _Avoid_: webhook event (a delivery is one hint source, not the concept), push, n
 The piece of software-work state a loop acts on — an issue or PR in a managed repo, identified apart from its changing content. Coarser than an Event: many Events can concern one Item.
 _Avoid_: matched item (long form), target, resource
 
+**Lifecycle**:
+How one piece of work moves through the engine — a deduplicated Event opens a Run, the Run's named Step is tried as Attempts, and exactly one closed state ends it.
+_Avoid_: run model (ADR 0002's name for the same arc), workflow, state machine (the closing mechanism, not the journey)
+
 **Run**:
 The work a loop owes one Event — at most one open per dedup key, ever. Open states: pending, waiting, running; closed: succeeded, failed, canceled.
 _Avoid_: execution, job, workflow run
