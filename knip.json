@@ -1,0 +1,16 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "workspaces": {
+    ".": {
+      "entry": [],
+      "project": []
+    },
+    "tooling/oxlint": {
+      "project": ["**/*.ts"]
+    },
+    "tooling/tsconfig": {
+      "entry": [],
+      "project": []
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [
+    "**/*.md",
+    "**/dist/**",
+    ".agent-sources/**",
+    ".agents/**",
+    ".claude/**",
+    "docs/**",
+    "pnpm-lock.yaml"
+  ]
+}

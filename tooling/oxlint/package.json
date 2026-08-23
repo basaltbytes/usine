@@ -1,0 +1,10 @@
+{
+  "name": "@usine/oxlint",
+  "version": "0.0.0",
+  "private": true,
+  "description": "usine's local oxlint rules (carried over from balade), loaded as a JS plugin by the root .oxlintrc.json.",
+  "type": "module",
+  "devDependencies": {
+    "@oxlint/plugins": "catalog:"
+  }
+}

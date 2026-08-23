@@ -1,0 +1,13 @@
+{
+  "extends": "./base.json",
+  "include": ["${configDir}/src"],
+  "compilerOptions": {
+    "outDir": "${configDir}/dist",
+    "rootDir": "${configDir}/src",
+    "incremental": true,
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  }
+}

@@ -1,0 +1,23 @@
+# The `effect` pin lives here, once, per ADR 0012 — every block references it
+# via `catalog:`; `pnpm publish` rewrites those references at pack time.
+packages:
+  - apps/*
+  - packages/*
+  - tooling/*
+
+# turbo's optional native msgpack accelerator — works without its postinstall.
+allowBuilds:
+  msgpackr-extract: false
+
+catalog:
+  "@changesets/cli": 3.0.1
+  "@effect/language-service": 0.87.2
+  "@oxlint/plugins": 1.79.0
+  "@effect/vitest": 4.0.0-rc.111
+  effect: 4.0.0-rc.111
+  knip: 6.32.2
+  oxfmt: 0.64.0
+  oxlint: 1.79.0
+  turbo: 2.10.11
+  typescript: 7.0.2
+  vitest: 4.1.11

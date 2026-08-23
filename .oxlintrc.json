@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["unicorn", "typescript", "oxc", "import"],
+  "jsPlugins": [{ "name": "usine", "specifier": "./tooling/oxlint/plugin.ts" }],
+  "categories": { "correctness": "error" },
+  "rules": {
+    "import/no-cycle": "error",
+    "unicorn/filename-case": ["error", { "case": "kebabCase" }],
+    "usine/no-chained-type-assertions": "error",
+    "usine/no-conditional-empty-object-spread": "error",
+    "usine/no-known-value-widening": "error",
+    "usine/no-module-mocking": "error",
+    "usine/no-object-parameters": "error",
+    "usine/no-reflect-apply": "error",
+    "usine/no-reflect-get": "error",
+    "usine/no-runtime-typeof": "error",
+    "usine/no-service-constructor-imports": "error",
+    "usine/no-shape-in-symbol-names": "error",
+    "usine/no-unknown-parameters": "error",
+    "usine/no-unknown-returns": "error",
+    "usine/no-unknown-type-aliases": "error",
+    "usine/no-unsafe-dictionary-type": "error",
+    "usine/no-widen-then-assert": "error",
+    "usine/require-safety-comment-for-type-assertion": "error"
+  },
+  "overrides": [
+    {
+      "files": ["tooling/oxlint/**"],
+      "rules": {
+        "usine/no-chained-type-assertions": "off",
+        "usine/no-conditional-empty-object-spread": "off",
+        "usine/no-known-value-widening": "off",
+        "usine/no-module-mocking": "off",
+        "usine/no-object-parameters": "off",
+        "usine/no-reflect-apply": "off",
+        "usine/no-reflect-get": "off",
+        "usine/no-runtime-typeof": "off",
+        "usine/no-service-constructor-imports": "off",
+        "usine/no-shape-in-symbol-names": "off",
+        "usine/no-unknown-parameters": "off",
+        "usine/no-unknown-returns": "off",
+        "usine/no-unknown-type-aliases": "off",
+        "usine/no-unsafe-dictionary-type": "off",
+        "usine/no-widen-then-assert": "off",
+        "usine/require-safety-comment-for-type-assertion": "off"
+      }
+    }
+  ],
+  "ignorePatterns": ["**/dist/**", ".agent-sources/**", ".agents/**", ".claude/**", "docs/**"]
+}

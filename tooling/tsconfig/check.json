@@ -1,0 +1,7 @@
+{
+  "extends": "./base.json",
+  "include": ["${configDir}/src", "${configDir}/test"],
+  "compilerOptions": {
+    "noEmit": true
+  }
+}
