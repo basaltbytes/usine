@@ -1,6 +1,6 @@
 {
   "name": "@usine/executor",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "The usine executor seam: the five-operation worker contract, with local and exe.dev executors.",
   "license": "MIT",
   "repository": {

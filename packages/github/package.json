@@ -1,6 +1,6 @@
 {
   "name": "@usine/github",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "GitHub integration for usine: polling change detection, per-stream GraphQL slice fetchers, App auth and token minting.",
   "license": "MIT",
   "repository": {
