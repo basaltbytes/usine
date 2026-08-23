@@ -183,56 +183,116 @@ finish() {
 # STAGES
 # ──────────────────────────────────────────────────────────────────────────
 
-TOTAL_STAGES=3
+TOTAL_STAGES=5
 
-banner "npm publishing setup for usine"
+banner "npm publishing setup for usine (OIDC trusted publishing, no tokens)"
 
-# ── Stage 1: claim the npm org ────────────────────────────────────────────
+# ── Stage 1: sign in to npm ───────────────────────────────────────────────
+stage "Sign in to npm"
+say "Publishing setup needs your npm account (browser login with 2FA — no"
+say "tokens are created anywhere in this wizard)."
+if npm whoami >/dev/null 2>&1; then
+  printf '  %s✓ already logged in as%s %s\n' "$GREEN" "$RESET" "$(npm whoami)"
+else
+  step "A browser window will open; complete the login with your 2FA."
+  pause "Press Enter to run 'npm login'"
+  npm login
+fi
+
+# ── Stage 2: claim the npm org ────────────────────────────────────────────
 stage "Claim the npm org"
 say "The nine blocks publish under the @usine scope (ADR 0012). Claiming the"
-say "org reserves the scope. You need to be logged in on npmjs.com first."
+say "org reserves the scope."
 open_url "https://www.npmjs.com/org/create"
 step "In 'Name of Organization', enter: usine"
 step "Pick the free 'Unlimited public packages' plan and create the org."
 warn "If 'usine' is taken, create 'usine-dev' instead — the recorded fallback."
 ask NPM_ORG "Which org did you end up creating? (usine / usine-dev):"
+write_env NPM_ORG "$NPM_ORG"
 if [[ "$NPM_ORG" == "usine-dev" ]]; then
-  SKIPPED+=("Scope fallback: tell the agent '@usine is taken, apply the @usine-dev fallback' so every package.json, README and workflow is renamed before publishing")
-  warn "Fallback scope — the repo must be renamed to @usine-dev before publishing."
+  SKIPPED+=("Scope fallback: tell the agent '@usine is taken, apply the @usine-dev fallback' so every package.json, README and workflow is renamed before merging the Version Packages PR")
+  warn "Fallback scope — the repo must be swept to @usine-dev before the release PR merges."
 elif [[ "$NPM_ORG" != "usine" ]]; then
   SKIPPED+=("Org name '$NPM_ORG' doesn't match the repo's @usine scope — sort the scope out with the agent before publishing")
   warn "That name doesn't match the @usine scope the repo uses."
 fi
 
-# ── Stage 2: granular automation token → NPM_TOKEN secret ─────────────────
-stage "Create the CI publish token"
-say "The release workflow publishes with an npm token stored as the NPM_TOKEN"
-say "GitHub secret. A granular token scoped to the org is the tight option."
-open_url "https://www.npmjs.com/"
-step "Avatar menu (top right) → Access Tokens → Generate New Token → Granular Access Token."
-step "Name it: usine-ci-publish. Pick the longest expiration you're comfortable with."
-step "Packages and scopes → permissions 'Read and write', scoped to the $NPM_ORG org."
-step "No Organizations permission needed. Generate, then copy the token."
-note "If your account enforces 2FA on writes, set npm Settings → Two-Factor"
-note "Authentication to require it for 'Authorization only', or CI publishes"
-note "will be rejected."
-ask_secret NPM_TOKEN_VALUE "Paste the token:"
-set_secret NPM_TOKEN "$NPM_TOKEN_VALUE"
+# The nine block names, re-scoped onto whichever org was created.
+BLOCKS=()
+for manifest in packages/*/package.json; do
+  BLOCKS+=("@$NPM_ORG/$(basename "$(dirname "$manifest")")")
+done
 
-# ── Stage 3: the release flow from here ───────────────────────────────────
-stage "First publish via the release PR"
-say "Nothing left to configure — the first 0.0.1 publish now rides the normal"
-say "changesets flow:"
-step "Merge the foundation PR (#43) into main (CI must be green)."
-step "The Release workflow opens a 'Version Packages' PR bumping all nine blocks to 0.0.1."
-step "Merge that PR — the workflow builds and publishes every block to npm."
-step "Verify with: npm view @$NPM_ORG/core version   (expect 0.0.1)"
-if command -v gh >/dev/null 2>&1 && gh secret list 2>/dev/null | grep -q "^NPM_TOKEN"; then
-  say ""
-  printf '  %s✓%s NPM_TOKEN is visible in the repo secrets — CI is ready.\n' "$GREEN" "$RESET"
+# ── Stage 3: reserve the nine names ───────────────────────────────────────
+stage "Reserve the nine package names"
+say "npm can only pin a trusted publisher on a package that exists, so each"
+say "block gets a 0.0.0 placeholder publish first. The real 0.0.1 release"
+say "then rides the pipeline. Already-published names are skipped."
+warn "npm will prompt for a 2FA one-time password per publish (up to 9×)."
+if confirm "Publish 0.0.0 placeholders for the ${#BLOCKS[@]} blocks?"; then
+  for pkg in "${BLOCKS[@]}"; do
+    if npm view "$pkg" version >/dev/null 2>&1; then
+      printf '  %s✓ exists%s %s — skipping\n' "$GREEN" "$RESET" "$pkg"
+      continue
+    fi
+    tmp=$(mktemp -d)
+    cat > "$tmp/package.json" <<JSON
+{
+  "name": "$pkg",
+  "version": "0.0.0",
+  "description": "Name reservation for the usine blocks; real releases start at 0.0.1.",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "git+https://github.com/basaltbytes/usine.git" }
+}
+JSON
+    printf 'Name reservation for the usine blocks; real releases start at 0.0.1.\n' > "$tmp/README.md"
+    if (cd "$tmp" && npm publish --access public); then
+      printf '  %s✓ reserved%s %s\n' "$GREEN" "$RESET" "$pkg"
+    else
+      SKIPPED+=("placeholder publish for $pkg — re-run this wizard, it skips what already worked")
+      warn "publish failed for $pkg — continuing with the rest"
+    fi
+    rm -rf "$tmp"
+  done
 else
-  warn "Couldn't confirm NPM_TOKEN in repo secrets — check: gh secret list"
+  SKIPPED+=("placeholder publishes — trusted publishers cannot be registered until the packages exist")
 fi
+
+# ── Stage 4: pin release.yml as each package's trusted publisher ──────────
+stage "Register the trusted publisher"
+say "Each package now lists this repo's release.yml workflow as its trusted"
+say "publisher; the registry then accepts the workflow's OIDC identity and no"
+say "npm token ever exists. ('npm trust' needs npm 11.15+, so it runs via npx;"
+say "the first call may ask for a 2FA one-time password.)"
+if confirm "Register basaltbytes/usine release.yml for the ${#BLOCKS[@]} blocks?"; then
+  for pkg in "${BLOCKS[@]}"; do
+    if npx --yes npm@11 trust github "$pkg" --file release.yml --repo basaltbytes/usine --allow-publish --yes; then
+      printf '  %s✓ trusted publisher set%s %s\n' "$GREEN" "$RESET" "$pkg"
+    else
+      SKIPPED+=("trusted publisher for $pkg — set it on the website instead (see note below)")
+      warn "npm trust failed for $pkg — continuing with the rest"
+    fi
+  done
+  note "Verify any package with: npx npm@11 trust list <name>"
+  note "Website fallback: npmjs.com → package → Settings → Trusted publisher →"
+  note "GitHub Actions, organization basaltbytes, repository usine, workflow release.yml."
+else
+  SKIPPED+=("trusted publisher registration — CI cannot publish until it is done")
+fi
+
+# ── Stage 5: clean up and ride the release ────────────────────────────────
+stage "Clean up and ride the release"
+if command -v gh >/dev/null 2>&1 && gh secret list 2>/dev/null | grep -q "^NPM_TOKEN"; then
+  warn "A stale NPM_TOKEN repo secret exists from the abandoned token plan."
+  if confirm "Delete the NPM_TOKEN repo secret?"; then
+    gh secret delete NPM_TOKEN && printf '  %s✓ deleted%s NPM_TOKEN\n' "$GREEN" "$RESET"
+  fi
+fi
+say "Nothing else to configure — the first 0.0.1 publish rides the normal"
+say "changesets flow:"
+step "Merge the 'Version Packages' PR — release.yml publishes every block via OIDC."
+step "Verify with: npm view @$NPM_ORG/core version   (expect 0.0.1)"
+step "Then delete this script — it was a one-shot."
 pause
 
 finish
