@@ -6,12 +6,11 @@
  * is tried as Attempts, and the state machine closes it. Entities are the
  * ledger rows (Event, Run, Step, Attempt); everything else is value objects,
  * typed errors, and pure derivers — each module docblock names its kind.
- * The attempt-channel envelope schema (ADR 0012) will arrive as a sibling
- * cluster.
  */
 export * as Attempt from "./lifecycle/attempt.ts";
 export * as AttemptFailure from "./lifecycle/attempt-failure.ts";
 export * as Event from "./lifecycle/event.ts";
+export * as Item from "./lifecycle/item.ts";
 export * as Loop from "./lifecycle/loop.ts";
 export * as Run from "./lifecycle/run.ts";
 export * as RunState from "./lifecycle/run-state.ts";
