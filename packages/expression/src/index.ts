@@ -1,8 +1,8 @@
 /**
- * @usine/expression — CEL expression seam for usine: check and evaluate the selection expressions loop files use.
- *
- * Not implemented yet: this 0.0.x release reserves the block's seam while the
- * engine grows.
+ * @usine/expression — a vendor-neutral CEL check/evaluation seam. The live
+ * layer exact-pins @marcbachmann/cel-js; callers depend only on CEL types and
+ * typed Effect failures, so another backend can implement the service.
  */
-
-export {};
+export * from "./expression-engine.ts";
+export * from "./marcbachmann-cel.ts";
+export * from "./model.ts";
