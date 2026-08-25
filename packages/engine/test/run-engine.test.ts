@@ -75,7 +75,9 @@ const waitFor = Effect.fn("test.waitFor")(function* (
     yield* Effect.sleep("10 millis");
     latest = yield* engine.inspect(runId);
   }
-  return yield* Effect.die(`Run ${runId} did not reach the expected state`);
+  return yield* Effect.die(
+    `Run ${runId} did not reach the expected state (state=${latest.run.state._tag}, attempts=${latest.attempts.map((attempt) => Option.match(attempt.outcome, { onNone: () => "open", onSome: (outcome) => outcome._tag })).join(",")})`,
+  );
 });
 
 const withInstance = <A, E, R>(use: (directory: InstanceDirectory) => Effect.Effect<A, E, R>) =>
@@ -212,7 +214,7 @@ describe("durable run engine", () => {
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
-          const accepted = yield* engine.submit(submission({ number: 3, item: "retry-cap" }));
+          const accepted = yield* engine.submit(submission({ number: 30, item: "retry-cap" }));
           assert.strictEqual(accepted._tag, "Claimed");
           if (accepted._tag !== "Claimed") return;
           const capped = yield* waitFor(
@@ -258,6 +260,7 @@ describe("durable run engine", () => {
           yield* Effect.sleep("25 millis");
           assert.strictEqual((yield* engine.inspect(accepted.runId)).attempts.length, 1);
 
+          // Retry as soon as the projection is Failed, while the workflow may still be suspending.
           yield* engine.retry(accepted.runId);
           const finished = yield* waitFor(
             engine,

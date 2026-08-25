@@ -15,5 +15,6 @@ export {
   Submission,
   SubmissionResult,
 } from "./model.ts";
-export { layer, RunEngine } from "./run-engine.ts";
+export { RunDatabase, type RunDatabaseClient } from "./database/database.ts";
+export { layer, layerWithDatabase, RunEngine } from "./run-engine.ts";
 export { StepExecutor } from "./step-executor.ts";

@@ -1,9 +1,11 @@
 import { NodeServices } from "@effect/platform-node";
-import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Event, Item, Loop, Run } from "@usine/core";
-import { Context, Effect, FileSystem, Layer, Option, Path } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import { ClusterWorkflowEngine, SingleRunner } from "effect/unstable/cluster";
+import { SqlClient } from "effect/unstable/sql";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
+import { RunDatabase } from "./database/database.ts";
+import { localSqliteLayer } from "./database/local-sqlite.ts";
 import type { InstanceDirectory, RunEngineError, Submission } from "./model.ts";
 import { RunStore } from "./run-store.ts";
 import {
@@ -49,7 +51,26 @@ const makeRunEngine = Effect.gen(function* () {
     yield* continueWithNewest(store, runId).pipe(provideWorkflowEngine);
   });
 
+  const awaitWorkflowSettlement = Effect.fn("RunEngine.awaitWorkflowSettlement")(function* (
+    runId: Run.RunId,
+  ) {
+    // A Failed projection is committed before the workflow finishes suspending.
+    // Wait for that durable state transition so an immediate operator retry is not lost.
+    while (true) {
+      const status = yield* DurableRun.poll(runId).pipe(provideWorkflowEngine);
+      if (Option.isSome(status)) return status.value;
+      yield* Effect.sleep("10 millis");
+    }
+  });
+
   const deliverResume = Effect.fn("RunEngine.deliverResume")(function* (runId: Run.RunId) {
+    const status = yield* awaitWorkflowSettlement(runId);
+    if (status._tag === "Complete") {
+      yield* store.reconcileCompletion(runId, status);
+      yield* store.completeWorkflowCommand(runId, "Resume");
+      yield* deliverContinuation(runId);
+      return;
+    }
     yield* DurableRun.resume(runId).pipe(provideWorkflowEngine);
     yield* store.completeWorkflowCommand(runId, "Resume");
   });
@@ -147,29 +168,15 @@ export class RunEngine extends Context.Service<RunEngine, Effect.Success<typeof 
   "@usine/engine/RunEngine",
 ) {}
 
-const sqliteLayer = (instanceDirectory: InstanceDirectory) =>
-  Layer.unwrap(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const runtimeDirectory = path.join(instanceDirectory, ".usine");
-      yield* fileSystem.makeDirectory(runtimeDirectory, { recursive: true });
-      return SqliteClient.layer({
-        filename: path.join(runtimeDirectory, "runtime.sqlite"),
-      });
-    }).pipe(Effect.orDie, Effect.provide(NodeServices.layer)),
-  );
-
 /**
- * Builds the whole single-process durable runtime. The returned layer requires
- * only a `StepExecutor`; SQL, cluster storage, workflow registration, and the
- * startup reconciliation sweep stay behind the engine boundary.
+ * Builds the durable runtime on a caller-selected SQLite-compatible database.
+ * The adapter must provide both Drizzle's run database and the matching Effect
+ * SQL client so run projections and cluster tables stay co-located.
  */
-export const layer = (
-  instanceDirectory: InstanceDirectory,
-): Layer.Layer<RunEngine, RunEngineError, StepExecutor> => {
-  const sql = sqliteLayer(instanceDirectory);
-  const store = RunStore.layer.pipe(Layer.provide(sql));
+export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
+  database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,
+): Layer.Layer<RunEngine, RunEngineError | DatabaseError, StepExecutor | DatabaseRequirements> => {
+  const store = RunStore.layer.pipe(Layer.provide(database));
   const cluster = SingleRunner.layer({
     runnerStorage: "memory",
     shardingConfig: {
@@ -177,7 +184,7 @@ export const layer = (
       assignedShardGroups: ["default", "workflow"],
       entityTerminationTimeout: 0,
     },
-  }).pipe(Layer.provide(sql), Layer.provide(NodeServices.layer), Layer.orDie);
+  }).pipe(Layer.provide(database), Layer.provide(NodeServices.layer), Layer.orDie);
   const workflowEngine = ClusterWorkflowEngine.layer.pipe(Layer.provide(cluster));
   const runtime = durableRunLayer.pipe(
     Layer.provideMerge(workflowEngine),
@@ -185,3 +192,9 @@ export const layer = (
   );
   return Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(runtime));
 };
+
+/** Local-first runtime backed by `.usine/runtime.sqlite`. */
+export const layer = (
+  instanceDirectory: InstanceDirectory,
+): Layer.Layer<RunEngine, RunEngineError, StepExecutor> =>
+  layerWithDatabase(localSqliteLayer(instanceDirectory));

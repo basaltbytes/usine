@@ -7,7 +7,11 @@ packages:
 
 # turbo's optional native msgpack accelerator — works without its postinstall.
 allowBuilds:
+  esbuild: false
   msgpackr-extract: false
+
+patchedDependencies:
+  drizzle-orm@1.0.0-rc.4: patches/drizzle-orm@1.0.0-rc.4.patch
 
 catalog:
   "@changesets/cli": 3.0.1
@@ -16,6 +20,8 @@ catalog:
   "@effect/sql-sqlite-node": 4.0.0-rc.111
   "@oxlint/plugins": 1.79.0
   "@effect/vitest": 4.0.0-rc.111
+  drizzle-kit: 1.0.0-rc.4
+  drizzle-orm: 1.0.0-rc.4
   effect: 4.0.0-rc.111
   knip: 6.32.2
   oxfmt: 0.64.0

@@ -2,7 +2,7 @@
 
 The durable run engine for [usine](https://github.com/basaltbytes/usine). It turns a synthetic Event into a Run with one named Step and a durable Attempt history.
 
-The engine stores usine's Event ledger and Run projections beside Effect's workflow tables in `<instance>/.usine/runtime.sqlite`. Submitting the same dedup key joins the original Run, including after a restart.
+The default adapter stores usine's Event ledger and Run projections beside Effect's workflow tables in `<instance>/.usine/runtime.sqlite`. Submitting the same dedup key joins the original Run, including after a restart.
 
 ## Runtime rules
 
@@ -14,7 +14,7 @@ The engine stores usine's Event ledger and Run projections beside Effect's workf
 
 ## Composition
 
-`layer` supplies SQLite, Effect `SingleRunner`, workflow registration, and startup reconciliation. Provide a `StepExecutor` implementation at the composition root:
+`layer` supplies local SQLite, Effect `SingleRunner`, workflow registration, and startup reconciliation. Provide a `StepExecutor` implementation at the composition root:
 
 ```ts
 import { Effect, Layer } from "effect"
@@ -32,6 +32,14 @@ const program = Effect.gen(function* () {
   const engine = yield* RunEngine
   // submit, approve, retry, cancel, revoke, inspect, or reconcile
 })
+```
+
+`layerWithDatabase` accepts another SQLite-compatible database layer. That layer must provide both `RunDatabase` and the matching Effect `SqlClient`, preserving atomic transactions and keeping the run projections beside Effect's cluster tables. Cloudflare D1 is not supported by Drizzle RC.4 for this use yet because its Effect driver cannot execute the store's transactions.
+
+The Drizzle schema is the source of truth for usine tables. After changing it, generate and review a migration with:
+
+```sh
+pnpm --filter @usine/engine db:generate --name <migration_name>
 ```
 
 Everything is 0.x, so APIs may change. Supply `effect` at the version pinned by the usine workspace.

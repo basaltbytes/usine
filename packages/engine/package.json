@@ -9,7 +9,8 @@
     "directory": "packages/engine"
   },
   "files": [
-    "dist"
+    "dist",
+    "drizzle"
   ],
   "type": "module",
   "sideEffects": false,
@@ -25,16 +26,19 @@
   "scripts": {
     "build": "tsc -b",
     "check": "tsc -p tsconfig.check.json",
+    "db:generate": "drizzle-kit generate --config drizzle.config.ts",
     "test": "vitest run"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
     "@effect/sql-sqlite-node": "catalog:",
-    "@usine/core": "workspace:*"
+    "@usine/core": "workspace:*",
+    "drizzle-orm": "catalog:"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@usine/tsconfig": "workspace:*",
+    "drizzle-kit": "catalog:",
     "effect": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
