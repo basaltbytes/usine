@@ -1,11 +1,15 @@
 ---
 name: effect-ts
-description: "Write idiomatic Effect v4 TypeScript following official best practices from effect-solutions and the Effect source. Use when writing, reviewing, or refactoring Effect code: services (ServiceMap.Service), layers and dependency injection, error handling (Schema.TaggedErrorClass), data modeling (Schema.Class, branded types, variants), testing (@effect/vitest), HTTP clients (effect/unstable/http), CLI tools (effect/unstable/cli), config, observability, and project setup. Triggers on: 'Effect', 'effect-ts', '@effect/', 'Schema', 'ServiceMap', 'Layer', 'Effect.gen', 'Effect.fn', 'TaggedError', 'branded types', or any Effect-TS related code."
+description: "Write idiomatic Effect v4 TypeScript following official best practices from effect-solutions and the Effect source. Use when writing, reviewing, or refactoring Effect code: services (Context.Service), layers and dependency injection, error handling (Schema.TaggedError), data modeling (Schema.Class, branded types, variants), testing (@effect/vitest), HTTP clients (effect/unstable/http), CLI tools (effect/unstable/cli), config, observability, and project setup. Triggers on: 'Effect', 'effect-ts', '@effect/', 'Schema', 'ServiceMap', 'Context.Service', 'Layer', 'Effect.gen', 'Effect.fn', 'TaggedError', 'branded types', or any Effect-TS related code."
 ---
 
 # Effect-TS (v4)
 
 Patterns from [effect-solutions](https://effect.solutions) and the [Effect source](https://github.com/effect-ts/effect). This covers the latest v4 APIs.
+
+## Version Pin
+
+Every API name in this skill is verified against `effect@4.0.0-rc.111`, the version pinned by this workspace. Names have churned during the v4 RC line — `ServiceMap.Service` and `Schema.TaggedErrorClass` existed on earlier v4 RCs and were renamed back to `Context.Service` and `Schema.TaggedError` — so if this skill and the source mirror ever disagree, the mirror wins (see Source-First Rule) and this skill must be updated in the same change.
 
 ## Source-First Rule
 
@@ -61,14 +65,14 @@ const fetchWithRetry = Effect.fn("fetchWithRetry")(
 )
 ```
 
-## ServiceMap.Service
+## Context.Service
 
 Define services as classes with a unique tag and typed interface:
 
 ```typescript
-import { Effect, ServiceMap } from "effect"
+import { Context, Effect } from "effect"
 
-class Database extends ServiceMap.Service<
+class Database extends Context.Service<
   Database,
   {
     readonly query: (sql: string) => Effect.Effect<unknown[]>
@@ -80,9 +84,9 @@ class Database extends ServiceMap.Service<
 Implement with `Layer.effect` or `Layer.sync`, using `Effect.fn` for all methods:
 
 ```typescript
-import { Effect, Layer } from "effect"
+import { Context, Effect, Layer } from "effect"
 
-class Users extends ServiceMap.Service<
+class Users extends Context.Service<
   Users,
   {
     readonly findById: (id: UserId) => Effect.Effect<User, UserNotFoundError>
@@ -111,6 +115,7 @@ class Users extends ServiceMap.Service<
 - Tag identifiers must be unique. Use `@app/ServiceName` pattern
 - Service methods should have `R = never` (dependencies via Layer, not method signatures)
 - Use `readonly` properties
+- Declare the interface in the `Context.Service` type parameter for public services — never infer a public API from the implementation (`Effect.Success<typeof make>`); internal single-implementation services may infer
 
 See [references/services-and-layers.md](references/services-and-layers.md) for service-driven development, test layers, layer memoization, and full composition patterns.
 
@@ -127,7 +132,7 @@ type UserId = typeof UserId.Type
 const Email = Schema.String.pipe(Schema.brand("Email"))
 type Email = typeof Email.Type
 
-class User extends Schema.Class("User")({
+class User extends Schema.Class<User>("User")({
   id: UserId,
   name: Schema.String,
   email: Email,
@@ -136,8 +141,9 @@ class User extends Schema.Class("User")({
   get displayName() { return `${this.name} (${this.email})` }
 }
 
-// Construct with makeUnsafe for brands
-const userId = UserId.makeUnsafe("user-123")
+// Construct with .make (throws on invalid input; .makeOption / .makeEffect
+// for non-throwing forms). There is no .makeUnsafe on schemas.
+const userId = UserId.make("user-123")
 ```
 
 Use `Schema.TaggedClass` + `Schema.Union` for variants (OR types):
@@ -145,10 +151,10 @@ Use `Schema.TaggedClass` + `Schema.Union` for variants (OR types):
 ```typescript
 import { Match, Schema } from "effect"
 
-class Success extends Schema.TaggedClass("Success")("Success", {
+class Success extends Schema.TaggedClass<Success>("Success")("Success", {
   value: Schema.Number,
 }) {}
-class Failure extends Schema.TaggedClass("Failure")("Failure", {
+class Failure extends Schema.TaggedClass<Failure>("Failure")("Failure", {
   error: Schema.String,
 }) {}
 const Result = Schema.Union([Success, Failure])
@@ -163,17 +169,16 @@ const render = (r: Result) => Match.valueTags(r, {
 
 See [references/data-modeling.md](references/data-modeling.md) for JSON encoding, Schema.Literals, validation, and full patterns.
 
-## Schema.TaggedErrorClass
+## Schema.TaggedError
 
-Define domain errors with `Schema.TaggedErrorClass`. They are yieldable (no `Effect.fail` needed):
+Define domain errors with `Schema.TaggedError`. They are yieldable (no `Effect.fail` needed):
 
 ```typescript
 import { Schema } from "effect"
 
-class UserNotFoundError extends Schema.TaggedErrorClass("UserNotFoundError")(
+class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>(
   "UserNotFoundError",
-  { userId: UserId, message: Schema.String }
-) {}
+)("UserNotFoundError", { userId: UserId, message: Schema.String }) {}
 
 // Yieldable: yield directly in generators
 const getUser = Effect.fn("getUser")(function* (id: UserId) {
@@ -203,6 +208,8 @@ const recovered2 = program.pipe(
 ```
 
 See [references/error-handling.md](references/error-handling.md) for defects, Schema.Defect, and recovery patterns.
+
+At layer boundaries, translate defects too: a port whose contract is a typed error channel should convert anything else escaping its adapter with `Effect.catchDefect` into one of its own typed errors — vendor crashes never cross into domain code.
 
 ## Layer Composition
 
@@ -274,8 +281,8 @@ const program = fetchData.pipe(
 | `Effect.catchAll(() => ...)` losing type info | `Effect.catchTag` / `Effect.catchTags` |
 | `null` / `undefined` in domain types | `Option<T>` with `Option.match` |
 | `Option.getOrThrow(...)` | `Option.match({ onNone, onSome })` or `Option.getOrElse` |
-| `Effect.Service` (v3) | `ServiceMap.Service` (v4) |
-| `Schema.TaggedError<T>()` (v3) | `Schema.TaggedErrorClass("Tag")("Tag", {...})` (v4) |
+| `Effect.Service` (v3) / `ServiceMap.Service` (earlier v4 RC) | `Context.Service` (rc.111) |
+| `Schema.TaggedErrorClass(...)` (earlier v4 RC) | `Schema.TaggedError<Self>("Tag")("Tag", {...})` (rc.111) |
 | Scatter `Effect.provide` calls | Provide once at app entry |
 | Call parameterized layer constructors inline | Store layers in constants (memoization) |
 
@@ -283,10 +290,10 @@ const program = fetchData.pipe(
 
 Load these as needed for deeper patterns:
 
-- **[Services & Layers](references/services-and-layers.md)**: ServiceMap.Service, service-driven development, test layers, layer memoization, provide vs provideMerge
+- **[Services & Layers](references/services-and-layers.md)**: Context.Service, service-driven development, test layers, layer memoization, provide vs provideMerge
 - **[Data Modeling](references/data-modeling.md)**: Schema.Class, branded types, variants, Match.valueTags, JSON encoding
 - **[Schema Decisions](references/schema-decisions.md)**: Schema.Class vs Struct vs TaggedClass decision flowchart, migration patterns
-- **[Error Handling](references/error-handling.md)**: Schema.TaggedErrorClass, catch/catchTag/catchTags, defects, Schema.Defect, TypeId/refail patterns
+- **[Error Handling](references/error-handling.md)**: Schema.TaggedError, catch/catchTag/catchTags, defects, Schema.Defect, TypeId/refail patterns
 - **[Testing](references/testing.md)**: @effect/vitest setup, it.effect/it.live/it.layer, TestClock, Effect.flip, FiberRef isolation, worked example
 - **[HTTP Clients](references/http-clients.md)**: HttpClient, request building, response decoding, middleware, retries, typed API service
 - **[CLI](references/cli.md)**: Command.make, Arguments, Flags, subcommands, worked task manager example

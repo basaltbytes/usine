@@ -30,7 +30,7 @@ import { Schema } from "effect"
 const UserId = Schema.String.pipe(Schema.brand("UserId"))
 type UserId = typeof UserId.Type
 
-class User extends Schema.Class("User")({
+class User extends Schema.Class<User>("User")({
   id: UserId,
   name: Schema.String,
   email: Schema.String,
@@ -42,7 +42,7 @@ class User extends Schema.Class("User")({
 }
 
 const user = new User({
-  id: UserId.makeUnsafe("user-123"),
+  id: UserId.make("user-123"),
   name: "Alice",
   email: "alice@example.com",
   createdAt: new Date(),
@@ -63,11 +63,11 @@ Structured variants with `Schema.TaggedClass` + `Schema.Union`:
 ```typescript
 import { Match, Schema } from "effect"
 
-class Success extends Schema.TaggedClass("Success")("Success", {
+class Success extends Schema.TaggedClass<Success>("Success")("Success", {
   value: Schema.Number,
 }) {}
 
-class Failure extends Schema.TaggedClass("Failure")("Failure", {
+class Failure extends Schema.TaggedClass<Failure>("Failure")("Failure", {
   error: Schema.String,
 }) {}
 
@@ -107,8 +107,8 @@ const Port = Schema.Int.pipe(
 type Port = typeof Port.Type
 
 // Usage: impossible to mix types
-const userId = UserId.makeUnsafe("user-123")
-const postId = PostId.makeUnsafe("post-456")
+const userId = UserId.make("user-123")
+const postId = PostId.make("post-456")
 
 function getUser(id: UserId) { /* ... */ }
 // getUser(postId) // Type error: can't pass PostId where UserId expected
@@ -121,7 +121,7 @@ Use `Schema.fromJsonString` to combine JSON.parse + schema decoding in one step:
 ```typescript
 import { Effect, Schema } from "effect"
 
-class Move extends Schema.Class("Move")({
+class Move extends Schema.Class<Move>("Move")({
   from: Schema.String,
   to: Schema.String,
 }) {}

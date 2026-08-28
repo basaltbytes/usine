@@ -67,7 +67,7 @@ Use when the type needs custom equality, hashing, methods, or PrimaryKey:
 ```typescript
 import { Equal, Hash, Schema } from "effect"
 
-class RunnerAddress extends Schema.Class("RunnerAddress")({
+class RunnerAddress extends Schema.Class<RunnerAddress>("RunnerAddress")({
   host: Schema.NonEmptyString,
   port: Schema.Int,
 }) {
@@ -92,15 +92,15 @@ For union variants with automatic `_tag` discrimination:
 ```typescript
 import { Match, Schema } from "effect"
 
-class Appended extends Schema.TaggedClass("Appended")("Appended", {
+class Appended extends Schema.TaggedClass<Appended>("Appended")("Appended", {
   recordId: RecordId,
 }) {}
 
-class AlreadyExists extends Schema.TaggedClass("AlreadyExists")("AlreadyExists", {
+class AlreadyExists extends Schema.TaggedClass<AlreadyExists>("AlreadyExists")("AlreadyExists", {
   recordId: RecordId,
 }) {}
 
-class Quarantined extends Schema.TaggedClass("Quarantined")("Quarantined", {
+class Quarantined extends Schema.TaggedClass<Quarantined>("Quarantined")("Quarantined", {
   reason: Schema.String,
 }) {}
 
@@ -173,10 +173,10 @@ type WorkflowId = typeof WorkflowId.Type
 interface Result { status: "success" | "failure"; data?: unknown; error?: string }
 
 // AFTER (proper discrimination)
-class Success extends Schema.TaggedClass("Success")("Success", {
+class Success extends Schema.TaggedClass<Success>("Success")("Success", {
   data: Schema.Unknown,
 }) {}
-class Failure extends Schema.TaggedClass("Failure")("Failure", {
+class Failure extends Schema.TaggedClass<Failure>("Failure")("Failure", {
   error: Schema.String,
 }) {}
 const Result = Schema.Union([Success, Failure])

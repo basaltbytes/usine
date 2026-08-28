@@ -105,7 +105,7 @@ import { Array, Option, Schema } from "effect"
 const TaskId = Schema.Number.pipe(Schema.brand("TaskId"))
 type TaskId = typeof TaskId.Type
 
-class Task extends Schema.Class("Task")({
+class Task extends Schema.Class<Task>("Task")({
   id: TaskId,
   text: Schema.NonEmptyString,
   done: Schema.Boolean,
@@ -113,15 +113,15 @@ class Task extends Schema.Class("Task")({
   toggle() { return new Task({ ...this, done: !this.done }) }
 }
 
-class TaskList extends Schema.Class("TaskList")({
+class TaskList extends Schema.Class<TaskList>("TaskList")({
   tasks: Schema.Array(Task),
 }) {
   static Json = Schema.fromJsonString(TaskList)
   static empty = new TaskList({ tasks: [] })
 
   get nextId(): TaskId {
-    if (this.tasks.length === 0) return TaskId.makeUnsafe(1)
-    return TaskId.makeUnsafe(Math.max(...this.tasks.map((t) => t.id)) + 1)
+    if (this.tasks.length === 0) return TaskId.make(1)
+    return TaskId.make(Math.max(...this.tasks.map((t) => t.id)) + 1)
   }
 
   add(text: string): [TaskList, Task] {
@@ -142,9 +142,9 @@ class TaskList extends Schema.Class("TaskList")({
 ### Service
 
 ```typescript
-import { Effect, FileSystem, Layer, ServiceMap } from "effect"
+import { Context, Effect, FileSystem, Layer } from "effect"
 
-class TaskRepo extends ServiceMap.Service<TaskRepo, {
+class TaskRepo extends Context.Service<TaskRepo, {
   readonly list: (all?: boolean) => Effect.Effect<ReadonlyArray<Task>>
   readonly add: (text: string) => Effect.Effect<Task>
   readonly toggle: (id: TaskId) => Effect.Effect<Option.Option<Task>>

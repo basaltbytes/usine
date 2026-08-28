@@ -2,20 +2,20 @@
 
 ## Table of Contents
 
-- [Schema.TaggedErrorClass](#schemataggederrorclass)
+- [Schema.TaggedError](#schemataggederror)
 - [Yieldable Errors](#yieldable-errors)
 - [Recovering from Errors](#recovering-from-errors)
 - [Expected Errors vs Defects](#expected-errors-vs-defects)
 - [Schema.Defect for Unknown Errors](#schemadefect-for-unknown-errors)
 
-## Schema.TaggedErrorClass
+## Schema.TaggedError
 
-Define domain errors with `Schema.TaggedErrorClass`:
+Define domain errors with `Schema.TaggedError`:
 
 ```typescript
 import { Schema } from "effect"
 
-class ValidationError extends Schema.TaggedErrorClass("ValidationError")(
+class ValidationError extends Schema.TaggedError<ValidationError>("ValidationError")(
   "ValidationError",
   {
     field: Schema.String,
@@ -23,7 +23,7 @@ class ValidationError extends Schema.TaggedErrorClass("ValidationError")(
   }
 ) {}
 
-class NotFoundError extends Schema.TaggedErrorClass("NotFoundError")(
+class NotFoundError extends Schema.TaggedError<NotFoundError>("NotFoundError")(
   "NotFoundError",
   {
     resource: Schema.String,
@@ -45,12 +45,12 @@ type AppError = typeof AppError.Type
 
 ## Yieldable Errors
 
-`Schema.TaggedErrorClass` values are yieldable. Return them directly in generators without wrapping in `Effect.fail`:
+`Schema.TaggedError` values are yieldable. Return them directly in generators without wrapping in `Effect.fail`:
 
 ```typescript
 import { Effect, Random, Schema } from "effect"
 
-class BadLuck extends Schema.TaggedErrorClass("BadLuck")(
+class BadLuck extends Schema.TaggedError<BadLuck>("BadLuck")(
   "BadLuck",
   { roll: Schema.Number }
 ) {}
@@ -127,7 +127,7 @@ const main = Effect.gen(function* () {
 })
 ```
 
-**When to catch defects:** Almost never. Only at system boundaries for logging/diagnostics. Use `Effect.exit` to inspect or `Effect.catchAllDefect` if you must recover (e.g., plugin sandboxing).
+**When to catch defects:** Almost never. Only at system boundaries for logging/diagnostics. Use `Effect.exit` to inspect or `Effect.catchDefect` if you must recover (e.g., plugin sandboxing).
 
 ## Schema.Defect for Unknown Errors
 
@@ -136,12 +136,12 @@ Wrap unknown errors from external libraries with `Schema.Defect`:
 ```typescript
 import { Schema, Effect } from "effect"
 
-class ApiError extends Schema.TaggedErrorClass("ApiError")(
+class ApiError extends Schema.TaggedError<ApiError>("ApiError")(
   "ApiError",
   {
     endpoint: Schema.String,
     statusCode: Schema.Number,
-    error: Schema.Defect, // wraps the underlying error
+    error: Schema.Defect(), // wraps the underlying error
   }
 ) {}
 
@@ -176,7 +176,7 @@ import { Schema } from "effect"
 export const TypeId: unique symbol = Symbol.for("@myapp/AppError")
 export type TypeId = typeof TypeId
 
-export class NotFoundError extends Schema.TaggedErrorClass("NotFoundError")(
+export class NotFoundError extends Schema.TaggedError<NotFoundError>("NotFoundError")(
   "NotFoundError",
   { resource: Schema.String, id: Schema.String }
 ) {
@@ -195,14 +195,14 @@ Create a static method that maps any error into your domain error:
 ```typescript
 import { Cause, Effect, Schema } from "effect"
 
-class PersistenceError extends Schema.TaggedErrorClass("PersistenceError")(
+class PersistenceError extends Schema.TaggedError<PersistenceError>("PersistenceError")(
   "PersistenceError",
-  { cause: Schema.Defect }
+  { cause: Schema.Defect() }
 ) {
   static refail<A, E, R>(
     effect: Effect.Effect<A, E, R>
   ): Effect.Effect<A, PersistenceError, R> {
-    return Effect.catchAllCause(effect, (cause) =>
+    return Effect.catchCause(effect, (cause) =>
       Effect.fail(new PersistenceError({ cause: Cause.squash(cause) }))
     )
   }

@@ -2,7 +2,7 @@
 
 ## Table of Contents
 
-- [ServiceMap.Service](#servicemapservice)
+- [Context.Service](#contextservice)
 - [Layer Implementations](#layer-implementations)
 - [Service-Driven Development](#service-driven-development)
 - [Test Implementations](#test-implementations)
@@ -10,14 +10,14 @@
 - [Layer Memoization](#layer-memoization)
 - [Sharing Layers Between Tests](#sharing-layers-between-tests)
 
-## ServiceMap.Service
+## Context.Service
 
-Define services with `ServiceMap.Service` as a class declaring a unique identifier and typed interface:
+Define services with `Context.Service` as a class declaring a unique identifier and typed interface:
 
 ```typescript
-import { Effect, ServiceMap } from "effect"
+import { Context, Effect } from "effect"
 
-class Database extends ServiceMap.Service<
+class Database extends Context.Service<
   Database,
   {
     readonly query: (sql: string) => Effect.Effect<unknown[]>
@@ -25,7 +25,7 @@ class Database extends ServiceMap.Service<
   }
 >()("@app/Database") {}
 
-class Logger extends ServiceMap.Service<
+class Logger extends Context.Service<
   Logger,
   {
     readonly log: (message: string) => Effect.Effect<void>
@@ -43,29 +43,29 @@ class Logger extends ServiceMap.Service<
 Use `Layer.effect` for effectful implementations and `Layer.sync` for synchronous ones:
 
 ```typescript
-import { Effect, Layer, Schema, ServiceMap } from "effect"
+import { Context, Effect, Layer, Schema } from "effect"
 import { HttpClient, HttpClientResponse } from "effect/unstable/http"
 
 const UserId = Schema.String.pipe(Schema.brand("UserId"))
 type UserId = typeof UserId.Type
 
-class User extends Schema.Class("User")({
+class User extends Schema.Class<User>("User")({
   id: UserId,
   name: Schema.String,
   email: Schema.String,
 }) {}
 
-class UserNotFoundError extends Schema.TaggedErrorClass("UserNotFoundError")(
+class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>("UserNotFoundError")(
   "UserNotFoundError",
   { id: UserId }
 ) {}
 
-class Analytics extends ServiceMap.Service<
+class Analytics extends Context.Service<
   Analytics,
   { readonly track: (event: string, data: Record<string, unknown>) => Effect.Effect<void> }
 >()("@app/Analytics") {}
 
-class Users extends ServiceMap.Service<
+class Users extends Context.Service<
   Users,
   {
     readonly findById: (id: UserId) => Effect.Effect<User, UserNotFoundError>
@@ -84,11 +84,13 @@ class Users extends ServiceMap.Service<
           const response = yield* http.get(`https://api.example.com/users/${id}`)
           return yield* HttpClientResponse.schemaBodyJson(User)(response)
         },
-        Effect.catchTag("ResponseError", (error) =>
-          error.response.status === 404
-            ? new UserNotFoundError({ id })
-            : Effect.die(error)
-        ),
+        // The pipeline argument receives (effect, ...args) — args are in scope
+        (effect, id) =>
+          Effect.catchTag(effect, "ResponseError", (error) =>
+            error.response.status === 404
+              ? new UserNotFoundError({ id })
+              : Effect.die(error)
+          ),
       )
 
       const all = Effect.fn("Users.all")(function* () {
@@ -109,7 +111,7 @@ class Users extends ServiceMap.Service<
 Sketch leaf service tags first (no implementations). This lets you write and type-check higher-level orchestration before leaf services are runnable:
 
 ```typescript
-import { Clock, Effect, Layer, Schema, ServiceMap } from "effect"
+import { Clock, Context, Effect, Layer, Schema } from "effect"
 
 const RegistrationId = Schema.String.pipe(Schema.brand("RegistrationId"))
 type RegistrationId = typeof RegistrationId.Type
@@ -120,37 +122,37 @@ type UserId = typeof UserId.Type
 const TicketId = Schema.String.pipe(Schema.brand("TicketId"))
 type TicketId = typeof TicketId.Type
 
-class User extends Schema.Class("User")({
+class User extends Schema.Class<User>("User")({
   id: UserId, name: Schema.String, email: Schema.String,
 }) {}
 
-class Registration extends Schema.Class("Registration")({
+class Registration extends Schema.Class<Registration>("Registration")({
   id: RegistrationId, eventId: EventId, userId: UserId,
   ticketId: TicketId, registeredAt: Schema.Date,
 }) {}
 
-class Ticket extends Schema.Class("Ticket")({
+class Ticket extends Schema.Class<Ticket>("Ticket")({
   id: TicketId, eventId: EventId, code: Schema.String,
 }) {}
 
 // Leaf services: contracts only, no implementations yet
-class Users extends ServiceMap.Service<
+class Users extends Context.Service<
   Users,
   { readonly findById: (id: UserId) => Effect.Effect<User> }
 >()("@app/Users") {}
 
-class Tickets extends ServiceMap.Service<
+class Tickets extends Context.Service<
   Tickets,
   { readonly issue: (eventId: EventId, userId: UserId) => Effect.Effect<Ticket> }
 >()("@app/Tickets") {}
 
-class Emails extends ServiceMap.Service<
+class Emails extends Context.Service<
   Emails,
   { readonly send: (to: string, subject: string, body: string) => Effect.Effect<void> }
 >()("@app/Emails") {}
 
 // Higher-level service: orchestrates leaf services
-class Events extends ServiceMap.Service<
+class Events extends Context.Service<
   Events,
   { readonly register: (eventId: EventId, userId: UserId) => Effect.Effect<Registration> }
 >()("@app/Events") {
@@ -168,7 +170,7 @@ class Events extends ServiceMap.Service<
           const now = yield* Clock.currentTimeMillis
 
           const registration = new Registration({
-            id: RegistrationId.makeUnsafe(crypto.randomUUID()),
+            id: RegistrationId.make(crypto.randomUUID()),
             eventId, userId, ticketId: ticket.id,
             registeredAt: new Date(now),
           })
@@ -196,7 +198,7 @@ This code compiles and type-checks even though leaf services have no implementat
 Use `Layer.sync` with in-memory state for test layers. Mutable state is fine in tests (JS is single-threaded):
 
 ```typescript
-class Database extends ServiceMap.Service<
+class Database extends Context.Service<
   Database,
   {
     readonly query: (sql: string) => Effect.Effect<unknown[]>

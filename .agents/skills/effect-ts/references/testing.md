@@ -178,7 +178,7 @@ Testing the Events service from [services-and-layers.md](services-and-layers.md#
 ### Test layers with in-memory state
 
 ```typescript
-import { Clock, Effect, Layer, Option, Schema, ServiceMap } from "effect"
+import { Clock, Context, Effect, Layer, Option, Schema } from "effect"
 import { describe, expect, it } from "@effect/vitest"
 
 const UserId = Schema.String.pipe(Schema.brand("UserId"))
@@ -190,29 +190,29 @@ type TicketId = typeof TicketId.Type
 const RegistrationId = Schema.String.pipe(Schema.brand("RegistrationId"))
 type RegistrationId = typeof RegistrationId.Type
 
-class User extends Schema.Class("User")({
+class User extends Schema.Class<User>("User")({
   id: UserId, name: Schema.String, email: Schema.String,
 }) {}
 
-class Registration extends Schema.Class("Registration")({
+class Registration extends Schema.Class<Registration>("Registration")({
   id: RegistrationId, eventId: EventId, userId: UserId,
   ticketId: TicketId, registeredAt: Schema.Date,
 }) {}
 
-class Ticket extends Schema.Class("Ticket")({
+class Ticket extends Schema.Class<Ticket>("Ticket")({
   id: TicketId, eventId: EventId, code: Schema.String,
 }) {}
 
-class Email extends Schema.Class("Email")({
+class Email extends Schema.Class<Email>("Email")({
   to: Schema.String, subject: Schema.String, body: Schema.String,
 }) {}
 
-class UserNotFound extends Schema.TaggedErrorClass("UserNotFound")(
+class UserNotFound extends Schema.TaggedError<UserNotFound>("UserNotFound")(
   "UserNotFound", { id: UserId }
 ) {}
 
 // Test layers with mutable in-memory state
-class Users extends ServiceMap.Service<Users, {
+class Users extends Context.Service<Users, {
   readonly create: (user: User) => Effect.Effect<void>
   readonly findById: (id: UserId) => Effect.Effect<User, UserNotFound>
 }>()("@app/Users") {
@@ -228,21 +228,21 @@ class Users extends ServiceMap.Service<Users, {
   })
 }
 
-class Tickets extends ServiceMap.Service<Tickets, {
+class Tickets extends Context.Service<Tickets, {
   readonly issue: (eventId: EventId, userId: UserId) => Effect.Effect<Ticket>
 }>()("@app/Tickets") {
   static readonly testLayer = Layer.sync(Tickets, () => {
     let counter = 0
     const issue = (eventId: EventId, _userId: UserId) =>
       Effect.sync(() => new Ticket({
-        id: TicketId.makeUnsafe(`ticket-${counter++}`),
+        id: TicketId.make(`ticket-${counter++}`),
         eventId, code: `CODE-${counter}`,
       }))
     return { issue }
   })
 }
 
-class Emails extends ServiceMap.Service<Emails, {
+class Emails extends Context.Service<Emails, {
   readonly send: (email: Email) => Effect.Effect<void>
   readonly sent: Effect.Effect<ReadonlyArray<Email>>
 }>()("@app/Emails") {
@@ -258,7 +258,7 @@ class Emails extends ServiceMap.Service<Emails, {
 ### The orchestration service
 
 ```typescript
-class Events extends ServiceMap.Service<Events, {
+class Events extends Context.Service<Events, {
   readonly register: (eventId: EventId, userId: UserId) => Effect.Effect<Registration, UserNotFound>
 }>()("@app/Events") {
   static readonly layer = Layer.effect(Events, Effect.gen(function* () {
@@ -272,7 +272,7 @@ class Events extends ServiceMap.Service<Events, {
         const ticket = yield* tickets.issue(eventId, userId)
         const now = yield* Clock.currentTimeMillis
         const registration = new Registration({
-          id: RegistrationId.makeUnsafe(crypto.randomUUID()),
+          id: RegistrationId.make(crypto.randomUUID()),
           eventId, userId, ticketId: ticket.id,
           registeredAt: new Date(now),
         })
@@ -306,12 +306,12 @@ describe("Events.register", () => {
       const events = yield* Events
 
       const user = new User({
-        id: UserId.makeUnsafe("user-123"),
+        id: UserId.make("user-123"),
         name: "Alice", email: "alice@example.com",
       })
       yield* users.create(user)
 
-      const eventId = EventId.makeUnsafe("event-789")
+      const eventId = EventId.make("event-789")
       const registration = yield* events.register(eventId, user.id)
 
       expect(registration.eventId).toBe(eventId)
@@ -326,12 +326,12 @@ describe("Events.register", () => {
       const emails = yield* Emails
 
       const user = new User({
-        id: UserId.makeUnsafe("user-456"),
+        id: UserId.make("user-456"),
         name: "Bob", email: "bob@example.com",
       })
       yield* users.create(user)
 
-      yield* events.register(EventId.makeUnsafe("event-789"), user.id)
+      yield* events.register(EventId.make("event-789"), user.id)
 
       const sentEmails = yield* emails.sent
       expect(sentEmails).toHaveLength(1)
