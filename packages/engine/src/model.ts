@@ -2,8 +2,8 @@ import { Attempt, Event, Item, Loop, Run, Step } from "@usine/core";
 import { Schema } from "effect";
 
 /** Whether a loop parks new runs until an approval Event arrives. */
-export const approvalRequirementValues = ["none", "required"] as const;
-export const ApprovalRequirement = Schema.Literals(approvalRequirementValues);
+export const APPROVAL_REQUIREMENTS = ["none", "required"] as const;
+export const ApprovalRequirement = Schema.Literals(APPROVAL_REQUIREMENTS);
 export type ApprovalRequirement = typeof ApprovalRequirement.Type;
 
 /** Absolute or caller-resolved path to the instance folder. */
@@ -30,8 +30,8 @@ export class Queued extends Schema.TaggedClass<Queued>("@usine/engine/Queued")("
   eventId: Event.EventId,
 }) {}
 
-export const ignoreReasonValues = ["superseded", "revoked"] as const;
-export const IgnoreReason = Schema.Literals(ignoreReasonValues);
+export const IGNORED_REASONS = ["superseded", "revoked"] as const;
+export const IgnoreReason = Schema.Literals(IGNORED_REASONS);
 export type IgnoreReason = typeof IgnoreReason.Type;
 
 /** The Event remains in the permanent ledger but can no longer open a Run. */

@@ -1,6 +1,6 @@
 import { Attempt, Event, Item, Loop, Run, RunState, Step } from "@usine/core";
 import { Effect, Option, Schema } from "effect";
-import { workflowCommandValues } from "./database/schema.ts";
+import { WORKFLOW_COMMANDS } from "./database/schema.ts";
 import {
   ApprovalRequirement,
   EnginePersistenceError,
@@ -51,7 +51,7 @@ const RecoverableRunRow = Schema.Struct({
 
 const RunIdRow = Schema.Struct({ runId: Run.RunId });
 const DiscardRow = Schema.Struct({ reason: IgnoreReason });
-const WorkflowCommand = Schema.Literals(workflowCommandValues);
+const WorkflowCommand = Schema.Literals(WORKFLOW_COMMANDS);
 const WorkflowCommandRow = Schema.Struct({
   runId: Run.RunId,
   command: WorkflowCommand,

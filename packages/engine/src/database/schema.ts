@@ -11,14 +11,14 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import {
-  approvalRequirementValues,
-  ignoreReasonValues,
+  APPROVAL_REQUIREMENTS,
+  IGNORED_REASONS,
   type ApprovalRequirement,
   type IgnoreReason,
 } from "../model.ts";
 
-export const workflowCommandValues = ["Approve", "Continue", "Interrupt", "Resume"] as const;
-export type WorkflowCommand = (typeof workflowCommandValues)[number];
+export const WORKFLOW_COMMANDS = ["Approve", "Continue", "Interrupt", "Resume"] as const;
+export type WorkflowCommand = (typeof WORKFLOW_COMMANDS)[number];
 
 export const events = snakeCase.table(
   "usine_events",
@@ -41,7 +41,7 @@ export const triggerEvents = snakeCase.table(
     itemKey: text().$type<Item.ItemKey>().notNull(),
     loopName: text().$type<Loop.LoopName>().notNull(),
     stepName: text().$type<Step.StepName>().notNull(),
-    approval: text({ enum: approvalRequirementValues }).$type<ApprovalRequirement>().notNull(),
+    approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
   },
   (table) => [
     check("usine_trigger_events_approval", sql`${table.approval} in ('none', 'required')`),
@@ -124,7 +124,7 @@ export const ignoredEvents = snakeCase.table(
       .$type<Event.EventId>()
       .primaryKey()
       .references(() => triggerEvents.eventId),
-    reason: text({ enum: ignoreReasonValues }).$type<IgnoreReason>().notNull(),
+    reason: text({ enum: IGNORED_REASONS }).$type<IgnoreReason>().notNull(),
   },
   (table) => [
     check("usine_ignored_events_reason", sql`${table.reason} in ('superseded', 'revoked')`),
@@ -138,7 +138,7 @@ export const workflowCommands = snakeCase.table(
       .$type<Run.RunId>()
       .notNull()
       .references(() => runs.runId),
-    command: text({ enum: workflowCommandValues }).$type<WorkflowCommand>().notNull(),
+    command: text({ enum: WORKFLOW_COMMANDS }).$type<WorkflowCommand>().notNull(),
   },
   (table) => [
     check(
