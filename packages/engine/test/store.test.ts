@@ -4,7 +4,7 @@ import { AttemptFailure, Event, Item, Loop, Run, Step } from "@usine/core";
 import { DateTime, Effect, FileSystem, Option } from "effect";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { InstanceDirectory, Submission } from "../src/model.ts";
-import { RunStore } from "../src/run-store.ts";
+import { RunStore } from "../src/store/store.ts";
 
 describe("run store", () => {
   it.live("commits the failed state with the capped Attempt", () =>

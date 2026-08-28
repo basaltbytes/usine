@@ -2,7 +2,7 @@ import { AttemptFailure, Run } from "@usine/core";
 import { Effect, Option, Result, Schema } from "effect";
 import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { StepExecutor } from "./step-executor.ts";
-import { AttemptRecoveryFailed, RunStore } from "./run-store.ts";
+import { AttemptRecoveryFailed, RunStore } from "./store/store.ts";
 import {
   EnginePersistenceError,
   RunNotFoundError,
@@ -78,7 +78,20 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
       return yield* started.failure;
     }
 
-    const result = yield* executor.execute(started.execution).pipe(Effect.result);
+    // Port ACL: the executor's contract is the typed AttemptFailure channel.
+    // A defect escaping the adapter is infrastructure breakage around the
+    // agent — translate it, or the workflow suspends and the projection stays
+    // Running with an open Attempt until the next reconcile.
+    const result = yield* executor.execute(started.execution).pipe(
+      Effect.catchDefect(
+        (defect) =>
+          new AttemptFailure.InfraFailure({
+            message: "The step executor crashed outside its typed failure channel",
+            cause: defect,
+          }),
+      ),
+      Effect.result,
+    );
     if (Result.isSuccess(result)) {
       yield* store.succeedAttempt(started.execution.attempt, result.success).pipe(asAttemptFailure);
       yield* continueWithNewest(store, runId).pipe(asAttemptFailure);

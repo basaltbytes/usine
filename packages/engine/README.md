@@ -11,14 +11,16 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 - A newer Event supersedes a pending or waiting Run. A running Attempt finishes first, then the engine opens only the newest queued Event for that Item.
 - Revoke stops pending and waiting Runs. Operator cancellation can also stop a running Attempt.
 - The startup sweep rejoins open workflow executions. If the process stopped during an Attempt, the engine records that Attempt as an infrastructure failure and resumes as N+1.
+- A crash inside the `StepExecutor` adapter is recorded as an infrastructure failure like any other. If the engine itself hits an invariant defect, the workflow suspends for inspection; `RunEngine.reconcile` (or a restart) repairs the projection.
 
 ## Composition
 
-`layer` supplies local SQLite, Effect `SingleRunner`, workflow registration, and startup reconciliation. Provide a `StepExecutor` implementation at the composition root:
+The root entry (`@usine/engine`) is platform-free; the Node local adapter lives behind `@usine/engine/local-sqlite`. Its `layer` supplies local SQLite, Effect `SingleRunner`, workflow registration, and startup reconciliation. Provide a `StepExecutor` implementation at the composition root:
 
 ```ts
 import { Effect, Layer } from "effect"
-import { InstanceDirectory, RunEngine, StepExecutor, layer } from "@usine/engine"
+import { InstanceDirectory, RunEngine, StepExecutor } from "@usine/engine"
+import { layer } from "@usine/engine/local-sqlite"
 
 const StepExecutorLive = Layer.succeed(StepExecutor)({
   execute: ({ event }) => Effect.succeed(`Handled ${event.id}`),
@@ -34,7 +36,7 @@ const program = Effect.gen(function* () {
 })
 ```
 
-`layerWithDatabase` accepts another SQLite-compatible database layer. That layer must provide both `RunDatabase` and the matching Effect `SqlClient`, preserving atomic transactions and keeping the run projections beside Effect's cluster tables. Cloudflare D1 is not supported by Drizzle RC.4 for this use yet because its Effect driver cannot execute the store's transactions.
+`layerWithDatabase` (from the root entry) accepts another SQLite-compatible database layer. That layer must provide both `RunDatabase` and the matching Effect `SqlClient`, preserving atomic transactions and keeping the run projections beside Effect's cluster tables; the deployment also supplies its platform `Crypto` layer, which the cluster uses to hash over-length deduplication keys. Cloudflare D1 is not supported by Drizzle RC.4 for this use yet because its Effect driver cannot execute the store's transactions.
 
 The Drizzle schema is the source of truth for usine tables. After changing it, generate and review a migration with:
 

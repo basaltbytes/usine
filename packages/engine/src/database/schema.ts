@@ -13,12 +13,11 @@ import {
 import {
   APPROVAL_REQUIREMENTS,
   IGNORED_REASONS,
+  WORKFLOW_COMMANDS,
   type ApprovalRequirement,
   type IgnoreReason,
+  type WorkflowCommand,
 } from "../model.ts";
-
-export const WORKFLOW_COMMANDS = ["Approve", "Continue", "Interrupt", "Resume"] as const;
-export type WorkflowCommand = (typeof WORKFLOW_COMMANDS)[number];
 
 export const events = snakeCase.table(
   "usine_events",

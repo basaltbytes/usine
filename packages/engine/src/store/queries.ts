@@ -2,7 +2,7 @@ import { Attempt, Event, Item, Loop, Run, RunState, Step } from "@usine/core";
 import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { Effect, Option } from "effect";
-import type { RunDatabaseClient } from "./database/database.ts";
+import type { RunDatabaseClient } from "../database/database.ts";
 import {
   approvals,
   attempts,
@@ -12,9 +12,14 @@ import {
   steps,
   triggerEvents,
   workflowCommands,
+} from "../database/schema.ts";
+import {
+  RunNotFoundError,
+  RunSnapshot,
+  Submission,
+  WORKFLOW_COMMAND_PRIORITY,
   type WorkflowCommand,
-} from "./database/schema.ts";
-import { RunNotFoundError, RunSnapshot, Submission } from "./model.ts";
+} from "../model.ts";
 import {
   attemptFromRow,
   decodeAttemptRows,
@@ -32,7 +37,7 @@ import {
   runFromRow,
   stepFromRow,
   submissionFromRow,
-} from "./run-store-codec.ts";
+} from "./codec.ts";
 
 const eventRouteSelection = {
   eventId: events.eventId,
@@ -45,8 +50,11 @@ const eventRouteSelection = {
   approval: triggerEvents.approval,
 } as const;
 
-const openState = sql`json_extract(${runs.stateJson}, '$._tag') in ('Pending', 'Waiting', 'Running')`;
-const unstartedState = sql`json_extract(${runs.stateJson}, '$._tag') in ('Pending', 'Waiting')`;
+// The state partitions stay owned by @usine/core (`RunState.Open` and the
+// supersede/revoke precondition); these predicates only borrow their tags.
+const storedStateTag = sql`json_extract(${runs.stateJson}, '$._tag')`;
+const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
+const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
 
 export const queriesFor = (database: RunDatabaseClient) => {
   // Keep `.execute()` explicit: RC.4's yieldable wrapper can cross an Effect
@@ -344,7 +352,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .onConflictDoNothing()
       .execute();
     const routes = yield* eventRouteByDedup(submission.event.dedupKey);
-    if (routes.length === 0) {
+    const existing = routes[0];
+    if (existing === undefined) {
       yield* database
         .insert(triggerEvents)
         .values({
@@ -357,7 +366,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
         .execute();
       return submission;
     }
-    return submissionFromRow(routes[0]);
+    return submissionFromRow(existing);
   });
 
   const nextQueued = Effect.fn("RunStoreQueries.nextQueued")(function* (runId: Run.RunId) {
@@ -405,9 +414,18 @@ export const queriesFor = (database: RunDatabaseClient) => {
       const rows = yield* database
         .select({ runId: workflowCommands.runId, command: workflowCommands.command })
         .from(workflowCommands)
-        .orderBy(workflowCommands.runId, desc(workflowCommands.command))
         .execute();
-      return yield* decodeWorkflowCommands(rows);
+      const decoded = yield* decodeWorkflowCommands(rows);
+      // Delivery order per run is a replay invariant, not a sort convenience —
+      // WORKFLOW_COMMAND_PRIORITY names it.
+      const priority = (command: WorkflowCommand) => WORKFLOW_COMMAND_PRIORITY.indexOf(command);
+      return [...decoded].sort((left, right) =>
+        left.runId === right.runId
+          ? priority(left.command) - priority(right.command)
+          : left.runId < right.runId
+            ? -1
+            : 1,
+      );
     },
   );
 

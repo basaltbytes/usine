@@ -17,7 +17,8 @@ import {
   Scope,
 } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { InstanceDirectory, RunEngine, StepExecutor, Submission, layer } from "../src/index.ts";
+import { layer } from "../src/database/local-sqlite.ts";
+import { InstanceDirectory, RunEngine, StepExecutor, Submission } from "../src/index.ts";
 
 type AttemptPlan = Effect.Effect<string, AttemptFailure.AttemptFailure>;
 
@@ -111,9 +112,11 @@ describe("durable run engine", () => {
           assert(Option.isSome(snapshot.step.result));
           assert.strictEqual(snapshot.step.result.value, "finished");
           assert.strictEqual(snapshot.attempts.length, 1);
+          const attempt = snapshot.attempts[0];
           assert(
-            Option.isSome(snapshot.attempts[0].outcome) &&
-              snapshot.attempts[0].outcome.value._tag === "Succeeded",
+            attempt !== undefined &&
+              Option.isSome(attempt.outcome) &&
+              attempt.outcome.value._tag === "Succeeded",
           );
         }).pipe(Effect.provide(runtime));
       }),
@@ -186,11 +189,50 @@ describe("durable run engine", () => {
             ({ run }) => run.state._tag === "Succeeded",
           );
           assert.strictEqual(finished.attempts.length, 2);
-          const firstOutcome = finished.attempts[0].outcome;
+          const firstOutcome = finished.attempts[0]?.outcome;
+          assert(firstOutcome !== undefined);
           assert(Option.isSome(firstOutcome));
           assert.strictEqual(firstOutcome.value._tag, "Failed");
           if (firstOutcome.value._tag === "Failed") {
             assert.strictEqual(firstOutcome.value.failure._tag, "InfraFailure");
+          }
+        }).pipe(Effect.provide(runtime));
+      }),
+    ),
+  );
+
+  it.live("translates an executor defect into a typed infrastructure failure", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.die(new Error("the executor adapter crashed")),
+          Effect.succeed("recovered"),
+        ]);
+        const runtime = layer(directory).pipe(Layer.provide(executorLayer(plans)));
+
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(
+            submission({ number: 13, item: "executor-defect" }),
+          );
+          assert.strictEqual(accepted._tag, "Claimed");
+          if (accepted._tag !== "Claimed") return;
+
+          // Without the port ACL the defect suspends the workflow and the run
+          // stays Running forever with an open Attempt; with it, the crash is
+          // an InfraFailure that auto-retries.
+          const finished = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(finished.attempts.length, 2);
+          const crashed = finished.attempts[0]?.outcome;
+          assert(crashed !== undefined);
+          assert(Option.isSome(crashed));
+          assert.strictEqual(crashed.value._tag, "Failed");
+          if (crashed.value._tag === "Failed") {
+            assert.strictEqual(crashed.value.failure._tag, "InfraFailure");
           }
         }).pipe(Effect.provide(runtime));
       }),
@@ -268,7 +310,7 @@ describe("durable run engine", () => {
             ({ run }) => run.state._tag === "Succeeded",
           );
           assert.strictEqual(finished.attempts.length, 2);
-          assert.strictEqual(finished.attempts[1].number, 2);
+          assert.strictEqual(finished.attempts[1]?.number, 2);
         }).pipe(Effect.provide(runtime));
       }),
     ),
@@ -384,7 +426,8 @@ describe("durable run engine", () => {
           const canceled = yield* engine.inspect(accepted.runId);
           assert.strictEqual(canceled.run.state._tag, "Canceled");
           assert.strictEqual(canceled.attempts.length, 1);
-          const outcome = canceled.attempts[0].outcome;
+          const outcome = canceled.attempts[0]?.outcome;
+          assert(outcome !== undefined);
           assert(Option.isSome(outcome));
           assert.strictEqual(outcome.value._tag, "Canceled");
         }).pipe(Effect.provide(runtime));
@@ -462,8 +505,9 @@ describe("durable run engine", () => {
           ({ run }) => run.state._tag === "Succeeded",
         );
         assert.strictEqual(repaired.attempts.length, 2);
-        assert.strictEqual(repaired.attempts[1].number, 2);
-        const interrupted = repaired.attempts[0].outcome;
+        assert.strictEqual(repaired.attempts[1]?.number, 2);
+        const interrupted = repaired.attempts[0]?.outcome;
+        assert(interrupted !== undefined);
         assert(Option.isSome(interrupted));
         assert.strictEqual(interrupted.value._tag, "Failed");
         if (interrupted.value._tag === "Failed") {

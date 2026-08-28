@@ -1,4 +1,10 @@
-/** @usine/engine — durable Event → Run → Step → Attempt execution. */
+/**
+ * @usine/engine — durable Event → Run → Step → Attempt execution.
+ *
+ * This entry is platform-free: compose it with a database adapter through
+ * `layerWithDatabase`, or import the Node local adapter from
+ * `@usine/engine/local-sqlite`.
+ */
 export {
   ApprovalRequirement,
   Claimed,
@@ -16,5 +22,5 @@ export {
   SubmissionResult,
 } from "./model.ts";
 export { RunDatabase, type RunDatabaseClient } from "./database/database.ts";
-export { layer, layerWithDatabase, RunEngine } from "./run-engine.ts";
+export { layerWithDatabase, RunEngine } from "./engine.ts";
 export { StepExecutor } from "./step-executor.ts";

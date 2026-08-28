@@ -1,21 +1,21 @@
-import { NodeServices } from "@effect/platform-node";
 import { Event, Item, Loop, Run } from "@usine/core";
-import { Context, Effect, Layer, Option } from "effect";
+import { Context, Crypto, Effect, Layer, Option } from "effect";
 import { ClusterWorkflowEngine, SingleRunner } from "effect/unstable/cluster";
 import { SqlClient } from "effect/unstable/sql";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
 import { RunDatabase } from "./database/database.ts";
-import { localSqliteLayer } from "./database/local-sqlite.ts";
-import type { InstanceDirectory, RunEngineError, Submission } from "./model.ts";
-import { RunStore } from "./run-store.ts";
+import type { RunEngineError, RunSnapshot, Submission, SubmissionResult } from "./model.ts";
+import { RunStore } from "./store/store.ts";
 import {
   ApprovalGate,
   DurableRun,
   continueWithNewest,
   durableRunLayer,
   runIdFor,
-} from "./run-workflow.ts";
+} from "./workflow.ts";
 import { StepExecutor } from "./step-executor.ts";
+
+const MAX_SETTLEMENT_POLLS = 500;
 
 const makeRunEngine = Effect.gen(function* () {
   const store = yield* RunStore;
@@ -55,12 +55,15 @@ const makeRunEngine = Effect.gen(function* () {
     runId: Run.RunId,
   ) {
     // A Failed projection is committed before the workflow finishes suspending.
-    // Wait for that durable state transition so an immediate operator retry is not lost.
-    while (true) {
+    // Poll across that short handover so an immediate operator retry is not
+    // lost. A workflow still absent at the deadline is a corrupted instance
+    // database, not a race — die loudly instead of hanging delivery forever.
+    for (let poll = 0; poll < MAX_SETTLEMENT_POLLS; poll += 1) {
       const status = yield* DurableRun.poll(runId).pipe(provideWorkflowEngine);
       if (Option.isSome(status)) return status.value;
       yield* Effect.sleep("10 millis");
     }
+    return yield* Effect.die(new Error(`Run ${runId} has no durable workflow execution to settle`));
   });
 
   const deliverResume = Effect.fn("RunEngine.deliverResume")(function* (runId: Run.RunId) {
@@ -164,18 +167,45 @@ const makeRunEngine = Effect.gen(function* () {
   return { approve, cancel, inspect, reconcile, retry, revoke, submit } as const;
 });
 
-export class RunEngine extends Context.Service<RunEngine, Effect.Success<typeof makeRunEngine>>()(
-  "@usine/engine/RunEngine",
-) {}
+/**
+ * The public run-engine service. The interface below is the package's declared
+ * API — widen it deliberately, never by letting an implementation change leak
+ * through inference.
+ */
+export class RunEngine extends Context.Service<
+  RunEngine,
+  {
+    readonly approve: (
+      runId: Run.RunId,
+      approval: Event.Event,
+    ) => Effect.Effect<void, RunEngineError>;
+    readonly cancel: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
+    readonly inspect: (runId: Run.RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
+    readonly reconcile: () => Effect.Effect<void, RunEngineError>;
+    readonly retry: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
+    readonly revoke: (
+      loop: Loop.LoopName,
+      itemKey: Item.ItemKey,
+    ) => Effect.Effect<void, RunEngineError>;
+    readonly submit: (submission: Submission) => Effect.Effect<SubmissionResult, RunEngineError>;
+  }
+>()("@usine/engine/RunEngine") {}
 
 /**
  * Builds the durable runtime on a caller-selected SQLite-compatible database.
  * The adapter must provide both Drizzle's run database and the matching Effect
- * SQL client so run projections and cluster tables stay co-located.
+ * SQL client so run projections and cluster tables stay co-located. This entry
+ * is platform-free: the deployment supplies its platform `Crypto` (the cluster
+ * hashes over-length deduplication keys with it) next to the `StepExecutor`
+ * port — see `database/local-sqlite.ts` for the Node composition.
  */
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,
-): Layer.Layer<RunEngine, RunEngineError | DatabaseError, StepExecutor | DatabaseRequirements> => {
+): Layer.Layer<
+  RunEngine,
+  RunEngineError | DatabaseError,
+  Crypto.Crypto | StepExecutor | DatabaseRequirements
+> => {
   const store = RunStore.layer.pipe(Layer.provide(database));
   const cluster = SingleRunner.layer({
     runnerStorage: "memory",
@@ -184,7 +214,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
       assignedShardGroups: ["default", "workflow"],
       entityTerminationTimeout: 0,
     },
-  }).pipe(Layer.provide(database), Layer.provide(NodeServices.layer), Layer.orDie);
+  }).pipe(Layer.provide(database), Layer.orDie);
   const workflowEngine = ClusterWorkflowEngine.layer.pipe(Layer.provide(cluster));
   const runtime = durableRunLayer.pipe(
     Layer.provideMerge(workflowEngine),
@@ -192,9 +222,3 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   );
   return Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(runtime));
 };
-
-/** Local-first runtime backed by `.usine/runtime.sqlite`. */
-export const layer = (
-  instanceDirectory: InstanceDirectory,
-): Layer.Layer<RunEngine, RunEngineError, StepExecutor> =>
-  layerWithDatabase(localSqliteLayer(instanceDirectory));

@@ -1,14 +1,13 @@
 import { Attempt, Event, Item, Loop, Run, RunState, Step } from "@usine/core";
 import { Effect, Option, Schema } from "effect";
-import { WORKFLOW_COMMANDS } from "./database/schema.ts";
 import {
   ApprovalRequirement,
   EnginePersistenceError,
   IgnoreReason,
-  RunNotFoundError,
-  RunOperationRejectedError,
+  RunEngineError,
   Submission,
-} from "./model.ts";
+  WorkflowCommand,
+} from "../model.ts";
 
 export const EventRouteRow = Schema.Struct({
   eventId: Event.EventId,
@@ -51,11 +50,11 @@ const RecoverableRunRow = Schema.Struct({
 
 const RunIdRow = Schema.Struct({ runId: Run.RunId });
 const DiscardRow = Schema.Struct({ reason: IgnoreReason });
-const WorkflowCommand = Schema.Literals(WORKFLOW_COMMANDS);
-const WorkflowCommandRow = Schema.Struct({
+export const WorkflowCommandRow = Schema.Struct({
   runId: Run.RunId,
   command: WorkflowCommand,
 });
+export type WorkflowCommandRow = typeof WorkflowCommandRow.Type;
 
 export const decodeEventRoutes = Schema.decodeUnknownEffect(Schema.Array(EventRouteRow));
 export const decodeRunRows = Schema.decodeUnknownEffect(Schema.Array(RunRow));
@@ -70,23 +69,13 @@ export const encodeDateTime = Schema.encodeSync(Schema.DateTimeUtcFromString);
 export const encodeRunState = Schema.encodeSync(RunState.RunState);
 export const encodeOutcome = Schema.encodeSync(Attempt.Outcome);
 
-const isRunEngineError = Schema.is(
-  Schema.Union([RunNotFoundError, RunOperationRejectedError, EnginePersistenceError]),
-);
+const isRunEngineError = Schema.is(RunEngineError);
 
 export const persistence =
   (operation: string) =>
-  <A, E, R>(
-    effect: Effect.Effect<A, E, R>,
-  ): Effect.Effect<A, EnginePersistenceError | RunNotFoundError | RunOperationRejectedError, R> =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, RunEngineError, R> =>
     Effect.mapError(effect, (error) =>
-      isRunEngineError(error)
-        ? error
-        : new EnginePersistenceError({
-            operation,
-            message: `${operation} failed`,
-            cause: error,
-          }),
+      isRunEngineError(error) ? error : new EnginePersistenceError({ operation, cause: error }),
     );
 
 export const eventFromRow = (row: EventRouteRow): Event.Event =>

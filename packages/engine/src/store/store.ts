@@ -1,47 +1,51 @@
 import { Attempt, AttemptFailure, Event, Item, Loop, Run, RunState } from "@usine/core";
 import { Cause, Context, DateTime, Effect, Exit, Layer, Option, Schema } from "effect";
 import type { Workflow } from "effect/unstable/workflow";
-import { RunDatabase } from "./database/database.ts";
-import type { WorkflowCommand } from "./database/schema.ts";
+import { RunDatabase } from "../database/database.ts";
 import {
   Claimed,
   Ignored,
   Queued,
   RunOperationRejectedError,
+  RunSnapshot,
   StepExecution,
   Submission,
-} from "./model.ts";
-import { persistence, submissionFromRow } from "./run-store-codec.ts";
-import { queriesFor } from "./run-store-queries.ts";
+  type RunEngineError,
+  type WorkflowCommand,
+} from "../model.ts";
+import { persistence, submissionFromRow, type WorkflowCommandRow } from "./codec.ts";
+import { queriesFor } from "./queries.ts";
 
 const MAX_AUTO_ATTEMPTS = Attempt.AttemptNumber.make(3);
 
-class StoredSubmission extends Schema.Class<StoredSubmission>(
+export class StoredSubmission extends Schema.Class<StoredSubmission>(
   "@usine/engine/internal/StoredSubmission",
 )({
   submission: Submission,
   runId: Run.RunId,
 }) {}
 
-class RecoverableRun extends Schema.Class<RecoverableRun>("@usine/engine/internal/RecoverableRun")({
+export class RecoverableRun extends Schema.Class<RecoverableRun>(
+  "@usine/engine/internal/RecoverableRun",
+)({
   submission: Submission,
   runId: Run.RunId,
   state: RunState.RunState,
 }) {}
 
-class Claim extends Schema.Class<Claim>("@usine/engine/internal/Claim")({
+export class Claim extends Schema.Class<Claim>("@usine/engine/internal/Claim")({
   submission: Submission,
   result: Schema.Union([Claimed, Queued, Ignored]),
   supersededRun: Schema.Option(Run.RunId),
 }) {}
 
-class AttemptStarted extends Schema.TaggedClass<AttemptStarted>(
+export class AttemptStarted extends Schema.TaggedClass<AttemptStarted>(
   "@usine/engine/internal/AttemptStarted",
 )("AttemptStarted", {
   execution: StepExecution,
 }) {}
 
-class AttemptRecoveryFailed extends Schema.TaggedClass<AttemptRecoveryFailed>(
+export class AttemptRecoveryFailed extends Schema.TaggedClass<AttemptRecoveryFailed>(
   "@usine/engine/internal/AttemptRecoveryFailed",
 )("AttemptRecoveryFailed", {
   failure: AttemptFailure.InfraFailure,
@@ -125,7 +129,7 @@ const makeRunStore = Effect.gen(function* () {
         return yield* openRun(tx, recorded, requestedRunId);
       }),
     );
-  });
+  }, persistence("submit Event"));
 
   const parkForApproval = Effect.fn("RunStore.parkForApproval")(function* (runId: Run.RunId) {
     yield* database.transaction((transaction) =>
@@ -137,7 +141,7 @@ const makeRunStore = Effect.gen(function* () {
         }
       }),
     );
-  });
+  }, persistence("park run for approval"));
 
   const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (runId: Run.RunId) {
     return yield* database.transaction((transaction) =>
@@ -209,7 +213,7 @@ const makeRunStore = Effect.gen(function* () {
         });
       }),
     );
-  });
+  }, persistence("begin attempt"));
 
   const succeedAttempt = Effect.fn("RunStore.succeedAttempt")(function* (
     attempt: Attempt.Attempt,
@@ -226,7 +230,7 @@ const makeRunStore = Effect.gen(function* () {
         yield* tx.requestWorkflowCommand(attempt.runId, "Continue");
       }),
     );
-  });
+  }, persistence("succeed attempt"));
 
   const failAttempt = Effect.fn("RunStore.failAttempt")(function* (
     attempt: Attempt.Attempt,
@@ -250,7 +254,7 @@ const makeRunStore = Effect.gen(function* () {
         return retry;
       }),
     );
-  });
+  }, persistence("fail attempt"));
 
   const approve = Effect.fn("RunStore.approve")(function* (
     runId: Run.RunId,
@@ -272,7 +276,7 @@ const makeRunStore = Effect.gen(function* () {
         yield* tx.requestWorkflowCommand(runId, "Approve");
       }),
     );
-  });
+  }, persistence("approve run"));
 
   const retry = Effect.fn("RunStore.retry")(function* (runId: Run.RunId) {
     yield* database.transaction((transaction) =>
@@ -297,7 +301,7 @@ const makeRunStore = Effect.gen(function* () {
         });
       }),
     );
-  });
+  }, persistence("retry run"));
 
   const cancel = Effect.fn("RunStore.cancel")(function* (runId: Run.RunId) {
     return yield* database.transaction((transaction) =>
@@ -317,7 +321,7 @@ const makeRunStore = Effect.gen(function* () {
         return true;
       }),
     );
-  });
+  }, persistence("cancel run"));
 
   const revoke = Effect.fn("RunStore.revoke")(function* (
     loop: Loop.LoopName,
@@ -337,7 +341,7 @@ const makeRunStore = Effect.gen(function* () {
         return storedRuns.map((row) => row.runId);
       }),
     );
-  });
+  }, persistence("revoke run"));
 
   const claimQueued = Effect.fn("RunStore.claimQueued")(function* (
     submission: Submission,
@@ -360,7 +364,7 @@ const makeRunStore = Effect.gen(function* () {
         return Option.some(new StoredSubmission({ submission, runId }));
       }),
     );
-  });
+  }, persistence("claim queued Event"));
 
   const recoverable = Effect.fn("RunStore.recoverable")(function* () {
     return (yield* queries.recoverable()).map(
@@ -371,7 +375,7 @@ const makeRunStore = Effect.gen(function* () {
           state: row.state,
         }),
     );
-  });
+  }, persistence("list recoverable runs"));
 
   const reconcileCompletion = Effect.fn("RunStore.reconcileCompletion")(function* (
     runId: Run.RunId,
@@ -399,48 +403,91 @@ const makeRunStore = Effect.gen(function* () {
         yield* tx.requestWorkflowCommand(runId, "Continue");
       }),
     );
-  });
+  }, persistence("reconcile workflow completion"));
 
   return {
-    approve: (runId: Run.RunId, approval: Event.Event) =>
-      approve(runId, approval).pipe(persistence("approve run")),
-    beginAttempt: (runId: Run.RunId) => beginAttempt(runId).pipe(persistence("begin attempt")),
-    cancel: (runId: Run.RunId) => cancel(runId).pipe(persistence("cancel run")),
-    claimQueued: (submission: Submission, runId: Run.RunId) =>
-      claimQueued(submission, runId).pipe(persistence("claim queued Event")),
+    approve,
+    beginAttempt,
+    cancel,
+    claimQueued,
     completeWorkflowCommand: (runId: Run.RunId, command: WorkflowCommand) =>
       queries
         .completeWorkflowCommand(runId, command)
         .pipe(persistence("complete workflow command")),
-    failAttempt: (attempt: Attempt.Attempt, failure: AttemptFailure.AttemptFailure) =>
-      failAttempt(attempt, failure).pipe(persistence("fail attempt")),
+    failAttempt,
     nextQueued: (runId: Run.RunId) =>
       queries.nextQueued(runId).pipe(persistence("find queued Event")),
-    parkForApproval: (runId: Run.RunId) =>
-      parkForApproval(runId).pipe(persistence("park run for approval")),
+    parkForApproval,
     pendingWorkflowCommands: queries
       .pendingWorkflowCommands()
       .pipe(persistence("list pending workflow commands")),
-    recordAndClaim: (submission: Submission, runId: Run.RunId) =>
-      recordAndClaim(submission, runId).pipe(persistence("submit Event")),
-    reconcileCompletion: (
-      runId: Run.RunId,
-      result: Workflow.Result<string, AttemptFailure.AttemptFailure>,
-    ) => reconcileCompletion(runId, result).pipe(persistence("reconcile workflow completion")),
-    recoverable: recoverable().pipe(persistence("list recoverable runs")),
-    retry: (runId: Run.RunId) => retry(runId).pipe(persistence("retry run")),
-    revoke: (loop: Loop.LoopName, itemKey: Item.ItemKey) =>
-      revoke(loop, itemKey).pipe(persistence("revoke run")),
+    recordAndClaim,
+    reconcileCompletion,
+    recoverable: recoverable(),
+    retry,
+    revoke,
     snapshot: (runId: Run.RunId) => queries.snapshot(runId).pipe(persistence("read run")),
-    succeedAttempt: (attempt: Attempt.Attempt, result: string) =>
-      succeedAttempt(attempt, result).pipe(persistence("succeed attempt")),
+    succeedAttempt,
   } as const;
 });
 
-export class RunStore extends Context.Service<RunStore, Effect.Success<typeof makeRunStore>>()(
-  "@usine/engine/internal/RunStore",
-) {
+/**
+ * The durable Run projection store. The interface below is the store's
+ * declared contract — the seam any other backend (for example a Postgres
+ * store) implements with its own `Layer.effect(RunStore, ...)`. Methods speak
+ * domain vocabulary only and fail only with `RunEngineError`.
+ */
+export class RunStore extends Context.Service<
+  RunStore,
+  {
+    readonly approve: (
+      runId: Run.RunId,
+      approval: Event.Event,
+    ) => Effect.Effect<void, RunEngineError>;
+    readonly beginAttempt: (
+      runId: Run.RunId,
+    ) => Effect.Effect<AttemptStarted | AttemptRecoveryFailed, RunEngineError>;
+    readonly cancel: (runId: Run.RunId) => Effect.Effect<boolean, RunEngineError>;
+    readonly claimQueued: (
+      submission: Submission,
+      runId: Run.RunId,
+    ) => Effect.Effect<Option.Option<StoredSubmission>, RunEngineError>;
+    readonly completeWorkflowCommand: (
+      runId: Run.RunId,
+      command: WorkflowCommand,
+    ) => Effect.Effect<void, RunEngineError>;
+    readonly failAttempt: (
+      attempt: Attempt.Attempt,
+      failure: AttemptFailure.AttemptFailure,
+    ) => Effect.Effect<boolean, RunEngineError>;
+    readonly nextQueued: (
+      runId: Run.RunId,
+    ) => Effect.Effect<Option.Option<Submission>, RunEngineError>;
+    readonly parkForApproval: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
+    readonly pendingWorkflowCommands: Effect.Effect<
+      ReadonlyArray<WorkflowCommandRow>,
+      RunEngineError
+    >;
+    readonly recordAndClaim: (
+      submission: Submission,
+      requestedRunId: Run.RunId,
+    ) => Effect.Effect<Claim, RunEngineError>;
+    readonly reconcileCompletion: (
+      runId: Run.RunId,
+      result: Workflow.Result<string, AttemptFailure.AttemptFailure>,
+    ) => Effect.Effect<void, RunEngineError>;
+    readonly recoverable: Effect.Effect<ReadonlyArray<RecoverableRun>, RunEngineError>;
+    readonly retry: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
+    readonly revoke: (
+      loop: Loop.LoopName,
+      itemKey: Item.ItemKey,
+    ) => Effect.Effect<ReadonlyArray<Run.RunId>, RunEngineError>;
+    readonly snapshot: (runId: Run.RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
+    readonly succeedAttempt: (
+      attempt: Attempt.Attempt,
+      result: string,
+    ) => Effect.Effect<void, RunEngineError>;
+  }
+>()("@usine/engine/internal/RunStore") {
   static readonly layer = Layer.effect(RunStore, makeRunStore);
 }
-
-export { AttemptRecoveryFailed };

@@ -18,6 +18,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./local-sqlite": {
+      "types": "./dist/database/local-sqlite.d.ts",
+      "default": "./dist/database/local-sqlite.js"
     }
   },
   "publishConfig": {
