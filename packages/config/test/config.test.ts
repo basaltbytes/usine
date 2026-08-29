@@ -307,6 +307,26 @@ describe("YamlWriter", () => {
     }),
   );
 
+  it.effect("retains CRLF newline style in standalone and frontmatter edits", () =>
+    Effect.gen(function* () {
+      const updatedYaml = yield* updateYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\r\nrepos: []\r\n",
+        new YamlEdit({ path: ["version"], value: 1 }),
+      );
+      expect(updatedYaml).toBe("version: 1\r\nrepos: []\r\n");
+
+      const updatedMarkdown = yield* updateFrontmatter(
+        InstancePath.make("agents/developer.md"),
+        "---\r\nharness: codex\r\nmodel: gpt-5\r\neffort: medium\r\n---\r\nPersona body.",
+        new YamlEdit({ path: ["effort"], value: "high" }),
+      );
+      expect(updatedMarkdown).toBe(
+        "---\r\nharness: codex\r\nmodel: gpt-5\r\neffort: high\r\n---\r\nPersona body.",
+      );
+    }),
+  );
+
   it.effect("does not treat a frontmatter-prefix line as the closing delimiter", () =>
     Effect.gen(function* () {
       const source = [
