@@ -127,10 +127,7 @@ describe("GitHubApp", () => {
           Repository.Name.make("basaltbytes/missing"),
         ]);
         assert.strictEqual(access[0]?._tag, "CoveredProject");
-        assert.strictEqual(access[1]?._tag, "UncoveredProject");
-        if (access[1]?._tag === "UncoveredProject") {
-          assert.strictEqual(access[1].error._tag, "ProjectNotInstalledError");
-        }
+        assert.strictEqual(access[1]?._tag, "ProjectNotInstalledError");
         const covered = access[0];
         assert(covered instanceof CoveredProject);
 
@@ -209,6 +206,58 @@ describe("GitHubApp", () => {
         )
         .pipe(Effect.flip);
       assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
+  it.live("rejects an installation token whose reported lifetime exceeds one hour", () => {
+    const expiresAt = new Date(Date.now() + 61 * 60 * 1_000).toISOString();
+    const client = HttpClient.make((request) =>
+      Effect.succeed(
+        jsonResponse(request, {
+          token: "long-lived",
+          expires_at: expiresAt,
+          repositories: [{ id: 99, full_name: "basaltbytes/usine" }],
+        }),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const failure = yield* app
+        .workerToken(
+          new CoveredProject({
+            installationId: InstallationId.make(77),
+            repository: Repository.Name.make("basaltbytes/usine"),
+            repositoryId: RepositoryId.make(99),
+          }),
+        )
+        .pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
+      if (failure._tag === "InvalidGitHubResponseError") {
+        assert.match(failure.message, /one-hour lifetime/u);
+      }
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
+  it.live("reports installation permission drift before minting a token", () => {
+    const client = HttpClient.make((request) =>
+      Effect.succeed(
+        jsonResponse(request, [
+          {
+            ...installation,
+            permissions: { ...permissions, contents: "read" },
+          },
+        ]),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const failure = yield* app.installation().pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "AppPermissionError");
+      if (failure._tag === "AppPermissionError") {
+        assert.deepStrictEqual(failure.missing, ["contents:write"]);
+      }
     }).pipe(Effect.provide(appLayer(client)));
   });
 

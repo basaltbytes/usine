@@ -29,8 +29,8 @@
   "scripts": {
     "build": "tsc -b",
     "check": "tsc -p tsconfig.check.json",
-    "test": "vitest run",
-    "test:integration": "vitest run test/github-app.integration.ts"
+    "test": "vitest run --exclude 'test/integration/**'",
+    "test:integration": "vitest run test/integration/github-app.test.ts"
   },
   "dependencies": {
     "@usine/core": "workspace:*"

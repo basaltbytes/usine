@@ -73,7 +73,7 @@ export const githubLayer = GitHubApp.layer.pipe(
 )
 ```
 
-Call `GitHubApp.projectAccess(registry)` before scheduling work. Each result is either a `CoveredProject`, which carries the repository ID needed for scoped minting, or an `UncoveredProject` with its own `ProjectNotInstalledError`. A missing repository does not block covered projects.
+Call `GitHubApp.projectAccess(registry)` before scheduling work. Each result is either a `CoveredProject`, which carries the repository ID needed for scoped minting, or a `ProjectNotInstalledError`. A missing repository does not block covered projects.
 
 Pass a `CoveredProject` to `GitHubApp.workerToken`. GitHub must confirm one matching repository in the token response; otherwise the call fails with `InvalidGitHubResponseError`.
 

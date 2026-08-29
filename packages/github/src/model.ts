@@ -17,8 +17,24 @@ export const PrivateKey = Schema.NonEmptyString.check(
     /^-----BEGIN (?:RSA )?PRIVATE KEY-----[\s\S]+-----END (?:RSA )?PRIVATE KEY-----\s*$/u,
     { message: "Expected a PEM-encoded RSA private key" },
   ),
-);
+).pipe(Schema.brand("GitHubAppPrivateKey"));
 export type PrivateKey = typeof PrivateKey.Type;
+
+export const AccountLogin = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/u, {
+    message: "Expected a GitHub account login",
+  }),
+).pipe(Schema.brand("GitHubInstallationAccountLogin"));
+export type AccountLogin = typeof AccountLogin.Type;
+
+export const GitHubOperation = Schema.Literals([
+  "discover-installation",
+  "discover-project-access",
+  "list-installation-repositories",
+  "mint-installation-token",
+  "mint-worker-token",
+]);
+export type GitHubOperation = typeof GitHubOperation.Type;
 
 const RedactedPrivateKey = Schema.Redacted(PrivateKey, {
   label: "GitHub App private key",
@@ -48,7 +64,7 @@ export type RequiredRepositoryPermission = keyof typeof REQUIRED_REPOSITORY_PERM
 
 export class Installation extends Schema.Class<Installation>("@usine/github/Installation")({
   id: InstallationId,
-  accountLogin: Schema.NonEmptyString,
+  accountLogin: AccountLogin,
 }) {}
 
 export class InstallationWide extends Schema.TaggedClass<InstallationWide>(
@@ -91,14 +107,7 @@ export class ProjectNotInstalledError extends Schema.TaggedError<ProjectNotInsta
   message: Schema.NonEmptyString,
 }) {}
 
-export class UncoveredProject extends Schema.TaggedClass<UncoveredProject>(
-  "@usine/github/ProjectAccess/UncoveredProject",
-)("UncoveredProject", {
-  repository: Repository.Name,
-  error: ProjectNotInstalledError,
-}) {}
-
-export const ProjectAccess = Schema.Union([CoveredProject, UncoveredProject]);
+export const ProjectAccess = Schema.Union([CoveredProject, ProjectNotInstalledError]);
 export type ProjectAccess = typeof ProjectAccess.Type;
 
 export interface InstalledRepository {
@@ -116,12 +125,9 @@ export const deriveProjectAccess = (
   return registry.map((repository) => {
     const match = byName.get(repository.toLowerCase());
     return match === undefined
-      ? new UncoveredProject({
+      ? new ProjectNotInstalledError({
           repository,
-          error: new ProjectNotInstalledError({
-            repository,
-            message: `The GitHub App installation does not cover ${repository}`,
-          }),
+          message: `The GitHub App installation does not cover ${repository}`,
         })
       : new CoveredProject({
           installationId: installation.id,
@@ -157,7 +163,7 @@ export class AppPermissionError extends Schema.TaggedError<AppPermissionError>(
 export class GitHubApiError extends Schema.TaggedError<GitHubApiError>(
   "@usine/github/GitHubApiError",
 )("GitHubApiError", {
-  operation: Schema.NonEmptyString,
+  operation: GitHubOperation,
   status: Schema.Option(Schema.Int),
   message: Schema.NonEmptyString,
 }) {}
@@ -165,7 +171,7 @@ export class GitHubApiError extends Schema.TaggedError<GitHubApiError>(
 export class InvalidGitHubResponseError extends Schema.TaggedError<InvalidGitHubResponseError>(
   "@usine/github/InvalidGitHubResponseError",
 )("InvalidGitHubResponseError", {
-  operation: Schema.NonEmptyString,
+  operation: GitHubOperation,
   message: Schema.NonEmptyString,
 }) {}
 

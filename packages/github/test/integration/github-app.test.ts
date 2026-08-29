@@ -3,8 +3,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { Instance, Repository } from "@usine/core";
 import { Config, Effect, Layer, Schema } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { GitHubApp, revealInstallationToken } from "../src/index.ts";
-import { localSecretsLayer } from "../src/local-secrets.ts";
+import { GitHubApp, revealInstallationToken } from "../../src/index.ts";
+import { localSecretsLayer } from "../../src/local-secrets.ts";
 
 const API_VERSION = "2026-03-10";
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
