@@ -102,6 +102,18 @@ describe("ExpressionEngine", () => {
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 
+  it.effect("rejects a structured result where prompt interpolation expects a scalar", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const failure = yield* engine
+        .checkScalar(source("item.labels.nodes"), issueEnvironment)
+        .pipe(Effect.flip);
+
+      expect(failure.code).toBe("unexpected_result_type");
+      expect(failure.message).toBe("Expected a scalar value, got list<Label>");
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
   it.effect("translates parser failures into a backend-neutral check error", () =>
     Effect.gen(function* () {
       const engine = yield* ExpressionEngine;

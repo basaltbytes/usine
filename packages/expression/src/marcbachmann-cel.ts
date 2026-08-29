@@ -6,9 +6,9 @@ import {
 import { Effect, Layer, Option, Schema } from "effect";
 import { ExpressionEngine } from "./expression-engine.ts";
 import {
-  CheckError,
   type Environment,
-  EvaluationError,
+  ExpressionCheckError,
+  ExpressionEvaluationError,
   type ObjectType,
   Scalar,
   type Source,
@@ -50,15 +50,15 @@ const messageFromCause = (cause: unknown, fallback: string): string =>
     },
   );
 
-const checkFailure = (source: Source, error: VendorCheckError | undefined): CheckError =>
+const checkFailure = (source: Source, error: VendorCheckError | undefined): ExpressionCheckError =>
   error === undefined
-    ? new CheckError({
+    ? new ExpressionCheckError({
         source,
         code: "check_failed",
         message: "CEL check failed without an error detail",
         position: Option.none(),
       })
-    : new CheckError({
+    : new ExpressionCheckError({
         source,
         code: error instanceof CelParseError ? "parse_error" : "type_error",
         message: error.message,
@@ -127,12 +127,12 @@ const checkExpected = (
   environment: Environment,
   accepts: (resultType: string) => boolean,
   expected: string,
-): Effect.Effect<void, CheckError> =>
+): Effect.Effect<void, ExpressionCheckError> =>
   Effect.gen(function* () {
     const result = yield* Effect.try({
       try: () => makeEnvironment(environment).check(source),
       catch: (cause) =>
-        new CheckError({
+        new ExpressionCheckError({
           source,
           code: "check_failed",
           message: messageFromCause(cause, "CEL check failed"),
@@ -142,7 +142,7 @@ const checkExpected = (
     if (!result.valid) return yield* checkFailure(source, result.error);
     const resultType = result.type;
     if (resultType === undefined || !accepts(resultType)) {
-      return yield* new CheckError({
+      return yield* new ExpressionCheckError({
         source,
         code: "unexpected_result_type",
         message: `Expected ${expected}, got ${resultType ?? "an unknown type"}`,
@@ -151,13 +151,40 @@ const checkExpected = (
     }
   });
 
+const evaluateRaw = (
+  source: Source,
+  environment: Environment,
+  context: Schema.JsonObject,
+): Effect.Effect<RuntimeValue, ExpressionEvaluationError> =>
+  Effect.try({
+    try: () =>
+      // SAFETY: CEL evaluation yields the same value vocabulary the context is
+      // built from; the callers below still decode the expected result type
+      // before anything leaves the seam.
+      makeEnvironment(environment).evaluate(
+        source,
+        normalizeContext(context, environment),
+      ) as RuntimeValue,
+    catch: (cause) =>
+      new ExpressionEvaluationError({
+        source,
+        message: messageFromCause(cause, "CEL evaluation failed"),
+      }),
+  });
+
+const unexpectedResult = (source: Source, expected: string) => () =>
+  new ExpressionEvaluationError({
+    source,
+    message: `CEL evaluation returned a value that is not ${expected}`,
+  });
+
 const checkBoolean = Effect.fn("ExpressionEngine.checkBoolean")(
-  (source: Source, environment: Environment): Effect.Effect<void, CheckError> =>
+  (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
     checkExpected(source, environment, (resultType) => resultType === "bool", "bool"),
 );
 
 const checkScalar = Effect.fn("ExpressionEngine.checkScalar")(
-  (source: Source, environment: Environment): Effect.Effect<void, CheckError> =>
+  (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
     checkExpected(
       source,
       environment,
@@ -166,49 +193,30 @@ const checkScalar = Effect.fn("ExpressionEngine.checkScalar")(
     ),
 );
 
-const evaluateBoolean = Effect.fn("ExpressionEngine.evaluateBoolean")(
-  (
-    source: Source,
-    environment: Environment,
-    context: Schema.JsonObject,
-  ): Effect.Effect<boolean, CheckError | EvaluationError> =>
-    Effect.gen(function* () {
-      yield* checkBoolean(source, environment);
-      return yield* Effect.try({
-        try: () =>
-          Schema.decodeUnknownSync(Schema.Boolean)(
-            makeEnvironment(environment).evaluate(source, normalizeContext(context, environment)),
-          ),
-        catch: (cause) =>
-          new EvaluationError({
-            source,
-            message: messageFromCause(cause, "CEL evaluation failed"),
-          }),
-      });
-    }),
-);
+const decodeBoolean = Schema.decodeUnknownEffect(Schema.Boolean);
+const decodeScalar = Schema.decodeUnknownEffect(Scalar);
 
-const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(
-  (
-    source: Source,
-    environment: Environment,
-    context: Schema.JsonObject,
-  ): Effect.Effect<Scalar, CheckError | EvaluationError> =>
-    Effect.gen(function* () {
-      yield* checkScalar(source, environment);
-      return yield* Effect.try({
-        try: () =>
-          Schema.decodeUnknownSync(Scalar)(
-            makeEnvironment(environment).evaluate(source, normalizeContext(context, environment)),
-          ),
-        catch: (cause) =>
-          new EvaluationError({
-            source,
-            message: messageFromCause(cause, "CEL evaluation failed"),
-          }),
-      });
-    }),
-);
+const evaluateBoolean = Effect.fn("ExpressionEngine.evaluateBoolean")(function* (
+  source: Source,
+  environment: Environment,
+  context: Schema.JsonObject,
+) {
+  yield* checkBoolean(source, environment);
+  const value = yield* evaluateRaw(source, environment, context);
+  return yield* decodeBoolean(value).pipe(Effect.mapError(unexpectedResult(source, "a boolean")));
+});
+
+const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
+  source: Source,
+  environment: Environment,
+  context: Schema.JsonObject,
+) {
+  yield* checkScalar(source, environment);
+  const value = yield* evaluateRaw(source, environment, context);
+  return yield* decodeScalar(value).pipe(
+    Effect.mapError(unexpectedResult(source, "a scalar value")),
+  );
+});
 
 /** Live CEL adapter backed by the exact-pinned @marcbachmann/cel-js implementation. */
 export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {

@@ -1,9 +1,8 @@
 import { Step } from "@usine/core";
 import {
-  type CheckError,
   type Environment,
-  type EvaluationError,
   ExpressionEngine,
+  type ExpressionError,
   Source,
 } from "@usine/expression";
 import { Context, Effect, Layer, Option, Schema, SchemaIssue } from "effect";
@@ -87,7 +86,7 @@ const parseYaml = (file: string, source: string): Effect.Effect<Schema.Json, Con
     });
   });
 
-const expressionError = (file: string, error: CheckError | EvaluationError): ConfigFileError =>
+const expressionError = (file: string, error: ExpressionError): ConfigFileError =>
   new ConfigFileError({ file, stage: "expression", message: error.message });
 
 const markdownName = (file: string): Effect.Effect<string, ConfigFileError> => {
