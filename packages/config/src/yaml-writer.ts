@@ -8,7 +8,7 @@ const causeMessage = (cause: unknown): string =>
     ? cause.message
     : "Unknown YAML parsing failure";
 
-export class YamlEdit extends Schema.Class<YamlEdit>("Config/YamlEdit")({
+export class YamlEdit extends Schema.Class<YamlEdit>("@usine/config/YamlEdit")({
   path: Schema.Array(Schema.NonEmptyString).check(Schema.isNonEmpty()),
   value: Schema.Json,
 }) {}

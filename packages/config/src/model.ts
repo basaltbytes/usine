@@ -62,7 +62,7 @@ const uniqueNames = Schema.makeFilter<ReadonlyArray<{ readonly name: string }>>(
   { message: "Expected unique names" },
 );
 
-export class ManagedRepo extends Schema.Class<ManagedRepo>("Config/ManagedRepo")({
+export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/ManagedRepo")({
   name: RepoName,
   tags: Schema.Array(RegistryTag)
     .check(Schema.isUnique())
@@ -72,13 +72,13 @@ export class ManagedRepo extends Schema.Class<ManagedRepo>("Config/ManagedRepo")
 export const WorkerKind = Schema.Literals(["local", "exe.dev"]);
 export type WorkerKind = typeof WorkerKind.Type;
 
-export class Worker extends Schema.Class<Worker>("Config/Worker")({
+export class Worker extends Schema.Class<Worker>("@usine/config/Worker")({
   name: WorkerName,
   kind: WorkerKind,
   maxConcurrentAttempts: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(1))),
 }) {}
 
-export class Settings extends Schema.Class<Settings>("Config/Settings")({
+export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
   poll_interval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
   max_children: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
   max_attempt_minutes: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
@@ -97,7 +97,7 @@ const ManagedRepos = Schema.Array(ManagedRepo).check(uniqueNames);
 const Workers = Schema.Array(Worker).check(uniqueNames);
 
 /** Strict, factory-wide authored config from usine.yaml. */
-export class UsineConfig extends Schema.Class<UsineConfig>("Config/UsineConfig")({
+export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")({
   version: Schema.Literal(1),
   repos: ManagedRepos,
   settings: Settings.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
@@ -110,7 +110,7 @@ export class UsineConfig extends Schema.Class<UsineConfig>("Config/UsineConfig")
   operator: Schema.OptionFromOptionalKey(OperatorLogin),
 }) {}
 
-export class Selector extends Schema.Class<Selector>("Config/Selector")({
+export class Selector extends Schema.Class<Selector>("@usine/config/Selector")({
   repos: Schema.OptionFromOptionalKey(
     Schema.Array(RepoName).check(Schema.isNonEmpty(), Schema.isUnique()),
   ),
@@ -177,24 +177,26 @@ export const TimeZone = Schema.String.check(
 ).pipe(Schema.brand("TimeZone"));
 export type TimeZone = typeof TimeZone.Type;
 
-export class IssueTrigger extends Schema.Class<IssueTrigger>("Config/IssueTrigger")({
+export class IssueTrigger extends Schema.Class<IssueTrigger>("@usine/config/IssueTrigger")({
   on: Schema.Literal("issue"),
   if: Source,
 }) {}
 
 export class PullRequestTrigger extends Schema.Class<PullRequestTrigger>(
-  "Config/PullRequestTrigger",
+  "@usine/config/PullRequestTrigger",
 )({
   on: Schema.Literal("pr"),
   if: Source,
 }) {}
 
-export class ScheduleTrigger extends Schema.Class<ScheduleTrigger>("Config/ScheduleTrigger")({
-  on: Schema.Literal("schedule"),
-  if: Source,
-  cron: Cron,
-  tz: TimeZone.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UTC"))),
-}) {}
+export class ScheduleTrigger extends Schema.Class<ScheduleTrigger>("@usine/config/ScheduleTrigger")(
+  {
+    on: Schema.Literal("schedule"),
+    if: Source,
+    cron: Cron,
+    tz: TimeZone.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UTC"))),
+  },
+) {}
 
 export const Trigger = Schema.Union([IssueTrigger, PullRequestTrigger, ScheduleTrigger]);
 export type Trigger = typeof Trigger.Type;
@@ -205,7 +207,7 @@ export type Stream = typeof Stream.Type;
 export const Approval = Schema.Literals(["none", "required"]);
 export type Approval = typeof Approval.Type;
 
-export class LoopFile extends Schema.Class<LoopFile>("Config/LoopFile")({
+export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
   name: LoopName,
   trigger: Trigger,
   selector: Schema.Option(ValidSelector),
@@ -221,7 +223,7 @@ export type Harness = typeof Harness.Type;
 export const Effort = Schema.Literals(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
 export type Effort = typeof Effort.Type;
 
-export class AgentFile extends Schema.Class<AgentFile>("Config/AgentFile")({
+export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile")({
   name: AgentName,
   harness: Harness,
   model: ModelId,
@@ -230,18 +232,20 @@ export class AgentFile extends Schema.Class<AgentFile>("Config/AgentFile")({
   persona: Persona,
 }) {}
 
-export class InvalidAgent extends Schema.Class<InvalidAgent>("Config/InvalidAgent")({
+export class InvalidAgent extends Schema.Class<InvalidAgent>("@usine/config/InvalidAgent")({
   file: Schema.NonEmptyString,
   error: ConfigFileError,
 }) {}
 
-export class QuarantinedLoop extends Schema.Class<QuarantinedLoop>("Config/QuarantinedLoop")({
-  file: Schema.NonEmptyString,
-  error: ConfigFileError,
-}) {}
+export class QuarantinedLoop extends Schema.Class<QuarantinedLoop>("@usine/config/QuarantinedLoop")(
+  {
+    file: Schema.NonEmptyString,
+    error: ConfigFileError,
+  },
+) {}
 
 /** One atomic snapshot of an instance folder. */
-export class LoadedInstance extends Schema.Class<LoadedInstance>("Config/LoadedInstance")({
+export class LoadedInstance extends Schema.Class<LoadedInstance>("@usine/config/LoadedInstance")({
   config: UsineConfig,
   agents: Schema.Array(AgentFile),
   invalidAgents: Schema.Array(InvalidAgent),

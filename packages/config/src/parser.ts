@@ -28,7 +28,7 @@ import { environmentFor } from "./payload-slices.ts";
 
 const formatIssue = SchemaIssue.makeFormatterDefault();
 
-class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("Config/LoopFrontmatter")({
+class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopFrontmatter")({
   trigger: Trigger,
   selector: Schema.OptionFromOptionalKey(ValidSelector),
   approval: Approval.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
@@ -36,7 +36,7 @@ class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("Config/LoopFrontmat
   agent: AgentName,
 }) {}
 
-class AgentFrontmatter extends Schema.Class<AgentFrontmatter>("Config/AgentFrontmatter")({
+class AgentFrontmatter extends Schema.Class<AgentFrontmatter>("@usine/config/AgentFrontmatter")({
   harness: Harness,
   model: ModelId,
   effort: Effort,
