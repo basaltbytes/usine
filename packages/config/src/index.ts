@@ -8,4 +8,4 @@ export * from "./model.ts";
 export * from "./parser.ts";
 export * from "./payload-slices.ts";
 export * from "./selector.ts";
-export * from "./yaml-writer.ts";
+export * from "./yaml/writer.ts";

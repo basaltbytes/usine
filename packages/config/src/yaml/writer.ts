@@ -1,12 +1,7 @@
 import { Effect, Schema } from "effect";
-import { parseDocument } from "yaml";
-import { ConfigFileError } from "./errors.ts";
-import { splitMarkdown } from "./frontmatter.ts";
-
-const causeMessage = (cause: unknown): string =>
-  cause instanceof Error && cause.message.length > 0
-    ? cause.message
-    : "Unknown YAML parsing failure";
+import type { ConfigFileError } from "../errors.ts";
+import { splitMarkdown } from "../frontmatter.ts";
+import { parseYamlDocument } from "./document.ts";
 
 export class YamlEdit extends Schema.Class<YamlEdit>("@usine/config/YamlEdit")({
   path: Schema.Array(Schema.NonEmptyString).check(Schema.isNonEmpty()),
@@ -17,25 +12,7 @@ export class YamlEdit extends Schema.Class<YamlEdit>("@usine/config/YamlEdit")({
 export const updateYaml = Effect.fn("YamlWriter.updateYaml")(
   (file: string, source: string, edit: YamlEdit): Effect.Effect<string, ConfigFileError> =>
     Effect.gen(function* () {
-      const document = yield* Effect.try({
-        try: () =>
-          parseDocument(source, {
-            keepSourceTokens: true,
-            prettyErrors: true,
-            strict: true,
-            uniqueKeys: true,
-          }),
-        catch: (cause) =>
-          new ConfigFileError({ file, stage: "yaml", message: causeMessage(cause) }),
-      });
-      const syntaxIssue = document.errors[0] ?? document.warnings[0];
-      if (syntaxIssue !== undefined) {
-        return yield* new ConfigFileError({
-          file,
-          stage: "yaml",
-          message: syntaxIssue.message,
-        });
-      }
+      const document = yield* parseYamlDocument(file, source);
       document.setIn(edit.path, edit.value);
       return document.toString();
     }),

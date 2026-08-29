@@ -5,10 +5,10 @@ import {
   type ExpressionError,
   Source,
 } from "@usine/expression";
-import { Context, Effect, Layer, Option, Schema, SchemaIssue } from "effect";
-import { parseDocument } from "yaml";
+import { Context, Effect, Layer, Schema, SchemaIssue } from "effect";
 import { ConfigFileError } from "./errors.ts";
 import { splitMarkdown } from "./frontmatter.ts";
+import { parseYamlDocument } from "./yaml/document.ts";
 import {
   AgentFile,
   AgentName,
@@ -49,41 +49,19 @@ interface Interpolation {
   readonly end: number;
 }
 
-const causeMessage = (cause: unknown): string =>
-  Option.match(
-    Schema.decodeUnknownOption(Schema.Struct({ message: Schema.NonEmptyString }))(cause),
-    {
-      onNone: () => "Unknown YAML parsing failure",
-      onSome: ({ message }) => message,
-    },
-  );
-
 const schemaError = (file: string, error: Schema.SchemaError): ConfigFileError =>
   new ConfigFileError({ file, stage: "schema", message: formatIssue(error.issue) });
 
+const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
+
 const parseYaml = (file: string, source: string): Effect.Effect<Schema.Json, ConfigFileError> =>
   Effect.gen(function* () {
-    const document = yield* Effect.try({
-      try: () =>
-        parseDocument(source, {
-          prettyErrors: true,
-          strict: true,
-          uniqueKeys: true,
-        }),
-      catch: (cause) => new ConfigFileError({ file, stage: "yaml", message: causeMessage(cause) }),
-    });
-    const syntaxIssue = document.errors[0] ?? document.warnings[0];
-    if (syntaxIssue !== undefined) {
-      return yield* new ConfigFileError({
-        file,
-        stage: "yaml",
-        message: syntaxIssue.message,
-      });
-    }
-    return yield* Effect.try({
-      try: () => Schema.decodeUnknownSync(Schema.Json)(document.toJS()),
-      catch: (cause) => new ConfigFileError({ file, stage: "yaml", message: causeMessage(cause) }),
-    });
+    const document = yield* parseYamlDocument(file, source);
+    return yield* decodeJson(document.toJS()).pipe(
+      Effect.mapError(
+        (error) => new ConfigFileError({ file, stage: "yaml", message: formatIssue(error.issue) }),
+      ),
+    );
   });
 
 const expressionError = (file: string, error: ExpressionError): ConfigFileError =>
