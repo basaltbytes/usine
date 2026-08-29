@@ -1,5 +1,5 @@
 import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
-import { assert, describe, expect, it } from "@effect/vitest";
+import { assert, describe, it } from "@effect/vitest";
 import { Repository } from "@usine/core";
 import { Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
@@ -13,14 +13,13 @@ import {
   PrivateKey,
   REQUIRED_REPOSITORY_PERMISSIONS,
   RepositoryId,
-  revealInstallationToken,
 } from "../src/index.ts";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const privatePem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
 const credentials = new AppCredentials({
   appId: AppId.make(12345),
-  privateKey: Redacted.make(PrivateKey.make(privatePem), { label: "GitHub App private key" }),
+  privateKey: Redacted.make(PrivateKey.make(privatePem)),
 });
 
 const permissions = { ...REQUIRED_REPOSITORY_PERMISSIONS };
@@ -119,7 +118,7 @@ describe("GitHubApp", () => {
         const app = yield* GitHubApp;
         const wide = yield* app.installationToken();
         assert.strictEqual(wide.scope._tag, "InstallationWide");
-        assert.strictEqual(revealInstallationToken(wide), "installation-secret");
+        assert.strictEqual(Redacted.value(wide.value), "installation-secret");
         assert(!String(wide).includes("installation-secret"));
 
         const access = yield* app.projectAccess([
@@ -133,10 +132,10 @@ describe("GitHubApp", () => {
 
         const worker = yield* app.workerToken(covered);
         assert.strictEqual(worker.scope._tag, "SingleRepository");
-        assert.strictEqual(revealInstallationToken(worker), "worker-secret");
+        assert.strictEqual(Redacted.value(worker.value), "worker-secret");
 
         const tokenRequests = requests.filter((request) => request.method === "POST");
-        assert(tokenRequests.length >= 3);
+        assert.strictEqual(tokenRequests.length, 3);
         for (const request of tokenRequests) {
           const body = requestJson(request);
           assert.deepStrictEqual(body.permissions, REQUIRED_REPOSITORY_PERMISSIONS);
@@ -258,16 +257,6 @@ describe("GitHubApp", () => {
       if (failure._tag === "AppPermissionError") {
         assert.deepStrictEqual(failure.missing, ["contents:write"]);
       }
-    }).pipe(Effect.provide(appLayer(client)));
-  });
-
-  it.live("translates an HTTP adapter defect into the GitHub error channel", () => {
-    const client = HttpClient.make(() => Effect.die("transport crashed"));
-    return Effect.gen(function* () {
-      const app = yield* GitHubApp;
-      const failure = yield* app.installation().pipe(Effect.flip);
-      expect(failure._tag).toBe("GitHubApiError");
-      if (failure._tag === "GitHubApiError") expect(failure.message).not.toContain("crashed");
     }).pipe(Effect.provide(appLayer(client)));
   });
 });

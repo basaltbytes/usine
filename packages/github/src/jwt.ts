@@ -1,4 +1,4 @@
-import { Clock, Context, Effect, Layer, Redacted } from "effect";
+import { Clock, Effect, Redacted } from "effect";
 import { AppAuthenticationError, type AppCredentials } from "./model.ts";
 
 interface JwtHeader {
@@ -37,6 +37,7 @@ const derLength = (length: number): Uint8Array => {
 const der = (tag: number, value: Uint8Array): Uint8Array =>
   concat(new Uint8Array([tag]), derLength(value.length), value);
 
+/** WebCrypto imports PKCS#8 only; GitHub downloads PKCS#1, so wrap it. */
 const wrapPkcs1AsPkcs8 = (pkcs1: Uint8Array): Uint8Array =>
   der(0x30, concat(new Uint8Array([0x02, 0x01, 0x00]), RSA_ALGORITHM_IDENTIFIER, der(0x04, pkcs1)));
 
@@ -66,48 +67,40 @@ const toArrayBuffer = (value: Uint8Array): ArrayBuffer => {
   return buffer;
 };
 
-/** Universal WebCrypto signer for GitHub App JWTs. */
-export class AppJwtSigner extends Context.Service<
-  AppJwtSigner,
-  {
-    readonly sign: (
-      credentials: AppCredentials,
-    ) => Effect.Effect<Redacted.Redacted<string>, AppAuthenticationError>;
-  }
->()("@usine/github/AppJwtSigner") {
-  static readonly layer = Layer.succeed(AppJwtSigner, {
-    sign: Effect.fn("AppJwtSigner.sign")(function* (credentials: AppCredentials) {
-      const now = yield* Clock.currentTimeMillis;
-      const issuedAt = Math.floor(now / 1_000) - 60;
-      const expiresAt = Math.floor(now / 1_000) + 9 * 60;
-      const unsigned = `${encodeJson({ alg: "RS256", typ: "JWT" })}.${encodeJson({
-        iat: issuedAt,
-        exp: expiresAt,
-        iss: credentials.appId,
-      })}`;
+/** Signs App JWTs: `iat` backdated a minute for clock skew, `exp` under GitHub's ten-minute cap. */
+export type AppJwtSigner = () => Effect.Effect<Redacted.Redacted<string>>;
 
-      const jwt = yield* Effect.tryPromise({
-        try: async () => {
-          const key = await crypto.subtle.importKey(
-            "pkcs8",
-            toArrayBuffer(decodePem(Redacted.value(credentials.privateKey))),
-            { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
-            false,
-            ["sign"],
-          );
-          const signature = await crypto.subtle.sign(
-            "RSASSA-PKCS1-v1_5",
-            key,
-            toArrayBuffer(encoder.encode(unsigned)),
-          );
-          return `${unsigned}.${base64Url(new Uint8Array(signature))}`;
-        },
-        catch: () =>
-          new AppAuthenticationError({
-            message: "The GitHub App private key could not sign an RS256 JWT",
-          }),
-      });
-      return Redacted.make(jwt, { label: "GitHub App JWT" });
-    }),
+/**
+ * Import the App private key once (platform-free WebCrypto, RS256). A key
+ * that cannot be imported fails here, at composition, not on the first request.
+ */
+export const appJwtSigner = Effect.fn("AppJwt.import")(function* (credentials: AppCredentials) {
+  const key = yield* Effect.tryPromise({
+    try: async () =>
+      crypto.subtle.importKey(
+        "pkcs8",
+        toArrayBuffer(decodePem(Redacted.value(credentials.privateKey))),
+        { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+        false,
+        ["sign"],
+      ),
+    catch: () =>
+      new AppAuthenticationError({
+        message: "The GitHub App private key is not an RSA private key WebCrypto can import",
+      }),
   });
-}
+
+  const sign: AppJwtSigner = Effect.fn("AppJwt.sign")(function* () {
+    const now = Math.floor((yield* Clock.currentTimeMillis) / 1_000);
+    const unsigned = `${encodeJson({ alg: "RS256", typ: "JWT" })}.${encodeJson({
+      iat: now - 60,
+      exp: now + 9 * 60,
+      iss: credentials.appId,
+    })}`;
+    const signature = yield* Effect.promise(() =>
+      crypto.subtle.sign("RSASSA-PKCS1-v1_5", key, toArrayBuffer(encoder.encode(unsigned))),
+    );
+    return Redacted.make(`${unsigned}.${base64Url(new Uint8Array(signature))}`);
+  });
+  return sign;
+});

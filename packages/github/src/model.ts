@@ -1,5 +1,5 @@
 import { Repository } from "@usine/core";
-import { Context, Redacted, Schema } from "effect";
+import { Context, Schema } from "effect";
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
@@ -20,26 +20,16 @@ export const PrivateKey = Schema.NonEmptyString.check(
 ).pipe(Schema.brand("GitHubAppPrivateKey"));
 export type PrivateKey = typeof PrivateKey.Type;
 
-export const AccountLogin = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/u, {
-    message: "Expected a GitHub account login",
-  }),
-).pipe(Schema.brand("GitHubInstallationAccountLogin"));
-export type AccountLogin = typeof AccountLogin.Type;
+/** A PEM string parsed straight into a `Redacted` that can never be encoded back out. */
+export const RedactedPrivateKey = Schema.RedactedFromValue(PrivateKey, { disallowEncode: true });
 
 export const GitHubOperation = Schema.Literals([
   "discover-installation",
-  "discover-project-access",
   "list-installation-repositories",
   "mint-installation-token",
   "mint-worker-token",
 ]);
 export type GitHubOperation = typeof GitHubOperation.Type;
-
-const RedactedPrivateKey = Schema.Redacted(PrivateKey, {
-  label: "GitHub App private key",
-  disallowJsonEncode: true,
-});
 
 /** Credentials held by the orchestrator and never passed to a worker. */
 export class AppCredentials extends Schema.Class<AppCredentials>("@usine/github/AppCredentials")({
@@ -62,9 +52,20 @@ export const REQUIRED_REPOSITORY_PERMISSIONS = {
 
 export type RequiredRepositoryPermission = keyof typeof REQUIRED_REPOSITORY_PERMISSIONS;
 
+const grants = (actual: string | undefined, required: "read" | "write"): boolean =>
+  actual === required || (required === "read" && actual === "write");
+
+/** Pure deriver: the required permissions an installation's grant does not satisfy. */
+export const missingPermissions = (
+  granted: Readonly<Record<string, string>>,
+): ReadonlyArray<string> =>
+  Object.entries(REQUIRED_REPOSITORY_PERMISSIONS).flatMap(([permission, required]) =>
+    grants(granted[permission], required) ? [] : [`${permission}:${required}`],
+  );
+
 export class Installation extends Schema.Class<Installation>("@usine/github/Installation")({
   id: InstallationId,
-  accountLogin: AccountLogin,
+  accountLogin: Schema.NonEmptyString,
 }) {}
 
 export class InstallationWide extends Schema.TaggedClass<InstallationWide>(
@@ -75,6 +76,7 @@ export class SingleRepository extends Schema.TaggedClass<SingleRepository>(
   "@usine/github/TokenScope/SingleRepository",
 )("SingleRepository", {
   repository: Repository.Name,
+  repositoryId: RepositoryId,
 }) {}
 
 export const TokenScope = Schema.Union([InstallationWide, SingleRepository]);
@@ -83,10 +85,7 @@ export type TokenScope = typeof TokenScope.Type;
 export class InstallationToken extends Schema.Class<InstallationToken>(
   "@usine/github/InstallationToken",
 )({
-  value: Schema.Redacted(Schema.NonEmptyString, {
-    label: "GitHub installation token",
-    disallowJsonEncode: true,
-  }),
+  value: Schema.Redacted(Schema.NonEmptyString, { disallowJsonEncode: true }),
   expiresAt: Schema.DateTimeUtc,
   scope: TokenScope,
 }) {}
@@ -137,6 +136,7 @@ export const deriveProjectAccess = (
   });
 };
 
+/** The private key cannot sign: raised once, when the App layer is built. */
 export class AppAuthenticationError extends Schema.TaggedError<AppAuthenticationError>(
   "@usine/github/AppAuthenticationError",
 )("AppAuthenticationError", {
@@ -175,14 +175,11 @@ export class InvalidGitHubResponseError extends Schema.TaggedError<InvalidGitHub
   message: Schema.NonEmptyString,
 }) {}
 
+/** Everything one GitHub App call can fail with. */
 export const GitHubAppError = Schema.Union([
-  AppAuthenticationError,
   InstallationDiscoveryError,
   AppPermissionError,
   GitHubApiError,
   InvalidGitHubResponseError,
 ]);
 export type GitHubAppError = typeof GitHubAppError.Type;
-
-export const revealInstallationToken = (token: InstallationToken): string =>
-  Redacted.value(token.value);

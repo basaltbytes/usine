@@ -1,9 +1,9 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Instance, Repository } from "@usine/core";
-import { Config, Effect, Layer, Schema } from "effect";
+import { Config, Effect, Layer, Redacted, Schema } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { GitHubApp, revealInstallationToken } from "../../src/index.ts";
+import { GitHubApp } from "../../src/index.ts";
 import { localSecretsLayer } from "../../src/local-secrets.ts";
 
 const API_VERSION = "2026-03-10";
@@ -83,7 +83,7 @@ describe("operator-created GitHub App", () => {
         const workerToken = yield* app.workerToken(project);
         assert.strictEqual(workerToken.scope._tag, "SingleRepository");
 
-        const token = revealInstallationToken(workerToken);
+        const token = Redacted.value(workerToken.value);
         yield* Effect.acquireUseRelease(
           fetchJson(
             `https://api.github.com/repos/${repository}/issues/${settings.issueNumber}/comments`,

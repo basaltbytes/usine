@@ -1,11 +1,12 @@
 import { Repository } from "@usine/core";
 import { Clock, Context, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
-import { AppJwtSigner } from "./jwt.ts";
+import type { HttpClientError } from "effect/unstable/http/HttpClientError";
+import { appJwtSigner } from "./jwt.ts";
 import {
-  AccountLogin,
+  type AppAuthenticationError,
   AppPermissionError,
-  CoveredProject,
+  type CoveredProject,
   GitHubApiError,
   type GitHubAppError,
   GitHubCredentials,
@@ -16,28 +17,23 @@ import {
   InstallationToken,
   InstallationWide,
   InvalidGitHubResponseError,
+  type InstalledRepository,
   type ProjectAccess,
   REQUIRED_REPOSITORY_PERMISSIONS,
   RepositoryId,
   SingleRepository,
   type TokenScope,
   deriveProjectAccess,
+  missingPermissions,
 } from "./model.ts";
 
 const API_ROOT = "https://api.github.com";
 const API_VERSION = "2026-03-10";
 const TOKEN_MAX_LIFETIME_MS = 60 * 60 * 1_000;
 
-interface MintRequest {
-  readonly installationId: InstallationId;
-  readonly operation: GitHubOperation;
-  readonly body: Schema.Json;
-  readonly scope: TokenScope;
-}
-
 const InstallationResponse = Schema.Struct({
   id: InstallationId,
-  account: Schema.Struct({ login: AccountLogin }),
+  account: Schema.Struct({ login: Schema.NonEmptyString }),
   permissions: Schema.Record(Schema.String, Schema.String),
   suspendedAt: Schema.NullOr(Schema.String),
 }).pipe(Schema.encodeKeys({ suspendedAt: "suspended_at" }));
@@ -60,15 +56,7 @@ const TokenResponse = Schema.Struct({
   repositories: Schema.OptionFromOptionalKey(Schema.Array(RepositoryResponse)),
 }).pipe(Schema.encodeKeys({ expiresAt: "expires_at" }));
 
-const requiredLevelIsPresent = (actual: string | undefined, required: "read" | "write") =>
-  actual === required || (required === "read" && actual === "write");
-
-const missingPermissions = (permissions: Readonly<Record<string, string>>): ReadonlyArray<string> =>
-  Object.entries(REQUIRED_REPOSITORY_PERMISSIONS).flatMap(([permission, required]) =>
-    requiredLevelIsPresent(permissions[permission], required) ? [] : [`${permission}:${required}`],
-  );
-
-const requestHeaders = (credential: Redacted.Redacted<string>) =>
+const authorized = (credential: Redacted.Redacted<string>) =>
   HttpClientRequest.setHeaders({
     accept: "application/vnd.github+json",
     authorization: `Bearer ${Redacted.value(credential)}`,
@@ -76,15 +64,30 @@ const requestHeaders = (credential: Redacted.Redacted<string>) =>
     "x-github-api-version": API_VERSION,
   });
 
-const apiFailure = (operation: GitHubOperation, status: Option.Option<number>, message: string) =>
-  new GitHubApiError({ operation, status, message });
-
-const adapterDefect = (operation: GitHubOperation) =>
-  apiFailure(
+const apiError = (operation: GitHubOperation, error: HttpClientError) =>
+  new GitHubApiError({
     operation,
-    Option.none(),
-    "The GitHub adapter failed outside its typed failure channel",
-  );
+    status: error.response === undefined ? Option.none() : Option.some(error.response.status),
+    message:
+      error.response === undefined
+        ? "The request to GitHub could not be sent"
+        : `GitHub rejected the request with status ${error.response.status}`,
+  });
+
+/** One token mint, described by its scope: what to ask for and what to call it. */
+const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema.Json } =>
+  scope._tag === "InstallationWide"
+    ? {
+        operation: "mint-installation-token",
+        body: { permissions: REQUIRED_REPOSITORY_PERMISSIONS },
+      }
+    : {
+        operation: "mint-worker-token",
+        body: {
+          permissions: REQUIRED_REPOSITORY_PERMISSIONS,
+          repository_ids: [scope.repositoryId],
+        },
+      };
 
 /**
  * Whole GitHub identity for one usine instance. The transport is supplied as
@@ -103,210 +106,158 @@ export class GitHubApp extends Context.Service<
     ) => Effect.Effect<InstallationToken, GitHubAppError>;
   }
 >()("@usine/github/GitHubApp") {
-  static readonly layer = Layer.effect(
+  static readonly layer: Layer.Layer<
+    GitHubApp,
+    AppAuthenticationError,
+    GitHubCredentials | HttpClient.HttpClient
+  > = Layer.effect(
     GitHubApp,
     Effect.gen(function* () {
       const credentials = yield* GitHubCredentials;
-      const jwtSigner = yield* AppJwtSigner;
-      const http = yield* HttpClient.HttpClient;
+      const sign = yield* appJwtSigner(credentials);
+      const http = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
 
-      const execute = (
+      /** Send one request and parse its JSON body; every other outcome is a typed error. */
+      const fetchJson = <S extends Schema.Codec<unknown, unknown, never, unknown>>(
         operation: GitHubOperation,
         request: HttpClientRequest.HttpClientRequest,
-      ): Effect.Effect<HttpClientResponse.HttpClientResponse, GitHubApiError> =>
+        schema: S,
+      ): Effect.Effect<S["Type"], GitHubApiError | InvalidGitHubResponseError> =>
         http.execute(request).pipe(
-          Effect.mapError(() =>
-            apiFailure(operation, Option.none(), "The request to GitHub could not be sent"),
-          ),
+          Effect.mapError((error) => apiError(operation, error)),
           Effect.flatMap((response) =>
-            response.status >= 200 && response.status < 300
-              ? Effect.succeed(response)
-              : apiFailure(
-                  operation,
-                  Option.some(response.status),
-                  `GitHub rejected the request with status ${response.status}`,
-                ),
+            HttpClientResponse.schemaBodyJson(schema)(response).pipe(
+              Effect.mapError(
+                () =>
+                  new InvalidGitHubResponseError({
+                    operation,
+                    message: "GitHub returned a response that does not match its API contract",
+                  }),
+              ),
+            ),
           ),
         );
 
-      const invalidResponse = (operation: GitHubOperation) =>
-        new InvalidGitHubResponseError({
-          operation,
-          message: "GitHub returned a response that does not match its API contract",
-        });
-
-      const discoverInstallation = Effect.fn("GitHubApp.discoverInstallation")(function* () {
-        const jwt = yield* jwtSigner.sign(credentials);
-        const request = HttpClientRequest.get(`${API_ROOT}/app/installations?per_page=2`).pipe(
-          requestHeaders(jwt),
+      const installation = Effect.fn("GitHubApp.installation")(function* () {
+        const jwt = yield* sign();
+        const [found, ...others] = yield* fetchJson(
+          "discover-installation",
+          HttpClientRequest.get(`${API_ROOT}/app/installations?per_page=2`).pipe(authorized(jwt)),
+          InstallationsResponse,
         );
-        const httpResponse = yield* execute("discover-installation", request);
-        const installations = yield* HttpClientResponse.schemaBodyJson(InstallationsResponse)(
-          httpResponse,
-        ).pipe(Effect.mapError(() => invalidResponse("discover-installation")));
-        if (installations.length === 0) {
+        if (found === undefined) {
           return yield* new InstallationDiscoveryError({
             reason: "missing",
             message: "The GitHub App is not installed on an account",
           });
         }
-        if (installations.length > 1) {
+        if (others.length > 0) {
           return yield* new InstallationDiscoveryError({
             reason: "multiple",
             message: "The GitHub App must have exactly one installation for this factory",
           });
         }
-        const installationResponse = installations[0];
-        if (installationResponse === undefined) {
-          return yield* new InvalidGitHubResponseError({
-            operation: "discover-installation",
-            message: "GitHub returned an empty installation result",
-          });
-        }
-        if (installationResponse.suspendedAt !== null) {
+        if (found.suspendedAt !== null) {
           return yield* new InstallationDiscoveryError({
             reason: "suspended",
             message: "The GitHub App installation is suspended",
           });
         }
-        const missing = missingPermissions(installationResponse.permissions);
+        const missing = missingPermissions(found.permissions);
         if (missing.length > 0) {
           return yield* new AppPermissionError({
             missing,
             message: `The GitHub App installation is missing permissions: ${missing.join(", ")}`,
           });
         }
-        return new Installation({
-          id: installationResponse.id,
-          accountLogin: installationResponse.account.login,
-        });
+        return new Installation({ id: found.id, accountLogin: found.account.login });
       });
 
-      const mintToken = Effect.fn("GitHubApp.mintToken")(function* (mint: MintRequest) {
-        const jwt = yield* jwtSigner.sign(credentials);
-        const request = HttpClientRequest.post(
-          `${API_ROOT}/app/installations/${mint.installationId}/access_tokens`,
-        ).pipe(HttpClientRequest.bodyJsonUnsafe(mint.body), requestHeaders(jwt));
-        const httpResponse = yield* execute(mint.operation, request);
-        const response = yield* HttpClientResponse.schemaBodyJson(TokenResponse)(httpResponse).pipe(
-          Effect.mapError(() => invalidResponse(mint.operation)),
+      const mintToken = Effect.fn("GitHubApp.mintToken")(function* (
+        installationId: InstallationId,
+        scope: TokenScope,
+      ) {
+        const { operation, body } = mintPlan(scope);
+        const jwt = yield* sign();
+        const response = yield* fetchJson(
+          operation,
+          HttpClientRequest.post(
+            `${API_ROOT}/app/installations/${installationId}/access_tokens`,
+          ).pipe(HttpClientRequest.bodyJsonUnsafe(body), authorized(jwt)),
+          TokenResponse,
         );
-        const receivedAt = yield* Clock.currentTimeMillis;
-        const lifetime = DateTime.toEpochMillis(response.expiresAt) - receivedAt;
+        const lifetime =
+          DateTime.toEpochMillis(response.expiresAt) - (yield* Clock.currentTimeMillis);
         if (lifetime <= 0 || lifetime > TOKEN_MAX_LIFETIME_MS) {
           return yield* new InvalidGitHubResponseError({
-            operation: mint.operation,
+            operation,
             message: "GitHub returned an installation token outside the one-hour lifetime bound",
           });
         }
-        if (mint.scope._tag === "SingleRepository") {
-          if (
-            Option.isNone(response.repositories) ||
-            response.repositories.value.length !== 1 ||
-            response.repositories.value[0]?.name.toLowerCase() !==
-              mint.scope.repository.toLowerCase()
-          ) {
-            return yield* new InvalidGitHubResponseError({
-              operation: mint.operation,
-              message: "GitHub did not confirm that the worker token is scoped to exactly one repo",
-            });
-          }
+        const confirmed = Option.getOrElse(response.repositories, () => []);
+        if (
+          scope._tag === "SingleRepository" &&
+          !(confirmed.length === 1 && confirmed.every((repo) => repo.id === scope.repositoryId))
+        ) {
+          return yield* new InvalidGitHubResponseError({
+            operation,
+            message: "GitHub did not confirm that the worker token is scoped to exactly one repo",
+          });
         }
         return new InstallationToken({
-          value: Redacted.make(response.token, { label: "GitHub installation token" }),
+          value: Redacted.make(response.token),
           expiresAt: response.expiresAt,
-          scope: mint.scope,
+          scope,
         });
       });
 
-      const mintInstallationToken = Effect.fn("GitHubApp.mintInstallationToken")(
-        (installationId: InstallationId) =>
-          mintToken({
-            installationId,
-            operation: "mint-installation-token",
-            body: { permissions: REQUIRED_REPOSITORY_PERMISSIONS },
-            scope: new InstallationWide(),
-          }),
-      );
-
-      const mintWorkerToken = Effect.fn("GitHubApp.mintWorkerToken")((project: CoveredProject) =>
-        mintToken({
-          installationId: project.installationId,
-          operation: "mint-worker-token",
-          body: {
-            permissions: REQUIRED_REPOSITORY_PERMISSIONS,
-            repository_ids: [project.repositoryId],
-          },
-          scope: new SingleRepository({ repository: project.repository }),
-        }),
-      );
-
-      const repositories = Effect.fn("GitHubApp.repositories")(function* (
+      const installedRepositories = Effect.fn("GitHubApp.installedRepositories")(function* (
         token: InstallationToken,
       ) {
-        const collect = (
-          page: number,
-          accumulated: ReadonlyArray<typeof RepositoryResponse.Type>,
-        ): Effect.Effect<
-          ReadonlyArray<typeof RepositoryResponse.Type>,
-          GitHubApiError | InvalidGitHubResponseError
-        > =>
-          Effect.suspend(() => {
-            const request = HttpClientRequest.get(
+        const installed: Array<InstalledRepository> = [];
+        for (let page = 1; ; page += 1) {
+          const response = yield* fetchJson(
+            "list-installation-repositories",
+            HttpClientRequest.get(
               `${API_ROOT}/installation/repositories?per_page=100&page=${page}`,
-            ).pipe(requestHeaders(token.value));
-            return execute("list-installation-repositories", request).pipe(
-              Effect.flatMap(HttpClientResponse.schemaBodyJson(RepositoriesResponse)),
-              Effect.mapError((error) =>
-                error instanceof GitHubApiError
-                  ? error
-                  : invalidResponse("list-installation-repositories"),
-              ),
-              Effect.flatMap((response) => {
-                const all = [...accumulated, ...response.repositories];
-                if (all.length >= response.totalCount) return Effect.succeed(all);
-                if (response.repositories.length === 0) {
-                  return new InvalidGitHubResponseError({
-                    operation: "list-installation-repositories",
-                    message:
-                      "GitHub pagination ended before total_count repositories were returned",
-                  });
-                }
-                return collect(page + 1, all);
-              }),
-            );
-          });
-        return yield* collect(1, []);
+            ).pipe(authorized(token.value)),
+            RepositoriesResponse,
+          );
+          installed.push(...response.repositories);
+          if (installed.length >= response.totalCount) return installed;
+          if (response.repositories.length === 0) {
+            return yield* new InvalidGitHubResponseError({
+              operation: "list-installation-repositories",
+              message: "GitHub pagination ended before total_count repositories were returned",
+            });
+          }
+        }
       });
 
-      const installation = Effect.fn("GitHubApp.installation")(() =>
-        discoverInstallation().pipe(
-          Effect.catchDefect(() => adapterDefect("discover-installation")),
+      return {
+        installation,
+        installationToken: Effect.fn("GitHubApp.installationToken")(function* () {
+          const found = yield* installation();
+          return yield* mintToken(found.id, new InstallationWide());
+        }),
+        projectAccess: Effect.fn("GitHubApp.projectAccess")(function* (
+          registry: ReadonlyArray<Repository.Name>,
+        ) {
+          const found = yield* installation();
+          const token = yield* mintToken(found.id, new InstallationWide());
+          const installed = yield* installedRepositories(token);
+          return deriveProjectAccess(found, registry, installed);
+        }),
+        workerToken: Effect.fn("GitHubApp.workerToken")((project: CoveredProject) =>
+          mintToken(
+            project.installationId,
+            new SingleRepository({
+              repository: project.repository,
+              repositoryId: project.repositoryId,
+            }),
+          ),
         ),
-      );
-
-      const installationToken = Effect.fn("GitHubApp.installationToken")(() =>
-        Effect.gen(function* () {
-          const installation = yield* discoverInstallation();
-          return yield* mintInstallationToken(installation.id);
-        }).pipe(Effect.catchDefect(() => adapterDefect("mint-installation-token"))),
-      );
-
-      const projectAccess = Effect.fn("GitHubApp.projectAccess")(
-        (registry: ReadonlyArray<Repository.Name>) =>
-          Effect.gen(function* () {
-            const installation = yield* discoverInstallation();
-            const token = yield* mintInstallationToken(installation.id);
-            const installed = yield* repositories(token);
-            return deriveProjectAccess(installation, registry, installed);
-          }).pipe(Effect.catchDefect(() => adapterDefect("discover-project-access"))),
-      );
-
-      const workerToken = Effect.fn("GitHubApp.workerToken")((project: CoveredProject) =>
-        mintWorkerToken(project).pipe(Effect.catchDefect(() => adapterDefect("mint-worker-token"))),
-      );
-
-      return { installation, installationToken, projectAccess, workerToken };
-    }).pipe(Effect.provide(AppJwtSigner.layer)),
+      };
+    }),
   );
 }

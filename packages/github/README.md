@@ -73,9 +73,11 @@ export const githubLayer = GitHubApp.layer.pipe(
 )
 ```
 
+`GitHubApp.layer` imports the private key once, when the layer is built: a key WebCrypto cannot import fails composition with `AppAuthenticationError` instead of failing the first request. Another credential source provides `GitHubCredentials` with an `AppCredentials` whose key went through the `RedactedPrivateKey` schema.
+
 Call `GitHubApp.projectAccess(registry)` before scheduling work. Each result is either a `CoveredProject`, which carries the repository ID needed for scoped minting, or a `ProjectNotInstalledError`. A missing repository does not block covered projects.
 
-Pass a `CoveredProject` to `GitHubApp.workerToken`. GitHub must confirm one matching repository in the token response; otherwise the call fails with `InvalidGitHubResponseError`.
+Pass a `CoveredProject` to `GitHubApp.workerToken`. GitHub must confirm in the token response that the token covers exactly that repository ID; otherwise the call fails with `InvalidGitHubResponseError`.
 
 ## Real-App integration check
 
