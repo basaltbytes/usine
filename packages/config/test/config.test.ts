@@ -7,6 +7,7 @@ import {
   ConfigParser,
   InstanceFolder,
   InstancePath,
+  LoadedInstance,
   ManagedRepo,
   YamlEdit,
   matchesSelector,
@@ -115,6 +116,55 @@ describe("ConfigParser", () => {
       expect(failure.message).toContain("valid five-field cron expression");
     }).pipe(Effect.provide(parserLayer)),
   );
+
+  it.effect(
+    "parses a schedule loop, defaulting tz to UTC and checking against the tick slice",
+    () =>
+      Effect.gen(function* () {
+        const parser = yield* ConfigParser;
+        const loop = yield* parser.parseLoopFile(
+          InstancePath.make("loops/weekly-sweep.md"),
+          [
+            "---",
+            "trigger:",
+            "  on: schedule",
+            "  if: item.tick.cron != ''",
+            "  cron: '0 9 * * 1'",
+            "agent: developer",
+            "---",
+            "Sweep the backlog for the tick at {{ item.tick.scheduledAt }}.",
+          ].join("\n"),
+        );
+
+        expect(loop.trigger.on).toBe("schedule");
+        if (loop.trigger.on !== "schedule") return;
+        expect(loop.trigger.cron).toBe("0 9 * * 1");
+        expect(loop.trigger.tz).toBe("UTC");
+      }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("fails a loop whose prompt leaves an interpolation unclosed", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const failure = yield* parser
+        .parseLoopFile(
+          InstancePath.make("loops/broken-prompt.md"),
+          [
+            "---",
+            "trigger:",
+            "  on: issue",
+            "  if: 'true'",
+            "agent: developer",
+            "---",
+            "Implement {{ item.title",
+          ].join("\n"),
+        )
+        .pipe(Effect.flip);
+
+      expect(failure.stage).toBe("expression");
+      expect(failure.message).toContain("Unclosed prompt interpolation");
+    }).pipe(Effect.provide(parserLayer)),
+  );
 });
 
 describe("InstanceFolder", () => {
@@ -134,8 +184,27 @@ describe("InstanceFolder", () => {
       ]);
       expect(loaded.quarantinedLoops[0]?.error.message).toContain("No such key: nmae");
       expect(loaded.quarantinedLoops[1]?.error.message).toBe("Unknown agent: ghost");
-      expect(loaded.agents).toHaveLength(2);
-      expect(loaded.invalidAgents).toHaveLength(0);
+      expect(loaded.agents.map(({ name }) => name)).toEqual(["developer", "reviewer"]);
+      expect(loaded.invalidAgents.map(({ file }) => file)).toEqual(["agents/intern.md"]);
+      expect(loaded.invalidAgents[0]?.error.stage).toBe("schema");
+    }).pipe(Effect.provide(instanceFolderLayer)),
+  );
+
+  it.effect("makes a snapshot whose loop references an unrostered agent unconstructible", () =>
+    Effect.gen(function* () {
+      const folder = yield* InstanceFolder;
+      const loaded = yield* folder.load(acceptanceRoot);
+
+      expect(
+        () =>
+          new LoadedInstance({
+            config: loaded.config,
+            agents: [],
+            invalidAgents: loaded.invalidAgents,
+            loops: loaded.loops,
+            quarantinedLoops: loaded.quarantinedLoops,
+          }),
+      ).toThrow();
     }).pipe(Effect.provide(instanceFolderLayer)),
   );
 

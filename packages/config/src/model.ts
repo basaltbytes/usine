@@ -256,11 +256,80 @@ export class QuarantinedLoop extends Schema.Class<QuarantinedLoop>("@usine/confi
   },
 ) {}
 
-/** One atomic snapshot of an instance folder. */
-export class LoadedInstance extends Schema.Class<LoadedInstance>("@usine/config/LoadedInstance")({
+/** The instance-relative path a loop's filename identity maps back to. */
+export const loopPath = (name: LoopName): InstancePath => InstancePath.make(`loops/${name}.md`);
+
+/** The names a loop may reference, drawn from one loaded roster and registry. */
+export interface ReferenceIndex {
+  readonly agentNames: ReadonlySet<AgentName>;
+  readonly registryTags: ReadonlySet<RegistryTag>;
+  readonly repoNames: ReadonlySet<RepoName>;
+}
+
+export const referenceIndex = (
   config: UsineConfig,
-  agents: Schema.Array(AgentFile),
-  invalidAgents: Schema.Array(InvalidAgent),
-  loops: Schema.Array(LoopFile),
-  quarantinedLoops: Schema.Array(QuarantinedLoop),
-}) {}
+  agents: ReadonlyArray<AgentFile>,
+): ReferenceIndex => ({
+  agentNames: new Set(agents.map(({ name }) => name)),
+  registryTags: new Set(config.repos.flatMap(({ tags }) => tags)),
+  repoNames: new Set(config.repos.map(({ name }) => name)),
+});
+
+/**
+ * Pure deriver: the reference failure quarantining one loop against the
+ * loaded roster and registry, if any. The single owner of the reference rule
+ * — the folder loader reports it per file, LoadedInstance enforces it at
+ * construction.
+ */
+export const loopReferenceFailure = (
+  file: InstancePath,
+  loop: LoopFile,
+  references: ReferenceIndex,
+): Option.Option<ConfigFileError> => {
+  const referenceError = (message: string): Option.Option<ConfigFileError> =>
+    Option.some(new ConfigFileError({ file, stage: "reference", message }));
+  if (!references.agentNames.has(loop.agent)) {
+    return referenceError(`Unknown agent: ${loop.agent}`);
+  }
+
+  if (Option.isNone(loop.selector)) return Option.none();
+  if (Option.isSome(loop.selector.value.repos)) {
+    const missing = loop.selector.value.repos.value.filter(
+      (name) => !references.repoNames.has(name),
+    );
+    if (missing.length > 0) {
+      return referenceError(`Unknown selector repos: ${missing.join(", ")}`);
+    }
+  }
+
+  if (Option.isSome(loop.selector.value.tags)) {
+    const missing = loop.selector.value.tags.value.filter(
+      (tag) => !references.registryTags.has(tag),
+    );
+    if (missing.length > 0) {
+      return referenceError(`Unknown selector tags: ${missing.join(", ")}`);
+    }
+  }
+  return Option.none();
+};
+
+/** One atomic snapshot of an instance folder. Loops with unresolved references are unconstructible. */
+export class LoadedInstance extends Schema.Class<LoadedInstance>("@usine/config/LoadedInstance")(
+  Schema.Struct({
+    config: UsineConfig,
+    agents: Schema.Array(AgentFile),
+    invalidAgents: Schema.Array(InvalidAgent),
+    loops: Schema.Array(LoopFile),
+    quarantinedLoops: Schema.Array(QuarantinedLoop),
+  }).check(
+    Schema.makeFilter(
+      ({ agents, config, loops }) => {
+        const references = referenceIndex(config, agents);
+        return loops.every((loop) =>
+          Option.isNone(loopReferenceFailure(loopPath(loop.name), loop, references)),
+        );
+      },
+      { message: "Expected every loop to reference the loaded roster and registry" },
+    ),
+  ),
+) {}

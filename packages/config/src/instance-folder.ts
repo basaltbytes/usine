@@ -2,7 +2,6 @@ import { Instance } from "@usine/core";
 import { Context, Effect, FileSystem, Layer, Option, Path, Result } from "effect";
 import {
   type AgentFile,
-  type AgentName,
   ConfigFileError,
   FactoryConfigError,
   InstancePath,
@@ -10,8 +9,8 @@ import {
   LoadedInstance,
   type LoopFile,
   QuarantinedLoop,
-  type RegistryTag,
-  type RepoName,
+  loopReferenceFailure,
+  referenceIndex,
 } from "./model.ts";
 import { ConfigParser } from "./parser.ts";
 
@@ -22,51 +21,12 @@ interface ParsedFile<A> {
   readonly result: Result.Result<A, ConfigFileError>;
 }
 
-interface ReferenceIndex {
-  readonly agentNames: ReadonlySet<AgentName>;
-  readonly registryTags: ReadonlySet<RegistryTag>;
-  readonly repoNames: ReadonlySet<RepoName>;
-}
-
 const factoryError = (error: ConfigFileError): FactoryConfigError =>
   new FactoryConfigError({
     file: error.file,
     stage: error.stage,
     message: error.message,
   });
-
-const referenceError = (file: InstancePath, message: string): ConfigFileError =>
-  new ConfigFileError({ file, stage: "reference", message });
-
-const validateReferences = (
-  file: InstancePath,
-  loop: LoopFile,
-  references: ReferenceIndex,
-): Option.Option<ConfigFileError> => {
-  if (!references.agentNames.has(loop.agent)) {
-    return Option.some(referenceError(file, `Unknown agent: ${loop.agent}`));
-  }
-
-  if (Option.isNone(loop.selector)) return Option.none();
-  if (Option.isSome(loop.selector.value.repos)) {
-    const missing = loop.selector.value.repos.value.filter(
-      (name) => !references.repoNames.has(name),
-    );
-    if (missing.length > 0) {
-      return Option.some(referenceError(file, `Unknown selector repos: ${missing.join(", ")}`));
-    }
-  }
-
-  if (Option.isSome(loop.selector.value.tags)) {
-    const missing = loop.selector.value.tags.value.filter(
-      (tag) => !references.registryTags.has(tag),
-    );
-    if (missing.length > 0) {
-      return Option.some(referenceError(file, `Unknown selector tags: ${missing.join(", ")}`));
-    }
-  }
-  return Option.none();
-};
 
 /** End-to-end instance-folder loader with factory failure and per-loop quarantine. */
 export class InstanceFolder extends Context.Service<
@@ -162,11 +122,7 @@ export class InstanceFolder extends Context.Service<
                 }
               }
 
-              const references: ReferenceIndex = {
-                agentNames: new Set(agents.map(({ name }) => name)),
-                registryTags: new Set(config.repos.flatMap(({ tags }) => tags)),
-                repoNames: new Set(config.repos.map(({ name }) => name)),
-              };
+              const references = referenceIndex(config, agents);
 
               const loops: Array<LoopFile> = [];
               const quarantinedLoops: Array<QuarantinedLoop> = [];
@@ -177,7 +133,7 @@ export class InstanceFolder extends Context.Service<
                   );
                   continue;
                 }
-                const referenceFailure = validateReferences(
+                const referenceFailure = loopReferenceFailure(
                   entry.file,
                   entry.result.success,
                   references,

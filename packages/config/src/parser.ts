@@ -16,6 +16,7 @@ import {
   InstancePath,
   LoopFile,
   LoopName,
+  loopPath,
   ModelId,
   Persona,
   PromptTemplate,
@@ -135,7 +136,7 @@ const render = (
   loop: LoopFile,
   context: Schema.JsonObject,
 ): Effect.Effect<string, ConfigFileError> => {
-  const file = InstancePath.make(`loops/${loop.name}.md`);
+  const file = loopPath(loop.name);
   const environment = environmentFor(loop.trigger.on);
   return Effect.gen(function* () {
     const expressions = yield* interpolations(file, loop.body);
