@@ -1,4 +1,4 @@
-import { Step } from "@usine/core";
+import { Loop as CoreLoop, Step } from "@usine/core";
 import {
   type Environment,
   ExpressionEngine,
@@ -10,7 +10,6 @@ import { splitMarkdown } from "./frontmatter.ts";
 import {
   AgentFile,
   AgentName,
-  Approval,
   ConfigFileError,
   Effort,
   Harness,
@@ -32,7 +31,9 @@ const formatIssue = SchemaIssue.makeFormatterDefault();
 class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopFrontmatter")({
   trigger: Trigger,
   selector: Schema.OptionFromOptionalKey(ValidSelector),
-  approval: Approval.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
+  approval: CoreLoop.ApprovalRequirement.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("none")),
+  ),
   step: Step.StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
   agent: AgentName,
 }) {}

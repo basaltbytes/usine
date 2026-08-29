@@ -1,6 +1,6 @@
 import { Loop as CoreLoop, Step } from "@usine/core";
 import { Source } from "@usine/expression";
-import { Effect, Option, Schema } from "effect";
+import { Cron as EffectCron, DateTime, Effect, Option, Result, Schema } from "effect";
 
 /** Instance-relative path of one authored file (`usine.yaml`, `loops/x.md`). */
 export const InstancePath = Schema.NonEmptyString.pipe(Schema.brand("InstancePath"));
@@ -175,52 +175,17 @@ export const ValidSelector = Selector.check(
   }),
 );
 
-const cronField = (field: string, minimum: number, maximum: number): boolean =>
-  field.split(",").every((part) => {
-    const stepParts = part.split("/");
-    if (stepParts.length > 2) return false;
-    const [range = "", stepText] = stepParts;
-    if (stepText !== undefined) {
-      const step = Number(stepText);
-      if (!Number.isInteger(step) || step < 1) return false;
-    }
-    if (range === "*") return true;
-    const rangeParts = range.split("-");
-    if (rangeParts.length > 2) return false;
-    const [startText = "", endText] = rangeParts;
-    if (startText.length === 0 || endText === "") return false;
-    const start = Number(startText);
-    if (!Number.isInteger(start) || start < minimum || start > maximum) return false;
-    if (endText === undefined) return true;
-    const end = Number(endText);
-    return Number.isInteger(end) && end >= start && end <= maximum;
-  });
-
-const isFiveFieldCron = (value: string): boolean => {
-  const fields = value.trim().split(/\s+/u);
-  return (
-    fields.length === 5 &&
-    cronField(fields[0] ?? "", 0, 59) &&
-    cronField(fields[1] ?? "", 0, 23) &&
-    cronField(fields[2] ?? "", 1, 31) &&
-    cronField(fields[3] ?? "", 1, 12) &&
-    cronField(fields[4] ?? "", 0, 7)
-  );
-};
+// Validated by the same effect Cron parser the engine's scheduler evaluates
+// with, so a cron that parses here can never fail at tick time.
+const isFiveFieldCron = (value: string): boolean =>
+  value.trim().split(/\s+/u).length === 5 && Result.isSuccess(EffectCron.parse(value));
 
 export const Cron = Schema.String.check(
   Schema.makeFilter(isFiveFieldCron, { message: "Expected a valid five-field cron expression" }),
 ).pipe(Schema.brand("Cron"));
 export type Cron = typeof Cron.Type;
 
-const isTimeZone = (value: string): boolean => {
-  try {
-    new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
-    return true;
-  } catch {
-    return false;
-  }
-};
+const isTimeZone = (value: string): boolean => Option.isSome(DateTime.zoneMakeNamed(value));
 
 export const TimeZone = Schema.String.check(
   Schema.makeFilter(isTimeZone, { message: "Expected an IANA time-zone name" }),
@@ -251,17 +216,14 @@ export class ScheduleTrigger extends Schema.Class<ScheduleTrigger>("@usine/confi
 export const Trigger = Schema.Union([IssueTrigger, PullRequestTrigger, ScheduleTrigger]);
 export type Trigger = typeof Trigger.Type;
 
-export const Stream = Schema.Literals(["issue", "pr", "schedule"]);
-export type Stream = typeof Stream.Type;
-
-export const Approval = Schema.Literals(["none", "required"]);
-export type Approval = typeof Approval.Type;
+/** The watched streams, derived from the Trigger union so the set has one owner. */
+export type Stream = Trigger["on"];
 
 export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
   name: LoopName,
   trigger: Trigger,
   selector: Schema.Option(ValidSelector),
-  approval: Approval,
+  approval: CoreLoop.ApprovalRequirement,
   step: Step.StepName,
   agent: AgentName,
   body: PromptTemplate,
