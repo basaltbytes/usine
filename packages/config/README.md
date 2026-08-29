@@ -7,7 +7,9 @@ Reads and edits the authored files in a [usine](https://github.com/basaltbytes/u
 - `agents/*.md` records a named agent's harness, model, effort, optional parent model, and persona.
 - `updateYaml` and `updateFrontmatter` change one path through the YAML document tree while retaining comments, key order, and the Markdown body.
 
-`InstanceFolder.load` returns one atomic snapshot. An invalid `usine.yaml` fails the load; an invalid loop enters `quarantinedLoops` without blocking valid siblings. Invalid agents appear in `invalidAgents`, and loops that name them are quarantined.
+Authored keys are snake_case (`poll_interval`, `max_concurrent_attempts`); the decoded domain types expose camelCase fields (`pollInterval`, `maxConcurrentAttempts`). The rename is part of the schema, so edits encode back to the authored casing.
+
+`InstanceFolder.load` takes an `Instance.Directory` (from `@usine/core`) and returns one atomic `LoadedInstance` snapshot. An invalid `usine.yaml` fails the load with a `FactoryConfigError`; an invalid loop enters `quarantinedLoops` with a `ConfigFileError` naming the file and stage, without blocking valid siblings. Invalid agents appear in `invalidAgents`, and loops that name them are quarantined. A `LoadedInstance` always satisfies its own reference rule: every loaded loop names a rostered agent and registered selector entries, enforced at construction. The `ConfigError` union covers both failure types.
 
 The package exports Effect services and layers. Supply `FileSystem.FileSystem` and `Path.Path` implementations when composing `InstanceFolder.layer`; `ConfigParser.layer` requires `ExpressionEngine` from `@usine/expression`.
 
