@@ -1,10 +1,12 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
+import { Instance } from "@usine/core";
 import { MarcbachmannCelLayer } from "@usine/expression";
 import { Effect, Layer, Option, Schema } from "effect";
 import {
   ConfigParser,
   InstanceFolder,
+  InstancePath,
   ManagedRepo,
   YamlEdit,
   matchesSelector,
@@ -16,11 +18,11 @@ const parserLayer = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer))
 const instanceFolderLayer = InstanceFolder.layer.pipe(
   Layer.provide(Layer.mergeAll(parserLayer, NodeFileSystem.layer, NodePath.layer)),
 );
-const acceptanceRoot = decodeURIComponent(
-  new URL("./fixtures/acceptance", import.meta.url).pathname,
+const acceptanceRoot = Instance.Directory.make(
+  decodeURIComponent(new URL("./fixtures/acceptance", import.meta.url).pathname),
 );
-const invalidFactoryRoot = decodeURIComponent(
-  new URL("./fixtures/invalid-factory", import.meta.url).pathname,
+const invalidFactoryRoot = Instance.Directory.make(
+  decodeURIComponent(new URL("./fixtures/invalid-factory", import.meta.url).pathname),
 );
 
 describe("ConfigParser", () => {
@@ -28,7 +30,7 @@ describe("ConfigParser", () => {
     Effect.gen(function* () {
       const parser = yield* ConfigParser;
       const config = yield* parser.parseUsineYaml(
-        "usine.yaml",
+        InstancePath.make("usine.yaml"),
         "version: 1\nrepos: []\nsettings: {}\n",
       );
 
@@ -40,7 +42,7 @@ describe("ConfigParser", () => {
       expect(Option.isNone(config.operator)).toBe(true);
 
       const configuredWorker = yield* parser.parseUsineYaml(
-        "usine.yaml",
+        InstancePath.make("usine.yaml"),
         [
           "version: 1",
           "repos: []",
@@ -53,7 +55,7 @@ describe("ConfigParser", () => {
       expect(configuredWorker.workers[0]?.maxConcurrentAttempts).toBe(1);
 
       const failure = yield* parser
-        .parseUsineYaml("usine.yaml", "version: 1\nrepos: []\nenabled: true\n")
+        .parseUsineYaml(InstancePath.make("usine.yaml"), "version: 1\nrepos: []\nenabled: true\n")
         .pipe(Effect.flip);
       expect(failure.stage).toBe("schema");
       expect(failure.message).toContain('["enabled"]');
@@ -65,7 +67,7 @@ describe("ConfigParser", () => {
       const parser = yield* ConfigParser;
       const failure = yield* parser
         .parseLoopFile(
-          "loops/disabled.md",
+          InstancePath.make("loops/disabled.md"),
           [
             "---",
             "enabled: false",
@@ -89,7 +91,7 @@ describe("ConfigParser", () => {
       const parser = yield* ConfigParser;
       const failure = yield* parser
         .parseLoopFile(
-          "loops/bad-schedule.md",
+          InstancePath.make("loops/bad-schedule.md"),
           [
             "---",
             "trigger:",
@@ -196,7 +198,7 @@ describe("YamlWriter", () => {
         "",
       ].join("\n");
       const updated = yield* updateYaml(
-        "usine.yaml",
+        InstancePath.make("usine.yaml"),
         source,
         new YamlEdit({ path: ["settings", "poll_interval"], value: 30 }),
       );
@@ -219,7 +221,7 @@ describe("YamlWriter", () => {
         "Persona body with # markdown.",
       ].join("\n");
       const updated = yield* updateFrontmatter(
-        "agents/developer.md",
+        InstancePath.make("agents/developer.md"),
         source,
         new YamlEdit({ path: ["effort"], value: "high" }),
       );
@@ -241,7 +243,7 @@ describe("YamlWriter", () => {
         "Persona body.",
       ].join("\n");
       const updated = yield* updateFrontmatter(
-        "agents/developer.md",
+        InstancePath.make("agents/developer.md"),
         source,
         new YamlEdit({ path: ["effort"], value: "high" }),
       );

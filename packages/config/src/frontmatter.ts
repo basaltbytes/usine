@@ -1,5 +1,5 @@
 import { Effect } from "effect";
-import { ConfigFileError } from "./errors.ts";
+import { ConfigFileError, type InstancePath } from "./model.ts";
 
 export interface MarkdownParts {
   readonly yaml: string;
@@ -22,7 +22,7 @@ const closingDelimiterAt = (source: string, newline: "\n" | "\r\n", from: number
 
 /** Split Markdown frontmatter without interpreting either half. */
 export const splitMarkdown = (
-  file: string,
+  file: InstancePath,
   source: string,
 ): Effect.Effect<MarkdownParts, ConfigFileError> => {
   const newline = source.startsWith("---\r\n")

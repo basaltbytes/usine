@@ -1,6 +1,6 @@
 import { Effect, Option, Schema } from "effect";
 import { type Document, parseDocument } from "yaml";
-import { ConfigFileError } from "../errors.ts";
+import { ConfigFileError, type InstancePath } from "../model.ts";
 
 const causeMessage = (cause: unknown): string =>
   Option.match(
@@ -16,7 +16,7 @@ const causeMessage = (cause: unknown): string =>
  * are errors), with source tokens retained so surgical edits keep formatting.
  */
 export const parseYamlDocument = (
-  file: string,
+  file: InstancePath,
   source: string,
 ): Effect.Effect<Document.Parsed, ConfigFileError> =>
   Effect.gen(function* () {

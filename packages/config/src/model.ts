@@ -1,7 +1,42 @@
 import { Loop as CoreLoop, Step } from "@usine/core";
 import { Source } from "@usine/expression";
 import { Effect, Option, Schema } from "effect";
-import { ConfigFileError } from "./errors.ts";
+
+/** Instance-relative path of one authored file (`usine.yaml`, `loops/x.md`). */
+export const InstancePath = Schema.NonEmptyString.pipe(Schema.brand("InstancePath"));
+export type InstancePath = typeof InstancePath.Type;
+
+export const FileStage = Schema.Literals([
+  "expression",
+  "frontmatter",
+  "read",
+  "reference",
+  "schema",
+  "yaml",
+]);
+export type FileStage = typeof FileStage.Type;
+
+/** One precise, file-owned config failure suitable for quarantine UI. */
+export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
+  "@usine/config/ConfigFileError",
+)("ConfigFileError", {
+  file: InstancePath,
+  stage: FileStage,
+  message: Schema.NonEmptyString,
+}) {}
+
+/** A factory-level failure: the registry/settings boundary could not be loaded. */
+export class FactoryConfigError extends Schema.TaggedError<FactoryConfigError>(
+  "@usine/config/FactoryConfigError",
+)("FactoryConfigError", {
+  file: InstancePath,
+  stage: FileStage,
+  message: Schema.NonEmptyString,
+}) {}
+
+/** Every failure mode this package's parsers and loaders can produce. */
+export const ConfigError = Schema.Union([ConfigFileError, FactoryConfigError]);
+export type ConfigError = typeof ConfigError.Type;
 
 const KebabCase = Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
   message: "Expected a kebab-case filename identity",
@@ -233,13 +268,13 @@ export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile"
 }) {}
 
 export class InvalidAgent extends Schema.Class<InvalidAgent>("@usine/config/InvalidAgent")({
-  file: Schema.NonEmptyString,
+  file: InstancePath,
   error: ConfigFileError,
 }) {}
 
 export class QuarantinedLoop extends Schema.Class<QuarantinedLoop>("@usine/config/QuarantinedLoop")(
   {
-    file: Schema.NonEmptyString,
+    file: InstancePath,
     error: ConfigFileError,
   },
 ) {}

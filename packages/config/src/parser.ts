@@ -6,15 +6,15 @@ import {
   Source,
 } from "@usine/expression";
 import { Context, Effect, Layer, Schema, SchemaIssue } from "effect";
-import { ConfigFileError } from "./errors.ts";
 import { splitMarkdown } from "./frontmatter.ts";
-import { parseYamlDocument } from "./yaml/document.ts";
 import {
   AgentFile,
   AgentName,
   Approval,
+  ConfigFileError,
   Effort,
   Harness,
+  InstancePath,
   LoopFile,
   LoopName,
   ModelId,
@@ -25,6 +25,7 @@ import {
   ValidSelector,
 } from "./model.ts";
 import { environmentFor } from "./payload-slices.ts";
+import { parseYamlDocument } from "./yaml/document.ts";
 
 const formatIssue = SchemaIssue.makeFormatterDefault();
 
@@ -49,12 +50,15 @@ interface Interpolation {
   readonly end: number;
 }
 
-const schemaError = (file: string, error: Schema.SchemaError): ConfigFileError =>
+const schemaError = (file: InstancePath, error: Schema.SchemaError): ConfigFileError =>
   new ConfigFileError({ file, stage: "schema", message: formatIssue(error.issue) });
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
 
-const parseYaml = (file: string, source: string): Effect.Effect<Schema.Json, ConfigFileError> =>
+const parseYaml = (
+  file: InstancePath,
+  source: string,
+): Effect.Effect<Schema.Json, ConfigFileError> =>
   Effect.gen(function* () {
     const document = yield* parseYamlDocument(file, source);
     return yield* decodeJson(document.toJS()).pipe(
@@ -64,10 +68,10 @@ const parseYaml = (file: string, source: string): Effect.Effect<Schema.Json, Con
     );
   });
 
-const expressionError = (file: string, error: ExpressionError): ConfigFileError =>
+const expressionError = (file: InstancePath, error: ExpressionError): ConfigFileError =>
   new ConfigFileError({ file, stage: "expression", message: error.message });
 
-const markdownName = (file: string): Effect.Effect<string, ConfigFileError> => {
+const markdownName = (file: InstancePath): Effect.Effect<string, ConfigFileError> => {
   const basename = file.slice(file.lastIndexOf("/") + 1);
   if (!basename.endsWith(".md")) {
     return new ConfigFileError({
@@ -79,7 +83,7 @@ const markdownName = (file: string): Effect.Effect<string, ConfigFileError> => {
   return Effect.succeed(basename.slice(0, -3));
 };
 
-const loopName = (file: string): Effect.Effect<LoopName, ConfigFileError> =>
+const loopName = (file: InstancePath): Effect.Effect<LoopName, ConfigFileError> =>
   markdownName(file).pipe(
     Effect.flatMap((name) =>
       Schema.decodeUnknownEffect(LoopName)(name).pipe(
@@ -88,7 +92,7 @@ const loopName = (file: string): Effect.Effect<LoopName, ConfigFileError> =>
     ),
   );
 
-const agentName = (file: string): Effect.Effect<AgentName, ConfigFileError> =>
+const agentName = (file: InstancePath): Effect.Effect<AgentName, ConfigFileError> =>
   markdownName(file).pipe(
     Effect.flatMap((name) =>
       Schema.decodeUnknownEffect(AgentName)(name).pipe(
@@ -98,7 +102,7 @@ const agentName = (file: string): Effect.Effect<AgentName, ConfigFileError> =>
   );
 
 const interpolations = (
-  file: string,
+  file: InstancePath,
   body: PromptTemplate,
 ): Effect.Effect<ReadonlyArray<Interpolation>, ConfigFileError> =>
   Effect.gen(function* () {
@@ -130,18 +134,15 @@ const render = (
   loop: LoopFile,
   context: Schema.JsonObject,
 ): Effect.Effect<string, ConfigFileError> => {
-  const file = `loops/${loop.name}.md`;
+  const file = InstancePath.make(`loops/${loop.name}.md`);
   const environment = environmentFor(loop.trigger.on);
   return Effect.gen(function* () {
     const expressions = yield* interpolations(file, loop.body);
-    const rendered = yield* Effect.forEach(
-      expressions,
-      (expression) =>
-        engine.evaluateScalar(expression.source, environment, context).pipe(
-          Effect.mapError((error) => expressionError(file, error)),
-          Effect.map((value) => ({ expression, value })),
-        ),
-      { concurrency: 16 },
+    const rendered = yield* Effect.forEach(expressions, (expression) =>
+      engine.evaluateScalar(expression.source, environment, context).pipe(
+        Effect.mapError((error) => expressionError(file, error)),
+        Effect.map((value) => ({ expression, value })),
+      ),
     );
     let output = "";
     let cursor = 0;
@@ -155,7 +156,7 @@ const render = (
 };
 
 const parseUsineYaml = Effect.fn("ConfigParser.parseUsineYaml")(
-  (file: string, source: string): Effect.Effect<UsineConfig, ConfigFileError> =>
+  (file: InstancePath, source: string): Effect.Effect<UsineConfig, ConfigFileError> =>
     Effect.gen(function* () {
       const yaml = yield* parseYaml(file, source);
       return yield* Schema.decodeUnknownEffect(UsineConfig)(yaml, {
@@ -165,7 +166,7 @@ const parseUsineYaml = Effect.fn("ConfigParser.parseUsineYaml")(
 );
 
 const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
-  (file: string, source: string): Effect.Effect<AgentFile, ConfigFileError> =>
+  (file: InstancePath, source: string): Effect.Effect<AgentFile, ConfigFileError> =>
     Effect.gen(function* () {
       const name = yield* agentName(file);
       const markdown = yield* splitMarkdown(file, source);
@@ -189,7 +190,7 @@ const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
 
 const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
   Effect.fn("ConfigParser.parseLoopFile")(
-    (file: string, source: string): Effect.Effect<LoopFile, ConfigFileError> =>
+    (file: InstancePath, source: string): Effect.Effect<LoopFile, ConfigFileError> =>
       Effect.gen(function* () {
         const name = yield* loopName(file);
         const markdown = yield* splitMarkdown(file, source);
@@ -211,7 +212,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
             engine
               .checkScalar(expression, environment)
               .pipe(Effect.mapError((error) => expressionError(file, error))),
-          { concurrency: 16, discard: true },
+          { discard: true },
         );
         return new LoopFile({
           name,
@@ -225,13 +226,27 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
       }),
   );
 
-/** Strict config parser and prompt renderer. All methods capture their CEL dependency. */
+/**
+ * Strict config parser and prompt renderer. All methods capture their CEL
+ * dependency. The interface below is the package's declared API — widen it
+ * deliberately, never by letting an implementation change leak through
+ * inference.
+ */
 export class ConfigParser extends Context.Service<
   ConfigParser,
   {
-    readonly parseUsineYaml: typeof parseUsineYaml;
-    readonly parseAgentFile: typeof parseAgentFile;
-    readonly parseLoopFile: ReturnType<typeof makeParseLoopFile>;
+    readonly parseUsineYaml: (
+      file: InstancePath,
+      source: string,
+    ) => Effect.Effect<UsineConfig, ConfigFileError>;
+    readonly parseAgentFile: (
+      file: InstancePath,
+      source: string,
+    ) => Effect.Effect<AgentFile, ConfigFileError>;
+    readonly parseLoopFile: (
+      file: InstancePath,
+      source: string,
+    ) => Effect.Effect<LoopFile, ConfigFileError>;
     readonly renderPrompt: (
       loop: LoopFile,
       context: Schema.JsonObject,

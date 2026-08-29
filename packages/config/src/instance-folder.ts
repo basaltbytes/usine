@@ -1,8 +1,11 @@
+import { Instance } from "@usine/core";
 import { Context, Effect, FileSystem, Layer, Option, Path, Result } from "effect";
-import { ConfigFileError, FactoryConfigError } from "./errors.ts";
 import {
   type AgentFile,
   type AgentName,
+  ConfigFileError,
+  FactoryConfigError,
+  InstancePath,
   InvalidAgent,
   LoadedInstance,
   type LoopFile,
@@ -12,8 +15,10 @@ import {
 } from "./model.ts";
 import { ConfigParser } from "./parser.ts";
 
+const FILE_CONCURRENCY = 16;
+
 interface ParsedFile<A> {
-  readonly file: string;
+  readonly file: InstancePath;
   readonly result: Result.Result<A, ConfigFileError>;
 }
 
@@ -30,11 +35,11 @@ const factoryError = (error: ConfigFileError): FactoryConfigError =>
     message: error.message,
   });
 
-const referenceError = (file: string, message: string): ConfigFileError =>
+const referenceError = (file: InstancePath, message: string): ConfigFileError =>
   new ConfigFileError({ file, stage: "reference", message });
 
 const validateReferences = (
-  file: string,
+  file: InstancePath,
   loop: LoopFile,
   references: ReferenceIndex,
 ): Option.Option<ConfigFileError> => {
@@ -67,7 +72,7 @@ const validateReferences = (
 export class InstanceFolder extends Context.Service<
   InstanceFolder,
   {
-    readonly load: (root: string) => Effect.Effect<LoadedInstance, FactoryConfigError>;
+    readonly load: (root: Instance.Directory) => Effect.Effect<LoadedInstance, FactoryConfigError>;
   }
 >()("@usine/config/InstanceFolder") {
   static readonly layer = Layer.effect(
@@ -78,7 +83,7 @@ export class InstanceFolder extends Context.Service<
       const parser = yield* ConfigParser;
 
       const readFile = Effect.fn("InstanceFolder.readFile")(
-        (absolutePath: string, file: string): Effect.Effect<string, ConfigFileError> =>
+        (absolutePath: string, file: InstancePath): Effect.Effect<string, ConfigFileError> =>
           fileSystem
             .readFileString(absolutePath)
             .pipe(
@@ -90,7 +95,7 @@ export class InstanceFolder extends Context.Service<
 
       const markdownFiles = Effect.fn("InstanceFolder.markdownFiles")(
         (
-          root: string,
+          root: Instance.Directory,
           directory: "agents" | "loops",
         ): Effect.Effect<ReadonlyArray<string>, FactoryConfigError> =>
           fileSystem.readDirectory(path.join(root, directory)).pipe(
@@ -98,7 +103,7 @@ export class InstanceFolder extends Context.Service<
             Effect.mapError(
               (error) =>
                 new FactoryConfigError({
-                  file: directory,
+                  file: InstancePath.make(directory),
                   stage: "read",
                   message: error.message,
                 }),
@@ -107,31 +112,31 @@ export class InstanceFolder extends Context.Service<
       );
 
       const loadMarkdownFiles = <A>(
-        root: string,
+        root: Instance.Directory,
         directory: "agents" | "loops",
-        parseFile: (file: string, source: string) => Effect.Effect<A, ConfigFileError>,
+        parseFile: (file: InstancePath, source: string) => Effect.Effect<A, ConfigFileError>,
       ): Effect.Effect<ReadonlyArray<ParsedFile<A>>, FactoryConfigError> =>
         Effect.gen(function* () {
           const files = yield* markdownFiles(root, directory);
           return yield* Effect.forEach(
             files,
             (name) => {
-              const file = `${directory}/${name}`;
+              const file = InstancePath.make(`${directory}/${name}`);
               return readFile(path.join(root, file), file).pipe(
                 Effect.flatMap((source) => parseFile(file, source)),
                 Effect.result,
                 Effect.map((result): ParsedFile<A> => ({ file, result })),
               );
             },
-            { concurrency: 16 },
+            { concurrency: FILE_CONCURRENCY },
           );
         });
 
       return {
         load: Effect.fn("InstanceFolder.load")(
-          (root: string): Effect.Effect<LoadedInstance, FactoryConfigError> =>
+          (root: Instance.Directory): Effect.Effect<LoadedInstance, FactoryConfigError> =>
             Effect.gen(function* () {
-              const configFile = "usine.yaml";
+              const configFile = InstancePath.make("usine.yaml");
               const configSource = yield* readFile(path.join(root, configFile), configFile).pipe(
                 Effect.mapError(factoryError),
               );

@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import type { ConfigFileError } from "../errors.ts";
+import type { ConfigFileError, InstancePath } from "../model.ts";
 import { splitMarkdown } from "../frontmatter.ts";
 import { parseYamlDocument } from "./document.ts";
 
@@ -10,7 +10,7 @@ export class YamlEdit extends Schema.Class<YamlEdit>("@usine/config/YamlEdit")({
 
 /** Mutate one YAML path through the Document AST, retaining comments and key order. */
 export const updateYaml = Effect.fn("YamlWriter.updateYaml")(
-  (file: string, source: string, edit: YamlEdit): Effect.Effect<string, ConfigFileError> =>
+  (file: InstancePath, source: string, edit: YamlEdit): Effect.Effect<string, ConfigFileError> =>
     Effect.gen(function* () {
       const document = yield* parseYamlDocument(file, source);
       document.setIn(edit.path, edit.value);
@@ -20,7 +20,7 @@ export const updateYaml = Effect.fn("YamlWriter.updateYaml")(
 
 /** Apply the same surgical mutation to the YAML half of a Markdown config file. */
 export const updateFrontmatter = Effect.fn("YamlWriter.updateFrontmatter")(
-  (file: string, source: string, edit: YamlEdit): Effect.Effect<string, ConfigFileError> =>
+  (file: InstancePath, source: string, edit: YamlEdit): Effect.Effect<string, ConfigFileError> =>
     Effect.gen(function* () {
       const markdown = yield* splitMarkdown(file, source);
       const updated = yield* updateYaml(file, markdown.yaml, edit);
