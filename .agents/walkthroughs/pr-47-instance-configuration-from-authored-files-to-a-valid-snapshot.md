@@ -2,10 +2,10 @@
 walkthrough: 1
 title: Instance configuration from authored files to a valid snapshot
 pr: 47
-commit: cb073b5ee533ce8eee6b3b2ded9236eb6daebe90
+commit: c731c6b45493844c9f5811b41ed91f826ec5e020
 meta:
   pr: "#47"
-  commit: cb073b5
+  commit: c731c6b
   scope: config, CEL, instance loading
   balade-authoring: 1.33.0
 ---
@@ -134,16 +134,15 @@ Reference checking has one pure owner. It rejects an unknown agent, an unknown s
 
 {% group label="Round-trip editing and shared vocabulary" %}
 {% section id="yaml-editing" title="Surgical YAML and frontmatter edits" icon="pencil" %}
-The writer parses YAML into a token-preserving document AST and updates one non-empty path. `updateFrontmatter()` changes only the YAML half, restores the original frontmatter newline style, and appends the original Markdown body unchanged.
+The writer parses YAML into a token-preserving document AST and updates one non-empty path. `updateFrontmatter()` changes only the YAML half and appends the original Markdown body unchanged.
 
-{% code file="packages/config/src/yaml/writer.ts" from=6 to=34 expect="export class YamlEdit extends Schema.Class<YamlEdit>(\"@usine/config/YamlEdit\")({" /%}
+The AST stringifier always emits LF, so newline restoration has one owner: `restoreNewlines` normalizes and re-applies the authored style. `updateYaml()` detects the style from its source; `updateFrontmatter()` applies the file's delimiter style, which also covers a one-line YAML half that carries no newline of its own.
 
-{% callout tone="warn" %}
-The implementation explicitly restores CRLF only in `updateFrontmatter()`. Standalone `updateYaml()` returns `document.toString()` directly, and its test covers LF input only. Review the broader claim that both APIs retain newline style.
-{% /callout %}
+{% code file="packages/config/src/yaml/writer.ts" from=6 to=43 expect="export class YamlEdit extends Schema.Class<YamlEdit>(\"@usine/config/YamlEdit\")({" /%}
 
 {% tests %}
-{% test name="document-preserving edits" kind="unit" ref="packages/config/test/config.test.ts" asserts=["keeps comments", "keeps key order", "keeps the Markdown body", "does not accept a delimiter-prefix line as the closing delimiter"] %}The tests cover the main authored-text preservation rules, apart from standalone CRLF output.{% /test %}
+{% test name="document-preserving edits" kind="unit" ref="packages/config/test/config.test.ts" asserts=["keeps comments", "keeps key order", "keeps the Markdown body", "does not accept a delimiter-prefix line as the closing delimiter"] %}The tests cover the authored-text preservation rules through the public writers.{% /test %}
+{% test name="CRLF round-trip" kind="unit" ref="packages/config/test/config.test.ts" asserts=["retains CRLF in a standalone YAML edit", "retains CRLF in a frontmatter edit"] %}Guards the regression where the AST stringifier silently renormalized a CRLF-authored file to LF on its first edit.{% /test %}
 {% /tests %}
 {% /section %}
 
