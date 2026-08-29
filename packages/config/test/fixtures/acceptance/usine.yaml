@@ -1,0 +1,6 @@
+# One schema version governs usine.yaml, loops, and agents.
+version: 1
+repos:
+  - name: basaltbytes/usine
+    tags: [active]
+settings: {}

@@ -1,10 +1,10 @@
 /**
- * @usine/config — config file machinery for usine: parse, validate, and
- * surgically rewrite the instance repo's files (usine.yaml, loop files,
- * agent files).
- *
- * Not implemented yet: this 0.0.x release reserves the block's seam while the
- * engine grows.
+ * @usine/config — strict schemas, CEL-aware parsing, per-loop quarantine,
+ * instance-folder loading, payload descriptors, and surgical YAML edits.
  */
-
-export {};
+export * from "./instance-folder.ts";
+export * from "./model.ts";
+export * from "./parser.ts";
+export * from "./payload-slices.ts";
+export * from "./selector.ts";
+export * from "./yaml/writer.ts";

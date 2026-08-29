@@ -7,6 +7,7 @@
  * ledger rows (Event, Run, Step, Attempt); everything else is value objects,
  * typed errors, and pure derivers — each module docblock names its kind.
  */
+export * as Instance from "./instance.ts";
 export * as Attempt from "./lifecycle/attempt.ts";
 export * as AttemptFailure from "./lifecycle/attempt-failure.ts";
 export * as Event from "./lifecycle/event.ts";
