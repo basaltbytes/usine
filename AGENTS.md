@@ -25,3 +25,4 @@ Standing rules:
 - Fix review findings in the PR under review: a logic flaw, stall risk, or architecture gap is a change request, never a note deferred to later — early packages set the precedent later agents copy.
 - Cloudflare Workers/D1 is the first cloud target: package root entries stay platform-free, Node adapters live behind subpath exports, and platform services stay in layer requirements (`@usine/engine/local-sqlite` and ADR 0020 are the precedent).
 - Files sharing a name prefix become a folder at creation, prefix dropped (`store/{store,codec,queries}.ts`).
+- Authored YAML surfaces (`usine.yaml`, loop/agent frontmatter) use snake_case keys; domain fields are camelCase. The rename happens once, at the parse boundary, via `Schema.encodeKeys` — file casing never leaks into domain types (`@usine/config`'s `Settings` is the precedent).

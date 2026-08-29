@@ -114,32 +114,47 @@ export class Worker extends Schema.Class<Worker>("@usine/config/Worker")({
 }) {}
 
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
-  poll_interval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
-  max_children: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
-  max_attempt_minutes: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
-  max_attempt_tokens: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(10_000_000))),
-  parent_model: Schema.OptionFromOptionalKey(ModelId),
+  pollInterval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
+  maxChildren: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
+  maxAttemptMinutes: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
+  maxAttemptTokens: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(10_000_000))),
+  parentModel: Schema.OptionFromOptionalKey(ModelId),
 }) {}
 
 export const Webhooks = Schema.Union([
   Schema.Struct({ mode: Schema.Literal("off") }),
   Schema.Struct({ mode: Schema.Literal("deliveries") }),
-  Schema.Struct({ mode: Schema.Literal("endpoint"), public_url: Schema.URLFromString }),
+  Schema.Struct({ mode: Schema.Literal("endpoint"), publicUrl: Schema.URLFromString }).pipe(
+    Schema.encodeKeys({ publicUrl: "public_url" }),
+  ),
 ]);
 export type Webhooks = typeof Webhooks.Type;
 
+// The authored YAML surface is snake_case; domain fields are camelCase. The
+// renames live here, at the parse boundary, and encode back for edits.
+const SettingsFromYaml = Settings.pipe(
+  Schema.encodeKeys({
+    pollInterval: "poll_interval",
+    maxChildren: "max_children",
+    maxAttemptMinutes: "max_attempt_minutes",
+    maxAttemptTokens: "max_attempt_tokens",
+    parentModel: "parent_model",
+  }),
+);
+const WorkerFromYaml = Worker.pipe(
+  Schema.encodeKeys({ maxConcurrentAttempts: "max_concurrent_attempts" }),
+);
+
 const ManagedRepos = Schema.Array(ManagedRepo).check(uniqueNames);
-const Workers = Schema.Array(Worker).check(uniqueNames);
+const Workers = Schema.Array(WorkerFromYaml).check(uniqueNames);
 
 /** Strict, factory-wide authored config from usine.yaml. */
 export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")({
   version: Schema.Literal(1),
   repos: ManagedRepos,
-  settings: Settings.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
+  settings: SettingsFromYaml.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
   workers: Workers.pipe(
-    Schema.withDecodingDefaultKey(
-      Effect.succeed([{ name: "local", kind: "local", maxConcurrentAttempts: 1 }]),
-    ),
+    Schema.withDecodingDefaultKey(Effect.succeed([{ name: "local", kind: "local" }])),
   ),
   webhooks: Webhooks.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ mode: "off" }))),
   operator: Schema.OptionFromOptionalKey(OperatorLogin),

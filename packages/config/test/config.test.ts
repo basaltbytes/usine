@@ -34,8 +34,8 @@ describe("ConfigParser", () => {
         "version: 1\nrepos: []\nsettings: {}\n",
       );
 
-      expect(config.settings.poll_interval).toBe(60);
-      expect(config.settings.max_children).toBe(4);
+      expect(config.settings.pollInterval).toBe(60);
+      expect(config.settings.maxChildren).toBe(4);
       expect(config.workers).toHaveLength(1);
       expect(config.workers[0]?.name).toBe("local");
       expect(config.webhooks.mode).toBe("off");
@@ -46,13 +46,19 @@ describe("ConfigParser", () => {
         [
           "version: 1",
           "repos: []",
-          "settings: {}",
+          "settings:",
+          "  poll_interval: 30",
           "workers:",
           "  - name: remote",
           "    kind: exe.dev",
+          "  - name: fast",
+          "    kind: local",
+          "    max_concurrent_attempts: 2",
         ].join("\n"),
       );
+      expect(configuredWorker.settings.pollInterval).toBe(30);
       expect(configuredWorker.workers[0]?.maxConcurrentAttempts).toBe(1);
+      expect(configuredWorker.workers[1]?.maxConcurrentAttempts).toBe(2);
 
       const failure = yield* parser
         .parseUsineYaml(InstancePath.make("usine.yaml"), "version: 1\nrepos: []\nenabled: true\n")
