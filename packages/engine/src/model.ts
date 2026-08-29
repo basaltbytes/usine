@@ -1,14 +1,14 @@
-import { Attempt, Event, Item, Loop, Run, Step } from "@usine/core";
+import { Attempt, Event, Instance, Item, Loop, Run, Step } from "@usine/core";
 import { Schema } from "effect";
 
 /** Whether a loop parks new runs until an approval Event arrives. */
-export const APPROVAL_REQUIREMENTS = ["none", "required"] as const;
-export const ApprovalRequirement = Schema.Literals(APPROVAL_REQUIREMENTS);
-export type ApprovalRequirement = typeof ApprovalRequirement.Type;
+export const APPROVAL_REQUIREMENTS = Loop.APPROVAL_REQUIREMENTS;
+export const ApprovalRequirement = Loop.ApprovalRequirement;
+export type ApprovalRequirement = Loop.ApprovalRequirement;
 
 /** Absolute or caller-resolved path to the instance folder. */
-export const InstanceDirectory = Schema.NonEmptyString.pipe(Schema.brand("InstanceDirectory"));
-export type InstanceDirectory = typeof InstanceDirectory.Type;
+export const InstanceDirectory = Instance.Directory;
+export type InstanceDirectory = Instance.Directory;
 
 /** The complete routing context needed to turn one Event into a Run. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
