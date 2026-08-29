@@ -1,7 +1,7 @@
 {
   "name": "@usine/github",
   "version": "0.0.1",
-  "description": "GitHub integration for usine: polling change detection, per-stream GraphQL slice fetchers, App auth and token minting.",
+  "description": "GitHub App authentication, installation discovery, project coverage, and scoped token minting for usine.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -17,17 +17,31 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./local-secrets": {
+      "types": "./dist/local-secrets.d.ts",
+      "default": "./dist/local-secrets.js"
     }
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run",
+    "test:integration": "vitest run test/github-app.integration.ts"
+  },
+  "dependencies": {
+    "@usine/core": "workspace:*"
   },
   "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
     "@usine/tsconfig": "workspace:*",
-    "typescript": "catalog:"
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "effect": "catalog:"
