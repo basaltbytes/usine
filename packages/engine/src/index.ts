@@ -1,8 +1,26 @@
 /**
- * @usine/engine — The usine run engine: event ledger, dedup/supersede/revoke, run scheduling, durable-execution seam, SQLite store.
+ * @usine/engine — durable Event → Run → Step → Attempt execution.
  *
- * Not implemented yet: this 0.0.x release reserves the block's seam while the
- * engine grows.
+ * This entry is platform-free: compose it with a database adapter through
+ * `layerWithDatabase`, or import the Node local adapter from
+ * `@usine/engine/local-sqlite`.
  */
-
-export {};
+export {
+  ApprovalRequirement,
+  Claimed,
+  EnginePersistenceError,
+  Ignored,
+  IgnoreReason,
+  InstanceDirectory,
+  Queued,
+  RunEngineError,
+  RunNotFoundError,
+  RunOperationRejectedError,
+  RunSnapshot,
+  StepExecution,
+  Submission,
+  SubmissionResult,
+} from "./model.ts";
+export { RunDatabase, type RunDatabaseClient } from "./database/database.ts";
+export { layerWithDatabase, RunEngine } from "./engine.ts";
+export { StepExecutor } from "./step-executor.ts";

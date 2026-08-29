@@ -47,9 +47,9 @@ Effect.runPromise(program.pipe(Effect.provide(testConfigLayer)))
 **Best practice:** Create a config service with `layer` and `testLayer`:
 
 ```typescript
-import { Config, Effect, Layer, Redacted, ServiceMap } from "effect"
+import { Config, Context, Effect, Layer, Redacted } from "effect"
 
-class ApiConfig extends ServiceMap.Service<
+class ApiConfig extends Context.Service<
   ApiConfig,
   {
     readonly apiKey: Redacted.Redacted
@@ -171,7 +171,7 @@ const program = Effect.gen(function* () {
 Use `Schema.Redacted(Schema.String)` in config schemas:
 
 ```typescript
-class DatabaseConfig extends ServiceMap.Service<
+class DatabaseConfig extends Context.Service<
   DatabaseConfig,
   { readonly host: string; readonly port: number; readonly password: Redacted.Redacted }
 >()("@app/DatabaseConfig") {

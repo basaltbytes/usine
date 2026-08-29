@@ -19,3 +19,9 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 Before writing or reviewing code, load the `coding-guidelines` skill — the Basaltbytes charter every line of usine follows.
 
 The monorepo is Effect v4 end to end — services, layers, typed errors, Schema at every boundary. Load the `effect-ts` skill alongside it whenever you touch TypeScript here.
+
+Standing rules:
+
+- Fix review findings in the PR under review: a logic flaw, stall risk, or architecture gap is a change request, never a note deferred to later — early packages set the precedent later agents copy.
+- Cloudflare Workers/D1 is the first cloud target: package root entries stay platform-free, Node adapters live behind subpath exports, and platform services stay in layer requirements (`@usine/engine/local-sqlite` and ADR 0020 are the precedent).
+- Files sharing a name prefix become a folder at creation, prefix dropped (`store/{store,codec,queries}.ts`).

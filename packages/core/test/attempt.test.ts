@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@effect/vitest";
-import { Schema } from "effect";
+import { DateTime, Schema } from "effect";
 import { AttemptNumber, shouldAutoRetry } from "../src/lifecycle/attempt.ts";
 import {
   AgentFailure,
@@ -7,7 +7,7 @@ import {
   isAutoRetryable,
   RunawayFailure,
 } from "../src/lifecycle/attempt-failure.ts";
-import { EventId } from "../src/lifecycle/event.ts";
+import { DedupKey, Event, EventId } from "../src/lifecycle/event.ts";
 
 const infra = new InfraFailure({ message: "worker unreachable", cause: new Error("ECONNREFUSED") });
 const agent = new AgentFailure({ message: "agent reported failure" });
@@ -43,5 +43,17 @@ describe("construction is the only door", () => {
 
   it("empty ids are unconstructible", () => {
     expect(() => Schema.decodeUnknownSync(EventId)("")).toThrow();
+  });
+
+  it("an Event rejects payloads that SQLite cannot preserve as JSON", () => {
+    const decodeEvent = Schema.decodeUnknownSync(Event);
+    expect(() =>
+      decodeEvent({
+        id: EventId.make("event-1"),
+        dedupKey: DedupKey.make("loop/item/revision"),
+        payload: { callback: () => "not JSON" },
+        receivedAt: DateTime.makeUnsafe("2026-08-24T12:00:00Z"),
+      }),
+    ).toThrow();
   });
 });

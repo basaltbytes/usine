@@ -163,8 +163,8 @@ Local clones for searching real implementations and patterns:
 Search examples:
 
 ```bash
-# Find ServiceMap usage patterns
-grep -r "ServiceMap.Service" ~/Code/kitlangton/effect-solutions/
+# Find Context.Service usage patterns
+grep -r "Context.Service" ~/Code/kitlangton/effect-solutions/
 
 # Find Schema patterns in effect source
 grep -r "Schema.Class" ~/Code/effect-ts/effect/packages/effect/src/

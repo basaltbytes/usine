@@ -2,7 +2,7 @@
 
 Domain model for [usine](https://github.com/basaltbytes/usine), an agent-agnostic software factory: the Event → Run → Step → Attempt vocabulary every other block types against.
 
-Everything lives in the `lifecycle` cluster — how one piece of work moves through the engine: a deduplicated Event opens a Run, the Run's named Step is tried as Attempts, and the state machine closes it. The attempt-channel envelope schema arrives later as a sibling cluster.
+Everything lives in the `lifecycle` cluster: a deduplicated Event opens a Run, the Run's named Step is tried as Attempts, and the state machine closes it.
 
 ## What each export is
 
@@ -10,8 +10,8 @@ Everything lives in the `lifecycle` cluster — how one piece of work moves thro
 | --- | --- |
 | `Event`, `Run`, `Step`, `Attempt` | Entities — the four ledger rows, identity plus validated construction |
 | `EventId`, `RunId`, `AttemptId` | Value objects — branded ids; identities that cannot be swapped for each other |
-| `DedupKey`, `LoopName`, `StepName`, `AttemptNumber` | Value objects — branded primitives carrying a domain constraint |
-| `RunState.*`, `CancelReason`, `Attempt.Outcome` | State value objects — discriminated unions, each state carrying exactly its own data |
+| `DedupKey`, `ItemKey`, `LoopName`, `StepName`, `AttemptNumber` | Value objects — branded primitives carrying a domain constraint |
+| `RunState.*`, `CancelReason`, `Attempt.Outcome` | State value objects — discriminated unions, including a distinct canceled Attempt outcome |
 | `RunState.awaitApproval/start/succeed/fail/retry/cancelByOperator/supersede/revoke` | Typestate transitions — each accepts only the states it is legal on, so an illegal transition is a compile error |
 | `InfraFailure`, `AgentFailure`, `RunawayFailure` | Typed errors — the attempt-failure taxonomy |
 | `AttemptFailure.isAutoRetryable`, `Attempt.shouldAutoRetry` | Derivers — pure decision functions stating the auto-retry law (class rule; class rule capped by attempt count) |

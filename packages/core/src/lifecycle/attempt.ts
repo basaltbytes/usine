@@ -30,7 +30,13 @@ export class Failed extends Schema.TaggedClass<Failed>("AttemptOutcome/Failed")(
   failure: AttemptFailure,
 }) {}
 
-export const Outcome = Schema.Union([Succeeded, Failed]);
+/** Outcome — value object: the operator canceled the Run during this Attempt. */
+export class Canceled extends Schema.TaggedClass<Canceled>("AttemptOutcome/Canceled")(
+  "Canceled",
+  {},
+) {}
+
+export const Outcome = Schema.Union([Succeeded, Failed, Canceled]);
 export type Outcome = typeof Outcome.Type;
 
 /**

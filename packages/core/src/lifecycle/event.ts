@@ -24,6 +24,6 @@ export type DedupKey = typeof DedupKey.Type;
 export class Event extends Schema.Class<Event>("Event")({
   id: EventId,
   dedupKey: DedupKey,
-  payload: Schema.Unknown,
+  payload: Schema.Json,
   receivedAt: Schema.DateTimeUtc,
 }) {}

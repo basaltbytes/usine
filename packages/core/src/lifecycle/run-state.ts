@@ -84,6 +84,29 @@ export type RunState = typeof RunState.Type;
 
 export const isOpen = Schema.is(Open);
 
+/**
+ * Compile-checked tag tuple over a state partition: the argument list must
+ * name every `_tag` of `State` and nothing else. A foreign tag fails the
+ * `Tags` constraint; a missing tag collapses the parameters to `[never]`, so
+ * the call stops compiling. This keeps the unions above the single owner of
+ * each partition while read-side SQL gets a value-level tag list.
+ */
+const tagsOf =
+  <State extends RunState>() =>
+  <const Tags extends ReadonlyArray<State["_tag"]>>(
+    ...tags: [State["_tag"]] extends [Tags[number]] ? Tags : [never]
+  ) =>
+    tags;
+
+/** The open partition as `_tag` literals, for queries that filter stored rows by state. */
+export const OPEN_STATE_TAGS = tagsOf<Open>()("Pending", "Waiting", "Running");
+
+/**
+ * The states with no started attempt, as `_tag` literals — the precondition
+ * of `supersede` and `revoke`, for queries that filter stored rows by state.
+ */
+export const UNSTARTED_STATE_TAGS = tagsOf<Pending | Waiting>()("Pending", "Waiting");
+
 /** pending → waiting: park the run on its loop's approval gate. */
 export const awaitApproval = (_state: Pending): Waiting => new Waiting();
 
