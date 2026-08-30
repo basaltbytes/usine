@@ -1,5 +1,15 @@
 import { Repository } from "@usine/core";
-import { Clock, Context, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
+import {
+  Clock,
+  Context,
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Redacted,
+  Schema,
+  SynchronizedRef,
+} from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import type { HttpClientError } from "effect/unstable/http/HttpClientError";
 import { appJwtSigner } from "./jwt.ts";
@@ -30,6 +40,14 @@ import {
 const API_ROOT = "https://api.github.com";
 const API_VERSION = "2026-03-10";
 const TOKEN_MAX_LIFETIME_MS = 60 * 60 * 1_000;
+/** Renew the shared lease once its token has less than this left to live. */
+const LEASE_RENEWAL_MARGIN_MS = 5 * 60 * 1_000;
+
+/** What the orchestrator acts under: one discovered installation and one installation-wide token. */
+interface Lease {
+  readonly installation: Installation;
+  readonly token: InstallationToken;
+}
 
 const InstallationResponse = Schema.Struct({
   id: InstallationId,
@@ -92,6 +110,10 @@ const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema
 /**
  * Whole GitHub identity for one usine instance. The transport is supplied as
  * an Effect HttpClient, so the root entry remains platform-free.
+ *
+ * The orchestrator-side operations share one lease — a single discovery and
+ * installation-wide mint reused until the token nears expiry — so polling does
+ * not spend two App requests per call. Worker tokens are minted per call.
  */
 export class GitHubApp extends Context.Service<
   GitHubApp,
@@ -138,7 +160,7 @@ export class GitHubApp extends Context.Service<
           ),
         );
 
-      const installation = Effect.fn("GitHubApp.installation")(function* () {
+      const discoverInstallation = Effect.fn("GitHubApp.discoverInstallation")(function* () {
         const jwt = yield* sign();
         const [found, ...others] = yield* fetchJson(
           "discover-installation",
@@ -234,19 +256,42 @@ export class GitHubApp extends Context.Service<
         }
       });
 
+      const leaseRef = yield* SynchronizedRef.make(Option.none<Lease>());
+
+      /** The current lease, renewed under the margin; renewals are serialized by the ref. */
+      const lease = Effect.fn("GitHubApp.lease")(() =>
+        SynchronizedRef.modifyEffect(leaseRef, (current) =>
+          Effect.gen(function* () {
+            const now = yield* Clock.currentTimeMillis;
+            if (
+              Option.isSome(current) &&
+              DateTime.toEpochMillis(current.value.token.expiresAt) - now > LEASE_RENEWAL_MARGIN_MS
+            ) {
+              const kept: [Lease, Option.Option<Lease>] = [current.value, current];
+              return kept;
+            }
+            const installation = yield* discoverInstallation();
+            const token = yield* mintToken(installation.id, new InstallationWide());
+            const renewed: Lease = { installation, token };
+            const stored: [Lease, Option.Option<Lease>] = [renewed, Option.some(renewed)];
+            return stored;
+          }),
+        ),
+      );
+
       return {
-        installation,
-        installationToken: Effect.fn("GitHubApp.installationToken")(function* () {
-          const found = yield* installation();
-          return yield* mintToken(found.id, new InstallationWide());
-        }),
+        installation: Effect.fn("GitHubApp.installation")(() =>
+          Effect.map(lease(), (current) => current.installation),
+        ),
+        installationToken: Effect.fn("GitHubApp.installationToken")(() =>
+          Effect.map(lease(), (current) => current.token),
+        ),
         projectAccess: Effect.fn("GitHubApp.projectAccess")(function* (
           registry: ReadonlyArray<Repository.Name>,
         ) {
-          const found = yield* installation();
-          const token = yield* mintToken(found.id, new InstallationWide());
+          const { installation, token } = yield* lease();
           const installed = yield* installedRepositories(token);
-          return deriveProjectAccess(found, registry, installed);
+          return deriveProjectAccess(installation, registry, installed);
         }),
         workerToken: Effect.fn("GitHubApp.workerToken")((project: CoveredProject) =>
           mintToken(

@@ -133,8 +133,18 @@ describe("GitHubApp", () => {
         const worker = yield* app.workerToken(covered);
         assert.strictEqual(worker.scope._tag, "SingleRepository");
         assert.strictEqual(Redacted.value(worker.value), "worker-secret");
+        yield* app.workerToken(covered);
 
+        // One lease serves both orchestrator calls; each worker call mints afresh.
+        const discoveries = requests.filter((request) =>
+          request.url.endsWith("/app/installations?per_page=2"),
+        );
+        assert.strictEqual(discoveries.length, 1);
         const tokenRequests = requests.filter((request) => request.method === "POST");
+        const wideRequests = tokenRequests.filter((request) =>
+          Option.isNone(requestJson(request).repository_ids),
+        );
+        assert.strictEqual(wideRequests.length, 1);
         assert.strictEqual(tokenRequests.length, 3);
         for (const request of tokenRequests) {
           const body = requestJson(request);
@@ -148,9 +158,7 @@ describe("GitHubApp", () => {
         assert(Option.isSome(workerBody.repository_ids));
         assert.deepStrictEqual(workerBody.repository_ids.value, [99]);
 
-        const appRequest = requests.find((request) =>
-          request.url.endsWith("/app/installations?per_page=2"),
-        );
+        const appRequest = discoveries[0];
         assert(appRequest !== undefined);
         assert.strictEqual(appRequest.headers["x-github-api-version"], "2026-03-10");
         const jwt = appRequest.headers.authorization?.slice("Bearer ".length);
@@ -177,6 +185,28 @@ describe("GitHubApp", () => {
       }).pipe(Effect.provide(appLayer(client)));
     },
   );
+
+  it.live("renews the shared lease once its token is about to expire", () => {
+    const expiresAt = new Date(Date.now() + 3 * 60 * 1_000).toISOString();
+    let mints = 0;
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        if (request.method === "POST") {
+          mints += 1;
+          return jsonResponse(request, { token: `short-lived-${mints}`, expires_at: expiresAt });
+        }
+        return jsonResponse(request, [installation]);
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      yield* app.installationToken();
+      const second = yield* app.installationToken();
+      assert.strictEqual(mints, 2);
+      assert.strictEqual(Redacted.value(second.value), "short-lived-2");
+    }).pipe(Effect.provide(appLayer(client)));
+  });
 
   it.live("rejects a worker token when GitHub does not confirm its single-repo scope", () => {
     const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
