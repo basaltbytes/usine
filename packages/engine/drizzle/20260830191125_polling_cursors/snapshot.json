@@ -2,9 +2,7 @@
   "version": "7",
   "dialect": "sqlite",
   "id": "d63c0a4a-1148-40a5-b8e9-d823d74ed69c",
-  "prevIds": [
-    "29403b39-52c7-42ce-b665-c5fbba2ce9fe"
-  ],
+  "prevIds": ["29403b39-52c7-42ce-b665-c5fbba2ce9fe"],
   "ddl": [
     {
       "name": "usine_approvals",
@@ -353,13 +351,9 @@
       "table": "usine_workflow_commands"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "tableTo": "usine_runs",
-      "columnsTo": [
-        "run_id"
-      ],
+      "columnsTo": ["run_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -368,13 +362,9 @@
       "table": "usine_approvals"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "tableTo": "usine_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -383,15 +373,9 @@
       "table": "usine_approvals"
     },
     {
-      "columns": [
-        "run_id",
-        "step_name"
-      ],
+      "columns": ["run_id", "step_name"],
       "tableTo": "usine_steps",
-      "columnsTo": [
-        "run_id",
-        "step_name"
-      ],
+      "columnsTo": ["run_id", "step_name"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -400,13 +384,9 @@
       "table": "usine_attempts"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "tableTo": "usine_trigger_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -415,13 +395,9 @@
       "table": "usine_ignored_events"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "tableTo": "usine_trigger_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -430,13 +406,9 @@
       "table": "usine_runs"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "tableTo": "usine_runs",
-      "columnsTo": [
-        "run_id"
-      ],
+      "columnsTo": ["run_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -445,13 +417,9 @@
       "table": "usine_steps"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "tableTo": "usine_events",
-      "columnsTo": [
-        "event_id"
-      ],
+      "columnsTo": ["event_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -460,13 +428,9 @@
       "table": "usine_trigger_events"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "tableTo": "usine_runs",
-      "columnsTo": [
-        "run_id"
-      ],
+      "columnsTo": ["run_id"],
       "onUpdate": "NO ACTION",
       "onDelete": "NO ACTION",
       "nameExplicit": false,
@@ -475,83 +439,63 @@
       "table": "usine_workflow_commands"
     },
     {
-      "columns": [
-        "run_id",
-        "step_name"
-      ],
+      "columns": ["run_id", "step_name"],
       "nameExplicit": false,
       "name": "usine_steps_pk",
       "entityType": "pks",
       "table": "usine_steps"
     },
     {
-      "columns": [
-        "run_id",
-        "command"
-      ],
+      "columns": ["run_id", "command"],
       "nameExplicit": false,
       "name": "usine_workflow_commands_pk",
       "entityType": "pks",
       "table": "usine_workflow_commands"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "nameExplicit": false,
       "name": "usine_approvals_pk",
       "table": "usine_approvals",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "attempt_id"
-      ],
+      "columns": ["attempt_id"],
       "nameExplicit": false,
       "name": "usine_attempts_pk",
       "table": "usine_attempts",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "cursor_key"
-      ],
+      "columns": ["cursor_key"],
       "nameExplicit": false,
       "name": "usine_cursors_pk",
       "table": "usine_cursors",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_events_pk",
       "table": "usine_events",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_ignored_events_pk",
       "table": "usine_ignored_events",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "run_id"
-      ],
+      "columns": ["run_id"],
       "nameExplicit": false,
       "name": "usine_runs_pk",
       "table": "usine_runs",
       "entityType": "pks"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_trigger_events_pk",
       "table": "usine_trigger_events",
@@ -612,27 +556,21 @@
       "table": "usine_trigger_events"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_approvals_event_id_unique",
       "entityType": "uniques",
       "table": "usine_approvals"
     },
     {
-      "columns": [
-        "dedup_key"
-      ],
+      "columns": ["dedup_key"],
       "nameExplicit": false,
       "name": "usine_events_dedup_key_unique",
       "entityType": "uniques",
       "table": "usine_events"
     },
     {
-      "columns": [
-        "event_id"
-      ],
+      "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_runs_event_id_unique",
       "entityType": "uniques",

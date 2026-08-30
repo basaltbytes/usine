@@ -14,9 +14,9 @@ import {
   UsineConfig,
 } from "@usine/config";
 import { Instance, Run, Step } from "@usine/core";
-import { RunEngine, StepExecutor } from "@usine/engine";
+import { CursorEntry, CursorKey, CursorStore, RunEngine, StepExecutor } from "@usine/engine";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
-import { MarcbachmannCelLayer, Source } from "@usine/expression";
+import { ExpressionEngine, MarcbachmannCelLayer, Source } from "@usine/expression";
 import {
   ChangedIssue,
   ContentHash,
@@ -24,14 +24,17 @@ import {
   GitHubPolling,
   IssueSnapshot,
   PollCursor,
+  RepositoryNotModified,
   RepositoryChanges,
   type IssuePayload,
 } from "@usine/github";
 import {
   Context,
+  Clock,
   DateTime,
   Effect,
   Exit,
+  Fiber,
   FileSystem,
   Layer,
   Option,
@@ -39,6 +42,7 @@ import {
   Schema,
   Scope,
 } from "effect";
+import { TestClock } from "effect/testing";
 import { PollingTriggers } from "../src/index.ts";
 
 const watchedRepository = "basaltbytes/usine";
@@ -147,7 +151,64 @@ const runtimeLayer = (directory: Instance.Directory, github: GitHubPolling["Serv
   return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
 };
 
+const schedulerLayer = (github: GitHubPolling["Service"]) => {
+  const cursors = Layer.succeed(CursorStore)({
+    read: () => Effect.succeed(Option.none()),
+    write: () => Effect.void,
+  });
+  const expressions = Layer.succeed(ExpressionEngine)({
+    checkBoolean: () => Effect.die("unused"),
+    checkScalar: () => Effect.die("unused"),
+    evaluateBoolean: () => Effect.die("unused"),
+    evaluateScalar: () => Effect.die("unused"),
+  });
+  const runs = Layer.succeed(RunEngine)({
+    approve: () => Effect.die("unused"),
+    cancel: () => Effect.die("unused"),
+    inspect: () => Effect.die("unused"),
+    reconcile: () => Effect.die("unused"),
+    retry: () => Effect.die("unused"),
+    revoke: () => Effect.die("unused"),
+    submit: () => Effect.die("unused"),
+  });
+  const dependencies = Layer.mergeAll(
+    cursors,
+    expressions,
+    runs,
+    Layer.succeed(GitHubPolling, github),
+  );
+  return PollingTriggers.layer.pipe(Layer.provide(dependencies));
+};
+
 describe("PollingTriggers", () => {
+  it.effect("waits past poll_interval when GitHub recommends a longer delay", () => {
+    let changeRequests = 0;
+    const github: GitHubPolling["Service"] = {
+      changes: (_repository, cursor) =>
+        Effect.gen(function* () {
+          changeRequests += 1;
+          const now = yield* Clock.currentTimeMillis;
+          return new RepositoryNotModified({
+            cursor,
+            nextPollAt: Option.some(DateTime.makeUnsafe(now + 120_000)),
+          });
+        }),
+      snapshot: () => Effect.die("an unchanged repository has no snapshots"),
+    };
+
+    return Effect.gen(function* () {
+      const polling = yield* PollingTriggers;
+      const fiber = yield* Effect.forkChild(polling.run(instanceWith([issueLoop("start-dev")])));
+      yield* Effect.yieldNow;
+      assert.strictEqual(changeRequests, 1);
+      yield* TestClock.adjust("119 seconds");
+      assert.strictEqual(changeRequests, 1);
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual(changeRequests, 2);
+      yield* Fiber.interrupt(fiber);
+    }).pipe(Effect.provide(schedulerLayer(github)));
+  });
+
   it.live(
     "deduplicates snapshots across restart and emits new Events only for new matching content",
     () =>
@@ -200,12 +261,22 @@ describe("PollingTriggers", () => {
         );
         const firstPolling = Context.get(firstContext, PollingTriggers);
         const firstEngine = Context.get(firstContext, RunEngine);
+        const firstCursors = Context.get(firstContext, CursorStore);
+
+        yield* firstCursors.write(
+          new CursorEntry({
+            key: CursorKey.make(`github-poll:${watchedRepository}`),
+            value: { obsolete: true },
+          }),
+        );
 
         const coldStart = yield* firstPolling.poll(firstInstance);
         assert.strictEqual(coldStart.repositories, 1);
         assert.strictEqual(coldStart.changedItems, 1);
         const originalRun = claimedRun(coldStart);
         yield* waitForState(firstEngine, originalRun, "Waiting");
+        const initialCursor = (yield* Ref.get(seenCursors))[0];
+        assert(initialCursor !== undefined && Option.isNone(initialCursor.entityTag));
 
         const duplicate = yield* firstPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(duplicate), originalRun);

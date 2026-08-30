@@ -119,6 +119,22 @@ const runtimeLayer = (directory: Instance.Directory, app: GitHubApp["Service"]) 
   return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
 };
 
+const openRuntime = Effect.fn("integration.openRuntime")(function* (
+  directory: Instance.Directory,
+  app: GitHubApp["Service"],
+) {
+  const scope = yield* Scope.make();
+  const context = yield* Scope.provide(Layer.build(runtimeLayer(directory, app)), scope);
+  return {
+    scope,
+    polling: Context.get(context, PollingTriggers),
+    engine: Context.get(context, RunEngine),
+  };
+});
+
+const closeRuntime = ({ scope }: Effect.Success<ReturnType<typeof openRuntime>>) =>
+  Scope.close(scope, Exit.void);
+
 const runIdFrom = (
   submissions: Effect.Success<ReturnType<PollingTriggers["Service"]["poll"]>>["submissions"],
 ): Option.Option<Run.RunId> => {
@@ -166,57 +182,59 @@ describe("live GitHub polling", () => {
           ),
           () =>
             Effect.gen(function* () {
-              const firstScope = yield* Scope.make();
-              const firstContext = yield* Scope.provide(
-                Layer.build(runtimeLayer(runtimeDirectory, app)),
-                firstScope,
-              );
-              const firstPolling = Context.get(firstContext, PollingTriggers);
-              const firstEngine = Context.get(firstContext, RunEngine);
+              const first = yield* Effect.acquireUseRelease(
+                openRuntime(runtimeDirectory, app),
+                ({ engine, polling }) =>
+                  Effect.gen(function* () {
+                    yield* polling.poll(instance);
+                    yield* request(
+                      token,
+                      `${api}/issues/${settings.issueNumber}/labels`,
+                      { method: "POST", body: JSON.stringify({ labels: [label] }) },
+                      200,
+                    );
 
-              yield* firstPolling.poll(instance);
-              yield* request(
-                token,
-                `${api}/issues/${settings.issueNumber}/labels`,
-                { method: "POST", body: JSON.stringify({ labels: [label] }) },
-                200,
+                    const deadline = Date.now() + instance.config.settings.pollInterval * 1_000;
+                    let originalRun = Option.none<Run.RunId>();
+                    while (Option.isNone(originalRun) && Date.now() <= deadline) {
+                      const cycle = yield* polling.poll(instance);
+                      originalRun = runIdFrom(cycle.submissions);
+                      if (Option.isNone(originalRun)) yield* Effect.sleep("1 second");
+                    }
+                    assert(Option.isSome(originalRun), "the label change did not produce an Event");
+                    const runId = originalRun.value;
+                    const snapshot = yield* engine.inspect(runId);
+                    const eventPayload = Schema.decodeUnknownSync(IssuePayload)(
+                      snapshot.event.payload,
+                    );
+                    assert(eventPayload.labels.nodes.some(({ name }) => name === label));
+
+                    const unchanged = yield* polling.poll(instance);
+                    const unchangedRun = runIdFrom(unchanged.submissions);
+                    if (Option.isSome(unchangedRun)) {
+                      assert.strictEqual(unchangedRun.value, runId);
+                    }
+                    return { eventId: snapshot.event.id, runId };
+                  }),
+                closeRuntime,
               );
 
-              const deadline = Date.now() + instance.config.settings.pollInterval * 1_000;
-              let originalRun = Option.none<Run.RunId>();
-              while (Option.isNone(originalRun) && Date.now() <= deadline) {
-                const cycle = yield* firstPolling.poll(instance);
-                originalRun = runIdFrom(cycle.submissions);
-                if (Option.isNone(originalRun)) yield* Effect.sleep("1 second");
-              }
-              assert(Option.isSome(originalRun), "the label change did not produce an Event");
-              const runId = originalRun.value;
-              const firstSnapshot = yield* firstEngine.inspect(runId);
-              const eventPayload = Schema.decodeUnknownSync(IssuePayload)(
-                firstSnapshot.event.payload,
+              yield* Effect.acquireUseRelease(
+                openRuntime(runtimeDirectory, app),
+                ({ engine, polling }) =>
+                  Effect.gen(function* () {
+                    const afterRestart = yield* polling.poll(instance);
+                    const restartedRun = runIdFrom(afterRestart.submissions);
+                    if (Option.isSome(restartedRun)) {
+                      assert.strictEqual(restartedRun.value, first.runId);
+                    }
+                    assert.strictEqual(
+                      (yield* engine.inspect(first.runId)).event.id,
+                      first.eventId,
+                    );
+                  }),
+                closeRuntime,
               );
-              assert(eventPayload.labels.nodes.some(({ name }) => name === label));
-
-              const unchanged = yield* firstPolling.poll(instance);
-              const unchangedRun = runIdFrom(unchanged.submissions);
-              if (Option.isSome(unchangedRun)) assert.strictEqual(unchangedRun.value, runId);
-              yield* Scope.close(firstScope, Exit.void);
-
-              const secondScope = yield* Scope.make();
-              const secondContext = yield* Scope.provide(
-                Layer.build(runtimeLayer(runtimeDirectory, app)),
-                secondScope,
-              );
-              const secondPolling = Context.get(secondContext, PollingTriggers);
-              const secondEngine = Context.get(secondContext, RunEngine);
-              const afterRestart = yield* secondPolling.poll(instance);
-              const restartedRun = runIdFrom(afterRestart.submissions);
-              if (Option.isSome(restartedRun)) assert.strictEqual(restartedRun.value, runId);
-              assert.strictEqual(
-                (yield* secondEngine.inspect(runId)).event.id,
-                firstSnapshot.event.id,
-              );
-              yield* Scope.close(secondScope, Exit.void);
             }),
           () =>
             request(token, `${api}/labels/${encodeURIComponent(label)}`, { method: "DELETE" }, 204),

@@ -60,7 +60,7 @@ const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set([
 
 const canonicalContent = (value: Schema.Json): Schema.Json => {
   if (Array.isArray(value)) return value.map(canonicalContent);
-  if (value !== null && typeof value === "object") {
+  if (Schema.is(Schema.JsonObject)(value)) {
     return Object.fromEntries(
       Object.entries(value)
         .filter(([key]) => !TIMESTAMP_FIELDS.has(key))
@@ -238,6 +238,9 @@ export const GitHubPollingLayer = Layer.effect(
           : new ChangedPullRequest({ number: item.number, updatedAt: item.updatedAt }),
       );
       const entityTag = Schema.decodeUnknownOption(EntityTag)(response.headers.etag);
+      if (Option.isNone(entityTag)) {
+        return yield* invalidResponse("poll-repository-changes");
+      }
       return new RepositoryChanges({
         cursor: new PollCursor({ entityTag, watermark: newerWatermark(cursor, items) }),
         items,

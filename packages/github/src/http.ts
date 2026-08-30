@@ -1,5 +1,5 @@
-import { Effect, Option, Redacted } from "effect";
-import { HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { Option, Redacted } from "effect";
+import { HttpClientRequest } from "effect/unstable/http";
 import type { HttpClientError } from "effect/unstable/http/HttpClientError";
 import { GitHubApiError, type GitHubOperation } from "./model.ts";
 
@@ -23,11 +23,3 @@ export const transportError = (operation: GitHubOperation, error: HttpClientErro
         ? "The request to GitHub could not be sent"
         : `GitHub rejected the request with status ${error.response.status}`,
   });
-
-export const requireOk = (
-  operation: GitHubOperation,
-  response: HttpClientResponse.HttpClientResponse,
-) =>
-  HttpClientResponse.filterStatusOk(response).pipe(
-    Effect.mapError((error) => transportError(operation, error)),
-  );

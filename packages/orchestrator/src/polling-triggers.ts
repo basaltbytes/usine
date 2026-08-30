@@ -64,6 +64,11 @@ interface RepositoryCycle {
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
+interface ItemCycle {
+  readonly submissions: ReadonlyArray<SubmissionResult>;
+  readonly revocations: number;
+}
+
 const canonicalRepository = (repository: string): string => repository.toLowerCase();
 
 const cursorKey = (repository: ManagedRepo): CursorKey =>
@@ -90,14 +95,8 @@ const watchedRepositories = (instance: LoadedInstance): ReadonlyArray<WatchedRep
 const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKey>): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
 
-const decodeStoredCursor = (
-  value: Schema.Json,
-): Effect.Effect<StoredPollCursor, EnginePersistenceError> =>
-  Schema.decodeUnknownEffect(StoredPollCursor)(value, { onExcessProperty: "error" }).pipe(
-    Effect.mapError(
-      (cause) => new EnginePersistenceError({ operation: "decode GitHub polling cursor", cause }),
-    ),
-  );
+const decodeStoredCursor = (value: Schema.Json): Option.Option<StoredPollCursor> =>
+  Schema.decodeUnknownOption(StoredPollCursor)(value, { onExcessProperty: "error" });
 
 const encodeStoredCursor = (
   value: StoredPollCursor,
@@ -182,8 +181,10 @@ export class PollingTriggers extends Context.Service<
       ) {
         const stored = yield* cursors.read(cursorKey(watched.repository));
         if (Option.isNone(stored)) return PollCursor.empty;
-        const decoded = yield* decodeStoredCursor(stored.value);
-        return sameWatches(decoded.watches, watched.watches) ? decoded.cursor : PollCursor.empty;
+        const decoded = decodeStoredCursor(stored.value);
+        return Option.isSome(decoded) && sameWatches(decoded.value.watches, watched.watches)
+          ? decoded.value.cursor
+          : PollCursor.empty;
       });
 
       const writeCursor = Effect.fn("PollingTriggers.writeCursor")(function* (
@@ -202,18 +203,14 @@ export class PollingTriggers extends Context.Service<
       ) {
         const loops = watched.loops.filter(({ trigger }) => trigger.on === itemStream(item));
         if (loops.length === 0) {
-          const empty: RepositoryCycle = {
-            changedItems: 1,
-            submissions: [],
-            revocations: 0,
-            nextPollAt: Option.none(),
-          };
+          const empty: ItemCycle = { submissions: [], revocations: 0 };
           return empty;
         }
 
         const snapshot = yield* github.snapshot(watched.repository.name, item);
         const payload = yield* payloadFor(item, snapshot);
         const context = { repo: repositoryContext(watched.repository), item: payload };
+        const stableItemKey = itemKey(watched.repository, item);
         const submissions: Array<SubmissionResult> = [];
         let revocations = 0;
         for (const loop of loops) {
@@ -222,7 +219,6 @@ export class PollingTriggers extends Context.Service<
             environmentFor(loop.trigger.on),
             context,
           );
-          const stableItemKey = itemKey(watched.repository, item);
           if (!matches) {
             yield* runs.revoke(loop.name, stableItemKey);
             revocations += 1;
@@ -248,12 +244,7 @@ export class PollingTriggers extends Context.Service<
             ),
           );
         }
-        const result: RepositoryCycle = {
-          changedItems: 1,
-          submissions,
-          revocations,
-          nextPollAt: Option.none(),
-        };
+        const result: ItemCycle = { submissions, revocations };
         return result;
       });
 
@@ -282,7 +273,7 @@ export class PollingTriggers extends Context.Service<
         // leaves the old cursor so the next cycle safely re-polls.
         yield* writeCursor(watched, detected.cursor);
         return {
-          changedItems: itemCycles.reduce((sum, cycle) => sum + cycle.changedItems, 0),
+          changedItems: detected.items.length,
           submissions: itemCycles.flatMap(({ submissions }) => submissions),
           revocations: itemCycles.reduce((sum, cycle) => sum + cycle.revocations, 0),
           nextPollAt: detected.nextPollAt,
@@ -301,8 +292,8 @@ export class PollingTriggers extends Context.Service<
         });
       });
 
-      const run = Effect.fn("PollingTriggers.run")(function* (instance: LoadedInstance) {
-        while (true) {
+      const run = Effect.fn("PollingTriggers.run")((instance: LoadedInstance) =>
+        Effect.gen(function* () {
           const startedAt = yield* Clock.currentTimeMillis;
           const recommended = yield* poll(instance).pipe(
             Effect.map(({ nextPollAt }) => nextPollAt),
@@ -317,11 +308,8 @@ export class PollingTriggers extends Context.Service<
           });
           const now = yield* Clock.currentTimeMillis;
           yield* Effect.sleep(Duration.millis(Math.max(0, target - now)));
-        }
-        // The loop is intentionally endless; this keeps its public success
-        // channel `never` without a narrowing assertion.
-        return yield* Effect.never;
-      });
+        }).pipe(Effect.forever),
+      );
 
       return { poll, run };
     }),

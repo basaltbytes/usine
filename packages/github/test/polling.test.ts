@@ -225,6 +225,16 @@ describe("GitHubPolling", () => {
     },
   );
 
+  it.effect("rejects change responses that cannot continue conditional polling", () => {
+    const client = HttpClient.make((request) => Effect.succeed(response(request, [])));
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const failure = yield* polling.changes(repository, PollCursor.empty).pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
   it.effect("hashes canonical issue content without any timestamp fields", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
     const firstVersion = issuePayload({
