@@ -4,6 +4,8 @@ The durable run engine for [usine](https://github.com/basaltbytes/usine). It tur
 
 The default adapter stores usine's Event ledger and Run projections beside Effect's workflow tables in `<instance>/.usine/runtime.sqlite`. Submitting the same dedup key joins the original Run, including after a restart.
 
+`CursorStore` keeps typed keys with JSON values in that database. Trigger adapters use it for efficiency-only cursors such as GitHub watermarks and ETags; deleting a cursor causes a safe replay because the Event ledger remains the source of deduplication.
+
 ## Runtime rules
 
 - Approval-gated Runs wait for an approval Event before their first Attempt.
@@ -19,7 +21,7 @@ The root entry (`@usine/engine`) is platform-free; the Node local adapter lives 
 
 ```ts
 import { Effect, Layer } from "effect"
-import { InstanceDirectory, RunEngine, StepExecutor } from "@usine/engine"
+import { CursorStore, InstanceDirectory, RunEngine, StepExecutor } from "@usine/engine"
 import { layer } from "@usine/engine/local-sqlite"
 
 const StepExecutorLive = Layer.succeed(StepExecutor)({
@@ -32,7 +34,8 @@ const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(
 
 const program = Effect.gen(function* () {
   const engine = yield* RunEngine
-  // submit, approve, retry, cancel, revoke, inspect, or reconcile
+  const cursors = yield* CursorStore
+  // use the engine and cursor store
 })
 ```
 
