@@ -2,10 +2,10 @@
 walkthrough: 1
 title: GitHub App identity and repository-scoped credentials
 pr: 50
-commit: 90d9df8640155b38f847d903e83bd5694bcfdecd
+commit: 7a52510cb31b0e832d46c5071b3439d33d7e379b
 meta:
   pr: "50"
-  commit: 90d9df86
+  commit: 7a52510c
   scope: "@usine/github"
   balade-authoring: 1.33.0
 ---
@@ -22,9 +22,11 @@ The change also moves the validated `owner/name` value object into `@usine/core`
 
 {% group label="GitHub App identity" %}
 {% section id="identity-service" title="One service owns discovery and token minting" icon="shield-check" related=["project-coverage","local-credentials"] %}
-`GitHubApp` exposes four operations. `installation()` validates App installation state. `installationToken()` returns the orchestrator token. `projectAccess()` resolves each registry entry against the installation. `workerToken()` accepts only the covered-project variant.
+`GitHubApp` exposes four operations. `installation()` validates App installation state. `installationToken()` returns the orchestrator token. `projectAccess()` resolves each registry entry against the installation. `workerToken()` accepts only the covered-project variant. The first three share one lease — a single discovery and installation-wide mint, held in a `SynchronizedRef` and renewed once the token has under five minutes left — so polling spends no App requests between renewals. `workerToken()` mints on every call.
 
-{% code file="packages/github/src/github-app.ts" from=96 to=108 expect="export class GitHubApp extends Context.Service<" /%}
+{% code file="packages/github/src/github-app.ts" from=118 to=130 expect="export class GitHubApp extends Context.Service<" /%}
+
+{% code file="packages/github/src/github-app.ts" from=259 to=280 expect="      const leaseRef = yield* SynchronizedRef.make(Option.none<Lease>());" /%}
 
 The layer imports the private key once, when it is built: a key WebCrypto cannot import fails composition with `AppAuthenticationError` rather than the first request. Each App-authenticated request then signs a short JWT with RS256, `iat` backdated one minute for clock skew and `exp` nine minutes ahead, returned as a redacted value. The import accepts PKCS#1 and PKCS#8 encodings through the package's platform-free WebCrypto path.
 
@@ -32,7 +34,7 @@ The layer imports the private key once, when it is built: a key WebCrypto cannot
 
 Installation discovery requests at most two records because the factory requires exactly one installation. It returns typed errors for no installation, multiple installations, suspension, and missing required permissions. Every GitHub call goes through one `fetchJson` path: a non-2xx status or transport failure becomes `GitHubApiError`, a body that does not match the API contract becomes `InvalidGitHubResponseError`, and defects stay defects.
 
-{% code file="packages/github/src/github-app.ts" from=141 to=174 expect="      const installation = Effect.fn(\"GitHubApp.installation\")(function* () {" collapsed=true /%}
+{% code file="packages/github/src/github-app.ts" from=163 to=196 expect="      const discoverInstallation = Effect.fn(\"GitHubApp.discoverInstallation\")(function* () {" collapsed=true /%}
 
 The required permission object is also the body sent for both token shapes. It includes read access for checks and metadata, and write access for contents, issues, and pull requests. It does not request workflow or administration permissions.
 
@@ -40,7 +42,7 @@ The required permission object is also the body sent for both token shapes. It i
 {% /section %}
 
 {% section id="project-coverage" title="Coverage isolates registry drift before worker minting" icon="filter" related=["identity-service"] %}
-`projectAccess()` first mints an installation-wide token and pages through every repository visible to that installation. It then performs a case-insensitive comparison with the registry. The result keeps registry order and contains one value per managed repo:
+`projectAccess()` takes the shared lease and pages through every repository visible to that installation. It then performs a case-insensitive comparison with the registry. The result keeps registry order and contains one value per managed repo:
 
 - `CoveredProject` carries the installation ID and GitHub repository ID needed for minting.
 - `ProjectNotInstalledError` reports drift for only that project. It does not fail covered siblings.
@@ -55,8 +57,7 @@ Worker minting sends `repository_ids` with the covered project's single numeric 
 
 ```pseudo
 resolve registry
-  discover one valid installation
-  mint installation-wide token
+  take the shared lease (discover one valid installation, mint installation-wide token; renewed near expiry)
   list all installed repositories
   return covered or project-local error per entry
 
@@ -67,7 +68,7 @@ mint worker token
   return redacted single-repository token
 ```
 
-{% code file="packages/github/src/github-app.ts" from=176 to=212 expect="      const mintToken = Effect.fn(\"GitHubApp.mintToken\")(function* (" /%}
+{% code file="packages/github/src/github-app.ts" from=198 to=234 expect="      const mintToken = Effect.fn(\"GitHubApp.mintToken\")(function* (" /%}
 {% /section %}
 {% /group %}
 
@@ -85,7 +86,7 @@ Credential contents are intentionally omitted from this walkthrough. Review the 
 
 The README gives the operator the matching manual procedure: create one account-scoped App, grant only the required repository permissions, install it on all managed repos, secure the runtime file, and compose the platform and HTTP layers.
 
-{% code file="packages/github/README.md" from=52 to=80 expect="## Compose the services" /%}
+{% code file="packages/github/README.md" from=52 to=82 expect="## Compose the services" /%}
 {% /section %}
 {% /group %}
 
@@ -94,8 +95,8 @@ The README gives the operator the matching manual procedure: create one account-
 The unit suite uses a generated RSA key and a fake HTTP client. It checks the request bodies and cryptographic signature, not only returned variants. Separate failure scenarios cover GitHub scope mismatch, an excessive token lifetime, permission drift, and adapter defects.
 
 {% tests %}
-{% test name="App JWT and both token shapes" kind="unit" ref="packages/github/test/github-app.test.ts" asserts=["verifies the RS256 signature and bounded JWT claims","requests the required permission set without workflows","uses one repository ID for the worker token","keeps returned token values redacted"] %}The fake GitHub API drives installation-wide minting, mixed covered and missing registry entries, and worker minting in one flow.{% /test %}
-{% test name="Boundary failures remain typed" kind="unit" ref="packages/github/test/github-app.test.ts" asserts=["rejects a response that confirms multiple repositories","rejects a reported lifetime over one hour","reports missing write permission"] %}These cases verify the response checks and the typed error channel.{% /test %}
+{% test name="App JWT and both token shapes" kind="unit" ref="packages/github/test/github-app.test.ts" asserts=["verifies the RS256 signature and bounded JWT claims","requests the required permission set without workflows","uses one repository ID for the worker token","keeps returned token values redacted","reuses one lease across orchestrator calls while worker tokens mint afresh"] %}The fake GitHub API drives installation-wide minting, mixed covered and missing registry entries, and worker minting in one flow.{% /test %}
+{% test name="Boundary failures remain typed" kind="unit" ref="packages/github/test/github-app.test.ts" asserts=["renews the lease once its token nears expiry","rejects a response that confirms multiple repositories","rejects a reported lifetime over one hour","reports missing write permission"] %}These cases verify the response checks and the typed error channel.{% /test %}
 {% test name="Local credential precedence and permissions" kind="unit" ref="packages/github/test/local-secrets.test.ts" asserts=["loads a 0600 file","allows one environment field to override its file field","skips file access for complete environment credentials","rejects a group-readable file"] %}The tests also check that object stringification does not expose the private key.{% /test %}
 {% test name="Operator-created App check" kind="http" ref="packages/github/test/integration/github-app.test.ts" asserts=["mints installation-wide and single-repository tokens","posts with the scoped token","observes the expected bot login","deletes the temporary comment"] %}This opt-in test exercises a real App and disposable issue. It is excluded from the default test command and runs through `test:integration`.{% /test %}
 {% /tests %}
