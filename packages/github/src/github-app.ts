@@ -11,8 +11,8 @@ import {
   SynchronizedRef,
 } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
-import type { HttpClientError } from "effect/unstable/http/HttpClientError";
 import { appJwtSigner } from "./jwt.ts";
+import { API_ROOT, authorized, transportError } from "./http.ts";
 import {
   type AppAuthenticationError,
   AppPermissionError,
@@ -37,8 +37,6 @@ import {
   missingPermissions,
 } from "./model.ts";
 
-const API_ROOT = "https://api.github.com";
-const API_VERSION = "2026-03-10";
 const TOKEN_MAX_LIFETIME_MS = 60 * 60 * 1_000;
 /** Renew the shared lease once its token has less than this left to live. */
 const LEASE_RENEWAL_MARGIN_MS = 5 * 60 * 1_000;
@@ -73,24 +71,6 @@ const TokenResponse = Schema.Struct({
   expiresAt: Schema.DateTimeUtcFromString,
   repositories: Schema.OptionFromOptionalKey(Schema.Array(RepositoryResponse)),
 }).pipe(Schema.encodeKeys({ expiresAt: "expires_at" }));
-
-const authorized = (credential: Redacted.Redacted<string>) =>
-  HttpClientRequest.setHeaders({
-    accept: "application/vnd.github+json",
-    authorization: `Bearer ${Redacted.value(credential)}`,
-    "user-agent": "usine",
-    "x-github-api-version": API_VERSION,
-  });
-
-const apiError = (operation: GitHubOperation, error: HttpClientError) =>
-  new GitHubApiError({
-    operation,
-    status: error.response === undefined ? Option.none() : Option.some(error.response.status),
-    message:
-      error.response === undefined
-        ? "The request to GitHub could not be sent"
-        : `GitHub rejected the request with status ${error.response.status}`,
-  });
 
 /** One token mint, described by its scope: what to ask for and what to call it. */
 const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema.Json } =>
@@ -146,7 +126,7 @@ export class GitHubApp extends Context.Service<
         schema: S,
       ): Effect.Effect<S["Type"], GitHubApiError | InvalidGitHubResponseError> =>
         http.execute(request).pipe(
-          Effect.mapError((error) => apiError(operation, error)),
+          Effect.mapError((error) => transportError(operation, error)),
           Effect.flatMap((response) =>
             HttpClientResponse.schemaBodyJson(schema)(response).pipe(
               Effect.mapError(
