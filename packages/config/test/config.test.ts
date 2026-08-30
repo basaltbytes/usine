@@ -61,6 +61,11 @@ describe("ConfigParser", () => {
       expect(configuredWorker.workers[0]?.maxConcurrentAttempts).toBe(1);
       expect(configuredWorker.workers[1]?.maxConcurrentAttempts).toBe(2);
 
+      const noWorkers = yield* parser
+        .parseUsineYaml(InstancePath.make("usine.yaml"), "version: 1\nrepos: []\nworkers: []\n")
+        .pipe(Effect.flip);
+      expect(noWorkers.stage).toBe("schema");
+
       const failure = yield* parser
         .parseUsineYaml(InstancePath.make("usine.yaml"), "version: 1\nrepos: []\nenabled: true\n")
         .pipe(Effect.flip);

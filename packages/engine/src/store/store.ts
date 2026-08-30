@@ -1,4 +1,15 @@
-import { Attempt, AttemptFailure, Event, Item, Loop, Run, RunState } from "@usine/core";
+import {
+  Attempt,
+  AttemptChannel,
+  AttemptFailure,
+  Event,
+  Item,
+  Loop,
+  Run,
+  RunState,
+  StepResult,
+  Worker,
+} from "@usine/core";
 import { Cause, Context, DateTime, Effect, Exit, Layer, Option, Schema } from "effect";
 import type { Workflow } from "effect/unstable/workflow";
 import { RunDatabase } from "../database/database.ts";
@@ -10,6 +21,9 @@ import {
   RunSnapshot,
   StepExecution,
   Submission,
+  TranscriptDirection,
+  TranscriptEntry,
+  TranscriptQuery,
   type RunEngineError,
   type WorkflowCommand,
 } from "../model.ts";
@@ -143,7 +157,10 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("park run for approval"));
 
-  const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (runId: Run.RunId) {
+  const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (
+    runId: Run.RunId,
+    worker: Worker.Name,
+  ) {
     return yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
@@ -192,6 +209,7 @@ const makeRunStore = Effect.gen(function* () {
           id: attemptId,
           runId,
           stepName: current.step.name,
+          worker,
           number,
           startedAt,
           outcome: Option.none(),
@@ -209,6 +227,9 @@ const makeRunStore = Effect.gen(function* () {
               openedAt: current.run.openedAt,
             }),
             step: current.step,
+            repository: current.repository,
+            revision: current.revision,
+            task: current.task,
           }),
         });
       }),
@@ -217,7 +238,7 @@ const makeRunStore = Effect.gen(function* () {
 
   const succeedAttempt = Effect.fn("RunStore.succeedAttempt")(function* (
     attempt: Attempt.Attempt,
-    result: string,
+    result: StepResult.StepResult,
   ) {
     yield* database.transaction((transaction) =>
       Effect.gen(function* () {
@@ -377,9 +398,20 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("list recoverable runs"));
 
+  const appendTranscript = Effect.fn("RunStore.appendTranscript")(function* (
+    direction: TranscriptDirection,
+    envelope: AttemptChannel.Envelope,
+  ) {
+    yield* queries.appendTranscript(direction, envelope, yield* DateTime.now);
+  }, persistence("append Attempt transcript"));
+
+  const transcript = Effect.fn("RunStore.transcript")(function* (query: TranscriptQuery) {
+    return yield* queries.transcript(query);
+  }, persistence("read Attempt transcript"));
+
   const reconcileCompletion = Effect.fn("RunStore.reconcileCompletion")(function* (
     runId: Run.RunId,
-    result: Workflow.Result<string, AttemptFailure.AttemptFailure>,
+    result: Workflow.Result<StepResult.StepResult, AttemptFailure.AttemptFailure>,
   ) {
     if (result._tag !== "Complete") return;
     yield* database.transaction((transaction) =>
@@ -407,6 +439,7 @@ const makeRunStore = Effect.gen(function* () {
 
   return {
     approve,
+    appendTranscript,
     beginAttempt,
     cancel,
     claimQueued,
@@ -428,6 +461,7 @@ const makeRunStore = Effect.gen(function* () {
     revoke,
     snapshot: (runId: Run.RunId) => queries.snapshot(runId).pipe(persistence("read run")),
     succeedAttempt,
+    transcript,
   } as const;
 });
 
@@ -444,8 +478,13 @@ export class RunStore extends Context.Service<
       runId: Run.RunId,
       approval: Event.Event,
     ) => Effect.Effect<void, RunEngineError>;
+    readonly appendTranscript: (
+      direction: TranscriptDirection,
+      envelope: AttemptChannel.Envelope,
+    ) => Effect.Effect<void, RunEngineError>;
     readonly beginAttempt: (
       runId: Run.RunId,
+      worker: Worker.Name,
     ) => Effect.Effect<AttemptStarted | AttemptRecoveryFailed, RunEngineError>;
     readonly cancel: (runId: Run.RunId) => Effect.Effect<boolean, RunEngineError>;
     readonly claimQueued: (
@@ -474,7 +513,7 @@ export class RunStore extends Context.Service<
     ) => Effect.Effect<Claim, RunEngineError>;
     readonly reconcileCompletion: (
       runId: Run.RunId,
-      result: Workflow.Result<string, AttemptFailure.AttemptFailure>,
+      result: Workflow.Result<StepResult.StepResult, AttemptFailure.AttemptFailure>,
     ) => Effect.Effect<void, RunEngineError>;
     readonly recoverable: Effect.Effect<ReadonlyArray<RecoverableRun>, RunEngineError>;
     readonly retry: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
@@ -485,8 +524,11 @@ export class RunStore extends Context.Service<
     readonly snapshot: (runId: Run.RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
     readonly succeedAttempt: (
       attempt: Attempt.Attempt,
-      result: string,
+      result: StepResult.StepResult,
     ) => Effect.Effect<void, RunEngineError>;
+    readonly transcript: (
+      query: TranscriptQuery,
+    ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunEngineError>;
   }
 >()("@usine/engine/internal/RunStore") {
   static readonly layer = Layer.effect(RunStore, makeRunStore);

@@ -1,9 +1,10 @@
-import { AttemptFailure, Run } from "@usine/core";
+import { AttemptFailure, Run, StepResult } from "@usine/core";
 import { Effect, Option, Result, Schema } from "effect";
 import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { StepExecutor } from "./step-executor.ts";
 import { AttemptRecoveryFailed, RunStore } from "./store/store.ts";
 import {
+  AttemptCancellationError,
   EnginePersistenceError,
   RunNotFoundError,
   RunOperationRejectedError,
@@ -18,7 +19,7 @@ type WorkflowPayload = typeof WorkflowPayload.Type;
 
 export const DurableRun = Workflow.make("@usine/engine/DurableRun", {
   payload: WorkflowPayload,
-  success: Schema.String,
+  success: StepResult.StepResult,
   error: AttemptFailure.AttemptFailure,
   idempotencyKey: ({ submission }) => submission.event.dedupKey,
 }).annotate(Workflow.SuspendOnFailure, true);
@@ -29,6 +30,11 @@ const asAttemptFailure = <A, R>(
   effect: Effect.Effect<A, RunEngineError, R>,
 ): Effect.Effect<A, AttemptFailure.AttemptFailure, R> =>
   Effect.catchTags(effect, {
+    AttemptCancellationError: (error: AttemptCancellationError) =>
+      new AttemptFailure.InfraFailure({
+        message: `Attempt ${error.attemptId} cancellation failed`,
+        cause: error,
+      }),
     EnginePersistenceError: (error: EnginePersistenceError) =>
       new AttemptFailure.InfraFailure({
         message: `Engine persistence failed during ${error.operation}`,
@@ -72,26 +78,41 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
   }
 
   while (true) {
-    const started = yield* store.beginAttempt(runId).pipe(asAttemptFailure);
-    if (started instanceof AttemptRecoveryFailed) {
+    const attempted = yield* Effect.acquireUseRelease(
+      executor.reserve(submission),
+      (lease) =>
+        Effect.gen(function* () {
+          const started = yield* store.beginAttempt(runId, lease.worker).pipe(asAttemptFailure);
+          if (started instanceof AttemptRecoveryFailed) return started;
+
+          // Port ACL: the executor's contract is the typed AttemptFailure channel.
+          // A defect escaping the adapter is infrastructure breakage around the
+          // agent, so it is translated before reaching the durable workflow.
+          const result = yield* executor
+            .execute(started.execution, {
+              append: (direction, envelope) =>
+                store.appendTranscript(direction, envelope).pipe(asAttemptFailure),
+            })
+            .pipe(
+              Effect.catchDefect(
+                (defect) =>
+                  new AttemptFailure.InfraFailure({
+                    message: "The step executor crashed outside its typed failure channel",
+                    cause: defect,
+                  }),
+              ),
+              Effect.result,
+            );
+          return { _tag: "AttemptExecuted" as const, result, started };
+        }),
+      (lease) => lease.release,
+    );
+    if (attempted instanceof AttemptRecoveryFailed) {
       yield* continueWithNewest(store, runId).pipe(asAttemptFailure);
-      return yield* started.failure;
+      return yield* attempted.failure;
     }
 
-    // Port ACL: the executor's contract is the typed AttemptFailure channel.
-    // A defect escaping the adapter is infrastructure breakage around the
-    // agent — translate it, or the workflow suspends and the projection stays
-    // Running with an open Attempt until the next reconcile.
-    const result = yield* executor.execute(started.execution).pipe(
-      Effect.catchDefect(
-        (defect) =>
-          new AttemptFailure.InfraFailure({
-            message: "The step executor crashed outside its typed failure channel",
-            cause: defect,
-          }),
-      ),
-      Effect.result,
-    );
+    const { result, started } = attempted;
     if (Result.isSuccess(result)) {
       yield* store.succeedAttempt(started.execution.attempt, result.success).pipe(asAttemptFailure);
       yield* continueWithNewest(store, runId).pipe(asAttemptFailure);

@@ -1,4 +1,4 @@
-import { Loop as CoreLoop, Repository, Step } from "@usine/core";
+import { Loop as CoreLoop, Repository, Step, Worker as CoreWorker } from "@usine/core";
 import { Source } from "@usine/expression";
 import { Cron as EffectCron, DateTime, Effect, Option, Result, Schema } from "effect";
 
@@ -53,8 +53,8 @@ export type AgentName = typeof AgentName.Type;
 export const LoopName = CoreLoop.LoopName.check(KebabCase);
 export type LoopName = typeof LoopName.Type;
 
-export const WorkerName = Slug.pipe(Schema.brand("WorkerName"));
-export type WorkerName = typeof WorkerName.Type;
+export const WorkerName = CoreWorker.Name;
+export type WorkerName = CoreWorker.Name;
 
 export const RepoName = Repository.Name;
 export type RepoName = Repository.Name;
@@ -142,7 +142,7 @@ const WorkerFromYaml = Worker.pipe(
 );
 
 const ManagedRepos = Schema.Array(ManagedRepo).check(uniqueNames);
-const Workers = Schema.Array(WorkerFromYaml).check(uniqueNames);
+const Workers = Schema.Array(WorkerFromYaml).check(Schema.isNonEmpty(), uniqueNames);
 
 /** Strict, factory-wide authored config from usine.yaml. */
 export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")({

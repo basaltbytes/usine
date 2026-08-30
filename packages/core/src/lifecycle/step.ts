@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { StepResult } from "../step-result.ts";
 import { RunId } from "./run.ts";
 
 /**
@@ -17,5 +18,5 @@ export type StepName = typeof StepName.Type;
 export class Step extends Schema.Class<Step>("Step")({
   runId: RunId,
   name: StepName,
-  result: Schema.Option(Schema.String),
+  result: Schema.Option(StepResult),
 }) {}

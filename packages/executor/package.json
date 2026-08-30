@@ -1,7 +1,7 @@
 {
   "name": "@usine/executor",
   "version": "0.0.1",
-  "description": "The usine executor seam: the five-operation worker contract, with local and exe.dev executors.",
+  "description": "The usine five-operation worker contract and Node local executor.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -17,16 +17,26 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./local": {
+      "types": "./dist/local/index.d.ts",
+      "default": "./dist/local/index.js"
     }
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "check": "tsc -p tsconfig.check.json"
+  },
+  "dependencies": {
+    "@usine/core": "workspace:*",
+    "@usine/run-host": "workspace:*"
   },
   "devDependencies": {
     "@usine/tsconfig": "workspace:*",
+    "effect": "catalog:",
     "typescript": "catalog:"
   },
   "peerDependencies": {

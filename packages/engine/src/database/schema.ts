@@ -1,4 +1,14 @@
-import { Attempt, Event, Item, Loop, Run, Step } from "@usine/core";
+import {
+  Attempt,
+  AttemptChannel,
+  Event,
+  Item,
+  Loop,
+  Repository,
+  Run,
+  Step,
+  Worker,
+} from "@usine/core";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -14,6 +24,7 @@ import {
   APPROVAL_REQUIREMENTS,
   IGNORED_REASONS,
   WORKFLOW_COMMANDS,
+  TRANSCRIPT_DIRECTIONS,
   type ApprovalRequirement,
   type IgnoreReason,
   type WorkflowCommand,
@@ -41,6 +52,18 @@ export const triggerEvents = snakeCase.table(
     loopName: text().$type<Loop.LoopName>().notNull(),
     stepName: text().$type<Step.StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
+    repository: text()
+      .$type<Repository.Name>()
+      .notNull()
+      .default(Repository.Name.make("unknown/unknown")),
+    revision: text()
+      .$type<Repository.Revision>()
+      .notNull()
+      .default(Repository.Revision.make("HEAD")),
+    task: text()
+      .$type<AttemptChannel.Task>()
+      .notNull()
+      .default(AttemptChannel.Task.make("Migrated run context unavailable")),
   },
   (table) => [
     check("usine_trigger_events_approval", sql`${table.approval} in ('none', 'required')`),
@@ -72,9 +95,15 @@ export const steps = snakeCase.table(
       .notNull()
       .references(() => runs.runId),
     stepName: text().$type<Step.StepName>().notNull(),
-    result: text(),
+    result: text({ mode: "json" }).$type<unknown>(),
   },
-  (table) => [primaryKey({ columns: [table.runId, table.stepName] })],
+  (table) => [
+    primaryKey({ columns: [table.runId, table.stepName] }),
+    check(
+      "usine_steps_result_json_valid",
+      sql`${table.result} is null or json_valid(${table.result})`,
+    ),
+  ],
 );
 
 export const attempts = snakeCase.table(
@@ -83,6 +112,7 @@ export const attempts = snakeCase.table(
     attemptId: text().$type<Attempt.AttemptId>().primaryKey(),
     runId: text().$type<Run.RunId>().notNull(),
     stepName: text().$type<Step.StepName>().notNull(),
+    workerName: text().$type<Worker.Name>().notNull().default(Worker.Name.make("local")),
     attemptNumber: integer({ mode: "number" }).$type<Attempt.AttemptNumber>().notNull(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
@@ -101,6 +131,35 @@ export const attempts = snakeCase.table(
       columns: [table.runId, table.stepName],
       foreignColumns: [steps.runId, steps.stepName],
     }),
+  ],
+);
+
+export const attemptTranscripts = snakeCase.table(
+  "usine_attempt_transcripts",
+  {
+    sequence: integer({ mode: "number" }).primaryKey({ autoIncrement: true }),
+    attemptId: text()
+      .$type<Attempt.AttemptId>()
+      .notNull()
+      .references(() => attempts.attemptId),
+    direction: text({ enum: TRANSCRIPT_DIRECTIONS }).notNull(),
+    channelSequence: integer({ mode: "number" }).$type<AttemptChannel.Sequence>().notNull(),
+    envelope: text({ mode: "json" }).$type<unknown>().notNull(),
+    receivedAt: text().notNull(),
+  },
+  (table) => [
+    check(
+      "usine_attempt_transcripts_direction",
+      sql`${table.direction} in ('inbound', 'outbound')`,
+    ),
+    check("usine_attempt_transcripts_sequence", sql`${table.channelSequence} >= 1`),
+    check("usine_attempt_transcripts_envelope_json_valid", sql`json_valid(${table.envelope})`),
+    uniqueIndex("usine_attempt_transcript_envelope").on(
+      table.attemptId,
+      table.direction,
+      table.channelSequence,
+    ),
+    index("usine_attempt_transcript_tail").on(table.attemptId, table.sequence),
   ],
 );
 
