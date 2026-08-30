@@ -1,0 +1,691 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "d63c0a4a-1148-40a5-b8e9-d823d74ed69c",
+  "prevIds": [
+    "29403b39-52c7-42ce-b665-c5fbba2ce9fe"
+  ],
+  "ddl": [
+    {
+      "name": "usine_approvals",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_attempts",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_cursors",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_ignored_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_runs",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_steps",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_trigger_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_workflow_commands",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "usine_approvals"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_approvals"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_id",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "step_name",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_number",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outcome_json",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cursor_key",
+      "entityType": "columns",
+      "table": "usine_cursors"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "value_json",
+      "entityType": "columns",
+      "table": "usine_cursors"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "dedup_key",
+      "entityType": "columns",
+      "table": "usine_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "payload_json",
+      "entityType": "columns",
+      "table": "usine_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "received_at",
+      "entityType": "columns",
+      "table": "usine_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_ignored_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reason",
+      "entityType": "columns",
+      "table": "usine_ignored_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "loop_name",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state_json",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "opened_at",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "usine_steps"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "step_name",
+      "entityType": "columns",
+      "table": "usine_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "result",
+      "entityType": "columns",
+      "table": "usine_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_key",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "loop_name",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "step_name",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "approval",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "usine_workflow_commands"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "command",
+      "entityType": "columns",
+      "table": "usine_workflow_commands"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "tableTo": "usine_runs",
+      "columnsTo": [
+        "run_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_approvals_run_id_usine_runs_run_id_fk",
+      "entityType": "fks",
+      "table": "usine_approvals"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "tableTo": "usine_events",
+      "columnsTo": [
+        "event_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_approvals_event_id_usine_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_approvals"
+    },
+    {
+      "columns": [
+        "run_id",
+        "step_name"
+      ],
+      "tableTo": "usine_steps",
+      "columnsTo": [
+        "run_id",
+        "step_name"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_attempts_run_id_step_name_usine_steps_run_id_step_name_fk",
+      "entityType": "fks",
+      "table": "usine_attempts"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "tableTo": "usine_trigger_events",
+      "columnsTo": [
+        "event_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_ignored_events_event_id_usine_trigger_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_ignored_events"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "tableTo": "usine_trigger_events",
+      "columnsTo": [
+        "event_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_runs_event_id_usine_trigger_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_runs"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "tableTo": "usine_runs",
+      "columnsTo": [
+        "run_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_steps_run_id_usine_runs_run_id_fk",
+      "entityType": "fks",
+      "table": "usine_steps"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "tableTo": "usine_events",
+      "columnsTo": [
+        "event_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_trigger_events_event_id_usine_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_trigger_events"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "tableTo": "usine_runs",
+      "columnsTo": [
+        "run_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_workflow_commands_run_id_usine_runs_run_id_fk",
+      "entityType": "fks",
+      "table": "usine_workflow_commands"
+    },
+    {
+      "columns": [
+        "run_id",
+        "step_name"
+      ],
+      "nameExplicit": false,
+      "name": "usine_steps_pk",
+      "entityType": "pks",
+      "table": "usine_steps"
+    },
+    {
+      "columns": [
+        "run_id",
+        "command"
+      ],
+      "nameExplicit": false,
+      "name": "usine_workflow_commands_pk",
+      "entityType": "pks",
+      "table": "usine_workflow_commands"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "nameExplicit": false,
+      "name": "usine_approvals_pk",
+      "table": "usine_approvals",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "attempt_id"
+      ],
+      "nameExplicit": false,
+      "name": "usine_attempts_pk",
+      "table": "usine_attempts",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "cursor_key"
+      ],
+      "nameExplicit": false,
+      "name": "usine_cursors_pk",
+      "table": "usine_cursors",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "nameExplicit": false,
+      "name": "usine_events_pk",
+      "table": "usine_events",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "nameExplicit": false,
+      "name": "usine_ignored_events_pk",
+      "table": "usine_ignored_events",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "run_id"
+      ],
+      "nameExplicit": false,
+      "name": "usine_runs_pk",
+      "table": "usine_runs",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "nameExplicit": false,
+      "name": "usine_trigger_events_pk",
+      "table": "usine_trigger_events",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false
+        },
+        {
+          "value": "step_name",
+          "isExpression": false
+        },
+        {
+          "value": "attempt_number",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_attempt_number",
+      "entityType": "indexes",
+      "table": "usine_attempts"
+    },
+    {
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"usine_attempts\".\"outcome_json\" is null",
+      "origin": "manual",
+      "name": "usine_one_in_flight_attempt",
+      "entityType": "indexes",
+      "table": "usine_attempts"
+    },
+    {
+      "columns": [
+        {
+          "value": "loop_name",
+          "isExpression": false
+        },
+        {
+          "value": "item_key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_trigger_events_item",
+      "entityType": "indexes",
+      "table": "usine_trigger_events"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "nameExplicit": false,
+      "name": "usine_approvals_event_id_unique",
+      "entityType": "uniques",
+      "table": "usine_approvals"
+    },
+    {
+      "columns": [
+        "dedup_key"
+      ],
+      "nameExplicit": false,
+      "name": "usine_events_dedup_key_unique",
+      "entityType": "uniques",
+      "table": "usine_events"
+    },
+    {
+      "columns": [
+        "event_id"
+      ],
+      "nameExplicit": false,
+      "name": "usine_runs_event_id_unique",
+      "entityType": "uniques",
+      "table": "usine_runs"
+    },
+    {
+      "value": "\"attempt_number\" >= 1",
+      "name": "usine_attempts_number",
+      "entityType": "checks",
+      "table": "usine_attempts"
+    },
+    {
+      "value": "\"outcome_json\" is null or json_valid(\"outcome_json\")",
+      "name": "usine_attempts_outcome_json_valid",
+      "entityType": "checks",
+      "table": "usine_attempts"
+    },
+    {
+      "value": "json_valid(\"value_json\")",
+      "name": "usine_cursors_value_json_valid",
+      "entityType": "checks",
+      "table": "usine_cursors"
+    },
+    {
+      "value": "json_valid(\"payload_json\")",
+      "name": "usine_events_payload_json_valid",
+      "entityType": "checks",
+      "table": "usine_events"
+    },
+    {
+      "value": "\"reason\" in ('superseded', 'revoked')",
+      "name": "usine_ignored_events_reason",
+      "entityType": "checks",
+      "table": "usine_ignored_events"
+    },
+    {
+      "value": "json_valid(\"state_json\")",
+      "name": "usine_runs_state_json_valid",
+      "entityType": "checks",
+      "table": "usine_runs"
+    },
+    {
+      "value": "\"approval\" in ('none', 'required')",
+      "name": "usine_trigger_events_approval",
+      "entityType": "checks",
+      "table": "usine_trigger_events"
+    },
+    {
+      "value": "\"command\" in ('Approve', 'Continue', 'Interrupt', 'Resume')",
+      "name": "usine_workflow_commands_command",
+      "entityType": "checks",
+      "table": "usine_workflow_commands"
+    }
+  ],
+  "renames": []
+}

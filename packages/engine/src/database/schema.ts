@@ -147,3 +147,13 @@ export const workflowCommands = snakeCase.table(
     primaryKey({ columns: [table.runId, table.command] }),
   ],
 );
+
+/** Opaque, owner-validated cursors for efficiency-only trigger state. */
+export const cursors = snakeCase.table(
+  "usine_cursors",
+  {
+    cursorKey: text().primaryKey(),
+    valueJson: text({ mode: "json" }).$type<unknown>().notNull(),
+  },
+  (table) => [check("usine_cursors_value_json_valid", sql`json_valid(${table.valueJson})`)],
+);
