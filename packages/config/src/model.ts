@@ -1,4 +1,4 @@
-import { Loop as CoreLoop, Step } from "@usine/core";
+import { Loop as CoreLoop, Repository, Step } from "@usine/core";
 import { Source } from "@usine/expression";
 import { Cron as EffectCron, DateTime, Effect, Option, Result, Schema } from "effect";
 
@@ -56,12 +56,8 @@ export type LoopName = typeof LoopName.Type;
 export const WorkerName = Slug.pipe(Schema.brand("WorkerName"));
 export type WorkerName = typeof WorkerName.Type;
 
-export const RepoName = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u, {
-    message: "Expected a full GitHub repo name (owner/name)",
-  }),
-).pipe(Schema.brand("RepoName"));
-export type RepoName = typeof RepoName.Type;
+export const RepoName = Repository.Name;
+export type RepoName = Repository.Name;
 
 export const RegistryTag = nonBlankString("Expected a non-blank registry tag").pipe(
   Schema.brand("RegistryTag"),

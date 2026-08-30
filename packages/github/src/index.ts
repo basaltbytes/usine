@@ -1,8 +1,32 @@
-/**
- * @usine/github — GitHub integration for usine: polling change detection, per-stream GraphQL slice fetchers, App auth and token minting.
- *
- * Not implemented yet: this 0.0.x release reserves the block's seam while the
- * engine grows.
- */
-
-export {};
+/** @usine/github — GitHub App identity and scoped installation tokens. */
+export { GitHubApp } from "./github-app.ts";
+export {
+  AppAuthenticationError,
+  AppCredentials,
+  AppId,
+  AppPermissionError,
+  CoveredProject,
+  GitHubApiError,
+  GitHubAppError,
+  GitHubCredentials,
+  GitHubOperation,
+  Installation,
+  InstallationDiscoveryError,
+  InstallationDiscoveryReason,
+  InstallationId,
+  InstallationToken,
+  InstallationWide,
+  InvalidGitHubResponseError,
+  ProjectAccess,
+  ProjectNotInstalledError,
+  PrivateKey,
+  REQUIRED_REPOSITORY_PERMISSIONS,
+  RedactedPrivateKey,
+  RepositoryId,
+  SingleRepository,
+  TokenScope,
+  deriveProjectAccess,
+  missingPermissions,
+  type InstalledRepository,
+  type RequiredRepositoryPermission,
+} from "./model.ts";
