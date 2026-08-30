@@ -25,9 +25,12 @@ export const RedactedPrivateKey = Schema.RedactedFromValue(PrivateKey, { disallo
 
 export const GitHubOperation = Schema.Literals([
   "discover-installation",
+  "fetch-issue-snapshot",
+  "fetch-pull-request-snapshot",
   "list-installation-repositories",
   "mint-installation-token",
   "mint-worker-token",
+  "poll-repository-changes",
 ]);
 export type GitHubOperation = typeof GitHubOperation.Type;
 
@@ -168,6 +171,14 @@ export class GitHubApiError extends Schema.TaggedError<GitHubApiError>(
   message: Schema.NonEmptyString,
 }) {}
 
+export class GitHubRateLimitError extends Schema.TaggedError<GitHubRateLimitError>(
+  "@usine/github/GitHubRateLimitError",
+)("GitHubRateLimitError", {
+  operation: GitHubOperation,
+  retryAt: Schema.DateTimeUtc,
+  message: Schema.NonEmptyString,
+}) {}
+
 export class InvalidGitHubResponseError extends Schema.TaggedError<InvalidGitHubResponseError>(
   "@usine/github/InvalidGitHubResponseError",
 )("InvalidGitHubResponseError", {
@@ -180,6 +191,7 @@ export const GitHubAppError = Schema.Union([
   InstallationDiscoveryError,
   AppPermissionError,
   GitHubApiError,
+  GitHubRateLimitError,
   InvalidGitHubResponseError,
 ]);
 export type GitHubAppError = typeof GitHubAppError.Type;
