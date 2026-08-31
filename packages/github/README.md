@@ -81,6 +81,15 @@ Call `GitHubApp.projectAccess(registry)` before scheduling work. Each result is 
 
 Pass a `CoveredProject` to `GitHubApp.workerToken`. GitHub must confirm in the token response that the token covers exactly that repository ID; otherwise the call fails with `InvalidGitHubResponseError`.
 
+## Poll repository changes
+
+`GitHubPollingLayer` supplies the two operations the orchestrator needs:
+
+- `changes(repository, cursor)` makes one conditional Issues REST request. It returns changed issue and pull-request numbers, the next ETag and watermark, plus any rate-limit delay GitHub requested.
+- `snapshot(repository, item)` fetches the issue or pull-request payload through GraphQL and computes its SHA-256 content hash. The stored payload retains timestamps, while the hash excludes timestamp fields at every nesting level.
+
+The REST cursor overlaps its watermark by five seconds. Repeated items are expected; the engine's permanent Event ledger owns deduplication. Provide `GitHubPollingLayer` with `GitHubApp`, an Effect HTTP client, and `Crypto.Crypto`. The package root remains platform-free.
+
 ## Real-App integration check
 
 Run the opt-in integration test against a disposable issue in a repository covered by the App:
@@ -93,6 +102,6 @@ export 'USINE_GITHUB_INTEGRATION_BOT_LOGIN=your-app-slug[bot]'
 pnpm --filter @usine/github test:integration
 ```
 
-The test mints both token shapes, posts one issue comment with the repository-scoped token, checks the comment author against the expected `<app>[bot]` login, and deletes the comment during cleanup.
+The test mints both token shapes, posts one issue comment with the repository-scoped token, checks the comment author against the expected `<app>[bot]` login, and deletes the comment during cleanup. `@usine/orchestrator` has a separate live polling test that temporarily creates and applies a repository label.
 
 All APIs remain 0.x and can change between minor releases.

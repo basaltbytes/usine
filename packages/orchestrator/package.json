@@ -23,11 +23,25 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run --exclude 'test/integration/**'",
+    "test:integration": "vitest run test/integration/polling-triggers.test.ts"
+  },
+  "dependencies": {
+    "@usine/config": "workspace:*",
+    "@usine/core": "workspace:*",
+    "@usine/engine": "workspace:*",
+    "@usine/expression": "workspace:*",
+    "@usine/github": "workspace:*"
   },
   "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
     "@usine/tsconfig": "workspace:*",
-    "typescript": "catalog:"
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "effect": "catalog:"

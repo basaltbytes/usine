@@ -257,16 +257,40 @@ importers:
 
   packages/orchestrator:
     dependencies:
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
+      '@usine/config':
+        specifier: workspace:*
+        version: link:../config
+      '@usine/core':
+        specifier: workspace:*
+        version: link:../core
+      '@usine/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@usine/expression':
+        specifier: workspace:*
+        version: link:../expression
+      '@usine/github':
+        specifier: workspace:*
+        version: link:../github
     devDependencies:
+      '@effect/platform-node':
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111(effect@4.0.0-rc.111)(redis@6.2.1)
+      '@effect/vitest':
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111(effect@4.0.0-rc.111)(vitest@4.1.11(@types/node@26.2.0)(vite@8.2.2(@types/node@26.2.0)(jiti@2.7.0)(yaml@2.9.0)))
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.11(@types/node@26.2.0)(vite@8.2.2(@types/node@26.2.0)(jiti@2.7.0)(yaml@2.9.0))
 
   packages/run-host:
     dependencies:
