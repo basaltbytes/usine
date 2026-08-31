@@ -83,10 +83,10 @@ const watchedSchedules = (instance: LoadedInstance): ReadonlyArray<WatchedSchedu
 
 /** Inclusive latest occurrence: Cron.prev itself is strict at an exact match. */
 const latestScheduledAt = (cron: Cron.Cron, now: DateTime.Utc): DateTime.Utc => {
-  const exactSecond = DateTime.toDateUtc(now);
-  exactSecond.setUTCMilliseconds(0);
+  const minuteBoundary = DateTime.toDateUtc(now);
+  minuteBoundary.setUTCSeconds(0, 0);
   return DateTime.fromDateUnsafe(
-    Cron.match(cron, exactSecond) ? exactSecond : Cron.prev(cron, exactSecond),
+    Cron.match(cron, minuteBoundary) ? minuteBoundary : Cron.prev(cron, minuteBoundary),
   );
 };
 

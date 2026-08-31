@@ -278,6 +278,25 @@ describe("ScheduleTriggers", () => {
         assert.strictEqual((yield* Ref.get(submissions)).length, 1);
         yield* TestClock.adjust("1 second");
         assert.strictEqual((yield* Ref.get(submissions)).length, 2);
+        assert.deepStrictEqual(
+          (yield* Ref.get(submissions)).map(({ event }) => event.payload),
+          [
+            {
+              tick: {
+                scheduledAt: "2026-08-31T10:00:00.000Z",
+                cron: "* * * * *",
+                tz: "UTC",
+              },
+            },
+            {
+              tick: {
+                scheduledAt: "2026-08-31T10:01:00.000Z",
+                cron: "* * * * *",
+                tz: "UTC",
+              },
+            },
+          ],
+        );
         yield* Fiber.interrupt(fiber);
       }).pipe(Effect.provide(fakeLayer(submissions)));
     }),
