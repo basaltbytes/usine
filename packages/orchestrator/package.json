@@ -30,7 +30,8 @@
     "build": "tsc -b",
     "check": "tsc -p tsconfig.check.json",
     "test": "vitest run --exclude 'test/integration/**'",
-    "test:integration": "vitest run test/integration/polling-triggers.test.ts"
+    "test:integration": "vitest run test/integration/polling-triggers.test.ts",
+    "test:integration:agent": "vitest run test/integration/agent-run.test.ts"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
