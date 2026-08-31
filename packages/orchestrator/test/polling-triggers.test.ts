@@ -17,7 +17,15 @@ import {
   UsineConfig,
 } from "@usine/config";
 import { Instance, Run, Step } from "@usine/core";
-import { Claimed, CursorKey, CursorStore, RunEngine, StepExecutor } from "@usine/engine";
+import {
+  Claimed,
+  CursorKey,
+  CursorStore,
+  LoopControl,
+  LoopRuntimeState,
+  RunEngine,
+  StepExecutor,
+} from "@usine/engine";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { ExpressionEngine, MarcbachmannCelLayer, Source } from "@usine/expression";
 import {
@@ -159,7 +167,18 @@ const runtimeLayer = (directory: Instance.Directory, github: GitHubPolling["Serv
   return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
 };
 
-const schedulerLayer = (github: GitHubPolling["Service"]) => {
+const loopControlLayer = (states: ReadonlyArray<LoopRuntimeState> = []) =>
+  Layer.succeed(LoopControl)({
+    isPaused: (loop) => Effect.succeed(states.some((state) => state.loop === loop && state.paused)),
+    pause: () => Effect.die("unused"),
+    states: Effect.succeed(states),
+    unpause: () => Effect.die("unused"),
+  });
+
+const schedulerLayer = (
+  github: GitHubPolling["Service"],
+  states: ReadonlyArray<LoopRuntimeState> = [],
+) => {
   const cursors = Layer.succeed(CursorStore)({
     read: () => Effect.succeed(Option.none()),
     write: () => Effect.void,
@@ -174,6 +193,7 @@ const schedulerLayer = (github: GitHubPolling["Service"]) => {
     approve: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
+    list: () => Effect.die("unused"),
     reconcile: () => Effect.die("unused"),
     retry: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),
@@ -186,6 +206,7 @@ const schedulerLayer = (github: GitHubPolling["Service"]) => {
     expressions,
     parser,
     runs,
+    loopControlLayer(states),
     Layer.succeed(GitHubPolling, github),
   );
   return PollingTriggers.layer.pipe(Layer.provide(dependencies));
@@ -218,6 +239,25 @@ describe("PollingTriggers", () => {
       assert.strictEqual(changeRequests, 2);
       yield* Fiber.interrupt(fiber);
     }).pipe(Effect.provide(schedulerLayer(github)));
+  });
+
+  it.effect("skips paused Loops without polling GitHub and exposes the latest cycle", () => {
+    const loop = issueLoop("paused-issues");
+    const github: GitHubPolling["Service"] = {
+      changes: () => Effect.die("a paused Loop must not poll GitHub"),
+      snapshot: () => Effect.die("a paused Loop has no snapshots"),
+    };
+    const state = new LoopRuntimeState({ loop: loop.name, paused: true });
+
+    return Effect.gen(function* () {
+      const polling = yield* PollingTriggers;
+      const cycle = yield* polling.poll(instanceWith([loop]));
+      assert.strictEqual(cycle.repositories, 0);
+      assert.strictEqual(cycle.submissions.length, 0);
+      const latest = yield* polling.latest;
+      assert(Option.isSome(latest));
+      assert.strictEqual(latest.value, cycle);
+    }).pipe(Effect.provide(schedulerLayer(github, [state])));
   });
 
   it.live(
@@ -427,6 +467,7 @@ describe("PollingTriggers", () => {
       approve: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
       inspect: () => Effect.die("unused"),
+      list: () => Effect.die("unused"),
       reconcile: () => Effect.die("unused"),
       retry: () => Effect.die("unused"),
       revoke: () => Effect.succeed([]),
@@ -448,6 +489,7 @@ describe("PollingTriggers", () => {
           MarcbachmannCelLayer,
           parser,
           Layer.succeed(GitHubPolling, github),
+          loopControlLayer(),
         ),
       ),
     );
@@ -482,6 +524,7 @@ describe("PollingTriggers", () => {
       approve: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
       inspect: () => Effect.die("unused"),
+      list: () => Effect.die("unused"),
       reconcile: () => Effect.die("unused"),
       retry: () => Effect.die("unused"),
       revoke: () => Effect.succeed([]),
@@ -541,6 +584,7 @@ describe("PollingTriggers", () => {
           MarcbachmannCelLayer,
           parser,
           Layer.succeed(GitHubPolling, github),
+          loopControlLayer(),
         ),
       ),
     );

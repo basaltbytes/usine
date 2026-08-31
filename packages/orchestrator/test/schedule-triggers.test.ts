@@ -22,6 +22,8 @@ import { Instance, Run, Step } from "@usine/core";
 import {
   Claimed,
   EnginePersistenceError,
+  LoopControl,
+  LoopRuntimeState,
   RunEngine,
   StepExecutor,
   type Submission,
@@ -119,11 +121,13 @@ const fakeLayer = (
   submissions: Ref.Ref<ReadonlyArray<Submission>>,
   failRepository: Option.Option<string> = Option.none(),
   parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
+  states: ReadonlyArray<LoopRuntimeState> = [],
 ) => {
   const runs = Layer.succeed(RunEngine)({
     approve: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
+    list: () => Effect.die("unused"),
     reconcile: () => Effect.die("unused"),
     retry: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),
@@ -145,7 +149,13 @@ const fakeLayer = (
           ),
     transcript: () => Effect.die("unused"),
   });
-  const dependencies = Layer.mergeAll(runs, MarcbachmannCelLayer, parser);
+  const loopControl = Layer.succeed(LoopControl)({
+    isPaused: (loop) => Effect.succeed(states.some((state) => state.loop === loop && state.paused)),
+    pause: () => Effect.die("unused"),
+    states: Effect.succeed(states),
+    unpause: () => Effect.die("unused"),
+  });
+  const dependencies = Layer.mergeAll(runs, loopControl, MarcbachmannCelLayer, parser);
   return ScheduleTriggers.layer.pipe(Layer.provide(dependencies));
 };
 
@@ -174,6 +184,25 @@ const runtimeLayer = (directory: Instance.Directory) => {
 };
 
 describe("ScheduleTriggers", () => {
+  it.effect("skips paused schedule Loops and exposes the latest cycle", () =>
+    Effect.gen(function* () {
+      const config = configWith([{ name: "basaltbytes/usine" }]);
+      const loop = scheduleLoop(config, { cron: "* * * * *" });
+      const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
+      const state = new LoopRuntimeState({ loop: loop.name, paused: true });
+
+      yield* Effect.gen(function* () {
+        const schedules = yield* ScheduleTriggers;
+        const cycle = yield* schedules.tick(instanceWith(config, [loop]));
+        assert.strictEqual(cycle.loops, 0);
+        assert.strictEqual(cycle.fanout, 0);
+        const latest = yield* schedules.latest;
+        assert(Option.isSome(latest));
+        assert.strictEqual(latest.value, cycle);
+      }).pipe(Effect.provide(fakeLayer(submissions, Option.none(), undefined, [state])));
+    }),
+  );
+
   it.effect("fans the latest due Tick out once per selected repository in its IANA zone", () =>
     Effect.gen(function* () {
       const config = configWith([
