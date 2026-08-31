@@ -32,6 +32,16 @@ export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
   message: Schema.NonEmptyString,
 }) {}
 
+/** The worker cannot run this brain from the billing pool required by its harness. */
+export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableError>(
+  "@usine/agents/PoolUnavailableError",
+)("PoolUnavailableError", {
+  harness: Agent.Harness,
+  model: Agent.ModelId,
+  pool: Agent.Pool,
+  message: Schema.NonEmptyString,
+}) {}
+
 /** The session ran to a terminal state and reported that the work itself failed. */
 export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   "@usine/agents/AgentResultError",
@@ -56,6 +66,7 @@ export class SessionOperationError extends Schema.TaggedError<SessionOperationEr
 
 export const AgentSessionError = Schema.Union([
   UnknownModelError,
+  PoolUnavailableError,
   AgentResultError,
   SessionOperationError,
 ]);
@@ -71,6 +82,7 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure.Attem
     SessionOperationError: (operation) =>
       new AttemptFailure.InfraFailure({ message: operation.message, cause: operation.cause }),
     UnknownModelError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
+    PoolUnavailableError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
     AgentResultError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
   });
 

@@ -45,15 +45,15 @@ flowchart LR
 {% /section %}
 
 {% section id="pi-child" title="Pi SDK sessions now run as children" icon="ai-model" related=["harness-dispatch","contract-proof"] %}
-The Pi SDK setup is shared by parent and child sessions. It parses a requested `provider/model`, selects the SDK model, keeps the session in memory, and disables project settings, extensions, prompt templates, skills, and themes. The inline subagents extension is still available to the parent through `extensionFactories`.
+The Pi SDK setup is shared by parent and child sessions. It parses a requested `provider/model`, selects the SDK model, keeps the session in memory, and disables project settings, extensions, prompt templates, skills, and themes. OAuth-backed models are rejected before prompting so Pi usage stays on the API-key pool. The inline subagents extension is still available to the parent through `extensionFactories`.
 
-{% code file="packages/agents/src/pi/pi.ts" from=65 to=104 expect="export const piSdkLive = Layer.succeed(PiSdk)({" /%}
+{% code file="packages/agents/src/pi/pi.ts" from=67 to=121 expect="export const piSdkLive = Layer.succeed(PiSdk)({" /%}
 
-The child adapter starts Pi without extensions, then rebuilds the public `ChildSession` with the SDK-selected model. It emits normalized SDK events and exposes native `steer` and `abort` operations. SDK and control failures remain typed `SessionOperationError` values.
+The child adapter starts Pi without extensions, then rebuilds the public `ChildSession` with the SDK-selected model. It emits normalized SDK events and exposes native `steer` and `abort` operations. SDK and control failures remain typed `SessionOperationError` values, while a pool mismatch is a non-retryable `PoolUnavailableError`.
 
-{% code file="packages/agents/src/pi/pi.ts" from=221 to=267 expect="  const launch: PiChildBackend[\"Service\"][\"launch\"] = Effect.fn(\"PiChildBackend.launch\")(" collapsed=true /%}
+{% code file="packages/agents/src/pi/pi.ts" from=228 to=286 expect="  const launch: PiChildBackend[\"Service\"][\"launch\"] = Effect.fn(\"PiChildBackend.launch\")(" collapsed=true /%}
 
-{% code file="packages/agents/src/pi/pi.ts" from=276 to=323 expect="      yield* Effect.tryPromise({" collapsed=true /%}
+{% code file="packages/agents/src/pi/pi.ts" from=295 to=342 expect="      yield* Effect.tryPromise({" collapsed=true /%}
 {% /section %}
 
 {% section id="codex-child" title="Codex app-server transport and event normalization" icon="terminal" related=["harness-dispatch","pool-events","contract-proof"] %}

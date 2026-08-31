@@ -8,7 +8,7 @@ The package root is platform-free. It exports prompt assembly, normalized sessio
 import { layer as agentLayer } from "@usine/agents/pi"
 ```
 
-The production layer resolves the Pi parent model from the Run spec, installs the subagents extension, and dispatches each child from the rostered `harness` field. Claude Code runs with `bypassPermissions` and reads only worker-user settings. Codex uses app-server JSON-RPC over standard input and output with `approvalPolicy: never`; its thread stays ephemeral and records ChatGPT plan rate-window updates as `PoolRateLimitsUpdated` session events. Pi children use the Pi SDK and the model's configured provider credentials.
+The production layer resolves the Pi parent model from the Run spec, installs the subagents extension, and dispatches each child from the rostered `harness` field. Claude Code runs with `bypassPermissions` and reads only worker-user settings. Codex uses app-server JSON-RPC over standard input and output with `approvalPolicy: never`; its thread stays ephemeral and records ChatGPT plan rate-window updates as `PoolRateLimitsUpdated` session events. Pi children use the Pi SDK and reject OAuth-backed models so they cannot leave the API-key pool.
 
 The Attempt worktree counts as repository-controlled input. Pi ignores project `.pi/` settings, extensions, prompt templates, skills, and themes. Claude omits project setting sources, while Codex marks the worktree untrusted before starting its thread. AGENTS instructions remain available to the coding harnesses. Worker isolation remains the executor's responsibility.
 

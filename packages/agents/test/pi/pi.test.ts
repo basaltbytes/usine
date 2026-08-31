@@ -12,6 +12,7 @@ import {
   ChildRequest,
   LaunchRequest,
   PiChildBackend,
+  PoolUnavailableError,
   SessionOperationError,
   SessionResult,
   UnknownModelError,
@@ -126,6 +127,22 @@ describe("Pi child backend", () => {
         const error = yield* Effect.flip(backend.launch(childRequest));
         assert(error instanceof UnknownModelError);
         assert.strictEqual(error.harness, "pi");
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect("rejects a child model outside the API-key pool", () => {
+    const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    const sdk = Layer.succeed(PiSdk)({
+      start: () => Promise.resolve({ _tag: "ApiKeyRequired", model }),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const backend = yield* PiChildBackend;
+        const error = yield* Effect.flip(backend.launch(childRequest));
+        assert(error instanceof PoolUnavailableError);
+        assert.strictEqual(error.pool, "apiKeys");
+        assert.strictEqual(error.model, model);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
     );
   });
@@ -250,6 +267,22 @@ describe("Pi parent runtime", () => {
         const error = yield* Effect.flip(runtime.launch(request));
         assert(error instanceof UnknownModelError);
         assert.strictEqual(error.model, parentModel);
+      }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
+    );
+  });
+
+  it.effect("rejects a parent model outside the API-key pool", () => {
+    const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    const sdk = Layer.succeed(PiSdk)({
+      start: () => Promise.resolve({ _tag: "ApiKeyRequired", model }),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const error = yield* Effect.flip(runtime.launch(request));
+        assert(error instanceof PoolUnavailableError);
+        assert.strictEqual(error.pool, "apiKeys");
+        assert.strictEqual(error.model, model);
       }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
     );
   });

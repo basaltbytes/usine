@@ -18,6 +18,7 @@ import {
   type ChildRequest,
   type LaunchRequest,
   PiChildBackend,
+  PoolUnavailableError,
   type RunningSession,
   SessionOperationError,
   UnknownModelError,
@@ -46,6 +47,7 @@ export interface PiStartOptions {
 }
 
 export type PiStartResult =
+  | { readonly _tag: "ApiKeyRequired"; readonly model: Agent.ModelId }
   | { readonly _tag: "UnknownModel" }
   | { readonly _tag: "Started"; readonly model: Agent.ModelId; readonly session: PiSession };
 
@@ -107,9 +109,14 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       session.dispose();
       throw new Error("Pi started without an active model");
     }
+    const model = Agent.ModelId.make(`${active.provider}/${active.id}`);
+    if (modelRuntime.isUsingOAuth(active.provider)) {
+      session.dispose();
+      return { _tag: "ApiKeyRequired", model };
+    }
     return {
       _tag: "Started",
-      model: Agent.ModelId.make(`${active.provider}/${active.id}`),
+      model,
       session,
     };
   },
@@ -247,6 +254,18 @@ const makePiChild = Effect.gen(function* () {
           harness: "pi",
           model: request.session.brain.model,
           message: `Pi does not expose model ${request.session.brain.model}`,
+        });
+      }
+      if (started._tag === "ApiKeyRequired") {
+        yield* Effect.logError("Pi child model is not backed by the API-key pool", {
+          model: started.model,
+          pool: "apiKeys",
+        });
+        return yield* new PoolUnavailableError({
+          harness: "pi",
+          model: started.model,
+          pool: "apiKeys",
+          message: `Pi model ${started.model} must use an API key`,
         });
       }
       const session = new Agent.ChildSession({
@@ -397,6 +416,18 @@ const makePiParent = Effect.gen(function* () {
           harness: "pi",
           model,
           message: `Pi does not expose model ${model}`,
+        });
+      }
+      if (started._tag === "ApiKeyRequired") {
+        yield* Effect.logError("Pi parent model is not backed by the API-key pool", {
+          model: started.model,
+          pool: "apiKeys",
+        });
+        return yield* new PoolUnavailableError({
+          harness: "pi",
+          model: started.model,
+          pool: "apiKeys",
+          message: `Pi model ${started.model} must use an API key`,
         });
       }
       const parent = new Agent.ParentSession({

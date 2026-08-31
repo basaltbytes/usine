@@ -4,6 +4,7 @@ import { Option, Schema } from "effect";
 import {
   AgentResultError,
   ChildRequest,
+  PoolUnavailableError,
   SessionOperationError,
   toAttemptFailure,
   UnknownModelError,
@@ -56,6 +57,12 @@ describe("agent runtime contract", () => {
         harness: "claude",
         model: Agent.ModelId.make("claude-never-existed"),
         message: "Claude does not expose model claude-never-existed",
+      }),
+      new PoolUnavailableError({
+        harness: "pi",
+        model: Agent.ModelId.make("openai-codex/gpt-5.6-sol"),
+        pool: "apiKeys",
+        message: "Pi model openai-codex/gpt-5.6-sol must use an API key",
       }),
       new AgentResultError({ sessionId, message: "ran out of turns" }),
     ];
