@@ -23,11 +23,19 @@
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@usine/core": "workspace:*"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@usine/tsconfig": "workspace:*",
-    "typescript": "catalog:"
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "effect": "catalog:"
