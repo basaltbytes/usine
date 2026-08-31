@@ -25,15 +25,19 @@ import {
   Result,
   Schema,
 } from "effect";
-import { submissionLogFields, triggerSubmission } from "./trigger-submission.ts";
+import {
+  type ResolvedLoop,
+  resolveTriggerLoops,
+  submissionLogFields,
+  triggerSubmission,
+} from "./trigger-submission.ts";
 
 /** Fanout submits to local SQLite only — kept small so write transactions don't pile up. */
 const FANOUT_CONCURRENCY = 4;
 /** Wake cadence when no schedule can name its next boundary (none exist, or cron math is down). */
 const IDLE_WAKE_MILLIS = 60_000;
 
-interface WatchedSchedule {
-  readonly loop: LoopFile;
+interface WatchedSchedule extends ResolvedLoop {
   readonly repositories: ReadonlyArray<ManagedRepo>;
   readonly trigger: ScheduleTrigger;
 }
@@ -44,8 +48,7 @@ interface ScheduleBoundaries {
   readonly next: DateTime.Utc;
 }
 
-interface DueTick {
-  readonly loop: LoopFile;
+interface DueTick extends ResolvedLoop {
   readonly repository: ManagedRepo;
   readonly scheduledAt: DateTime.Utc;
   readonly scheduledAtLocal: string;
@@ -95,13 +98,18 @@ export class ScheduleCycle extends Schema.Class<ScheduleCycle>("@usine/orchestra
   },
 ) {}
 
-const watchedSchedules = (instance: LoadedInstance): ReadonlyArray<WatchedSchedule> =>
-  instance.loops.flatMap((loop) => {
+const watchedSchedules = (
+  instance: LoadedInstance,
+  resolved: ReadonlyArray<ResolvedLoop>,
+): ReadonlyArray<WatchedSchedule> =>
+  resolved.flatMap(({ agent, loop, parentModel }) => {
     const trigger = loop.trigger;
     if (trigger.on !== "schedule") return [];
     return [
       {
+        agent,
         loop,
+        parentModel,
         repositories: instance.config.repos.filter((repository) =>
           matchesSelector(loop.selector, repository),
         ),
@@ -226,6 +234,7 @@ export class ScheduleTriggers extends Context.Service<
         const task = yield* config.renderPrompt(due.loop, context);
         const submitted = yield* runs.submit(
           triggerSubmission({
+            agent: due.agent,
             dedupKey,
             itemKey: itemKey(due.repository),
             loop: due.loop,
@@ -233,6 +242,7 @@ export class ScheduleTriggers extends Context.Service<
             receivedAt,
             repository: due.repository,
             task: AttemptChannel.Task.make(task),
+            parentModel: due.parentModel,
           }),
         );
         yield* Effect.logInfo("Submitted scheduled Tick", {
@@ -248,7 +258,7 @@ export class ScheduleTriggers extends Context.Service<
 
       const tick = Effect.fn("ScheduleTriggers.tick")(function* (instance: LoadedInstance) {
         const now = yield* DateTime.now;
-        const schedules = watchedSchedules(instance);
+        const schedules = watchedSchedules(instance, yield* resolveTriggerLoops(instance));
         const fired = yield* Ref.get(lastFired);
 
         const due: Array<DueTick> = [];
@@ -319,7 +329,9 @@ export class ScheduleTriggers extends Context.Service<
           });
           for (const repository of schedule.repositories) {
             due.push({
+              agent: schedule.agent,
               loop: schedule.loop,
+              parentModel: schedule.parentModel,
               repository,
               scheduledAt: boundaries.latest,
               scheduledAtLocal: boundaries.latestLocal,

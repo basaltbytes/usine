@@ -8,7 +8,7 @@ import {
   matchesSelector,
   repositoryContext,
 } from "@usine/config";
-import { Agent, AttemptChannel, Event, Item, Repository } from "@usine/core";
+import { AttemptChannel, Event, Item, Repository } from "@usine/core";
 import {
   CursorKey,
   CursorStore,
@@ -25,7 +25,12 @@ import {
   type PayloadSnapshot,
 } from "@usine/github";
 import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Result, Schema } from "effect";
-import { submissionLogFields, triggerSubmission } from "./trigger-submission.ts";
+import {
+  type ResolvedLoop,
+  resolveTriggerLoops,
+  submissionLogFields,
+  triggerSubmission,
+} from "./trigger-submission.ts";
 
 /** GitHub REST + GraphQL tolerate a handful of parallel calls per token. */
 const REPOSITORY_CONCURRENCY = 4;
@@ -65,14 +70,8 @@ type RepositoryPollError = ConfigFileError | ExpressionError | GitHubAppError | 
 
 interface WatchedRepository {
   readonly repository: ManagedRepo;
-  readonly loops: ReadonlyArray<WatchedLoop>;
+  readonly loops: ReadonlyArray<ResolvedLoop>;
   readonly watches: ReadonlyArray<WatchKey>;
-}
-
-interface WatchedLoop {
-  readonly loop: LoopFile;
-  readonly agent: Agent.Agent;
-  readonly parentModel: Option.Option<Agent.ModelId>;
 }
 
 interface RepositoryCycle {
@@ -90,45 +89,19 @@ interface ItemCycle {
 const cursorKey = (repository: ManagedRepo): CursorKey =>
   CursorKey.make(`github-poll:${Repository.canonical(repository.name)}`);
 
-const watchKey = ({ loop }: WatchedLoop): WatchKey =>
+const watchKey = ({ loop }: ResolvedLoop): WatchKey =>
   WatchKey.make(JSON.stringify([loop.name, loop.trigger.on, loop.trigger.if]));
 
-const watchedRepositories = Effect.fn("PollingTriggers.watchedRepositories")(function* (
+const watchedRepositories = (
   instance: LoadedInstance,
-) {
-  const roster = new Map(instance.agents.map((agent) => [agent.name, agent]));
-  const resolved = yield* Effect.forEach(instance.loops, (loop) =>
-    Effect.gen(function* () {
-      const loaded = roster.get(loop.agent);
-      if (loaded === undefined) {
-        return yield* Effect.die(
-          new Error(`Loaded loop ${loop.name} has no rostered Agent ${loop.agent}`),
-        );
-      }
-      const agent = new Agent.Agent({
-        name: loaded.name,
-        brain: new Agent.BrainSpec({
-          harness: loaded.harness,
-          model: loaded.model,
-          effort: loaded.effort,
-        }),
-        parentModel: loaded.parentModel,
-        persona: loaded.persona,
-      });
-      return {
-        loop,
-        agent,
-        parentModel: Agent.resolveParentModel(agent, instance.config.settings.parentModel),
-      } satisfies WatchedLoop;
-    }),
-  );
-  return instance.config.repos.flatMap((repository) => {
+  resolved: ReadonlyArray<ResolvedLoop>,
+): ReadonlyArray<WatchedRepository> =>
+  instance.config.repos.flatMap((repository) => {
     const loops = resolved.filter(
       ({ loop }) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
     );
     return loops.length === 0 ? [] : [{ repository, loops, watches: loops.map(watchKey).sort() }];
   });
-});
 
 const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKey>): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
@@ -325,7 +298,7 @@ export class PollingTriggers extends Context.Service<
       });
 
       const poll = Effect.fn("PollingTriggers.poll")(function* (instance: LoadedInstance) {
-        const watched = yield* watchedRepositories(instance);
+        const watched = watchedRepositories(instance, yield* resolveTriggerLoops(instance));
         const settled = yield* Effect.forEach(
           watched,
           (repository) =>

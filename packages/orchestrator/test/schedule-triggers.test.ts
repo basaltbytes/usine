@@ -203,6 +203,9 @@ describe("ScheduleTriggers", () => {
         );
         for (const submission of captured) {
           assert.strictEqual(submission.task, `Run maintenance for ${submission.repository}.`);
+          assert.strictEqual(submission.agent.name, agent.name);
+          assert.strictEqual(submission.agent.brain.model, agent.model);
+          assert(Option.isNone(submission.parentModel));
           assert.deepStrictEqual(submission.event.payload, {
             tick: {
               scheduledAt: "2026-08-31T07:00:00.000Z",
