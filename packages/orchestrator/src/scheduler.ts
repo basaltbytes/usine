@@ -69,10 +69,11 @@ const makeLease = Effect.fn("WorkerScheduler.makeLease")(function* (
   } satisfies WorkerLease;
 });
 
-const validateLocalWorkers = (
+const validateWorkers = (
+  kind: ConfigWorker["kind"],
   workers: ReadonlyArray<ConfigWorker>,
 ): Effect.Effect<ReadonlyArray<ConfigWorker>, UnsupportedWorkerError> => {
-  const unsupported = workers.find((worker) => worker.kind !== "local");
+  const unsupported = workers.find((worker) => worker.kind !== kind);
   return unsupported === undefined
     ? Effect.succeed(workers)
     : new UnsupportedWorkerError({ worker: unsupported.name, kind: unsupported.kind });
@@ -86,7 +87,7 @@ export const stepExecutorLayer = (
     StepExecutor,
     Effect.gen(function* () {
       const executor = yield* Executor;
-      const workers = yield* validateLocalWorkers(config.workers);
+      const workers = yield* validateWorkers(executor.kind, config.workers);
       yield* Effect.forEach(workers, ({ name }) => executor.preflight(name), {
         concurrency: "unbounded",
         discard: true,

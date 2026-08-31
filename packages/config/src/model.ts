@@ -100,8 +100,8 @@ export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/Manage
     .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}
 
-export const WorkerKind = Schema.Literals(["local", "exe.dev"]);
-export type WorkerKind = typeof WorkerKind.Type;
+export const WorkerKind = CoreWorker.Kind;
+export type WorkerKind = CoreWorker.Kind;
 
 export class Worker extends Schema.Class<Worker>("@usine/config/Worker")({
   name: WorkerName,

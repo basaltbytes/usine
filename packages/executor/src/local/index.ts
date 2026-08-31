@@ -27,14 +27,13 @@ import {
   ExecutorError,
   ExecutorOperationError,
   PreparedAttempt,
+  type RunHostCommand,
   WorktreePath,
+  WorkerCapabilityError,
   type ExecutorOperation,
 } from "../index.ts";
 
-export interface RunHostCommand {
-  readonly command: string;
-  readonly args: ReadonlyArray<string>;
-}
+export type { RunHostCommand } from "../index.ts";
 
 export interface LocalExecutorOptions {
   readonly instanceDirectory: Instance.Directory;
@@ -267,22 +266,24 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     ) {
       const gitVersion = (yield* executeCommand("preflight", "git", ["--version"])).trim();
       if (!gitVersion.startsWith("git version ")) {
-        return yield* executorError(
-          "preflight",
-          `Worker ${worker} returned an unrecognized git version`,
-          new Error(gitVersion),
-        );
+        return yield* new WorkerCapabilityError({
+          worker,
+          capability: "toolchain",
+          message: `Worker ${worker} returned an unrecognized git version`,
+          cause: new Error(gitVersion),
+        });
       }
       const reported = (yield* executeCommand("preflight", runHost.command, [
         ...runHost.args,
         "--protocol-version",
       ])).trim();
       if (reported !== String(AttemptChannel.PROTOCOL_VERSION)) {
-        return yield* executorError(
-          "preflight",
-          `Worker ${worker} has run-host protocol ${reported || "unknown"}; expected ${AttemptChannel.PROTOCOL_VERSION}`,
-          new Error("run-host protocol mismatch"),
-        );
+        return yield* new WorkerCapabilityError({
+          worker,
+          capability: "run-host",
+          message: `Worker ${worker} has run-host protocol ${reported || "unknown"}; expected ${AttemptChannel.PROTOCOL_VERSION}`,
+          cause: new Error("run-host protocol mismatch"),
+        });
       }
       yield* Effect.logInfo("Worker preflight verified", {
         worker,
@@ -718,7 +719,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       );
     });
 
-    return Executor.of({ cancel, cleanup, launch, preflight, prepare });
+    return Executor.of({ kind: "local", cancel, cleanup, launch, preflight, prepare });
   });
 
 /** Node-only local executor; the package root remains platform-free. */

@@ -19,6 +19,15 @@ export const ExecutorOperation = Schema.Literals([
 ]);
 export type ExecutorOperation = typeof ExecutorOperation.Type;
 
+export const WorkerCapability = Schema.Literals([
+  "machine",
+  "toolchain",
+  "run-host",
+  "harness-login",
+  "credentials",
+]);
+export type WorkerCapability = typeof WorkerCapability.Type;
+
 export class ExecutorOperationError extends Schema.TaggedError<ExecutorOperationError>(
   "@usine/executor/ExecutorOperationError",
 )("ExecutorOperationError", {
@@ -35,8 +44,28 @@ export class CredentialUnavailableError extends Schema.TaggedError<CredentialUna
   cause: Schema.Defect(),
 }) {}
 
-export const ExecutorError = Schema.Union([ExecutorOperationError, CredentialUnavailableError]);
+/** A verify-only preflight found a Worker capability missing or incompatible. */
+export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityError>(
+  "@usine/executor/WorkerCapabilityError",
+)("WorkerCapabilityError", {
+  worker: Worker.Name,
+  capability: WorkerCapability,
+  message: Schema.NonEmptyString,
+  cause: Schema.Defect(),
+}) {}
+
+export const ExecutorError = Schema.Union([
+  ExecutorOperationError,
+  CredentialUnavailableError,
+  WorkerCapabilityError,
+]);
 export type ExecutorError = typeof ExecutorError.Type;
+
+/** Process command for a one-shot run host or a preflight capability probe. */
+export interface RunHostCommand {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+}
 
 /** Secret-free request used to create one fresh Attempt workspace. */
 export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
@@ -77,6 +106,7 @@ export class CredentialProvider extends Context.Service<
 export class Executor extends Context.Service<
   Executor,
   {
+    readonly kind: Worker.Kind;
     readonly preflight: (worker: Worker.Name) => Effect.Effect<void, ExecutorError>;
     readonly prepare: (request: CheckoutRequest) => Effect.Effect<PreparedAttempt, ExecutorError>;
     readonly launch: (
