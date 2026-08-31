@@ -10,6 +10,7 @@ export {
   GitHubAppError,
   GitHubCredentials,
   GitHubOperation,
+  GitHubRateLimitError,
   Installation,
   InstallationDiscoveryError,
   InstallationDiscoveryReason,
@@ -30,3 +31,20 @@ export {
   type InstalledRepository,
   type RequiredRepositoryPermission,
 } from "./model.ts";
+export {
+  ChangedIssue,
+  ChangedItem,
+  ChangedPullRequest,
+  ChangeDetection,
+  ContentHash,
+  EntityTag,
+  IssuePayload,
+  IssueSnapshot,
+  PayloadSnapshot,
+  PollCursor,
+  PullRequestPayload,
+  PullRequestSnapshot,
+  RepositoryChanges,
+  RepositoryNotModified,
+} from "./polling/model.ts";
+export { GitHubPolling } from "./polling/polling.ts";

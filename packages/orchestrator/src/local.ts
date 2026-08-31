@@ -5,7 +5,7 @@ import { layer as localExecutorLayer, type LocalExecutorOptions } from "@usine/e
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { executableCommand } from "@usine/run-host/executable";
 import { Layer } from "effect";
-import { stepExecutorLayer } from "./index.ts";
+import { stepExecutorLayer } from "./scheduler.ts";
 
 /** Complete local-worker engine composition. Credential sourcing stays caller-owned. */
 export const layer = (

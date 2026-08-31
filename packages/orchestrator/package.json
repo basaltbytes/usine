@@ -29,7 +29,8 @@
   "scripts": {
     "build": "tsc -b",
     "check": "tsc -p tsconfig.check.json",
-    "test": "vitest run"
+    "test": "vitest run --exclude 'test/integration/**'",
+    "test:integration": "vitest run test/integration/polling-triggers.test.ts"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
@@ -37,6 +38,7 @@
     "@usine/core": "workspace:*",
     "@usine/engine": "workspace:*",
     "@usine/executor": "workspace:*",
+    "@usine/expression": "workspace:*",
     "@usine/github": "workspace:*",
     "@usine/run-host": "workspace:*"
   },

@@ -22,6 +22,7 @@ import {
   runIdFor,
 } from "./workflow.ts";
 import { StepExecutor } from "./step-executor.ts";
+import { CursorStore } from "./cursor/store.ts";
 
 const MAX_SETTLEMENT_POLLS = 500;
 
@@ -153,6 +154,7 @@ const makeRunEngine = Effect.gen(function* () {
       concurrency: "unbounded",
       discard: true,
     });
+    return revoked;
   });
 
   const inspect = Effect.fn("RunEngine.inspect")(function* (runId: Run.RunId) {
@@ -216,7 +218,7 @@ export class RunEngine extends Context.Service<
     readonly revoke: (
       loop: Loop.LoopName,
       itemKey: Item.ItemKey,
-    ) => Effect.Effect<void, RunEngineError>;
+    ) => Effect.Effect<ReadonlyArray<Run.RunId>, RunEngineError>;
     readonly submit: (submission: Submission) => Effect.Effect<SubmissionResult, RunEngineError>;
     readonly transcript: (
       query: TranscriptQuery,
@@ -235,7 +237,7 @@ export class RunEngine extends Context.Service<
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,
 ): Layer.Layer<
-  RunEngine,
+  CursorStore | RunEngine,
   RunEngineError | DatabaseError,
   Crypto.Crypto | StepExecutor | DatabaseRequirements
 > => {
@@ -253,5 +255,6 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     Layer.provideMerge(workflowEngine),
     Layer.provideMerge(store),
   );
-  return Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(runtime));
+  const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(runtime));
+  return Layer.merge(runEngine, CursorStore.layer.pipe(Layer.provide(database)));
 };

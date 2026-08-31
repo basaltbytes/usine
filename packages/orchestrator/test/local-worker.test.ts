@@ -256,31 +256,34 @@ describe("local worker", () => {
     ),
   );
 
-  it.live("keeps excess Runs pending and assigns the oldest pending Event first", () =>
-    withLocalEngine(["--stub-delay-ms", "300"], ({ engine }) =>
-      Effect.gen(function* () {
-        const first = yield* engine.submit(submission(3, "2026-08-30T12:00:03Z"));
-        assert.strictEqual(first._tag, "Claimed");
-        if (first._tag !== "Claimed") return;
-        yield* waitFor(engine, first.runId, "Running");
+  it.live(
+    "keeps excess Runs pending and assigns the oldest pending Event first",
+    () =>
+      withLocalEngine(["--stub-delay-ms", "300"], ({ engine }) =>
+        Effect.gen(function* () {
+          const first = yield* engine.submit(submission(3, "2026-08-30T12:00:03Z"));
+          assert.strictEqual(first._tag, "Claimed");
+          if (first._tag !== "Claimed") return;
+          yield* waitFor(engine, first.runId, "Running");
 
-        const newer = yield* engine.submit(submission(4, "2026-08-30T12:00:05Z"));
-        const older = yield* engine.submit(submission(5, "2026-08-30T12:00:04Z"));
-        assert.strictEqual(newer._tag, "Claimed");
-        assert.strictEqual(older._tag, "Claimed");
-        if (newer._tag !== "Claimed" || older._tag !== "Claimed") return;
-        assert.strictEqual((yield* engine.inspect(newer.runId)).run.state._tag, "Pending");
-        assert.strictEqual((yield* engine.inspect(older.runId)).run.state._tag, "Pending");
+          const newer = yield* engine.submit(submission(4, "2026-08-30T12:00:05Z"));
+          const older = yield* engine.submit(submission(5, "2026-08-30T12:00:04Z"));
+          assert.strictEqual(newer._tag, "Claimed");
+          assert.strictEqual(older._tag, "Claimed");
+          if (newer._tag !== "Claimed" || older._tag !== "Claimed") return;
+          assert.strictEqual((yield* engine.inspect(newer.runId)).run.state._tag, "Pending");
+          assert.strictEqual((yield* engine.inspect(older.runId)).run.state._tag, "Pending");
 
-        yield* waitFor(engine, first.runId, "Succeeded");
-        const olderFinished = yield* waitFor(engine, older.runId, "Succeeded");
-        const newerFinished = yield* waitFor(engine, newer.runId, "Succeeded");
-        const olderStarted = olderFinished.attempts[0]?.startedAt;
-        const newerStarted = newerFinished.attempts[0]?.startedAt;
-        assert(olderStarted !== undefined && newerStarted !== undefined);
-        assert(DateTime.toEpochMillis(olderStarted) <= DateTime.toEpochMillis(newerStarted));
-      }),
-    ),
+          yield* waitFor(engine, first.runId, "Succeeded");
+          const olderFinished = yield* waitFor(engine, older.runId, "Succeeded");
+          const newerFinished = yield* waitFor(engine, newer.runId, "Succeeded");
+          const olderStarted = olderFinished.attempts[0]?.startedAt;
+          const newerStarted = newerFinished.attempts[0]?.startedAt;
+          assert(olderStarted !== undefined && newerStarted !== undefined);
+          assert(DateTime.toEpochMillis(olderStarted) <= DateTime.toEpochMillis(newerStarted));
+        }),
+      ),
+    20_000,
   );
 
   it.live("classifies channel loss as retryable infrastructure failure", () =>

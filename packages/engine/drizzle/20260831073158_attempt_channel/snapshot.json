@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "5028016b-8e44-4a48-96b1-520043cc4d6d",
-  "prevIds": ["29403b39-52c7-42ce-b665-c5fbba2ce9fe"],
+  "id": "6ade9cfc-383a-4124-a9d4-9e688624f870",
+  "prevIds": ["d63c0a4a-1148-40a5-b8e9-d823d74ed69c"],
   "ddl": [
     {
       "name": "usine_approvals",
@@ -14,6 +14,10 @@
     },
     {
       "name": "usine_attempts",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_cursors",
       "entityType": "tables"
     },
     {
@@ -189,6 +193,26 @@
       "name": "outcome_json",
       "entityType": "columns",
       "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cursor_key",
+      "entityType": "columns",
+      "table": "usine_cursors"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "value_json",
+      "entityType": "columns",
+      "table": "usine_cursors"
     },
     {
       "type": "text",
@@ -595,6 +619,13 @@
       "entityType": "pks"
     },
     {
+      "columns": ["cursor_key"],
+      "nameExplicit": false,
+      "name": "usine_cursors_pk",
+      "table": "usine_cursors",
+      "entityType": "pks"
+    },
+    {
       "columns": ["event_id"],
       "nameExplicit": false,
       "name": "usine_events_pk",
@@ -766,6 +797,12 @@
       "name": "usine_attempts_outcome_json_valid",
       "entityType": "checks",
       "table": "usine_attempts"
+    },
+    {
+      "value": "json_valid(\"value_json\")",
+      "name": "usine_cursors_value_json_valid",
+      "entityType": "checks",
+      "table": "usine_cursors"
     },
     {
       "value": "json_valid(\"payload_json\")",

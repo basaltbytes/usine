@@ -90,7 +90,7 @@ The engine passes an append function into every executor call. Each accepted inb
 
 The migration adds the execution context twice, deliberately: the trigger-event columns are the immutable submitted fact (a queued Event is claimed from them later), and the run columns are the Run's *effective* context, seeded at creation — the point ADR 0018's edit-and-retry will amend. All columns are plain `NOT NULL` with no sentinel defaults: nothing has shipped, so the migration assumes a fresh runtime database rather than backfilling fake values into branded types.
 
-{% code file="packages/engine/drizzle/20260831072015_attempt_channel/migration.sql" from=1 to=35 expect="CREATE TABLE `usine_attempt_transcripts` (" /%}
+{% code file="packages/engine/drizzle/20260831073158_attempt_channel/migration.sql" from=1 to=35 expect="CREATE TABLE `usine_attempt_transcripts` (" /%}
 {% /section %}
 
 {% section id="runtime-tests" title="Behavior covered at real process and database seams" icon="beaker" related=["capacity","workspace-lifecycle","durable-transcript"] %}

@@ -275,6 +275,9 @@ importers:
       '@usine/executor':
         specifier: workspace:*
         version: link:../executor
+      '@usine/expression':
+        specifier: workspace:*
+        version: link:../expression
       '@usine/github':
         specifier: workspace:*
         version: link:../github
