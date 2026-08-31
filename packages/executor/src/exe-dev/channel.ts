@@ -2,13 +2,20 @@ import { AttemptFailure } from "@usine/core";
 import { Effect, Ref, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { PreparedAttempt, RunHostCommand } from "../index.ts";
-import { runHostSessionFor, type RunHostInput } from "../run-host-session.ts";
+import { runHostSessionFor, type RunHostInput, type RunHostSession } from "../run-host-session.ts";
 import type { ExeDevCommands } from "./commands.ts";
 import type { PreparedStates } from "./model.ts";
 
 const RUN_HOST_SHELL = 'cd "$1" && shift && export GH_HOST=github.int.exe.xyz && exec "$@"';
 
-export const attemptChannelFor = Effect.fn("ExeDevExecutor.attemptChannelFor")(function* (
+export const attemptChannelFor: (
+  commands: ExeDevCommands,
+  preparedStates: PreparedStates,
+  runHost: RunHostCommand,
+  interruptGrace: Parameters<typeof Effect.timeoutOption>[1],
+) => Effect.Effect<RunHostSession, never, ChildProcessSpawner.ChildProcessSpawner> = Effect.fn(
+  "ExeDevExecutor.attemptChannelFor",
+)(function* (
   commands: ExeDevCommands,
   preparedStates: PreparedStates,
   runHost: RunHostCommand,
