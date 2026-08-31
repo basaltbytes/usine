@@ -50,6 +50,16 @@ const agent = new AgentFile({
   persona: Persona.make("Implement the issue."),
 });
 
+const isSchedulePayload = Schema.is(
+  Schema.Struct({
+    tick: Schema.Struct({
+      scheduledAt: Schema.String,
+      cron: CronExpression,
+      tz: TimeZone,
+    }),
+  }),
+);
+
 const configWith = (repos: ReadonlyArray<{ readonly name: string; readonly tags?: string[] }>) =>
   Schema.decodeUnknownSync(UsineConfig)({ version: 1, repos });
 
@@ -313,11 +323,7 @@ describe("ScheduleTriggers", () => {
       const first = firstCycle.submissions[0];
       assert(first !== undefined && first._tag === "Claimed");
       const snapshot = yield* waitForWaiting(firstEngine, first.runId);
-      assert(
-        typeof snapshot.event.payload === "object" &&
-          snapshot.event.payload !== null &&
-          !Array.isArray(snapshot.event.payload),
-      );
+      assert(isSchedulePayload(snapshot.event.payload));
       assert.deepStrictEqual(Object.keys(snapshot.event.payload), ["tick"]);
       const duplicate = (yield* firstSchedules.tick(instance)).submissions[0];
       assert(duplicate !== undefined && duplicate._tag === "Claimed");
