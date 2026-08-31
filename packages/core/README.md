@@ -12,7 +12,7 @@ Everything lives in the `lifecycle` cluster: a deduplicated Event opens a Run, t
 | `EventId`, `RunId`, `AttemptId` | Value objects — branded ids; identities that cannot be swapped for each other |
 | `DedupKey`, `ItemKey`, `LoopName`, `StepName`, `AttemptNumber` | Value objects — branded primitives carrying a domain constraint |
 | `Instance.Directory`, `Repository.Name`, `Repository.Revision`, `Repository.CommitSha` | Shared value objects — paths and validated Git identities |
-| `Worker.Name` | Value object — the worker that owns an Attempt |
+| `Worker.Name`, `Worker.Kind` | Value objects — a Worker identity and its local or exe.dev adapter kind |
 | `AttemptChannel.*` | Protocol values — the secret-free run spec, framed input, and versioned Attempt envelopes |
 | `StepResult.*` | Result values — the final agent message plus commit, pull-request, and comment facts |
 | `RunState.*`, `CancelReason`, `Attempt.Outcome` | State value objects — discriminated unions, including a distinct canceled Attempt outcome |
