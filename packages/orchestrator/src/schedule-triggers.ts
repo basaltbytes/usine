@@ -6,8 +6,8 @@ import {
   matchesSelector,
   type ScheduleTrigger,
 } from "@usine/config";
-import { AttemptChannel, Event, Item, Repository } from "@usine/core";
-import { RunEngine, type RunEngineError, Submission, SubmissionResult } from "@usine/engine";
+import { Event, Item, Loop, Repository } from "@usine/core";
+import { RunEngine, type RunEngineError, SubmissionResult } from "@usine/engine";
 import { ExpressionEngine, type ExpressionError } from "@usine/expression";
 import {
   Clock,
@@ -21,14 +21,9 @@ import {
   Result,
   Schema,
 } from "effect";
+import { repositoryContext, submissionRunId, triggerSubmission } from "./trigger-submission.ts";
 
 const FANOUT_CONCURRENCY = 4;
-
-/**
- * The worker fetch target until per-loop revisions exist: `git fetch origin
- * HEAD` resolves the remote's current default branch at prepare time.
- */
-const DEFAULT_BRANCH_REVISION = Repository.Revision.make("HEAD");
 
 interface WatchedSchedule {
   readonly cron: Cron.Cron;
@@ -50,7 +45,7 @@ type ScheduleTriggerError = ExpressionError | RunEngineError;
 export class ScheduleTickFailure extends Schema.Class<ScheduleTickFailure>(
   "@usine/orchestrator/ScheduleTickFailure",
 )({
-  loop: Schema.NonEmptyString,
+  loop: Loop.LoopName,
   repository: Repository.Name,
   scheduledAt: Schema.DateTimeUtc,
   errorTag: Schema.NonEmptyString,
@@ -76,7 +71,6 @@ const watchedSchedules = (instance: LoadedInstance): ReadonlyArray<WatchedSchedu
     const repositories = instance.config.repos.filter((repository) =>
       matchesSelector(loop.selector, repository),
     );
-    if (repositories.length === 0) return [];
     return [
       {
         cron: Cron.parseUnsafe(trigger.cron, trigger.tz),
@@ -120,15 +114,6 @@ const eventKey = (
     ]),
   );
 
-const repositoryContext = (repository: ManagedRepo): Schema.JsonObject => {
-  const { owner } = Repository.parts(repository.name);
-  return {
-    name: repository.name,
-    owner,
-    url: `https://github.com/${repository.name}`,
-  };
-};
-
 const tickPayload = (trigger: ScheduleTrigger, scheduledAt: DateTime.Utc): Schema.JsonObject => ({
   tick: {
     scheduledAt: DateTime.formatIso(scheduledAt),
@@ -136,9 +121,6 @@ const tickPayload = (trigger: ScheduleTrigger, scheduledAt: DateTime.Utc): Schem
     tz: trigger.tz,
   },
 });
-
-const submissionRunId = (submission: SubmissionResult): string =>
-  submission._tag === "Claimed" ? submission.runId : "";
 
 /** Clock-driven schedule → per-repository Event composition. */
 export class ScheduleTriggers extends Context.Service<
@@ -184,20 +166,13 @@ export class ScheduleTriggers extends Context.Service<
 
         const dedupKey = eventKey(due.loop, due.repository, due.scheduledAt);
         const submitted = yield* runs.submit(
-          new Submission({
-            event: new Event.Event({
-              id: Event.EventId.make(dedupKey),
-              dedupKey,
-              payload,
-              receivedAt,
-            }),
+          triggerSubmission({
+            dedupKey,
             itemKey: itemKey(due.repository),
-            loop: due.loop.name,
-            step: due.loop.step,
-            approval: due.loop.approval,
-            repository: due.repository.name,
-            revision: DEFAULT_BRANCH_REVISION,
-            task: AttemptChannel.Task.make(due.loop.body),
+            loop: due.loop,
+            payload,
+            receivedAt,
+            repository: due.repository,
           }),
         );
         yield* Effect.logInfo("Submitted scheduled Tick", {
@@ -213,6 +188,13 @@ export class ScheduleTriggers extends Context.Service<
       const tick = Effect.fn("ScheduleTriggers.tick")(function* (instance: LoadedInstance) {
         const now = yield* DateTime.now;
         const schedules = watchedSchedules(instance);
+        for (const schedule of schedules) {
+          if (schedule.repositories.length === 0) {
+            yield* Effect.logDebug("Schedule loop selected no repositories", {
+              loop: schedule.loop.name,
+            });
+          }
+        }
         const due = schedules.flatMap((schedule) => {
           const scheduledAt = latestScheduledAt(schedule.cron, now);
           return schedule.repositories.map((repository): DueTick => ({
@@ -226,7 +208,7 @@ export class ScheduleTriggers extends Context.Service<
           due,
           (candidate) =>
             Effect.result(submitTick(candidate, now)).pipe(
-              Effect.map((result) => ({ candidate, result }) as const),
+              Effect.map((result) => ({ candidate, result })),
             ),
           { concurrency: FANOUT_CONCURRENCY },
         );

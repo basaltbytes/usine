@@ -5,12 +5,11 @@ import {
   type ManagedRepo,
   matchesSelector,
 } from "@usine/config";
-import { AttemptChannel, Event, Item, Repository } from "@usine/core";
+import { Event, Item, Repository } from "@usine/core";
 import {
   CursorKey,
   CursorStore,
   RunEngine,
-  Submission,
   SubmissionResult,
   type RunEngineError,
 } from "@usine/engine";
@@ -23,15 +22,11 @@ import {
   type PayloadSnapshot,
 } from "@usine/github";
 import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Result, Schema } from "effect";
+import { repositoryContext, submissionRunId, triggerSubmission } from "./trigger-submission.ts";
 
 /** GitHub REST + GraphQL tolerate a handful of parallel calls per token. */
 const REPOSITORY_CONCURRENCY = 4;
 
-/**
- * The worker fetch target until per-loop revisions exist: `git fetch origin
- * HEAD` resolves the remote's current default branch at prepare time.
- */
-const DEFAULT_BRANCH_REVISION = Repository.Revision.make("HEAD");
 const ITEM_CONCURRENCY = 4;
 
 const WatchKey = Schema.NonEmptyString.pipe(Schema.brand("GitHubPollWatchKey"));
@@ -128,15 +123,6 @@ const eventKey = (
     ]),
   );
 
-const repositoryContext = (repository: ManagedRepo): Schema.JsonObject => {
-  const { owner } = Repository.parts(repository.name);
-  return {
-    name: repository.name,
-    owner,
-    url: `https://github.com/${repository.name}`,
-  };
-};
-
 const latestPollAt = (
   values: ReadonlyArray<Option.Option<DateTime.Utc>>,
 ): Option.Option<DateTime.Utc> => {
@@ -148,9 +134,6 @@ const latestPollAt = (
   );
   return epochs.length === 0 ? Option.none() : DateTime.make(Math.max(...epochs));
 };
-
-const submissionRunId = (submission: SubmissionResult): string =>
-  submission._tag === "Claimed" ? submission.runId : "";
 
 /** Full selector-pruned GitHub change → snapshot → CEL → Event composition. */
 export class PollingTriggers extends Context.Service<
@@ -243,25 +226,13 @@ export class PollingTriggers extends Context.Service<
           const dedupKey = eventKey(loop, watched.repository, item, snapshot);
           const receivedAt = yield* DateTime.now;
           const submitted = yield* runs.submit(
-            new Submission({
-              event: new Event.Event({
-                // The dedup key IS the event's identity: one deduplicated fact,
-                // one row. Two columns exist because dedup_key carries the
-                // uniqueness constraint while id is the stable reference.
-                id: Event.EventId.make(dedupKey),
-                dedupKey,
-                payload,
-                receivedAt,
-              }),
+            triggerSubmission({
+              dedupKey,
               itemKey: stableItemKey,
-              loop: loop.name,
-              step: loop.step,
-              approval: loop.approval,
-              repository: watched.repository.name,
-              revision: DEFAULT_BRANCH_REVISION,
-              // Interpolation is a later ticket; until then the authored loop
-              // body is the rendered task the run host hands the agent.
-              task: AttemptChannel.Task.make(loop.body),
+              loop,
+              payload,
+              receivedAt,
+              repository: watched.repository,
             }),
           );
           yield* Effect.logInfo("Submitted matching item state", {
