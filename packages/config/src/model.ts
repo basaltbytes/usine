@@ -28,6 +28,7 @@ export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
 )("ConfigFileError", {
   file: InstancePath,
   stage: FileStage,
+  expression: Schema.OptionFromOptionalKey(Source),
   message: Schema.NonEmptyString,
 }) {}
 
@@ -285,7 +286,9 @@ export const loopReferenceFailure = (
   references: ReferenceIndex,
 ): Option.Option<ConfigFileError> => {
   const referenceError = (message: string): Option.Option<ConfigFileError> =>
-    Option.some(new ConfigFileError({ file, stage: "reference", message }));
+    Option.some(
+      new ConfigFileError({ file, stage: "reference", expression: Option.none(), message }),
+    );
   if (!references.agentNames.has(loop.agent)) {
     return referenceError(`Unknown agent: ${loop.agent}`);
   }

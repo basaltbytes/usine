@@ -213,6 +213,9 @@ describe("InstanceFolder", () => {
         "loops/unknown-agent.md",
       ]);
       expect(loaded.quarantinedLoops[0]?.error.message).toContain("No such key: nmae");
+      expect(Option.getOrNull(loaded.quarantinedLoops[0]?.error.expression ?? Option.none())).toBe(
+        'item.labels.nodes.exists(label, label.nmae == "ready")',
+      );
       expect(loaded.quarantinedLoops[1]?.error.message).toBe("Unknown agent: ghost");
       expect(loaded.agents.map(({ name }) => name)).toEqual(["developer", "reviewer"]);
       expect(loaded.invalidAgents.map(({ file }) => file)).toEqual(["agents/intern.md"]);

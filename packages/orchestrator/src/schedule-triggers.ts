@@ -9,7 +9,7 @@ import {
   repositoryContext,
   type ScheduleTrigger,
 } from "@usine/config";
-import { AttemptChannel, Event, Item, Loop, Repository } from "@usine/core";
+import { Agent, AttemptChannel, Event, Item, Loop, Repository } from "@usine/core";
 import { RunEngine, type RunEngineError, SubmissionResult } from "@usine/engine";
 import { ExpressionEngine, type ExpressionError } from "@usine/expression";
 import {
@@ -26,8 +26,10 @@ import {
   Schema,
 } from "effect";
 import {
+  configFileErrorLogFields,
+  type LoopAgentResolutionError,
   type ResolvedLoop,
-  resolveTriggerLoops,
+  resolveTriggerLoop,
   submissionLogFields,
   triggerSubmission,
 } from "./trigger-submission.ts";
@@ -37,7 +39,8 @@ const FANOUT_CONCURRENCY = 4;
 /** Wake cadence when no schedule can name its next boundary (none exist, or cron math is down). */
 const IDLE_WAKE_MILLIS = 60_000;
 
-interface WatchedSchedule extends ResolvedLoop {
+interface WatchedSchedule {
+  readonly loop: LoopFile;
   readonly repositories: ReadonlyArray<ManagedRepo>;
   readonly trigger: ScheduleTrigger;
 }
@@ -56,6 +59,26 @@ interface DueTick extends ResolvedLoop {
 }
 
 type ScheduleTriggerError = ConfigFileError | ExpressionError | RunEngineError;
+
+const scheduleFailureLogFields = (error: ScheduleTriggerError) => {
+  const common = { errorTag: error._tag, message: error.message };
+  if (error._tag === "ConfigFileError") {
+    return { ...common, ...configFileErrorLogFields(error) };
+  }
+  if (error._tag === "ExpressionCheckError" || error._tag === "ExpressionEvaluationError") {
+    return { ...common, expression: error.source };
+  }
+  return common;
+};
+
+/** One schedule loop whose authored Agent disappeared from the loaded roster. */
+export class ScheduleAgentFailure extends Schema.Class<ScheduleAgentFailure>(
+  "@usine/orchestrator/ScheduleAgentFailure",
+)({
+  loop: Loop.LoopName,
+  agent: Agent.Name,
+  message: Schema.String,
+}) {}
 
 /** One selected repository whose scheduled Tick could not be evaluated or submitted. */
 export class ScheduleTickFailure extends Schema.Class<ScheduleTickFailure>(
@@ -82,7 +105,11 @@ export class ScheduleCronFailure extends Schema.Class<ScheduleCronFailure>(
   message: Schema.String,
 }) {}
 
-export const ScheduleFailure = Schema.Union([ScheduleCronFailure, ScheduleTickFailure]);
+export const ScheduleFailure = Schema.Union([
+  ScheduleAgentFailure,
+  ScheduleCronFailure,
+  ScheduleTickFailure,
+]);
 export type ScheduleFailure = typeof ScheduleFailure.Type;
 
 /** Observable result of evaluating every schedule loop at one clock instant. */
@@ -98,18 +125,13 @@ export class ScheduleCycle extends Schema.Class<ScheduleCycle>("@usine/orchestra
   },
 ) {}
 
-const watchedSchedules = (
-  instance: LoadedInstance,
-  resolved: ReadonlyArray<ResolvedLoop>,
-): ReadonlyArray<WatchedSchedule> =>
-  resolved.flatMap(({ agent, loop, parentModel }) => {
+const watchedSchedules = (instance: LoadedInstance): ReadonlyArray<WatchedSchedule> =>
+  instance.loops.flatMap((loop) => {
     const trigger = loop.trigger;
     if (trigger.on !== "schedule") return [];
     return [
       {
-        agent,
         loop,
-        parentModel,
         repositories: instance.config.repos.filter((repository) =>
           matchesSelector(loop.selector, repository),
         ),
@@ -258,10 +280,11 @@ export class ScheduleTriggers extends Context.Service<
 
       const tick = Effect.fn("ScheduleTriggers.tick")(function* (instance: LoadedInstance) {
         const now = yield* DateTime.now;
-        const schedules = watchedSchedules(instance, yield* resolveTriggerLoops(instance));
+        const schedules = watchedSchedules(instance);
         const fired = yield* Ref.get(lastFired);
 
         const due: Array<DueTick> = [];
+        const agentFailures: Array<ScheduleAgentFailure> = [];
         const cronFailures: Array<ScheduleCronFailure> = [];
         const boundariesByLoop = new Map<Loop.LoopName, number>();
         const nexts: Array<DateTime.Utc> = [];
@@ -316,6 +339,24 @@ export class ScheduleTriggers extends Context.Service<
             });
             continue;
           }
+          const resolved = yield* Effect.result(resolveTriggerLoop(instance, schedule.loop));
+          if (Result.isFailure(resolved)) {
+            const error: LoopAgentResolutionError = resolved.failure;
+            yield* Effect.logError("Schedule loop could not resolve its Agent", {
+              loop: error.loop,
+              agent: error.agent,
+              errorTag: error._tag,
+              message: error.message,
+            });
+            agentFailures.push(
+              new ScheduleAgentFailure({
+                loop: error.loop,
+                agent: error.agent,
+                message: error.message,
+              }),
+            );
+            continue;
+          }
           if (schedule.repositories.length === 0) continue;
           boundariesByLoop.set(schedule.loop.name, latestEpoch);
           yield* Effect.logInfo("Schedule tick due", {
@@ -329,9 +370,9 @@ export class ScheduleTriggers extends Context.Service<
           });
           for (const repository of schedule.repositories) {
             due.push({
-              agent: schedule.agent,
+              agent: resolved.success.agent,
               loop: schedule.loop,
-              parentModel: schedule.parentModel,
+              parentModel: resolved.success.parentModel,
               repository,
               scheduledAt: boundaries.latest,
               scheduledAtLocal: boundaries.latestLocal,
@@ -369,8 +410,7 @@ export class ScheduleTriggers extends Context.Service<
             loop: candidate.loop.name,
             repository: candidate.repository.name,
             scheduledAt: DateTime.formatIso(candidate.scheduledAt),
-            errorTag: error._tag,
-            message: error.message,
+            ...scheduleFailureLogFields(error),
           });
           tickFailures.push(
             new ScheduleTickFailure({
@@ -403,7 +443,7 @@ export class ScheduleTriggers extends Context.Service<
           submissions,
           skipped,
           alreadyFired,
-          failures: [...cronFailures, ...tickFailures],
+          failures: [...agentFailures, ...cronFailures, ...tickFailures],
           nextTickAt: earliest(nexts),
         });
       });

@@ -26,6 +26,7 @@ import {
 } from "@usine/github";
 import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Result, Schema } from "effect";
 import {
+  configFileErrorLogFields,
   type ResolvedLoop,
   resolveTriggerLoops,
   submissionLogFields,
@@ -67,6 +68,17 @@ export class PollCycle extends Schema.Class<PollCycle>("@usine/orchestrator/Poll
 }) {}
 
 type RepositoryPollError = ConfigFileError | ExpressionError | GitHubAppError | RunEngineError;
+
+const repositoryFailureLogFields = (error: RepositoryPollError) => {
+  const common = { errorTag: error._tag, message: error.message };
+  if (error._tag === "ConfigFileError") {
+    return { ...common, ...configFileErrorLogFields(error) };
+  }
+  if (error._tag === "ExpressionCheckError" || error._tag === "ExpressionEvaluationError") {
+    return { ...common, expression: error.source };
+  }
+  return common;
+};
 
 interface WatchedRepository {
   readonly repository: ManagedRepo;
@@ -230,7 +242,18 @@ export class PollingTriggers extends Context.Service<
 
           const dedupKey = eventKey(loop, watched.repository, item, snapshot);
           const receivedAt = yield* DateTime.now;
-          const task = yield* config.renderPrompt(loop, context);
+          const task = yield* config.renderPrompt(loop, context).pipe(
+            Effect.tapError((error) =>
+              Effect.logError("Loop prompt rendering failed", {
+                loop: loop.name,
+                repository: watched.repository.name,
+                item: item.number,
+                errorTag: error._tag,
+                message: error.message,
+                ...configFileErrorLogFields(error),
+              }),
+            ),
+          );
           const submitted = yield* runs.submit(
             triggerSubmission({
               dedupKey,
@@ -329,8 +352,7 @@ export class PollingTriggers extends Context.Service<
           }
           yield* Effect.logError("Repository poll cycle failed; siblings were unaffected", {
             repository: repository.repository.name,
-            errorTag: error._tag,
-            message: error.message,
+            ...repositoryFailureLogFields(error),
           });
           failures.push(
             new RepositoryPollFailure({
