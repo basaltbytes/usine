@@ -28,40 +28,32 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
     yield* locks.withPermit(key)(
       Effect.gen(function* () {
         const current = (yield* Ref.get(counts)).get(key) ?? 0;
-        if (current === 0) {
-          yield* commands
-            .lobby("prepare", [
-              "integrations",
-              "attach",
-              integration,
-              `vm:${worker}`,
-              "--for",
-              `${grantMinutes}m`,
-            ])
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new CredentialUnavailableError({
-                    repository,
-                    message: `Could not attach exe.dev GitHub integration ${integration}`,
-                    cause,
-                  }),
-              ),
-            );
-          yield* Effect.logInfo("Attached time-boxed exe.dev GitHub integration", {
-            worker,
-            repository,
+        yield* commands
+          .lobby("prepare", [
+            "integrations",
+            "attach",
             integration,
-            grantMinutes,
-          });
-        } else {
-          yield* Effect.logDebug("Reusing an attached exe.dev GitHub integration", {
-            worker,
-            repository,
-            integration,
-            activeGrants: current,
-          });
-        }
+            `vm:${worker}`,
+            "--for",
+            `${grantMinutes}m`,
+          ])
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new CredentialUnavailableError({
+                  repository,
+                  message: `Could not attach exe.dev GitHub integration ${integration}`,
+                  cause,
+                }),
+            ),
+          );
+        yield* Effect.logInfo("Attached or refreshed time-boxed exe.dev GitHub integration", {
+          worker,
+          repository,
+          integration,
+          grantMinutes,
+          activeGrants: current,
+        });
         yield* Ref.update(counts, (currentCounts) => {
           const next = new Map(currentCounts);
           next.set(key, current + 1);
@@ -94,12 +86,17 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
           });
           return;
         }
-        yield* commands.lobby("cleanup", ["integrations", "detach", integration, `vm:${worker}`]);
-        yield* Ref.update(counts, (currentCounts) => {
-          const next = new Map(currentCounts);
-          next.delete(key);
-          return next;
-        });
+        yield* commands
+          .lobby("cleanup", ["integrations", "detach", integration, `vm:${worker}`])
+          .pipe(
+            Effect.ensuring(
+              Ref.update(counts, (currentCounts) => {
+                const next = new Map(currentCounts);
+                next.delete(key);
+                return next;
+              }),
+            ),
+          );
         yield* Effect.logInfo("Detached exe.dev GitHub integration", {
           worker,
           integration,

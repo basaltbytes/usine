@@ -37,7 +37,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   const workers = yield* Ref.make(new Map<Worker.Name, VmState>());
 
   const resolveVm = Effect.fn("ExeDevExecutor.resolveVm")(function* (worker: Worker.Name) {
-    const response = yield* commands.lobby("preflight", ["ls", worker]);
+    const response = yield* commands.lobbyJson("preflight", ["ls", worker]);
     const decoded = yield* decodeVmList(response).pipe(
       Effect.mapError((cause) =>
         capabilityError(

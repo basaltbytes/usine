@@ -164,7 +164,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
               worktree,
               baseCommit,
             ]);
-            return new PreparedAttempt({
+            const prepared = new PreparedAttempt({
               worker: request.worker,
               spec: new AttemptChannel.RunSpec({
                 attemptId: request.attemptId,
@@ -175,6 +175,12 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
               }),
               worktree: WorktreePath.make(worktree),
             });
+            yield* Ref.update(preparedStates, (current) => {
+              const next = new Map(current);
+              next.set(request.attemptId, { cache, integration, vm });
+              return next;
+            });
+            return prepared;
           }),
         )
         .pipe(
@@ -185,6 +191,11 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
           ),
           Effect.onError(() =>
             Effect.gen(function* () {
+              yield* Ref.update(preparedStates, (current) => {
+                const next = new Map(current);
+                next.delete(request.attemptId);
+                return next;
+              });
               yield* commands.remote("cleanup", vm, "rm", ["-rf", worktree, staging]).pipe(
                 Effect.tapError((error) =>
                   Effect.logWarning("Could not remove a partial exe.dev workspace", {
@@ -207,11 +218,6 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
           ),
         );
 
-      yield* Ref.update(preparedStates, (current) => {
-        const next = new Map(current);
-        next.set(request.attemptId, { cache, integration, vm });
-        return next;
-      });
       yield* Effect.logInfo("exe.dev Attempt workspace ready", {
         attemptId: request.attemptId,
         worker: request.worker,

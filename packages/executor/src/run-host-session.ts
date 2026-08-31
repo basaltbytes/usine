@@ -11,6 +11,7 @@ import {
   Schema,
   Scope,
   Stream,
+  type PlatformError,
 } from "effect";
 import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner";
 import { ExecutorError, ExecutorOperationError, type PreparedAttempt } from "./index.ts";
@@ -27,7 +28,11 @@ export interface RunHostSessionOptions {
   readonly spawn: (
     prepared: PreparedAttempt,
     input: RunHostInput,
-  ) => Effect.Effect<SpawnedRunHost, unknown, Scope.Scope>;
+  ) => Effect.Effect<
+    SpawnedRunHost,
+    AttemptFailure.AttemptFailure | PlatformError.PlatformError,
+    Scope.Scope
+  >;
 }
 
 export interface RunHostSession {

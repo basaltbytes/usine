@@ -16,6 +16,10 @@ export interface ExeDevCommands {
     operation: ExecutorOperation,
     args: ReadonlyArray<string>,
   ) => Effect.Effect<string, ExecutorOperationError>;
+  readonly lobbyJson: (
+    operation: ExecutorOperation,
+    args: ReadonlyArray<string>,
+  ) => Effect.Effect<string, ExecutorOperationError>;
   readonly remoteRaw: (
     operation: ExecutorOperation,
     vm: VmState,
@@ -143,7 +147,12 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     operation: ExecutorOperation,
     args: ReadonlyArray<string>,
   ): Effect.Effect<string, ExecutorOperationError> =>
-    executeChecked(operation, ssh.command, [...ssh.args, "exe.dev", ...args, "--json"]);
+    executeChecked(operation, ssh.command, [...ssh.args, "exe.dev", ...args]);
+
+  const lobbyJson = (
+    operation: ExecutorOperation,
+    args: ReadonlyArray<string>,
+  ): Effect.Effect<string, ExecutorOperationError> => lobby(operation, [...args, "--json"]);
 
   const remoteRaw = (
     operation: ExecutorOperation,
@@ -164,6 +173,7 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
   return {
     environment,
     lobby,
+    lobbyJson,
     remote,
     remoteRaw,
     ssh,

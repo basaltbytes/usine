@@ -299,10 +299,34 @@ describe("exe.dev executor", () => {
         for (const command of ssh.state.commands) {
           assert(!("GH_TOKEN" in (command.options.env ?? {})));
           assert(!("GITHUB_TOKEN" in (command.options.env ?? {})));
+          if (command.args.includes("integrations")) assert(!command.args.includes("--json"));
         }
       }).pipe(Effect.provide(runtime(ssh.layer)));
     },
   );
+
+  it.effect("refreshes a shared grant for each Attempt and detaches after the last cleanup", () => {
+    const ssh = fakeSsh("1");
+    const secondRequest = new CheckoutRequest({
+      ...request,
+      attemptId: Attempt.AttemptId.make("remote-run/execute/2"),
+    });
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER);
+      const first = yield* executor.prepare(request);
+      const second = yield* executor.prepare(secondRequest);
+      const matchingCommands = (subcommand: string) =>
+        ssh.state.commands.filter(
+          ({ args }) => args.includes("integrations") && args.includes(subcommand),
+        );
+      assert.strictEqual(matchingCommands("attach").length, 2);
+      yield* executor.cleanup(first);
+      assert.strictEqual(matchingCommands("detach").length, 0);
+      yield* executor.cleanup(second);
+      assert.strictEqual(matchingCommands("detach").length, 1);
+    }).pipe(Effect.provide(runtime(ssh.layer)));
+  });
 
   it.effect("surfaces run-host skew as a typed preflight capability error", () => {
     const ssh = fakeSsh("2");
