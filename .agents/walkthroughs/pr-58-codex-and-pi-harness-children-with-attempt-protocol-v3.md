@@ -2,10 +2,10 @@
 walkthrough: 1
 title: Codex and Pi harness children with Attempt protocol v3
 pr: 58
-commit: fb24c80cc3355e61f63edc8cc98e281577f84ba1
+commit: 949d4f46df6eacb2df02e377fe6d1297b1f841fc
 meta:
   pr: "58"
-  commit: fb24c80
+  commit: 949d4f4
   scope: agents, channel, persistence
   balade-authoring: 1.33.0
 ---
