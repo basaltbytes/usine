@@ -10,12 +10,17 @@ import type { ExeDevCommands } from "./commands.ts";
 import type { ExeDevExecutorOptions, VmState } from "./model.ts";
 
 const MINIMUM_NODE_MAJOR = 22;
+const SshDestination = Schema.String.check(
+  Schema.isPattern(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/u, {
+    message: "Expected an exe.dev SSH hostname, optionally prefixed by a user",
+  }),
+);
 
 const VmList = Schema.Struct({
   vms: Schema.Array(
     Schema.Struct({
       vm_name: Schema.NonEmptyString,
-      ssh_dest: Schema.NonEmptyString,
+      ssh_dest: SshDestination,
       status: Schema.NonEmptyString,
     }),
   ),
@@ -67,7 +72,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
     }
     const partial = { home: "", sshDest: vm.ssh_dest };
     const home = (yield* commands.remote("preflight", partial, "printenv", ["HOME"])).trim();
-    if (!home.startsWith("/")) {
+    if (!home.startsWith("/") || home.includes("\0") || /[\r\n]/u.test(home)) {
       return yield* capabilityError(
         worker,
         "toolchain",
