@@ -141,6 +141,8 @@ const claimedRun = (cycle: Effect.Success<ReturnType<PollingTriggers["Service"][
 
 const runtimeLayer = (directory: Instance.Directory, github: GitHubPolling["Service"]) => {
   const executor = Layer.succeed(StepExecutor)({
+    interrupt: () => Effect.void,
+    reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
     execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
   });
   const engine = localEngineLayer(directory).pipe(Layer.provide(executor));
@@ -171,6 +173,7 @@ const schedulerLayer = (github: GitHubPolling["Service"]) => {
     retry: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),
     submit: () => Effect.die("unused"),
+    transcript: () => Effect.die("unused"),
   });
   const dependencies = Layer.mergeAll(
     cursors,
@@ -410,6 +413,7 @@ describe("PollingTriggers", () => {
             runId: Run.RunId.make(`run-${submission.event.id}`),
           }),
         ),
+      transcript: () => Effect.die("unused"),
     });
     const layer = PollingTriggers.layer.pipe(
       Layer.provide(

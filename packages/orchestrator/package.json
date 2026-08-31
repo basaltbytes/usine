@@ -17,6 +17,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./local": {
+      "types": "./dist/local.d.ts",
+      "default": "./dist/local.js"
     }
   },
   "publishConfig": {
@@ -29,14 +33,16 @@
     "test:integration": "vitest run test/integration/polling-triggers.test.ts"
   },
   "dependencies": {
+    "@effect/platform-node": "catalog:",
     "@usine/config": "workspace:*",
     "@usine/core": "workspace:*",
     "@usine/engine": "workspace:*",
+    "@usine/executor": "workspace:*",
     "@usine/expression": "workspace:*",
-    "@usine/github": "workspace:*"
+    "@usine/github": "workspace:*",
+    "@usine/run-host": "workspace:*"
   },
   "devDependencies": {
-    "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",

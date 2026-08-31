@@ -8,6 +8,9 @@
     "url": "git+https://github.com/basaltbytes/usine.git",
     "directory": "packages/run-host"
   },
+  "bin": {
+    "usine-run-host": "./dist/bin.js"
+  },
   "files": [
     "dist"
   ],
@@ -17,16 +20,26 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./executable": {
+      "types": "./dist/executable.d.ts",
+      "default": "./dist/executable.js"
     }
   },
   "publishConfig": {
     "access": "public"
   },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b",
+    "check": "tsc -p tsconfig.check.json"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@usine/core": "workspace:*"
   },
   "devDependencies": {
     "@usine/tsconfig": "workspace:*",
+    "effect": "catalog:",
     "typescript": "catalog:"
   },
   "peerDependencies": {

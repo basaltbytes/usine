@@ -1,10 +1,18 @@
 import { Event, Item, Loop, Run } from "@usine/core";
-import { Context, Crypto, Effect, Layer, Option } from "effect";
+import { Context, Crypto, Effect, Layer, Option, Result } from "effect";
 import { ClusterWorkflowEngine, SingleRunner } from "effect/unstable/cluster";
 import { SqlClient } from "effect/unstable/sql";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
 import { RunDatabase } from "./database/database.ts";
-import type { RunEngineError, RunSnapshot, Submission, SubmissionResult } from "./model.ts";
+import {
+  AttemptCancellationError,
+  type RunEngineError,
+  type RunSnapshot,
+  type Submission,
+  type SubmissionResult,
+  type TranscriptEntry,
+  type TranscriptQuery,
+} from "./model.ts";
 import { RunStore } from "./store/store.ts";
 import {
   ApprovalGate,
@@ -20,6 +28,7 @@ const MAX_SETTLEMENT_POLLS = 500;
 
 const makeRunEngine = Effect.gen(function* () {
   const store = yield* RunStore;
+  const stepExecutor = yield* StepExecutor;
   const workflowEngine = yield* WorkflowEngine.WorkflowEngine;
   const provideWorkflowEngine = <A, E>(
     effect: Effect.Effect<A, E, WorkflowEngine.WorkflowEngine>,
@@ -112,10 +121,27 @@ const makeRunEngine = Effect.gen(function* () {
   });
 
   const cancel = Effect.fn("RunEngine.cancel")(function* (runId: Run.RunId) {
-    const changed = yield* store.cancel(runId);
-    if (changed) {
-      yield* deliverInterrupt(runId);
-      yield* deliverContinuation(runId);
+    // The closing transaction decides both facts at once: whether the run was
+    // still open, and which attempt (if any) was in flight when it closed.
+    const outcome = yield* store.cancel(runId);
+    if (outcome._tag === "AlreadyClosed") {
+      yield* Effect.logDebug("Cancel was a no-op; the run was already closed", { runId });
+      return;
+    }
+    yield* Effect.logInfo("Run canceled", {
+      runId,
+      openAttempt: Option.getOrElse(outcome.openAttempt, () => "none"),
+    });
+    const handshake = Option.isSome(outcome.openAttempt)
+      ? yield* stepExecutor.interrupt(outcome.openAttempt.value).pipe(Effect.result)
+      : Result.succeed(undefined);
+    yield* deliverInterrupt(runId);
+    yield* deliverContinuation(runId);
+    if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
+      return yield* new AttemptCancellationError({
+        attemptId: outcome.openAttempt.value,
+        cause: handshake.failure,
+      });
     }
   });
 
@@ -133,6 +159,10 @@ const makeRunEngine = Effect.gen(function* () {
 
   const inspect = Effect.fn("RunEngine.inspect")(function* (runId: Run.RunId) {
     return yield* store.snapshot(runId);
+  });
+
+  const transcript = Effect.fn("RunEngine.transcript")(function* (query: TranscriptQuery) {
+    return yield* store.transcript(query);
   });
 
   const reconcile = Effect.fn("RunEngine.reconcile")(function* () {
@@ -166,7 +196,7 @@ const makeRunEngine = Effect.gen(function* () {
 
   yield* reconcile();
 
-  return { approve, cancel, inspect, reconcile, retry, revoke, submit } as const;
+  return { approve, cancel, inspect, reconcile, retry, revoke, submit, transcript } as const;
 });
 
 /**
@@ -190,6 +220,9 @@ export class RunEngine extends Context.Service<
       itemKey: Item.ItemKey,
     ) => Effect.Effect<ReadonlyArray<Run.RunId>, RunEngineError>;
     readonly submit: (submission: Submission) => Effect.Effect<SubmissionResult, RunEngineError>;
+    readonly transcript: (
+      query: TranscriptQuery,
+    ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunEngineError>;
   }
 >()("@usine/engine/RunEngine") {}
 

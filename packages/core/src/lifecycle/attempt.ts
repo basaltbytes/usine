@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AttemptFailure, isAutoRetryable } from "./attempt-failure.ts";
 import { RunId } from "./run.ts";
 import { StepName } from "./step.ts";
+import { Name as WorkerName } from "../worker.ts";
 
 /**
  * Value object (branded id): identity of one Attempt.
@@ -47,6 +48,7 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
   id: AttemptId,
   runId: RunId,
   stepName: StepName,
+  worker: WorkerName,
   number: AttemptNumber,
   startedAt: Schema.DateTimeUtc,
   outcome: Schema.Option(Outcome),

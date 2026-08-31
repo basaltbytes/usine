@@ -11,7 +11,10 @@ Everything lives in the `lifecycle` cluster: a deduplicated Event opens a Run, t
 | `Event`, `Run`, `Step`, `Attempt` | Entities — the four ledger rows, identity plus validated construction |
 | `EventId`, `RunId`, `AttemptId` | Value objects — branded ids; identities that cannot be swapped for each other |
 | `DedupKey`, `ItemKey`, `LoopName`, `StepName`, `AttemptNumber` | Value objects — branded primitives carrying a domain constraint |
-| `Instance.Directory`, `Repository.Name` | Shared value objects — the instance-folder path and validated GitHub `owner/name` identity |
+| `Instance.Directory`, `Repository.Name`, `Repository.Revision`, `Repository.CommitSha` | Shared value objects — paths and validated Git identities |
+| `Worker.Name` | Value object — the worker that owns an Attempt |
+| `AttemptChannel.*` | Protocol values — the secret-free run spec, framed input, and versioned Attempt envelopes |
+| `StepResult.*` | Result values — the final agent message plus commit, pull-request, and comment facts |
 | `RunState.*`, `CancelReason`, `Attempt.Outcome` | State value objects — discriminated unions, including a distinct canceled Attempt outcome |
 | `RunState.awaitApproval/start/succeed/fail/retry/cancelByOperator/supersede/revoke` | Typestate transitions — each accepts only the states it is legal on, so an illegal transition is a compile error |
 | `InfraFailure`, `AgentFailure`, `RunawayFailure` | Typed errors — the attempt-failure taxonomy |

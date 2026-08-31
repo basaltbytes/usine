@@ -1,4 +1,14 @@
-import { Attempt, Event, Instance, Item, Loop, Run, Step } from "@usine/core";
+import {
+  Attempt,
+  AttemptChannel,
+  Event,
+  Instance,
+  Item,
+  Loop,
+  Repository,
+  Run,
+  Step,
+} from "@usine/core";
 import { Schema } from "effect";
 
 /** Whether a loop parks new runs until an approval Event arrives. */
@@ -17,6 +27,9 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   loop: Loop.LoopName,
   step: Step.StepName,
   approval: ApprovalRequirement,
+  repository: Repository.Name,
+  revision: Repository.Revision,
+  task: AttemptChannel.Task,
 }) {}
 
 /** The Event owns a Run and repeated submissions return the same identity. */
@@ -69,6 +82,9 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   run: Run.Run,
   step: Step.Step,
   attempts: Schema.Array(Attempt.Attempt),
+  repository: Repository.Name,
+  revision: Repository.Revision,
+  task: AttemptChannel.Task,
 }) {}
 
 /** Input passed to the attempt-execution port. */
@@ -77,7 +93,39 @@ export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/St
   event: Event.Event,
   run: Run.Run,
   step: Step.Step,
+  repository: Repository.Name,
+  revision: Repository.Revision,
+  task: AttemptChannel.Task,
 }) {}
+
+/**
+ * Value object: global append order of the persisted transcript — the tail
+ * cursor. Distinct from `AttemptChannel.Sequence`, which orders messages
+ * within one Attempt's channel direction.
+ */
+export const TranscriptSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+  Schema.brand("TranscriptSequence"),
+);
+export type TranscriptSequence = typeof TranscriptSequence.Type;
+
+/** One append-only row in an Attempt transcript. */
+export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engine/TranscriptEntry")(
+  {
+    sequence: TranscriptSequence,
+    attemptId: Attempt.AttemptId,
+    direction: AttemptChannel.Direction,
+    envelope: AttemptChannel.Envelope,
+    receivedAt: Schema.DateTimeUtc,
+  },
+) {}
+
+/** Cursor query used to tail the append-only transcript. */
+export class TranscriptQuery extends Schema.Class<TranscriptQuery>("@usine/engine/TranscriptQuery")(
+  {
+    attemptId: Attempt.AttemptId,
+    after: Schema.Option(TranscriptSequence),
+  },
+) {}
 
 export class RunNotFoundError extends Schema.TaggedError<RunNotFoundError>(
   "@usine/engine/RunNotFoundError",
@@ -100,9 +148,26 @@ export class EnginePersistenceError extends Schema.TaggedError<EnginePersistence
   cause: Schema.Defect(),
 }) {}
 
+export class AttemptCancellationError extends Schema.TaggedError<AttemptCancellationError>(
+  "@usine/engine/AttemptCancellationError",
+)("AttemptCancellationError", {
+  attemptId: Attempt.AttemptId,
+  cause: Schema.Defect(),
+}) {}
+
+/** Everything the store itself can fail with. */
+export const RunStoreError = Schema.Union([
+  RunNotFoundError,
+  RunOperationRejectedError,
+  EnginePersistenceError,
+]);
+export type RunStoreError = typeof RunStoreError.Type;
+
+/** The store's failures plus the engine-only cancellation handshake failure. */
 export const RunEngineError = Schema.Union([
   RunNotFoundError,
   RunOperationRejectedError,
   EnginePersistenceError,
+  AttemptCancellationError,
 ]);
 export type RunEngineError = typeof RunEngineError.Type;

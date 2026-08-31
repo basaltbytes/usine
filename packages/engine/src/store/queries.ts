@@ -1,10 +1,21 @@
-import { Attempt, Event, Item, Loop, Run, RunState, Step } from "@usine/core";
-import { and, desc, eq, inArray, isNull, ne, sql } from "drizzle-orm";
+import {
+  Attempt,
+  AttemptChannel,
+  Event,
+  Item,
+  Loop,
+  Run,
+  RunState,
+  Step,
+  StepResult,
+} from "@usine/core";
+import { and, asc, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { Effect, Option } from "effect";
+import { DateTime, Effect, Option } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import {
   approvals,
+  attemptTranscripts,
   attempts,
   events,
   ignoredEvents,
@@ -17,6 +28,7 @@ import {
   RunNotFoundError,
   RunSnapshot,
   Submission,
+  TranscriptQuery,
   WORKFLOW_COMMAND_PRIORITY,
   type WorkflowCommand,
 } from "../model.ts";
@@ -29,14 +41,18 @@ import {
   decodeRunIds,
   decodeRunRows,
   decodeWorkflowCommands,
+  decodeTranscriptRows,
   encodeDateTime,
+  encodeEnvelope,
   encodeOutcome,
   encodePayload,
   encodeRunState,
+  encodeStepResult,
   eventFromRow,
   runFromRow,
   stepFromRow,
   submissionFromRow,
+  transcriptEntryFromRow,
 } from "./codec.ts";
 
 const eventRouteSelection = {
@@ -48,6 +64,9 @@ const eventRouteSelection = {
   loop: triggerEvents.loopName,
   step: triggerEvents.stepName,
   approval: triggerEvents.approval,
+  repository: triggerEvents.repository,
+  revision: triggerEvents.revision,
+  task: triggerEvents.task,
 } as const;
 
 // The state partitions stay owned by @usine/core (`RunState.Open` and the
@@ -92,6 +111,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
         loop: runs.loopName,
         state: runs.stateJson,
         openedAt: runs.openedAt,
+        repository: runs.repository,
+        revision: runs.revision,
+        task: runs.task,
         stepName: steps.stepName,
         result: steps.result,
       })
@@ -108,6 +130,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
         attemptId: attempts.attemptId,
         runId: attempts.runId,
         stepName: attempts.stepName,
+        worker: attempts.workerName,
         number: attempts.attemptNumber,
         startedAt: attempts.startedAt,
         outcome: attempts.outcomeJson,
@@ -135,6 +158,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
       run: runFromRow(storedRun),
       step: stepFromRow(storedRun),
       attempts: storedAttempts.map(attemptFromRow),
+      repository: storedRun.repository,
+      revision: storedRun.revision,
+      task: storedRun.task,
     });
   });
 
@@ -160,6 +186,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
         attemptId: attempt.id,
         runId: attempt.runId,
         stepName: attempt.stepName,
+        workerName: attempt.worker,
         attemptNumber: attempt.number,
         startedAt: encodeDateTime(attempt.startedAt),
         outcomeJson: null,
@@ -181,11 +208,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
   const updateStepResult = Effect.fn("RunStoreQueries.updateStepResult")(function* (
     runId: Run.RunId,
     stepName: Step.StepName,
-    result: string,
+    result: StepResult.StepResult,
   ) {
     yield* database
       .update(steps)
-      .set({ result })
+      .set({ result: encodeStepResult(result) })
       .where(and(eq(steps.runId, runId), eq(steps.stepName, stepName)))
       .execute();
   });
@@ -290,6 +317,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
         loopName: submission.loop,
         stateJson: encodeRunState(new RunState.Pending()),
         openedAt: encodeDateTime(submission.event.receivedAt),
+        repository: submission.repository,
+        revision: submission.revision,
+        task: submission.task,
       })
       .onConflictDoNothing()
       .execute();
@@ -362,6 +392,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
           loopName: submission.loop,
           stepName: submission.step,
           approval: submission.approval,
+          repository: submission.repository,
+          revision: submission.revision,
+          task: submission.task,
         })
         .execute();
       return submission;
@@ -392,6 +425,51 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
     const queued = yield* decodeEventRoutes(queuedRows);
     return Option.fromNullishOr(queued[0]).pipe(Option.map(submissionFromRow));
+  });
+
+  const appendTranscript = Effect.fn("RunStoreQueries.appendTranscript")(function* (
+    direction: AttemptChannel.Direction,
+    envelope: AttemptChannel.Envelope,
+    receivedAt: DateTime.Utc,
+  ) {
+    yield* database
+      .insert(attemptTranscripts)
+      .values({
+        attemptId: envelope.attemptId,
+        direction,
+        channelSequence: envelope.sequence,
+        envelope: encodeEnvelope(envelope),
+        receivedAt: encodeDateTime(receivedAt),
+      })
+      .onConflictDoNothing()
+      .execute();
+  });
+
+  const transcript = Effect.fn("RunStoreQueries.transcript")(function* (query: TranscriptQuery) {
+    const cursor = Option.match(query.after, {
+      onNone: () => eq(attemptTranscripts.attemptId, query.attemptId),
+      onSome: (sequence) =>
+        and(
+          eq(attemptTranscripts.attemptId, query.attemptId),
+          gt(attemptTranscripts.sequence, sequence),
+        ),
+    });
+    const rows = yield* database
+      .select({
+        sequence: attemptTranscripts.sequence,
+        attemptId: attemptTranscripts.attemptId,
+        direction: attemptTranscripts.direction,
+        envelope: attemptTranscripts.envelope,
+        receivedAt: attemptTranscripts.receivedAt,
+      })
+      .from(attemptTranscripts)
+      .where(cursor)
+      .orderBy(asc(attemptTranscripts.sequence))
+      .execute();
+    // Transcript rows are usine-owned: an unknown key is corruption, not tolerance.
+    return (yield* decodeTranscriptRows(rows, { onExcessProperty: "error" })).map(
+      transcriptEntryFromRow,
+    );
   });
 
   const recoverable = Effect.fn("RunStoreQueries.recoverable")(function* () {
@@ -480,6 +558,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   return {
     addAttempt,
+    appendTranscript,
     approvalExists,
     blockingRun,
     closeAttempt,
@@ -498,6 +577,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     revokeUnstarted,
     runForEvent,
     snapshot,
+    transcript,
     updateStepResult,
     updateState,
   } as const;

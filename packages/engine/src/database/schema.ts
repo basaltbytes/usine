@@ -1,4 +1,14 @@
-import { Attempt, Event, Item, Loop, Run, Step } from "@usine/core";
+import {
+  Attempt,
+  AttemptChannel,
+  Event,
+  Item,
+  Loop,
+  Repository,
+  Run,
+  Step,
+  Worker,
+} from "@usine/core";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -41,6 +51,12 @@ export const triggerEvents = snakeCase.table(
     loopName: text().$type<Loop.LoopName>().notNull(),
     stepName: text().$type<Step.StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
+    // The submitted execution context, part of the immutable Event fact. A
+    // queued Event (blocked behind a running Run) is claimed later from these
+    // columns; the Run's own copy below is what execution reads.
+    repository: text().$type<Repository.Name>().notNull(),
+    revision: text().$type<Repository.Revision>().notNull(),
+    task: text().$type<AttemptChannel.Task>().notNull(),
   },
   (table) => [
     check("usine_trigger_events_approval", sql`${table.approval} in ('none', 'required')`),
@@ -60,6 +76,11 @@ export const runs = snakeCase.table(
     loopName: text().$type<Loop.LoopName>().notNull(),
     stateJson: text({ mode: "json" }).$type<unknown>().notNull(),
     openedAt: text().notNull(),
+    // The Run's *effective* context, seeded from the claiming submission.
+    // ADR 0018's edit-and-retry amends these; the Event columns never change.
+    repository: text().$type<Repository.Name>().notNull(),
+    revision: text().$type<Repository.Revision>().notNull(),
+    task: text().$type<AttemptChannel.Task>().notNull(),
   },
   (table) => [check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`)],
 );
@@ -72,9 +93,15 @@ export const steps = snakeCase.table(
       .notNull()
       .references(() => runs.runId),
     stepName: text().$type<Step.StepName>().notNull(),
-    result: text(),
+    result: text({ mode: "json" }).$type<unknown>(),
   },
-  (table) => [primaryKey({ columns: [table.runId, table.stepName] })],
+  (table) => [
+    primaryKey({ columns: [table.runId, table.stepName] }),
+    check(
+      "usine_steps_result_json_valid",
+      sql`${table.result} is null or json_valid(${table.result})`,
+    ),
+  ],
 );
 
 export const attempts = snakeCase.table(
@@ -83,6 +110,7 @@ export const attempts = snakeCase.table(
     attemptId: text().$type<Attempt.AttemptId>().primaryKey(),
     runId: text().$type<Run.RunId>().notNull(),
     stepName: text().$type<Step.StepName>().notNull(),
+    workerName: text().$type<Worker.Name>().notNull(),
     attemptNumber: integer({ mode: "number" }).$type<Attempt.AttemptNumber>().notNull(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
@@ -101,6 +129,35 @@ export const attempts = snakeCase.table(
       columns: [table.runId, table.stepName],
       foreignColumns: [steps.runId, steps.stepName],
     }),
+  ],
+);
+
+export const attemptTranscripts = snakeCase.table(
+  "usine_attempt_transcripts",
+  {
+    sequence: integer({ mode: "number" }).primaryKey({ autoIncrement: true }),
+    attemptId: text()
+      .$type<Attempt.AttemptId>()
+      .notNull()
+      .references(() => attempts.attemptId),
+    direction: text({ enum: AttemptChannel.DIRECTIONS }).notNull(),
+    channelSequence: integer({ mode: "number" }).$type<AttemptChannel.Sequence>().notNull(),
+    envelope: text({ mode: "json" }).$type<unknown>().notNull(),
+    receivedAt: text().notNull(),
+  },
+  (table) => [
+    check(
+      "usine_attempt_transcripts_direction",
+      sql`${table.direction} in ('inbound', 'outbound')`,
+    ),
+    check("usine_attempt_transcripts_sequence", sql`${table.channelSequence} >= 1`),
+    check("usine_attempt_transcripts_envelope_json_valid", sql`json_valid(${table.envelope})`),
+    uniqueIndex("usine_attempt_transcript_envelope").on(
+      table.attemptId,
+      table.direction,
+      table.channelSequence,
+    ),
+    index("usine_attempt_transcript_tail").on(table.attemptId, table.sequence),
   ],
 );
 

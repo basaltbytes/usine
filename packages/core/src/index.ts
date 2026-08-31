@@ -9,6 +9,9 @@
  */
 export * as Instance from "./instance.ts";
 export * as Repository from "./repository.ts";
+export * as AttemptChannel from "./attempt-channel.ts";
+export * as StepResult from "./step-result.ts";
+export * as Worker from "./worker.ts";
 export * as Attempt from "./lifecycle/attempt.ts";
 export * as AttemptFailure from "./lifecycle/attempt-failure.ts";
 export * as Event from "./lifecycle/event.ts";

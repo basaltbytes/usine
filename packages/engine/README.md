@@ -14,6 +14,7 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 - Revoke stops pending and waiting Runs. Operator cancellation can also stop a running Attempt.
 - The startup sweep rejoins open workflow executions. If the process stopped during an Attempt, the engine records that Attempt as an infrastructure failure and resumes as N+1.
 - A crash inside the `StepExecutor` adapter is recorded as an infrastructure failure like any other. If the engine itself hits an invariant defect, the workflow suspends for inspection; `RunEngine.reconcile` (or a restart) repairs the projection.
+- Attempt channel envelopes are stored in an append-only transcript. `RunEngine.transcript` accepts an optional sequence cursor for live tailing.
 
 ## Composition
 
@@ -21,11 +22,20 @@ The root entry (`@usine/engine`) is platform-free; the Node local adapter lives 
 
 ```ts
 import { Effect, Layer } from "effect"
+import { StepResult, Worker } from "@usine/core"
 import { CursorStore, InstanceDirectory, RunEngine, StepExecutor } from "@usine/engine"
 import { layer } from "@usine/engine/local-sqlite"
 
 const StepExecutorLive = Layer.succeed(StepExecutor)({
-  execute: ({ event }) => Effect.succeed(`Handled ${event.id}`),
+  reserve: () => Effect.succeed({
+    worker: Worker.Name.make("local"),
+    release: Effect.void,
+  }),
+  execute: ({ event }) => Effect.succeed(new StepResult.StepResult({
+    message: `Handled ${event.id}`,
+    facts: [],
+  })),
+  interrupt: () => Effect.void,
 })
 
 const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(
@@ -35,7 +45,8 @@ const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(
 const program = Effect.gen(function* () {
   const engine = yield* RunEngine
   const cursors = yield* CursorStore
-  // use the engine and cursor store
+  // submit, approve, retry, cancel, revoke, inspect, reconcile, read a transcript,
+  // or read and write efficiency-only cursors
 })
 ```
 

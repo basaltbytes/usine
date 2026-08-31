@@ -5,7 +5,7 @@ import {
   type ManagedRepo,
   matchesSelector,
 } from "@usine/config";
-import { Event, Item, Repository } from "@usine/core";
+import { AttemptChannel, Event, Item, Repository } from "@usine/core";
 import {
   CursorKey,
   CursorStore,
@@ -26,6 +26,12 @@ import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Result, Sche
 
 /** GitHub REST + GraphQL tolerate a handful of parallel calls per token. */
 const REPOSITORY_CONCURRENCY = 4;
+
+/**
+ * The worker fetch target until per-loop revisions exist: `git fetch origin
+ * HEAD` resolves the remote's current default branch at prepare time.
+ */
+const DEFAULT_BRANCH_REVISION = Repository.Revision.make("HEAD");
 const ITEM_CONCURRENCY = 4;
 
 const WatchKey = Schema.NonEmptyString.pipe(Schema.brand("GitHubPollWatchKey"));
@@ -251,6 +257,11 @@ export class PollingTriggers extends Context.Service<
               loop: loop.name,
               step: loop.step,
               approval: loop.approval,
+              repository: watched.repository.name,
+              revision: DEFAULT_BRANCH_REVISION,
+              // Interpolation is a later ticket; until then the authored loop
+              // body is the rendered task the run host hands the agent.
+              task: AttemptChannel.Task.make(loop.body),
             }),
           );
           yield* Effect.logInfo("Submitted matching item state", {

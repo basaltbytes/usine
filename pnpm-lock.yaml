@@ -197,13 +197,16 @@ importers:
 
   packages/executor:
     dependencies:
-      effect:
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111
+      '@usine/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
@@ -257,6 +260,9 @@ importers:
 
   packages/orchestrator:
     dependencies:
+      '@effect/platform-node':
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111(effect@4.0.0-rc.111)(redis@6.2.1)
       '@usine/config':
         specifier: workspace:*
         version: link:../config
@@ -266,16 +272,19 @@ importers:
       '@usine/engine':
         specifier: workspace:*
         version: link:../engine
+      '@usine/executor':
+        specifier: workspace:*
+        version: link:../executor
       '@usine/expression':
         specifier: workspace:*
         version: link:../expression
       '@usine/github':
         specifier: workspace:*
         version: link:../github
+      '@usine/run-host':
+        specifier: workspace:*
+        version: link:../run-host
     devDependencies:
-      '@effect/platform-node':
-        specifier: 'catalog:'
-        version: 4.0.0-rc.111(effect@4.0.0-rc.111)(redis@6.2.1)
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-rc.111(effect@4.0.0-rc.111)(vitest@4.1.11(@types/node@26.2.0)(vite@8.2.2(@types/node@26.2.0)(jiti@2.7.0)(yaml@2.9.0)))
@@ -294,13 +303,19 @@ importers:
 
   packages/run-host:
     dependencies:
-      effect:
+      '@effect/platform-node':
         specifier: 'catalog:'
-        version: 4.0.0-rc.111
+        version: 4.0.0-rc.111(effect@4.0.0-rc.111)(redis@6.2.1)
+      '@usine/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
+      effect:
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111
       typescript:
         specifier: 'catalog:'
         version: 7.0.2
