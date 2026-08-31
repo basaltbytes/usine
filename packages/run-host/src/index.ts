@@ -36,7 +36,7 @@ const encodeOutput = Schema.encodeSync(Schema.fromJsonString(AttemptChannel.Outb
 const hostError = (stage: RunHostError["stage"], message: string, cause: unknown): RunHostError =>
   new RunHostError({ stage, message, cause });
 
-/** Runs one real agent session over the strict protocol-v2 newline-delimited channel. */
+/** Runs one real agent session over the strict protocol-v3 newline-delimited channel. */
 export const runHost = () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -172,7 +172,6 @@ export const runHost = () =>
         );
       });
 
-      yield* emit(new AttemptChannel.Started());
       const launched = yield* Effect.result(
         agents.launch(
           new LaunchRequest({
@@ -191,6 +190,14 @@ export const runHost = () =>
         return;
       }
       const session = launched.success;
+      yield* emit(
+        new AttemptChannel.Started({
+          spawned: new AttemptChannel.SpawnedSpec({
+            brain: spec.agent.brain,
+            parentModel: session.session.brain.model,
+          }),
+        }),
+      );
       const eventFiber = yield* session.events.pipe(
         Stream.runForEach((event) => emit(new AttemptChannel.SessionEvent({ event }))),
         Effect.forkChild,

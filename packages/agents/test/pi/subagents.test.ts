@@ -35,6 +35,7 @@ describe("owned Pi subagents extension", () => {
       launch: (request) => {
         childRequest = request;
         return Effect.succeed({
+          session: request.session,
           events: Stream.make(
             new Agent.SessionStarted({ session: request.session }),
             new Agent.TextOutput({ session: request.session, text: "working" }),

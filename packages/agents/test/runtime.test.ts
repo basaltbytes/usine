@@ -7,7 +7,6 @@ import {
   SessionOperationError,
   toAttemptFailure,
   UnknownModelError,
-  UnsupportedHarnessError,
   WorkingDirectory,
 } from "../src/index.ts";
 
@@ -52,16 +51,15 @@ describe("agent runtime contract", () => {
     );
     assert.strictEqual(infra._tag, "InfraFailure");
 
-    const declared = [
+    const terminal = [
       new UnknownModelError({
         harness: "claude",
         model: Agent.ModelId.make("claude-never-existed"),
         message: "Claude does not expose model claude-never-existed",
       }),
-      new UnsupportedHarnessError({ harness: "codex", message: "no codex child yet" }),
       new AgentResultError({ sessionId, message: "ran out of turns" }),
     ];
-    for (const error of declared) {
+    for (const error of terminal) {
       assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
     }
   });

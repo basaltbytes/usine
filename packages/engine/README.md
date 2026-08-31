@@ -14,7 +14,7 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 - Revoke stops pending and waiting Runs. Operator cancellation can also stop a running Attempt.
 - The startup sweep rejoins open workflow executions. If the process stopped during an Attempt, the engine records that Attempt as an infrastructure failure and resumes as N+1.
 - A crash inside the `StepExecutor` adapter is recorded as an infrastructure failure like any other. If the engine itself hits an invariant defect, the workflow suspends for inspection; `RunEngine.reconcile` (or a restart) repairs the projection.
-- Attempt channel envelopes are stored in an append-only transcript. Normalized parent and child activity retains its session identity, and `RunEngine.transcript` accepts an optional sequence cursor for live tailing.
+- Attempt channel envelopes are stored in an append-only transcript. Normalized parent and child session events retain their session identity, and `RunEngine.transcript` accepts an optional sequence cursor for live tailing. A protocol-v3 `Started` frame writes the effective brain and SDK-selected parent model onto the Attempt.
 - The submitted agent, rendered task, payload snapshot, effective parent model, and per-Attempt child brain survive restarts in the run ledger.
 
 ## Composition

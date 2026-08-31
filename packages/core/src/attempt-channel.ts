@@ -5,7 +5,7 @@ import { AttemptFailure } from "./lifecycle/attempt-failure.ts";
 import { CommitSha, Name as RepositoryName, Revision } from "./repository.ts";
 import { StepResult } from "./step-result.ts";
 
-export const PROTOCOL_VERSION = 2 as const;
+export const PROTOCOL_VERSION = 3 as const;
 
 /**
  * Value object: monotonically increasing per-Attempt, per-direction message
@@ -43,7 +43,15 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
   parentModel: Schema.OptionFromNullOr(ModelId),
 }) {}
 
-export class Started extends Schema.TaggedClass<Started>("AttemptChannel/Started")("Started", {}) {}
+/** The effective models selected when the run host successfully launches an Attempt. */
+export class SpawnedSpec extends Schema.Class<SpawnedSpec>("AttemptChannel/SpawnedSpec")({
+  brain: Agent.fields.brain,
+  parentModel: ModelId,
+}) {}
+
+export class Started extends Schema.TaggedClass<Started>("AttemptChannel/Started")("Started", {
+  spawned: SpawnedSpec,
+}) {}
 
 /** One normalized parent or child session event, persisted in the Attempt transcript. */
 export class SessionEvent extends Schema.TaggedClass<SessionEvent>("AttemptChannel/SessionEvent")(
@@ -143,7 +151,7 @@ const isTerminal = (payload: OutboundPayload): boolean =>
   payload._tag === "Final" || payload._tag === "Failed" || payload._tag === "Interrupted";
 
 /**
- * Pure protocol-v1 reducer for the outbound channel: admits one envelope
+ * Pure outbound protocol reducer: admits one envelope
  * against the progress so far, or names the violation. Owning it here keeps
  * every transport adapter folding the same state machine.
  */
@@ -170,9 +178,13 @@ export const admit = (
       detail: envelope.payload._tag,
     });
   }
-  if (progress.state === "AwaitingStarted" && envelope.payload._tag !== "Started") {
+  if (
+    progress.state === "AwaitingStarted" &&
+    envelope.payload._tag !== "Started" &&
+    envelope.payload._tag !== "Failed"
+  ) {
     return Result.fail({
-      message: "The run host did not begin with a Started envelope",
+      message: "The run host did not begin with a Started or Failed envelope",
       detail: envelope.payload._tag,
     });
   }

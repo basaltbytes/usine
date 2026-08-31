@@ -7,7 +7,6 @@ import {
   ChildRequest,
   SessionOperationError,
   UnknownModelError,
-  UnsupportedHarnessError,
   WorkingDirectory,
 } from "../../src/index.ts";
 import {
@@ -53,7 +52,7 @@ const scripted = (
 });
 
 describe("Claude child backend", () => {
-  it.effect("streams normalized activity and runs headlessly with the declared model", () => {
+  it.effect("streams normalized session events and runs headlessly with the declared model", () => {
     let input: AsyncIterable<ClaudeUserMessage> | undefined;
     let options: ClaudeQueryOptions | undefined;
     const sdk = Layer.succeed(ClaudeSdk)({
@@ -124,25 +123,6 @@ describe("Claude child backend", () => {
       );
       assert.strictEqual(closed, true);
     });
-  });
-
-  it.effect("rejects a non-Claude harness before opening the SDK", () => {
-    let opened = 0;
-    const sdk = Layer.succeed(ClaudeSdk)({
-      open: () => {
-        opened += 1;
-        return scripted([]);
-      },
-    });
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const backend = yield* ChildBackend;
-        const error = yield* Effect.flip(backend.launch(request(undefined, { harness: "codex" })));
-        assert(error instanceof UnsupportedHarnessError);
-        assert.strictEqual(error.harness, "codex");
-        assert.strictEqual(opened, 0);
-      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
-    );
   });
 
   it.effect("maps the usine effort scale onto Claude's options", () => {

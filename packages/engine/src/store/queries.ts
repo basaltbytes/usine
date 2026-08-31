@@ -222,6 +222,20 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
+  const updateAttemptSpawnedSpec = Effect.fn("RunStoreQueries.updateAttemptSpawnedSpec")(function* (
+    attemptId: Attempt.AttemptId,
+    spawned: AttemptChannel.SpawnedSpec,
+  ) {
+    yield* database
+      .update(attempts)
+      .set({
+        brainJson: encodeBrainSpec(spawned.brain),
+        parentModel: spawned.parentModel,
+      })
+      .where(eq(attempts.attemptId, attemptId))
+      .execute();
+  });
+
   const updateStepResult = Effect.fn("RunStoreQueries.updateStepResult")(function* (
     runId: Run.RunId,
     stepName: Step.StepName,
@@ -600,6 +614,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     snapshot,
     transcript,
     updateStepResult,
+    updateAttemptSpawnedSpec,
     updateState,
   } as const;
 };

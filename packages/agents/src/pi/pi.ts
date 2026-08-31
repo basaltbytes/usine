@@ -15,7 +15,9 @@ import {
   type AgentSessionError,
   AgentRuntime,
   ChildBackend,
+  type ChildRequest,
   type LaunchRequest,
+  PiChildBackend,
   type RunningSession,
   SessionOperationError,
   UnknownModelError,
@@ -161,7 +163,7 @@ const lastMessageText = (messages: ReadonlyArray<PiMessage>): string | undefined
 
 const sessionEventFrom = (
   event: PiSessionEvent,
-  session: Agent.ParentSession,
+  session: Agent.Session,
 ): Agent.SessionEvent | undefined => {
   if (event.type === "message_end") {
     const text = messageText(event.message);
@@ -199,6 +201,130 @@ const parentError = (
     message,
     cause,
   });
+
+const childError = (
+  operation: SessionOperationError["operation"],
+  request: ChildRequest,
+  message: string,
+  cause: unknown,
+) =>
+  new SessionOperationError({
+    operation,
+    sessionId: Option.some(request.session.id),
+    message,
+    cause,
+  });
+
+const makePiChild = Effect.gen(function* () {
+  const sdk = yield* PiSdk;
+
+  const launch: PiChildBackend["Service"]["launch"] = Effect.fn("PiChildBackend.launch")(
+    function* (request) {
+      yield* Effect.annotateCurrentSpan({
+        agent: request.session.agent,
+        effort: request.session.brain.effort,
+        harness: request.session.brain.harness,
+        model: request.session.brain.model,
+        parentSessionId: request.session.parentId,
+        sessionId: request.session.id,
+      });
+      yield* Effect.logInfo("Launching Pi child session");
+      const started = yield* Effect.tryPromise({
+        try: () =>
+          sdk.start({
+            cwd: request.cwd,
+            extensions: [],
+            model: Option.some(request.session.brain.model),
+            thinkingLevel: request.session.brain.effort,
+          }),
+        catch: (cause) => childError("launch", request, "Pi child session failed to start", cause),
+      });
+      if (started._tag === "UnknownModel") {
+        yield* Effect.logError("Pi child rejected an unknown model", {
+          model: request.session.brain.model,
+        });
+        return yield* new UnknownModelError({
+          harness: "pi",
+          model: request.session.brain.model,
+          message: `Pi does not expose model ${request.session.brain.model}`,
+        });
+      }
+      const session = new Agent.ChildSession({
+        id: request.session.id,
+        parentId: request.session.parentId,
+        agent: request.session.agent,
+        brain: new Agent.BrainSpec({
+          harness: "pi",
+          model: started.model,
+          effort: request.session.brain.effort,
+        }),
+      });
+      const channel = yield* sessionChannel({
+        label: "Pi child session",
+        sessionId: session.id,
+      });
+      let lastText: string | undefined;
+      yield* Queue.offer(channel.events, new Agent.SessionStarted({ session }));
+      const unsubscribe = started.session.subscribe((event) => {
+        const sessionEvent = sessionEventFrom(event, session);
+        if (sessionEvent === undefined) return;
+        if (sessionEvent._tag === "TextOutput") lastText = sessionEvent.text;
+        Queue.offerUnsafe(channel.events, sessionEvent);
+      });
+      channel.onTerminal(unsubscribe);
+
+      yield* Effect.tryPromise({
+        try: () => started.session.prompt(request.prompt),
+        catch: (cause) => childError("stream", request, "Pi child session failed", cause),
+      }).pipe(
+        Effect.flatMap(() =>
+          channel.finish(
+            session,
+            lastText ?? lastMessageText(started.session.messages) ?? "Pi child session completed",
+          ),
+        ),
+        Effect.catch((error) => channel.fail(error)),
+        Effect.forkScoped,
+      );
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          unsubscribe();
+          started.session.dispose();
+        }),
+      );
+
+      const steer = Effect.fn("PiChildBackend.steer")((message: string) =>
+        Effect.logDebug("Steering Pi child session", { sessionId: session.id }).pipe(
+          Effect.andThen(
+            Effect.tryPromise({
+              try: () => started.session.steer(message),
+              catch: (cause) => childError("steer", request, "Could not steer Pi child", cause),
+            }),
+          ),
+        ),
+      );
+      const interrupt = Effect.logInfo("Interrupting Pi child session", {
+        sessionId: session.id,
+      }).pipe(
+        Effect.andThen(
+          Effect.tryPromise({
+            try: () => started.session.abort(),
+            catch: (cause) =>
+              childError("interrupt", request, "Could not interrupt Pi child", cause),
+          }),
+        ),
+      );
+      return {
+        session,
+        events: Stream.fromQueue(channel.events),
+        interrupt,
+        result: Deferred.await(channel.result),
+        steer,
+      } satisfies RunningSession;
+    },
+  );
+  return PiChildBackend.of({ launch });
+});
 
 const makePiParent = Effect.gen(function* () {
   const children = yield* ChildBackend;
@@ -342,6 +468,7 @@ const makePiParent = Effect.gen(function* () {
         ),
       );
       return {
+        session: parent,
         events: Stream.fromQueue(channel.events),
         interrupt,
         result: Deferred.await(channel.result),
@@ -353,3 +480,4 @@ const makePiParent = Effect.gen(function* () {
 });
 
 export const piParentLayer = Layer.effect(AgentRuntime, makePiParent);
+export const piChildBackendLayer = Layer.effect(PiChildBackend, makePiChild);

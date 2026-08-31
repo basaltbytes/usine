@@ -1,3 +1,9 @@
 {
-  "extends": "@usine/tsconfig/build.json"
+  "extends": "@usine/tsconfig/build.json",
+  "compilerOptions": {
+    "paths": {
+      "@pwrdrvr/codex-app-server-protocol": ["./src/protocol/codex.ts"],
+      "@pwrdrvr/codex-app-server-protocol/v2": ["./src/protocol/codex.ts"]
+    }
+  }
 }

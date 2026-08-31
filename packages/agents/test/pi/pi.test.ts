@@ -9,13 +9,17 @@ import { Effect, Layer, Option, Stream } from "effect";
 import {
   AgentRuntime,
   ChildBackend,
+  ChildRequest,
   LaunchRequest,
+  PiChildBackend,
+  SessionOperationError,
   SessionResult,
   UnknownModelError,
   WorkingDirectory,
 } from "../../src/index.ts";
 import {
   PiSdk,
+  piChildBackendLayer,
   piParentLayer,
   type PiSession,
   type PiSessionEvent,
@@ -31,6 +35,114 @@ const agent = new Agent.Agent({
   }),
   parentModel: Option.none(),
   persona: Agent.Persona.make("Implement the issue carefully."),
+});
+
+describe("Pi child backend", () => {
+  const childRequest = new ChildRequest({
+    session: new Agent.ChildSession({
+      id: Agent.SessionId.make("pi-child-1"),
+      parentId: Agent.SessionId.make("parent-1"),
+      agent: Agent.Name.make("developer"),
+      brain: new Agent.BrainSpec({
+        harness: "pi",
+        model: Agent.ModelId.make("openai/gpt-5.6-terra"),
+        effort: "medium",
+      }),
+    }),
+    cwd: WorkingDirectory.make("/workspace/usine"),
+    prompt: "Implement the focused task.",
+  });
+
+  it.effect("normalizes session events and forwards input and controls", () => {
+    let options: PiStartOptions | undefined;
+    let listener: ((event: PiSessionEvent) => void) | undefined;
+    let prompt = "";
+    let steer = "";
+    let interrupted = false;
+    const session: PiSession = {
+      abort: () => {
+        interrupted = true;
+        return Promise.resolve();
+      },
+      dispose: () => undefined,
+      messages: [],
+      prompt: (value) => {
+        prompt = value;
+        listener?.({
+          type: "message_end",
+          message: { role: "assistant", content: [{ type: "text", text: "Pi child done." }] },
+        });
+        return Promise.resolve();
+      },
+      steer: (value) => {
+        steer = value;
+        return Promise.resolve();
+      },
+      subscribe: (found) => {
+        listener = found;
+        return () => undefined;
+      },
+    };
+    const effectiveModel = Agent.ModelId.make("openai/gpt-5.6-terra-2026-08-01");
+    const sdk = Layer.succeed(PiSdk)({
+      start: (found) => {
+        options = found;
+        return Promise.resolve({ _tag: "Started", model: effectiveModel, session });
+      },
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const backend = yield* PiChildBackend;
+        const running = yield* backend.launch(childRequest);
+        yield* running.steer("Check the test output.");
+        yield* running.interrupt;
+        const [events, result] = yield* Effect.all([
+          Stream.runCollect(running.events),
+          running.result,
+        ]);
+        assert.strictEqual(result.message, "Pi child done.");
+        assert.strictEqual(running.session.brain.model, effectiveModel);
+        assert.strictEqual(prompt, childRequest.prompt);
+        assert.strictEqual(steer, "Check the test output.");
+        assert.strictEqual(interrupted, true);
+        assert.deepStrictEqual(options?.extensions, []);
+        assert.deepStrictEqual(options?.model, Option.some(childRequest.session.brain.model));
+        assert.deepStrictEqual(
+          events.map((event) => event._tag),
+          ["SessionStarted", "TextOutput", "SessionFinished"],
+        );
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect("surfaces an unknown configured child model as a typed failure", () => {
+    const sdk = Layer.succeed(PiSdk)({
+      start: () => Promise.resolve({ _tag: "UnknownModel" }),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const backend = yield* PiChildBackend;
+        const error = yield* Effect.flip(backend.launch(childRequest));
+        assert(error instanceof UnknownModelError);
+        assert.strictEqual(error.harness, "pi");
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect("maps Pi SDK trouble to a session operation failure", () => {
+    const sdk = Layer.succeed(PiSdk)({
+      start: () => Promise.reject(new Error("provider unavailable")),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const backend = yield* PiChildBackend;
+        const error = yield* Effect.flip(backend.launch(childRequest));
+        assert(error instanceof SessionOperationError);
+        assert.strictEqual(error.operation, "launch");
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+    );
+  });
 });
 const parentModel = Agent.ModelId.make("anthropic/claude-opus-4-6");
 const request = new LaunchRequest({
@@ -164,10 +276,11 @@ describe("Pi parent runtime", () => {
     });
     let sawLaunchContext = false;
     const child = Layer.succeed(ChildBackend)({
-      launch: () =>
+      launch: (childRequest) =>
         Effect.gen(function* () {
           sawLaunchContext = Option.isSome(yield* Effect.serviceOption(PiSdk));
           return {
+            session: childRequest.session,
             events: Stream.empty,
             result: Effect.succeed(new SessionResult({ message: "child done" })),
             steer: () => Effect.void,

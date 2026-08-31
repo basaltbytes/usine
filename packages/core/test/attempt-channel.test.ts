@@ -1,6 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Option, Result, Schema } from "effect";
-import { Agent, AttemptChannel, Attempt, Repository, StepResult } from "../src/index.ts";
+import {
+  Agent,
+  AttemptChannel,
+  Attempt,
+  AttemptFailure,
+  Repository,
+  StepResult,
+} from "../src/index.ts";
 
 const agent = new Agent.Agent({
   name: Agent.Name.make("developer"),
@@ -25,7 +32,7 @@ const spec = new AttemptChannel.RunSpec({
   parentModel: Option.some(parentModel),
 });
 
-describe("attempt channel v2", () => {
+describe("attempt channel v3", () => {
   it("round-trips a final envelope through its framed JSON schema", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,
@@ -80,8 +87,10 @@ describe("attempt channel v2", () => {
         sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
         payload,
       });
-    const started = new AttemptChannel.Started();
-    const activity = new AttemptChannel.SessionEvent({
+    const started = new AttemptChannel.Started({
+      spawned: new AttemptChannel.SpawnedSpec({ brain: agent.brain, parentModel }),
+    });
+    const sessionEvent = new AttemptChannel.SessionEvent({
       event: new Agent.SessionStarted({
         session: new Agent.ParentSession({
           id: Agent.SessionId.make("parent-1"),
@@ -102,10 +111,10 @@ describe("attempt channel v2", () => {
       return Result.succeed(progress);
     };
 
-    it("admits a legal Started → activity → terminal flow", () => {
+    it("admits a legal Started → session event → terminal flow", () => {
       const outcome = admitAll([
         outbound(1, started),
-        outbound(2, activity),
+        outbound(2, sessionEvent),
         outbound(3, interruptedTerminal),
       ]);
       assert(Result.isSuccess(outcome));
@@ -119,15 +128,28 @@ describe("attempt channel v2", () => {
     });
 
     it("rejects a non-contiguous sequence", () => {
-      const outcome = admitAll([outbound(1, started), outbound(3, activity)]);
+      const outcome = admitAll([outbound(1, started), outbound(3, sessionEvent)]);
       assert(Result.isFailure(outcome));
       assert.match(outcome.failure.message, /non-contiguous/u);
     });
 
     it("rejects a first frame that is not Started", () => {
-      const outcome = admitAll([outbound(1, activity)]);
+      const outcome = admitAll([outbound(1, sessionEvent)]);
       assert(Result.isFailure(outcome));
-      assert.match(outcome.failure.message, /begin with a Started/u);
+      assert.match(outcome.failure.message, /begin with a Started or Failed/u);
+    });
+
+    it("admits a launch failure as the first and terminal frame", () => {
+      const outcome = admitAll([
+        outbound(
+          1,
+          new AttemptChannel.Failed({
+            failure: new AttemptFailure.AgentFailure({ message: "Unknown model" }),
+          }),
+        ),
+      ]);
+      assert(Result.isSuccess(outcome));
+      assert.strictEqual(outcome.success.state, "Terminal");
     });
 
     it("rejects a duplicate Started", () => {
@@ -140,7 +162,7 @@ describe("attempt channel v2", () => {
       const outcome = admitAll([
         outbound(1, started),
         outbound(2, interruptedTerminal),
-        outbound(3, activity),
+        outbound(3, sessionEvent),
       ]);
       assert(Result.isFailure(outcome));
       assert.match(outcome.failure.message, /after its terminal envelope/u);

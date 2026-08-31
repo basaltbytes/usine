@@ -15,7 +15,7 @@ Everything lives in the `lifecycle` cluster: a deduplicated Event opens a Run, t
 | `Worker.Name`, `Worker.Kind` | Value objects — a Worker identity and its local or exe.dev adapter kind |
 | `Agent.Agent`, `Agent.BrainSpec` | Agent values — a named persona, its child brain, and optional Pi parent-model override |
 | `Agent.SessionEvent` | Session events — typed parent or first-level child lifecycle, text, and tool events |
-| `AttemptChannel.*` | Protocol values — the secret-free run spec, framed input, and protocol-v2 Attempt envelopes |
+| `AttemptChannel.*` | Protocol values: the secret-free run spec, effective spawned spec, framed input, and protocol-v3 Attempt envelopes |
 | `StepResult.*` | Result values — the final agent message plus commit, pull-request, and comment facts |
 | `RunState.*`, `CancelReason`, `Attempt.Outcome` | State value objects — discriminated unions, including a distinct canceled Attempt outcome |
 | `RunState.awaitApproval/start/succeed/fail/retry/cancelByOperator/supersede/revoke` | Typestate transitions — each accepts only the states it is legal on, so an illegal transition is a compile error |
