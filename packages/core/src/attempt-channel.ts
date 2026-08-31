@@ -1,10 +1,11 @@
 import { Result, Schema, type Effect } from "effect";
+import { Agent, ModelId } from "./agent.ts";
 import { AttemptId } from "./lifecycle/attempt.ts";
 import { AttemptFailure } from "./lifecycle/attempt-failure.ts";
 import { CommitSha, Name as RepositoryName, Revision } from "./repository.ts";
 import { StepResult } from "./step-result.ts";
 
-export const PROTOCOL_VERSION = 1 as const;
+export const PROTOCOL_VERSION = 2 as const;
 
 /**
  * Value object: monotonically increasing per-Attempt, per-direction message
@@ -36,7 +37,10 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
   repository: RepositoryName,
   revision: Revision,
   baseCommit: CommitSha,
+  payload: Schema.Json,
   task: Task,
+  agent: Agent,
+  parentModel: Schema.OptionFromNullOr(ModelId),
 }) {}
 
 export class Started extends Schema.TaggedClass<Started>("AttemptChannel/Started")("Started", {}) {}

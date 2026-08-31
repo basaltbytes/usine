@@ -388,7 +388,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
                 repository: request.repository,
                 revision: request.revision,
                 baseCommit,
+                payload: request.payload,
                 task: request.task,
+                agent: request.agent,
+                parentModel: request.parentModel,
               }),
               worktree: WorktreePath.make(worktree),
             });

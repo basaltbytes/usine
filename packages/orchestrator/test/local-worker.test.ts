@@ -330,7 +330,10 @@ describe("local worker", () => {
       repository: Repository.Name.make("acme/demo"),
       revision: Repository.Revision.make("main"),
       baseCommit: Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+      payload: {},
       task: AttemptChannel.Task.make("Prove cleanup stays out of the outcome"),
+      agent: testAgent,
+      parentModel: Option.none(),
     });
     const prepared = new PreparedAttempt({
       worker: Worker.Name.make("local"),

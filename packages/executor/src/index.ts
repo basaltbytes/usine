@@ -1,6 +1,7 @@
 /** @usine/executor — platform-free worker execution contract. */
 
 import {
+  Agent,
   Attempt,
   AttemptChannel,
   AttemptFailure,
@@ -46,7 +47,10 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   worker: Worker.Name,
   repository: Repository.Name,
   revision: Repository.Revision,
+  payload: Schema.Json,
   task: AttemptChannel.Task,
+  agent: Agent.Agent,
+  parentModel: Schema.Option(Agent.ModelId),
 }) {}
 
 /** Value object (branded path): one Attempt's disposable checkout directory. */

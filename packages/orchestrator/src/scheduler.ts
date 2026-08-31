@@ -166,7 +166,10 @@ export const stepExecutorLayer = (
                 worker: execution.attempt.worker,
                 repository: execution.repository,
                 revision: execution.revision,
+                payload: execution.event.payload,
                 task: execution.task,
+                agent: execution.agent,
+                parentModel: execution.parentModel,
               }),
             )
             .pipe(Effect.mapError(asInfrastructureFailure));

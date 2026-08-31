@@ -1,16 +1,28 @@
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Result, Schema } from "effect";
-import { AttemptChannel, Attempt, Repository, StepResult } from "../src/index.ts";
+import { DateTime, Option, Result, Schema } from "effect";
+import { Agent, AttemptChannel, Attempt, Repository, StepResult } from "../src/index.ts";
+
+const agent = new Agent.Agent({
+  name: Agent.Name.make("developer"),
+  harness: "claude",
+  model: Agent.ModelId.make("claude-sonnet-4-6"),
+  effort: "high",
+  parentModel: Option.none(),
+  persona: Agent.Persona.make("Implement the task and sign every GitHub comment."),
+});
 
 const spec = new AttemptChannel.RunSpec({
   attemptId: Attempt.AttemptId.make("attempt-1"),
   repository: Repository.Name.make("basaltbytes/usine"),
   revision: Repository.Revision.make("main"),
   baseCommit: Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+  payload: { number: 30, title: "Agent layer" },
   task: AttemptChannel.Task.make("Implement the issue"),
+  agent,
+  parentModel: Option.some(Agent.ModelId.make("anthropic/claude-opus-4-6")),
 });
 
-describe("attempt channel v1", () => {
+describe("attempt channel v2", () => {
   it("round-trips a final envelope through its framed JSON schema", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,
