@@ -6,6 +6,8 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 
 `CursorStore` keeps typed keys with JSON values in that database. Trigger adapters use it for efficiency-only cursors such as GitHub watermarks and ETags; deleting a cursor causes a safe replay because the Event ledger remains the source of deduplication.
 
+`LoopControl` keeps runtime pause state in the same database. Pausing or unpausing a Loop never edits its authored Markdown file. `RunEngine.list()` returns durable snapshots newest first for observe-and-intervene surfaces.
+
 ## Runtime rules
 
 - Approval-gated Runs wait for an approval Event before their first Attempt.
@@ -24,7 +26,7 @@ The root entry (`@usine/engine`) is platform-free; the Node local adapter lives 
 ```ts
 import { Effect, Layer } from "effect"
 import { StepResult, Worker } from "@usine/core"
-import { CursorStore, InstanceDirectory, RunEngine, StepExecutor } from "@usine/engine"
+import { CursorStore, InstanceDirectory, LoopControl, RunEngine, StepExecutor } from "@usine/engine"
 import { layer } from "@usine/engine/local-sqlite"
 
 const StepExecutorLive = Layer.succeed(StepExecutor)({
@@ -46,8 +48,9 @@ const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(
 const program = Effect.gen(function* () {
   const engine = yield* RunEngine
   const cursors = yield* CursorStore
+  const loops = yield* LoopControl
   // submit, approve, retry, cancel, revoke, inspect, reconcile, read a transcript,
-  // or read and write efficiency-only cursors
+  // list runs, pause/unpause loops, or read and write efficiency-only cursors
 })
 ```
 

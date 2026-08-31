@@ -179,6 +179,16 @@ export const queriesFor = (database: RunDatabaseClient) => {
     });
   });
 
+  const runIds = Effect.fn("RunStoreQueries.runIds")(function* () {
+    return yield* decodeRunIds(
+      yield* database
+        .select({ runId: runs.runId })
+        .from(runs)
+        .orderBy(desc(runs.openedAt), desc(runs.runId))
+        .execute(),
+    );
+  });
+
   const updateState = Effect.fn("RunStoreQueries.updateState")(function* (
     runId: Run.RunId,
     state: RunState.RunState,
@@ -607,6 +617,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     requestInterrupt,
     requestWorkflowCommand,
     revokeUnstarted,
+    runIds,
     runForEvent,
     snapshot,
     transcript,

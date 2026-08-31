@@ -156,6 +156,36 @@ describe("durable run engine", () => {
     ),
   );
 
+  it.live("lists every Run newest first for operator read models", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
+        const runtime = layer(directory).pipe(Layer.provide(executorLayer(plans)));
+
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const first = yield* engine.submit(
+            submission({ number: 1, item: "listed-one", approval: "required" }),
+          );
+          const second = yield* engine.submit(
+            submission({ number: 2, item: "listed-two", approval: "required" }),
+          );
+          assert.strictEqual(first._tag, "Claimed");
+          assert.strictEqual(second._tag, "Claimed");
+          if (first._tag !== "Claimed" || second._tag !== "Claimed") return;
+          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
+          yield* waitFor(engine, second.runId, ({ run }) => run.state._tag === "Waiting");
+
+          const listed = yield* engine.list();
+          assert.deepStrictEqual(
+            listed.map(({ run }) => run.id),
+            [second.runId, first.runId],
+          );
+        }).pipe(Effect.provide(runtime));
+      }),
+    ),
+  );
+
   it.live("deduplicates permanently and opens an approval gate only once", () =>
     withInstance((directory) =>
       Effect.gen(function* () {

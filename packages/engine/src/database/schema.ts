@@ -226,3 +226,9 @@ export const cursors = snakeCase.table(
   },
   (table) => [check("usine_cursors_value_json_valid", sql`json_valid(${table.valueJson})`)],
 );
+
+/** Operator-owned runtime toggles; deliberately separate from authored Loop files (ADR 0009). */
+export const loopRuntime = snakeCase.table("usine_loop_runtime", {
+  loopName: text().$type<Loop.LoopName>().primaryKey(),
+  paused: integer({ mode: "boolean" }).notNull(),
+});

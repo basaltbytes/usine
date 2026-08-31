@@ -23,6 +23,7 @@ import {
 } from "./workflow.ts";
 import { StepExecutor } from "./step-executor.ts";
 import { CursorStore } from "./cursor/store.ts";
+import { LoopControl } from "./loop-control.ts";
 
 const MAX_SETTLEMENT_POLLS = 500;
 
@@ -161,6 +162,10 @@ const makeRunEngine = Effect.gen(function* () {
     return yield* store.snapshot(runId);
   });
 
+  const list = Effect.fn("RunEngine.list")(function* () {
+    return yield* store.list();
+  });
+
   const transcript = Effect.fn("RunEngine.transcript")(function* (query: TranscriptQuery) {
     return yield* store.transcript(query);
   });
@@ -196,7 +201,7 @@ const makeRunEngine = Effect.gen(function* () {
 
   yield* reconcile();
 
-  return { approve, cancel, inspect, reconcile, retry, revoke, submit, transcript } as const;
+  return { approve, cancel, inspect, list, reconcile, retry, revoke, submit, transcript } as const;
 });
 
 /**
@@ -213,6 +218,7 @@ export class RunEngine extends Context.Service<
     ) => Effect.Effect<void, RunEngineError>;
     readonly cancel: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
     readonly inspect: (runId: Run.RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
+    readonly list: () => Effect.Effect<ReadonlyArray<RunSnapshot>, RunEngineError>;
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     readonly retry: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
     readonly revoke: (
@@ -237,7 +243,7 @@ export class RunEngine extends Context.Service<
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,
 ): Layer.Layer<
-  CursorStore | RunEngine,
+  CursorStore | LoopControl | RunEngine,
   RunEngineError | DatabaseError,
   Crypto.Crypto | StepExecutor | DatabaseRequirements
 > => {
@@ -256,5 +262,9 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     Layer.provideMerge(store),
   );
   const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(runtime));
-  return Layer.merge(runEngine, CursorStore.layer.pipe(Layer.provide(database)));
+  return Layer.mergeAll(
+    runEngine,
+    CursorStore.layer.pipe(Layer.provide(database)),
+    LoopControl.layer.pipe(Layer.provide(database)),
+  );
 };

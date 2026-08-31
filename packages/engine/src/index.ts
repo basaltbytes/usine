@@ -13,6 +13,7 @@ export {
   Ignored,
   IgnoreReason,
   InstanceDirectory,
+  LoopRuntimeState,
   Queued,
   RunEngineError,
   RunNotFoundError,
@@ -29,4 +30,5 @@ export { RunDatabase, type RunDatabaseClient } from "./database/database.ts";
 export { CursorKey } from "./cursor/model.ts";
 export { CursorStore } from "./cursor/store.ts";
 export { layerWithDatabase, RunEngine } from "./engine.ts";
+export { LoopControl } from "./loop-control.ts";
 export { StepExecutor, type WorkerLease } from "./step-executor.ts";

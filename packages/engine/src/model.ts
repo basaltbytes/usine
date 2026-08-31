@@ -21,6 +21,14 @@ export type ApprovalRequirement = Loop.ApprovalRequirement;
 export const InstanceDirectory = Instance.Directory;
 export type InstanceDirectory = Instance.Directory;
 
+/** Durable runtime state for one Loop. Authored loop files never carry this toggle. */
+export class LoopRuntimeState extends Schema.Class<LoopRuntimeState>(
+  "@usine/engine/LoopRuntimeState",
+)({
+  loop: Loop.LoopName,
+  paused: Schema.Boolean,
+}) {}
+
 /** The complete routing context needed to turn one Event into a Run. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
   event: Event.Event,
