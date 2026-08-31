@@ -31,8 +31,7 @@
     "check": "tsc -p tsconfig.check.json"
   },
   "dependencies": {
-    "@usine/core": "workspace:*",
-    "@usine/run-host": "workspace:*"
+    "@usine/core": "workspace:*"
   },
   "devDependencies": {
     "@usine/tsconfig": "workspace:*",

@@ -577,4 +577,36 @@ describe("durable run engine", () => {
       }),
     ),
   );
+
+  it.live("cancels a run parked in the worker queue without starting an attempt", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const reserveEntered = yield* Deferred.make<void>();
+        // A 0-capacity scheduler: the run parks in `reserve` forever; only a
+        // cancel that can reach the parked reservation ends it.
+        const executor = Layer.succeed(StepExecutor)({
+          interrupt: () => Effect.void,
+          reserve: () =>
+            Deferred.succeed(reserveEntered, undefined).pipe(Effect.andThen(Effect.never)),
+          execute: () => Effect.die("a canceled queued run must not execute"),
+        });
+        const runtime = layer(directory).pipe(Layer.provide(executor));
+
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const result = yield* engine.submit(submission({ number: 41 }));
+          assert(result._tag === "Claimed");
+          if (result._tag !== "Claimed") return;
+          yield* Deferred.await(reserveEntered);
+          yield* engine.cancel(result.runId);
+          const snapshot = yield* waitFor(
+            engine,
+            result.runId,
+            ({ run }) => run.state._tag === "Canceled",
+          );
+          assert.strictEqual(snapshot.attempts.length, 0);
+        }).pipe(Effect.provide(runtime));
+      }),
+    ),
+  );
 });

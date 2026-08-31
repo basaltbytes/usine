@@ -16,9 +16,8 @@ import {
   ApprovalRequirement,
   EnginePersistenceError,
   IgnoreReason,
-  RunEngineError,
+  RunStoreError,
   Submission,
-  TranscriptDirection,
   TranscriptEntry,
   TranscriptSequence,
   WorkflowCommand,
@@ -40,6 +39,9 @@ export const EventRouteRow = Schema.Struct({
 export type EventRouteRow = typeof EventRouteRow.Type;
 
 export const RunRow = Schema.Struct({
+  repository: Repository.Name,
+  revision: Repository.Revision,
+  task: AttemptChannel.Task,
   runId: Run.RunId,
   eventId: Event.EventId,
   loop: Loop.LoopName,
@@ -64,7 +66,7 @@ export type AttemptRow = typeof AttemptRow.Type;
 export const TranscriptRow = Schema.Struct({
   sequence: TranscriptSequence,
   attemptId: Attempt.AttemptId,
-  direction: TranscriptDirection,
+  direction: AttemptChannel.Direction,
   envelope: AttemptChannel.Envelope,
   receivedAt: Schema.DateTimeUtcFromString,
 });
@@ -100,13 +102,13 @@ export const encodeOutcome = Schema.encodeSync(Attempt.Outcome);
 export const encodeStepResult = Schema.encodeSync(StepResult.StepResult);
 export const encodeEnvelope = Schema.encodeSync(AttemptChannel.Envelope);
 
-const isRunEngineError = Schema.is(RunEngineError);
+const isRunStoreError = Schema.is(RunStoreError);
 
 export const persistence =
   (operation: string) =>
-  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, RunEngineError, R> =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, RunStoreError, R> =>
     Effect.mapError(effect, (error) =>
-      isRunEngineError(error) ? error : new EnginePersistenceError({ operation, cause: error }),
+      isRunStoreError(error) ? error : new EnginePersistenceError({ operation, cause: error }),
     );
 
 export const eventFromRow = (row: EventRouteRow): Event.Event =>

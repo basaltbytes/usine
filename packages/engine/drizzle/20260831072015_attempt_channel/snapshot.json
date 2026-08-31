@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "bb69185f-0d1f-4d32-9803-6aab3424425f",
+  "id": "5028016b-8e44-4a48-96b1-520043cc4d6d",
   "prevIds": ["29403b39-52c7-42ce-b665-c5fbba2ce9fe"],
   "ddl": [
     {
@@ -154,7 +154,7 @@
       "type": "text",
       "notNull": true,
       "autoincrement": false,
-      "default": "'local'",
+      "default": null,
       "generated": null,
       "name": "worker_name",
       "entityType": "columns",
@@ -306,6 +306,36 @@
       "autoincrement": false,
       "default": null,
       "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revision",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
       "name": "run_id",
       "entityType": "columns",
       "table": "usine_steps"
@@ -384,7 +414,7 @@
       "type": "text",
       "notNull": true,
       "autoincrement": false,
-      "default": "'unknown/unknown'",
+      "default": null,
       "generated": null,
       "name": "repository",
       "entityType": "columns",
@@ -394,7 +424,7 @@
       "type": "text",
       "notNull": true,
       "autoincrement": false,
-      "default": "'HEAD'",
+      "default": null,
       "generated": null,
       "name": "revision",
       "entityType": "columns",
@@ -404,7 +434,7 @@
       "type": "text",
       "notNull": true,
       "autoincrement": false,
-      "default": "'Migrated run context unavailable'",
+      "default": null,
       "generated": null,
       "name": "task",
       "entityType": "columns",

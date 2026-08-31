@@ -1,6 +1,6 @@
 /** @usine/run-host — one-shot worker-side Attempt host. */
 
-import { AttemptChannel, AttemptFailure, Repository, StepResult } from "@usine/core";
+import { AttemptChannel, Repository, StepResult } from "@usine/core";
 import {
   Deferred,
   DateTime,
@@ -28,7 +28,11 @@ export interface RunHostOptions {
   readonly stubDelayMillis?: number;
 }
 
-const decodeInput = Schema.decodeUnknownEffect(AttemptChannel.InputFrameFromJson);
+/** Strict by contract: an unknown key on a protocol frame is a rejected frame. */
+const decodeInput = (line: string) =>
+  Schema.decodeUnknownEffect(AttemptChannel.InputFrameFromJson)(line, {
+    onExcessProperty: "error",
+  });
 const encodeOutput = Schema.encodeSync(Schema.fromJsonString(AttemptChannel.OutboundEnvelope));
 
 const hostError = (stage: RunHostError["stage"], message: string, cause: unknown): RunHostError =>
@@ -174,17 +178,25 @@ export const runHost = (options: RunHostOptions = {}) =>
     });
 
     const harvestCommits = Effect.fn("RunHost.harvestCommits")(function* () {
-      const shas = yield* gitLines(["rev-list", "--reverse", `${spec.baseCommit}..HEAD`]);
-      return yield* Effect.forEach(shas, (value) =>
+      // One subprocess for the whole range: hash and summary NUL-separated.
+      const lines = yield* gitLines([
+        "log",
+        "--reverse",
+        "--format=%H%x00%s",
+        `${spec.baseCommit}..HEAD`,
+      ]);
+      return yield* Effect.forEach(lines, (line) =>
         Effect.gen(function* () {
-          const sha = yield* Schema.decodeUnknownEffect(Repository.CommitSha)(value).pipe(
+          const separator = line.indexOf("\u0000");
+          const sha = yield* Schema.decodeUnknownEffect(Repository.CommitSha)(
+            separator < 0 ? line : line.slice(0, separator),
+          ).pipe(
             Effect.mapError((cause) =>
               hostError("git", "git returned an invalid commit id", cause),
             ),
           );
-          const summaries = yield* gitLines(["show", "-s", "--format=%s", sha]);
-          const summary = summaries[0]?.trim();
-          if (summary === undefined || summary.length === 0) {
+          const summary = separator < 0 ? "" : line.slice(separator + 1).trim();
+          if (summary.length === 0) {
             return yield* hostError(
               "git",
               `Commit ${sha} has no summary`,
@@ -217,11 +229,9 @@ export const runHost = (options: RunHostOptions = {}) =>
         Effect.andThen(Fiber.join(commandFiber), Effect.never),
       );
       if (result._tag === "Interrupted") {
-        yield* emit(
-          new AttemptChannel.Failed({
-            failure: new AttemptFailure.AgentFailure({ message: "Attempt interrupted" }),
-          }),
-        );
+        // The wire says what actually happened; the orchestrator has already
+        // closed the Attempt as Canceled by the time this lands.
+        yield* emit(new AttemptChannel.Interrupted());
         return;
       }
       yield* emit(new AttemptChannel.Final({ result: result.value }));

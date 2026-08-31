@@ -24,7 +24,6 @@ import {
   APPROVAL_REQUIREMENTS,
   IGNORED_REASONS,
   WORKFLOW_COMMANDS,
-  TRANSCRIPT_DIRECTIONS,
   type ApprovalRequirement,
   type IgnoreReason,
   type WorkflowCommand,
@@ -52,18 +51,12 @@ export const triggerEvents = snakeCase.table(
     loopName: text().$type<Loop.LoopName>().notNull(),
     stepName: text().$type<Step.StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
-    repository: text()
-      .$type<Repository.Name>()
-      .notNull()
-      .default(Repository.Name.make("unknown/unknown")),
-    revision: text()
-      .$type<Repository.Revision>()
-      .notNull()
-      .default(Repository.Revision.make("HEAD")),
-    task: text()
-      .$type<AttemptChannel.Task>()
-      .notNull()
-      .default(AttemptChannel.Task.make("Migrated run context unavailable")),
+    // The submitted execution context, part of the immutable Event fact. A
+    // queued Event (blocked behind a running Run) is claimed later from these
+    // columns; the Run's own copy below is what execution reads.
+    repository: text().$type<Repository.Name>().notNull(),
+    revision: text().$type<Repository.Revision>().notNull(),
+    task: text().$type<AttemptChannel.Task>().notNull(),
   },
   (table) => [
     check("usine_trigger_events_approval", sql`${table.approval} in ('none', 'required')`),
@@ -83,6 +76,11 @@ export const runs = snakeCase.table(
     loopName: text().$type<Loop.LoopName>().notNull(),
     stateJson: text({ mode: "json" }).$type<unknown>().notNull(),
     openedAt: text().notNull(),
+    // The Run's *effective* context, seeded from the claiming submission.
+    // ADR 0018's edit-and-retry amends these; the Event columns never change.
+    repository: text().$type<Repository.Name>().notNull(),
+    revision: text().$type<Repository.Revision>().notNull(),
+    task: text().$type<AttemptChannel.Task>().notNull(),
   },
   (table) => [check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`)],
 );
@@ -112,7 +110,7 @@ export const attempts = snakeCase.table(
     attemptId: text().$type<Attempt.AttemptId>().primaryKey(),
     runId: text().$type<Run.RunId>().notNull(),
     stepName: text().$type<Step.StepName>().notNull(),
-    workerName: text().$type<Worker.Name>().notNull().default(Worker.Name.make("local")),
+    workerName: text().$type<Worker.Name>().notNull(),
     attemptNumber: integer({ mode: "number" }).$type<Attempt.AttemptNumber>().notNull(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
@@ -142,7 +140,7 @@ export const attemptTranscripts = snakeCase.table(
       .$type<Attempt.AttemptId>()
       .notNull()
       .references(() => attempts.attemptId),
-    direction: text({ enum: TRANSCRIPT_DIRECTIONS }).notNull(),
+    direction: text({ enum: AttemptChannel.DIRECTIONS }).notNull(),
     channelSequence: integer({ mode: "number" }).$type<AttemptChannel.Sequence>().notNull(),
     envelope: text({ mode: "json" }).$type<unknown>().notNull(),
     receivedAt: text().notNull(),

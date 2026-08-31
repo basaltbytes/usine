@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Schema } from "effect";
+import { DateTime, Result, Schema } from "effect";
 import { AttemptChannel, Attempt, Repository, StepResult } from "../src/index.ts";
 
 const spec = new AttemptChannel.RunSpec({
@@ -50,5 +50,77 @@ describe("attempt channel v1", () => {
         onExcessProperty: "error",
       }),
     );
+  });
+
+  describe("outbound protocol reducer", () => {
+    const outbound = (
+      sequence: number,
+      payload: AttemptChannel.OutboundPayload,
+      attemptId = spec.attemptId,
+    ) =>
+      new AttemptChannel.OutboundEnvelope({
+        version: AttemptChannel.PROTOCOL_VERSION,
+        attemptId,
+        sequence: AttemptChannel.Sequence.make(sequence),
+        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
+        payload,
+      });
+    const started = new AttemptChannel.Started();
+    const message = new AttemptChannel.AgentMessage({ message: "working" });
+    const interruptedTerminal = new AttemptChannel.Interrupted();
+
+    const admitAll = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) => {
+      let progress = AttemptChannel.initialProgress;
+      for (const envelope of envelopes) {
+        const admitted = AttemptChannel.admit(progress, spec.attemptId, envelope);
+        if (Result.isFailure(admitted)) return admitted;
+        progress = admitted.success;
+      }
+      return Result.succeed(progress);
+    };
+
+    it("admits a legal Started → message → terminal flow", () => {
+      const outcome = admitAll([
+        outbound(1, started),
+        outbound(2, message),
+        outbound(3, interruptedTerminal),
+      ]);
+      assert(Result.isSuccess(outcome));
+      assert.strictEqual(outcome.success.state, "Terminal");
+    });
+
+    it("rejects a frame for another Attempt", () => {
+      const outcome = admitAll([outbound(1, started, Attempt.AttemptId.make("attempt-2"))]);
+      assert(Result.isFailure(outcome));
+      assert.match(outcome.failure.message, /another Attempt/u);
+    });
+
+    it("rejects a non-contiguous sequence", () => {
+      const outcome = admitAll([outbound(1, started), outbound(3, message)]);
+      assert(Result.isFailure(outcome));
+      assert.match(outcome.failure.message, /non-contiguous/u);
+    });
+
+    it("rejects a first frame that is not Started", () => {
+      const outcome = admitAll([outbound(1, message)]);
+      assert(Result.isFailure(outcome));
+      assert.match(outcome.failure.message, /begin with a Started/u);
+    });
+
+    it("rejects a duplicate Started", () => {
+      const outcome = admitAll([outbound(1, started), outbound(2, started)]);
+      assert(Result.isFailure(outcome));
+      assert.match(outcome.failure.message, /more than one Started/u);
+    });
+
+    it("rejects an envelope after the terminal envelope", () => {
+      const outcome = admitAll([
+        outbound(1, started),
+        outbound(2, interruptedTerminal),
+        outbound(3, message),
+      ]);
+      assert(Result.isFailure(outcome));
+      assert.match(outcome.failure.message, /after its terminal envelope/u);
+    });
   });
 });

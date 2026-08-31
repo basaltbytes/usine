@@ -1,9 +1,35 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config";
-import { AttemptChannel, Event, Item, Loop, Repository, Run, Step } from "@usine/core";
-import { CredentialProvider } from "@usine/executor";
-import { InstanceDirectory, RunEngine, Submission, TranscriptQuery } from "@usine/engine";
+import {
+  Attempt,
+  AttemptChannel,
+  Event,
+  Item,
+  Loop,
+  Repository,
+  Run,
+  RunState,
+  Step,
+  StepResult,
+  Worker,
+} from "@usine/core";
+import {
+  CredentialProvider,
+  Executor,
+  ExecutorOperationError,
+  PreparedAttempt,
+  WorktreePath,
+} from "@usine/executor";
+import {
+  InstanceDirectory,
+  RunEngine,
+  StepExecution,
+  StepExecutor,
+  Submission,
+  TranscriptQuery,
+} from "@usine/engine";
+import { stepExecutorLayer } from "../src/index.ts";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
@@ -283,4 +309,75 @@ describe("local worker", () => {
       CHANNEL_LOSS_HOST,
     ),
   );
+
+  it.effect("keeps a successful attempt successful when cleanup fails", () => {
+    const spec = new AttemptChannel.RunSpec({
+      attemptId: Attempt.AttemptId.make("cleanup-run/run/1"),
+      repository: Repository.Name.make("acme/demo"),
+      revision: Repository.Revision.make("main"),
+      baseCommit: Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+      task: AttemptChannel.Task.make("Prove cleanup stays out of the outcome"),
+    });
+    const prepared = new PreparedAttempt({
+      worker: Worker.Name.make("local"),
+      spec,
+      worktree: WorktreePath.make("/tmp/usine-cleanup-test"),
+    });
+    const executor = Layer.succeed(Executor)({
+      preflight: () => Effect.void,
+      prepare: () => Effect.succeed(prepared),
+      launch: () => Effect.succeed(new StepResult.StepResult({ message: "done", facts: [] })),
+      cancel: () => Effect.void,
+      // ADR 0006 regression: a failed worktree removal must never convert a
+      // finished agent session into a retryable infra failure.
+      cleanup: () =>
+        Effect.fail(
+          new ExecutorOperationError({
+            operation: "cleanup",
+            message: "worktree removal failed",
+            cause: new Error("EBUSY"),
+          }),
+        ),
+    });
+    const runId = Run.RunId.make("cleanup-run");
+    const event = new Event.Event({
+      id: Event.EventId.make("cleanup-event"),
+      dedupKey: Event.DedupKey.make("cleanup/event"),
+      payload: {},
+      receivedAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
+    });
+    const execution = new StepExecution({
+      attempt: new Attempt.Attempt({
+        id: spec.attemptId,
+        runId,
+        stepName: Step.StepName.make("run"),
+        worker: Worker.Name.make("local"),
+        number: Attempt.AttemptNumber.make(1),
+        startedAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
+        outcome: Option.none(),
+      }),
+      event,
+      run: new Run.Run({
+        id: runId,
+        eventId: event.id,
+        loop: Loop.LoopName.make("review"),
+        state: RunState.start(new RunState.Pending()),
+        openedAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
+      }),
+      step: new Step.Step({
+        runId,
+        name: Step.StepName.make("run"),
+        result: Option.none(),
+      }),
+      repository: spec.repository,
+      revision: spec.revision,
+      task: spec.task,
+    });
+
+    return Effect.gen(function* () {
+      const stepExecutor = yield* StepExecutor;
+      const result = yield* stepExecutor.execute(execution, { append: () => Effect.void });
+      assert.strictEqual(result.message, "done");
+    }).pipe(Effect.provide(stepExecutorLayer(config).pipe(Layer.provide(executor))));
+  });
 });

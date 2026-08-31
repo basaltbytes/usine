@@ -200,9 +200,6 @@ importers:
       '@usine/core':
         specifier: workspace:*
         version: link:../core
-      '@usine/run-host':
-        specifier: workspace:*
-        version: link:../run-host
     devDependencies:
       '@usine/tsconfig':
         specifier: workspace:*
@@ -281,6 +278,9 @@ importers:
       '@usine/github':
         specifier: workspace:*
         version: link:../github
+      '@usine/run-host':
+        specifier: workspace:*
+        version: link:../run-host
     devDependencies:
       '@effect/vitest':
         specifier: 'catalog:'

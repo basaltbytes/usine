@@ -1,7 +1,8 @@
-import { Attempt, AttemptChannel, AttemptFailure, Repository } from "@usine/core";
-import { executableCommand as defaultRunHost } from "@usine/run-host/executable";
+import { Attempt, AttemptChannel, AttemptFailure, Instance, Repository } from "@usine/core";
 import {
+  Array as Arr,
   Cause,
+  Config,
   DateTime,
   Effect,
   Fiber,
@@ -16,7 +17,6 @@ import {
   Result,
   Schema,
   Stream,
-  SynchronizedRef,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner";
@@ -27,8 +27,7 @@ import {
   ExecutorError,
   ExecutorOperationError,
   PreparedAttempt,
-  PreflightReport,
-  type ChannelIo,
+  WorktreePath,
   type ExecutorOperation,
 } from "../index.ts";
 
@@ -38,8 +37,9 @@ export interface RunHostCommand {
 }
 
 export interface LocalExecutorOptions {
-  readonly instanceDirectory: string;
-  readonly runHost?: RunHostCommand;
+  readonly instanceDirectory: Instance.Directory;
+  /** How to launch the one-shot run host; the composition root resolves it. */
+  readonly runHost: RunHostCommand;
   readonly repositoryUrl?: (repository: Repository.Name) => string;
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
 }
@@ -53,20 +53,49 @@ interface ActiveAttempt {
   readonly cancelStarted: Ref.Ref<boolean>;
   readonly handle: ChildProcessHandle;
   readonly input: Queue.Queue<Uint8Array, Cause.Done>;
-  readonly io: ChannelIo;
+  readonly io: AttemptChannel.Sink;
   readonly sequence: Ref.Ref<number>;
 }
 
-type TerminalEnvelope =
-  | { readonly _tag: "Final"; readonly result: AttemptChannel.Final["result"] }
-  | { readonly _tag: "Failed"; readonly failure: AttemptChannel.Failed["failure"] };
-
-type ChannelState = "AwaitingStarted" | "Running" | "Terminal";
-
 const inputFrameToJson = Schema.encodeSync(AttemptChannel.InputFrameFromJson);
-const decodeOutboundEnvelope = Schema.decodeUnknownEffect(AttemptChannel.OutboundEnvelopeFromJson);
+/** Strict by contract: an unknown key on a protocol frame is a rejected frame. */
+const decodeOutboundEnvelope = (line: string) =>
+  Schema.decodeUnknownEffect(AttemptChannel.OutboundEnvelopeFromJson)(line, {
+    onExcessProperty: "error",
+  });
 const isExecutorError = Schema.is(ExecutorError);
 const encoder = new TextEncoder();
+
+/** Every git invocation is bounded: a hung clone or fetch must stay cancellable. */
+const COMMAND_TIMEOUT = "10 minutes";
+const STDERR_TAIL_BYTES = 4_096;
+
+/**
+ * The run host gets a minimal environment, never the orchestrator's: the App
+ * private key and every other orchestrator secret must not reach the agent
+ * (ADR 0011's single-repo worker token is the only credential it holds).
+ */
+const HOST_ENVIRONMENT_ALLOWLIST = [
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "PATH",
+  "SHELL",
+  "TMPDIR",
+  "USER",
+] as const;
+
+const hostEnvironment: Effect.Effect<Record<string, string>> = Effect.forEach(
+  HOST_ENVIRONMENT_ALLOWLIST,
+  (name) =>
+    Effect.map(Config.option(Config.string(name)), (value) =>
+      Option.map(value, (found) => [name, found] as const),
+    ),
+).pipe(
+  Effect.map((entries) => Object.fromEntries(Arr.getSomes(entries))),
+  // An unreadable process environment at layer build is startup breakage.
+  Effect.orDie,
+);
 
 const frame = (input: AttemptChannel.InputFrame): Uint8Array =>
   encoder.encode(`${inputFrameToJson(input)}\n`);
@@ -80,11 +109,22 @@ const executorError = (
 const infrastructureFailure = (message: string, cause: unknown) =>
   new AttemptFailure.InfraFailure({ message, cause });
 
+const violationFailure = (violation: AttemptChannel.Violation) =>
+  infrastructureFailure(violation.message, new Error(violation.detail));
+
 const safeSegment = (value: string): string => value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
 
-const credentialEnvironment = (credential: Redacted.Redacted<string>) => {
+/** The credential must never survive into a persisted error message. */
+const scrubbed = (text: string, credential: Redacted.Redacted<string>): string =>
+  text.replaceAll(Redacted.value(credential), "[REDACTED]");
+
+const credentialEnvironment = (
+  base: Record<string, string>,
+  credential: Redacted.Redacted<string>,
+) => {
   const token = Redacted.value(credential);
   return {
+    ...base,
     GH_TOKEN: token,
     GITHUB_TOKEN: token,
     GIT_CONFIG_COUNT: "1",
@@ -100,13 +140,15 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const path = yield* Path.Path;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fetches = yield* PartitionedSemaphore.make<string>({ permits: 1 });
-    const preparedStates = yield* SynchronizedRef.make(new Map<Attempt.AttemptId, PreparedState>());
-    const activeAttempts = yield* SynchronizedRef.make(new Map<Attempt.AttemptId, ActiveAttempt>());
+    const preparedStates = yield* Ref.make(new Map<Attempt.AttemptId, PreparedState>());
+    const activeAttempts = yield* Ref.make(new Map<Attempt.AttemptId, ActiveAttempt>());
+    const baseEnvironment = yield* hostEnvironment;
     const repositoryUrl =
       options.repositoryUrl ??
       ((repository: Repository.Name): string => `https://github.com/${repository}.git`);
-    const runHost = options.runHost ?? defaultRunHost;
+    const runHost = options.runHost;
     const interruptGrace = options.interruptGrace ?? "2 seconds";
+    const workersRoot = path.join(options.instanceDirectory, ".usine", "workers");
 
     const executeCommand = Effect.fn("LocalExecutor.executeCommand")(function* (
       operation: ExecutorOperation,
@@ -116,7 +158,13 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     ) {
       const result = yield* Effect.scoped(
         Effect.gen(function* () {
-          const handle = yield* spawner.spawn(ChildProcess.make(command, args, commandOptions));
+          const handle = yield* spawner.spawn(
+            ChildProcess.make(command, args, {
+              env: baseEnvironment,
+              extendEnv: false,
+              ...commandOptions,
+            }),
+          );
           const stdoutFiber = yield* handle.stdout.pipe(
             Stream.decodeText(),
             Stream.mkString,
@@ -135,11 +183,18 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           return { exitCode, stderr, stdout } as const;
         }),
       ).pipe(
+        Effect.timeout(COMMAND_TIMEOUT),
         Effect.mapError((cause) =>
           executorError(operation, `${command} could not be executed`, cause),
         ),
       );
       if (Number(result.exitCode) !== 0) {
+        yield* Effect.logWarning("Executor command exited non-zero", {
+          operation,
+          command,
+          args: args.join(" "),
+          exitCode: String(result.exitCode),
+        });
         return yield* executorError(
           operation,
           `${command} exited with code ${String(result.exitCode)}`,
@@ -148,8 +203,6 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       }
       return result.stdout;
     });
-
-    const output = executeCommand;
 
     const run = Effect.fn("LocalExecutor.run")(function* (
       operation: ExecutorOperation,
@@ -160,10 +213,59 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* executeCommand(operation, command, args, commandOptions);
     });
 
+    // ADR 0006: worktrees never outlive their Attempt. A crashed orchestrator
+    // leaves both directories and bare-cache registrations behind; the sweep
+    // reclaims them at the next layer build, before new Attempts start.
+    const sweepAbandonedWorktrees = Effect.fn("LocalExecutor.sweepAbandonedWorktrees")(
+      function* () {
+        if (!(yield* fileSystem.exists(workersRoot))) return;
+        const workers = yield* fileSystem.readDirectory(workersRoot);
+        for (const worker of workers) {
+          const attemptsRoot = path.join(workersRoot, worker, "attempts");
+          if (yield* fileSystem.exists(attemptsRoot)) {
+            const leftovers = yield* fileSystem.readDirectory(attemptsRoot);
+            for (const leftover of leftovers) {
+              const target = path.join(attemptsRoot, leftover);
+              yield* Effect.logInfo("Sweeping abandoned Attempt worktree", { worktree: target });
+              yield* fileSystem.remove(target, { recursive: true, force: true });
+            }
+          }
+          const reposRoot = path.join(workersRoot, worker, "repos");
+          if (yield* fileSystem.exists(reposRoot)) {
+            const caches = yield* fileSystem.readDirectory(reposRoot);
+            for (const cache of caches) {
+              yield* run("cleanup", "git", [
+                "--git-dir",
+                path.join(reposRoot, cache),
+                "worktree",
+                "prune",
+              ]).pipe(
+                Effect.tapError((error) =>
+                  Effect.logWarning("Could not prune a bare cache during the sweep", {
+                    cache,
+                    message: error.message,
+                  }),
+                ),
+                Effect.ignore,
+              );
+            }
+          }
+        }
+      },
+    );
+    yield* sweepAbandonedWorktrees().pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("Abandoned-worktree sweep failed; continuing", {
+          message: String(error),
+        }),
+      ),
+      Effect.ignore,
+    );
+
     const preflight = Effect.fn("LocalExecutor.preflight")(function* (
       worker: CheckoutRequest["worker"],
     ) {
-      const gitVersion = (yield* output("preflight", "git", ["--version"])).trim();
+      const gitVersion = (yield* executeCommand("preflight", "git", ["--version"])).trim();
       if (!gitVersion.startsWith("git version ")) {
         return yield* executorError(
           "preflight",
@@ -171,7 +273,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           new Error(gitVersion),
         );
       }
-      const reported = (yield* output("preflight", runHost.command, [
+      const reported = (yield* executeCommand("preflight", runHost.command, [
         ...runHost.args,
         "--protocol-version",
       ])).trim();
@@ -182,19 +284,33 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           new Error("run-host protocol mismatch"),
         );
       }
-      return new PreflightReport({
+      yield* Effect.logInfo("Worker preflight verified", {
+        worker,
         gitVersion,
         protocolVersion: AttemptChannel.PROTOCOL_VERSION,
       });
     });
 
     const prepare = Effect.fn("LocalExecutor.prepare")(function* (request: CheckoutRequest) {
+      yield* Effect.annotateCurrentSpan({
+        attemptId: request.attemptId,
+        worker: request.worker,
+        repository: request.repository,
+      });
       const credential = yield* credentials.issue(request.repository, request.attemptId);
-      const workerRoot = path.join(options.instanceDirectory, ".usine", "workers", request.worker);
+      const workerRoot = path.join(workersRoot, request.worker);
       const cache = path.join(workerRoot, "repos", `${safeSegment(request.repository)}.git`);
       const worktree = path.join(workerRoot, "attempts", safeSegment(request.attemptId));
-      const environment = credentialEnvironment(credential);
-      const commandOptions = { env: environment, extendEnv: true } as const;
+      const environment = credentialEnvironment(baseEnvironment, credential);
+      const commandOptions = { env: environment, extendEnv: false } as const;
+      yield* Effect.logInfo("Preparing Attempt workspace", {
+        attemptId: request.attemptId,
+        worker: request.worker,
+        repository: request.repository,
+        revision: request.revision,
+        cache,
+        worktree,
+      });
 
       const prepared = yield* fetches
         .withPermit(request.repository)(
@@ -203,12 +319,28 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             yield* fileSystem.makeDirectory(path.dirname(worktree), { recursive: true });
             yield* fileSystem.remove(worktree, { recursive: true, force: true });
             if (!(yield* fileSystem.exists(cache))) {
+              // Clone into a sibling staging directory and rename on success:
+              // an interrupted clone must never leave a half-initialized cache
+              // that every later fetch for this repository would poison.
+              const staging = `${cache}.cloning`;
+              yield* fileSystem.remove(staging, { recursive: true, force: true });
               yield* run(
                 "prepare",
                 "git",
-                ["clone", "--bare", "--filter=blob:none", repositoryUrl(request.repository), cache],
+                [
+                  "clone",
+                  "--bare",
+                  "--filter=blob:none",
+                  repositoryUrl(request.repository),
+                  staging,
+                ],
                 commandOptions,
+              ).pipe(
+                Effect.onError(() =>
+                  fileSystem.remove(staging, { recursive: true, force: true }).pipe(Effect.ignore),
+                ),
               );
+              yield* fileSystem.rename(staging, cache);
             } else {
               yield* run(
                 "prepare",
@@ -230,7 +362,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
               ["--git-dir", cache, "fetch", "--force", "--prune", "origin", request.revision],
               commandOptions,
             );
-            const resolved = (yield* output(
+            const resolved = (yield* executeCommand(
               "prepare",
               "git",
               ["--git-dir", cache, "rev-parse", "FETCH_HEAD"],
@@ -258,26 +390,35 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
                 baseCommit,
                 task: request.task,
               }),
-              worktree,
+              worktree: WorktreePath.make(worktree),
             });
           }),
         )
         .pipe(
-          Effect.tapError(() =>
-            fileSystem.remove(worktree, { recursive: true, force: true }).pipe(Effect.ignore),
-          ),
           Effect.mapError((error) =>
             isExecutorError(error)
               ? error
               : executorError("prepare", "Attempt workspace preparation failed", error),
           ),
-          Effect.onError(() => Effect.sync(() => Redacted.wipeUnsafe(credential))),
+          Effect.onError(() =>
+            Effect.gen(function* () {
+              yield* fileSystem
+                .remove(worktree, { recursive: true, force: true })
+                .pipe(Effect.ignore);
+              Redacted.wipeUnsafe(credential);
+            }),
+          ),
         );
 
-      yield* SynchronizedRef.update(preparedStates, (current) => {
+      yield* Ref.update(preparedStates, (current) => {
         const next = new Map(current);
         next.set(request.attemptId, { cache, credential });
         return next;
+      });
+      yield* Effect.logInfo("Attempt workspace ready", {
+        attemptId: request.attemptId,
+        baseCommit: prepared.spec.baseCommit,
+        worktree,
       });
       return prepared;
     });
@@ -293,6 +434,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             (started) => [!started, true] as const,
           );
           if (!first) return;
+          yield* Effect.logInfo("Sending the interrupt envelope", { attemptId });
           const sequence = yield* Ref.getAndUpdate(active.sequence, (value) => value + 1);
           const envelope = new AttemptChannel.InboundEnvelope({
             version: AttemptChannel.PROTOCOL_VERSION,
@@ -304,23 +446,31 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           yield* active.io.append("inbound", envelope).pipe(
             Effect.andThen(Queue.offer(active.input, frame(envelope))),
             Effect.catch((error) =>
-              active.handle
-                .kill({ killSignal: "SIGKILL" })
-                .pipe(Effect.ignore, Effect.andThen(Effect.fail(error))),
+              Effect.logWarning("Interrupt could not be delivered; hard-killing the run host", {
+                attemptId,
+                message: String(error),
+              }).pipe(
+                Effect.andThen(active.handle.kill({ killSignal: "SIGKILL" })),
+                Effect.ignore,
+                Effect.andThen(Effect.fail(error)),
+              ),
             ),
           );
           const completed = yield* active.handle.exitCode.pipe(
             Effect.timeoutOption(interruptGrace),
           );
           if (Option.isNone(completed) && (yield* active.handle.isRunning)) {
+            yield* Effect.logWarning("Interrupt grace expired; sending SIGKILL", { attemptId });
             yield* active.handle.kill({ killSignal: "SIGKILL" });
+          } else {
+            yield* Effect.logInfo("Run host stopped within the interrupt grace", { attemptId });
           }
         }),
       );
     });
 
     const cancel = Effect.fn("LocalExecutor.cancel")(function* (attemptId: Attempt.AttemptId) {
-      const active = (yield* SynchronizedRef.get(activeAttempts)).get(attemptId);
+      const active = (yield* Ref.get(activeAttempts)).get(attemptId);
       if (active === undefined) return;
       yield* cancelActive(attemptId, active).pipe(
         Effect.mapError((cause) =>
@@ -333,24 +483,32 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
 
     const launch = Effect.fn("LocalExecutor.launch")(function* (
       prepared: PreparedAttempt,
-      io: ChannelIo,
+      io: AttemptChannel.Sink,
     ) {
-      const stored = (yield* SynchronizedRef.get(preparedStates)).get(prepared.spec.attemptId);
+      const attemptId = prepared.spec.attemptId;
+      yield* Effect.annotateCurrentSpan({ attemptId, worker: prepared.worker });
+      const stored = (yield* Ref.get(preparedStates)).get(attemptId);
       if (stored === undefined) {
         return yield* infrastructureFailure(
-          `Attempt ${prepared.spec.attemptId} has no prepared credential`,
+          `Attempt ${attemptId} has no prepared credential`,
           new Error("prepared Attempt state missing"),
         );
       }
+      const scrub = (text: string): string => scrubbed(text, stored.credential);
 
       const execute = Effect.scoped(
         Effect.gen(function* () {
           const input = yield* Queue.make<Uint8Array, Cause.Done>();
+          yield* Effect.logInfo("Launching the run host", {
+            attemptId,
+            command: runHost.command,
+            worktree: prepared.worktree,
+          });
           const handle = yield* spawner.spawn(
             ChildProcess.make(runHost.command, runHost.args, {
               cwd: prepared.worktree,
-              env: credentialEnvironment(stored.credential),
-              extendEnv: true,
+              env: credentialEnvironment(baseEnvironment, stored.credential),
+              extendEnv: false,
               stdin: { stream: Stream.fromQueue(input), endOnDone: true },
             }),
           );
@@ -361,9 +519,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             io,
             sequence: yield* Ref.make(1),
           };
-          yield* SynchronizedRef.update(activeAttempts, (current) => {
+          yield* Ref.update(activeAttempts, (current) => {
             const next = new Map(current);
-            next.set(prepared.spec.attemptId, active);
+            next.set(attemptId, active);
             return next;
           });
           yield* Queue.offer(
@@ -380,13 +538,16 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           const stderrFiber = yield* handle.stderr.pipe(
             Stream.decodeText(),
             Stream.runForEach((chunk) =>
-              Ref.update(stderr, (current) => `${current}${chunk}`.slice(-4_096)),
+              Ref.update(stderr, (current) => `${current}${chunk}`.slice(-STDERR_TAIL_BYTES)),
             ),
             Effect.forkChild,
           );
-          const terminal = yield* Ref.make(Option.none<TerminalEnvelope>());
-          const expectedSequence = yield* Ref.make(1);
-          const channelState = yield* Ref.make<ChannelState>("AwaitingStarted");
+          const terminal = yield* Ref.make(
+            Option.none<
+              AttemptChannel.Final | AttemptChannel.Failed | AttemptChannel.Interrupted
+            >(),
+          );
+          const progress = yield* Ref.make(AttemptChannel.initialProgress);
 
           yield* handle.stdout.pipe(
             Stream.decodeText(),
@@ -398,57 +559,25 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
                     infrastructureFailure("The run host emitted an invalid frame", cause),
                   ),
                 );
-                if (envelope.attemptId !== prepared.spec.attemptId) {
-                  return yield* infrastructureFailure(
-                    "The run host emitted a frame for another Attempt",
-                    new Error(String(envelope.attemptId)),
-                  );
+                const before = yield* Ref.get(progress);
+                const admitted = AttemptChannel.admit(before, attemptId, envelope);
+                if (Result.isFailure(admitted)) {
+                  return yield* violationFailure(admitted.failure);
                 }
-                const expected = yield* Ref.get(expectedSequence);
-                if (envelope.sequence !== expected) {
-                  return yield* infrastructureFailure(
-                    "The run host emitted a non-contiguous sequence",
-                    new Error(`expected ${expected}, received ${envelope.sequence}`),
-                  );
-                }
-                yield* Ref.set(expectedSequence, expected + 1);
-                const state = yield* Ref.get(channelState);
-                if (state === "AwaitingStarted" && envelope.payload._tag !== "Started") {
-                  return yield* infrastructureFailure(
-                    "The run host did not begin with a Started envelope",
-                    new Error(envelope.payload._tag),
-                  );
-                }
-                if (state === "Running" && envelope.payload._tag === "Started") {
-                  return yield* infrastructureFailure(
-                    "The run host emitted more than one Started envelope",
-                    new Error("duplicate Started envelope"),
-                  );
-                }
-                if (state === "Terminal") {
-                  return yield* infrastructureFailure(
-                    "The run host emitted an envelope after its terminal envelope",
-                    new Error(envelope.payload._tag),
-                  );
-                }
-                yield* Ref.set(
-                  channelState,
-                  envelope.payload._tag === "Final" || envelope.payload._tag === "Failed"
-                    ? "Terminal"
-                    : "Running",
-                );
+                yield* Ref.set(progress, admitted.success);
                 yield* io.append("outbound", envelope);
-                if (envelope.payload._tag === "Final") {
-                  yield* Ref.set(
-                    terminal,
-                    Option.some({ _tag: "Final", result: envelope.payload.result }),
-                  );
-                  yield* Queue.end(input);
-                } else if (envelope.payload._tag === "Failed") {
-                  yield* Ref.set(
-                    terminal,
-                    Option.some({ _tag: "Failed", failure: envelope.payload.failure }),
-                  );
+                const payload = envelope.payload;
+                if (
+                  payload._tag === "Final" ||
+                  payload._tag === "Failed" ||
+                  payload._tag === "Interrupted"
+                ) {
+                  yield* Effect.logInfo("Run host reached its terminal envelope", {
+                    attemptId,
+                    terminal: payload._tag,
+                    sequence: envelope.sequence,
+                  });
+                  yield* Ref.set(terminal, Option.some(payload));
                   yield* Queue.end(input);
                 }
               }),
@@ -465,34 +594,53 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             ),
           );
           yield* Fiber.join(stderrFiber).pipe(Effect.ignore);
+          yield* Effect.logInfo("Run host exited", { attemptId, exitCode: String(exitCode) });
           const ended = yield* Ref.get(terminal);
           if (Option.isNone(ended)) {
             return yield* infrastructureFailure(
               "The run-host channel closed without a final envelope",
               new Error(
-                `run host exited with code ${String(exitCode)}: ${(yield* Ref.get(stderr)).trim()}`,
+                `run host exited with code ${String(exitCode)}: ${scrub((yield* Ref.get(stderr)).trim())}`,
               ),
             );
           }
           if (ended.value._tag === "Failed") return yield* ended.value.failure;
+          if (ended.value._tag === "Interrupted") {
+            // The cancel path has already closed the Attempt as Canceled; the
+            // wire confirmation only needs a typed way out of this fiber.
+            return yield* new AttemptFailure.AgentFailure({
+              message: "The run host confirmed the interrupt and stopped",
+            });
+          }
           if (Number(exitCode) !== 0) {
             return yield* infrastructureFailure(
               `The run host exited with code ${String(exitCode)} after its final envelope`,
-              new Error((yield* Ref.get(stderr)).trim()),
+              new Error(scrub((yield* Ref.get(stderr)).trim())),
             );
           }
           return ended.value.result;
-        }),
+        }).pipe(
+          // Inside the scope: the interrupt handshake must run while the
+          // spawn finalizer (which kills the process group) is still pending.
+          Effect.onInterrupt(() =>
+            cancel(attemptId).pipe(
+              Effect.tapError((error) =>
+                Effect.logWarning("Cancel-on-interrupt failed", {
+                  attemptId,
+                  message: String(error),
+                }),
+              ),
+              Effect.ignore,
+            ),
+          ),
+        ),
       );
 
       return yield* execute.pipe(
-        Effect.onInterrupt(() =>
-          cancel(prepared.spec.attemptId).pipe(Effect.catch(() => Effect.void)),
-        ),
         Effect.ensuring(
-          SynchronizedRef.update(activeAttempts, (current) => {
+          Ref.update(activeAttempts, (current) => {
             const next = new Map(current);
-            next.delete(prepared.spec.attemptId);
+            next.delete(attemptId);
             return next;
           }),
         ),
@@ -505,7 +653,12 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     });
 
     const cleanup = Effect.fn("LocalExecutor.cleanup")(function* (prepared: PreparedAttempt) {
-      const state = (yield* SynchronizedRef.get(preparedStates)).get(prepared.spec.attemptId);
+      const attemptId = prepared.spec.attemptId;
+      yield* Effect.logInfo("Cleaning Attempt workspace", {
+        attemptId,
+        worktree: prepared.worktree,
+      });
+      const state = (yield* Ref.get(preparedStates)).get(attemptId);
       if (state === undefined) {
         yield* fileSystem
           .remove(prepared.worktree, { recursive: true, force: true })
@@ -548,15 +701,15 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         Effect.mapError((cause) =>
           isExecutorError(cause)
             ? cause
-            : executorError("cleanup", `Could not clean Attempt ${prepared.spec.attemptId}`, cause),
+            : executorError("cleanup", `Could not clean Attempt ${attemptId}`, cause),
         ),
       );
       yield* finish.pipe(
         Effect.ensuring(
           Effect.gen(function* () {
-            yield* SynchronizedRef.update(preparedStates, (current) => {
+            yield* Ref.update(preparedStates, (current) => {
               const next = new Map(current);
-              next.delete(prepared.spec.attemptId);
+              next.delete(attemptId);
               return next;
             });
             Redacted.wipeUnsafe(state.credential);

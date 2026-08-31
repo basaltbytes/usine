@@ -21,10 +21,9 @@ import {
   RunSnapshot,
   StepExecution,
   Submission,
-  TranscriptDirection,
   TranscriptEntry,
   TranscriptQuery,
-  type RunEngineError,
+  type RunStoreError,
   type WorkflowCommand,
 } from "../model.ts";
 import { persistence, submissionFromRow, type WorkflowCommandRow } from "./codec.ts";
@@ -64,6 +63,22 @@ export class AttemptRecoveryFailed extends Schema.TaggedClass<AttemptRecoveryFai
 )("AttemptRecoveryFailed", {
   failure: AttemptFailure.InfraFailure,
 }) {}
+
+/**
+ * The Run closed (canceled, superseded, or revoked) while it waited for a
+ * worker slot — a routine outcome once capacity queues exist, never an error.
+ */
+export class RunClosed extends Schema.TaggedClass<RunClosed>("@usine/engine/internal/RunClosed")(
+  "RunClosed",
+  {
+    state: Schema.String,
+  },
+) {}
+
+/** What `RunStore.cancel` did, decided inside the closing transaction. */
+export type CancelOutcome =
+  | { readonly _tag: "AlreadyClosed" }
+  | { readonly _tag: "Canceled"; readonly openAttempt: Option.Option<Attempt.AttemptId> };
 
 const makeRunStore = Effect.gen(function* () {
   const database = yield* RunDatabase;
@@ -195,11 +210,9 @@ const makeRunStore = Effect.gen(function* () {
           yield* tx.updateState(runId, runState);
         }
         if (runState._tag !== "Running") {
-          return yield* new RunOperationRejectedError({
-            runId,
-            operation: "retry",
-            state: runState._tag,
-          });
+          // Cancel, supersede, and revoke can all land while the run waits
+          // for a worker slot; the caller releases the slot and moves on.
+          return new RunClosed({ state: runState._tag });
         }
 
         const number = Attempt.AttemptNumber.make((lastAttempt?.number ?? 0) + 1);
@@ -329,17 +342,23 @@ const makeRunStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const current = yield* tx.snapshot(runId);
-        if (!RunState.isOpen(current.run.state)) return false;
+        if (!RunState.isOpen(current.run.state)) {
+          const alreadyClosed: CancelOutcome = { _tag: "AlreadyClosed" };
+          return alreadyClosed;
+        }
+        let openAttempt = Option.none<Attempt.AttemptId>();
         if (current.run.state._tag === "Running") {
           const attempt = current.attempts[current.attempts.length - 1];
           if (attempt !== undefined && Option.isNone(attempt.outcome)) {
             yield* tx.closeAttempt(attempt.id, new Attempt.Canceled());
+            openAttempt = Option.some(attempt.id);
           }
         }
         yield* tx.updateState(runId, RunState.cancelByOperator(current.run.state));
         yield* tx.requestInterrupt(runId);
         yield* tx.requestWorkflowCommand(runId, "Continue");
-        return true;
+        const canceled: CancelOutcome = { _tag: "Canceled", openAttempt };
+        return canceled;
       }),
     );
   }, persistence("cancel run"));
@@ -399,7 +418,7 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("list recoverable runs"));
 
   const appendTranscript = Effect.fn("RunStore.appendTranscript")(function* (
-    direction: TranscriptDirection,
+    direction: AttemptChannel.Direction,
     envelope: AttemptChannel.Envelope,
   ) {
     yield* queries.appendTranscript(direction, envelope, yield* DateTime.now);
@@ -469,7 +488,7 @@ const makeRunStore = Effect.gen(function* () {
  * The durable Run projection store. The interface below is the store's
  * declared contract — the seam any other backend (for example a Postgres
  * store) implements with its own `Layer.effect(RunStore, ...)`. Methods speak
- * domain vocabulary only and fail only with `RunEngineError`.
+ * domain vocabulary only and fail only with `RunStoreError`.
  */
 export class RunStore extends Context.Service<
   RunStore,
@@ -477,58 +496,58 @@ export class RunStore extends Context.Service<
     readonly approve: (
       runId: Run.RunId,
       approval: Event.Event,
-    ) => Effect.Effect<void, RunEngineError>;
+    ) => Effect.Effect<void, RunStoreError>;
     readonly appendTranscript: (
-      direction: TranscriptDirection,
+      direction: AttemptChannel.Direction,
       envelope: AttemptChannel.Envelope,
-    ) => Effect.Effect<void, RunEngineError>;
+    ) => Effect.Effect<void, RunStoreError>;
     readonly beginAttempt: (
       runId: Run.RunId,
       worker: Worker.Name,
-    ) => Effect.Effect<AttemptStarted | AttemptRecoveryFailed, RunEngineError>;
-    readonly cancel: (runId: Run.RunId) => Effect.Effect<boolean, RunEngineError>;
+    ) => Effect.Effect<AttemptStarted | AttemptRecoveryFailed | RunClosed, RunStoreError>;
+    readonly cancel: (runId: Run.RunId) => Effect.Effect<CancelOutcome, RunStoreError>;
     readonly claimQueued: (
       submission: Submission,
       runId: Run.RunId,
-    ) => Effect.Effect<Option.Option<StoredSubmission>, RunEngineError>;
+    ) => Effect.Effect<Option.Option<StoredSubmission>, RunStoreError>;
     readonly completeWorkflowCommand: (
       runId: Run.RunId,
       command: WorkflowCommand,
-    ) => Effect.Effect<void, RunEngineError>;
+    ) => Effect.Effect<void, RunStoreError>;
     readonly failAttempt: (
       attempt: Attempt.Attempt,
       failure: AttemptFailure.AttemptFailure,
-    ) => Effect.Effect<boolean, RunEngineError>;
+    ) => Effect.Effect<boolean, RunStoreError>;
     readonly nextQueued: (
       runId: Run.RunId,
-    ) => Effect.Effect<Option.Option<Submission>, RunEngineError>;
-    readonly parkForApproval: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
+    ) => Effect.Effect<Option.Option<Submission>, RunStoreError>;
+    readonly parkForApproval: (runId: Run.RunId) => Effect.Effect<void, RunStoreError>;
     readonly pendingWorkflowCommands: Effect.Effect<
       ReadonlyArray<WorkflowCommandRow>,
-      RunEngineError
+      RunStoreError
     >;
     readonly recordAndClaim: (
       submission: Submission,
       requestedRunId: Run.RunId,
-    ) => Effect.Effect<Claim, RunEngineError>;
+    ) => Effect.Effect<Claim, RunStoreError>;
     readonly reconcileCompletion: (
       runId: Run.RunId,
       result: Workflow.Result<StepResult.StepResult, AttemptFailure.AttemptFailure>,
-    ) => Effect.Effect<void, RunEngineError>;
-    readonly recoverable: Effect.Effect<ReadonlyArray<RecoverableRun>, RunEngineError>;
-    readonly retry: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
+    ) => Effect.Effect<void, RunStoreError>;
+    readonly recoverable: Effect.Effect<ReadonlyArray<RecoverableRun>, RunStoreError>;
+    readonly retry: (runId: Run.RunId) => Effect.Effect<void, RunStoreError>;
     readonly revoke: (
       loop: Loop.LoopName,
       itemKey: Item.ItemKey,
-    ) => Effect.Effect<ReadonlyArray<Run.RunId>, RunEngineError>;
-    readonly snapshot: (runId: Run.RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
+    ) => Effect.Effect<ReadonlyArray<Run.RunId>, RunStoreError>;
+    readonly snapshot: (runId: Run.RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
     readonly succeedAttempt: (
       attempt: Attempt.Attempt,
       result: StepResult.StepResult,
-    ) => Effect.Effect<void, RunEngineError>;
+    ) => Effect.Effect<void, RunStoreError>;
     readonly transcript: (
       query: TranscriptQuery,
-    ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunEngineError>;
+    ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunStoreError>;
   }
 >()("@usine/engine/internal/RunStore") {
   static readonly layer = Layer.effect(RunStore, makeRunStore);

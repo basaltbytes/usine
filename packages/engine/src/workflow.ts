@@ -4,12 +4,11 @@ import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workf
 import { StepExecutor } from "./step-executor.ts";
 import { AttemptRecoveryFailed, RunStore } from "./store/store.ts";
 import {
-  AttemptCancellationError,
   EnginePersistenceError,
   RunNotFoundError,
   RunOperationRejectedError,
   Submission,
-  type RunEngineError,
+  type RunStoreError,
 } from "./model.ts";
 
 const WorkflowPayload = Schema.Struct({
@@ -27,14 +26,9 @@ export const DurableRun = Workflow.make("@usine/engine/DurableRun", {
 export const ApprovalGate = DurableDeferred.make("@usine/engine/ApprovalGate");
 
 const asAttemptFailure = <A, R>(
-  effect: Effect.Effect<A, RunEngineError, R>,
+  effect: Effect.Effect<A, RunStoreError, R>,
 ): Effect.Effect<A, AttemptFailure.AttemptFailure, R> =>
   Effect.catchTags(effect, {
-    AttemptCancellationError: (error: AttemptCancellationError) =>
-      new AttemptFailure.InfraFailure({
-        message: `Attempt ${error.attemptId} cancellation failed`,
-        cause: error,
-      }),
     EnginePersistenceError: (error: EnginePersistenceError) =>
       new AttemptFailure.InfraFailure({
         message: `Engine persistence failed during ${error.operation}`,
@@ -49,7 +43,7 @@ const executionId = (submission: Submission) => DurableRun.executionId({ submiss
 export const continueWithNewest: (
   store: RunStore["Service"],
   completedRunId: Run.RunId,
-) => Effect.Effect<void, RunEngineError, WorkflowEngine.WorkflowEngine> = Effect.fn(
+) => Effect.Effect<void, RunStoreError, WorkflowEngine.WorkflowEngine> = Effect.fn(
   "DurableRun.continueWithNewest",
 )(function* (store: RunStore["Service"], completedRunId: Run.RunId) {
   const queued = yield* store.nextQueued(completedRunId);
@@ -78,35 +72,49 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
   }
 
   while (true) {
-    const attempted = yield* Effect.acquireUseRelease(
-      executor.reserve(submission),
-      (lease) =>
-        Effect.gen(function* () {
-          const started = yield* store.beginAttempt(runId, lease.worker).pipe(asAttemptFailure);
-          if (started instanceof AttemptRecoveryFailed) return started;
+    // The wait for a worker slot stays interruptible: a cancel must be able
+    // to reach a run parked in `reserve` (its scheduler releases or reoffers
+    // the slot in its own onInterrupt). Only after the lease exists does the
+    // release obligation begin.
+    const lease = yield* executor.reserve(submission);
+    const attempted = yield* Effect.gen(function* () {
+      const started = yield* store.beginAttempt(runId, lease.worker).pipe(asAttemptFailure);
+      if (started instanceof AttemptRecoveryFailed || started._tag === "RunClosed") {
+        return started;
+      }
 
-          // Port ACL: the executor's contract is the typed AttemptFailure channel.
-          // A defect escaping the adapter is infrastructure breakage around the
-          // agent, so it is translated before reaching the durable workflow.
-          const result = yield* executor
-            .execute(started.execution, {
-              append: (direction, envelope) =>
-                store.appendTranscript(direction, envelope).pipe(asAttemptFailure),
-            })
-            .pipe(
-              Effect.catchDefect(
-                (defect) =>
-                  new AttemptFailure.InfraFailure({
-                    message: "The step executor crashed outside its typed failure channel",
-                    cause: defect,
-                  }),
-              ),
-              Effect.result,
-            );
-          return { _tag: "AttemptExecuted" as const, result, started };
-        }),
-      (lease) => lease.release,
-    );
+      // Port ACL: the executor's contract is the typed AttemptFailure channel.
+      // A defect escaping the adapter is infrastructure breakage around the
+      // agent, so it is translated before reaching the durable workflow.
+      const result = yield* executor
+        .execute(started.execution, {
+          append: (direction, envelope) =>
+            store.appendTranscript(direction, envelope).pipe(asAttemptFailure),
+        })
+        .pipe(
+          Effect.catchDefect(
+            (defect) =>
+              new AttemptFailure.InfraFailure({
+                message: "The step executor crashed outside its typed failure channel",
+                cause: defect,
+              }),
+          ),
+          Effect.result,
+        );
+      return { _tag: "AttemptExecuted" as const, result, started };
+    }).pipe(Effect.ensuring(lease.release));
+    if (attempted._tag === "RunClosed") {
+      // Canceled, superseded, or revoked while queued: release was the only
+      // obligation; the closing operation already delivered the interrupt.
+      yield* Effect.logInfo("Run closed while it waited for a worker", {
+        runId,
+        state: attempted.state,
+      });
+      yield* continueWithNewest(store, runId).pipe(asAttemptFailure);
+      return yield* new AttemptFailure.AgentFailure({
+        message: `The run closed (${attempted.state}) before an attempt started`,
+      });
+    }
     if (attempted instanceof AttemptRecoveryFailed) {
       yield* continueWithNewest(store, runId).pipe(asAttemptFailure);
       return yield* attempted.failure;

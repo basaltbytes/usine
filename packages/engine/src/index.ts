@@ -21,11 +21,10 @@ export {
   StepExecution,
   Submission,
   SubmissionResult,
-  TranscriptDirection,
   TranscriptEntry,
   TranscriptQuery,
   TranscriptSequence,
 } from "./model.ts";
 export { RunDatabase, type RunDatabaseClient } from "./database/database.ts";
 export { layerWithDatabase, RunEngine } from "./engine.ts";
-export { StepExecutor, type StepIo, type WorkerLease } from "./step-executor.ts";
+export { StepExecutor, type WorkerLease } from "./step-executor.ts";

@@ -28,7 +28,6 @@ import {
   RunNotFoundError,
   RunSnapshot,
   Submission,
-  TranscriptDirection,
   TranscriptQuery,
   WORKFLOW_COMMAND_PRIORITY,
   type WorkflowCommand,
@@ -112,6 +111,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
         loop: runs.loopName,
         state: runs.stateJson,
         openedAt: runs.openedAt,
+        repository: runs.repository,
+        revision: runs.revision,
+        task: runs.task,
         stepName: steps.stepName,
         result: steps.result,
       })
@@ -156,9 +158,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
       run: runFromRow(storedRun),
       step: stepFromRow(storedRun),
       attempts: storedAttempts.map(attemptFromRow),
-      repository: route.repository,
-      revision: route.revision,
-      task: route.task,
+      repository: storedRun.repository,
+      revision: storedRun.revision,
+      task: storedRun.task,
     });
   });
 
@@ -315,6 +317,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
         loopName: submission.loop,
         stateJson: encodeRunState(new RunState.Pending()),
         openedAt: encodeDateTime(submission.event.receivedAt),
+        repository: submission.repository,
+        revision: submission.revision,
+        task: submission.task,
       })
       .onConflictDoNothing()
       .execute();
@@ -423,7 +428,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const appendTranscript = Effect.fn("RunStoreQueries.appendTranscript")(function* (
-    direction: TranscriptDirection,
+    direction: AttemptChannel.Direction,
     envelope: AttemptChannel.Envelope,
     receivedAt: DateTime.Utc,
   ) {
@@ -461,7 +466,10 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .where(cursor)
       .orderBy(asc(attemptTranscripts.sequence))
       .execute();
-    return (yield* decodeTranscriptRows(rows)).map(transcriptEntryFromRow);
+    // Transcript rows are usine-owned: an unknown key is corruption, not tolerance.
+    return (yield* decodeTranscriptRows(rows, { onExcessProperty: "error" })).map(
+      transcriptEntryFromRow,
+    );
   });
 
   const recoverable = Effect.fn("RunStoreQueries.recoverable")(function* () {

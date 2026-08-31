@@ -98,10 +98,11 @@ export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/St
   task: AttemptChannel.Task,
 }) {}
 
-export const TRANSCRIPT_DIRECTIONS = AttemptChannel.DIRECTIONS;
-export const TranscriptDirection = AttemptChannel.Direction;
-export type TranscriptDirection = AttemptChannel.Direction;
-
+/**
+ * Value object: global append order of the persisted transcript — the tail
+ * cursor. Distinct from `AttemptChannel.Sequence`, which orders messages
+ * within one Attempt's channel direction.
+ */
 export const TranscriptSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("TranscriptSequence"),
 );
@@ -112,7 +113,7 @@ export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engin
   {
     sequence: TranscriptSequence,
     attemptId: Attempt.AttemptId,
-    direction: TranscriptDirection,
+    direction: AttemptChannel.Direction,
     envelope: AttemptChannel.Envelope,
     receivedAt: Schema.DateTimeUtc,
   },
@@ -154,10 +155,19 @@ export class AttemptCancellationError extends Schema.TaggedError<AttemptCancella
   cause: Schema.Defect(),
 }) {}
 
-export const RunEngineError = Schema.Union([
-  AttemptCancellationError,
+/** Everything the store itself can fail with. */
+export const RunStoreError = Schema.Union([
   RunNotFoundError,
   RunOperationRejectedError,
   EnginePersistenceError,
+]);
+export type RunStoreError = typeof RunStoreError.Type;
+
+/** The store's failures plus the engine-only cancellation handshake failure. */
+export const RunEngineError = Schema.Union([
+  RunNotFoundError,
+  RunOperationRejectedError,
+  EnginePersistenceError,
+  AttemptCancellationError,
 ]);
 export type RunEngineError = typeof RunEngineError.Type;

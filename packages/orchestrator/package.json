@@ -37,7 +37,8 @@
     "@usine/core": "workspace:*",
     "@usine/engine": "workspace:*",
     "@usine/executor": "workspace:*",
-    "@usine/github": "workspace:*"
+    "@usine/github": "workspace:*",
+    "@usine/run-host": "workspace:*"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

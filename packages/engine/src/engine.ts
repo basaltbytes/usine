@@ -120,22 +120,27 @@ const makeRunEngine = Effect.gen(function* () {
   });
 
   const cancel = Effect.fn("RunEngine.cancel")(function* (runId: Run.RunId) {
-    const before = yield* store.snapshot(runId);
-    const openAttempt = before.attempts.find((attempt) => Option.isNone(attempt.outcome));
-    const changed = yield* store.cancel(runId);
-    if (changed) {
-      const handshake =
-        openAttempt === undefined
-          ? Result.succeed(undefined)
-          : yield* stepExecutor.interrupt(openAttempt.id).pipe(Effect.result);
-      yield* deliverInterrupt(runId);
-      yield* deliverContinuation(runId);
-      if (Result.isFailure(handshake) && openAttempt !== undefined) {
-        return yield* new AttemptCancellationError({
-          attemptId: openAttempt.id,
-          cause: handshake.failure,
-        });
-      }
+    // The closing transaction decides both facts at once: whether the run was
+    // still open, and which attempt (if any) was in flight when it closed.
+    const outcome = yield* store.cancel(runId);
+    if (outcome._tag === "AlreadyClosed") {
+      yield* Effect.logDebug("Cancel was a no-op; the run was already closed", { runId });
+      return;
+    }
+    yield* Effect.logInfo("Run canceled", {
+      runId,
+      openAttempt: Option.getOrElse(outcome.openAttempt, () => "none"),
+    });
+    const handshake = Option.isSome(outcome.openAttempt)
+      ? yield* stepExecutor.interrupt(outcome.openAttempt.value).pipe(Effect.result)
+      : Result.succeed(undefined);
+    yield* deliverInterrupt(runId);
+    yield* deliverContinuation(runId);
+    if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
+      return yield* new AttemptCancellationError({
+        attemptId: outcome.openAttempt.value,
+        cause: handshake.failure,
+      });
     }
   });
 

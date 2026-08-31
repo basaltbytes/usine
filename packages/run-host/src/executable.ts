@@ -1,10 +1,10 @@
 import { fileURLToPath } from "node:url";
 
-/** Absolute path to the run-host executable shipped by this package. */
-export const executablePath = fileURLToPath(new URL("./bin.js", import.meta.url));
-
-/** Node command that launches the executable shipped by this package. */
-export const executableCommand = {
+/**
+ * Node command that launches the executable shipped by this package. Resolved
+ * at call time so importing this module stays inert.
+ */
+export const executableCommand = () => ({
   command: process.execPath,
-  args: [executablePath],
-} as const;
+  args: [fileURLToPath(new URL("./bin.js", import.meta.url))],
+});

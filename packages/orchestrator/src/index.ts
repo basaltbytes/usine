@@ -19,7 +19,6 @@ import {
   Queue,
   Ref,
   Schema,
-  SynchronizedRef,
   TxPriorityQueue,
 } from "effect";
 
@@ -39,16 +38,13 @@ interface Reservation {
   readonly deferred: Deferred.Deferred<WorkerLease>;
   readonly eventTime: number;
   readonly order: number;
-  readonly state: SynchronizedRef.SynchronizedRef<ReservationState>;
+  readonly state: Ref.Ref<ReservationState>;
 }
 
-const reservationOrder = Order.make<Reservation>((left, right) => {
-  if (left.eventTime < right.eventTime) return -1;
-  if (left.eventTime > right.eventTime) return 1;
-  if (left.order < right.order) return -1;
-  if (left.order > right.order) return 1;
-  return 0;
-});
+const reservationOrder = Order.combine(
+  Order.mapInput(Order.Number, (reservation: Reservation) => reservation.eventTime),
+  Order.mapInput(Order.Number, (reservation: Reservation) => reservation.order),
+);
 
 const asInfrastructureFailure = (error: ExecutorError | ExecutorOperationError) =>
   new AttemptFailure.InfraFailure({
@@ -111,12 +107,13 @@ export const stepExecutorLayer = (
           const worker = yield* Queue.take(available);
           const reservation = yield* TxPriorityQueue.take(pending);
           const lease = yield* makeLease(worker, available);
-          const assign = yield* SynchronizedRef.modify(reservation.state, (state) =>
+          const assign = yield* Ref.modify(reservation.state, (state) =>
             state._tag === "Pending"
               ? [true, { _tag: "Assigned", lease } satisfies ReservationState]
               : [false, state],
           );
           if (assign) {
+            yield* Effect.logDebug("Worker slot assigned", { worker });
             yield* Deferred.succeed(reservation.deferred, lease);
           } else {
             yield* lease.release;
@@ -128,7 +125,7 @@ export const stepExecutorLayer = (
       const reserve: StepExecutor["Service"]["reserve"] = Effect.fn("WorkerScheduler.reserve")(
         function* (submission) {
           const deferred = yield* Deferred.make<WorkerLease>();
-          const state = yield* SynchronizedRef.make<ReservationState>({ _tag: "Pending" });
+          const state = yield* Ref.make<ReservationState>({ _tag: "Pending" });
           const reservation: Reservation = {
             deferred,
             eventTime: DateTime.toEpochMillis(submission.event.receivedAt),
@@ -138,7 +135,7 @@ export const stepExecutorLayer = (
           yield* TxPriorityQueue.offer(pending, reservation);
           return yield* Deferred.await(deferred).pipe(
             Effect.onInterrupt(() =>
-              SynchronizedRef.modify(state, (current) =>
+              Ref.modify(state, (current) =>
                 current._tag === "Assigned"
                   ? [Option.some(current.lease), { _tag: "Canceled" } satisfies ReservationState]
                   : [Option.none<WorkerLease>(), { _tag: "Canceled" } satisfies ReservationState],
@@ -154,32 +151,52 @@ export const stepExecutorLayer = (
 
       const execute: StepExecutor["Service"]["execute"] = Effect.fn("WorkerScheduler.execute")(
         function* (execution, io) {
-          return yield* Effect.acquireUseRelease(
-            executor
-              .prepare(
-                new CheckoutRequest({
-                  attemptId: execution.attempt.id,
-                  worker: execution.attempt.worker,
-                  repository: execution.repository,
-                  revision: execution.revision,
-                  task: execution.task,
-                }),
-              )
-              .pipe(Effect.mapError(asInfrastructureFailure)),
-            (prepared) =>
-              executor
-                .launch(prepared, io)
-                .pipe(
-                  Effect.onInterrupt(() =>
-                    executor.cancel(execution.attempt.id).pipe(Effect.catch(() => Effect.void)),
-                  ),
+          yield* Effect.annotateCurrentSpan({
+            attemptId: execution.attempt.id,
+            runId: execution.run.id,
+            worker: execution.attempt.worker,
+          });
+          // `prepare` stays interruptible — a cancel must be able to stop a
+          // hung clone or fetch; the adapter cleans its partial state on any
+          // non-success exit.
+          const prepared = yield* executor
+            .prepare(
+              new CheckoutRequest({
+                attemptId: execution.attempt.id,
+                worker: execution.attempt.worker,
+                repository: execution.repository,
+                revision: execution.revision,
+                task: execution.task,
+              }),
+            )
+            .pipe(Effect.mapError(asInfrastructureFailure));
+          return yield* executor.launch(prepared, io).pipe(
+            Effect.onInterrupt(() =>
+              executor.cancel(execution.attempt.id).pipe(
+                Effect.tapError((error) =>
+                  Effect.logWarning("Cancel-on-interrupt failed", {
+                    attemptId: execution.attempt.id,
+                    message: error.message,
+                  }),
                 ),
-            (prepared) => executor.cleanup(prepared).pipe(Effect.mapError(asInfrastructureFailure)),
-          ).pipe(
-            Effect.mapError((error) =>
-              Schema.is(AttemptFailure.AttemptFailure)(error)
-                ? error
-                : asInfrastructureFailure(error),
+                Effect.ignore,
+              ),
+            ),
+            // ADR 0006: the worktree dies at attempt end regardless of outcome.
+            // Cleanup never decides that outcome — a failed removal is logged,
+            // not allowed to convert a finished agent session into a retryable
+            // infra failure that would re-run non-idempotent work.
+            Effect.ensuring(
+              executor.cleanup(prepared).pipe(
+                Effect.tapError((error) =>
+                  Effect.logError("Attempt cleanup failed; the worktree may need manual removal", {
+                    attemptId: execution.attempt.id,
+                    worktree: prepared.worktree,
+                    message: error.message,
+                  }),
+                ),
+                Effect.ignore,
+              ),
             ),
           );
         },
