@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import {
+  Agent,
   AttemptChannel,
   AttemptFailure,
   Event,
@@ -17,6 +18,15 @@ import { CursorKey } from "../src/cursor/model.ts";
 import { CursorStore } from "../src/cursor/store.ts";
 import { InstanceDirectory, Submission } from "../src/model.ts";
 import { RunStore } from "../src/store/store.ts";
+
+const testAgent = new Agent.Agent({
+  name: Agent.Name.make("developer"),
+  harness: "claude",
+  model: Agent.ModelId.make("claude-sonnet-4-6"),
+  effort: "high",
+  parentModel: Option.none(),
+  persona: Agent.Persona.make("Implement the task."),
+});
 
 describe("run store", () => {
   it.live("commits the failed state with the capped Attempt", () =>
@@ -40,6 +50,8 @@ describe("run store", () => {
         repository: Repository.Name.make("basaltbytes/usine"),
         revision: Repository.Revision.make("store-revision"),
         task: AttemptChannel.Task.make("Run the store test"),
+        agent: testAgent,
+        parentModel: Option.none(),
       });
       const runId = Run.RunId.make("store-run");
       const failure = new AttemptFailure.InfraFailure({
@@ -87,6 +99,8 @@ describe("run store", () => {
         repository: Repository.Name.make("basaltbytes/usine"),
         revision: Repository.Revision.make("closed-revision"),
         task: AttemptChannel.Task.make("Close before starting"),
+        agent: testAgent,
+        parentModel: Option.none(),
       });
       const runId = Run.RunId.make("closed-run");
 

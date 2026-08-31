@@ -44,7 +44,7 @@ export class Agent extends Schema.Class<Agent>("Agent")({
   harness: Harness,
   model: ModelId,
   effort: Effort,
-  parentModel: Schema.Option(ModelId),
+  parentModel: Schema.OptionFromNullOr(ModelId),
   persona: Persona,
 }) {}
 

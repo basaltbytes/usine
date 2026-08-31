@@ -1,4 +1,5 @@
 import {
+  Agent,
   Attempt,
   AttemptChannel,
   Event,
@@ -57,9 +58,12 @@ export const triggerEvents = snakeCase.table(
     repository: text().$type<Repository.Name>().notNull(),
     revision: text().$type<Repository.Revision>().notNull(),
     task: text().$type<AttemptChannel.Task>().notNull(),
+    agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    parentModel: text().$type<Agent.ModelId>(),
   },
   (table) => [
     check("usine_trigger_events_approval", sql`${table.approval} in ('none', 'required')`),
+    check("usine_trigger_events_agent_json_valid", sql`json_valid(${table.agentJson})`),
     index("usine_trigger_events_item").on(table.loopName, table.itemKey),
   ],
 );
@@ -81,8 +85,13 @@ export const runs = snakeCase.table(
     repository: text().$type<Repository.Name>().notNull(),
     revision: text().$type<Repository.Revision>().notNull(),
     task: text().$type<AttemptChannel.Task>().notNull(),
+    agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    parentModel: text().$type<Agent.ModelId>(),
   },
-  (table) => [check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`)],
+  (table) => [
+    check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`),
+    check("usine_runs_agent_json_valid", sql`json_valid(${table.agentJson})`),
+  ],
 );
 
 export const steps = snakeCase.table(

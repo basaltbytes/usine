@@ -9,6 +9,7 @@ import {
   Step,
   StepResult,
 } from "@usine/core";
+import type { Agent } from "@usine/core";
 import { and, asc, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { DateTime, Effect, Option } from "effect";
@@ -42,6 +43,7 @@ import {
   decodeRunRows,
   decodeWorkflowCommands,
   decodeTranscriptRows,
+  encodeAgent,
   encodeDateTime,
   encodeEnvelope,
   encodeOutcome,
@@ -67,6 +69,8 @@ const eventRouteSelection = {
   repository: triggerEvents.repository,
   revision: triggerEvents.revision,
   task: triggerEvents.task,
+  agent: triggerEvents.agentJson,
+  parentModel: triggerEvents.parentModel,
 } as const;
 
 // The state partitions stay owned by @usine/core (`RunState.Open` and the
@@ -74,6 +78,7 @@ const eventRouteSelection = {
 const storedStateTag = sql`json_extract(${runs.stateJson}, '$._tag')`;
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
+const storedAgent = (agent: Agent.Agent): unknown => encodeAgent(agent);
 
 export const queriesFor = (database: RunDatabaseClient) => {
   // Keep `.execute()` explicit: RC.4's yieldable wrapper can cross an Effect
@@ -114,6 +119,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
         repository: runs.repository,
         revision: runs.revision,
         task: runs.task,
+        agent: runs.agentJson,
+        parentModel: runs.parentModel,
         stepName: steps.stepName,
         result: steps.result,
       })
@@ -161,6 +168,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
       repository: storedRun.repository,
       revision: storedRun.revision,
       task: storedRun.task,
+      agent: storedRun.agent,
+      parentModel: Option.fromNullishOr(storedRun.parentModel),
     });
   });
 
@@ -320,6 +329,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
         repository: submission.repository,
         revision: submission.revision,
         task: submission.task,
+        agentJson: storedAgent(submission.agent),
+        parentModel: Option.getOrNull(submission.parentModel),
       })
       .onConflictDoNothing()
       .execute();
@@ -395,6 +406,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
           repository: submission.repository,
           revision: submission.revision,
           task: submission.task,
+          agentJson: storedAgent(submission.agent),
+          parentModel: Option.getOrNull(submission.parentModel),
         })
         .execute();
       return submission;

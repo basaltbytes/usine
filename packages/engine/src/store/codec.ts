@@ -1,4 +1,5 @@
 import {
+  Agent,
   Attempt,
   AttemptChannel,
   Event,
@@ -35,6 +36,8 @@ export const EventRouteRow = Schema.Struct({
   repository: Repository.Name,
   revision: Repository.Revision,
   task: AttemptChannel.Task,
+  agent: Agent.Agent,
+  parentModel: Schema.NullOr(Agent.ModelId),
 });
 export type EventRouteRow = typeof EventRouteRow.Type;
 
@@ -42,6 +45,8 @@ export const RunRow = Schema.Struct({
   repository: Repository.Name,
   revision: Repository.Revision,
   task: AttemptChannel.Task,
+  agent: Agent.Agent,
+  parentModel: Schema.NullOr(Agent.ModelId),
   runId: Run.RunId,
   eventId: Event.EventId,
   loop: Loop.LoopName,
@@ -101,6 +106,7 @@ export const encodeRunState = Schema.encodeSync(RunState.RunState);
 export const encodeOutcome = Schema.encodeSync(Attempt.Outcome);
 export const encodeStepResult = Schema.encodeSync(StepResult.StepResult);
 export const encodeEnvelope = Schema.encodeSync(AttemptChannel.Envelope);
+export const encodeAgent = Schema.encodeSync(Agent.Agent);
 
 const isRunStoreError = Schema.is(RunStoreError);
 
@@ -129,6 +135,8 @@ export const submissionFromRow = (row: EventRouteRow): Submission =>
     repository: row.repository,
     revision: row.revision,
     task: row.task,
+    agent: row.agent,
+    parentModel: Option.fromNullishOr(row.parentModel),
   });
 
 export const runFromRow = (row: RunRow): Run.Run =>

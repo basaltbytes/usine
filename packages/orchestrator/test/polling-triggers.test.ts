@@ -55,7 +55,7 @@ const config = Schema.decodeUnknownSync(UsineConfig)({
     { name: watchedRepository, tags: ["active"] },
     { name: "basaltbytes/unwatched", tags: ["inactive"] },
   ],
-  settings: { poll_interval: 60 },
+  settings: { poll_interval: 60, parent_model: "anthropic/instance-parent" },
 });
 
 const agent = new AgentFile({
@@ -285,6 +285,15 @@ describe("PollingTriggers", () => {
         const originalRun = claimedRun(coldStart);
         const originalSnapshot = yield* waitForState(firstEngine, originalRun, "Waiting");
         assert.strictEqual(originalSnapshot.task, "Implement issue 28.");
+        assert.strictEqual(originalSnapshot.agent.name, "developer");
+        assert.strictEqual(originalSnapshot.agent.harness, "codex");
+        assert.strictEqual(originalSnapshot.agent.model, "gpt-5.6-sol");
+        assert.strictEqual(originalSnapshot.agent.effort, "high");
+        assert.strictEqual(originalSnapshot.agent.persona, "Implement the issue.");
+        assert.deepStrictEqual(
+          originalSnapshot.parentModel,
+          Option.some(ModelId.make("anthropic/instance-parent")),
+        );
         const initialCursor = (yield* Ref.get(seenCursors))[0];
         assert(initialCursor !== undefined && Option.isNone(initialCursor.entityTag));
 
@@ -302,7 +311,13 @@ describe("PollingTriggers", () => {
 
         const afterRestart = yield* secondPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(afterRestart), originalRun);
-        assert.strictEqual((yield* secondEngine.inspect(originalRun)).task, "Implement issue 28.");
+        const restoredSnapshot = yield* secondEngine.inspect(originalRun);
+        assert.strictEqual(restoredSnapshot.task, "Implement issue 28.");
+        assert.strictEqual(restoredSnapshot.agent.name, "developer");
+        assert.deepStrictEqual(
+          restoredSnapshot.parentModel,
+          Option.some(ModelId.make("anthropic/instance-parent")),
+        );
         const restoredCursors = yield* Ref.get(seenCursors);
         const restartCursor = restoredCursors[2];
         assert(restartCursor !== undefined && Option.isSome(restartCursor.entityTag));

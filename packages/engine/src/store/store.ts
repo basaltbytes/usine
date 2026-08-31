@@ -243,6 +243,8 @@ const makeRunStore = Effect.gen(function* () {
             repository: current.repository,
             revision: current.revision,
             task: current.task,
+            agent: current.agent,
+            parentModel: current.parentModel,
           }),
         });
       }),

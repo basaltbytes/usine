@@ -8,7 +8,7 @@ import {
   matchesSelector,
   repositoryContext,
 } from "@usine/config";
-import { AttemptChannel, Event, Item, Repository } from "@usine/core";
+import { Agent, AttemptChannel, Event, Item, Repository } from "@usine/core";
 import {
   CursorKey,
   CursorStore,
@@ -65,8 +65,14 @@ type RepositoryPollError = ConfigFileError | ExpressionError | GitHubAppError | 
 
 interface WatchedRepository {
   readonly repository: ManagedRepo;
-  readonly loops: ReadonlyArray<LoopFile>;
+  readonly loops: ReadonlyArray<WatchedLoop>;
   readonly watches: ReadonlyArray<WatchKey>;
+}
+
+interface WatchedLoop {
+  readonly loop: LoopFile;
+  readonly agent: Agent.Agent;
+  readonly parentModel: Option.Option<Agent.ModelId>;
 }
 
 interface RepositoryCycle {
@@ -84,23 +90,43 @@ interface ItemCycle {
 const cursorKey = (repository: ManagedRepo): CursorKey =>
   CursorKey.make(`github-poll:${Repository.canonical(repository.name)}`);
 
-const watchKey = (loop: LoopFile): WatchKey =>
+const watchKey = ({ loop }: WatchedLoop): WatchKey =>
   WatchKey.make(JSON.stringify([loop.name, loop.trigger.on, loop.trigger.if]));
 
-const watchedRepositories = (instance: LoadedInstance): ReadonlyArray<WatchedRepository> =>
-  instance.config.repos.flatMap((repository) => {
-    const loops = instance.loops.filter(
-      (loop) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
+const watchedRepositories = Effect.fn("PollingTriggers.watchedRepositories")(function* (
+  instance: LoadedInstance,
+) {
+  const roster = new Map(instance.agents.map((agent) => [agent.name, agent]));
+  const resolved = yield* Effect.forEach(instance.loops, (loop) =>
+    Effect.gen(function* () {
+      const loaded = roster.get(loop.agent);
+      if (loaded === undefined) {
+        return yield* Effect.die(
+          new Error(`Loaded loop ${loop.name} has no rostered Agent ${loop.agent}`),
+        );
+      }
+      const agent = new Agent.Agent({
+        name: loaded.name,
+        harness: loaded.harness,
+        model: loaded.model,
+        effort: loaded.effort,
+        parentModel: loaded.parentModel,
+        persona: loaded.persona,
+      });
+      return {
+        loop,
+        agent,
+        parentModel: Agent.resolveParentModel(agent, instance.config.settings.parentModel),
+      } satisfies WatchedLoop;
+    }),
+  );
+  return instance.config.repos.flatMap((repository) => {
+    const loops = resolved.filter(
+      ({ loop }) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
     );
-    if (loops.length === 0) return [];
-    return [
-      {
-        repository,
-        loops,
-        watches: loops.map(watchKey).sort(),
-      },
-    ];
+    return loops.length === 0 ? [] : [{ repository, loops, watches: loops.map(watchKey).sort() }];
   });
+});
 
 const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKey>): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
@@ -189,7 +215,7 @@ export class PollingTriggers extends Context.Service<
         watched: WatchedRepository,
         item: ChangedItem,
       ) {
-        const loops = watched.loops.filter(({ trigger }) => trigger.on === itemStream(item));
+        const loops = watched.loops.filter(({ loop }) => loop.trigger.on === itemStream(item));
         if (loops.length === 0) {
           return { submissions: [], revokedRuns: 0 } satisfies ItemCycle;
         }
@@ -207,7 +233,7 @@ export class PollingTriggers extends Context.Service<
         });
         const submissions: Array<SubmissionResult> = [];
         let revokedRuns = 0;
-        for (const loop of loops) {
+        for (const { agent, loop, parentModel } of loops) {
           const matches = yield* expressions.evaluateBoolean(
             loop.trigger.if,
             environmentFor(loop.trigger.on),
@@ -239,6 +265,8 @@ export class PollingTriggers extends Context.Service<
               receivedAt,
               repository: watched.repository,
               task: AttemptChannel.Task.make(task),
+              agent,
+              parentModel,
             }),
           );
           yield* Effect.logInfo("Submitted matching item state", {
@@ -295,7 +323,7 @@ export class PollingTriggers extends Context.Service<
       });
 
       const poll = Effect.fn("PollingTriggers.poll")(function* (instance: LoadedInstance) {
-        const watched = watchedRepositories(instance);
+        const watched = yield* watchedRepositories(instance);
         const settled = yield* Effect.forEach(
           watched,
           (repository) =>

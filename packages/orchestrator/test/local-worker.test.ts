@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config";
 import {
+  Agent,
   Attempt,
   AttemptChannel,
   Event,
@@ -38,6 +39,14 @@ import { layer as localLayer } from "../src/local.ts";
 const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
 const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
 const TOKEN = "one-attempt-test-token";
+const testAgent = new Agent.Agent({
+  name: Agent.Name.make("developer"),
+  harness: "claude",
+  model: Agent.ModelId.make("claude-sonnet-4-6"),
+  effort: "high",
+  parentModel: Option.none(),
+  persona: Agent.Persona.make("Implement the task."),
+});
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
   version: 1,
@@ -106,6 +115,8 @@ const submission = (number: number, receivedAt = `2026-08-30T12:00:0${number}Z`)
     repository: Repository.Name.make("acme/demo"),
     revision: Repository.Revision.make("main"),
     task: AttemptChannel.Task.make(`Complete local task ${number}`),
+    agent: testAgent,
+    parentModel: Option.none(),
   });
 
 const waitFor = Effect.fn("test.waitFor")(function* (
@@ -375,6 +386,8 @@ describe("local worker", () => {
       repository: spec.repository,
       revision: spec.revision,
       task: spec.task,
+      agent: testAgent,
+      parentModel: Option.none(),
     });
 
     return Effect.gen(function* () {
