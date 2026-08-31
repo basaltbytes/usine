@@ -2,10 +2,10 @@
 walkthrough: 1
 title: exe.dev Worker over the shared Attempt channel
 pr: 54
-commit: c848848ed84aa32169d81a14c3ec46e678f32c35
+commit: 6073e33974a9338cb8d346ac3c63e15bf4bbd834
 meta:
   pr: "54"
-  commit: c848848ed84a
+  commit: 6073e33974a9
   scope: executor and orchestrator
   balade-authoring: 1.33.0
 ---
@@ -18,7 +18,7 @@ The main review points are:
 
 - preflight verifies the baked VM before the scheduler creates capacity;
 - prepare attaches a bounded native GitHub integration grant and creates an isolated worktree;
-- local stdio and remote SSH now use one framing and cancellation implementation;
+- local stdio and remote SSH now use one framing and cancellation implementation, and one shared provisioning choreography, process runner, and per-key lock;
 - cleanup removes remote worktrees and releases shared grants;
 - each scheduler composition accepts only one Worker kind.
 
@@ -32,7 +32,7 @@ A single composition does not support a mixed Worker pool. The config schema acc
 {% section id="worker-kind" title="The adapter declares its Worker kind" icon="sliders" related=["preflight"] %}
 `Worker.Kind` now owns the `local` and `exe.dev` values, and the config schema reuses it. The `Executor` contract also exposes `kind` beside the unchanged five operations.
 
-{% code file="packages/executor/src/index.ts" from=105 to=118 expect="/** The five-operation worker contract from ADR 0006. Preflight verifies only — it never installs. */" /%}
+{% code file="packages/executor/src/index.ts" from=123 to=137 expect="/** The five-operation worker contract from ADR 0006. Preflight verifies only — it never installs. */" /%}
 
 At layer construction, the scheduler first validates all configured Workers against that adapter kind. It then runs every preflight concurrently and creates capacity slots only after all checks succeed.
 
@@ -44,19 +44,21 @@ The new composition supplies Node process services to the exe.dev adapter, conne
 {% /section %}
 
 {% section id="preflight" title="Preflight proves the baked VM is ready" icon="shield-check" related=["worker-kind","remote-workspace"] %}
-Preflight resolves the configured Worker name from exe.dev metadata. It requires a running VM, parses the SSH destination, and requires an absolute remote home directory. It then checks Git, Node.js 22 or later, the current Attempt protocol version, each configured harness login, and each configured native GitHub integration.
+Preflight resolves the configured Worker name from exe.dev metadata. It requires a running VM, and both the SSH destination and the remote home directory are branded value objects — an unvalidated address or path cannot be carried in a `VmState` at all. It then checks Git, Node.js 22 or later, the current Attempt protocol version, each configured harness login, and each configured native GitHub integration.
 
 A failed check becomes `WorkerCapabilityError` with one of five capability values: `machine`, `toolchain`, `run-host`, `harness-login`, or `credentials`. This moves VM image skew to scheduler startup instead of an active Attempt. Preflight does not install or attach anything.
 
-{% code file="packages/executor/src/exe-dev/preflight.ts" from=94 to=179 expect="  const preflight = Effect.fn(\"ExeDevExecutor.preflight\")(function* (worker: Worker.Name) {" collapsed=true /%}
+Every refusal is also logged with its worker and capability, so a scheduler that never came up is explainable from logs alone.
+
+{% code file="packages/executor/src/exe-dev/preflight.ts" from=89 to=177 expect="  const preflight = Effect.fn(\"ExeDevExecutor.preflight\")(function* (worker: Worker.Name) {" collapsed=true /%}
 {% /section %}
 {% /group %}
 
 {% group label="Remote Attempt lifecycle" %}
 {% section id="remote-workspace" title="Bounded grants and isolated remote worktrees" icon="git-branch" related=["preflight","attempt-channel"] %}
-Prepare maps the managed repository to one native exe.dev integration. Before repository access, it sweeps crash leftovers once per Worker and acquires the grant. It uses a stable bare cache for each repository and a separate detached worktree for each Attempt. A repository semaphore serializes cache updates. A new cache is cloned to a staging path and moved into place only after success.
+Prepare maps the managed repository to one native exe.dev integration. Before repository access, it sweeps crash leftovers once per Worker; each sweep removal is isolated and logged, and a partial sweep never blocks later prepares. The grant is acquired inside the same compensated, per-repository-locked region as the clone, so an interrupt parked on the lock cannot leak an attachment. The cached-clone-to-worktree choreography itself — staging clone, promote, fetch, detached worktree — is the shared `provisionWorktree`, the same code the local adapter runs; only the primitives (SSH commands versus the filesystem) differ. The per-repository lock is a real keyed mutex: `PartitionedSemaphore`'s permit count is one shared pool, so the previous `permits: 1` construction serialized every repository behind one global permit.
 
-{% code file="packages/executor/src/exe-dev/index.ts" from=76 to=197 expect="    const prepare = Effect.fn(\"ExeDevExecutor.prepare\")(function* (request: CheckoutRequest) {" collapsed=true /%}
+{% code file="packages/executor/src/exe-dev/index.ts" from=77 to=195 expect="    const prepare = Effect.fn(\"ExeDevExecutor.prepare\")(function* (request: CheckoutRequest) {" collapsed=true /%}
 
 Grant updates are serialized by Worker and integration. Each prepare attaches or refreshes the bounded grant and increments an in-memory reference count. Cleanup decrements the count and detaches only after the final active Attempt releases it.
 
@@ -77,13 +79,13 @@ cleanup Attempt
     detach integration
 ```
 
-{% code file="packages/executor/src/exe-dev/grants.ts" from=18 to=64 expect="  const locks = yield* PartitionedSemaphore.make<string>({ permits: 1 });" /%}
+{% code file="packages/executor/src/exe-dev/grants.ts" from=19 to=65 expect="  const locks = yield* keyedLockFor<string>();" /%}
 
-Every remote command becomes one quoted shell string after the SSH `--` boundary. The quoting handles embedded single quotes, so repository revisions and paths cannot add a second command. The SSH process receives only an environment allowlist. The run host receives the public integration host selector, not a GitHub credential. **Credential values are intentionally omitted from this walkthrough.**
+Every remote command becomes one quoted shell string after the SSH `--` boundary. The quoting handles embedded single quotes, so repository revisions and paths cannot add a second command — and `Repository.Revision` itself now rejects whitespace and a leading dash, so git can never parse a revision as an option either. The SSH process receives only an environment allowlist and sends keepalives, turning a dead link into a failed operation instead of a forever-park. The run host receives the public integration host selector, not a GitHub credential, and records its pid beside the worktree so cleanup can confirm the remote process is dead before removing the workspace under it. **Credential values are intentionally omitted from this walkthrough.**
 
-{% code file="packages/executor/src/exe-dev/shell.ts" from=1 to=13 expect="const quote = (value: string): string => `'${value.replaceAll(\"'\", `'\"'\"'`)}'`;" /%}
+{% code file="packages/executor/src/exe-dev/shell.ts" from=1 to=20 expect="const quote = (value: string): string => `'${value.replaceAll(\"'\", `'\"'\"'`)}'`;" /%}
 
-Cleanup attempts worktree removal and grant release independently, logs both failures, and removes prepared state only after both resources are clean. The scheduler runs cleanup in `ensuring`, so launch success, failure, and interruption all enter this path without letting cleanup change the Attempt outcome.
+Cleanup attempts worktree removal and grant release independently and logs both failures — but the prepared state drops exactly once, whatever the outcome. A partially failed cleanup therefore cannot be retried into a second grant release that would detach a running sibling Attempt's credentials. The scheduler runs cleanup in `ensuring`, so launch success, failure, and interruption all enter this path without letting cleanup change the Attempt outcome; the scheduler also bounds every launch at `max_attempt_minutes`, interrupting through the normal cancel handshake and reporting a typed infrastructure failure before the credential grant lapses.
 {% /section %}
 
 {% section id="attempt-channel" title="One session state machine for stdio and SSH" icon="workflow" related=["remote-workspace"] %}
@@ -104,9 +106,9 @@ sequenceDiagram
 
 The session strictly decodes each newline-delimited outbound envelope. `AttemptChannel.admit` enforces Attempt identity and sequence rules before the sink persists it. A `Final` envelope is not sufficient by itself: the process must also exit successfully.
 
-{% code file="packages/executor/src/run-host-session.ts" from=217 to=346 expect="    const launch = Effect.fn(\"RunHostSession.launch\")(function* (" collapsed=true /%}
+{% code file="packages/executor/src/run-host-session.ts" from=222 to=351 expect="    const launch = Effect.fn(\"RunHostSession.launch\")(function* (" collapsed=true /%}
 
-Cancellation is idempotent. The first call persists and sends one `Interrupt` envelope. If delivery fails, delivery times out, or the process does not exit during the grace period, the session sends `SIGKILL`. Hard-kill itself is also time-bounded.
+Cancellation is idempotent. The first call persists and sends one `Interrupt` envelope. If delivery fails, delivery times out, or the process does not exit during the grace period, the session sends `SIGKILL`. Hard-kill has its own five-second bound and never propagates its failure over the error that forced it. The exe.dev grace defaults to ten seconds — an SSH round trip, not a local pipe — and killing the local SSH client is not trusted as proof of remote death: cleanup separately confirms the recorded run-host pid on the VM.
 
 {% callout tone="key" %}
 The implementation differs from the linked issue text, which says to kill the SSH session and then clean up. The code first performs the protocol interrupt and kills only on delivery failure or grace expiry. This behavior matches ADR 0006's two-stage cancellation rule.
@@ -122,7 +124,8 @@ The fake SSH suite checks the adapter at the child-process seam. The opt-in inte
 
 {% tests %}
 {% test name="Remote lifecycle and credential boundary" kind="unit" ref="packages/executor/test/exe-dev.test.ts" asserts=["preserves Start and outbound protocol envelopes", "quotes an adversarial revision as one remote argument", "limits the SSH environment", "cleans the worktree and grant idempotently"] %}A fake SSH process runs preflight, prepare, launch, transcript append, and repeated cleanup.{% /test %}
-{% test name="Grant sharing and crash recovery" kind="unit" ref="packages/executor/test/exe-dev.test.ts" asserts=["refreshes the grant for each prepare", "detaches only after the final cleanup", "sweeps abandoned worktrees", "rejects paths outside the sweep root"] %}Concurrent Attempts share one Worker integration without releasing it early.{% /test %}
+{% test name="Grant sharing and crash recovery" kind="unit" ref="packages/executor/test/exe-dev.test.ts" asserts=["refreshes the grant for each prepare", "detaches only after the final cleanup", "sweeps abandoned worktrees", "contains an invalid sweep boundary without touching it or blocking prepare"] %}Concurrent Attempts share one Worker integration without releasing it early.{% /test %}
+{% test name="Cleanup and interruption stay grant-safe" kind="unit" ref="packages/executor/test/exe-dev.test.ts" asserts=["drops prepared state exactly once when cleanup partially fails", "never re-releases a grant on a second cleanup", "releases the grant when prepare is interrupted mid-clone"] %}The regression pair for the shared-grant hazards: a failed cleanup and an interrupted prepare both leave the refcount balanced.{% /test %}
 {% test name="Protocol outcome and cancellation" kind="unit" ref="packages/executor/test/exe-dev.test.ts" asserts=["reports run-host skew as a capability error", "rejects non-zero exit after Final", "sends one cooperative interrupt", "kills stalled or parked sessions after the grace"] %}The Effect test clock covers cooperative and forced cancellation branches.{% /test %}
 {% test name="Live exe.dev Attempt" kind="tour" ref="packages/orchestrator/test/integration/exe-dev-worker.test.ts" asserts=["finishes a submitted Run on the configured VM", "persists Started, AgentMessage, and Final", "retains the bare cache", "removes the Attempt worktree"] %}This environment-gated test uses an existing baked VM and native integration.{% /test %}
 {% /tests %}
