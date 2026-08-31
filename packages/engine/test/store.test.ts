@@ -1,9 +1,9 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { AttemptFailure, Event, Item, Loop, Run, Step } from "@usine/core";
-import { DateTime, Effect, FileSystem, Option } from "effect";
+import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
-import { CursorEntry, CursorKey } from "../src/cursor/model.ts";
+import { CursorKey } from "../src/cursor/model.ts";
 import { CursorStore } from "../src/cursor/store.ts";
 import { InstanceDirectory, Submission } from "../src/model.ts";
 import { RunStore } from "../src/store/store.ts";
@@ -55,6 +55,9 @@ describe("run store", () => {
   );
 });
 
+const TestCursor = Schema.Struct({ etag: Schema.String });
+const StricterCursor = Schema.Struct({ watermark: Schema.String });
+
 describe("cursor store", () => {
   it.live("replaces one cursor durably without exposing database rows", () =>
     Effect.gen(function* () {
@@ -67,16 +70,19 @@ describe("cursor store", () => {
 
       yield* Effect.gen(function* () {
         const store = yield* CursorStore;
-        assert(Option.isNone(yield* store.read(key)));
-        yield* store.write(new CursorEntry({ key, value: { etag: "first" } }));
-        yield* store.write(new CursorEntry({ key, value: { etag: "second" } }));
+        assert(Option.isNone(yield* store.read(key, TestCursor)));
+        yield* store.write(key, TestCursor, { etag: "first" });
+        yield* store.write(key, TestCursor, { etag: "second" });
       }).pipe(Effect.provide(CursorStore.layer), Effect.provide(database));
 
       yield* Effect.gen(function* () {
         const store = yield* CursorStore;
-        const restored = yield* store.read(key);
+        const restored = yield* store.read(key, TestCursor);
         assert(Option.isSome(restored));
         assert.deepStrictEqual(restored.value, { etag: "second" });
+        // A stored value that no longer decodes (owner schema evolved) must
+        // read as absent, never fail: losing a cursor is always safe.
+        assert(Option.isNone(yield* store.read(key, StricterCursor)));
       }).pipe(Effect.provide(CursorStore.layer), Effect.provide(database));
     }).pipe(Effect.provide(NodeServices.layer)),
   );

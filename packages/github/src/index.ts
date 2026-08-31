@@ -38,10 +38,8 @@ export {
   ChangeDetection,
   ContentHash,
   EntityTag,
-  GitHubPolling,
   IssuePayload,
   IssueSnapshot,
-  PayloadHashError,
   PayloadSnapshot,
   PollCursor,
   PullRequestPayload,
@@ -49,4 +47,4 @@ export {
   RepositoryChanges,
   RepositoryNotModified,
 } from "./polling/model.ts";
-export { GitHubPollingLayer } from "./polling/polling.ts";
+export { GitHubPolling } from "./polling/polling.ts";

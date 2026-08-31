@@ -14,13 +14,14 @@ import {
   UsineConfig,
 } from "@usine/config";
 import { Instance, Run, Step } from "@usine/core";
-import { CursorEntry, CursorKey, CursorStore, RunEngine, StepExecutor } from "@usine/engine";
+import { Claimed, CursorKey, CursorStore, RunEngine, StepExecutor } from "@usine/engine";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { ExpressionEngine, MarcbachmannCelLayer, Source } from "@usine/expression";
 import {
   ChangedIssue,
   ContentHash,
   EntityTag,
+  GitHubApiError,
   GitHubPolling,
   IssueSnapshot,
   PollCursor,
@@ -95,8 +96,8 @@ const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
     quarantinedLoops: [],
   });
 
-const issuePayload = (labels: ReadonlyArray<string>): IssuePayload => ({
-  number: 28,
+const issuePayload = (labels: ReadonlyArray<string>, number = 28): IssuePayload => ({
+  number,
   title: "Polling triggers",
   body: "Build the trigger path.",
   url: "https://github.com/basaltbytes/usine/issues/28",
@@ -239,6 +240,7 @@ describe("PollingTriggers", () => {
                   watermark: Option.some(changed.updatedAt),
                 }),
                 items: [changed],
+                backlog: false,
                 nextPollAt: Option.none(),
               });
             }),
@@ -264,10 +266,9 @@ describe("PollingTriggers", () => {
         const firstCursors = Context.get(firstContext, CursorStore);
 
         yield* firstCursors.write(
-          new CursorEntry({
-            key: CursorKey.make(`github-poll:${watchedRepository}`),
-            value: { obsolete: true },
-          }),
+          CursorKey.make(`github-poll:${watchedRepository}`),
+          Schema.Struct({ obsolete: Schema.Boolean }),
+          { obsolete: true },
         );
 
         const coldStart = yield* firstPolling.poll(firstInstance);
@@ -323,7 +324,7 @@ describe("PollingTriggers", () => {
         });
         const unmatched = yield* secondPolling.poll(expandedInstance);
         assert.strictEqual(unmatched.submissions.length, 0);
-        assert.strictEqual(unmatched.revocations, 2);
+        assert.strictEqual(unmatched.revokedRuns, 2);
         const revoked = yield* waitForState(secondEngine, flippedRun, "Canceled");
         assert.strictEqual(revoked.run.state._tag, "Canceled");
         if (revoked.run.state._tag === "Canceled") {
@@ -337,5 +338,170 @@ describe("PollingTriggers", () => {
         assert.strictEqual(yield* Ref.get(snapshotCalls), 6);
         yield* Scope.close(secondScope, Exit.void);
       }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("isolates one repository's failure from its siblings", () => {
+    const multiConfig = Schema.decodeUnknownSync(UsineConfig)({
+      version: 1,
+      repos: [{ name: "basaltbytes/failing" }, { name: "basaltbytes/healthy" }],
+      settings: { poll_interval: 60 },
+    });
+    const loop = new LoopFile({
+      name: LoopName.make("watch-open"),
+      trigger: new IssueTrigger({ on: "issue", if: Source.make('item.state == "OPEN"') }),
+      selector: Option.none(),
+      approval: "required",
+      step: Step.StepName.make("run"),
+      agent: agent.name,
+      body: PromptTemplate.make("Implement issue {{ item.number }}."),
+    });
+    const instance = new LoadedInstance({
+      config: multiConfig,
+      agents: [agent],
+      invalidAgents: [],
+      loops: [loop],
+      quarantinedLoops: [],
+    });
+    const changed = new ChangedIssue({
+      number: 7,
+      updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+    });
+    const github: GitHubPolling["Service"] = {
+      changes: (repository, cursor) =>
+        repository === "basaltbytes/failing"
+          ? Effect.fail(
+              new GitHubApiError({
+                operation: "poll-repository-changes",
+                status: Option.some(500),
+                message: "GitHub rejected the request with status 500",
+              }),
+            )
+          : Effect.succeed(
+              new RepositoryChanges({
+                cursor,
+                items: [changed],
+                backlog: false,
+                nextPollAt: Option.none(),
+              }),
+            ),
+      snapshot: () =>
+        Effect.succeed(
+          new IssueSnapshot({
+            payload: issuePayload([], 7),
+            contentHash: ContentHash.make("d".repeat(64)),
+          }),
+        ),
+    };
+    const cursors = Layer.succeed(CursorStore)({
+      read: () => Effect.succeed(Option.none()),
+      write: () => Effect.void,
+    });
+    const runs = Layer.succeed(RunEngine)({
+      approve: () => Effect.die("unused"),
+      cancel: () => Effect.die("unused"),
+      inspect: () => Effect.die("unused"),
+      reconcile: () => Effect.die("unused"),
+      retry: () => Effect.die("unused"),
+      revoke: () => Effect.succeed([]),
+      submit: (submission) =>
+        Effect.succeed(
+          new Claimed({
+            eventId: submission.event.id,
+            runId: Run.RunId.make(`run-${submission.event.id}`),
+          }),
+        ),
+    });
+    const layer = PollingTriggers.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(cursors, runs, MarcbachmannCelLayer, Layer.succeed(GitHubPolling, github)),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* PollingTriggers;
+      // One repository's typed failure never stops its siblings: the cycle
+      // reports the failure and the healthy repository still submits.
+      const cycle = yield* polling.poll(instance);
+      assert.strictEqual(cycle.repositories, 2);
+      assert.strictEqual(cycle.failures.length, 1);
+      assert.strictEqual(cycle.failures[0]?.repository, "basaltbytes/failing");
+      assert.strictEqual(cycle.failures[0]?.errorTag, "GitHubApiError");
+      assert.strictEqual(cycle.submissions.length, 1);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.live("submits items from concurrent repositories through one engine", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = Instance.Directory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-polling-multi-" }),
+      );
+      const multiConfig = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [{ name: "basaltbytes/one" }, { name: "basaltbytes/two" }],
+        settings: { poll_interval: 60 },
+      });
+      const loop = new LoopFile({
+        name: LoopName.make("watch-open"),
+        trigger: new IssueTrigger({ on: "issue", if: Source.make('item.state == "OPEN"') }),
+        selector: Option.none(),
+        approval: "required",
+        step: Step.StepName.make("run"),
+        agent: agent.name,
+        body: PromptTemplate.make("Implement issue {{ item.number }}."),
+      });
+      const instance = new LoadedInstance({
+        config: multiConfig,
+        agents: [agent],
+        invalidAgents: [],
+        loops: [loop],
+        quarantinedLoops: [],
+      });
+      const changedItems = [11, 12].map(
+        (number) =>
+          new ChangedIssue({ number, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
+      );
+      const hashFor = (repository: string, number: number) =>
+        ContentHash.make(
+          `${(repository.endsWith("one") ? "a" : "b").repeat(32)}${String(number).repeat(16)}`,
+        );
+      const github: GitHubPolling["Service"] = {
+        changes: (_repository, cursor) =>
+          Effect.succeed(
+            new RepositoryChanges({
+              cursor,
+              items: changedItems,
+              backlog: false,
+              nextPollAt: Option.none(),
+            }),
+          ),
+        snapshot: (repository, item) =>
+          Effect.succeed(
+            new IssueSnapshot({
+              payload: issuePayload([], item.number),
+              contentHash: hashFor(repository, item.number),
+            }),
+          ),
+      };
+
+      // Four concurrent submissions across two repositories all land on one
+      // SQLite engine: distinct runs, no lost or interleaved writes.
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const engine = yield* RunEngine;
+        const cycle = yield* polling.poll(instance);
+        assert.strictEqual(cycle.repositories, 2);
+        assert.strictEqual(cycle.changedItems, 4);
+        assert.strictEqual(cycle.failures.length, 0);
+        assert.strictEqual(cycle.submissions.length, 4);
+        const runIds = cycle.submissions.flatMap((submission) =>
+          submission._tag === "Claimed" ? [submission.runId] : [],
+        );
+        assert.strictEqual(new Set(runIds).size, 4);
+        for (const runId of runIds) {
+          yield* waitForState(engine, runId, "Waiting");
+        }
+      }).pipe(Effect.provide(runtimeLayer(directory, github)));
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

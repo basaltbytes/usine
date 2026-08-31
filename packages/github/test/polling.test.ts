@@ -8,7 +8,6 @@ import {
   ChangedPullRequest,
   GitHubApp,
   GitHubPolling,
-  GitHubPollingLayer,
   Installation,
   InstallationId,
   InstallationToken,
@@ -32,7 +31,7 @@ const appLayer = Layer.succeed(GitHubApp)({
 });
 
 const pollingLayer = (client: HttpClient.HttpClient) =>
-  GitHubPollingLayer.pipe(
+  GitHubPolling.layer.pipe(
     Layer.provide(appLayer),
     Layer.provide(Layer.succeed(HttpClient.HttpClient, client)),
     Layer.provide(NodeServices.layer),
@@ -122,8 +121,9 @@ const pullRequestPayload = {
   statusCheckRollup: { state: "PENDING" },
   labels: { totalCount: 0, nodes: [] },
   reviewRequests: {
-    totalCount: 1,
-    nodes: [{ requestedReviewer: { login: "PhilDL" } }],
+    totalCount: 2,
+    // A deleted user or mannequin arrives as a null requestedReviewer.
+    nodes: [{ requestedReviewer: { login: "PhilDL" } }, { requestedReviewer: null }],
   },
   reviews: {
     totalCount: 1,
@@ -225,13 +225,101 @@ describe("GitHubPolling", () => {
     },
   );
 
-  it.effect("rejects change responses that cannot continue conditional polling", () => {
+  it.effect("keeps polling when GitHub omits the efficiency-only ETag", () => {
     const client = HttpClient.make((request) => Effect.succeed(response(request, [])));
 
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
-      const failure = yield* polling.changes(repository, PollCursor.empty).pipe(Effect.flip);
+      // The cursor is efficiency-only (ADR 0007): a page without an ETag must
+      // degrade to unconditional polling, never fail the cycle.
+      const detected = yield* polling.changes(repository, PollCursor.empty);
+      assert.strictEqual(detected._tag, "RepositoryChanges");
+      if (detected._tag !== "RepositoryChanges") return;
+      assert(Option.isNone(detected.cursor.entityTag));
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
+  it.effect("walks paginated change pages within one cycle", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests.push(request);
+        return requests.length === 1
+          ? response(request, [{ number: 28, updated_at: "2026-08-30T20:00:01Z" }], {
+              headers: {
+                etag: 'W/"page-1"',
+                link: '<https://api.github.com/repositories/1/issues?page=2>; rel="next"',
+              },
+            })
+          : response(request, [{ number: 29, updated_at: "2026-08-30T20:00:02Z" }]);
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const detected = yield* polling.changes(repository, PollCursor.empty);
+      assert.strictEqual(detected._tag, "RepositoryChanges");
+      if (detected._tag !== "RepositoryChanges") return;
+      assert.strictEqual(detected.items.length, 2);
+      assert.strictEqual(detected.backlog, false);
+      // The first page's ETag stays on the cursor: it matches the canonical
+      // URL the next cycle re-requests conditionally.
+      assert(Option.isSome(detected.cursor.entityTag));
+      assert.strictEqual(detected.cursor.entityTag.value, 'W/"page-1"');
+      assert(Option.isSome(detected.cursor.watermark));
+      assert.strictEqual(
+        DateTime.formatIso(detected.cursor.watermark.value),
+        "2026-08-30T20:00:02.000Z",
+      );
+      assert.strictEqual(requests.length, 2);
+      assert.strictEqual(requests[1]?.url, "https://api.github.com/repositories/1/issues?page=2");
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
+  it.effect("classifies GraphQL rate limiting reported on HTTP 200", () => {
+    const client = HttpClient.make((request) =>
+      Effect.succeed(
+        response(request, {
+          data: null,
+          errors: [{ type: "RATE_LIMITED", message: "API rate limit exhausted" }],
+        }),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const failure = yield* polling
+        .snapshot(
+          repository,
+          new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
+        )
+        .pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "GitHubRateLimitError");
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
+  it.effect("carries GraphQL error messages instead of discarding them", () => {
+    const client = HttpClient.make((request) =>
+      Effect.succeed(
+        response(request, {
+          data: null,
+          errors: [{ message: "Something went wrong while executing your query." }],
+        }),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const failure = yield* polling
+        .snapshot(
+          repository,
+          new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
+        )
+        .pipe(Effect.flip);
       assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
+      if (failure._tag === "InvalidGitHubResponseError") {
+        assert.match(failure.detail, /Something went wrong/u);
+      }
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 
@@ -317,6 +405,58 @@ describe("GitHubPolling", () => {
       assert.match(String(body.query), /reviewThreads\(first: 50\)/u);
       assert.match(String(body.query), /reviews\(last: 20\)/u);
       assert.match(String(body.query), /statusCheckRollup \{ state \}/u);
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
+  it.effect("normalizes GitHub's nullable connections to empty connections", () => {
+    const base = {
+      ...pullRequestPayload,
+      reviewThreads: { totalCount: 0, nodes: [] },
+      comments: { totalCount: 0, nodes: [] },
+    };
+    const nullConnections = {
+      ...base,
+      labels: null,
+      reviewRequests: null,
+      reviews: null,
+      closingIssuesReferences: null,
+    };
+    const emptyConnections = {
+      ...base,
+      labels: { totalCount: 0, nodes: [] },
+      reviewRequests: { totalCount: 0, nodes: [] },
+      reviews: { totalCount: 0, nodes: [] },
+      closingIssuesReferences: { totalCount: 0, nodes: [] },
+    };
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        requests.push(request);
+        return response(request, {
+          data: {
+            repository: {
+              pullRequest: requests.length === 1 ? nullConnections : emptyConnections,
+            },
+          },
+        });
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const changed = new ChangedPullRequest({
+        number: 51,
+        updatedAt: DateTime.makeUnsafe("2026-08-30T19:00:00Z"),
+      });
+      const fromNulls = yield* polling.snapshot(repository, changed);
+      const fromEmpties = yield* polling.snapshot(repository, changed);
+      assert.strictEqual(fromNulls._tag, "PullRequestSnapshot");
+      if (fromNulls._tag !== "PullRequestSnapshot") return;
+      // A null connection is the same information as an empty one: the domain
+      // payload stays non-null and both shapes hash to the same Event identity.
+      assert.deepStrictEqual(fromNulls.payload.labels, { totalCount: 0, nodes: [] });
+      assert.deepStrictEqual(fromNulls.payload.reviews, { totalCount: 0, nodes: [] });
+      assert.strictEqual(fromNulls.contentHash, fromEmpties.contentHash);
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 

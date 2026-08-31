@@ -11,3 +11,15 @@ export const Name = Schema.String.check(
   }),
 ).pipe(Schema.brand("RepoName"));
 export type Name = typeof Name.Type;
+
+/** The `owner` and `name` halves of a full repo name; the brand proves the separator exists. */
+export const parts = (repository: Name) => {
+  const separator = repository.indexOf("/");
+  return {
+    owner: repository.slice(0, separator),
+    name: repository.slice(separator + 1),
+  } as const;
+};
+
+/** Case-insensitive comparison key: GitHub repo names differ only by display casing. */
+export const canonical = (repository: Name): string => repository.toLowerCase();

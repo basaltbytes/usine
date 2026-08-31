@@ -17,7 +17,7 @@ import { Instance, Repository, Run, Step } from "@usine/core";
 import { RunEngine, StepExecutor } from "@usine/engine";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer, Source } from "@usine/expression";
-import { GitHubApp, GitHubPollingLayer, IssuePayload } from "@usine/github";
+import { GitHubApp, GitHubPolling, IssuePayload } from "@usine/github";
 import { localSecretsLayer } from "@usine/github/local-secrets";
 import {
   Config,
@@ -89,7 +89,10 @@ const makeInstance = (repository: Repository.Name, label: string): LoadedInstanc
       if: Source.make(`item.labels.nodes.exists(label, label.name == ${JSON.stringify(label)})`),
     }),
     selector: Option.some(
-      new Selector({ repos: Option.some([config.repos[0]!.name]), tags: Option.none() }),
+      new Selector({
+        repos: Option.some([config.repos[0]?.name ?? assert.fail("missing integration repo")]),
+        tags: Option.none(),
+      }),
     ),
     approval: "required",
     step: Step.StepName.make("run"),
@@ -110,7 +113,7 @@ const runtimeLayer = (directory: Instance.Directory, app: GitHubApp["Service"]) 
     execute: () => Effect.die("the approval-gated integration run must not execute"),
   });
   const engine = localEngineLayer(directory).pipe(Layer.provide(executor));
-  const polling = GitHubPollingLayer.pipe(
+  const polling = GitHubPolling.layer.pipe(
     Layer.provide(Layer.succeed(GitHubApp, app)),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
@@ -198,6 +201,13 @@ describe("live GitHub polling", () => {
                     let originalRun = Option.none<Run.RunId>();
                     while (Option.isNone(originalRun) && Date.now() <= deadline) {
                       const cycle = yield* polling.poll(instance);
+                      if (cycle.failures.length > 0) {
+                        return yield* Effect.die(
+                          `polling failed: ${cycle.failures
+                            .map(({ errorTag, message }) => `${errorTag}: ${message}`)
+                            .join("; ")}`,
+                        );
+                      }
                       originalRun = runIdFrom(cycle.submissions);
                       if (Option.isNone(originalRun)) yield* Effect.sleep("1 second");
                     }
@@ -211,9 +221,13 @@ describe("live GitHub polling", () => {
 
                     const unchanged = yield* polling.poll(instance);
                     const unchangedRun = runIdFrom(unchanged.submissions);
-                    if (Option.isSome(unchangedRun)) {
-                      assert.strictEqual(unchangedRun.value, runId);
-                    }
+                    // Unconditional dedup claim: an unchanged state either
+                    // submits nothing (304 or empty page) or resolves to the
+                    // very same run — never a second one.
+                    assert(
+                      Option.isNone(unchangedRun) || unchangedRun.value === runId,
+                      "an unchanged state must not open a second run",
+                    );
                     return { eventId: snapshot.event.id, runId };
                   }),
                 closeRuntime,
@@ -225,9 +239,12 @@ describe("live GitHub polling", () => {
                   Effect.gen(function* () {
                     const afterRestart = yield* polling.poll(instance);
                     const restartedRun = runIdFrom(afterRestart.submissions);
-                    if (Option.isSome(restartedRun)) {
-                      assert.strictEqual(restartedRun.value, first.runId);
-                    }
+                    // Same claim across restart: the durable ledger, not the
+                    // lost in-memory state, is what prevents a second run.
+                    assert(
+                      Option.isNone(restartedRun) || restartedRun.value === first.runId,
+                      "a restart must not open a second run for the same state",
+                    );
                     assert.strictEqual(
                       (yield* engine.inspect(first.runId)).event.id,
                       first.eventId,

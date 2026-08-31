@@ -184,6 +184,8 @@ export class InvalidGitHubResponseError extends Schema.TaggedError<InvalidGitHub
 )("InvalidGitHubResponseError", {
   operation: GitHubOperation,
   message: Schema.NonEmptyString,
+  /** What made the response invalid — decode path, missing field, GraphQL errors. */
+  detail: Schema.NonEmptyString,
 }) {}
 
 /** Everything one GitHub App call can fail with. */

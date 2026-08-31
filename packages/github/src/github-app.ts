@@ -12,13 +12,14 @@ import {
 } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { appJwtSigner } from "./jwt.ts";
-import { API_ROOT, authorized, transportError } from "./http.ts";
+import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
 import {
   type AppAuthenticationError,
   AppPermissionError,
   type CoveredProject,
-  GitHubApiError,
+  type GitHubApiError,
   type GitHubAppError,
+  type GitHubRateLimitError,
   GitHubCredentials,
   type GitHubOperation,
   Installation,
@@ -117,28 +118,28 @@ export class GitHubApp extends Context.Service<
     Effect.gen(function* () {
       const credentials = yield* GitHubCredentials;
       const sign = yield* appJwtSigner(credentials);
-      const http = (yield* HttpClient.HttpClient).pipe(HttpClient.filterStatusOk);
+      const http = yield* HttpClient.HttpClient;
 
       /** Send one request and parse its JSON body; every other outcome is a typed error. */
       const fetchJson = <S extends Schema.Codec<unknown, unknown, never, unknown>>(
         operation: GitHubOperation,
         request: HttpClientRequest.HttpClientRequest,
         schema: S,
-      ): Effect.Effect<S["Type"], GitHubApiError | InvalidGitHubResponseError> =>
-        http.execute(request).pipe(
-          Effect.mapError((error) => transportError(operation, error)),
-          Effect.flatMap((response) =>
-            HttpClientResponse.schemaBodyJson(schema)(response).pipe(
-              Effect.mapError(
-                () =>
-                  new InvalidGitHubResponseError({
-                    operation,
-                    message: "GitHub returned a response that does not match its API contract",
-                  }),
-              ),
-            ),
-          ),
-        );
+      ): Effect.Effect<
+        S["Type"],
+        GitHubApiError | GitHubRateLimitError | InvalidGitHubResponseError
+      > =>
+        Effect.gen(function* () {
+          const response = yield* http
+            .execute(request)
+            .pipe(Effect.mapError((error) => transportError(operation, error)));
+          if (response.status < 200 || response.status >= 300) {
+            return yield* statusError(operation, response, yield* Clock.currentTimeMillis);
+          }
+          return yield* HttpClientResponse.schemaBodyJson(schema)(response).pipe(
+            Effect.mapError((error) => invalidResponse(operation, error.message)),
+          );
+        });
 
       const discoverInstallation = Effect.fn("GitHubApp.discoverInstallation")(function* () {
         const jwt = yield* sign();
@@ -194,6 +195,7 @@ export class GitHubApp extends Context.Service<
           return yield* new InvalidGitHubResponseError({
             operation,
             message: "GitHub returned an installation token outside the one-hour lifetime bound",
+            detail: `expires_at ${DateTime.formatIso(response.expiresAt)} leaves ${lifetime}ms to live`,
           });
         }
         const confirmed = Option.getOrElse(response.repositories, () => []);
@@ -204,6 +206,7 @@ export class GitHubApp extends Context.Service<
           return yield* new InvalidGitHubResponseError({
             operation,
             message: "GitHub did not confirm that the worker token is scoped to exactly one repo",
+            detail: `expected repository id ${scope.repositoryId}, confirmed [${confirmed.map((repo) => repo.id).join(", ")}]`,
           });
         }
         return new InstallationToken({
@@ -231,6 +234,7 @@ export class GitHubApp extends Context.Service<
             return yield* new InvalidGitHubResponseError({
               operation: "list-installation-repositories",
               message: "GitHub pagination ended before total_count repositories were returned",
+              detail: `page ${page} was empty after ${installed.length} of ${response.totalCount} repositories`,
             });
           }
         }

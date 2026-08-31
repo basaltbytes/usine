@@ -5,12 +5,10 @@ import {
   type ManagedRepo,
   matchesSelector,
 } from "@usine/config";
-import { Event, Item } from "@usine/core";
+import { Event, Item, Repository } from "@usine/core";
 import {
-  CursorEntry,
   CursorKey,
   CursorStore,
-  EnginePersistenceError,
   RunEngine,
   Submission,
   SubmissionResult,
@@ -19,13 +17,16 @@ import {
 import { ExpressionEngine, type ExpressionError } from "@usine/expression";
 import {
   GitHubPolling,
-  PayloadHashError,
   PollCursor,
   type ChangedItem,
   type GitHubAppError,
   type PayloadSnapshot,
 } from "@usine/github";
-import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Schema } from "effect";
+import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Result, Schema } from "effect";
+
+/** GitHub REST + GraphQL tolerate a handful of parallel calls per token. */
+const REPOSITORY_CONCURRENCY = 4;
+const ITEM_CONCURRENCY = 4;
 
 const WatchKey = Schema.NonEmptyString.pipe(Schema.brand("GitHubPollWatchKey"));
 type WatchKey = typeof WatchKey.Type;
@@ -37,19 +38,26 @@ class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   watches: Schema.Array(WatchKey).check(Schema.isUnique()),
 }) {}
 
+/** One repository whose cycle ended in a typed error; siblings were unaffected. */
+export class RepositoryPollFailure extends Schema.Class<RepositoryPollFailure>(
+  "@usine/orchestrator/RepositoryPollFailure",
+)({
+  repository: Repository.Name,
+  errorTag: Schema.NonEmptyString,
+  message: Schema.String,
+}) {}
+
 export class PollCycle extends Schema.Class<PollCycle>("@usine/orchestrator/PollCycle")({
   repositories: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   changedItems: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   submissions: Schema.Array(SubmissionResult),
-  revocations: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  /** Run ids actually revoked because their item stopped matching. */
+  revokedRuns: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+  failures: Schema.Array(RepositoryPollFailure),
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
 }) {}
 
-export type PollingTriggersError =
-  | ExpressionError
-  | GitHubAppError
-  | PayloadHashError
-  | RunEngineError;
+type RepositoryPollError = ExpressionError | GitHubAppError | RunEngineError;
 
 interface WatchedRepository {
   readonly repository: ManagedRepo;
@@ -60,19 +68,17 @@ interface WatchedRepository {
 interface RepositoryCycle {
   readonly changedItems: number;
   readonly submissions: ReadonlyArray<SubmissionResult>;
-  readonly revocations: number;
+  readonly revokedRuns: number;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
 interface ItemCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
-  readonly revocations: number;
+  readonly revokedRuns: number;
 }
 
-const canonicalRepository = (repository: string): string => repository.toLowerCase();
-
 const cursorKey = (repository: ManagedRepo): CursorKey =>
-  CursorKey.make(`github-poll:${canonicalRepository(repository.name)}`);
+  CursorKey.make(`github-poll:${Repository.canonical(repository.name)}`);
 
 const watchKey = (loop: LoopFile): WatchKey =>
   WatchKey.make(JSON.stringify([loop.name, loop.trigger.on, loop.trigger.if]));
@@ -95,33 +101,11 @@ const watchedRepositories = (instance: LoadedInstance): ReadonlyArray<WatchedRep
 const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKey>): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
 
-const decodeStoredCursor = (value: Schema.Json): Option.Option<StoredPollCursor> =>
-  Schema.decodeUnknownOption(StoredPollCursor)(value, { onExcessProperty: "error" });
-
-const encodeStoredCursor = (
-  value: StoredPollCursor,
-): Effect.Effect<Schema.Json, EnginePersistenceError> =>
-  Schema.encodeEffect(StoredPollCursor)(value).pipe(
-    Effect.flatMap(Schema.decodeUnknownEffect(Schema.Json)),
-    Effect.mapError(
-      (cause) => new EnginePersistenceError({ operation: "encode GitHub polling cursor", cause }),
-    ),
-  );
-
 const itemStream = (item: ChangedItem): "issue" | "pr" =>
   item._tag === "ChangedIssue" ? "issue" : "pr";
 
-const payloadFor = (
-  item: ChangedItem,
-  snapshot: PayloadSnapshot,
-): Effect.Effect<Schema.JsonObject> =>
-  (item._tag === "ChangedIssue" && snapshot._tag !== "IssueSnapshot") ||
-  (item._tag === "ChangedPullRequest" && snapshot._tag !== "PullRequestSnapshot")
-    ? Effect.die(new Error(`GitHub returned ${snapshot._tag} for ${item._tag}`))
-    : Effect.succeed(snapshot.payload);
-
 const itemKey = (repository: ManagedRepo, item: ChangedItem): Item.ItemKey =>
-  Item.ItemKey.make(JSON.stringify(["github", canonicalRepository(repository.name), item.number]));
+  Item.ItemKey.make(JSON.stringify(["github", Repository.canonical(repository.name), item.number]));
 
 const eventKey = (
   loop: LoopFile,
@@ -132,15 +116,14 @@ const eventKey = (
   Event.DedupKey.make(
     JSON.stringify([
       loop.name,
-      canonicalRepository(repository.name),
+      Repository.canonical(repository.name),
       item.number,
       snapshot.contentHash,
     ]),
   );
 
 const repositoryContext = (repository: ManagedRepo): Schema.JsonObject => {
-  const separator = repository.name.indexOf("/");
-  const owner = repository.name.slice(0, separator);
+  const { owner } = Repository.parts(repository.name);
   return {
     name: repository.name,
     owner,
@@ -160,12 +143,20 @@ const latestPollAt = (
   return epochs.length === 0 ? Option.none() : DateTime.make(Math.max(...epochs));
 };
 
+const submissionRunId = (submission: SubmissionResult): string =>
+  submission._tag === "Claimed" ? submission.runId : "";
+
 /** Full selector-pruned GitHub change → snapshot → CEL → Event composition. */
 export class PollingTriggers extends Context.Service<
   PollingTriggers,
   {
-    readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle, PollingTriggersError>;
-    readonly run: (instance: LoadedInstance) => Effect.Effect<never, PollingTriggersError>;
+    /**
+     * One cycle over every watched repository. Per-repository failures are
+     * isolated, logged, and reported on the cycle — one bad repository never
+     * stops its siblings, and only a defect stops the loop.
+     */
+    readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle>;
+    readonly run: (instance: LoadedInstance) => Effect.Effect<never>;
   }
 >()("@usine/orchestrator/PollingTriggers") {
   static readonly layer = Layer.effect(
@@ -179,23 +170,27 @@ export class PollingTriggers extends Context.Service<
       const readCursor = Effect.fn("PollingTriggers.readCursor")(function* (
         watched: WatchedRepository,
       ) {
-        const stored = yield* cursors.read(cursorKey(watched.repository));
+        const stored = yield* cursors.read(cursorKey(watched.repository), StoredPollCursor);
         if (Option.isNone(stored)) return PollCursor.empty;
-        const decoded = decodeStoredCursor(stored.value);
-        return Option.isSome(decoded) && sameWatches(decoded.value.watches, watched.watches)
-          ? decoded.value.cursor
-          : PollCursor.empty;
+        if (!sameWatches(stored.value.watches, watched.watches)) {
+          yield* Effect.logInfo("Watched loops changed; re-polling the repository from scratch", {
+            repository: watched.repository.name,
+            previousWatches: stored.value.watches.length,
+            currentWatches: watched.watches.length,
+          });
+          return PollCursor.empty;
+        }
+        return stored.value.cursor;
       });
 
-      const writeCursor = Effect.fn("PollingTriggers.writeCursor")(function* (
-        watched: WatchedRepository,
-        cursor: PollCursor,
-      ) {
-        const value = yield* encodeStoredCursor(
-          new StoredPollCursor({ cursor, watches: watched.watches }),
-        );
-        yield* cursors.write(new CursorEntry({ key: cursorKey(watched.repository), value }));
-      });
+      const writeCursor = Effect.fn("PollingTriggers.writeCursor")(
+        (watched: WatchedRepository, cursor: PollCursor) =>
+          cursors.write(
+            cursorKey(watched.repository),
+            StoredPollCursor,
+            new StoredPollCursor({ cursor, watches: watched.watches }),
+          ),
+      );
 
       const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* (
         watched: WatchedRepository,
@@ -203,16 +198,22 @@ export class PollingTriggers extends Context.Service<
       ) {
         const loops = watched.loops.filter(({ trigger }) => trigger.on === itemStream(item));
         if (loops.length === 0) {
-          const empty: ItemCycle = { submissions: [], revocations: 0 };
-          return empty;
+          return { submissions: [], revokedRuns: 0 } satisfies ItemCycle;
         }
 
         const snapshot = yield* github.snapshot(watched.repository.name, item);
-        const payload = yield* payloadFor(item, snapshot);
+        // Both snapshot variants carry their payload; the union needs no recheck.
+        const payload: Schema.JsonObject = snapshot.payload;
         const context = { repo: repositoryContext(watched.repository), item: payload };
         const stableItemKey = itemKey(watched.repository, item);
+        yield* Effect.logDebug("Fetched changed-item snapshot", {
+          repository: watched.repository.name,
+          item: item.number,
+          stream: itemStream(item),
+          contentHash: snapshot.contentHash,
+        });
         const submissions: Array<SubmissionResult> = [];
-        let revocations = 0;
+        let revokedRuns = 0;
         for (const loop of loops) {
           const matches = yield* expressions.evaluateBoolean(
             loop.trigger.if,
@@ -220,53 +221,78 @@ export class PollingTriggers extends Context.Service<
             context,
           );
           if (!matches) {
-            yield* runs.revoke(loop.name, stableItemKey);
-            revocations += 1;
+            const revoked = yield* runs.revoke(loop.name, stableItemKey);
+            revokedRuns += revoked.length;
+            if (revoked.length > 0) {
+              yield* Effect.logInfo("Item stopped matching; revoked its unstarted runs", {
+                repository: watched.repository.name,
+                loop: loop.name,
+                item: item.number,
+                runIds: revoked.join(", "),
+              });
+            }
             continue;
           }
 
           const dedupKey = eventKey(loop, watched.repository, item, snapshot);
           const receivedAt = yield* DateTime.now;
-          submissions.push(
-            yield* runs.submit(
-              new Submission({
-                event: new Event.Event({
-                  id: Event.EventId.make(dedupKey),
-                  dedupKey,
-                  payload,
-                  receivedAt,
-                }),
-                itemKey: stableItemKey,
-                loop: loop.name,
-                step: loop.step,
-                approval: loop.approval,
+          const submitted = yield* runs.submit(
+            new Submission({
+              event: new Event.Event({
+                // The dedup key IS the event's identity: one deduplicated fact,
+                // one row. Two columns exist because dedup_key carries the
+                // uniqueness constraint while id is the stable reference.
+                id: Event.EventId.make(dedupKey),
+                dedupKey,
+                payload,
+                receivedAt,
               }),
-            ),
+              itemKey: stableItemKey,
+              loop: loop.name,
+              step: loop.step,
+              approval: loop.approval,
+            }),
           );
+          yield* Effect.logInfo("Submitted matching item state", {
+            repository: watched.repository.name,
+            loop: loop.name,
+            item: item.number,
+            contentHash: snapshot.contentHash,
+            result: submitted._tag,
+            runId: submissionRunId(submitted),
+          });
+          submissions.push(submitted);
         }
-        const result: ItemCycle = { submissions, revocations };
-        return result;
+        return { submissions, revokedRuns } satisfies ItemCycle;
       });
 
       const pollRepository = Effect.fn("PollingTriggers.pollRepository")(function* (
         watched: WatchedRepository,
       ) {
+        yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
         const cursor = yield* readCursor(watched);
         const detected = yield* github.changes(watched.repository.name, cursor);
         if (detected._tag === "RepositoryNotModified") {
-          const unchanged: RepositoryCycle = {
+          yield* Effect.logDebug("Repository unchanged (304)", {
+            repository: watched.repository.name,
+          });
+          return {
             changedItems: 0,
             submissions: [],
-            revocations: 0,
+            revokedRuns: 0,
             nextPollAt: detected.nextPollAt,
-          };
-          return unchanged;
+          } satisfies RepositoryCycle;
         }
 
+        yield* Effect.logInfo("Repository changed", {
+          repository: watched.repository.name,
+          changedItems: detected.items.length,
+          backlog: detected.backlog,
+        });
         const itemCycles = yield* Effect.forEach(
           detected.items,
           (item) => evaluateItem(watched, item),
-          { concurrency: 4 },
+          { concurrency: ITEM_CONCURRENCY },
         );
         // Advancing is the commit point: every changed item was fetched,
         // evaluated, and submitted/revoked successfully. A prior failure
@@ -275,41 +301,87 @@ export class PollingTriggers extends Context.Service<
         return {
           changedItems: detected.items.length,
           submissions: itemCycles.flatMap(({ submissions }) => submissions),
-          revocations: itemCycles.reduce((sum, cycle) => sum + cycle.revocations, 0),
+          revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
           nextPollAt: detected.nextPollAt,
         } satisfies RepositoryCycle;
       });
 
       const poll = Effect.fn("PollingTriggers.poll")(function* (instance: LoadedInstance) {
         const watched = watchedRepositories(instance);
-        const cycles = yield* Effect.forEach(watched, pollRepository, { concurrency: 4 });
+        const settled = yield* Effect.forEach(
+          watched,
+          (repository) =>
+            Effect.result(pollRepository(repository)).pipe(
+              Effect.map((result) => ({ repository, result }) as const),
+            ),
+          { concurrency: REPOSITORY_CONCURRENCY },
+        );
+
+        const cycles: Array<RepositoryCycle> = [];
+        const failures: Array<RepositoryPollFailure> = [];
+        const backoffs: Array<Option.Option<DateTime.Utc>> = [];
+        for (const { repository, result } of settled) {
+          if (Result.isSuccess(result)) {
+            cycles.push(result.success);
+            continue;
+          }
+          const error: RepositoryPollError = result.failure;
+          if (error._tag === "GitHubRateLimitError") {
+            // A rate-limit pause is scheduling input, not a repository failure.
+            yield* Effect.logWarning("GitHub rate limit reached; delaying the next cycle", {
+              repository: repository.repository.name,
+              operation: error.operation,
+              retryAt: DateTime.formatIso(error.retryAt),
+            });
+            backoffs.push(Option.some(error.retryAt));
+            continue;
+          }
+          yield* Effect.logError("Repository poll cycle failed; siblings were unaffected", {
+            repository: repository.repository.name,
+            errorTag: error._tag,
+            message: error.message,
+          });
+          failures.push(
+            new RepositoryPollFailure({
+              repository: repository.repository.name,
+              errorTag: error._tag,
+              message: error.message,
+            }),
+          );
+        }
         return new PollCycle({
           repositories: watched.length,
           changedItems: cycles.reduce((sum, cycle) => sum + cycle.changedItems, 0),
           submissions: cycles.flatMap(({ submissions }) => submissions),
-          revocations: cycles.reduce((sum, cycle) => sum + cycle.revocations, 0),
-          nextPollAt: latestPollAt(cycles.map(({ nextPollAt }) => nextPollAt)),
+          revokedRuns: cycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
+          failures,
+          nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
         });
       });
 
-      const run = Effect.fn("PollingTriggers.run")((instance: LoadedInstance) =>
+      // No Effect.fn here: `run` never returns, so a named wrapper would open
+      // a span that never closes. Each cycle's span lives on `poll`.
+      const run = (instance: LoadedInstance): Effect.Effect<never> =>
         Effect.gen(function* () {
           const startedAt = yield* Clock.currentTimeMillis;
-          const recommended = yield* poll(instance).pipe(
-            Effect.map(({ nextPollAt }) => nextPollAt),
-            Effect.catchTag("GitHubRateLimitError", ({ retryAt }) =>
-              Effect.succeed(Option.some(retryAt)),
-            ),
-          );
+          const cycle = yield* poll(instance);
           const intervalAt = startedAt + instance.config.settings.pollInterval * 1_000;
-          const target = Option.match(recommended, {
+          const target = Option.match(cycle.nextPollAt, {
             onNone: () => intervalAt,
             onSome: (value) => Math.max(intervalAt, DateTime.toEpochMillis(value)),
           });
           const now = yield* Clock.currentTimeMillis;
-          yield* Effect.sleep(Duration.millis(Math.max(0, target - now)));
-        }).pipe(Effect.forever),
-      );
+          const sleepMs = Math.max(0, target - now);
+          yield* Effect.logInfo("Poll cycle complete", {
+            repositories: cycle.repositories,
+            changedItems: cycle.changedItems,
+            submissions: cycle.submissions.length,
+            revokedRuns: cycle.revokedRuns,
+            failures: cycle.failures.length,
+            sleepMs,
+          });
+          yield* Effect.sleep(Duration.millis(sleepMs));
+        }).pipe(Effect.forever);
 
       return { poll, run };
     }),

@@ -1,4 +1,5 @@
 ---
+"@usine/core": minor
 "@usine/engine": minor
 "@usine/github": minor
 "@usine/orchestrator": minor

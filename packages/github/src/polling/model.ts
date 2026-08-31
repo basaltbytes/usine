@@ -1,6 +1,4 @@
-import { Repository } from "@usine/core";
-import { Context, Effect, Option, Schema } from "effect";
-import type { GitHubAppError } from "../model.ts";
+import { Option, Schema, SchemaGetter } from "effect";
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 const NonNegativeInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
@@ -9,6 +7,20 @@ const Timestamp = Schema.String.check(
     message: "Expected a GitHub UTC timestamp",
   }),
 );
+
+/**
+ * The payload keys that hold a `Timestamp` above. Bound to the slice schemas:
+ * a field added to a slice with a `Timestamp` value MUST be listed here, or it
+ * silently joins the content hash and re-fires every item once (ADR 0007 keeps
+ * timestamps in the payload but out of the hash).
+ */
+export const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set([
+  "closedAt",
+  "createdAt",
+  "mergedAt",
+  "submittedAt",
+  "updatedAt",
+]);
 
 export const EntityTag = Schema.NonEmptyString.pipe(Schema.brand("GitHubEntityTag"));
 export type EntityTag = typeof EntityTag.Type;
@@ -54,11 +66,29 @@ export class RepositoryChanges extends Schema.TaggedClass<RepositoryChanges>(
 )("RepositoryChanges", {
   cursor: PollCursor,
   items: Schema.Array(ChangedItem),
+  /** True when the page cap ended the walk early; the rest arrives next cycle. */
+  backlog: Schema.Boolean,
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
 }) {}
 
 export const ChangeDetection = Schema.Union([RepositoryNotModified, RepositoryChanges]);
 export type ChangeDetection = typeof ChangeDetection.Type;
+
+/**
+ * GitHub declares most GraphQL connections nullable. A null connection and an
+ * empty one carry the same information, so the boundary normalizes null to
+ * empty — the domain type (and the CEL environment typed on it) stays
+ * non-null, and both shapes hash identically.
+ */
+const orEmpty = <A>(schema: Schema.Codec<A, A, never, never>, empty: A) =>
+  Schema.NullOr(schema).pipe(
+    Schema.decodeTo(schema, {
+      decode: SchemaGetter.transform((value: A | null) => value ?? empty),
+      encode: SchemaGetter.transform((value: A) => value),
+    }),
+  );
+
+const emptyConnection = { totalCount: 0, nodes: [] } as const;
 
 const Actor = Schema.Struct({ login: Schema.NonEmptyString });
 const NullableActor = Schema.NullOr(Actor);
@@ -88,24 +118,30 @@ export const IssuePayload = Schema.Struct({
   author: NullableActor,
   issueType: Schema.NullOr(Schema.Struct({ name: Schema.String })),
   milestone: Schema.NullOr(Schema.Struct({ title: Schema.String })),
-  labels: Labels,
+  labels: orEmpty(Labels, emptyConnection),
   assignees: Schema.Struct({ totalCount: NonNegativeInt, nodes: Schema.Array(Actor) }),
   comments: IssueComments,
-  closedByPullRequestsReferences: Schema.Struct({
-    totalCount: NonNegativeInt,
-    nodes: Schema.Array(
-      Schema.Struct({
-        number: PositiveInt,
-        state: Schema.String,
-        isDraft: Schema.Boolean,
-        url: Schema.NonEmptyString,
-      }),
-    ),
-  }),
+  closedByPullRequestsReferences: orEmpty(
+    Schema.Struct({
+      totalCount: NonNegativeInt,
+      nodes: Schema.Array(
+        Schema.Struct({
+          number: PositiveInt,
+          state: Schema.String,
+          isDraft: Schema.Boolean,
+          url: Schema.NonEmptyString,
+        }),
+      ),
+    }),
+    emptyConnection,
+  ),
 });
 export type IssuePayload = typeof IssuePayload.Type;
 
-const RequestedReviewer = Schema.Struct({ login: Schema.optionalKey(Schema.NonEmptyString) });
+/** Null when the reviewer is a deleted user or a mannequin — real content, kept. */
+const RequestedReviewer = Schema.NullOr(
+  Schema.Struct({ login: Schema.optionalKey(Schema.NonEmptyString) }),
+);
 const Review = Schema.Struct({
   author: NullableActor,
   state: Schema.String,
@@ -136,12 +172,18 @@ export const PullRequestPayload = Schema.Struct({
   changedFiles: NonNegativeInt,
   reviewDecision: Schema.NullOr(Schema.String),
   statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),
-  labels: Labels,
-  reviewRequests: Schema.Struct({
-    totalCount: NonNegativeInt,
-    nodes: Schema.Array(Schema.Struct({ requestedReviewer: RequestedReviewer })),
-  }),
-  reviews: Schema.Struct({ totalCount: NonNegativeInt, nodes: Schema.Array(Review) }),
+  labels: orEmpty(Labels, emptyConnection),
+  reviewRequests: orEmpty(
+    Schema.Struct({
+      totalCount: NonNegativeInt,
+      nodes: Schema.Array(Schema.Struct({ requestedReviewer: RequestedReviewer })),
+    }),
+    emptyConnection,
+  ),
+  reviews: orEmpty(
+    Schema.Struct({ totalCount: NonNegativeInt, nodes: Schema.Array(Review) }),
+    emptyConnection,
+  ),
   reviewThreads: Schema.Struct({
     totalCount: NonNegativeInt,
     nodes: Schema.Array(
@@ -157,10 +199,13 @@ export const PullRequestPayload = Schema.Struct({
     ),
   }),
   comments: IssueComments,
-  closingIssuesReferences: Schema.Struct({
-    totalCount: NonNegativeInt,
-    nodes: Schema.Array(Schema.Struct({ number: PositiveInt, state: Schema.String })),
-  }),
+  closingIssuesReferences: orEmpty(
+    Schema.Struct({
+      totalCount: NonNegativeInt,
+      nodes: Schema.Array(Schema.Struct({ number: PositiveInt, state: Schema.String })),
+    }),
+    emptyConnection,
+  ),
 });
 export type PullRequestPayload = typeof PullRequestPayload.Type;
 
@@ -186,25 +231,3 @@ export class PullRequestSnapshot extends Schema.TaggedClass<PullRequestSnapshot>
 
 export const PayloadSnapshot = Schema.Union([IssueSnapshot, PullRequestSnapshot]);
 export type PayloadSnapshot = typeof PayloadSnapshot.Type;
-
-export class PayloadHashError extends Schema.TaggedError<PayloadHashError>(
-  "@usine/github/PayloadHashError",
-)("PayloadHashError", {
-  message: Schema.NonEmptyString,
-  cause: Schema.Defect(),
-}) {}
-
-/** GitHub change detection and snapshot fetching behind one external seam. */
-export class GitHubPolling extends Context.Service<
-  GitHubPolling,
-  {
-    readonly changes: (
-      repository: Repository.Name,
-      cursor: PollCursor,
-    ) => Effect.Effect<ChangeDetection, GitHubAppError>;
-    readonly snapshot: (
-      repository: Repository.Name,
-      item: ChangedItem,
-    ) => Effect.Effect<PayloadSnapshot, GitHubAppError | PayloadHashError>;
-  }
->()("@usine/github/GitHubPolling") {}

@@ -128,6 +128,7 @@ const makeRunEngine = Effect.gen(function* () {
       concurrency: "unbounded",
       discard: true,
     });
+    return revoked;
   });
 
   const inspect = Effect.fn("RunEngine.inspect")(function* (runId: Run.RunId) {
@@ -187,7 +188,7 @@ export class RunEngine extends Context.Service<
     readonly revoke: (
       loop: Loop.LoopName,
       itemKey: Item.ItemKey,
-    ) => Effect.Effect<void, RunEngineError>;
+    ) => Effect.Effect<ReadonlyArray<Run.RunId>, RunEngineError>;
     readonly submit: (submission: Submission) => Effect.Effect<SubmissionResult, RunEngineError>;
   }
 >()("@usine/engine/RunEngine") {}

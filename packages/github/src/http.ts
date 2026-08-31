@@ -1,7 +1,12 @@
-import { Option, Redacted } from "effect";
-import { HttpClientRequest } from "effect/unstable/http";
+import { DateTime, Option, Redacted } from "effect";
+import { HttpClientRequest, type HttpClientResponse } from "effect/unstable/http";
 import type { HttpClientError } from "effect/unstable/http/HttpClientError";
-import { GitHubApiError, type GitHubOperation } from "./model.ts";
+import {
+  GitHubApiError,
+  GitHubRateLimitError,
+  InvalidGitHubResponseError,
+  type GitHubOperation,
+} from "./model.ts";
 
 export const API_ROOT = "https://api.github.com";
 export const API_VERSION = "2026-03-10";
@@ -23,3 +28,71 @@ export const transportError = (operation: GitHubOperation, error: HttpClientErro
         ? "The request to GitHub could not be sent"
         : `GitHub rejected the request with status ${error.response.status}`,
   });
+
+export const invalidResponse = (operation: GitHubOperation, detail: string) =>
+  new InvalidGitHubResponseError({
+    operation,
+    message: "GitHub returned a response that does not match its API contract",
+    detail,
+  });
+
+type Headers = HttpClientResponse.HttpClientResponse["headers"];
+
+const parseInteger = (value: string | undefined): Option.Option<number> => {
+  if (value === undefined || !/^\d+$/u.test(value)) return Option.none();
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? Option.some(parsed) : Option.none();
+};
+
+export const retryAfterMillis = (value: string | undefined, now: number): Option.Option<number> => {
+  const seconds = parseInteger(value);
+  if (Option.isSome(seconds)) return Option.some(now + seconds.value * 1_000);
+  if (value === undefined) return Option.none();
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? Option.some(parsed) : Option.none();
+};
+
+export const rateLimitResetMillis = (
+  headers: Headers,
+  threshold: number,
+): Option.Option<number> => {
+  const remaining = parseInteger(headers["x-ratelimit-remaining"]);
+  const reset = parseInteger(headers["x-ratelimit-reset"]);
+  return Option.isSome(remaining) && remaining.value <= threshold && Option.isSome(reset)
+    ? Option.some(reset.value * 1_000)
+    : Option.none();
+};
+
+export const pollIntervalMillis = (headers: Headers, now: number): Option.Option<number> =>
+  Option.map(parseInteger(headers["x-poll-interval"]), (seconds) => now + seconds * 1_000);
+
+const latestEpoch = (candidates: ReadonlyArray<Option.Option<number>>): Option.Option<number> => {
+  const epochs = candidates.flatMap((candidate) =>
+    Option.match(candidate, { onNone: () => [], onSome: (value) => [value] }),
+  );
+  return epochs.length === 0 ? Option.none() : Option.some(Math.max(...epochs));
+};
+
+/** When GitHub asked us to come back, from `retry-after` and an exhausted primary budget. */
+export const rateLimitRetryEpoch = (headers: Headers, now: number): Option.Option<number> =>
+  latestEpoch([retryAfterMillis(headers["retry-after"], now), rateLimitResetMillis(headers, 0)]);
+
+/** One classification for every non-2xx GitHub status: rate-limit pauses become typed waits. */
+export const statusError = (
+  operation: GitHubOperation,
+  response: HttpClientResponse.HttpClientResponse,
+  now: number,
+): GitHubApiError | GitHubRateLimitError => {
+  const retryAt = Option.flatMap(rateLimitRetryEpoch(response.headers, now), DateTime.make);
+  return (response.status === 403 || response.status === 429) && Option.isSome(retryAt)
+    ? new GitHubRateLimitError({
+        operation,
+        retryAt: retryAt.value,
+        message: "GitHub asked the poller to wait before retrying",
+      })
+    : new GitHubApiError({
+        operation,
+        status: Option.some(response.status),
+        message: `GitHub rejected the request with status ${response.status}`,
+      });
+};
