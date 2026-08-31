@@ -1,9 +1,7 @@
 import { Attempt, AttemptChannel, AttemptFailure, Instance, Repository } from "@usine/core";
 import {
   Array as Arr,
-  Cause,
   Config,
-  DateTime,
   Effect,
   Fiber,
   FileSystem,
@@ -11,7 +9,6 @@ import {
   Option,
   PartitionedSemaphore,
   Path,
-  Queue,
   Redacted,
   Ref,
   Result,
@@ -19,7 +16,6 @@ import {
   Stream,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner";
 import {
   CheckoutRequest,
   CredentialProvider,
@@ -32,6 +28,7 @@ import {
   WorkerCapabilityError,
   type ExecutorOperation,
 } from "../index.ts";
+import { runHostSessionFor, type RunHostInput } from "../run-host-session.ts";
 
 export type { RunHostCommand } from "../index.ts";
 
@@ -48,26 +45,10 @@ interface PreparedState {
   readonly credential: Redacted.Redacted<string>;
 }
 
-interface ActiveAttempt {
-  readonly cancelStarted: Ref.Ref<boolean>;
-  readonly handle: ChildProcessHandle;
-  readonly input: Queue.Queue<Uint8Array, Cause.Done>;
-  readonly io: AttemptChannel.Sink;
-  readonly sequence: Ref.Ref<number>;
-}
-
-const inputFrameToJson = Schema.encodeSync(AttemptChannel.InputFrameFromJson);
-/** Strict by contract: an unknown key on a protocol frame is a rejected frame. */
-const decodeOutboundEnvelope = (line: string) =>
-  Schema.decodeUnknownEffect(AttemptChannel.OutboundEnvelopeFromJson)(line, {
-    onExcessProperty: "error",
-  });
 const isExecutorError = Schema.is(ExecutorError);
-const encoder = new TextEncoder();
 
 /** Every git invocation is bounded: a hung clone or fetch must stay cancellable. */
 const COMMAND_TIMEOUT = "10 minutes";
-const STDERR_TAIL_BYTES = 4_096;
 
 /**
  * The run host gets a minimal environment, never the orchestrator's: the App
@@ -96,20 +77,11 @@ const hostEnvironment: Effect.Effect<Record<string, string>> = Effect.forEach(
   Effect.orDie,
 );
 
-const frame = (input: AttemptChannel.InputFrame): Uint8Array =>
-  encoder.encode(`${inputFrameToJson(input)}\n`);
-
 const executorError = (
   operation: ExecutorOperation,
   message: string,
   cause: unknown,
 ): ExecutorOperationError => new ExecutorOperationError({ operation, message, cause });
-
-const infrastructureFailure = (message: string, cause: unknown) =>
-  new AttemptFailure.InfraFailure({ message, cause });
-
-const violationFailure = (violation: AttemptChannel.Violation) =>
-  infrastructureFailure(violation.message, new Error(violation.detail));
 
 const safeSegment = (value: string): string => value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
 
@@ -140,7 +112,6 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fetches = yield* PartitionedSemaphore.make<string>({ permits: 1 });
     const preparedStates = yield* Ref.make(new Map<Attempt.AttemptId, PreparedState>());
-    const activeAttempts = yield* Ref.make(new Map<Attempt.AttemptId, ActiveAttempt>());
     const baseEnvironment = yield* hostEnvironment;
     const repositoryUrl =
       options.repositoryUrl ??
@@ -225,7 +196,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             const leftovers = yield* fileSystem.readDirectory(attemptsRoot);
             for (const leftover of leftovers) {
               const target = path.join(attemptsRoot, leftover);
-              yield* Effect.logInfo("Sweeping abandoned Attempt worktree", { worktree: target });
+              yield* Effect.logInfo("Sweeping abandoned Attempt worktree", {
+                worktree: target,
+              });
               yield* fileSystem.remove(target, { recursive: true, force: true });
             }
           }
@@ -316,15 +289,25 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       const prepared = yield* fetches
         .withPermit(request.repository)(
           Effect.gen(function* () {
-            yield* fileSystem.makeDirectory(path.dirname(cache), { recursive: true });
-            yield* fileSystem.makeDirectory(path.dirname(worktree), { recursive: true });
-            yield* fileSystem.remove(worktree, { recursive: true, force: true });
+            yield* fileSystem.makeDirectory(path.dirname(cache), {
+              recursive: true,
+            });
+            yield* fileSystem.makeDirectory(path.dirname(worktree), {
+              recursive: true,
+            });
+            yield* fileSystem.remove(worktree, {
+              recursive: true,
+              force: true,
+            });
             if (!(yield* fileSystem.exists(cache))) {
               // Clone into a sibling staging directory and rename on success:
               // an interrupted clone must never leave a half-initialized cache
               // that every later fetch for this repository would poison.
               const staging = `${cache}.cloning`;
-              yield* fileSystem.remove(staging, { recursive: true, force: true });
+              yield* fileSystem.remove(staging, {
+                recursive: true,
+                force: true,
+              });
               yield* run(
                 "prepare",
                 "git",
@@ -424,234 +407,38 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       return prepared;
     });
 
-    const cancelActive = Effect.fn("LocalExecutor.cancelActive")(function* (
-      attemptId: Attempt.AttemptId,
-      active: ActiveAttempt,
-    ) {
-      return yield* Effect.uninterruptible(
-        Effect.gen(function* () {
-          const first = yield* Ref.modify(
-            active.cancelStarted,
-            (started) => [!started, true] as const,
-          );
-          if (!first) return;
-          yield* Effect.logInfo("Sending the interrupt envelope", { attemptId });
-          const sequence = yield* Ref.getAndUpdate(active.sequence, (value) => value + 1);
-          const envelope = new AttemptChannel.InboundEnvelope({
-            version: AttemptChannel.PROTOCOL_VERSION,
-            attemptId,
-            sequence: AttemptChannel.Sequence.make(sequence),
-            sentAt: yield* DateTime.now,
-            payload: new AttemptChannel.Interrupt(),
-          });
-          yield* active.io.append("inbound", envelope).pipe(
-            Effect.andThen(Queue.offer(active.input, frame(envelope))),
-            Effect.catch((error) =>
-              Effect.logWarning("Interrupt could not be delivered; hard-killing the run host", {
-                attemptId,
-                message: String(error),
-              }).pipe(
-                Effect.andThen(active.handle.kill({ killSignal: "SIGKILL" })),
-                Effect.ignore,
-                Effect.andThen(Effect.fail(error)),
-              ),
-            ),
-          );
-          const completed = yield* active.handle.exitCode.pipe(
-            Effect.timeoutOption(interruptGrace),
-          );
-          if (Option.isNone(completed) && (yield* active.handle.isRunning)) {
-            yield* Effect.logWarning("Interrupt grace expired; sending SIGKILL", { attemptId });
-            yield* active.handle.kill({ killSignal: "SIGKILL" });
-          } else {
-            yield* Effect.logInfo("Run host stopped within the interrupt grace", { attemptId });
-          }
-        }),
-      );
-    });
-
-    const cancel = Effect.fn("LocalExecutor.cancel")(function* (attemptId: Attempt.AttemptId) {
-      const active = (yield* Ref.get(activeAttempts)).get(attemptId);
-      if (active === undefined) return;
-      yield* cancelActive(attemptId, active).pipe(
-        Effect.mapError((cause) =>
-          isExecutorError(cause)
-            ? cause
-            : executorError("cancel", `Could not cancel Attempt ${attemptId}`, cause),
-        ),
-      );
-    });
-
-    const launch = Effect.fn("LocalExecutor.launch")(function* (
+    const spawn = Effect.fn("LocalExecutor.spawnRunHost")(function* (
       prepared: PreparedAttempt,
-      io: AttemptChannel.Sink,
+      input: RunHostInput,
     ) {
       const attemptId = prepared.spec.attemptId;
-      yield* Effect.annotateCurrentSpan({ attemptId, worker: prepared.worker });
       const stored = (yield* Ref.get(preparedStates)).get(attemptId);
       if (stored === undefined) {
-        return yield* infrastructureFailure(
-          `Attempt ${attemptId} has no prepared credential`,
-          new Error("prepared Attempt state missing"),
-        );
+        return yield* new AttemptFailure.InfraFailure({
+          message: `Attempt ${attemptId} has no prepared credential`,
+          cause: new Error("prepared Attempt state missing"),
+        });
       }
-      const scrub = (text: string): string => scrubbed(text, stored.credential);
-
-      const execute = Effect.scoped(
-        Effect.gen(function* () {
-          const input = yield* Queue.make<Uint8Array, Cause.Done>();
-          yield* Effect.logInfo("Launching the run host", {
-            attemptId,
-            command: runHost.command,
-            worktree: prepared.worktree,
-          });
-          const handle = yield* spawner.spawn(
-            ChildProcess.make(runHost.command, runHost.args, {
-              cwd: prepared.worktree,
-              env: credentialEnvironment(baseEnvironment, stored.credential),
-              extendEnv: false,
-              stdin: { stream: Stream.fromQueue(input), endOnDone: true },
-            }),
-          );
-          const active: ActiveAttempt = {
-            cancelStarted: yield* Ref.make(false),
-            handle,
-            input,
-            io,
-            sequence: yield* Ref.make(1),
-          };
-          yield* Ref.update(activeAttempts, (current) => {
-            const next = new Map(current);
-            next.set(attemptId, active);
-            return next;
-          });
-          yield* Queue.offer(
-            input,
-            frame(
-              new AttemptChannel.Start({
-                version: AttemptChannel.PROTOCOL_VERSION,
-                spec: prepared.spec,
-              }),
-            ),
-          );
-
-          const stderr = yield* Ref.make("");
-          const stderrFiber = yield* handle.stderr.pipe(
-            Stream.decodeText(),
-            Stream.runForEach((chunk) =>
-              Ref.update(stderr, (current) => `${current}${chunk}`.slice(-STDERR_TAIL_BYTES)),
-            ),
-            Effect.forkChild,
-          );
-          const terminal = yield* Ref.make(
-            Option.none<
-              AttemptChannel.Final | AttemptChannel.Failed | AttemptChannel.Interrupted
-            >(),
-          );
-          const progress = yield* Ref.make(AttemptChannel.initialProgress);
-
-          yield* handle.stdout.pipe(
-            Stream.decodeText(),
-            Stream.splitLines,
-            Stream.runForEach((line) =>
-              Effect.gen(function* () {
-                const envelope = yield* decodeOutboundEnvelope(line).pipe(
-                  Effect.mapError((cause) =>
-                    infrastructureFailure("The run host emitted an invalid frame", cause),
-                  ),
-                );
-                const before = yield* Ref.get(progress);
-                const admitted = AttemptChannel.admit(before, attemptId, envelope);
-                if (Result.isFailure(admitted)) {
-                  return yield* violationFailure(admitted.failure);
-                }
-                yield* Ref.set(progress, admitted.success);
-                yield* io.append("outbound", envelope);
-                const payload = envelope.payload;
-                if (
-                  payload._tag === "Final" ||
-                  payload._tag === "Failed" ||
-                  payload._tag === "Interrupted"
-                ) {
-                  yield* Effect.logInfo("Run host reached its terminal envelope", {
-                    attemptId,
-                    terminal: payload._tag,
-                    sequence: envelope.sequence,
-                  });
-                  yield* Ref.set(terminal, Option.some(payload));
-                  yield* Queue.end(input);
-                }
-              }),
-            ),
-            Effect.mapError((error) =>
-              Schema.is(AttemptFailure.AttemptFailure)(error)
-                ? error
-                : infrastructureFailure("The run-host channel failed", error),
-            ),
-          );
-          const exitCode = yield* handle.exitCode.pipe(
-            Effect.mapError((cause) =>
-              infrastructureFailure("Could not read the run-host exit code", cause),
-            ),
-          );
-          yield* Fiber.join(stderrFiber).pipe(Effect.ignore);
-          yield* Effect.logInfo("Run host exited", { attemptId, exitCode: String(exitCode) });
-          const ended = yield* Ref.get(terminal);
-          if (Option.isNone(ended)) {
-            return yield* infrastructureFailure(
-              "The run-host channel closed without a final envelope",
-              new Error(
-                `run host exited with code ${String(exitCode)}: ${scrub((yield* Ref.get(stderr)).trim())}`,
-              ),
-            );
-          }
-          if (ended.value._tag === "Failed") return yield* ended.value.failure;
-          if (ended.value._tag === "Interrupted") {
-            // The cancel path has already closed the Attempt as Canceled; the
-            // wire confirmation only needs a typed way out of this fiber.
-            return yield* new AttemptFailure.AgentFailure({
-              message: "The run host confirmed the interrupt and stopped",
-            });
-          }
-          if (Number(exitCode) !== 0) {
-            return yield* infrastructureFailure(
-              `The run host exited with code ${String(exitCode)} after its final envelope`,
-              new Error(scrub((yield* Ref.get(stderr)).trim())),
-            );
-          }
-          return ended.value.result;
-        }).pipe(
-          // Inside the scope: the interrupt handshake must run while the
-          // spawn finalizer (which kills the process group) is still pending.
-          Effect.onInterrupt(() =>
-            cancel(attemptId).pipe(
-              Effect.tapError((error) =>
-                Effect.logWarning("Cancel-on-interrupt failed", {
-                  attemptId,
-                  message: String(error),
-                }),
-              ),
-              Effect.ignore,
-            ),
-          ),
-        ),
+      yield* Effect.logInfo("Launching the run host", {
+        attemptId,
+        command: runHost.command,
+        worktree: prepared.worktree,
+      });
+      const handle = yield* spawner.spawn(
+        ChildProcess.make(runHost.command, runHost.args, {
+          cwd: prepared.worktree,
+          env: credentialEnvironment(baseEnvironment, stored.credential),
+          extendEnv: false,
+          stdin: { stream: Stream.fromQueue(input), endOnDone: true },
+        }),
       );
-
-      return yield* execute.pipe(
-        Effect.ensuring(
-          Ref.update(activeAttempts, (current) => {
-            const next = new Map(current);
-            next.delete(attemptId);
-            return next;
-          }),
-        ),
-        Effect.mapError((error) =>
-          Schema.is(AttemptFailure.AttemptFailure)(error)
-            ? error
-            : infrastructureFailure("The local executor failed", error),
-        ),
-      );
+      return {
+        handle,
+        scrubStderr: (text: string): string => scrubbed(text, stored.credential),
+      };
     });
+
+    const session = yield* runHostSessionFor({ interruptGrace, spawn });
 
     const cleanup = Effect.fn("LocalExecutor.cleanup")(function* (prepared: PreparedAttempt) {
       const attemptId = prepared.spec.attemptId;
@@ -719,7 +506,14 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       );
     });
 
-    return Executor.of({ kind: "local", cancel, cleanup, launch, preflight, prepare });
+    return Executor.of({
+      kind: "local",
+      cancel: session.cancel,
+      cleanup,
+      launch: session.launch,
+      preflight,
+      prepare,
+    });
   });
 
 /** Node-only local executor; the package root remains platform-free. */
