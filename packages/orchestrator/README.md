@@ -6,7 +6,7 @@
 
 `PollingTriggers.poll(instance)` performs one cycle; `PollingTriggers.run(instance)` repeats cycles using the instance's factory-wide `poll_interval` and waits longer when GitHub reports rate-limit pressure. Per-repository failures are isolated and reported on the cycle — one failing repository never stops its siblings.
 
-Each cycle prunes repositories through loop selectors, asks `GitHubPolling` for changed items, fetches one payload snapshot per item, and evaluates each stream-matching loop's CEL `if:` expression against that snapshot. A match stores the snapshot in an Event whose durable identity covers the loop, canonical repository, item number, and timestamp-free content hash. An unmatch revokes pending or approval-waiting work for that loop and item.
+Each cycle prunes repositories through loop selectors, asks `GitHubPolling` for changed items, fetches one payload snapshot per item, and evaluates each stream-matching loop's CEL `if:` expression against that snapshot. A match renders every `{{ CEL expression }}` in the loop body, resolves the named agent and effective parent model, then stores that immutable execution context with the Event. The Event identity covers the loop, canonical repository, item number, and timestamp-free content hash. An unmatch revokes pending or approval-waiting work for that loop and item.
 
 Polling cursors live in the engine's `CursorStore`. When a loop starts watching a repository or its trigger expression changes, the orchestrator discards that repository's efficiency cursor and performs a cold poll, while the permanent Event ledger absorbs repeated state.
 
@@ -59,5 +59,17 @@ export USINE_GITHUB_INTEGRATION_REPO=owner/repo
 export USINE_GITHUB_INTEGRATION_ISSUE_NUMBER=123
 pnpm --filter @usine/orchestrator test:integration
 ```
+
+The agent contract test also starts the local worker and production run host. The Pi parent delegates to Claude Code, which reads the issue with `gh` and posts one signed comment as the App bot. Build the workspace first, provide working Pi and Claude credentials in the worker user's home directory, then run:
+
+```sh
+pnpm build
+export USINE_GITHUB_INTEGRATION_BOT_LOGIN='your-app[bot]'
+export USINE_AGENT_INTEGRATION_PARENT_MODEL=provider/model
+export USINE_AGENT_INTEGRATION_CHILD_MODEL=claude-model-id
+pnpm --filter @usine/orchestrator test:integration:agent
+```
+
+The test removes its kick and result comments during cleanup.
 
 Everything here is 0.x, so APIs can change between minor releases. Supply `effect` at the version pinned by the usine workspace.
