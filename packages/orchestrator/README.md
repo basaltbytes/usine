@@ -49,6 +49,42 @@ const EngineLive = localLayer(instanceDirectory, config, {
 
 Provide `CredentialProvider` to `EngineLive`, then request `RunEngine` from the resulting Effect layer. The local composition caches repositories under `<instance>/.usine/workers/<worker>/repos` and removes Attempt worktrees after completion or cancellation.
 
+For an exe.dev Worker, use the `@usine/orchestrator/exe-dev` composition. It keeps the engine and SQLite runtime local while the unchanged Worker contract runs on the named VM:
+
+```ts
+import { Repository } from "@usine/core"
+import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev"
+import { layer as exeDevLayer } from "@usine/orchestrator/exe-dev"
+
+const EngineLive = exeDevLayer(instanceDirectory, config, {
+  githubIntegrations: [
+    new GitHubIntegration({
+      repository: Repository.Name.make("acme/widget"),
+      name: IntegrationName.make("usine-acme-widget"),
+    }),
+  ],
+  harnessLoginChecks: [
+    new HarnessLoginCheck({
+      harness: "codex",
+      command: "codex",
+      args: ["login", "status"],
+    }),
+  ],
+})
+```
+
+The composition sets the GitHub integration grant to five minutes beyond `max_attempt_minutes`. Pass `credentialGrantMinutes` to use another bounded window. The scheduler also bounds every launch at `max_attempt_minutes`: a hung run host or dead link is interrupted through the normal cancel handshake and reported as a typed infrastructure failure before its credential grant lapses.
+
+The live exe.dev check requires an existing baked VM and its GitHub integration:
+
+```sh
+export USINE_EXE_DEV_INTEGRATION_WORKER=worker-name
+export USINE_EXE_DEV_INTEGRATION_REPO=owner/repo
+export USINE_EXE_DEV_INTEGRATION_REVISION=main
+export USINE_EXE_DEV_INTEGRATION_GITHUB_INTEGRATION=integration-name
+pnpm --filter @usine/orchestrator test:exe-dev
+```
+
 ## Live GitHub check
 
 The opt-in integration test needs a disposable issue in a repository covered by the configured GitHub App. It creates a uniquely named repository label, applies it to the issue, checks the resulting Event and restart deduplication, then deletes the label.

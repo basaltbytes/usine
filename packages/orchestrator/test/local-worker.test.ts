@@ -327,6 +327,7 @@ describe("local worker", () => {
       worktree: WorktreePath.make("/tmp/usine-cleanup-test"),
     });
     const executor = Layer.succeed(Executor)({
+      kind: "local",
       preflight: () => Effect.void,
       prepare: () => Effect.succeed(prepared),
       launch: () => Effect.succeed(new StepResult.StepResult({ message: "done", facts: [] })),
