@@ -25,6 +25,14 @@ export const triggersLayer = PollingTriggers.layer.pipe(
 
 Call `poll` when another scheduler owns timing. Use `run` for the built-in endless polling loop.
 
+## Schedule triggers
+
+`ScheduleTriggers.tick(instance)` evaluates the most recent due Tick for every `on: schedule` loop and fans it out to the repositories selected by that loop. Each selected repository receives one Event whose payload is `item.tick = { scheduledAt, cron, tz }`; `scheduledAt` is the time the Tick was due, while the Event's `receivedAt` records when the orchestrator observed it.
+
+The Event key covers the loop, canonical repository, and scheduled time. Calling `tick` repeatedly is therefore harmless, and waking after downtime emits only the latest missed Tick. The repository is the schedule stream's Item, so a later Tick follows the same supersede rules as issue and pull-request state. Schedule Runs go through the unchanged `RunEngine`, approval gate, worker scheduler, executor, and agent layer. Because they have no GitHub issue or pull request to comment on, their blocking moments remain UI-only.
+
+`ScheduleTriggers.run(instance)` evaluates once at startup for catch-up, then sleeps until the earliest next Tick. Its layer requires `RunEngine` and `ExpressionEngine`.
+
 ## Worker scheduling
 
 The platform-free root entry exports `stepExecutorLayer`. At startup it verifies every configured worker, creates one capacity slot per `max_concurrent_attempts`, and assigns slots by Event receipt time. Runs stay pending while every slot is occupied. The layer rejects worker kinds that its supplied executor cannot run.
