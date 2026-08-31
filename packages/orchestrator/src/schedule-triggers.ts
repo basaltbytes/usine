@@ -234,6 +234,7 @@ export class ScheduleTriggers extends Context.Service<
         yield* Effect.annotateCurrentSpan({
           loop: due.loop.name,
           repository: due.repository.name,
+          agent: due.agent.name,
           scheduledAt: DateTime.formatIso(due.scheduledAt),
         });
         const payload = tickPayload(due);
@@ -247,6 +248,7 @@ export class ScheduleTriggers extends Context.Service<
           yield* Effect.logDebug("Scheduled Tick did not match its expression", {
             loop: due.loop.name,
             repository: due.repository.name,
+            agent: due.agent.name,
             scheduledAt: DateTime.formatIso(due.scheduledAt),
           });
           return Option.none<SubmissionResult>();
@@ -270,6 +272,7 @@ export class ScheduleTriggers extends Context.Service<
         yield* Effect.logInfo("Submitted scheduled Tick", {
           loop: due.loop.name,
           repository: due.repository.name,
+          agent: due.agent.name,
           scheduledAt: DateTime.formatIso(due.scheduledAt),
           scheduledAtLocal: due.scheduledAtLocal,
           result: submitted._tag,
@@ -361,6 +364,7 @@ export class ScheduleTriggers extends Context.Service<
           boundariesByLoop.set(schedule.loop.name, latestEpoch);
           yield* Effect.logInfo("Schedule tick due", {
             loop: schedule.loop.name,
+            agent: resolved.success.agent.name,
             cron: schedule.trigger.cron,
             tz: schedule.trigger.tz,
             scheduledAt: DateTime.formatIso(boundaries.latest),
@@ -409,6 +413,7 @@ export class ScheduleTriggers extends Context.Service<
           yield* Effect.logError("Scheduled Tick failed; sibling fanout was unaffected", {
             loop: candidate.loop.name,
             repository: candidate.repository.name,
+            agent: candidate.agent.name,
             scheduledAt: DateTime.formatIso(candidate.scheduledAt),
             ...scheduleFailureLogFields(error),
           });

@@ -202,6 +202,10 @@ export class PollingTriggers extends Context.Service<
         watched: WatchedRepository,
         item: ChangedItem,
       ) {
+        yield* Effect.annotateCurrentSpan({
+          repository: watched.repository.name,
+          item: item.number,
+        });
         const loops = watched.loops.filter(({ loop }) => loop.trigger.on === itemStream(item));
         if (loops.length === 0) {
           return { submissions: [], revokedRuns: 0 } satisfies ItemCycle;
@@ -221,18 +225,26 @@ export class PollingTriggers extends Context.Service<
         const submissions: Array<SubmissionResult> = [];
         let revokedRuns = 0;
         for (const { agent, loop, parentModel } of loops) {
+          yield* Effect.annotateCurrentSpan({ loop: loop.name, agent: agent.name });
           const matches = yield* expressions.evaluateBoolean(
             loop.trigger.if,
             environmentFor(loop.trigger.on),
             context,
           );
           if (!matches) {
+            yield* Effect.logDebug("Item did not match its loop expression", {
+              repository: watched.repository.name,
+              loop: loop.name,
+              agent: agent.name,
+              item: item.number,
+            });
             const revoked = yield* runs.revoke(loop.name, stableItemKey);
             revokedRuns += revoked.length;
             if (revoked.length > 0) {
               yield* Effect.logInfo("Item stopped matching; revoked its unstarted runs", {
                 repository: watched.repository.name,
                 loop: loop.name,
+                agent: agent.name,
                 item: item.number,
                 runIds: revoked.join(", "),
               });
@@ -247,6 +259,7 @@ export class PollingTriggers extends Context.Service<
               Effect.logError("Loop prompt rendering failed", {
                 loop: loop.name,
                 repository: watched.repository.name,
+                agent: agent.name,
                 item: item.number,
                 errorTag: error._tag,
                 message: error.message,
@@ -270,6 +283,7 @@ export class PollingTriggers extends Context.Service<
           yield* Effect.logInfo("Submitted matching item state", {
             repository: watched.repository.name,
             loop: loop.name,
+            agent: agent.name,
             item: item.number,
             contentHash: snapshot.contentHash,
             result: submitted._tag,

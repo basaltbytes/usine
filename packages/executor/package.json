@@ -1,7 +1,7 @@
 {
   "name": "@usine/executor",
   "version": "0.0.1",
-  "description": "The usine five-operation worker contract and Node local executor.",
+  "description": "The usine five-operation Worker contract with local and exe.dev adapters.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -21,6 +21,10 @@
     "./local": {
       "types": "./dist/local/index.d.ts",
       "default": "./dist/local/index.js"
+    },
+    "./exe-dev": {
+      "types": "./dist/exe-dev/index.d.ts",
+      "default": "./dist/exe-dev/index.js"
     }
   },
   "publishConfig": {
@@ -28,15 +32,18 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "check": "tsc -p tsconfig.check.json"
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@usine/core": "workspace:*"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "effect": "catalog:"

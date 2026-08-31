@@ -12,9 +12,15 @@ export const Name = Schema.String.check(
 ).pipe(Schema.brand("RepoName"));
 export type Name = typeof Name.Type;
 
-/** Value object: a git revision resolved when an Attempt workspace is created. */
+/**
+ * Value object: a git revision resolved when an Attempt workspace is created.
+ * Revisions reach `git fetch` as bare arguments, so a leading `-` (which git
+ * would parse as an option) and whitespace are unrepresentable by the brand.
+ */
 export const Revision = Schema.String.check(
-  Schema.isPattern(/\S/u, { message: "Expected a non-blank git revision" }),
+  Schema.isPattern(/^[^\s-]\S*$/u, {
+    message: "Expected a git revision without whitespace or a leading dash",
+  }),
 ).pipe(Schema.brand("RepositoryRevision"));
 export type Revision = typeof Revision.Type;
 

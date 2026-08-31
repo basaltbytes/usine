@@ -12,7 +12,7 @@ Everything lives in the `lifecycle` cluster: a deduplicated Event opens a Run, t
 | `EventId`, `RunId`, `AttemptId` | Value objects — branded ids; identities that cannot be swapped for each other |
 | `DedupKey`, `ItemKey`, `LoopName`, `StepName`, `AttemptNumber` | Value objects — branded primitives carrying a domain constraint |
 | `Instance.Directory`, `Repository.Name`, `Repository.Revision`, `Repository.CommitSha` | Shared value objects — paths and validated Git identities |
-| `Worker.Name` | Value object — the worker that owns an Attempt |
+| `Worker.Name`, `Worker.Kind` | Value objects — a Worker identity and its local or exe.dev adapter kind |
 | `Agent.Agent`, `Agent.BrainSpec` | Agent values — a named persona, its child brain, and optional Pi parent-model override |
 | `Agent.Activity` | Session activity — typed parent or first-level child lifecycle, text, and tool events |
 | `AttemptChannel.*` | Protocol values — the secret-free run spec, framed input, and protocol-v2 Attempt envelopes |

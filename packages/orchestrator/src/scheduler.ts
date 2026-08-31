@@ -69,10 +69,11 @@ const makeLease = Effect.fn("WorkerScheduler.makeLease")(function* (
   } satisfies WorkerLease;
 });
 
-const validateLocalWorkers = (
+const validateWorkers = (
+  kind: ConfigWorker["kind"],
   workers: ReadonlyArray<ConfigWorker>,
 ): Effect.Effect<ReadonlyArray<ConfigWorker>, UnsupportedWorkerError> => {
-  const unsupported = workers.find((worker) => worker.kind !== "local");
+  const unsupported = workers.find((worker) => worker.kind !== kind);
   return unsupported === undefined
     ? Effect.succeed(workers)
     : new UnsupportedWorkerError({ worker: unsupported.name, kind: unsupported.kind });
@@ -86,7 +87,7 @@ export const stepExecutorLayer = (
     StepExecutor,
     Effect.gen(function* () {
       const executor = yield* Executor;
-      const workers = yield* validateLocalWorkers(config.workers);
+      const workers = yield* validateWorkers(executor.kind, config.workers);
       yield* Effect.forEach(workers, ({ name }) => executor.preflight(name), {
         concurrency: "unbounded",
         discard: true,
@@ -185,6 +186,20 @@ export const stepExecutorLayer = (
                 Effect.ignore,
               ),
             ),
+            // The attempt dies before its credential grant does: a hung run
+            // host or dead link past the configured budget interrupts the
+            // launch (running the cancel handshake above) and reports a typed
+            // infra failure, never a silent forever-park (ADR 0006).
+            Effect.timeoutOrElse({
+              duration: `${config.settings.maxAttemptMinutes} minutes`,
+              orElse: () =>
+                Effect.fail(
+                  new AttemptFailure.InfraFailure({
+                    message: `Attempt exceeded the ${config.settings.maxAttemptMinutes}-minute budget`,
+                    cause: new Error("attempt timeout"),
+                  }),
+                ),
+            }),
             // ADR 0006: the worktree dies at attempt end regardless of outcome.
             // Cleanup never decides that outcome — a failed removal is logged,
             // not allowed to convert a finished agent session into a retryable
