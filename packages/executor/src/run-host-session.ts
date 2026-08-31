@@ -114,8 +114,17 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
                 attemptId,
                 message: String(error),
               }).pipe(
-                Effect.andThen(active.handle.kill({ killSignal: "SIGKILL" })),
-                Effect.ignore,
+                Effect.andThen(
+                  active.handle.kill({ killSignal: "SIGKILL" }).pipe(
+                    Effect.tapError((killError) =>
+                      Effect.logError("Run-host hard kill failed after interrupt delivery failed", {
+                        attemptId,
+                        message: String(killError),
+                      }),
+                    ),
+                    Effect.ignore,
+                  ),
+                ),
                 Effect.andThen(Effect.fail(error)),
               ),
             ),
@@ -243,7 +252,15 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
               infrastructureFailure("Could not read the run-host exit code", cause),
             ),
           );
-          yield* Fiber.join(stderrFiber).pipe(Effect.ignore);
+          yield* Fiber.join(stderrFiber).pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning("Could not finish reading run-host stderr", {
+                attemptId,
+                message: String(error),
+              }),
+            ),
+            Effect.ignore,
+          );
           yield* Effect.logInfo("Run host exited", {
             attemptId,
             exitCode: String(exitCode),

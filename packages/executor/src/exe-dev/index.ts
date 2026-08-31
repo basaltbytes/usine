@@ -121,7 +121,15 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
                 ])
                 .pipe(
                   Effect.onError(() =>
-                    commands.remote("prepare", vm, "rm", ["-rf", staging]).pipe(Effect.ignore),
+                    commands.remote("prepare", vm, "rm", ["-rf", staging]).pipe(
+                      Effect.tapError((error) =>
+                        Effect.logWarning("Could not remove a partial exe.dev clone", {
+                          attemptId: request.attemptId,
+                          message: error.message,
+                        }),
+                      ),
+                      Effect.ignore,
+                    ),
                   ),
                 );
               yield* commands.remote("prepare", vm, "mv", [staging, cache]);
