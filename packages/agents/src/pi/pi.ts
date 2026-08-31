@@ -9,18 +9,7 @@ import {
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
 import { Agent } from "@usine/core";
-import {
-  Cause,
-  Context,
-  Deferred,
-  Effect,
-  Layer,
-  Option,
-  Queue,
-  Ref,
-  Schema,
-  Stream,
-} from "effect";
+import { Context, Deferred, Effect, Fiber, Layer, Option, Queue, Schema, Stream } from "effect";
 import { assemblePrompt } from "../prompt.ts";
 import {
   type AgentSessionError,
@@ -29,9 +18,9 @@ import {
   type LaunchRequest,
   type RunningSession,
   SessionOperationError,
-  SessionResult,
   UnknownModelError,
 } from "../runtime.ts";
+import { sessionChannel } from "./session.ts";
 import { subagentsExtension } from "./subagents.ts";
 
 export type PiSessionEvent = AgentSessionEvent;
@@ -82,12 +71,21 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       if (selected === undefined) return { _tag: "UnknownModel" };
     }
     const agentDir = getAgentDir();
-    const settingsManager = SettingsManager.create(options.cwd, agentDir);
+    // The Attempt worktree is repository-controlled input: never trust its
+    // `.pi/` settings, SYSTEM.md, extensions, or skills. The subagents tool
+    // arrives as an inline factory, which the loader registers regardless.
+    const settingsManager = SettingsManager.create(options.cwd, agentDir, {
+      projectTrusted: false,
+    });
     const resourceLoader = new DefaultResourceLoader({
       agentDir,
       cwd: options.cwd,
       extensionFactories: [...options.extensions],
       settingsManager,
+      noExtensions: true,
+      noPromptTemplates: true,
+      noSkills: true,
+      noThemes: true,
     });
     await resourceLoader.reload();
     const sessionOptions = {
@@ -103,7 +101,10 @@ export const piSdkLive = Layer.succeed(PiSdk)({
         ? await createAgentSession(sessionOptions)
         : await createAgentSession({ ...sessionOptions, model: selected });
     const active = session.model;
-    if (active === undefined) throw new Error("Pi started without an active model");
+    if (active === undefined) {
+      session.dispose();
+      throw new Error("Pi started without an active model");
+    }
     return {
       _tag: "Started",
       model: Agent.ModelId.make(`${active.provider}/${active.id}`),
@@ -158,10 +159,10 @@ const lastMessageText = (messages: ReadonlyArray<PiMessage>): string | undefined
   return undefined;
 };
 
-const activityFrom = (
+const sessionEventFrom = (
   event: PiSessionEvent,
   session: Agent.ParentSession,
-): Agent.Activity | undefined => {
+): Agent.SessionEvent | undefined => {
   if (event.type === "message_end") {
     const text = messageText(event.message);
     return text === undefined ? undefined : new Agent.TextOutput({ session, text });
@@ -215,11 +216,32 @@ const makePiParent = Effect.gen(function* () {
         sessionId: parentId,
       });
       yield* Effect.logInfo("Launching Pi parent session");
-      const events = yield* Queue.make<Agent.Activity, AgentSessionError | Cause.Done>();
-      const emitChild = (activity: Agent.Activity) =>
-        Effect.sync(() => {
-          Queue.offerUnsafe(events, activity);
-        });
+      const channel = yield* sessionChannel({ label: "Pi parent session", sessionId: parentId });
+      // The Pi tool callback runs outside any usine fiber. Child programs must
+      // still carry this fiber's services (stderr logging, tracing) and die
+      // with this launch scope, so the extension receives a runner instead of
+      // reaching for the default runtime.
+      const scope = yield* Effect.scope;
+      const context = yield* Effect.context<never>();
+      const runChild = <A>(program: Effect.Effect<A, AgentSessionError>): Promise<A> =>
+        Effect.runPromise(
+          program.pipe(
+            Effect.provideContext(context),
+            Effect.forkIn(scope),
+            Effect.flatMap(Fiber.join),
+          ),
+        );
+      const emitChild = (event: Agent.SessionEvent) =>
+        Queue.offer(channel.events, event).pipe(
+          Effect.flatMap((accepted) =>
+            accepted
+              ? Effect.void
+              : Effect.logWarning("Dropped a child session event after the parent terminal", {
+                  sessionId: parentId,
+                  event: event._tag,
+                }),
+          ),
+        );
       const started = yield* Effect.tryPromise({
         try: () =>
           sdk.start({
@@ -231,6 +253,7 @@ const makePiParent = Effect.gen(function* () {
                 cwd: request.cwd,
                 emit: emitChild,
                 parentId,
+                run: runChild,
               }),
             ],
             model: request.spec.parentModel,
@@ -259,27 +282,18 @@ const makePiParent = Effect.gen(function* () {
           effort: request.spec.agent.brain.effort,
         }),
       });
-      const result = yield* Deferred.make<SessionResult, AgentSessionError>();
-      const terminal = yield* Ref.make(false);
       let lastText: string | undefined;
-      yield* Queue.offer(events, new Agent.SessionStarted({ session: parent }));
+      yield* Queue.offer(channel.events, new Agent.SessionStarted({ session: parent }));
       const unsubscribe = started.session.subscribe((event) => {
-        const activity = activityFrom(event, parent);
-        if (activity === undefined) return;
-        if (activity._tag === "TextOutput") lastText = activity.text;
-        Queue.offerUnsafe(events, activity);
+        const sessionEvent = sessionEventFrom(event, parent);
+        if (sessionEvent === undefined) return;
+        if (sessionEvent._tag === "TextOutput") lastText = sessionEvent.text;
+        // The subscription is removed on the terminal transition, so a false
+        // return can only occur in the transition's own instant.
+        Queue.offerUnsafe(channel.events, sessionEvent);
       });
+      channel.onTerminal(unsubscribe);
 
-      const fail = Effect.fn("PiParentRuntime.fail")(function* (error: AgentSessionError) {
-        if (yield* Ref.getAndSet(terminal, true)) return;
-        yield* Effect.logError("Pi parent session failed", {
-          errorTag: error._tag,
-          message: error.message,
-          sessionId: parentId,
-        });
-        yield* Deferred.fail(result, error);
-        yield* Queue.fail(events, error);
-      });
       const prompt = assemblePrompt({
         repository: request.spec.repository,
         payload: request.spec.payload,
@@ -292,19 +306,12 @@ const makePiParent = Effect.gen(function* () {
         catch: (cause) => parentError("stream", request, "Pi parent session failed", cause),
       }).pipe(
         Effect.flatMap(() =>
-          Effect.gen(function* () {
-            if (yield* Ref.getAndSet(terminal, true)) return;
-            const message =
-              lastText ??
-              lastMessageText(started.session.messages) ??
-              "Pi parent session completed";
-            yield* Queue.offer(events, new Agent.SessionFinished({ session: parent }));
-            yield* Deferred.succeed(result, new SessionResult({ message }));
-            yield* Queue.end(events);
-            yield* Effect.logInfo("Pi parent session finished", { sessionId: parentId });
-          }),
+          channel.finish(
+            parent,
+            lastText ?? lastMessageText(started.session.messages) ?? "Pi parent session completed",
+          ),
         ),
-        Effect.catch((error) => fail(error)),
+        Effect.catch((error) => channel.fail(error)),
       );
       yield* Effect.forkScoped(run);
       yield* Effect.addFinalizer(() =>
@@ -335,9 +342,9 @@ const makePiParent = Effect.gen(function* () {
         ),
       );
       return {
-        events: Stream.fromQueue(events),
+        events: Stream.fromQueue(channel.events),
         interrupt,
-        result: Deferred.await(result),
+        result: Deferred.await(channel.result),
         steer,
       } satisfies RunningSession;
     },

@@ -1,10 +1,16 @@
 import { assert, describe, it } from "@effect/vitest";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+  ToolDefinition,
+} from "@earendil-works/pi-coding-agent";
 import { Agent, Attempt, AttemptChannel, Repository } from "@usine/core";
 import { Effect, Layer, Option, Stream } from "effect";
 import {
   AgentRuntime,
   ChildBackend,
   LaunchRequest,
+  SessionResult,
   UnknownModelError,
   WorkingDirectory,
 } from "../../src/index.ts";
@@ -133,6 +139,68 @@ describe("Pi parent runtime", () => {
         assert(error instanceof UnknownModelError);
         assert.strictEqual(error.model, parentModel);
       }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
+    );
+  });
+
+  it.effect("runs subagent tool programs on the launch fiber's own services", () => {
+    // Pi invokes the tool callback outside any usine fiber. A detached
+    // Effect.runPromise would reset every fiber reference to its default —
+    // notably the stderr log redirect, whose loss corrupts the protocol
+    // stdout — so the runner must carry the launch context into the child.
+    let options: PiStartOptions | undefined;
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => undefined,
+      messages: [],
+      prompt: () => Promise.resolve(),
+      steer: () => Promise.resolve(),
+      subscribe: () => () => undefined,
+    };
+    const sdk = Layer.succeed(PiSdk)({
+      start: (found) => {
+        options = found;
+        return Promise.resolve({ _tag: "Started", model: parentModel, session });
+      },
+    });
+    let sawLaunchContext = false;
+    const child = Layer.succeed(ChildBackend)({
+      launch: () =>
+        Effect.gen(function* () {
+          sawLaunchContext = Option.isSome(yield* Effect.serviceOption(PiSdk));
+          return {
+            events: Stream.empty,
+            result: Effect.succeed(new SessionResult({ message: "child done" })),
+            steer: () => Effect.void,
+            interrupt: Effect.void,
+          };
+        }),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        yield* runtime.launch(request);
+        const extension = options?.extensions[0];
+        assert(extension !== undefined);
+        let registered: ToolDefinition | undefined;
+        yield* Effect.promise(async () => {
+          // SAFETY: this extension only calls registerTool; other members are unused.
+          await extension.factory({ registerTool: (tool) => (registered = tool) } as ExtensionAPI);
+        });
+        assert(registered !== undefined);
+        const result = yield* Effect.promise(() =>
+          // SAFETY: the owned subagent tool does not read ExtensionContext.
+          registered!.execute(
+            "tool-1",
+            { task: "Prove context propagation." },
+            undefined,
+            undefined,
+            {} as ExtensionContext,
+          ),
+        );
+        assert.strictEqual(result.content[0]?.text, "child done");
+        assert.strictEqual(sawLaunchContext, true);
+      }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(child)),
     );
   });
 });

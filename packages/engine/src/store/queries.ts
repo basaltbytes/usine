@@ -79,8 +79,11 @@ const eventRouteSelection = {
 const storedStateTag = sql`json_extract(${runs.stateJson}, '$._tag')`;
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
+// The Json round-trip is the portable named type for `queriesFor`'s inferred
+// signature — without it tsc cannot emit the declaration (TS2883).
 const storedAgent = (agent: Agent.Agent): Schema.Json =>
   Schema.decodeUnknownSync(Schema.Json)(encodeAgent(agent));
+
 export const queriesFor = (database: RunDatabaseClient) => {
   // Keep `.execute()` explicit: RC.4's yieldable wrapper can cross an Effect
   // Workflow suspension before its final mutation is observable (ADR 0020).

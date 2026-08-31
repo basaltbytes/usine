@@ -4,14 +4,15 @@ import type { Schema } from "effect";
 export interface PromptParts {
   readonly repository: Repository.Name;
   readonly payload: Schema.Json;
-  readonly agent?: Agent.Name;
-  readonly persona: string;
+  readonly agent: Agent.Name;
+  readonly persona: Agent.Persona;
   readonly task: AttemptChannel.Task;
 }
 
 export interface ChildPromptParts {
   readonly agent: Agent.Name;
-  readonly persona: string;
+  readonly persona: Agent.Persona;
+  /** Free text authored by the parent model, not the rendered loop task. */
   readonly task: string;
 }
 
@@ -37,15 +38,11 @@ export const assemblePrompt = (parts: PromptParts): string =>
     "# Task",
     "",
     parts.task,
-    ...(parts.agent === undefined
-      ? []
-      : [
-          "",
-          "# GitHub identity",
-          "",
-          "Append this signature to every GitHub comment, issue, or pull request you publish:",
-          githubSignature(parts.agent),
-        ]),
+    "",
+    "# GitHub identity",
+    "",
+    "Append this signature to every GitHub comment, issue, or pull request you publish:",
+    githubSignature(parts.agent),
   ].join("\n");
 
 /** Builds the isolated prompt given to a first-level child session. */

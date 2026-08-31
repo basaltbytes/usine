@@ -7,19 +7,36 @@ import { Agent } from "@usine/core";
 import { Effect, Fiber, Stream } from "effect";
 import { Type } from "typebox";
 import { assembleChildPrompt } from "../prompt.ts";
-import { type ChildBackend, ChildRequest, type WorkingDirectory } from "../runtime.ts";
+import {
+  type AgentSessionError,
+  type ChildBackend,
+  ChildRequest,
+  type WorkingDirectory,
+} from "../runtime.ts";
 
 export interface SubagentsExtensionOptions {
   readonly agent: Agent.Agent;
   readonly backend: ChildBackend["Service"];
   readonly cwd: WorkingDirectory;
-  readonly emit: (activity: Agent.Activity) => Effect.Effect<void>;
+  readonly emit: (event: Agent.SessionEvent) => Effect.Effect<void>;
   readonly parentId: Agent.SessionId;
+  /**
+   * Executes one child program on the parent launch's own services and scope.
+   * Pi invokes the tool outside any usine fiber, so running through the
+   * default runtime would lose the stderr log redirect (corrupting the
+   * protocol stdout) and detach the child from the Attempt's lifetime.
+   */
+  readonly run: <A>(program: Effect.Effect<A, AgentSessionError>) => Promise<A>;
 }
 
-const interrupted = (signal: AbortSignal | undefined): Effect.Effect<void> =>
+const interrupted = (
+  signal: AbortSignal | undefined,
+  sessionId: Agent.SessionId,
+): Effect.Effect<void> =>
   signal === undefined
-    ? Effect.never
+    ? Effect.logWarning("Pi supplied no abort signal; the child outlives only its scope", {
+        sessionId,
+      }).pipe(Effect.andThen(Effect.never))
     : Effect.callback<void>((resume) => {
         const onAbort = () => resume(Effect.void);
         if (signal.aborted) onAbort();
@@ -78,7 +95,7 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
               );
               const result = yield* Effect.raceFirst(
                 child.result,
-                interrupted(signal).pipe(
+                interrupted(signal, request.session.id).pipe(
                   Effect.andThen(child.interrupt),
                   Effect.andThen(Effect.interrupt),
                 ),
@@ -97,7 +114,7 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
               };
             }),
           );
-          return Effect.runPromise(program);
+          return options.run(program);
         },
       }),
     );

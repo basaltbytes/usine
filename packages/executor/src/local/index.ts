@@ -332,7 +332,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       return {
         handle,
         host: "local",
-        scrubStderr: (text: string): string => scrubbed(text, stored.credential),
+        scrub: (text: string): string => scrubbed(text, stored.credential),
       };
     });
 

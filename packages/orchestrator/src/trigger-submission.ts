@@ -6,7 +6,7 @@ import {
 } from "@usine/config";
 import { Agent, AttemptChannel, Event, Item, Loop, Repository } from "@usine/core";
 import { Submission, type SubmissionResult } from "@usine/engine";
-import { type DateTime, Effect, Match, Option, Schema } from "effect";
+import { type DateTime, Effect, Match, Option, Result, Schema } from "effect";
 
 /**
  * The worker fetch target until per-loop revisions exist: `git fetch origin
@@ -61,23 +61,30 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
   } satisfies ResolvedLoop;
 });
 
-/** Snapshot the validated instance roster; a mismatch here is a violated invariant. */
+/**
+ * Snapshot the validated instance roster. `InstanceFolder.load` quarantines
+ * loops naming unknown Agents, so a miss here is config drift on a
+ * hand-assembled instance: the loop is skipped with a log every cycle while
+ * its siblings keep polling — the same isolation the schedule path applies.
+ */
 export const resolveTriggerLoops = Effect.fn("TriggerRouting.resolveLoops")(function* (
   instance: LoadedInstance,
 ) {
-  return yield* Effect.forEach(instance.loops, (loop) =>
-    resolveTriggerLoop(instance, loop).pipe(
-      Effect.tapError((error) =>
-        Effect.logError("Loaded loop lost its rostered Agent", {
-          loop: error.loop,
-          agent: error.agent,
-          errorTag: error._tag,
-          message: error.message,
-        }),
-      ),
-      Effect.orDie,
-    ),
-  );
+  const resolved: Array<ResolvedLoop> = [];
+  for (const loop of instance.loops) {
+    const result = yield* Effect.result(resolveTriggerLoop(instance, loop));
+    if (Result.isSuccess(result)) {
+      resolved.push(result.success);
+      continue;
+    }
+    yield* Effect.logError("Loaded loop lost its rostered Agent; skipping the loop", {
+      loop: result.failure.loop,
+      agent: result.failure.agent,
+      errorTag: result.failure._tag,
+      message: result.failure.message,
+    });
+  }
+  return resolved;
 });
 
 interface TriggerSubmissionOptions {

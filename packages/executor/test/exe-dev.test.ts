@@ -180,8 +180,8 @@ const interactiveHandle = (command: StandardCommand, state: FakeSshState, mode: 
                   attemptId: input.spec.attemptId,
                   sequence: AttemptChannel.Sequence.make(2),
                   sentAt: DateTime.makeUnsafe("2026-08-31T12:00:01Z"),
-                  payload: new AttemptChannel.Activity({
-                    activity: new Agent.TextOutput({
+                  payload: new AttemptChannel.SessionEvent({
+                    event: new Agent.TextOutput({
                       session: TEST_SESSION,
                       text: "Remote work completed",
                     }),
@@ -465,7 +465,7 @@ describe("exe.dev executor", () => {
           transcript.map(([direction, envelope]) => [direction, envelope.payload._tag]),
           [
             ["outbound", "Started"],
-            ["outbound", "Activity"],
+            ["outbound", "SessionEvent"],
             ["outbound", "Final"],
           ],
         );

@@ -14,7 +14,7 @@ Everything lives in the `lifecycle` cluster: a deduplicated Event opens a Run, t
 | `Instance.Directory`, `Repository.Name`, `Repository.Revision`, `Repository.CommitSha` | Shared value objects — paths and validated Git identities |
 | `Worker.Name`, `Worker.Kind` | Value objects — a Worker identity and its local or exe.dev adapter kind |
 | `Agent.Agent`, `Agent.BrainSpec` | Agent values — a named persona, its child brain, and optional Pi parent-model override |
-| `Agent.Activity` | Session activity — typed parent or first-level child lifecycle, text, and tool events |
+| `Agent.SessionEvent` | Session events — typed parent or first-level child lifecycle, text, and tool events |
 | `AttemptChannel.*` | Protocol values — the secret-free run spec, framed input, and protocol-v2 Attempt envelopes |
 | `StepResult.*` | Result values — the final agent message plus commit, pull-request, and comment facts |
 | `RunState.*`, `CancelReason`, `Attempt.Outcome` | State value objects — discriminated unions, including a distinct canceled Attempt outcome |
@@ -24,6 +24,6 @@ Everything lives in the `lifecycle` cluster: a deduplicated Event opens a Run, t
 
 The run state machine is `pending → waiting → running → succeeded / failed / canceled`, with `failed → running` on operator retry. The failure taxonomy separates infra failures (the only auto-retryable class, capped), agent failures (always wait for the operator), and the runaway guard tripping (never auto-retried).
 
-Each Attempt records the child `BrainSpec` and effective Pi parent model used for that try. The attempt channel carries immutable repository, payload, task, and agent context in its `Start` frame; outbound `Activity` envelopes retain parent and first-level child session identity.
+Each Attempt records the child `BrainSpec` and effective Pi parent model used for that try. The attempt channel carries immutable repository, payload, task, and agent context in its `Start` frame; outbound `SessionEvent` envelopes retain parent and first-level child session identity.
 
 Everything is 0.x: APIs change without notice while the engine grows. `effect` is a peer dependency — supply it yourself at the pinned version.

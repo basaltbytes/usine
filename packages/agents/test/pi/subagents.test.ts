@@ -46,14 +46,15 @@ describe("owned Pi subagents extension", () => {
         });
       },
     });
-    const activities: Array<Agent.Activity> = [];
+    const events: Array<Agent.SessionEvent> = [];
     let registered: ToolDefinition | undefined;
     const extension = createSubagentsExtension({
       agent,
       backend: child,
       cwd: WorkingDirectory.make("/workspace/repo"),
-      emit: (activity) => Effect.sync(() => activities.push(activity)),
+      emit: (event) => Effect.sync(() => events.push(event)),
       parentId: parent.id,
+      run: (program) => Effect.runPromise(program),
     });
     // SAFETY: this extension only calls registerTool; all other ExtensionAPI members are unused.
     await extension({ registerTool: (tool) => (registered = tool) } as ExtensionAPI);
@@ -74,7 +75,7 @@ describe("owned Pi subagents extension", () => {
     assert.match(childRequest?.prompt ?? "", /Implement focused TypeScript changes/u);
     assert.match(childRequest?.prompt ?? "", /— usine agent: developer/u);
     assert.deepStrictEqual(
-      activities.map((activity) => activity._tag),
+      events.map((event) => event._tag),
       ["SessionStarted", "TextOutput", "SessionFinished"],
     );
   });

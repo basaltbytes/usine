@@ -198,9 +198,9 @@ describe("local worker", () => {
           transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
           [
             ["outbound", "Started"],
-            ["outbound", "Activity"],
-            ["outbound", "Activity"],
-            ["outbound", "Activity"],
+            ["outbound", "SessionEvent"],
+            ["outbound", "SessionEvent"],
+            ["outbound", "SessionEvent"],
             ["outbound", "Final"],
           ],
         );
@@ -214,7 +214,7 @@ describe("local worker", () => {
         );
         assert.deepStrictEqual(
           tail.map(({ envelope }) => envelope.payload._tag),
-          ["Activity", "Activity", "Activity", "Final"],
+          ["SessionEvent", "SessionEvent", "SessionEvent", "Final"],
         );
 
         const attempts = yield* fileSystem.readDirectory(

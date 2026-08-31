@@ -1,5 +1,5 @@
-import { Agent, AttemptChannel } from "@usine/core";
-import { Context, Effect, Schema, Scope, Stream } from "effect";
+import { Agent, AttemptChannel, AttemptFailure } from "@usine/core";
+import { Context, Effect, Match, Schema, Scope, Stream } from "effect";
 
 /** Value object: process-local working directory for one isolated Attempt. */
 export const WorkingDirectory = Schema.NonEmptyString.pipe(Schema.brand("AgentWorkingDirectory"));
@@ -40,6 +40,14 @@ export class UnsupportedHarnessError extends Schema.TaggedError<UnsupportedHarne
   message: Schema.NonEmptyString,
 }) {}
 
+/** The session ran to a terminal state and reported that the work itself failed. */
+export class AgentResultError extends Schema.TaggedError<AgentResultError>(
+  "@usine/agents/AgentResultError",
+)("AgentResultError", {
+  sessionId: Schema.OptionFromNullOr(Agent.SessionId),
+  message: Schema.NonEmptyString,
+}) {}
+
 export const SESSION_OPERATIONS = ["launch", "stream", "steer", "interrupt"] as const;
 export const SessionOperation = Schema.Literals(SESSION_OPERATIONS);
 export type SessionOperation = typeof SessionOperation.Type;
@@ -57,13 +65,28 @@ export class SessionOperationError extends Schema.TaggedError<SessionOperationEr
 export const AgentSessionError = Schema.Union([
   UnknownModelError,
   UnsupportedHarnessError,
+  AgentResultError,
   SessionOperationError,
 ]);
 export type AgentSessionError = typeof AgentSessionError.Type;
 
+/**
+ * The one place the session error union meets the ADR 0002 retry taxonomy:
+ * SDK/process trouble is retryable infrastructure; a bad roster spec or the
+ * agent failing its own work always waits for the operator.
+ */
+export const toAttemptFailure = (error: AgentSessionError): AttemptFailure.AttemptFailure =>
+  Match.valueTags(error, {
+    SessionOperationError: (operation) =>
+      new AttemptFailure.InfraFailure({ message: operation.message, cause: operation.cause }),
+    UnknownModelError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
+    UnsupportedHarnessError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
+    AgentResultError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
+  });
+
 /** Live SDK session. Its event stream and controls are backend-independent. */
 export interface RunningSession {
-  readonly events: Stream.Stream<Agent.Activity, AgentSessionError>;
+  readonly events: Stream.Stream<Agent.SessionEvent, AgentSessionError>;
   readonly result: Effect.Effect<SessionResult, AgentSessionError>;
   readonly steer: (message: string) => Effect.Effect<void, AgentSessionError>;
   readonly interrupt: Effect.Effect<void, AgentSessionError>;

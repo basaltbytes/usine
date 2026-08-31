@@ -346,8 +346,8 @@ describe("live agent loop", () => {
             assert(
               transcript.some(
                 ({ envelope }) =>
-                  envelope.payload._tag === "Activity" &&
-                  envelope.payload.activity.session._tag === "ChildSession",
+                  envelope.payload._tag === "SessionEvent" &&
+                  envelope.payload.event.session._tag === "ChildSession",
               ),
               "the transcript must expose child activity one level deep",
             );

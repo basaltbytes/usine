@@ -146,7 +146,7 @@ describe("live exe.dev Worker", () => {
           transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
           [
             ["outbound", "Started"],
-            ["outbound", "Activity"],
+            ["outbound", "SessionEvent"],
             ["outbound", "Final"],
           ],
         );

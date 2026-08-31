@@ -9,7 +9,7 @@ describe("assemblePrompt", () => {
       repository: Repository.Name.make("acme/demo"),
       payload: { number: 30, title: "Build the agent layer" },
       agent: Agent.Name.make("developer"),
-      persona: "You are the factory's implementation agent.",
+      persona: Agent.Persona.make("You are the factory's implementation agent."),
       task: AttemptChannel.Task.make("Implement issue #30: Build the agent layer"),
     });
 
@@ -47,7 +47,7 @@ describe("assemblePrompt", () => {
     assert.strictEqual(
       assembleChildPrompt({
         agent: name,
-        persona: "You implement focused TypeScript changes.",
+        persona: Agent.Persona.make("You implement focused TypeScript changes."),
         task: "Add the session interrupt adapter.",
       }),
       [

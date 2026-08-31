@@ -22,7 +22,7 @@ export const stubLayer = (delayMillis = 0) =>
                 effort: request.spec.agent.brain.effort,
               }),
             });
-            const events = yield* Queue.make<Agent.Activity, Cause.Done>();
+            const events = yield* Queue.make<Agent.SessionEvent, Cause.Done>();
             const result = yield* Deferred.make<SessionResult>();
             yield* Queue.offer(events, new Agent.SessionStarted({ session }));
             yield* Queue.offer(

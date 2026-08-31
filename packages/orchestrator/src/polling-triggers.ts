@@ -90,12 +90,15 @@ interface RepositoryCycle {
   readonly changedItems: number;
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
+  readonly failures: ReadonlyArray<RepositoryPollFailure>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
 interface ItemCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
+  /** Loop-authoring failures isolated to their loop so the cursor still advances. */
+  readonly failures: ReadonlyArray<RepositoryPollFailure>;
 }
 
 const cursorKey = (repository: ManagedRepo): CursorKey =>
@@ -208,7 +211,7 @@ export class PollingTriggers extends Context.Service<
         });
         const loops = watched.loops.filter(({ loop }) => loop.trigger.on === itemStream(item));
         if (loops.length === 0) {
-          return { submissions: [], revokedRuns: 0 } satisfies ItemCycle;
+          return { submissions: [], revokedRuns: 0, failures: [] } satisfies ItemCycle;
         }
 
         const snapshot = yield* github.snapshot(watched.repository.name, item);
@@ -223,6 +226,7 @@ export class PollingTriggers extends Context.Service<
           contentHash: snapshot.contentHash,
         });
         const submissions: Array<SubmissionResult> = [];
+        const failures: Array<RepositoryPollFailure> = [];
         let revokedRuns = 0;
         for (const { agent, loop, parentModel } of loops) {
           yield* Effect.annotateCurrentSpan({ loop: loop.name, agent: agent.name });
@@ -254,19 +258,29 @@ export class PollingTriggers extends Context.Service<
 
           const dedupKey = eventKey(loop, watched.repository, item, snapshot);
           const receivedAt = yield* DateTime.now;
-          const task = yield* config.renderPrompt(loop, context).pipe(
-            Effect.tapError((error) =>
-              Effect.logError("Loop prompt rendering failed", {
-                loop: loop.name,
+          // A render failure is deterministic loop authoring, not transport:
+          // re-polling the same snapshot re-fails identically. Isolate it to
+          // this loop so sibling loops and the cursor still advance.
+          const rendered = yield* Effect.result(config.renderPrompt(loop, context));
+          if (Result.isFailure(rendered)) {
+            yield* Effect.logError("Loop prompt rendering failed; sibling loops were unaffected", {
+              loop: loop.name,
+              repository: watched.repository.name,
+              agent: agent.name,
+              item: item.number,
+              errorTag: rendered.failure._tag,
+              message: rendered.failure.message,
+              ...configFileErrorLogFields(rendered.failure),
+            });
+            failures.push(
+              new RepositoryPollFailure({
                 repository: watched.repository.name,
-                agent: agent.name,
-                item: item.number,
-                errorTag: error._tag,
-                message: error.message,
-                ...configFileErrorLogFields(error),
+                errorTag: rendered.failure._tag,
+                message: rendered.failure.message,
               }),
-            ),
-          );
+            );
+            continue;
+          }
           const submitted = yield* runs.submit(
             triggerSubmission({
               dedupKey,
@@ -275,7 +289,7 @@ export class PollingTriggers extends Context.Service<
               payload,
               receivedAt,
               repository: watched.repository,
-              task: AttemptChannel.Task.make(task),
+              task: AttemptChannel.Task.make(rendered.success),
               agent,
               parentModel,
             }),
@@ -291,7 +305,7 @@ export class PollingTriggers extends Context.Service<
           });
           submissions.push(submitted);
         }
-        return { submissions, revokedRuns } satisfies ItemCycle;
+        return { submissions, revokedRuns, failures } satisfies ItemCycle;
       });
 
       const pollRepository = Effect.fn("PollingTriggers.pollRepository")(function* (
@@ -308,6 +322,7 @@ export class PollingTriggers extends Context.Service<
             changedItems: 0,
             submissions: [],
             revokedRuns: 0,
+            failures: [],
             nextPollAt: detected.nextPollAt,
           } satisfies RepositoryCycle;
         }
@@ -330,6 +345,7 @@ export class PollingTriggers extends Context.Service<
           changedItems: detected.items.length,
           submissions: itemCycles.flatMap(({ submissions }) => submissions),
           revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
+          failures: itemCycles.flatMap(({ failures }) => failures),
           nextPollAt: detected.nextPollAt,
         } satisfies RepositoryCycle;
       });
@@ -381,7 +397,7 @@ export class PollingTriggers extends Context.Service<
           changedItems: cycles.reduce((sum, cycle) => sum + cycle.changedItems, 0),
           submissions: cycles.flatMap(({ submissions }) => submissions),
           revokedRuns: cycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
-          failures,
+          failures: [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
           nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
         });
       });

@@ -1,7 +1,7 @@
 /** @usine/run-host — one-shot worker-side Attempt host. */
 
-import { AgentRuntime, AgentSessionError, LaunchRequest, WorkingDirectory } from "@usine/agents";
-import { AttemptChannel, AttemptFailure, Repository, StepResult } from "@usine/core";
+import { AgentRuntime, LaunchRequest, toAttemptFailure, WorkingDirectory } from "@usine/agents";
+import { AttemptChannel, Repository, StepResult } from "@usine/core";
 import {
   Deferred,
   DateTime,
@@ -35,9 +35,6 @@ const encodeOutput = Schema.encodeSync(Schema.fromJsonString(AttemptChannel.Outb
 
 const hostError = (stage: RunHostError["stage"], message: string, cause: unknown): RunHostError =>
   new RunHostError({ stage, message, cause });
-
-const agentFailure = (error: AgentSessionError): AttemptFailure.AgentFailure =>
-  new AttemptFailure.AgentFailure({ message: error.message });
 
 /** Runs one real agent session over the strict protocol-v2 newline-delimited channel. */
 export const runHost = () =>
@@ -189,13 +186,13 @@ export const runHost = () =>
           errorTag: launched.failure._tag,
           message: launched.failure.message,
         });
-        yield* emit(new AttemptChannel.Failed({ failure: agentFailure(launched.failure) }));
+        yield* emit(new AttemptChannel.Failed({ failure: toAttemptFailure(launched.failure) }));
         yield* Fiber.interrupt(inputFiber);
         return;
       }
       const session = launched.success;
-      const activityFiber = yield* session.events.pipe(
-        Stream.runForEach((activity) => emit(new AttemptChannel.Activity({ activity }))),
+      const eventFiber = yield* session.events.pipe(
+        Stream.runForEach((event) => emit(new AttemptChannel.SessionEvent({ event }))),
         Effect.forkChild,
       );
       const interrupted = yield* Deferred.make<void>();
@@ -243,7 +240,7 @@ export const runHost = () =>
 
       const completed = Effect.gen(function* () {
         const sessionResult = yield* session.result;
-        yield* Fiber.join(activityFiber);
+        yield* Fiber.join(eventFiber);
         const commits = yield* harvestCommits();
         return new StepResult.StepResult({ message: sessionResult.message, facts: commits });
       });
@@ -256,12 +253,18 @@ export const runHost = () =>
           Effect.andThen(Fiber.join(commandFiber), Effect.never),
         ).pipe(Effect.result);
         if (Result.isFailure(outcome)) {
-          if (Schema.is(RunHostError)(outcome.failure)) return yield* outcome.failure;
+          if (Schema.is(RunHostError)(outcome.failure)) {
+            yield* Effect.logError("Run host protocol failure", {
+              stage: outcome.failure.stage,
+              message: outcome.failure.message,
+            });
+            return yield* outcome.failure;
+          }
           yield* Effect.logError("Agent session failed", {
             errorTag: outcome.failure._tag,
             message: outcome.failure.message,
           });
-          yield* emit(new AttemptChannel.Failed({ failure: agentFailure(outcome.failure) }));
+          yield* emit(new AttemptChannel.Failed({ failure: toAttemptFailure(outcome.failure) }));
           return;
         }
         if (outcome.success._tag === "Interrupted") {
@@ -278,7 +281,7 @@ export const runHost = () =>
           Effect.all(
             [
               Fiber.interrupt(commandFiber),
-              Fiber.interrupt(activityFiber),
+              Fiber.interrupt(eventFiber),
               Fiber.interrupt(inputFiber),
             ],
             { discard: true },

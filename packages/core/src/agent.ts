@@ -111,14 +111,14 @@ export class SessionFinished extends Schema.TaggedClass<SessionFinished>("Agent/
 ) {}
 
 /** Normalized events emitted by every parent and child SDK backend. */
-export const Activity = Schema.Union([
+export const SessionEvent = Schema.Union([
   SessionStarted,
   TextOutput,
   ToolStarted,
   ToolFinished,
   SessionFinished,
 ]);
-export type Activity = typeof Activity.Type;
+export type SessionEvent = typeof SessionEvent.Type;
 
 /** Pure deriver: a per-Agent parent override wins over the instance default. */
 export const resolveParentModel = (

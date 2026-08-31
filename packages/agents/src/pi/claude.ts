@@ -5,28 +5,17 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Agent } from "@usine/core";
+import { Context, Deferred, Effect, Layer, Option, Queue, Schema, Stream } from "effect";
 import {
-  Cause,
-  Context,
-  Deferred,
-  Effect,
-  Layer,
-  Option,
-  Queue,
-  Ref,
-  Schema,
-  Stream,
-} from "effect";
-import {
-  type AgentSessionError,
+  AgentResultError,
   ChildBackend,
   type ChildRequest,
   type RunningSession,
   SessionOperationError,
-  SessionResult,
   UnknownModelError,
   UnsupportedHarnessError,
 } from "../runtime.ts";
+import { sessionChannel } from "./session.ts";
 
 export interface ClaudeUserMessage {
   readonly type: "user";
@@ -39,7 +28,6 @@ export type ClaudeQueryOptions = Pick<
   | "allowDangerouslySkipPermissions"
   | "cwd"
   | "effort"
-  | "includePartialMessages"
   | "model"
   | "permissionMode"
   | "persistSession"
@@ -145,11 +133,13 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
   const shared: Omit<ClaudeQueryOptions, "effort" | "thinking"> = {
     allowDangerouslySkipPermissions: true,
     cwd: request.cwd,
-    includePartialMessages: true,
     model: request.session.brain.model,
     permissionMode: "bypassPermissions",
     persistSession: false,
-    settingSources: ["user", "project", "local"],
+    // The Attempt worktree is repository-controlled input: its project and
+    // local settings (hooks, env) must never load into a child that carries
+    // the App credential. Only the worker user's own settings apply.
+    settingSources: ["user"],
   };
   return effort === "off"
     ? { ...shared, thinking: { type: "disabled" } }
@@ -163,12 +153,9 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
 const modelExists = (models: ReadonlyArray<ClaudeModelInfo>, model: Agent.ModelId): boolean =>
   models.some((candidate) => candidate.value === model || candidate.resolvedModel === model);
 
-const ClaudeTextDeltaMessage = Schema.Struct({
-  type: Schema.Literal("stream_event"),
-  event: Schema.Struct({
-    type: Schema.Literal("content_block_delta"),
-    delta: Schema.Struct({ type: Schema.Literal("text_delta"), text: Schema.NonEmptyString }),
-  }),
+const ClaudeTextBlock = Schema.Struct({
+  type: Schema.Literal("text"),
+  text: Schema.NonEmptyString,
 });
 const ClaudeContentMessage = Schema.Struct({
   type: Schema.Literals(["assistant", "user"]),
@@ -194,20 +181,21 @@ const ClaudeResultMessage = Schema.Struct({
   queued_turn_count: Schema.optionalKey(Schema.Number),
 });
 
-const activitiesFrom = (
+const sessionEventsFrom = (
   message: Schema.Json,
   session: Agent.ChildSession,
   tools: Map<string, string>,
-): ReadonlyArray<Agent.Activity> => {
-  if (Schema.is(ClaudeTextDeltaMessage)(message)) {
-    return [new Agent.TextOutput({ session, text: message.event.delta.text })];
-  }
+): ReadonlyArray<Agent.SessionEvent> => {
   if (!Schema.is(ClaudeContentMessage)(message)) return [];
-  const activities: Array<Agent.Activity> = [];
+  const events: Array<Agent.SessionEvent> = [];
   for (const block of message.message.content) {
-    if (Schema.is(ClaudeToolUseBlock)(block)) {
+    // Complete messages only: one TextOutput per finished assistant message
+    // keeps transcript volume at message granularity, matching the parent.
+    if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
+      events.push(new Agent.TextOutput({ session, text: block.text }));
+    } else if (Schema.is(ClaudeToolUseBlock)(block)) {
       tools.set(block.id, block.name);
-      activities.push(
+      events.push(
         new Agent.ToolStarted({
           session,
           callId: block.id,
@@ -216,7 +204,7 @@ const activitiesFrom = (
         }),
       );
     } else if (Schema.is(ClaudeToolResultBlock)(block)) {
-      activities.push(
+      events.push(
         new Agent.ToolFinished({
           session,
           callId: block.tool_use_id,
@@ -227,7 +215,7 @@ const activitiesFrom = (
       );
     }
   }
-  return activities;
+  return events;
 };
 
 const makeClaudeChild = Effect.gen(function* () {
@@ -272,61 +260,51 @@ const makeClaudeChild = Effect.gen(function* () {
         });
       }
 
-      const events = yield* Queue.make<Agent.Activity, AgentSessionError | Cause.Done>();
-      const result = yield* Deferred.make<SessionResult, AgentSessionError>();
-      const terminal = yield* Ref.make(false);
-      const tools = new Map<string, string>();
-      yield* Queue.offer(events, new Agent.SessionStarted({ session: request.session }));
-      input.offer(userMessage(request.prompt));
-
-      const fail = Effect.fn("ClaudeChildBackend.fail")(function* (error: AgentSessionError) {
-        if (yield* Ref.getAndSet(terminal, true)) return;
-        yield* Effect.logError("Claude child session failed", {
-          errorTag: error._tag,
-          message: error.message,
-          sessionId: request.session.id,
-        });
-        yield* Deferred.fail(result, error);
-        yield* Queue.fail(events, error);
+      const channel = yield* sessionChannel({
+        label: "Claude child session",
+        sessionId: request.session.id,
+      });
+      channel.onTerminal(() => {
         input.end();
       });
+      const tools = new Map<string, string>();
+      yield* Queue.offer(channel.events, new Agent.SessionStarted({ session: request.session }));
+      input.offer(userMessage(request.prompt));
 
       const consume = Stream.fromAsyncIterable(query, (cause) =>
         operationError("stream", request, "Claude output stream failed", cause),
       ).pipe(
         Stream.runForEach((message) =>
           Effect.gen(function* () {
-            for (const activity of activitiesFrom(message, request.session, tools)) {
-              yield* Queue.offer(events, activity);
+            for (const event of sessionEventsFrom(message, request.session, tools)) {
+              yield* Queue.offer(channel.events, event);
             }
             if (!Schema.is(ClaudeResultMessage)(message)) return;
             if (message.subtype !== "success" || message.result === undefined) {
               const detail = message.errors?.join("; ") ?? "Claude returned an unsuccessful result";
-              yield* fail(
-                operationError("stream", request, "Claude child session failed", new Error(detail)),
+              yield* channel.fail(
+                new AgentResultError({
+                  sessionId: Option.some(request.session.id),
+                  message: detail,
+                }),
               );
               return;
             }
             if (message.queued_turn_count !== undefined && message.queued_turn_count > 0) {
               return;
             }
-            if (yield* Ref.getAndSet(terminal, true)) return;
-            const text = message.result.trim() || "Claude child session completed";
-            yield* Queue.offer(events, new Agent.SessionFinished({ session: request.session }));
-            yield* Deferred.succeed(result, new SessionResult({ message: text }));
-            yield* Queue.end(events);
-            input.end();
-            yield* Effect.logInfo("Claude child session finished", {
-              sessionId: request.session.id,
-            });
+            yield* channel.finish(
+              request.session,
+              message.result.trim() || "Claude child session completed",
+            );
           }),
         ),
         Effect.flatMap(() =>
-          Ref.get(terminal).pipe(
+          channel.isTerminal.pipe(
             Effect.flatMap((done) =>
               done
                 ? Effect.void
-                : fail(
+                : channel.fail(
                     operationError(
                       "stream",
                       request,
@@ -337,7 +315,7 @@ const makeClaudeChild = Effect.gen(function* () {
             ),
           ),
         ),
-        Effect.catch((error) => fail(error)),
+        Effect.catch((error) => channel.fail(error)),
       );
       yield* Effect.forkScoped(consume);
 
@@ -367,9 +345,9 @@ const makeClaudeChild = Effect.gen(function* () {
         Effect.asVoid,
       );
       return {
-        events: Stream.fromQueue(events),
+        events: Stream.fromQueue(channel.events),
         interrupt,
-        result: Deferred.await(result),
+        result: Deferred.await(channel.result),
         steer,
       } satisfies RunningSession;
     },

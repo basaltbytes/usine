@@ -19,7 +19,8 @@ import { ExecutorError, ExecutorOperationError, type PreparedAttempt } from "./i
 export interface SpawnedRunHost {
   readonly handle: ChildProcessHandle;
   readonly host: string;
-  readonly scrubStderr: (text: string) => string;
+  /** Redacts the Attempt credential from any run-host output before it is persisted. */
+  readonly scrub: (text: string) => string;
 }
 
 export type RunHostInput = Queue.Queue<Uint8Array, Cause.Done>;
@@ -229,7 +230,7 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
       const execute = Effect.scoped(
         Effect.gen(function* () {
           const input = yield* Queue.make<Uint8Array, Cause.Done>();
-          const { handle, host, scrubStderr } = yield* options.spawn(prepared, input);
+          const { handle, host, scrub } = yield* options.spawn(prepared, input);
           yield* Effect.annotateCurrentSpan({ host });
           const active: ActiveAttempt = {
             cancelStarted: yield* Ref.make(false),
@@ -273,8 +274,11 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
           yield* handle.stdout.pipe(
             Stream.decodeText(),
             Stream.splitLines,
-            Stream.runForEach((line) =>
+            Stream.runForEach((rawLine) =>
               Effect.gen(function* () {
+                // Protocol v2 carries raw tool inputs and outputs; scrub the
+                // credential from the line before it is decoded or persisted.
+                const line = scrub(rawLine);
                 const envelope = yield* decodeOutboundEnvelope(line).pipe(
                   Effect.mapError((cause) =>
                     infrastructureFailure("The run host emitted an invalid frame", cause),
@@ -329,7 +333,7 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
             exitCode: String(exitCode),
           });
           const ended = yield* Ref.get(terminal);
-          const errorOutput = scrubStderr((yield* Ref.get(stderr)).trim());
+          const errorOutput = scrub((yield* Ref.get(stderr)).trim());
           if (Option.isNone(ended)) {
             return yield* infrastructureFailure(
               "The run-host channel closed without a final envelope",

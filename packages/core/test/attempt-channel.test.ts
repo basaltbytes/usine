@@ -81,8 +81,8 @@ describe("attempt channel v2", () => {
         payload,
       });
     const started = new AttemptChannel.Started();
-    const activity = new AttemptChannel.Activity({
-      activity: new Agent.SessionStarted({
+    const activity = new AttemptChannel.SessionEvent({
+      event: new Agent.SessionStarted({
         session: new Agent.ParentSession({
           id: Agent.SessionId.make("parent-1"),
           agent: agent.name,
