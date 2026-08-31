@@ -1,5 +1,5 @@
 import { Result, Schema, type Effect } from "effect";
-import { Agent, ModelId } from "./agent.ts";
+import { Activity as AgentActivity, Agent, ModelId } from "./agent.ts";
 import { AttemptId } from "./lifecycle/attempt.ts";
 import { AttemptFailure } from "./lifecycle/attempt-failure.ts";
 import { CommitSha, Name as RepositoryName, Revision } from "./repository.ts";
@@ -52,6 +52,11 @@ export class AgentMessage extends Schema.TaggedClass<AgentMessage>("AttemptChann
   },
 ) {}
 
+/** One normalized parent or child session event, persisted in the Attempt transcript. */
+export class Activity extends Schema.TaggedClass<Activity>("AttemptChannel/Activity")("Activity", {
+  activity: AgentActivity,
+}) {}
+
 export class Final extends Schema.TaggedClass<Final>("AttemptChannel/Final")("Final", {
   result: StepResult,
 }) {}
@@ -66,7 +71,14 @@ export class Interrupted extends Schema.TaggedClass<Interrupted>("AttemptChannel
   {},
 ) {}
 
-export const OutboundPayload = Schema.Union([Started, AgentMessage, Final, Failed, Interrupted]);
+export const OutboundPayload = Schema.Union([
+  Started,
+  AgentMessage,
+  Activity,
+  Final,
+  Failed,
+  Interrupted,
+]);
 export type OutboundPayload = typeof OutboundPayload.Type;
 
 export class Steer extends Schema.TaggedClass<Steer>("AttemptChannel/Steer")("Steer", {

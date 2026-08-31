@@ -48,6 +48,80 @@ export class Agent extends Schema.Class<Agent>("Agent")({
   persona: Persona,
 }) {}
 
+/** Value object: SDK-local identity of one parent or child agent session. */
+export const SessionId = Schema.NonEmptyString.pipe(Schema.brand("AgentSessionId"));
+export type SessionId = typeof SessionId.Type;
+
+/** Parent session descriptor. It cannot name a parent, so recursive nesting is unrepresentable. */
+export class ParentSession extends Schema.TaggedClass<ParentSession>("Agent/ParentSession")(
+  "ParentSession",
+  {
+    id: SessionId,
+    agent: Name,
+    brain: BrainSpec,
+  },
+) {}
+
+/** Child session descriptor. Exactly one parent id keeps activity nesting one level deep. */
+export class ChildSession extends Schema.TaggedClass<ChildSession>("Agent/ChildSession")(
+  "ChildSession",
+  {
+    id: SessionId,
+    parentId: SessionId,
+    agent: Name,
+    brain: BrainSpec,
+  },
+) {}
+
+export const Session = Schema.Union([ParentSession, ChildSession]);
+export type Session = typeof Session.Type;
+
+export class SessionStarted extends Schema.TaggedClass<SessionStarted>("Agent/SessionStarted")(
+  "SessionStarted",
+  { session: Session },
+) {}
+
+export class TextOutput extends Schema.TaggedClass<TextOutput>("Agent/TextOutput")("TextOutput", {
+  session: Session,
+  text: Schema.NonEmptyString,
+}) {}
+
+export class ToolStarted extends Schema.TaggedClass<ToolStarted>("Agent/ToolStarted")(
+  "ToolStarted",
+  {
+    session: Session,
+    callId: Schema.NonEmptyString,
+    tool: Schema.NonEmptyString,
+    input: Schema.Json,
+  },
+) {}
+
+export class ToolFinished extends Schema.TaggedClass<ToolFinished>("Agent/ToolFinished")(
+  "ToolFinished",
+  {
+    session: Session,
+    callId: Schema.NonEmptyString,
+    tool: Schema.NonEmptyString,
+    output: Schema.Json,
+    isError: Schema.Boolean,
+  },
+) {}
+
+export class SessionFinished extends Schema.TaggedClass<SessionFinished>("Agent/SessionFinished")(
+  "SessionFinished",
+  { session: Session },
+) {}
+
+/** Normalized events emitted by every parent and child SDK backend. */
+export const Activity = Schema.Union([
+  SessionStarted,
+  TextOutput,
+  ToolStarted,
+  ToolFinished,
+  SessionFinished,
+]);
+export type Activity = typeof Activity.Type;
+
 /** Pure deriver: the child brain declared by one rostered Agent. */
 export const brainOf = (agent: Agent): BrainSpec =>
   new BrainSpec({ harness: agent.harness, model: agent.model, effort: agent.effort });

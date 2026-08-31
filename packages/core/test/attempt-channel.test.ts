@@ -10,6 +10,7 @@ const agent = new Agent.Agent({
   parentModel: Option.none(),
   persona: Agent.Persona.make("Implement the task and sign every GitHub comment."),
 });
+const parentModel = Agent.ModelId.make("anthropic/claude-opus-4-6");
 
 const spec = new AttemptChannel.RunSpec({
   attemptId: Attempt.AttemptId.make("attempt-1"),
@@ -19,7 +20,7 @@ const spec = new AttemptChannel.RunSpec({
   payload: { number: 30, title: "Agent layer" },
   task: AttemptChannel.Task.make("Implement the issue"),
   agent,
-  parentModel: Option.some(Agent.ModelId.make("anthropic/claude-opus-4-6")),
+  parentModel: Option.some(parentModel),
 });
 
 describe("attempt channel v2", () => {
@@ -79,6 +80,15 @@ describe("attempt channel v2", () => {
       });
     const started = new AttemptChannel.Started();
     const message = new AttemptChannel.AgentMessage({ message: "working" });
+    const activity = new AttemptChannel.Activity({
+      activity: new Agent.SessionStarted({
+        session: new Agent.ParentSession({
+          id: Agent.SessionId.make("parent-1"),
+          agent: agent.name,
+          brain: new Agent.BrainSpec({ harness: "pi", model: parentModel, effort: "high" }),
+        }),
+      }),
+    });
     const interruptedTerminal = new AttemptChannel.Interrupted();
 
     const admitAll = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) => {
@@ -95,7 +105,8 @@ describe("attempt channel v2", () => {
       const outcome = admitAll([
         outbound(1, started),
         outbound(2, message),
-        outbound(3, interruptedTerminal),
+        outbound(3, activity),
+        outbound(4, interruptedTerminal),
       ]);
       assert(Result.isSuccess(outcome));
       assert.strictEqual(outcome.success.state, "Terminal");
