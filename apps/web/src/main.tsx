@@ -226,8 +226,21 @@ const RunDrawer = ({ runId, close }: { readonly runId: string; readonly close: (
   const [confirmCancel, setConfirmCancel] = useState(false);
   const detail = useQuery({
     queryKey: ["run", runId],
-    queryFn: () => api(`/api/runs/${encodeURIComponent(runId)}`, RunDetailView),
-    refetchInterval: 1_000,
+    queryFn: async () => {
+      const key = ["run", runId] as const;
+      const previous = queryClient.getQueryData<RunDetailView>(key);
+      const cursor = previous?.transcript.at(-1)?.sequence;
+      const search = cursor === undefined ? "" : `?after=${cursor}`;
+      const next = await api(`/api/runs/${encodeURIComponent(runId)}${search}`, RunDetailView);
+      if (previous === undefined || cursor === undefined) return next;
+      const seen = new Set(previous.transcript.map(({ sequence }) => sequence));
+      const transcript = [
+        ...previous.transcript,
+        ...next.transcript.filter(({ sequence }) => !seen.has(sequence)),
+      ].sort((left, right) => left.sequence - right.sequence);
+      return new RunDetailView({ ...next, transcript });
+    },
+    refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
   });
   const mutation = useMutation({
     mutationFn: (act: "approve" | "retry" | "cancel") =>
@@ -446,7 +459,7 @@ const FactoryScreen = () => {
                   <p className="empty-copy">No runs yet.</p>
                 ) : (
                   <div className="run-list">
-                    {project.runs.slice(0, 8).map((run) => (
+                    {project.runs.map((run) => (
                       <RunRow key={run.id} run={run} open={() => openRun(run.id)} />
                     ))}
                   </div>

@@ -1,4 +1,9 @@
+import { TranscriptSequence } from "@usine/engine";
 import { Schema } from "effect";
+
+/** Cursor for tailing the append-only transcript without replaying older events. */
+export const TranscriptCursor = TranscriptSequence;
+export type TranscriptCursor = TranscriptSequence;
 
 export const ProjectStatus = Schema.Literals(["clear", "active", "needs-you"]);
 export type ProjectStatus = typeof ProjectStatus.Type;

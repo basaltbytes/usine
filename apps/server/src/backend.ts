@@ -1,8 +1,14 @@
 import type { LoadedInstance } from "@usine/config";
 import { Loop, Run } from "@usine/core";
-import type { FactoryOverview, Operator, OperatorError, RunDetailView } from "@usine/orchestrator";
+import type {
+  FactoryOverview,
+  Operator,
+  OperatorError,
+  RunDetailView,
+  TranscriptCursor,
+} from "@usine/orchestrator";
 import { LoopView, NeedsSetupOverview, ProjectView } from "@usine/orchestrator";
-import { Context, Effect, Layer, Schema } from "effect";
+import { Context, Effect, Layer, Option, Schema } from "effect";
 
 export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailableError>(
   "@usine/server/BackendUnavailableError",
@@ -16,7 +22,10 @@ export class FactoryBackend extends Context.Service<
   FactoryBackend,
   {
     readonly overview: Effect.Effect<FactoryOverview, BackendError>;
-    readonly detail: (runId: Run.RunId) => Effect.Effect<RunDetailView, BackendError>;
+    readonly detail: (
+      runId: Run.RunId,
+      after: Option.Option<TranscriptCursor>,
+    ) => Effect.Effect<RunDetailView, BackendError>;
     readonly approve: (runId: Run.RunId) => Effect.Effect<void, BackendError>;
     readonly retry: (runId: Run.RunId) => Effect.Effect<void, BackendError>;
     readonly cancel: (runId: Run.RunId) => Effect.Effect<void, BackendError>;

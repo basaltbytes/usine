@@ -7,7 +7,13 @@ import {
   type TranscriptEntry,
 } from "@usine/engine";
 import { DateTime, Effect, Option, Schema } from "effect";
-import { AttemptView, RunView, TranscriptEventView, type TranscriptScope } from "./model.ts";
+import {
+  AttemptView,
+  RunView,
+  TranscriptEventView,
+  type TranscriptCursor,
+  type TranscriptScope,
+} from "./model.ts";
 
 const jsonDetail = (value: Schema.Json): string => JSON.stringify(value, null, 2) ?? "null";
 
@@ -123,18 +129,19 @@ const transcriptEvent = (entry: TranscriptEntry): TranscriptEventView => {
 export const readTranscript: (
   runs: RunEngine["Service"],
   snapshot: RunSnapshot,
+  after?: Option.Option<TranscriptCursor>,
 ) => Effect.Effect<ReadonlyArray<TranscriptEventView>, RunEngineError> = Effect.fn(
   "Operator.readTranscript",
 )(
   (
     runs: RunEngine["Service"],
     snapshot: RunSnapshot,
+    after: Option.Option<TranscriptCursor> = Option.none(),
   ): Effect.Effect<ReadonlyArray<TranscriptEventView>, RunEngineError> =>
     Effect.gen(function* () {
       const entries = yield* Effect.forEach(
         snapshot.attempts,
-        (attempt) =>
-          runs.transcript(new TranscriptQuery({ attemptId: attempt.id, after: Option.none() })),
+        (attempt) => runs.transcript(new TranscriptQuery({ attemptId: attempt.id, after })),
         { concurrency: 4 },
       );
       return entries

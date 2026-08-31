@@ -56,5 +56,11 @@ describe("operator HTTP API", () => {
       error: "BackendUnavailableError",
       message: "GitHub App setup is required.",
     });
+
+    const invalidCursor = await app.handler(
+      new Request(`http://localhost/api/runs/${Run.RunId.make("run-1")}?after=0`),
+    );
+    assert.strictEqual(invalidCursor.status, 400);
+    assert.strictEqual((await invalidCursor.json()).error, "SchemaError");
   });
 });

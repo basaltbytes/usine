@@ -2,13 +2,15 @@ import { createServer } from "node:http";
 import { resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
 import { Loop, Run } from "@usine/core";
-import { FactoryOverview, RunDetailView } from "@usine/orchestrator";
-import { Effect, Layer, Schema } from "effect";
+import { FactoryOverview, RunDetailView, TranscriptCursor } from "@usine/orchestrator";
+import { Effect, Layer, Option, Schema } from "effect";
 import { HttpBody, HttpRouter, HttpServerResponse } from "effect/unstable/http";
 import { FactoryBackend, type BackendError } from "./backend.ts";
 
 const PathRun = Schema.Struct({ runId: Run.RunId });
 const PathLoop = Schema.Struct({ loop: Loop.LoopName });
+const TranscriptCursorFromString = Schema.FiniteFromString.pipe(Schema.decodeTo(TranscriptCursor));
+const RunDetailSearch = Schema.Struct({ after: Schema.optional(TranscriptCursorFromString) });
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
 const ApiError = Schema.Struct({ error: Schema.String, message: Schema.String });
 const ok = HttpServerResponse.schemaJson(ApiOk);
@@ -93,14 +95,17 @@ export const apiRoutes = HttpRouter.addAll([
       }),
     ),
   ),
-  HttpRouter.route(
-    "GET",
-    "/api/runs/:runId",
+  HttpRouter.route("GET", "/api/runs/:runId", (request) =>
     handled(
       Effect.gen(function* () {
         const backend = yield* FactoryBackend;
         const { runId } = yield* HttpRouter.schemaPathParams(PathRun);
-        return yield* HttpServerResponse.schemaJson(RunDetailView)(yield* backend.detail(runId));
+        const { after } = yield* Schema.decodeUnknownEffect(RunDetailSearch)({
+          after: new URL(request.url, "http://localhost").searchParams.get("after") ?? undefined,
+        });
+        return yield* HttpServerResponse.schemaJson(RunDetailView)(
+          yield* backend.detail(runId, Option.fromUndefinedOr(after)),
+        );
       }),
     ),
   ),

@@ -39,6 +39,7 @@ import {
   RepositoryPollFailure,
   ScheduleCycle,
   ScheduleTriggers,
+  TranscriptCursor,
 } from "../src/index.ts";
 
 const now = DateTime.makeUnsafe("2026-08-31T12:00:00.000Z");
@@ -180,7 +181,13 @@ const testLayer = (approved: Ref.Ref<ReadonlyArray<Run.RunId>>) => {
     retry: () => Effect.void,
     revoke: () => Effect.succeed([]),
     submit: () => Effect.die("unused"),
-    transcript: () => Effect.succeed(transcript),
+    transcript: ({ after }) =>
+      Effect.succeed(
+        Option.match(after, {
+          onNone: () => transcript,
+          onSome: (cursor) => transcript.filter((entry) => entry.sequence > cursor),
+        }),
+      ),
   });
   const controls = Layer.succeed(LoopControl)({
     isPaused: () => Effect.succeed(true),
@@ -256,6 +263,12 @@ describe("Operator", () => {
           assert.strictEqual(detail.transcript[1]?.scope, "child");
           assert.strictEqual(detail.transcript[1]?.parentId, parent.id);
           assert.strictEqual(detail.transcript[1]?.sessionId, child.id);
+
+          const tail = yield* operator.detail(runId, Option.some(TranscriptCursor.make(1)));
+          assert.deepStrictEqual(
+            tail.transcript.map(({ sequence }) => sequence),
+            [2],
+          );
 
           yield* operator.approve(runId);
           assert.deepStrictEqual(yield* Ref.get(approved), [runId]);

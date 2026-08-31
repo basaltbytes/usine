@@ -15,6 +15,7 @@ import {
   ReadyOverview,
   RunDetailView,
   type ProjectStatus,
+  type TranscriptCursor,
 } from "./model.ts";
 import { readTranscript, runView } from "./projection.ts";
 
@@ -123,14 +124,17 @@ const makeOperator = Effect.gen(function* () {
     return new ReadyOverview({ projects, loops, needsYou });
   });
 
-  const detail = Effect.fn("Operator.detail")(function* (runId: Run.RunId) {
+  const detail = Effect.fn("Operator.detail")(function* (
+    runId: Run.RunId,
+    after: Option.Option<TranscriptCursor> = Option.none(),
+  ) {
     yield* Effect.annotateCurrentSpan({ runId });
     const snapshot = yield* runs.inspect(runId);
     return new RunDetailView({
       run: runView(snapshot),
       eventDedupKey: snapshot.event.dedupKey,
       eventPayload: snapshot.event.payload,
-      transcript: yield* readTranscript(runs, snapshot),
+      transcript: yield* readTranscript(runs, snapshot, after),
     });
   });
 
