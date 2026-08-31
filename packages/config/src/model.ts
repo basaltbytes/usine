@@ -172,7 +172,9 @@ export const ValidSelector = Selector.check(
 );
 
 // Validated by the same effect Cron parser the engine's scheduler evaluates
-// with, so a cron that parses here can never fail at tick time.
+// with, so a cron that parses here parses at tick time too. Evaluation is a
+// weaker guarantee: Cron.prev/next can still fail inside a DST gap, which the
+// scheduler isolates per schedule.
 const isFiveFieldCron = (value: string): boolean =>
   value.trim().split(/\s+/u).length === 5 && Result.isSuccess(EffectCron.parse(value));
 

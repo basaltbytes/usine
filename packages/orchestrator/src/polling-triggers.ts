@@ -4,6 +4,7 @@ import {
   type LoopFile,
   type ManagedRepo,
   matchesSelector,
+  repositoryContext,
 } from "@usine/config";
 import { Event, Item, Repository } from "@usine/core";
 import {
@@ -22,7 +23,7 @@ import {
   type PayloadSnapshot,
 } from "@usine/github";
 import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Result, Schema } from "effect";
-import { repositoryContext, submissionRunId, triggerSubmission } from "./trigger-submission.ts";
+import { submissionLogFields, triggerSubmission } from "./trigger-submission.ts";
 
 /** GitHub REST + GraphQL tolerate a handful of parallel calls per token. */
 const REPOSITORY_CONCURRENCY = 4;
@@ -241,7 +242,7 @@ export class PollingTriggers extends Context.Service<
             item: item.number,
             contentHash: snapshot.contentHash,
             result: submitted._tag,
-            runId: submissionRunId(submitted),
+            ...submissionLogFields(submitted),
           });
           submissions.push(submitted);
         }

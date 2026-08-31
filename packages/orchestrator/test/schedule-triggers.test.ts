@@ -39,7 +39,7 @@ import {
   Scope,
 } from "effect";
 import { TestClock } from "effect/testing";
-import { ScheduleTriggers } from "../src/index.ts";
+import { ScheduleCronFailure, ScheduleTickFailure, ScheduleTriggers } from "../src/index.ts";
 
 const agent = new AgentFile({
   name: AgentName.make("developer"),
@@ -54,6 +54,7 @@ const isSchedulePayload = Schema.is(
   Schema.Struct({
     tick: Schema.Struct({
       scheduledAt: Schema.String,
+      scheduledAtLocal: Schema.String,
       cron: CronExpression,
       tz: TimeZone,
     }),
@@ -201,6 +202,7 @@ describe("ScheduleTriggers", () => {
           assert.deepStrictEqual(submission.event.payload, {
             tick: {
               scheduledAt: "2026-08-31T07:00:00.000Z",
+              scheduledAtLocal: "2026-08-31T09:00:00.000+02:00[Europe/Warsaw]",
               cron: "0 9 * * *",
               tz: "Europe/Warsaw",
             },
@@ -244,6 +246,7 @@ describe("ScheduleTriggers", () => {
               {
                 tick: {
                   scheduledAt: "2026-08-31T10:00:00.000Z",
+                  scheduledAtLocal: "2026-08-31T10:00:00.000+00:00[UTC]",
                   cron: "* * * * *",
                   tz: "UTC",
                 },
@@ -251,6 +254,7 @@ describe("ScheduleTriggers", () => {
               {
                 tick: {
                   scheduledAt: "2026-08-31T10:06:00.000Z",
+                  scheduledAtLocal: "2026-08-31T10:06:00.000+00:00[UTC]",
                   cron: "* * * * *",
                   tz: "UTC",
                 },
@@ -272,7 +276,11 @@ describe("ScheduleTriggers", () => {
       yield* Effect.gen(function* () {
         const schedules = yield* ScheduleTriggers;
         const fiber = yield* Effect.forkChild(schedules.run(instance));
-        yield* Effect.yieldNow;
+        // Wait on the observable outcome, not on a scheduler-op budget.
+        for (let spin = 0; (yield* Ref.get(submissions)).length === 0; spin += 1) {
+          if (spin > 1_000) return yield* Effect.die("the first cycle never submitted");
+          yield* Effect.yieldNow;
+        }
         assert.strictEqual((yield* Ref.get(submissions)).length, 1);
         yield* TestClock.adjust("29 seconds");
         assert.strictEqual((yield* Ref.get(submissions)).length, 1);
@@ -284,6 +292,7 @@ describe("ScheduleTriggers", () => {
             {
               tick: {
                 scheduledAt: "2026-08-31T10:00:00.000Z",
+                scheduledAtLocal: "2026-08-31T10:00:00.000+00:00[UTC]",
                 cron: "* * * * *",
                 tz: "UTC",
               },
@@ -291,6 +300,7 @@ describe("ScheduleTriggers", () => {
             {
               tick: {
                 scheduledAt: "2026-08-31T10:01:00.000Z",
+                scheduledAtLocal: "2026-08-31T10:01:00.000+00:00[UTC]",
                 cron: "* * * * *",
                 tz: "UTC",
               },
@@ -307,6 +317,7 @@ describe("ScheduleTriggers", () => {
       const config = configWith([{ name: "basaltbytes/failing" }, { name: "basaltbytes/healthy" }]);
       const loop = scheduleLoop(config, { cron: "0 0 1 1 *" });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
+      yield* TestClock.setTime(Date.parse("2026-08-31T10:00:00.000Z"));
 
       yield* Effect.gen(function* () {
         const schedules = yield* ScheduleTriggers;
@@ -315,13 +326,71 @@ describe("ScheduleTriggers", () => {
         assert.strictEqual(cycle.fanout, 2);
         assert.strictEqual(cycle.submissions.length, 1);
         assert.strictEqual(cycle.failures.length, 1);
-        assert.strictEqual(cycle.failures[0]?.repository, "basaltbytes/failing");
-        assert.strictEqual(cycle.failures[0]?.errorTag, "EnginePersistenceError");
+        const failure = cycle.failures[0];
+        assert(failure instanceof ScheduleTickFailure);
+        assert.strictEqual(failure.repository, "basaltbytes/failing");
+        assert.strictEqual(failure.errorTag, "EnginePersistenceError");
         assert.deepStrictEqual(
           (yield* Ref.get(submissions)).map(({ repository }) => repository),
           ["basaltbytes/healthy"],
         );
       }).pipe(Effect.provide(fakeLayer(submissions, Option.some("basaltbytes/failing"))));
+    }),
+  );
+
+  it.effect("keeps evaluating when a cron minute falls in a DST spring-forward gap", () =>
+    Effect.gen(function* () {
+      const config = configWith([{ name: "basaltbytes/usine" }]);
+      // Warsaw skips 02:00-03:00 local on 2026-03-29 (01:00Z): effect's
+      // Cron.prev throws for this instant. The stream must fail only this
+      // schedule and keep returning cycles instead of dying with a defect.
+      const loop = scheduleLoop(config, { cron: "30 2 * * *", tz: "Europe/Warsaw" });
+      const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
+      yield* TestClock.setTime(Date.parse("2026-03-29T01:30:00.000Z"));
+
+      yield* Effect.gen(function* () {
+        const schedules = yield* ScheduleTriggers;
+        const cycle = yield* schedules.tick(instanceWith(config, [loop]));
+
+        assert.strictEqual(cycle.fanout, 0);
+        assert.strictEqual(cycle.submissions.length, 0);
+        assert.strictEqual(cycle.failures.length, 1);
+        const failure = cycle.failures[0];
+        assert(failure instanceof ScheduleCronFailure);
+        assert.strictEqual(failure.loop, "scheduled-maintenance");
+        assert.strictEqual(failure.tz, "Europe/Warsaw");
+        // With no computable boundary the run loop falls back to its idle wake.
+        assert(Option.isNone(cycle.nextTickAt));
+      }).pipe(Effect.provide(fakeLayer(submissions)));
+    }),
+  );
+
+  it.effect("fires a coarser schedule once, not on every finer-grained cycle", () =>
+    Effect.gen(function* () {
+      const config = configWith([{ name: "basaltbytes/usine" }]);
+      const minutely = scheduleLoop(config, { cron: "* * * * *", name: "minutely" });
+      const daily = scheduleLoop(config, { cron: "0 9 * * *", name: "daily" });
+      const instance = instanceWith(config, [minutely, daily]);
+      const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
+      yield* TestClock.setTime(Date.parse("2026-08-31T10:00:00.000Z"));
+
+      yield* Effect.gen(function* () {
+        const schedules = yield* ScheduleTriggers;
+        const first = yield* schedules.tick(instance);
+        assert.strictEqual(first.submissions.length, 2);
+        assert.strictEqual(first.alreadyFired, 0);
+
+        yield* TestClock.adjust("60 seconds");
+        const second = yield* schedules.tick(instance);
+        // The daily loop's 09:00 tick already fired: no duplicate submit, no
+        // duplicate log line, and the cycle says so.
+        assert.strictEqual(second.submissions.length, 1);
+        assert.strictEqual(second.alreadyFired, 1);
+        assert.deepStrictEqual(
+          (yield* Ref.get(submissions)).map(({ loop }) => loop),
+          ["minutely", "daily", "minutely"],
+        );
+      }).pipe(Effect.provide(fakeLayer(submissions)));
     }),
   );
 
@@ -344,9 +413,10 @@ describe("ScheduleTriggers", () => {
       const snapshot = yield* waitForWaiting(firstEngine, first.runId);
       assert(isSchedulePayload(snapshot.event.payload));
       assert.deepStrictEqual(Object.keys(snapshot.event.payload), ["tick"]);
-      const duplicate = (yield* firstSchedules.tick(instance)).submissions[0];
-      assert(duplicate !== undefined && duplicate._tag === "Claimed");
-      assert.strictEqual(duplicate.runId, first.runId);
+      // In-process, the fired-tick memory suppresses the duplicate entirely.
+      const duplicateCycle = yield* firstSchedules.tick(instance);
+      assert.strictEqual(duplicateCycle.submissions.length, 0);
+      assert.strictEqual(duplicateCycle.alreadyFired, 1);
       yield* Scope.close(firstScope, Exit.void);
 
       const secondScope = yield* Scope.make();
