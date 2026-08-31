@@ -248,6 +248,9 @@ describe("Operator", () => {
           );
 
           const detail = yield* operator.detail(runId);
+          assert.strictEqual(detail.eventDedupKey, snapshot.event.dedupKey);
+          assert.deepStrictEqual(detail.eventPayload, { number: 31 });
+          assert.strictEqual(detail.run.attempts[0]?.number, 1);
           assert.strictEqual(detail.transcript[0]?.scope, "parent");
           assert.strictEqual(detail.transcript[0]?.detail, "Parent update");
           assert.strictEqual(detail.transcript[1]?.scope, "child");

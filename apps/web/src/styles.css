@@ -538,6 +538,51 @@ h3,
   color: var(--blue);
 }
 
+.event-key {
+  overflow-wrap: anywhere;
+}
+
+.payload-gist {
+  overflow-x: auto;
+  max-height: 14rem;
+  margin: 0.75rem 0 0;
+  padding: 0.85rem 1rem;
+  border-left: 2px solid var(--lavender);
+  background: var(--mantle);
+  color: var(--subtext-0);
+  font: inherit;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.attempt-list {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.attempt-entry {
+  padding: 0.85rem 1rem;
+  border-left: 2px solid var(--surface-2);
+  background: var(--mantle);
+}
+
+.attempt-entry header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.attempt-entry .attempt-meta,
+.attempt-entry .attempt-error {
+  margin: 0.55rem 0 0;
+}
+
+.attempt-error {
+  color: var(--red);
+}
+
 .transcript {
   display: grid;
   gap: 0.75rem;

@@ -128,6 +128,7 @@ const makeOperator = Effect.gen(function* () {
     const snapshot = yield* runs.inspect(runId);
     return new RunDetailView({
       run: runView(snapshot),
+      eventDedupKey: snapshot.event.dedupKey,
       eventPayload: snapshot.event.payload,
       transcript: yield* readTranscript(runs, snapshot),
     });

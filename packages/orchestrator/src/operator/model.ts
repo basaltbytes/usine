@@ -85,6 +85,7 @@ export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
 export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestrator/RunDetailView")(
   {
     run: RunView,
+    eventDedupKey: Schema.String,
     eventPayload: Schema.Json,
     transcript: Schema.Array(TranscriptEventView),
   },

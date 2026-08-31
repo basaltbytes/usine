@@ -53,6 +53,8 @@ const timeAgo = (value: string): string => {
   return `${Math.floor(elapsed / 86_400_000)}d`;
 };
 
+const jsonGist = (value: Schema.Json): string => JSON.stringify(value, null, 2) ?? "null";
+
 const StatusMark = ({ state }: { readonly state: string }) => (
   <span className={`status-mark state-${state.toLowerCase()}`} aria-label={state}>
     {state}
@@ -312,6 +314,34 @@ const RunDrawer = ({ runId, close }: { readonly runId: string; readonly close: (
             <section className="drawer-section">
               <h3>Task</h3>
               <p>{run.task}</p>
+            </section>
+            <section className="drawer-section">
+              <h3>Event</h3>
+              <p className="annotation event-key">{detail.data?.eventDedupKey}</p>
+              <pre className="payload-gist">{jsonGist(detail.data?.eventPayload ?? null)}</pre>
+            </section>
+            <section className="drawer-section">
+              <h3>Attempts</h3>
+              <div className="attempt-list">
+                {run.attempts.length === 0 && <p className="empty-copy">No attempt has started.</p>}
+                {run.attempts.map((attempt) => (
+                  <article className="attempt-entry" key={attempt.id}>
+                    <header>
+                      <strong>Attempt {attempt.number}</strong>
+                      <StatusMark state={attempt.outcome ?? "Running"} />
+                    </header>
+                    <p className="annotation attempt-meta">
+                      {attempt.worker} · {attempt.brain} · started {timeAgo(attempt.startedAt)} ago
+                    </p>
+                    {attempt.errorTag !== null && (
+                      <p className="attempt-error">
+                        <strong>{attempt.errorTag}</strong>
+                        {attempt.errorMessage === null ? "" : ` — ${attempt.errorMessage}`}
+                      </p>
+                    )}
+                  </article>
+                ))}
+              </div>
             </section>
             {run.resultMessage !== null && (
               <section className="drawer-section">
