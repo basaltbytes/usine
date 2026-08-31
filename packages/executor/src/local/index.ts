@@ -126,6 +126,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       args: ReadonlyArray<string>,
       commandOptions: ChildProcess.CommandOptions = {},
     ) {
+      yield* Effect.annotateCurrentSpan({ host: "local", operation });
       const result = yield* Effect.scoped(
         Effect.gen(function* () {
           const handle = yield* spawner.spawn(
@@ -197,6 +198,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             for (const leftover of leftovers) {
               const target = path.join(attemptsRoot, leftover);
               yield* Effect.logInfo("Sweeping abandoned Attempt worktree", {
+                worker,
+                host: "local",
                 worktree: target,
               });
               yield* fileSystem.remove(target, { recursive: true, force: true });
@@ -214,6 +217,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
               ]).pipe(
                 Effect.tapError((error) =>
                   Effect.logWarning("Could not prune a bare cache during the sweep", {
+                    worker,
+                    host: "local",
                     cache,
                     message: error.message,
                   }),
@@ -237,6 +242,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const preflight = Effect.fn("LocalExecutor.preflight")(function* (
       worker: CheckoutRequest["worker"],
     ) {
+      yield* Effect.annotateCurrentSpan({ worker, host: "local" });
       const gitVersion = (yield* executeCommand("preflight", "git", ["--version"])).trim();
       if (!gitVersion.startsWith("git version ")) {
         return yield* new WorkerCapabilityError({
@@ -260,6 +266,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       }
       yield* Effect.logInfo("Worker preflight verified", {
         worker,
+        host: "local",
         gitVersion,
         protocolVersion: AttemptChannel.PROTOCOL_VERSION,
       });
@@ -269,6 +276,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* Effect.annotateCurrentSpan({
         attemptId: request.attemptId,
         worker: request.worker,
+        host: "local",
         repository: request.repository,
       });
       const credential = yield* credentials.issue(request.repository, request.attemptId);
@@ -321,7 +329,18 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
                 commandOptions,
               ).pipe(
                 Effect.onError(() =>
-                  fileSystem.remove(staging, { recursive: true, force: true }).pipe(Effect.ignore),
+                  fileSystem.remove(staging, { recursive: true, force: true }).pipe(
+                    Effect.tapError((error) =>
+                      Effect.logWarning("Could not remove a partial local clone", {
+                        attemptId: request.attemptId,
+                        worker: request.worker,
+                        host: "local",
+                        staging,
+                        message: String(error),
+                      }),
+                    ),
+                    Effect.ignore,
+                  ),
                 ),
               );
               yield* fileSystem.rename(staging, cache);
@@ -386,9 +405,18 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           ),
           Effect.onError(() =>
             Effect.gen(function* () {
-              yield* fileSystem
-                .remove(worktree, { recursive: true, force: true })
-                .pipe(Effect.ignore);
+              yield* fileSystem.remove(worktree, { recursive: true, force: true }).pipe(
+                Effect.tapError((error) =>
+                  Effect.logWarning("Could not remove a partial local workspace", {
+                    attemptId: request.attemptId,
+                    worker: request.worker,
+                    host: "local",
+                    worktree,
+                    message: String(error),
+                  }),
+                ),
+                Effect.ignore,
+              );
               Redacted.wipeUnsafe(credential);
             }),
           ),
@@ -412,6 +440,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       input: RunHostInput,
     ) {
       const attemptId = prepared.spec.attemptId;
+      yield* Effect.annotateCurrentSpan({
+        attemptId,
+        worker: prepared.worker,
+        host: "local",
+      });
       const stored = (yield* Ref.get(preparedStates)).get(attemptId);
       if (stored === undefined) {
         return yield* new AttemptFailure.InfraFailure({
@@ -421,6 +454,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       }
       yield* Effect.logInfo("Launching the run host", {
         attemptId,
+        worker: prepared.worker,
+        host: "local",
         command: runHost.command,
         worktree: prepared.worktree,
       });
@@ -434,6 +469,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       );
       return {
         handle,
+        host: "local",
         scrubStderr: (text: string): string => scrubbed(text, stored.credential),
       };
     });
@@ -442,8 +478,15 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
 
     const cleanup = Effect.fn("LocalExecutor.cleanup")(function* (prepared: PreparedAttempt) {
       const attemptId = prepared.spec.attemptId;
+      yield* Effect.annotateCurrentSpan({
+        attemptId,
+        worker: prepared.worker,
+        host: "local",
+      });
       yield* Effect.logInfo("Cleaning Attempt workspace", {
         attemptId,
+        worker: prepared.worker,
+        host: "local",
         worktree: prepared.worktree,
       });
       const state = (yield* Ref.get(preparedStates)).get(attemptId);
@@ -504,6 +547,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           }),
         ),
       );
+      yield* Effect.logInfo("Attempt cleanup completed", {
+        attemptId,
+        worker: prepared.worker,
+        host: "local",
+      });
     });
 
     return Executor.of({

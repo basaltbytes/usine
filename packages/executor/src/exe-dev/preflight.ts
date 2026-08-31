@@ -97,6 +97,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
         capabilityError(worker, "machine", `Could not reach exe.dev Worker ${worker}`, cause),
       ),
     );
+    yield* Effect.annotateCurrentSpan({ worker, host: vm.sshDest });
     const gitVersion = (yield* asCapability(
       worker,
       "toolchain",
@@ -168,7 +169,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
     });
     yield* Effect.logInfo("exe.dev Worker preflight verified", {
       worker,
-      sshDest: vm.sshDest,
+      host: vm.sshDest,
       gitVersion,
       nodeVersion,
       protocolVersion: AttemptChannel.PROTOCOL_VERSION,

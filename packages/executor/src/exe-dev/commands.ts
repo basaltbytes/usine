@@ -83,9 +83,11 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
 
   const executeRaw = Effect.fn("ExeDevExecutor.executeRaw")(function* (
     operation: ExecutorOperation,
+    host: string,
     command: string,
     args: ReadonlyArray<string>,
   ) {
+    yield* Effect.annotateCurrentSpan({ host, operation });
     return yield* Effect.scoped(
       Effect.gen(function* () {
         const handle = yield* spawner.spawn(
@@ -125,10 +127,11 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
 
   const executeChecked = Effect.fn("ExeDevExecutor.executeChecked")(function* (
     operation: ExecutorOperation,
+    host: string,
     command: string,
     args: ReadonlyArray<string>,
   ) {
-    const result = yield* executeRaw(operation, command, args);
+    const result = yield* executeRaw(operation, host, command, args);
     if (result.exitCode !== 0) {
       yield* Effect.logWarning("exe.dev command exited non-zero", {
         operation,
@@ -148,7 +151,7 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     operation: ExecutorOperation,
     args: ReadonlyArray<string>,
   ): Effect.Effect<string, ExecutorOperationError> =>
-    executeChecked(operation, ssh.command, [...ssh.args, "exe.dev", ...args]);
+    executeChecked(operation, "exe.dev", ssh.command, [...ssh.args, "exe.dev", ...args]);
 
   const lobbyJson = (
     operation: ExecutorOperation,
@@ -161,7 +164,7 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     command: string,
     args: ReadonlyArray<string>,
   ): Effect.Effect<CommandResult, ExecutorOperationError> =>
-    executeRaw(operation, ssh.command, [
+    executeRaw(operation, vm.sshDest, ssh.command, [
       ...ssh.args,
       vm.sshDest,
       "--",
@@ -174,7 +177,7 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     command: string,
     args: ReadonlyArray<string>,
   ): Effect.Effect<string, ExecutorOperationError> =>
-    executeChecked(operation, ssh.command, [
+    executeChecked(operation, vm.sshDest, ssh.command, [
       ...ssh.args,
       vm.sshDest,
       "--",

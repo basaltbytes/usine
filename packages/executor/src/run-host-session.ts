@@ -18,6 +18,7 @@ import { ExecutorError, ExecutorOperationError, type PreparedAttempt } from "./i
 
 export interface SpawnedRunHost {
   readonly handle: ChildProcessHandle;
+  readonly host: string;
   readonly scrubStderr: (text: string) => string;
 }
 
@@ -46,9 +47,11 @@ export interface RunHostSession {
 interface ActiveAttempt {
   readonly cancelStarted: Ref.Ref<boolean>;
   readonly handle: ChildProcessHandle;
+  readonly host: string;
   readonly input: Queue.Queue<Uint8Array, Cause.Done>;
   readonly io: AttemptChannel.Sink;
   readonly sequence: Ref.Ref<number>;
+  readonly worker: PreparedAttempt["worker"];
 }
 
 const STDERR_TAIL_BYTES = 4_096;
@@ -82,12 +85,48 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
   Effect.fn("RunHostSession.for")(function* (options: RunHostSessionOptions) {
     const activeAttempts = yield* Ref.make(new Map<Attempt.AttemptId, ActiveAttempt>());
 
+    const hardKill = Effect.fn("RunHostSession.hardKill")(function* (
+      attemptId: Attempt.AttemptId,
+      active: ActiveAttempt,
+      reason: "delivery-failed" | "grace-expired",
+    ) {
+      yield* Effect.logWarning("Hard-killing the run host", {
+        attemptId,
+        worker: active.worker,
+        host: active.host,
+        reason,
+      });
+      yield* active.handle.kill({ killSignal: "SIGKILL" }).pipe(
+        Effect.timeout(options.interruptGrace),
+        Effect.tapError((error) =>
+          Effect.logError("Run-host hard kill failed", {
+            attemptId,
+            worker: active.worker,
+            host: active.host,
+            reason,
+            message: String(error),
+          }),
+        ),
+      );
+      yield* Effect.logWarning("Run-host hard-kill signal sent", {
+        attemptId,
+        worker: active.worker,
+        host: active.host,
+        reason,
+      });
+    });
+
     const cancelActive = Effect.fn("RunHostSession.cancelActive")(function* (
       attemptId: Attempt.AttemptId,
       active: ActiveAttempt,
     ) {
       return yield* Effect.uninterruptible(
         Effect.gen(function* () {
+          yield* Effect.annotateCurrentSpan({
+            attemptId,
+            worker: active.worker,
+            host: active.host,
+          });
           const first = yield* Ref.modify(
             active.cancelStarted,
             (started) => [!started, true] as const,
@@ -95,10 +134,16 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
           if (!first) {
             yield* Effect.logDebug("Attempt cancellation was already started", {
               attemptId,
+              worker: active.worker,
+              host: active.host,
             });
             return;
           }
-          yield* Effect.logInfo("Sending the interrupt envelope", { attemptId });
+          yield* Effect.logInfo("Sending the interrupt envelope", {
+            attemptId,
+            worker: active.worker,
+            host: active.host,
+          });
           const sequence = yield* Ref.getAndUpdate(active.sequence, (value) => value + 1);
           const envelope = new AttemptChannel.InboundEnvelope({
             version: AttemptChannel.PROTOCOL_VERSION,
@@ -107,39 +152,49 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
             sentAt: yield* DateTime.now,
             payload: new AttemptChannel.Interrupt(),
           });
-          yield* active.io.append("inbound", envelope).pipe(
+          const delivered = yield* active.io.append("inbound", envelope).pipe(
             Effect.andThen(Queue.offer(active.input, frame(envelope))),
-            Effect.catch((error) =>
-              Effect.logWarning("Interrupt could not be delivered; killing the run host", {
-                attemptId,
-                message: String(error),
-              }).pipe(
-                Effect.andThen(
-                  active.handle.kill({ killSignal: "SIGKILL" }).pipe(
-                    Effect.tapError((killError) =>
-                      Effect.logError("Run-host hard kill failed after interrupt delivery failed", {
-                        attemptId,
-                        message: String(killError),
-                      }),
-                    ),
-                    Effect.ignore,
-                  ),
-                ),
-                Effect.andThen(Effect.fail(error)),
-              ),
-            ),
+            // The transcript store is outside the process adapter and may be
+            // parked. Bound it so the uninterruptible cancellation handshake
+            // always reaches the hard-kill phase.
+            Effect.timeoutOption(options.interruptGrace),
+            Effect.result,
           );
+          if (Result.isFailure(delivered)) {
+            yield* Effect.logWarning("Interrupt could not be delivered", {
+              attemptId,
+              worker: active.worker,
+              host: active.host,
+              message: String(delivered.failure),
+            });
+            yield* hardKill(attemptId, active, "delivery-failed");
+            return yield* delivered.failure;
+          }
+          if (Option.isNone(delivered.success)) {
+            const cause = new Error("interrupt delivery exceeded the cancellation grace");
+            yield* Effect.logWarning("Interrupt delivery timed out", {
+              attemptId,
+              worker: active.worker,
+              host: active.host,
+            });
+            yield* hardKill(attemptId, active, "delivery-failed");
+            return yield* cancelError(attemptId, cause);
+          }
           const completed = yield* active.handle.exitCode.pipe(
             Effect.timeoutOption(options.interruptGrace),
           );
-          if (Option.isNone(completed) && (yield* active.handle.isRunning)) {
-            yield* Effect.logWarning("Interrupt grace expired; killing the run host", {
+          if (Option.isNone(completed)) {
+            yield* Effect.logWarning("Interrupt grace expired", {
               attemptId,
+              worker: active.worker,
+              host: active.host,
             });
-            yield* active.handle.kill({ killSignal: "SIGKILL" });
+            yield* hardKill(attemptId, active, "grace-expired");
           } else {
             yield* Effect.logInfo("Run host stopped within the interrupt grace", {
               attemptId,
+              worker: active.worker,
+              host: active.host,
             });
           }
         }),
@@ -169,13 +224,16 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
       const execute = Effect.scoped(
         Effect.gen(function* () {
           const input = yield* Queue.make<Uint8Array, Cause.Done>();
-          const { handle, scrubStderr } = yield* options.spawn(prepared, input);
+          const { handle, host, scrubStderr } = yield* options.spawn(prepared, input);
+          yield* Effect.annotateCurrentSpan({ host });
           const active: ActiveAttempt = {
             cancelStarted: yield* Ref.make(false),
             handle,
+            host,
             input,
             io,
             sequence: yield* Ref.make(1),
+            worker: prepared.worker,
           };
           yield* Ref.update(activeAttempts, (current) => {
             const next = new Map(current);

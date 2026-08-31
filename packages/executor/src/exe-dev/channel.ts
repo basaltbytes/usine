@@ -34,10 +34,15 @@ export const attemptChannelFor: (
         cause: new Error("prepared Attempt state missing"),
       });
     }
+    yield* Effect.annotateCurrentSpan({
+      attemptId,
+      worker: prepared.worker,
+      host: state.vm.sshDest,
+    });
     yield* Effect.logInfo("Launching the run host over SSH", {
       attemptId,
       worker: prepared.worker,
-      sshDest: state.vm.sshDest,
+      host: state.vm.sshDest,
       worktree: prepared.worktree,
     });
     const handle = yield* spawner.spawn(
@@ -56,7 +61,7 @@ export const attemptChannelFor: (
         },
       ),
     );
-    return { handle, scrubStderr: (text: string): string => text };
+    return { handle, host: state.vm.sshDest, scrubStderr: (text: string): string => text };
   });
 
   return yield* runHostSessionFor({ interruptGrace, spawn });

@@ -22,6 +22,7 @@ import {
   type PreparedState,
 } from "./model.ts";
 import { preflightFor } from "./preflight.ts";
+import { abandonedWorktreeSweepFor } from "./sweep.ts";
 
 export {
   CredentialGrantMinutes,
@@ -64,6 +65,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
 
     const worker = yield* preflightFor(options, commands, runHost);
     const credentialGrants = yield* credentialGrantsFor(options, commands);
+    const sweepAbandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
     const attemptChannel = yield* attemptChannelFor(
       commands,
       preparedStates,
@@ -91,6 +93,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       const worktree = `${root}/attempts/${safeSegment(request.attemptId)}`;
       const staging = `${cache}.cloning`;
       const remoteUrl = `https://github.int.exe.xyz/${request.repository}.git`;
+      yield* Effect.annotateCurrentSpan({ host: vm.sshDest });
+      yield* sweepAbandonedWorktrees(request.attemptId, request.worker, vm, root);
 
       yield* credentialGrants.acquire(request.worker, request.repository, integration);
       const prepared = yield* fetches
@@ -125,6 +129,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
                       Effect.tapError((error) =>
                         Effect.logWarning("Could not remove a partial exe.dev clone", {
                           attemptId: request.attemptId,
+                          worker: request.worker,
+                          host: vm.sshDest,
                           message: error.message,
                         }),
                       ),
@@ -208,6 +214,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
                 Effect.tapError((error) =>
                   Effect.logWarning("Could not remove a partial exe.dev workspace", {
                     attemptId: request.attemptId,
+                    worker: request.worker,
+                    host: vm.sshDest,
                     message: error.message,
                   }),
                 ),
@@ -217,6 +225,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
                 Effect.tapError((error) =>
                   Effect.logWarning("Could not detach credentials after prepare failed", {
                     attemptId: request.attemptId,
+                    worker: request.worker,
+                    host: vm.sshDest,
                     message: error.message,
                   }),
                 ),
@@ -229,6 +239,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       yield* Effect.logInfo("exe.dev Attempt workspace ready", {
         attemptId: request.attemptId,
         worker: request.worker,
+        host: vm.sshDest,
         repository: request.repository,
         baseCommit: prepared.spec.baseCommit,
         worktree,
@@ -240,6 +251,11 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       prepared: PreparedAttempt,
       state: PreparedState,
     ) {
+      yield* Effect.annotateCurrentSpan({
+        attemptId: prepared.spec.attemptId,
+        worker: prepared.worker,
+        host: state.vm.sshDest,
+      });
       const removed = yield* commands.remoteRaw("cleanup", state.vm, "git", [
         "--git-dir",
         state.cache,
@@ -251,6 +267,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       if (removed.exitCode !== 0) {
         yield* Effect.logDebug("Remote Git worktree removal returned non-zero", {
           attemptId: prepared.spec.attemptId,
+          worker: prepared.worker,
+          host: state.vm.sshDest,
           exitCode: String(removed.exitCode),
         });
       }
@@ -265,6 +283,10 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
 
     const cleanup = Effect.fn("ExeDevExecutor.cleanup")(function* (prepared: PreparedAttempt) {
       const attemptId = prepared.spec.attemptId;
+      yield* Effect.annotateCurrentSpan({
+        attemptId,
+        worker: prepared.worker,
+      });
       yield* Effect.logInfo("Cleaning exe.dev Attempt workspace", {
         attemptId,
         worker: prepared.worker,
@@ -274,16 +296,32 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       if (state === undefined) {
         yield* Effect.logDebug("exe.dev Attempt cleanup was already complete", {
           attemptId,
+          worker: prepared.worker,
         });
         return;
       }
+      yield* Effect.annotateCurrentSpan({ host: state.vm.sshDest });
       const [worktreeResult, grantResult] = yield* Effect.all([
         cleanWorktree(prepared, state).pipe(Effect.result),
         credentialGrants.release(prepared.worker, state.integration).pipe(Effect.result),
       ]);
-      for (const result of [worktreeResult, grantResult]) {
-        if (Result.isFailure(result)) return yield* result.failure;
+      const results = [
+        ["worktree", worktreeResult],
+        ["credential-grant", grantResult],
+      ] as const;
+      for (const [resource, result] of results) {
+        if (Result.isFailure(result)) {
+          yield* Effect.logError("exe.dev Attempt cleanup operation failed", {
+            attemptId,
+            worker: prepared.worker,
+            host: state.vm.sshDest,
+            resource,
+            message: result.failure.message,
+          });
+        }
       }
+      if (Result.isFailure(worktreeResult)) return yield* worktreeResult.failure;
+      if (Result.isFailure(grantResult)) return yield* grantResult.failure;
       yield* Ref.update(preparedStates, (current) => {
         const next = new Map(current);
         next.delete(attemptId);
@@ -292,6 +330,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       yield* Effect.logInfo("exe.dev Attempt cleanup completed", {
         attemptId,
         worker: prepared.worker,
+        host: state.vm.sshDest,
       });
     });
 

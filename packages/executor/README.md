@@ -24,6 +24,8 @@ Preflight changes no remote state. It reads VM metadata through `ssh exe.dev ls 
 
 Prepare attaches the repository's integration to the VM with a bounded `--for` grant. It then fetches a bare cached clone from `github.int.exe.xyz` and creates a detached worktree for the Attempt. Launch keeps one SSH process open and carries the protocol-v1 frames on that process's standard input and output. Cleanup removes the worktree, prunes its cache registration, and detaches the integration after the last concurrent Attempt using it finishes.
 
+The first prepare on each VM after orchestrator startup sweeps abandoned Attempt worktrees and prunes cached worktree registrations left by a crash. One-shot lobby and SSH commands carry a ten-minute timeout. Cancellation also bounds interrupt persistence and delivery before escalating to a hard kill, so a parked store or remote process cannot stall shutdown.
+
 ```ts
 import { Repository } from "@usine/core"
 import {
