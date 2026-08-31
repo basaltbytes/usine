@@ -171,7 +171,7 @@ const withLocalEngine = <A, E, R>(
 
 describe("local worker", () => {
   it.live("runs Event → Attempt, persists the transcript, and removes the worktree", () =>
-    withLocalEngine([], ({ engine, instance }) =>
+    withLocalEngine(["--stub"], ({ engine, instance }) =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const fileSystem = yield* FileSystem.FileSystem;
@@ -196,7 +196,9 @@ describe("local worker", () => {
           transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
           [
             ["outbound", "Started"],
-            ["outbound", "AgentMessage"],
+            ["outbound", "Activity"],
+            ["outbound", "Activity"],
+            ["outbound", "Activity"],
             ["outbound", "Final"],
           ],
         );
@@ -210,7 +212,7 @@ describe("local worker", () => {
         );
         assert.deepStrictEqual(
           tail.map(({ envelope }) => envelope.payload._tag),
-          ["AgentMessage", "Final"],
+          ["Activity", "Activity", "Activity", "Final"],
         );
 
         const attempts = yield* fileSystem.readDirectory(

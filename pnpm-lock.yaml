@@ -324,6 +324,9 @@ importers:
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.0.0-rc.111(effect@4.0.0-rc.111)(redis@6.2.1)
+      '@usine/agents':
+        specifier: workspace:*
+        version: link:../agents
       '@usine/core':
         specifier: workspace:*
         version: link:../core

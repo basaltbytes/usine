@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
+import { layer as agentLayer } from "@usine/agents/pi";
 import { AttemptChannel } from "@usine/core";
 import { Effect, Stdio, Stream } from "effect";
 import { runHost } from "./index.ts";
+import { stubLayer } from "./stub.ts";
 
 const program = Effect.gen(function* () {
   const stdio = yield* Stdio.Stdio;
@@ -19,7 +21,8 @@ const program = Effect.gen(function* () {
   if (!Number.isSafeInteger(stubDelayMillis) || stubDelayMillis < 0) {
     return yield* Effect.die(new Error("--stub-delay-ms must be a non-negative integer"));
   }
-  yield* runHost({ stubDelayMillis });
+  const useStub = args.includes("--stub") || delayFlag >= 0;
+  yield* runHost().pipe(Effect.provide(useStub ? stubLayer(stubDelayMillis) : agentLayer));
 }).pipe(Effect.provide(NodeServices.layer));
 
 NodeRuntime.runMain(program);
