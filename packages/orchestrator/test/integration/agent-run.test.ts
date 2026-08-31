@@ -222,138 +222,146 @@ const waitForTerminal = Effect.fn("agentIntegration.waitForTerminal")(function* 
 });
 
 describe("live agent loop", () => {
-  it.live("reads an issue and comments as the App bot with the Agent signature", () =>
-    Effect.gen(function* () {
-      const settings = yield* Effect.all({
-        botLogin: Config.string("USINE_GITHUB_INTEGRATION_BOT_LOGIN"),
-        childModel: Config.string("USINE_AGENT_INTEGRATION_CHILD_MODEL"),
-        credentialsDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
-        issueNumber: Config.schema(PositiveIntFromString, "USINE_GITHUB_INTEGRATION_ISSUE_NUMBER"),
-        parentModel: Config.string("USINE_AGENT_INTEGRATION_PARENT_MODEL"),
-        repository: Config.string("USINE_GITHUB_INTEGRATION_REPO"),
-      });
-      const repository = Repository.Name.make(settings.repository);
-      const marker = `usine live agent contract ${globalThis.crypto.randomUUID()}`;
-      const kick = `usine live agent kick ${globalThis.crypto.randomUUID()}`;
-      const instance = makeInstance({
-        childModel: Agent.ModelId.make(settings.childModel),
-        issueNumber: settings.issueNumber,
-        kick,
-        marker,
-        parentModel: Agent.ModelId.make(settings.parentModel),
-        repository,
-      });
-      const fileSystem = yield* FileSystem.FileSystem;
-      const runtimeDirectory = Instance.Directory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-live-agent-" }),
-      );
-      const credentialsDirectory = Instance.Directory.make(settings.credentialsDirectory);
-      const scope = yield* Scope.make();
-      yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
-      const context = yield* Scope.provide(
-        Layer.build(runtimeLayer(credentialsDirectory, runtimeDirectory, instance)),
-        scope,
-      );
-      const app = Context.get(context, GitHubApp);
-      const engine = Context.get(context, RunEngine);
-      const polling = Context.get(context, PollingTriggers);
-      const api = repositoryApi(repository);
-      const installationToken = yield* app.installationToken();
-      const token = Redacted.value(installationToken.value);
-
-      const listComments = () =>
-        requestJson({
-          expectedStatus: 200,
-          schema: GitHubComments,
-          token,
-          url: `${api}/issues/${String(settings.issueNumber)}/comments?per_page=100`,
-        });
-      const removeTestComments = Effect.gen(function* () {
-        const comments = yield* listComments();
-        yield* Effect.forEach(
-          comments.filter(
-            ({ body }) => body?.includes(marker) === true || body?.includes(kick) === true,
+  it.live(
+    "reads an issue and comments as the App bot with the Agent signature",
+    () =>
+      Effect.gen(function* () {
+        const settings = yield* Effect.all({
+          botLogin: Config.string("USINE_GITHUB_INTEGRATION_BOT_LOGIN"),
+          childModel: Config.string("USINE_AGENT_INTEGRATION_CHILD_MODEL"),
+          credentialsDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
+          issueNumber: Config.schema(
+            PositiveIntFromString,
+            "USINE_GITHUB_INTEGRATION_ISSUE_NUMBER",
           ),
-          ({ id }) =>
-            requestEmpty({
-              expectedStatus: 204,
-              method: "DELETE",
-              token,
-              url: `${api}/issues/comments/${String(id)}`,
-            }),
-          { concurrency: "unbounded", discard: true },
+          parentModel: Config.string("USINE_AGENT_INTEGRATION_PARENT_MODEL"),
+          repository: Config.string("USINE_GITHUB_INTEGRATION_REPO"),
+        });
+        const repository = Repository.Name.make(settings.repository);
+        const marker = `usine live agent contract ${globalThis.crypto.randomUUID()}`;
+        const kick = `usine live agent kick ${globalThis.crypto.randomUUID()}`;
+        const instance = makeInstance({
+          childModel: Agent.ModelId.make(settings.childModel),
+          issueNumber: settings.issueNumber,
+          kick,
+          marker,
+          parentModel: Agent.ModelId.make(settings.parentModel),
+          repository,
+        });
+        const fileSystem = yield* FileSystem.FileSystem;
+        const runtimeDirectory = Instance.Directory.make(
+          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-live-agent-" }),
         );
-      });
+        const credentialsDirectory = Instance.Directory.make(settings.credentialsDirectory);
+        const scope = yield* Scope.make();
+        yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+        const context = yield* Scope.provide(
+          Layer.build(runtimeLayer(credentialsDirectory, runtimeDirectory, instance)),
+          scope,
+        );
+        const app = Context.get(context, GitHubApp);
+        const engine = Context.get(context, RunEngine);
+        const polling = Context.get(context, PollingTriggers);
+        const api = repositoryApi(repository);
+        const installationToken = yield* app.installationToken();
+        const token = Redacted.value(installationToken.value);
 
-      yield* Effect.acquireUseRelease(
-        Effect.succeed(undefined),
-        () =>
-          Effect.gen(function* () {
-            yield* polling.poll(instance);
-            yield* requestJson({
-              body: { body: kick },
-              expectedStatus: 201,
-              method: "POST",
-              schema: GitHubComment,
-              token,
-              url: `${api}/issues/${String(settings.issueNumber)}/comments`,
-            });
-            const runId = yield* waitForClaim(polling, instance);
-            const snapshot = yield* waitForTerminal(engine, runId);
-            assert.strictEqual(
-              snapshot.run.state._tag,
-              "Succeeded",
-              `live Run ended ${snapshot.run.state._tag}: ${snapshot.attempts
-                .map((attempt) =>
-                  Option.match(attempt.outcome, {
-                    onNone: () => "open",
-                    onSome: (outcome) =>
-                      outcome._tag === "Failed"
-                        ? `${outcome.failure._tag}: ${outcome.failure.message}`
-                        : outcome._tag,
-                  }),
-                )
-                .join("; ")}`,
-            );
-            const attempt = snapshot.attempts[0] ?? assert.fail("live Run recorded no Attempt");
-            assert.strictEqual(attempt.brain.harness, "claude");
-            assert.strictEqual(attempt.brain.model, settings.childModel);
-            assert.strictEqual(attempt.brain.effort, "low");
-            assert(Option.isSome(attempt.parentModel));
-            assert.strictEqual(attempt.parentModel.value, settings.parentModel);
-            const payload = Schema.decodeUnknownSync(IssuePayload)(snapshot.event.payload);
+        const listComments = () =>
+          requestJson({
+            expectedStatus: 200,
+            schema: GitHubComments,
+            token,
+            url: `${api}/issues/${String(settings.issueNumber)}/comments?per_page=100`,
+          });
+        const removeTestComments = Effect.gen(function* () {
+          const comments = yield* listComments();
+          yield* Effect.forEach(
+            comments.filter(
+              ({ body }) => body?.includes(marker) === true || body?.includes(kick) === true,
+            ),
+            ({ id }) =>
+              requestEmpty({
+                expectedStatus: 204,
+                method: "DELETE",
+                token,
+                url: `${api}/issues/comments/${String(id)}`,
+              }),
+            { concurrency: "unbounded", discard: true },
+          );
+        });
 
-            const comments = (yield* listComments()).filter(
-              ({ body }) => body?.includes(marker) === true,
-            );
-            assert.strictEqual(
-              comments.length,
-              1,
-              "the child must post exactly one result comment",
-            );
-            const comment = comments[0] ?? assert.fail("missing live contract comment");
-            assert.strictEqual(comment.user.login, settings.botLogin);
-            assert(
-              comment.body?.includes(`Issue title: ${payload.title}`),
-              "the result comment must contain the CEL-interpolated issue title",
-            );
-            assert.match(comment.body ?? "", /— usine agent: live-contract-agent/u);
+        yield* Effect.acquireUseRelease(
+          Effect.succeed(undefined),
+          () =>
+            Effect.gen(function* () {
+              yield* polling.poll(instance);
+              yield* requestJson({
+                body: { body: kick },
+                expectedStatus: 201,
+                method: "POST",
+                schema: GitHubComment,
+                token,
+                url: `${api}/issues/${String(settings.issueNumber)}/comments`,
+              });
+              const runId = yield* waitForClaim(polling, instance);
+              const snapshot = yield* waitForTerminal(engine, runId);
+              assert.strictEqual(
+                snapshot.run.state._tag,
+                "Succeeded",
+                `live Run ended ${snapshot.run.state._tag}: ${snapshot.attempts
+                  .map((attempt) =>
+                    Option.match(attempt.outcome, {
+                      onNone: () => "open",
+                      onSome: (outcome) =>
+                        outcome._tag === "Failed"
+                          ? `${outcome.failure._tag}: ${outcome.failure.message}`
+                          : outcome._tag,
+                    }),
+                  )
+                  .join("; ")}`,
+              );
+              const attempt = snapshot.attempts[0] ?? assert.fail("live Run recorded no Attempt");
+              assert.strictEqual(attempt.brain.harness, "claude");
+              assert.strictEqual(attempt.brain.model, settings.childModel);
+              assert.strictEqual(attempt.brain.effort, "low");
+              assert(Option.isSome(attempt.parentModel));
+              assert.strictEqual(attempt.parentModel.value, settings.parentModel);
+              const payload = Schema.decodeUnknownSync(IssuePayload)(snapshot.event.payload);
 
-            const transcript = yield* engine.transcript({
-              attemptId: attempt.id,
-              after: Option.none(),
-            });
-            assert(
-              transcript.some(
-                ({ envelope }) =>
-                  envelope.payload._tag === "SessionEvent" &&
-                  envelope.payload.event.session._tag === "ChildSession",
-              ),
-              "the transcript must expose child activity one level deep",
-            );
-          }),
-        () => removeTestComments,
-      );
-    }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+              const comments = (yield* listComments()).filter(
+                ({ body }) => body?.includes(marker) === true,
+              );
+              assert.strictEqual(
+                comments.length,
+                1,
+                "the child must post exactly one result comment",
+              );
+              const comment = comments[0] ?? assert.fail("missing live contract comment");
+              assert.strictEqual(comment.user.login, settings.botLogin);
+              assert(
+                comment.body?.includes(`Issue title: ${payload.title}`),
+                "the result comment must contain the CEL-interpolated issue title",
+              );
+              assert.match(comment.body ?? "", /— usine agent: live-contract-agent/u);
+
+              const transcript = yield* engine.transcript({
+                attemptId: attempt.id,
+                after: Option.none(),
+              });
+              assert(
+                transcript.some(
+                  ({ envelope }) =>
+                    envelope.payload._tag === "SessionEvent" &&
+                    envelope.payload.event.session._tag === "ChildSession",
+                ),
+                "the transcript must expose child activity one level deep",
+              );
+            }),
+          () => removeTestComments,
+        );
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    // The run legitimately spans a poll claim plus a full agent session; the
+    // in-test terminal wait already caps it at ten minutes.
+    720_000,
   );
 });
