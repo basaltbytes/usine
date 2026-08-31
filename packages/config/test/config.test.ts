@@ -122,6 +122,31 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("rejects a schedule loop whose tz is not an IANA time-zone name", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const failure = yield* parser
+        .parseLoopFile(
+          InstancePath.make("loops/bad-time-zone.md"),
+          [
+            "---",
+            "trigger:",
+            "  on: schedule",
+            "  if: 'true'",
+            "  cron: '0 9 * * *'",
+            "  tz: 'Mars/Olympus_Mons'",
+            "agent: developer",
+            "---",
+            "Run scheduled maintenance.",
+          ].join("\n"),
+        )
+        .pipe(Effect.flip);
+
+      expect(failure.stage).toBe("schema");
+      expect(failure.message).toContain("IANA time-zone name");
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect(
     "parses a schedule loop, defaulting tz to UTC and checking against the tick slice",
     () =>
