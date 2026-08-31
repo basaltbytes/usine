@@ -16,6 +16,7 @@ interface TriggerSubmissionOptions {
   readonly payload: Schema.Json;
   readonly receivedAt: DateTime.Utc;
   readonly repository: ManagedRepo;
+  readonly task: AttemptChannel.Task;
 }
 
 /** The one routing contract shared by every trigger stream. */
@@ -33,9 +34,7 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     approval: options.loop.approval,
     repository: options.repository.name,
     revision: DEFAULT_BRANCH_REVISION,
-    // Interpolation is a later ticket; until then the authored loop body is
-    // the rendered task the run host hands the agent.
-    task: AttemptChannel.Task.make(options.loop.body),
+    task: options.task,
   });
 
 /**

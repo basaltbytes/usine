@@ -1,12 +1,14 @@
 import {
+  ConfigParser,
   environmentFor,
+  type ConfigFileError,
   type LoadedInstance,
   type LoopFile,
   type ManagedRepo,
   matchesSelector,
   repositoryContext,
 } from "@usine/config";
-import { Event, Item, Repository } from "@usine/core";
+import { AttemptChannel, Event, Item, Repository } from "@usine/core";
 import {
   CursorKey,
   CursorStore,
@@ -59,7 +61,7 @@ export class PollCycle extends Schema.Class<PollCycle>("@usine/orchestrator/Poll
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
 }) {}
 
-type RepositoryPollError = ExpressionError | GitHubAppError | RunEngineError;
+type RepositoryPollError = ConfigFileError | ExpressionError | GitHubAppError | RunEngineError;
 
 interface WatchedRepository {
   readonly repository: ManagedRepo;
@@ -153,6 +155,7 @@ export class PollingTriggers extends Context.Service<
     PollingTriggers,
     Effect.gen(function* () {
       const cursors = yield* CursorStore;
+      const config = yield* ConfigParser;
       const expressions = yield* ExpressionEngine;
       const github = yield* GitHubPolling;
       const runs = yield* RunEngine;
@@ -226,6 +229,7 @@ export class PollingTriggers extends Context.Service<
 
           const dedupKey = eventKey(loop, watched.repository, item, snapshot);
           const receivedAt = yield* DateTime.now;
+          const task = yield* config.renderPrompt(loop, context);
           const submitted = yield* runs.submit(
             triggerSubmission({
               dedupKey,
@@ -234,6 +238,7 @@ export class PollingTriggers extends Context.Service<
               payload,
               receivedAt,
               repository: watched.repository,
+              task: AttemptChannel.Task.make(task),
             }),
           );
           yield* Effect.logInfo("Submitted matching item state", {

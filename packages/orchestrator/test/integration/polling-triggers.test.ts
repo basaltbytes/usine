@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   AgentFile,
   AgentName,
+  ConfigParser,
   IssueTrigger,
   LoadedInstance,
   LoopFile,
@@ -120,7 +121,8 @@ const runtimeLayer = (directory: Instance.Directory, app: GitHubApp["Service"]) 
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
   );
-  const dependencies = Layer.mergeAll(engine, MarcbachmannCelLayer, polling);
+  const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
+  const dependencies = Layer.mergeAll(engine, MarcbachmannCelLayer, parser, polling);
   return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
 };
 

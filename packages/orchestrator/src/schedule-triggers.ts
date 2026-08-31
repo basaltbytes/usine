@@ -1,5 +1,7 @@
 import {
+  ConfigParser,
   environmentFor,
+  type ConfigFileError,
   type LoadedInstance,
   type LoopFile,
   type ManagedRepo,
@@ -7,7 +9,7 @@ import {
   repositoryContext,
   type ScheduleTrigger,
 } from "@usine/config";
-import { Event, Item, Loop, Repository } from "@usine/core";
+import { AttemptChannel, Event, Item, Loop, Repository } from "@usine/core";
 import { RunEngine, type RunEngineError, SubmissionResult } from "@usine/engine";
 import { ExpressionEngine, type ExpressionError } from "@usine/expression";
 import {
@@ -50,7 +52,7 @@ interface DueTick {
   readonly trigger: ScheduleTrigger;
 }
 
-type ScheduleTriggerError = ExpressionError | RunEngineError;
+type ScheduleTriggerError = ConfigFileError | ExpressionError | RunEngineError;
 
 /** One selected repository whose scheduled Tick could not be evaluated or submitted. */
 export class ScheduleTickFailure extends Schema.Class<ScheduleTickFailure>(
@@ -177,6 +179,7 @@ export class ScheduleTriggers extends Context.Service<
   static readonly layer = Layer.effect(
     ScheduleTriggers,
     Effect.gen(function* () {
+      const config = yield* ConfigParser;
       const expressions = yield* ExpressionEngine;
       const runs = yield* RunEngine;
       // Efficiency-only fired-tick memory: an empty map after a restart is
@@ -204,10 +207,11 @@ export class ScheduleTriggers extends Context.Service<
           scheduledAt: DateTime.formatIso(due.scheduledAt),
         });
         const payload = tickPayload(due);
+        const context = { repo: repositoryContext(due.repository), item: payload };
         const matches = yield* expressions.evaluateBoolean(
           due.trigger.if,
           environmentFor("schedule"),
-          { repo: repositoryContext(due.repository), item: payload },
+          context,
         );
         if (!matches) {
           yield* Effect.logDebug("Scheduled Tick did not match its expression", {
@@ -219,6 +223,7 @@ export class ScheduleTriggers extends Context.Service<
         }
 
         const dedupKey = eventKey(due.loop, due.repository, due.scheduledAt);
+        const task = yield* config.renderPrompt(due.loop, context);
         const submitted = yield* runs.submit(
           triggerSubmission({
             dedupKey,
@@ -227,6 +232,7 @@ export class ScheduleTriggers extends Context.Service<
             payload,
             receivedAt,
             repository: due.repository,
+            task: AttemptChannel.Task.make(task),
           }),
         );
         yield* Effect.logInfo("Submitted scheduled Tick", {

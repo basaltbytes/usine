@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   AgentFile,
   AgentName,
+  ConfigParser,
   IssueTrigger,
   LoadedInstance,
   LoopFile,
@@ -146,9 +147,11 @@ const runtimeLayer = (directory: Instance.Directory, github: GitHubPolling["Serv
     execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
   });
   const engine = localEngineLayer(directory).pipe(Layer.provide(executor));
+  const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
   const dependencies = Layer.mergeAll(
     engine,
     MarcbachmannCelLayer,
+    parser,
     Layer.succeed(GitHubPolling, github),
   );
   return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
@@ -175,9 +178,11 @@ const schedulerLayer = (github: GitHubPolling["Service"]) => {
     submit: () => Effect.die("unused"),
     transcript: () => Effect.die("unused"),
   });
+  const parser = ConfigParser.layer.pipe(Layer.provide(expressions));
   const dependencies = Layer.mergeAll(
     cursors,
     expressions,
+    parser,
     runs,
     Layer.succeed(GitHubPolling, github),
   );
@@ -278,7 +283,8 @@ describe("PollingTriggers", () => {
         assert.strictEqual(coldStart.repositories, 1);
         assert.strictEqual(coldStart.changedItems, 1);
         const originalRun = claimedRun(coldStart);
-        yield* waitForState(firstEngine, originalRun, "Waiting");
+        const originalSnapshot = yield* waitForState(firstEngine, originalRun, "Waiting");
+        assert.strictEqual(originalSnapshot.task, "Implement issue 28.");
         const initialCursor = (yield* Ref.get(seenCursors))[0];
         assert(initialCursor !== undefined && Option.isNone(initialCursor.entityTag));
 
@@ -296,6 +302,7 @@ describe("PollingTriggers", () => {
 
         const afterRestart = yield* secondPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(afterRestart), originalRun);
+        assert.strictEqual((yield* secondEngine.inspect(originalRun)).task, "Implement issue 28.");
         const restoredCursors = yield* Ref.get(seenCursors);
         const restartCursor = restoredCursors[2];
         assert(restartCursor !== undefined && Option.isSome(restartCursor.entityTag));
@@ -415,9 +422,16 @@ describe("PollingTriggers", () => {
         ),
       transcript: () => Effect.die("unused"),
     });
+    const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
     const layer = PollingTriggers.layer.pipe(
       Layer.provide(
-        Layer.mergeAll(cursors, runs, MarcbachmannCelLayer, Layer.succeed(GitHubPolling, github)),
+        Layer.mergeAll(
+          cursors,
+          runs,
+          MarcbachmannCelLayer,
+          parser,
+          Layer.succeed(GitHubPolling, github),
+        ),
       ),
     );
 

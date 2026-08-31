@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   AgentFile,
   AgentName,
+  ConfigParser,
   Cron as CronExpression,
   LoadedInstance,
   LoopFile,
@@ -140,7 +141,8 @@ const fakeLayer = (
           ),
     transcript: () => Effect.die("unused"),
   });
-  const dependencies = Layer.merge(runs, MarcbachmannCelLayer);
+  const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
+  const dependencies = Layer.mergeAll(runs, MarcbachmannCelLayer, parser);
   return ScheduleTriggers.layer.pipe(Layer.provide(dependencies));
 };
 
@@ -163,7 +165,8 @@ const runtimeLayer = (directory: Instance.Directory) => {
     execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
   });
   const engine = localEngineLayer(directory).pipe(Layer.provide(executor));
-  const dependencies = Layer.merge(engine, MarcbachmannCelLayer);
+  const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
+  const dependencies = Layer.mergeAll(engine, MarcbachmannCelLayer, parser);
   return Layer.merge(dependencies, ScheduleTriggers.layer.pipe(Layer.provide(dependencies)));
 };
 
@@ -199,6 +202,7 @@ describe("ScheduleTriggers", () => {
           ["basaltbytes/one", "basaltbytes/two"],
         );
         for (const submission of captured) {
+          assert.strictEqual(submission.task, `Run maintenance for ${submission.repository}.`);
           assert.deepStrictEqual(submission.event.payload, {
             tick: {
               scheduledAt: "2026-08-31T07:00:00.000Z",
