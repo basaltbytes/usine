@@ -3,7 +3,7 @@ import type { Schema } from "effect";
 
 export interface PromptParts {
   readonly repository: Repository.Name;
-  readonly payload: Schema.JsonObject;
+  readonly payload: Schema.Json;
   readonly agent?: Agent.Name;
   readonly persona: string;
   readonly task: AttemptChannel.Task;
