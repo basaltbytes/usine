@@ -2,6 +2,7 @@ import { Array as Arr, Config, Effect, Fiber, Option, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { ExecutorOperationError, type ExecutorOperation, type RunHostCommand } from "../index.ts";
 import type { VmState } from "./model.ts";
+import { shellCommand } from "./shell.ts";
 
 interface CommandResult {
   readonly exitCode: number;
@@ -160,7 +161,12 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     command: string,
     args: ReadonlyArray<string>,
   ): Effect.Effect<CommandResult, ExecutorOperationError> =>
-    executeRaw(operation, ssh.command, [...ssh.args, vm.sshDest, "--", command, ...args]);
+    executeRaw(operation, ssh.command, [
+      ...ssh.args,
+      vm.sshDest,
+      "--",
+      shellCommand(command, args),
+    ]);
 
   const remote = (
     operation: ExecutorOperation,
@@ -168,7 +174,12 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     command: string,
     args: ReadonlyArray<string>,
   ): Effect.Effect<string, ExecutorOperationError> =>
-    executeChecked(operation, ssh.command, [...ssh.args, vm.sshDest, "--", command, ...args]);
+    executeChecked(operation, ssh.command, [
+      ...ssh.args,
+      vm.sshDest,
+      "--",
+      shellCommand(command, args),
+    ]);
 
   return {
     environment,

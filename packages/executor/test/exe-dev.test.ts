@@ -28,7 +28,7 @@ import { TestClock } from "effect/testing";
 const ATTEMPT_ID = Attempt.AttemptId.make("remote-run/execute/1");
 const WORKER = Worker.Name.make("remote-one");
 const REPOSITORY = Repository.Name.make("acme/demo");
-const REVISION = Repository.Revision.make("main");
+const REVISION = Repository.Revision.make("main; touch /tmp/usine-injected");
 const COMMIT = Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567");
 const TASK = AttemptChannel.Task.make("Complete the remote task");
 const INTEGRATION = IntegrationName.make("usine-acme-demo");
@@ -185,7 +185,8 @@ const fakeSsh = (protocol: string, mode: LaunchMode = "success") => {
       if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected pipeline");
       state.commands.push(command);
       const remote = remoteArgs(command);
-      if (remote[0] === "sh" && remote[1] === "-c") {
+      const remoteLine = remote[0] ?? "";
+      if (remoteLine.includes("&& export GH_HOST=github.int.exe.xyz &&")) {
         return yield* interactiveHandle(command, state, mode);
       }
       if (command.args.includes("exe.dev") && command.args.includes("ls")) {
@@ -203,18 +204,18 @@ const fakeSsh = (protocol: string, mode: LaunchMode = "success") => {
           0,
         );
       }
-      if (remote[0] === "printenv") return oneShotHandle("/home/exedev\n", 0);
-      if (remote[0] === "git" && remote[1] === "--version") {
+      if (remoteLine === "exec 'printenv' 'HOME'") return oneShotHandle("/home/exedev\n", 0);
+      if (remoteLine === "exec 'git' '--version'") {
         return oneShotHandle("git version 2.50.1\n", 0);
       }
-      if (remote[0] === "node" && remote[1] === "--version") {
+      if (remoteLine === "exec 'node' '--version'") {
         return oneShotHandle("v22.18.0\n", 0);
       }
-      if (remote[0] === "usine-run-host" && remote.includes("--protocol-version")) {
+      if (remoteLine === "exec 'usine-run-host' '--protocol-version'") {
         return oneShotHandle(`${protocol}\n`, 0);
       }
-      if (remote[0] === "test") return oneShotHandle("", 1);
-      if (remote[0] === "git" && remote.includes("rev-parse")) {
+      if (remoteLine.startsWith("exec 'test' ")) return oneShotHandle("", 1);
+      if (remoteLine.includes("'git' '--git-dir'") && remoteLine.includes("'rev-parse'")) {
         return oneShotHandle(`${COMMIT}\n`, 0);
       }
       return oneShotHandle("{}\n", 0);
@@ -294,12 +295,15 @@ describe("exe.dev executor", () => {
         assert(
           commandLines.some((line) => line.includes("https://github.int.exe.xyz/acme/demo.git")),
         );
-        assert(commandLines.some((line) => line.includes("sh -c")));
+        assert(commandLines.some((line) => line.includes("export GH_HOST=github.int.exe.xyz")));
+        assert(commandLines.some((line) => line.includes("'main; touch /tmp/usine-injected'")));
         assert(commandLines.some((line) => line.includes("integrations detach usine-acme-demo")));
         for (const command of ssh.state.commands) {
           assert(!("GH_TOKEN" in (command.options.env ?? {})));
           assert(!("GITHUB_TOKEN" in (command.options.env ?? {})));
           if (command.args.includes("integrations")) assert(!command.args.includes("--json"));
+          const separator = command.args.indexOf("--");
+          if (separator >= 0) assert.strictEqual(command.args.slice(separator + 1).length, 1);
         }
       }).pipe(Effect.provide(runtime(ssh.layer)));
     },

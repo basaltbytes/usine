@@ -3,7 +3,11 @@ import { Schema, type Effect, type Ref } from "effect";
 import type { RunHostCommand } from "../index.ts";
 
 /** The name of one exe.dev edge-injected integration. */
-export const IntegrationName = Schema.NonEmptyString.pipe(Schema.brand("ExeDevIntegrationName"));
+export const IntegrationName = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$/u, {
+    message: "Expected an exe.dev integration name safe for the lobby command boundary",
+  }),
+).pipe(Schema.brand("ExeDevIntegrationName"));
 export type IntegrationName = typeof IntegrationName.Type;
 
 /** One standing exe.dev GitHub integration; only its VM attachment is per Attempt. */

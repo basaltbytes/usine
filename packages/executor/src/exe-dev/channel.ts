@@ -5,8 +5,7 @@ import type { PreparedAttempt, RunHostCommand } from "../index.ts";
 import { runHostSessionFor, type RunHostInput, type RunHostSession } from "../run-host-session.ts";
 import type { ExeDevCommands } from "./commands.ts";
 import type { PreparedStates } from "./model.ts";
-
-const RUN_HOST_SHELL = 'cd "$1" && shift && export GH_HOST=github.int.exe.xyz && exec "$@"';
+import { runHostShellCommand } from "./shell.ts";
 
 export const attemptChannelFor: (
   commands: ExeDevCommands,
@@ -48,13 +47,7 @@ export const attemptChannelFor: (
           ...commands.ssh.args,
           state.vm.sshDest,
           "--",
-          "sh",
-          "-c",
-          RUN_HOST_SHELL,
-          "usine-run-host",
-          prepared.worktree,
-          runHost.command,
-          ...runHost.args,
+          runHostShellCommand(prepared.worktree, runHost.command, runHost.args),
         ],
         {
           env: commands.environment,
