@@ -35,6 +35,7 @@
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
+    "@usine/agents": "workspace:*",
     "@usine/core": "workspace:*"
   },
   "devDependencies": {

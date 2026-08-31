@@ -35,6 +35,7 @@
     "check": "tsc -p tsconfig.check.json",
     "test": "vitest run --exclude 'test/integration/**'",
     "test:integration": "vitest run test/integration/polling-triggers.test.ts",
+    "test:integration:agent": "vitest run test/integration/agent-run.test.ts",
     "test:exe-dev": "vitest run test/integration/exe-dev-worker.test.ts"
   },
   "dependencies": {

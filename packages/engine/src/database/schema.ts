@@ -1,4 +1,5 @@
 import {
+  Agent,
   Attempt,
   AttemptChannel,
   Event,
@@ -57,9 +58,12 @@ export const triggerEvents = snakeCase.table(
     repository: text().$type<Repository.Name>().notNull(),
     revision: text().$type<Repository.Revision>().notNull(),
     task: text().$type<AttemptChannel.Task>().notNull(),
+    agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    parentModel: text().$type<Agent.ModelId>(),
   },
   (table) => [
     check("usine_trigger_events_approval", sql`${table.approval} in ('none', 'required')`),
+    check("usine_trigger_events_agent_json_valid", sql`json_valid(${table.agentJson})`),
     index("usine_trigger_events_item").on(table.loopName, table.itemKey),
   ],
 );
@@ -81,8 +85,13 @@ export const runs = snakeCase.table(
     repository: text().$type<Repository.Name>().notNull(),
     revision: text().$type<Repository.Revision>().notNull(),
     task: text().$type<AttemptChannel.Task>().notNull(),
+    agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    parentModel: text().$type<Agent.ModelId>(),
   },
-  (table) => [check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`)],
+  (table) => [
+    check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`),
+    check("usine_runs_agent_json_valid", sql`json_valid(${table.agentJson})`),
+  ],
 );
 
 export const steps = snakeCase.table(
@@ -112,11 +121,14 @@ export const attempts = snakeCase.table(
     stepName: text().$type<Step.StepName>().notNull(),
     workerName: text().$type<Worker.Name>().notNull(),
     attemptNumber: integer({ mode: "number" }).$type<Attempt.AttemptNumber>().notNull(),
+    brainJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    parentModel: text().$type<Agent.ModelId>(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
     check("usine_attempts_number", sql`${table.attemptNumber} >= 1`),
+    check("usine_attempts_brain_json_valid", sql`json_valid(${table.brainJson})`),
     check(
       "usine_attempts_outcome_json_valid",
       sql`${table.outcomeJson} is null or json_valid(${table.outcomeJson})`,

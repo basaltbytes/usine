@@ -44,13 +44,17 @@ export class InstanceFolder extends Context.Service<
 
       const readFile = Effect.fn("InstanceFolder.readFile")(
         (absolutePath: string, file: InstancePath): Effect.Effect<string, ConfigFileError> =>
-          fileSystem
-            .readFileString(absolutePath)
-            .pipe(
-              Effect.mapError(
-                (error) => new ConfigFileError({ file, stage: "read", message: error.message }),
-              ),
+          fileSystem.readFileString(absolutePath).pipe(
+            Effect.mapError(
+              (error) =>
+                new ConfigFileError({
+                  file,
+                  stage: "read",
+                  expression: Option.none(),
+                  message: error.message,
+                }),
             ),
+          ),
       );
 
       const markdownFiles = Effect.fn("InstanceFolder.markdownFiles")(

@@ -1,5 +1,7 @@
 import {
+  ConfigParser,
   environmentFor,
+  type ConfigFileError,
   type LoadedInstance,
   type LoopFile,
   type ManagedRepo,
@@ -7,7 +9,7 @@ import {
   repositoryContext,
   type ScheduleTrigger,
 } from "@usine/config";
-import { Event, Item, Loop, Repository } from "@usine/core";
+import { Agent, AttemptChannel, Event, Item, Loop, Repository } from "@usine/core";
 import { RunEngine, type RunEngineError, SubmissionResult } from "@usine/engine";
 import { ExpressionEngine, type ExpressionError } from "@usine/expression";
 import {
@@ -23,7 +25,14 @@ import {
   Result,
   Schema,
 } from "effect";
-import { submissionLogFields, triggerSubmission } from "./trigger-submission.ts";
+import {
+  configFileErrorLogFields,
+  type LoopAgentResolutionError,
+  type ResolvedLoop,
+  resolveTriggerLoop,
+  submissionLogFields,
+  triggerSubmission,
+} from "./trigger-submission.ts";
 
 /** Fanout submits to local SQLite only — kept small so write transactions don't pile up. */
 const FANOUT_CONCURRENCY = 4;
@@ -42,15 +51,34 @@ interface ScheduleBoundaries {
   readonly next: DateTime.Utc;
 }
 
-interface DueTick {
-  readonly loop: LoopFile;
+interface DueTick extends ResolvedLoop {
   readonly repository: ManagedRepo;
   readonly scheduledAt: DateTime.Utc;
   readonly scheduledAtLocal: string;
   readonly trigger: ScheduleTrigger;
 }
 
-type ScheduleTriggerError = ExpressionError | RunEngineError;
+type ScheduleTriggerError = ConfigFileError | ExpressionError | RunEngineError;
+
+const scheduleFailureLogFields = (error: ScheduleTriggerError) => {
+  const common = { errorTag: error._tag, message: error.message };
+  if (error._tag === "ConfigFileError") {
+    return { ...common, ...configFileErrorLogFields(error) };
+  }
+  if (error._tag === "ExpressionCheckError" || error._tag === "ExpressionEvaluationError") {
+    return { ...common, expression: error.source };
+  }
+  return common;
+};
+
+/** One schedule loop whose authored Agent disappeared from the loaded roster. */
+export class ScheduleAgentFailure extends Schema.Class<ScheduleAgentFailure>(
+  "@usine/orchestrator/ScheduleAgentFailure",
+)({
+  loop: Loop.LoopName,
+  agent: Agent.Name,
+  message: Schema.String,
+}) {}
 
 /** One selected repository whose scheduled Tick could not be evaluated or submitted. */
 export class ScheduleTickFailure extends Schema.Class<ScheduleTickFailure>(
@@ -77,7 +105,11 @@ export class ScheduleCronFailure extends Schema.Class<ScheduleCronFailure>(
   message: Schema.String,
 }) {}
 
-export const ScheduleFailure = Schema.Union([ScheduleCronFailure, ScheduleTickFailure]);
+export const ScheduleFailure = Schema.Union([
+  ScheduleAgentFailure,
+  ScheduleCronFailure,
+  ScheduleTickFailure,
+]);
 export type ScheduleFailure = typeof ScheduleFailure.Type;
 
 /** Observable result of evaluating every schedule loop at one clock instant. */
@@ -177,6 +209,7 @@ export class ScheduleTriggers extends Context.Service<
   static readonly layer = Layer.effect(
     ScheduleTriggers,
     Effect.gen(function* () {
+      const config = yield* ConfigParser;
       const expressions = yield* ExpressionEngine;
       const runs = yield* RunEngine;
       // Efficiency-only fired-tick memory: an empty map after a restart is
@@ -201,37 +234,45 @@ export class ScheduleTriggers extends Context.Service<
         yield* Effect.annotateCurrentSpan({
           loop: due.loop.name,
           repository: due.repository.name,
+          agent: due.agent.name,
           scheduledAt: DateTime.formatIso(due.scheduledAt),
         });
         const payload = tickPayload(due);
+        const context = { repo: repositoryContext(due.repository), item: payload };
         const matches = yield* expressions.evaluateBoolean(
           due.trigger.if,
           environmentFor("schedule"),
-          { repo: repositoryContext(due.repository), item: payload },
+          context,
         );
         if (!matches) {
           yield* Effect.logDebug("Scheduled Tick did not match its expression", {
             loop: due.loop.name,
             repository: due.repository.name,
+            agent: due.agent.name,
             scheduledAt: DateTime.formatIso(due.scheduledAt),
           });
           return Option.none<SubmissionResult>();
         }
 
         const dedupKey = eventKey(due.loop, due.repository, due.scheduledAt);
+        const task = yield* config.renderPrompt(due.loop, context);
         const submitted = yield* runs.submit(
           triggerSubmission({
+            agent: due.agent,
             dedupKey,
             itemKey: itemKey(due.repository),
             loop: due.loop,
             payload,
             receivedAt,
             repository: due.repository,
+            task: AttemptChannel.Task.make(task),
+            parentModel: due.parentModel,
           }),
         );
         yield* Effect.logInfo("Submitted scheduled Tick", {
           loop: due.loop.name,
           repository: due.repository.name,
+          agent: due.agent.name,
           scheduledAt: DateTime.formatIso(due.scheduledAt),
           scheduledAtLocal: due.scheduledAtLocal,
           result: submitted._tag,
@@ -246,6 +287,7 @@ export class ScheduleTriggers extends Context.Service<
         const fired = yield* Ref.get(lastFired);
 
         const due: Array<DueTick> = [];
+        const agentFailures: Array<ScheduleAgentFailure> = [];
         const cronFailures: Array<ScheduleCronFailure> = [];
         const boundariesByLoop = new Map<Loop.LoopName, number>();
         const nexts: Array<DateTime.Utc> = [];
@@ -300,10 +342,29 @@ export class ScheduleTriggers extends Context.Service<
             });
             continue;
           }
+          const resolved = yield* Effect.result(resolveTriggerLoop(instance, schedule.loop));
+          if (Result.isFailure(resolved)) {
+            const error: LoopAgentResolutionError = resolved.failure;
+            yield* Effect.logError("Schedule loop could not resolve its Agent", {
+              loop: error.loop,
+              agent: error.agent,
+              errorTag: error._tag,
+              message: error.message,
+            });
+            agentFailures.push(
+              new ScheduleAgentFailure({
+                loop: error.loop,
+                agent: error.agent,
+                message: error.message,
+              }),
+            );
+            continue;
+          }
           if (schedule.repositories.length === 0) continue;
           boundariesByLoop.set(schedule.loop.name, latestEpoch);
           yield* Effect.logInfo("Schedule tick due", {
             loop: schedule.loop.name,
+            agent: resolved.success.agent.name,
             cron: schedule.trigger.cron,
             tz: schedule.trigger.tz,
             scheduledAt: DateTime.formatIso(boundaries.latest),
@@ -313,7 +374,9 @@ export class ScheduleTriggers extends Context.Service<
           });
           for (const repository of schedule.repositories) {
             due.push({
+              agent: resolved.success.agent,
               loop: schedule.loop,
+              parentModel: resolved.success.parentModel,
               repository,
               scheduledAt: boundaries.latest,
               scheduledAtLocal: boundaries.latestLocal,
@@ -350,9 +413,9 @@ export class ScheduleTriggers extends Context.Service<
           yield* Effect.logError("Scheduled Tick failed; sibling fanout was unaffected", {
             loop: candidate.loop.name,
             repository: candidate.repository.name,
+            agent: candidate.agent.name,
             scheduledAt: DateTime.formatIso(candidate.scheduledAt),
-            errorTag: error._tag,
-            message: error.message,
+            ...scheduleFailureLogFields(error),
           });
           tickFailures.push(
             new ScheduleTickFailure({
@@ -385,7 +448,7 @@ export class ScheduleTriggers extends Context.Service<
           submissions,
           skipped,
           alreadyFired,
-          failures: [...cronFailures, ...tickFailures],
+          failures: [...agentFailures, ...cronFailures, ...tickFailures],
           nextTickAt: earliest(nexts),
         });
       });

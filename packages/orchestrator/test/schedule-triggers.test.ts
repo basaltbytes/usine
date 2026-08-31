@@ -3,6 +3,9 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   AgentFile,
   AgentName,
+  ConfigFileError,
+  ConfigParser,
+  InstancePath,
   Cron as CronExpression,
   LoadedInstance,
   LoopFile,
@@ -68,6 +71,7 @@ const scheduleLoop = (
   config: UsineConfig,
   options: {
     readonly cron: string;
+    readonly body?: string;
     readonly expression?: string;
     readonly name?: string;
     readonly selectedTag?: string;
@@ -99,7 +103,7 @@ const scheduleLoop = (
     approval: "required",
     step: Step.StepName.make("run"),
     agent: agent.name,
-    body: PromptTemplate.make("Run maintenance for {{ repo.name }}."),
+    body: PromptTemplate.make(options.body ?? "Run maintenance for {{ repo.name }}."),
   });
 
 const instanceWith = (config: UsineConfig, loops: ReadonlyArray<LoopFile>) =>
@@ -114,6 +118,7 @@ const instanceWith = (config: UsineConfig, loops: ReadonlyArray<LoopFile>) =>
 const fakeLayer = (
   submissions: Ref.Ref<ReadonlyArray<Submission>>,
   failRepository: Option.Option<string> = Option.none(),
+  parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
 ) => {
   const runs = Layer.succeed(RunEngine)({
     approve: () => Effect.die("unused"),
@@ -140,7 +145,7 @@ const fakeLayer = (
           ),
     transcript: () => Effect.die("unused"),
   });
-  const dependencies = Layer.merge(runs, MarcbachmannCelLayer);
+  const dependencies = Layer.mergeAll(runs, MarcbachmannCelLayer, parser);
   return ScheduleTriggers.layer.pipe(Layer.provide(dependencies));
 };
 
@@ -163,7 +168,8 @@ const runtimeLayer = (directory: Instance.Directory) => {
     execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
   });
   const engine = localEngineLayer(directory).pipe(Layer.provide(executor));
-  const dependencies = Layer.merge(engine, MarcbachmannCelLayer);
+  const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
+  const dependencies = Layer.mergeAll(engine, MarcbachmannCelLayer, parser);
   return Layer.merge(dependencies, ScheduleTriggers.layer.pipe(Layer.provide(dependencies)));
 };
 
@@ -199,6 +205,10 @@ describe("ScheduleTriggers", () => {
           ["basaltbytes/one", "basaltbytes/two"],
         );
         for (const submission of captured) {
+          assert.strictEqual(submission.task, `Run maintenance for ${submission.repository}.`);
+          assert.strictEqual(submission.agent.name, agent.name);
+          assert.strictEqual(submission.agent.brain.model, agent.model);
+          assert(Option.isNone(submission.parentModel));
           assert.deepStrictEqual(submission.event.payload, {
             tick: {
               scheduledAt: "2026-08-31T07:00:00.000Z",
@@ -335,6 +345,53 @@ describe("ScheduleTriggers", () => {
           ["basaltbytes/healthy"],
         );
       }).pipe(Effect.provide(fakeLayer(submissions, Option.some("basaltbytes/failing"))));
+    }),
+  );
+
+  it.effect("isolates one loop's prompt rendering failure from sibling schedules", () =>
+    Effect.gen(function* () {
+      const config = configWith([{ name: "basaltbytes/usine" }]);
+      const broken = scheduleLoop(config, {
+        cron: "0 0 1 1 *",
+        name: "broken-prompt",
+        body: "Run {{ item.tick.missing }}.",
+      });
+      const healthy = scheduleLoop(config, { cron: "0 0 1 1 *", name: "healthy-prompt" });
+      const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
+      const parser = Layer.succeed(ConfigParser)({
+        parseAgentFile: () => Effect.die("unused"),
+        parseLoopFile: () => Effect.die("unused"),
+        parseUsineYaml: () => Effect.die("unused"),
+        renderPrompt: (loop) =>
+          loop.name === broken.name
+            ? Effect.fail(
+                new ConfigFileError({
+                  file: InstancePath.make(`loops/${loop.name}.md`),
+                  stage: "expression",
+                  expression: Option.some(Source.make("item.tick.missing")),
+                  message: "No such key: missing",
+                }),
+              )
+            : Effect.succeed(`Rendered ${loop.name}.`),
+      });
+      yield* TestClock.setTime(Date.parse("2026-08-31T10:00:00.000Z"));
+
+      yield* Effect.gen(function* () {
+        const schedules = yield* ScheduleTriggers;
+        const cycle = yield* schedules.tick(instanceWith(config, [broken, healthy]));
+
+        assert.strictEqual(cycle.fanout, 2);
+        assert.strictEqual(cycle.submissions.length, 1);
+        assert.strictEqual(cycle.failures.length, 1);
+        const failure = cycle.failures[0];
+        assert(failure instanceof ScheduleTickFailure);
+        assert.strictEqual(failure.loop, broken.name);
+        assert.strictEqual(failure.errorTag, "ConfigFileError");
+        assert.deepStrictEqual(
+          (yield* Ref.get(submissions)).map(({ loop, task }) => ({ loop, task })),
+          [{ loop: healthy.name, task: `Rendered ${healthy.name}.` }],
+        );
+      }).pipe(Effect.provide(fakeLayer(submissions, Option.none(), parser)));
     }),
   );
 

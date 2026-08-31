@@ -112,7 +112,10 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
       repository: request.repository,
       revision: request.revision,
       baseCommit,
+      payload: request.payload,
       task: request.task,
+      agent: request.agent,
+      parentModel: request.parentModel,
     }),
     worktree: WorktreePath.make(layout.worktree),
   });

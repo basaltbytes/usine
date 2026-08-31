@@ -28,13 +28,20 @@ export const parseYamlDocument = (
           strict: true,
           uniqueKeys: true,
         }),
-      catch: (cause) => new ConfigFileError({ file, stage: "yaml", message: causeMessage(cause) }),
+      catch: (cause) =>
+        new ConfigFileError({
+          file,
+          stage: "yaml",
+          expression: Option.none(),
+          message: causeMessage(cause),
+        }),
     });
     const syntaxIssue = document.errors[0] ?? document.warnings[0];
     if (syntaxIssue !== undefined) {
       return yield* new ConfigFileError({
         file,
         stage: "yaml",
+        expression: Option.none(),
         message: syntaxIssue.message,
       });
     }

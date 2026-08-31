@@ -1,4 +1,10 @@
-import { Loop as CoreLoop, Repository, Step, Worker as CoreWorker } from "@usine/core";
+import {
+  Agent as CoreAgent,
+  Loop as CoreLoop,
+  Repository,
+  Step,
+  Worker as CoreWorker,
+} from "@usine/core";
 import { Source } from "@usine/expression";
 import { Cron as EffectCron, DateTime, Effect, Option, Result, Schema } from "effect";
 
@@ -22,6 +28,7 @@ export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
 )("ConfigFileError", {
   file: InstancePath,
   stage: FileStage,
+  expression: Schema.OptionFromOptionalKey(Source),
   message: Schema.NonEmptyString,
 }) {}
 
@@ -42,13 +49,11 @@ const KebabCase = Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
   message: "Expected a kebab-case filename identity",
 });
 
-const Slug = Schema.String.check(KebabCase);
-
 const nonBlankString = (message: string) =>
   Schema.String.check(Schema.isPattern(/\S/u, { message }));
 
-export const AgentName = Slug.pipe(Schema.brand("AgentName"));
-export type AgentName = typeof AgentName.Type;
+export const AgentName = CoreAgent.Name;
+export type AgentName = CoreAgent.Name;
 
 export const LoopName = CoreLoop.LoopName.check(KebabCase);
 export type LoopName = typeof LoopName.Type;
@@ -64,10 +69,8 @@ export const RegistryTag = nonBlankString("Expected a non-blank registry tag").p
 );
 export type RegistryTag = typeof RegistryTag.Type;
 
-export const ModelId = nonBlankString("Expected a non-blank model id").pipe(
-  Schema.brand("ModelId"),
-);
-export type ModelId = typeof ModelId.Type;
+export const ModelId = CoreAgent.ModelId;
+export type ModelId = CoreAgent.ModelId;
 
 export const OperatorLogin = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/u, {
@@ -81,10 +84,8 @@ export const PromptTemplate = nonBlankString("Expected a non-blank Markdown prom
 );
 export type PromptTemplate = typeof PromptTemplate.Type;
 
-export const Persona = nonBlankString("Expected a non-blank Markdown persona").pipe(
-  Schema.brand("Persona"),
-);
-export type Persona = typeof Persona.Type;
+export const Persona = CoreAgent.Persona;
+export type Persona = CoreAgent.Persona;
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
@@ -227,11 +228,11 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
   body: PromptTemplate,
 }) {}
 
-export const Harness = Schema.Literals(["claude", "codex", "pi"]);
-export type Harness = typeof Harness.Type;
+export const Harness = CoreAgent.Harness;
+export type Harness = CoreAgent.Harness;
 
-export const Effort = Schema.Literals(["off", "minimal", "low", "medium", "high", "xhigh", "max"]);
-export type Effort = typeof Effort.Type;
+export const Effort = CoreAgent.Effort;
+export type Effort = CoreAgent.Effort;
 
 export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile")({
   name: AgentName,
@@ -285,7 +286,9 @@ export const loopReferenceFailure = (
   references: ReferenceIndex,
 ): Option.Option<ConfigFileError> => {
   const referenceError = (message: string): Option.Option<ConfigFileError> =>
-    Option.some(new ConfigFileError({ file, stage: "reference", message }));
+    Option.some(
+      new ConfigFileError({ file, stage: "reference", expression: Option.none(), message }),
+    );
   if (!references.agentNames.has(loop.agent)) {
     return referenceError(`Unknown agent: ${loop.agent}`);
   }

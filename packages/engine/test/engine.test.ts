@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import {
+  Agent,
   AttemptChannel,
   AttemptFailure,
   Event,
@@ -32,6 +33,16 @@ import { layer } from "../src/database/local-sqlite.ts";
 import { InstanceDirectory, RunEngine, StepExecutor, Submission } from "../src/index.ts";
 
 const stepResult = (message: string) => new StepResult.StepResult({ message, facts: [] });
+const testAgent = new Agent.Agent({
+  name: Agent.Name.make("developer"),
+  brain: new Agent.BrainSpec({
+    harness: "claude",
+    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    effort: "high",
+  }),
+  parentModel: Option.none(),
+  persona: Agent.Persona.make("Implement the task."),
+});
 
 type AttemptPlan = Effect.Effect<StepResult.StepResult, AttemptFailure.AttemptFailure>;
 
@@ -70,6 +81,8 @@ const submission = (options: {
     repository: Repository.Name.make("basaltbytes/usine"),
     revision: Repository.Revision.make(`revision-${options.number}`),
     task: AttemptChannel.Task.make(`Run test ${options.number}`),
+    agent: testAgent,
+    parentModel: Option.none(),
   });
 };
 

@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config";
 import {
+  Agent,
   Attempt,
   AttemptChannel,
   Event,
@@ -38,6 +39,16 @@ import { layer as localLayer } from "../src/local.ts";
 const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
 const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
 const TOKEN = "one-attempt-test-token";
+const testAgent = new Agent.Agent({
+  name: Agent.Name.make("developer"),
+  brain: new Agent.BrainSpec({
+    harness: "claude",
+    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    effort: "high",
+  }),
+  parentModel: Option.none(),
+  persona: Agent.Persona.make("Implement the task."),
+});
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
   version: 1,
@@ -106,6 +117,8 @@ const submission = (number: number, receivedAt = `2026-08-30T12:00:0${number}Z`)
     repository: Repository.Name.make("acme/demo"),
     revision: Repository.Revision.make("main"),
     task: AttemptChannel.Task.make(`Complete local task ${number}`),
+    agent: testAgent,
+    parentModel: Option.none(),
   });
 
 const waitFor = Effect.fn("test.waitFor")(function* (
@@ -160,7 +173,7 @@ const withLocalEngine = <A, E, R>(
 
 describe("local worker", () => {
   it.live("runs Event → Attempt, persists the transcript, and removes the worktree", () =>
-    withLocalEngine([], ({ engine, instance }) =>
+    withLocalEngine(["--stub"], ({ engine, instance }) =>
       Effect.gen(function* () {
         const path = yield* Path.Path;
         const fileSystem = yield* FileSystem.FileSystem;
@@ -185,7 +198,9 @@ describe("local worker", () => {
           transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
           [
             ["outbound", "Started"],
-            ["outbound", "AgentMessage"],
+            ["outbound", "SessionEvent"],
+            ["outbound", "SessionEvent"],
+            ["outbound", "SessionEvent"],
             ["outbound", "Final"],
           ],
         );
@@ -199,7 +214,7 @@ describe("local worker", () => {
         );
         assert.deepStrictEqual(
           tail.map(({ envelope }) => envelope.payload._tag),
-          ["AgentMessage", "Final"],
+          ["SessionEvent", "SessionEvent", "SessionEvent", "Final"],
         );
 
         const attempts = yield* fileSystem.readDirectory(
@@ -319,7 +334,10 @@ describe("local worker", () => {
       repository: Repository.Name.make("acme/demo"),
       revision: Repository.Revision.make("main"),
       baseCommit: Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+      payload: {},
       task: AttemptChannel.Task.make("Prove cleanup stays out of the outcome"),
+      agent: testAgent,
+      parentModel: Option.none(),
     });
     const prepared = new PreparedAttempt({
       worker: Worker.Name.make("local"),
@@ -357,6 +375,8 @@ describe("local worker", () => {
         stepName: Step.StepName.make("run"),
         worker: Worker.Name.make("local"),
         number: Attempt.AttemptNumber.make(1),
+        brain: testAgent.brain,
+        parentModel: Option.none(),
         startedAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
         outcome: Option.none(),
       }),
@@ -376,6 +396,8 @@ describe("local worker", () => {
       repository: spec.repository,
       revision: spec.revision,
       task: spec.task,
+      agent: testAgent,
+      parentModel: Option.none(),
     });
 
     return Effect.gen(function* () {

@@ -1,4 +1,5 @@
 import {
+  Agent,
   Attempt,
   AttemptChannel,
   Event,
@@ -30,6 +31,8 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   repository: Repository.Name,
   revision: Repository.Revision,
   task: AttemptChannel.Task,
+  agent: Agent.Agent,
+  parentModel: Schema.Option(Agent.ModelId),
 }) {}
 
 /** The Event owns a Run and repeated submissions return the same identity. */
@@ -85,6 +88,8 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   repository: Repository.Name,
   revision: Repository.Revision,
   task: AttemptChannel.Task,
+  agent: Agent.Agent,
+  parentModel: Schema.Option(Agent.ModelId),
 }) {}
 
 /** Input passed to the attempt-execution port. */
@@ -96,6 +101,8 @@ export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/St
   repository: Repository.Name,
   revision: Repository.Revision,
   task: AttemptChannel.Task,
+  agent: Agent.Agent,
+  parentModel: Schema.Option(Agent.ModelId),
 }) {}
 
 /**

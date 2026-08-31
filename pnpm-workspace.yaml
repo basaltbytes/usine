@@ -5,10 +5,12 @@ packages:
   - packages/*
   - tooling/*
 
-# turbo's optional native msgpack accelerator — works without its postinstall.
+# Optional/package-maintenance scripts are unnecessary at runtime.
 allowBuilds:
+  "@google/genai": false
   esbuild: false
   msgpackr-extract: false
+  protobufjs: false
 
 patchedDependencies:
   drizzle-orm@1.0.0-rc.4: patches/drizzle-orm@1.0.0-rc.4.patch

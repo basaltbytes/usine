@@ -8,6 +8,7 @@
  * typed errors, and pure derivers — each module docblock names its kind.
  */
 export * as Instance from "./instance.ts";
+export * as Agent from "./agent.ts";
 export * as Repository from "./repository.ts";
 export * as AttemptChannel from "./attempt-channel.ts";
 export * as StepResult from "./step-result.ts";

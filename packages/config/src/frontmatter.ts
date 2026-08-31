@@ -1,4 +1,4 @@
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import { ConfigFileError, type InstancePath } from "./model.ts";
 
 export interface MarkdownParts {
@@ -34,6 +34,7 @@ export const splitMarkdown = (
     return new ConfigFileError({
       file,
       stage: "frontmatter",
+      expression: Option.none(),
       message: "Expected the file to start with a YAML frontmatter delimiter (---)",
     });
   }
@@ -45,6 +46,7 @@ export const splitMarkdown = (
     return new ConfigFileError({
       file,
       stage: "frontmatter",
+      expression: Option.none(),
       message: "Expected a closing YAML frontmatter delimiter (---)",
     });
   }

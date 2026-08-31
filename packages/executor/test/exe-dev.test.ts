@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Attempt, AttemptChannel, Repository, StepResult, Worker } from "@usine/core";
+import { Agent, Attempt, AttemptChannel, Repository, StepResult, Worker } from "@usine/core";
 import { CheckoutRequest, Executor, type PreparedAttempt } from "../src/index.ts";
 import {
   GitHubIntegration,
@@ -14,6 +14,7 @@ import {
   Effect,
   Fiber,
   Layer,
+  Option,
   Queue,
   Ref,
   Result,
@@ -33,6 +34,22 @@ const REPOSITORY = Repository.Name.make("acme/demo");
 const REVISION = Repository.Revision.make("main;$(touch$IFS/tmp/usine-injected)");
 const COMMIT = Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567");
 const TASK = AttemptChannel.Task.make("Complete the remote task");
+const PROTOCOL = String(AttemptChannel.PROTOCOL_VERSION);
+const TEST_AGENT = new Agent.Agent({
+  name: Agent.Name.make("developer"),
+  brain: new Agent.BrainSpec({
+    harness: "claude",
+    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    effort: "high",
+  }),
+  parentModel: Option.none(),
+  persona: Agent.Persona.make("Implement the task."),
+});
+const TEST_SESSION = new Agent.ParentSession({
+  id: Agent.SessionId.make("parent-session"),
+  agent: TEST_AGENT.name,
+  brain: TEST_AGENT.brain,
+});
 const INTEGRATION = IntegrationName.make("usine-acme-demo");
 const encoder = new TextEncoder();
 const SSH_ENVIRONMENT_ALLOWLIST = new Set([
@@ -163,7 +180,12 @@ const interactiveHandle = (command: StandardCommand, state: FakeSshState, mode: 
                   attemptId: input.spec.attemptId,
                   sequence: AttemptChannel.Sequence.make(2),
                   sentAt: DateTime.makeUnsafe("2026-08-31T12:00:01Z"),
-                  payload: new AttemptChannel.AgentMessage({ message: "Remote work completed" }),
+                  payload: new AttemptChannel.SessionEvent({
+                    event: new Agent.TextOutput({
+                      session: TEST_SESSION,
+                      text: "Remote work completed",
+                    }),
+                  }),
                 }),
               );
               yield* emit(
@@ -317,7 +339,10 @@ const request = new CheckoutRequest({
   worker: WORKER,
   repository: REPOSITORY,
   revision: REVISION,
+  payload: { issue: { number: 42 } },
   task: TASK,
+  agent: TEST_AGENT,
+  parentModel: Option.none(),
 });
 
 const runtime = (sshLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>) =>
@@ -330,7 +355,7 @@ const runtime = (sshLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>)
 
 describe("exe.dev executor", () => {
   it.effect("preflight verifies the baked VM without changing remote state", () => {
-    const ssh = fakeSsh("1");
+    const ssh = fakeSsh(PROTOCOL);
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
@@ -356,7 +381,7 @@ describe("exe.dev executor", () => {
   });
 
   it.effect("contains an invalid sweep boundary without touching it or blocking prepare", () => {
-    const ssh = fakeSsh("1", "success", "invalid-path");
+    const ssh = fakeSsh(PROTOCOL, "success", "invalid-path");
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
@@ -364,6 +389,9 @@ describe("exe.dev executor", () => {
       // the Worker root is never acted on.
       const prepared = yield* executor.prepare(request);
       assert.strictEqual(prepared.spec.attemptId, ATTEMPT_ID);
+      assert.deepStrictEqual(prepared.spec.payload, request.payload);
+      assert.deepStrictEqual(prepared.spec.agent, request.agent);
+      assert.deepStrictEqual(prepared.spec.parentModel, request.parentModel);
       const commandLine = ssh.state.commands.map(({ args }) => args.join(" ")).join("\n");
       assert(!commandLine.includes("/tmp/not-a-worker-child"));
       assert(commandLine.includes("integrations attach"));
@@ -371,7 +399,7 @@ describe("exe.dev executor", () => {
   });
 
   it.effect("drops the prepared state exactly once when cleanup partially fails", () => {
-    const ssh = fakeSsh("1");
+    const ssh = fakeSsh(PROTOCOL);
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
@@ -394,7 +422,7 @@ describe("exe.dev executor", () => {
   });
 
   it.effect("releases the credential grant when prepare is interrupted mid-clone", () => {
-    const ssh = fakeSsh("1");
+    const ssh = fakeSsh(PROTOCOL);
     ssh.state.hangClone = true;
     return Effect.gen(function* () {
       const executor = yield* Executor;
@@ -419,7 +447,7 @@ describe("exe.dev executor", () => {
   it.effect(
     "runs unchanged Attempt envelopes over SSH and cleans the edge grant and worktree",
     () => {
-      const ssh = fakeSsh("1");
+      const ssh = fakeSsh(PROTOCOL);
       const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
       return Effect.gen(function* () {
         const executor = yield* Executor;
@@ -437,7 +465,7 @@ describe("exe.dev executor", () => {
           transcript.map(([direction, envelope]) => [direction, envelope.payload._tag]),
           [
             ["outbound", "Started"],
-            ["outbound", "AgentMessage"],
+            ["outbound", "SessionEvent"],
             ["outbound", "Final"],
           ],
         );
@@ -494,7 +522,7 @@ describe("exe.dev executor", () => {
   );
 
   it.effect("refreshes a shared grant for each Attempt and detaches after the last cleanup", () => {
-    const ssh = fakeSsh("1");
+    const ssh = fakeSsh(PROTOCOL);
     const secondRequest = new CheckoutRequest({
       ...request,
       attemptId: Attempt.AttemptId.make("remote-run/execute/2"),
@@ -517,19 +545,19 @@ describe("exe.dev executor", () => {
   });
 
   it.effect("surfaces run-host skew as a typed preflight capability error", () => {
-    const ssh = fakeSsh("2");
+    const ssh = fakeSsh("1");
     return Effect.gen(function* () {
       const executor = yield* Executor;
       const error = yield* executor.preflight(WORKER).pipe(Effect.flip);
       assert.strictEqual(error._tag, "WorkerCapabilityError");
       if (error._tag !== "WorkerCapabilityError") return;
       assert.strictEqual(error.capability, "run-host");
-      assert(error.message.includes("expected 1"));
+      assert(error.message.includes(`expected ${PROTOCOL}`));
     }).pipe(Effect.provide(runtime(ssh.layer)));
   });
 
   it.effect("requires a successful SSH exit after the final envelope", () => {
-    const ssh = fakeSsh("1", "final-nonzero");
+    const ssh = fakeSsh(PROTOCOL, "final-nonzero");
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
@@ -544,7 +572,7 @@ describe("exe.dev executor", () => {
   });
 
   it.effect("cancels once through the SSH channel and confirms the remote interrupt", () => {
-    const ssh = fakeSsh("1", "wait-for-interrupt");
+    const ssh = fakeSsh(PROTOCOL, "wait-for-interrupt");
     const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
     return Effect.gen(function* () {
       const executor = yield* Executor;
@@ -585,7 +613,7 @@ describe("exe.dev executor", () => {
   });
 
   it.effect("kills a stalled SSH session after the interrupt grace", () => {
-    const ssh = fakeSsh("1", "ignore-interrupt");
+    const ssh = fakeSsh(PROTOCOL, "ignore-interrupt");
     const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
     return Effect.gen(function* () {
       const executor = yield* Executor;
@@ -619,7 +647,7 @@ describe("exe.dev executor", () => {
   });
 
   it.effect("hard-kills when the persisted interrupt write is parked", () => {
-    const ssh = fakeSsh("1", "ignore-interrupt");
+    const ssh = fakeSsh(PROTOCOL, "ignore-interrupt");
     const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
     return Effect.gen(function* () {
       const executor = yield* Executor;

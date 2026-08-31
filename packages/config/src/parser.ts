@@ -5,7 +5,7 @@ import {
   type ExpressionError,
   Source,
 } from "@usine/expression";
-import { Context, Effect, Layer, Schema, SchemaIssue } from "effect";
+import { Context, Effect, Layer, Option, Schema, SchemaIssue } from "effect";
 import { splitMarkdown } from "./frontmatter.ts";
 import {
   AgentFile,
@@ -53,7 +53,12 @@ interface Interpolation {
 }
 
 const schemaError = (file: InstancePath, error: Schema.SchemaError): ConfigFileError =>
-  new ConfigFileError({ file, stage: "schema", message: formatIssue(error.issue) });
+  new ConfigFileError({
+    file,
+    stage: "schema",
+    expression: Option.none(),
+    message: formatIssue(error.issue),
+  });
 
 const decodeJson = Schema.decodeUnknownEffect(Schema.Json);
 
@@ -65,13 +70,24 @@ const parseYaml = (
     const document = yield* parseYamlDocument(file, source);
     return yield* decodeJson(document.toJS()).pipe(
       Effect.mapError(
-        (error) => new ConfigFileError({ file, stage: "yaml", message: formatIssue(error.issue) }),
+        (error) =>
+          new ConfigFileError({
+            file,
+            stage: "yaml",
+            expression: Option.none(),
+            message: formatIssue(error.issue),
+          }),
       ),
     );
   });
 
 const expressionError = (file: InstancePath, error: ExpressionError): ConfigFileError =>
-  new ConfigFileError({ file, stage: "expression", message: error.message });
+  new ConfigFileError({
+    file,
+    stage: "expression",
+    expression: Option.some(error.source),
+    message: error.message,
+  });
 
 const markdownName = (file: InstancePath): Effect.Effect<string, ConfigFileError> => {
   const basename = file.slice(file.lastIndexOf("/") + 1);
@@ -79,6 +95,7 @@ const markdownName = (file: InstancePath): Effect.Effect<string, ConfigFileError
     return new ConfigFileError({
       file,
       stage: "schema",
+      expression: Option.none(),
       message: "Expected a .md filename",
     });
   }
@@ -118,6 +135,7 @@ const interpolations = (
         return yield* new ConfigFileError({
           file,
           stage: "expression",
+          expression: Option.none(),
           message: `Unclosed prompt interpolation at character ${start}`,
         });
       }

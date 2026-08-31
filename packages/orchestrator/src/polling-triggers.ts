@@ -1,12 +1,14 @@
 import {
+  ConfigParser,
   environmentFor,
+  type ConfigFileError,
   type LoadedInstance,
   type LoopFile,
   type ManagedRepo,
   matchesSelector,
   repositoryContext,
 } from "@usine/config";
-import { Event, Item, Repository } from "@usine/core";
+import { AttemptChannel, Event, Item, Repository } from "@usine/core";
 import {
   CursorKey,
   CursorStore,
@@ -23,7 +25,13 @@ import {
   type PayloadSnapshot,
 } from "@usine/github";
 import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Result, Schema } from "effect";
-import { submissionLogFields, triggerSubmission } from "./trigger-submission.ts";
+import {
+  configFileErrorLogFields,
+  type ResolvedLoop,
+  resolveTriggerLoops,
+  submissionLogFields,
+  triggerSubmission,
+} from "./trigger-submission.ts";
 
 /** GitHub REST + GraphQL tolerate a handful of parallel calls per token. */
 const REPOSITORY_CONCURRENCY = 4;
@@ -59,11 +67,22 @@ export class PollCycle extends Schema.Class<PollCycle>("@usine/orchestrator/Poll
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
 }) {}
 
-type RepositoryPollError = ExpressionError | GitHubAppError | RunEngineError;
+type RepositoryPollError = ConfigFileError | ExpressionError | GitHubAppError | RunEngineError;
+
+const repositoryFailureLogFields = (error: RepositoryPollError) => {
+  const common = { errorTag: error._tag, message: error.message };
+  if (error._tag === "ConfigFileError") {
+    return { ...common, ...configFileErrorLogFields(error) };
+  }
+  if (error._tag === "ExpressionCheckError" || error._tag === "ExpressionEvaluationError") {
+    return { ...common, expression: error.source };
+  }
+  return common;
+};
 
 interface WatchedRepository {
   readonly repository: ManagedRepo;
-  readonly loops: ReadonlyArray<LoopFile>;
+  readonly loops: ReadonlyArray<ResolvedLoop>;
   readonly watches: ReadonlyArray<WatchKey>;
 }
 
@@ -71,33 +90,32 @@ interface RepositoryCycle {
   readonly changedItems: number;
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
+  readonly failures: ReadonlyArray<RepositoryPollFailure>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
 interface ItemCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
+  /** Loop-authoring failures isolated to their loop so the cursor still advances. */
+  readonly failures: ReadonlyArray<RepositoryPollFailure>;
 }
 
 const cursorKey = (repository: ManagedRepo): CursorKey =>
   CursorKey.make(`github-poll:${Repository.canonical(repository.name)}`);
 
-const watchKey = (loop: LoopFile): WatchKey =>
+const watchKey = ({ loop }: ResolvedLoop): WatchKey =>
   WatchKey.make(JSON.stringify([loop.name, loop.trigger.on, loop.trigger.if]));
 
-const watchedRepositories = (instance: LoadedInstance): ReadonlyArray<WatchedRepository> =>
+const watchedRepositories = (
+  instance: LoadedInstance,
+  resolved: ReadonlyArray<ResolvedLoop>,
+): ReadonlyArray<WatchedRepository> =>
   instance.config.repos.flatMap((repository) => {
-    const loops = instance.loops.filter(
-      (loop) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
+    const loops = resolved.filter(
+      ({ loop }) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
     );
-    if (loops.length === 0) return [];
-    return [
-      {
-        repository,
-        loops,
-        watches: loops.map(watchKey).sort(),
-      },
-    ];
+    return loops.length === 0 ? [] : [{ repository, loops, watches: loops.map(watchKey).sort() }];
   });
 
 const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKey>): boolean =>
@@ -153,6 +171,7 @@ export class PollingTriggers extends Context.Service<
     PollingTriggers,
     Effect.gen(function* () {
       const cursors = yield* CursorStore;
+      const config = yield* ConfigParser;
       const expressions = yield* ExpressionEngine;
       const github = yield* GitHubPolling;
       const runs = yield* RunEngine;
@@ -186,9 +205,13 @@ export class PollingTriggers extends Context.Service<
         watched: WatchedRepository,
         item: ChangedItem,
       ) {
-        const loops = watched.loops.filter(({ trigger }) => trigger.on === itemStream(item));
+        yield* Effect.annotateCurrentSpan({
+          repository: watched.repository.name,
+          item: item.number,
+        });
+        const loops = watched.loops.filter(({ loop }) => loop.trigger.on === itemStream(item));
         if (loops.length === 0) {
-          return { submissions: [], revokedRuns: 0 } satisfies ItemCycle;
+          return { submissions: [], revokedRuns: 0, failures: [] } satisfies ItemCycle;
         }
 
         const snapshot = yield* github.snapshot(watched.repository.name, item);
@@ -203,20 +226,29 @@ export class PollingTriggers extends Context.Service<
           contentHash: snapshot.contentHash,
         });
         const submissions: Array<SubmissionResult> = [];
+        const failures: Array<RepositoryPollFailure> = [];
         let revokedRuns = 0;
-        for (const loop of loops) {
+        for (const { agent, loop, parentModel } of loops) {
+          yield* Effect.annotateCurrentSpan({ loop: loop.name, agent: agent.name });
           const matches = yield* expressions.evaluateBoolean(
             loop.trigger.if,
             environmentFor(loop.trigger.on),
             context,
           );
           if (!matches) {
+            yield* Effect.logDebug("Item did not match its loop expression", {
+              repository: watched.repository.name,
+              loop: loop.name,
+              agent: agent.name,
+              item: item.number,
+            });
             const revoked = yield* runs.revoke(loop.name, stableItemKey);
             revokedRuns += revoked.length;
             if (revoked.length > 0) {
               yield* Effect.logInfo("Item stopped matching; revoked its unstarted runs", {
                 repository: watched.repository.name,
                 loop: loop.name,
+                agent: agent.name,
                 item: item.number,
                 runIds: revoked.join(", "),
               });
@@ -226,6 +258,29 @@ export class PollingTriggers extends Context.Service<
 
           const dedupKey = eventKey(loop, watched.repository, item, snapshot);
           const receivedAt = yield* DateTime.now;
+          // A render failure is deterministic loop authoring, not transport:
+          // re-polling the same snapshot re-fails identically. Isolate it to
+          // this loop so sibling loops and the cursor still advance.
+          const rendered = yield* Effect.result(config.renderPrompt(loop, context));
+          if (Result.isFailure(rendered)) {
+            yield* Effect.logError("Loop prompt rendering failed; sibling loops were unaffected", {
+              loop: loop.name,
+              repository: watched.repository.name,
+              agent: agent.name,
+              item: item.number,
+              errorTag: rendered.failure._tag,
+              message: rendered.failure.message,
+              ...configFileErrorLogFields(rendered.failure),
+            });
+            failures.push(
+              new RepositoryPollFailure({
+                repository: watched.repository.name,
+                errorTag: rendered.failure._tag,
+                message: rendered.failure.message,
+              }),
+            );
+            continue;
+          }
           const submitted = yield* runs.submit(
             triggerSubmission({
               dedupKey,
@@ -234,11 +289,15 @@ export class PollingTriggers extends Context.Service<
               payload,
               receivedAt,
               repository: watched.repository,
+              task: AttemptChannel.Task.make(rendered.success),
+              agent,
+              parentModel,
             }),
           );
           yield* Effect.logInfo("Submitted matching item state", {
             repository: watched.repository.name,
             loop: loop.name,
+            agent: agent.name,
             item: item.number,
             contentHash: snapshot.contentHash,
             result: submitted._tag,
@@ -246,7 +305,7 @@ export class PollingTriggers extends Context.Service<
           });
           submissions.push(submitted);
         }
-        return { submissions, revokedRuns } satisfies ItemCycle;
+        return { submissions, revokedRuns, failures } satisfies ItemCycle;
       });
 
       const pollRepository = Effect.fn("PollingTriggers.pollRepository")(function* (
@@ -263,6 +322,7 @@ export class PollingTriggers extends Context.Service<
             changedItems: 0,
             submissions: [],
             revokedRuns: 0,
+            failures: [],
             nextPollAt: detected.nextPollAt,
           } satisfies RepositoryCycle;
         }
@@ -285,12 +345,13 @@ export class PollingTriggers extends Context.Service<
           changedItems: detected.items.length,
           submissions: itemCycles.flatMap(({ submissions }) => submissions),
           revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
+          failures: itemCycles.flatMap(({ failures }) => failures),
           nextPollAt: detected.nextPollAt,
         } satisfies RepositoryCycle;
       });
 
       const poll = Effect.fn("PollingTriggers.poll")(function* (instance: LoadedInstance) {
-        const watched = watchedRepositories(instance);
+        const watched = watchedRepositories(instance, yield* resolveTriggerLoops(instance));
         const settled = yield* Effect.forEach(
           watched,
           (repository) =>
@@ -321,8 +382,7 @@ export class PollingTriggers extends Context.Service<
           }
           yield* Effect.logError("Repository poll cycle failed; siblings were unaffected", {
             repository: repository.repository.name,
-            errorTag: error._tag,
-            message: error.message,
+            ...repositoryFailureLogFields(error),
           });
           failures.push(
             new RepositoryPollFailure({
@@ -337,7 +397,7 @@ export class PollingTriggers extends Context.Service<
           changedItems: cycles.reduce((sum, cycle) => sum + cycle.changedItems, 0),
           submissions: cycles.flatMap(({ submissions }) => submissions),
           revokedRuns: cycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
-          failures,
+          failures: [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
           nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
         });
       });

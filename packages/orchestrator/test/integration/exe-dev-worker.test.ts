@@ -1,7 +1,17 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config";
-import { AttemptChannel, Event, Instance, Item, Loop, Repository, Step, Worker } from "@usine/core";
+import {
+  Agent,
+  AttemptChannel,
+  Event,
+  Instance,
+  Item,
+  Loop,
+  Repository,
+  Step,
+  Worker,
+} from "@usine/core";
 import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev";
 import { RunEngine, Submission, TranscriptQuery } from "@usine/engine";
 import { Config, DateTime, Effect, FileSystem, Option, Schema } from "effect";
@@ -63,6 +73,16 @@ describe("live exe.dev Worker", () => {
       const worker = Worker.Name.make(settings.worker);
       const repository = Repository.Name.make(settings.repository);
       const revision = Repository.Revision.make(settings.revision);
+      const agent = new Agent.Agent({
+        name: Agent.Name.make("developer"),
+        brain: new Agent.BrainSpec({
+          harness: "codex",
+          model: Agent.ModelId.make("gpt-5.6-sol"),
+          effort: "high",
+        }),
+        parentModel: Option.none(),
+        persona: Agent.Persona.make("Verify the remote Worker transport."),
+      });
       const config = Schema.decodeUnknownSync(UsineConfig)({
         version: 1,
         repos: [{ name: repository }],
@@ -107,6 +127,8 @@ describe("live exe.dev Worker", () => {
             repository,
             revision,
             task: AttemptChannel.Task.make("Verify the exe.dev Worker transport"),
+            agent,
+            parentModel: Option.none(),
           }),
         );
         assert.strictEqual(accepted._tag, "Claimed");
@@ -124,7 +146,7 @@ describe("live exe.dev Worker", () => {
           transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
           [
             ["outbound", "Started"],
-            ["outbound", "AgentMessage"],
+            ["outbound", "SessionEvent"],
             ["outbound", "Final"],
           ],
         );

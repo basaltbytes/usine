@@ -224,6 +224,8 @@ const makeRunStore = Effect.gen(function* () {
           stepName: current.step.name,
           worker,
           number,
+          brain: current.agent.brain,
+          parentModel: current.parentModel,
           startedAt,
           outcome: Option.none(),
         });
@@ -243,6 +245,8 @@ const makeRunStore = Effect.gen(function* () {
             repository: current.repository,
             revision: current.revision,
             task: current.task,
+            agent: current.agent,
+            parentModel: current.parentModel,
           }),
         });
       }),

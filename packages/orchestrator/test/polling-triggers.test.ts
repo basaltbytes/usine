@@ -3,6 +3,9 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   AgentFile,
   AgentName,
+  ConfigFileError,
+  ConfigParser,
+  InstancePath,
   IssueTrigger,
   LoadedInstance,
   LoopFile,
@@ -54,7 +57,7 @@ const config = Schema.decodeUnknownSync(UsineConfig)({
     { name: watchedRepository, tags: ["active"] },
     { name: "basaltbytes/unwatched", tags: ["inactive"] },
   ],
-  settings: { poll_interval: 60 },
+  settings: { poll_interval: 60, parent_model: "anthropic/instance-parent" },
 });
 
 const agent = new AgentFile({
@@ -146,9 +149,11 @@ const runtimeLayer = (directory: Instance.Directory, github: GitHubPolling["Serv
     execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
   });
   const engine = localEngineLayer(directory).pipe(Layer.provide(executor));
+  const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
   const dependencies = Layer.mergeAll(
     engine,
     MarcbachmannCelLayer,
+    parser,
     Layer.succeed(GitHubPolling, github),
   );
   return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
@@ -175,9 +180,11 @@ const schedulerLayer = (github: GitHubPolling["Service"]) => {
     submit: () => Effect.die("unused"),
     transcript: () => Effect.die("unused"),
   });
+  const parser = ConfigParser.layer.pipe(Layer.provide(expressions));
   const dependencies = Layer.mergeAll(
     cursors,
     expressions,
+    parser,
     runs,
     Layer.succeed(GitHubPolling, github),
   );
@@ -278,7 +285,17 @@ describe("PollingTriggers", () => {
         assert.strictEqual(coldStart.repositories, 1);
         assert.strictEqual(coldStart.changedItems, 1);
         const originalRun = claimedRun(coldStart);
-        yield* waitForState(firstEngine, originalRun, "Waiting");
+        const originalSnapshot = yield* waitForState(firstEngine, originalRun, "Waiting");
+        assert.strictEqual(originalSnapshot.task, "Implement issue 28.");
+        assert.strictEqual(originalSnapshot.agent.name, "developer");
+        assert.strictEqual(originalSnapshot.agent.brain.harness, "codex");
+        assert.strictEqual(originalSnapshot.agent.brain.model, "gpt-5.6-sol");
+        assert.strictEqual(originalSnapshot.agent.brain.effort, "high");
+        assert.strictEqual(originalSnapshot.agent.persona, "Implement the issue.");
+        assert.deepStrictEqual(
+          originalSnapshot.parentModel,
+          Option.some(ModelId.make("anthropic/instance-parent")),
+        );
         const initialCursor = (yield* Ref.get(seenCursors))[0];
         assert(initialCursor !== undefined && Option.isNone(initialCursor.entityTag));
 
@@ -296,6 +313,13 @@ describe("PollingTriggers", () => {
 
         const afterRestart = yield* secondPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(afterRestart), originalRun);
+        const restoredSnapshot = yield* secondEngine.inspect(originalRun);
+        assert.strictEqual(restoredSnapshot.task, "Implement issue 28.");
+        assert.strictEqual(restoredSnapshot.agent.name, "developer");
+        assert.deepStrictEqual(
+          restoredSnapshot.parentModel,
+          Option.some(ModelId.make("anthropic/instance-parent")),
+        );
         const restoredCursors = yield* Ref.get(seenCursors);
         const restartCursor = restoredCursors[2];
         assert(restartCursor !== undefined && Option.isSome(restartCursor.entityTag));
@@ -415,9 +439,16 @@ describe("PollingTriggers", () => {
         ),
       transcript: () => Effect.die("unused"),
     });
+    const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
     const layer = PollingTriggers.layer.pipe(
       Layer.provide(
-        Layer.mergeAll(cursors, runs, MarcbachmannCelLayer, Layer.succeed(GitHubPolling, github)),
+        Layer.mergeAll(
+          cursors,
+          runs,
+          MarcbachmannCelLayer,
+          parser,
+          Layer.succeed(GitHubPolling, github),
+        ),
       ),
     );
 
@@ -431,6 +462,98 @@ describe("PollingTriggers", () => {
       assert.strictEqual(cycle.failures[0]?.repository, "basaltbytes/failing");
       assert.strictEqual(cycle.failures[0]?.errorTag, "GitHubApiError");
       assert.strictEqual(cycle.submissions.length, 1);
+    }).pipe(Effect.provide(layer));
+  });
+
+  it.effect("isolates one loop's prompt rendering failure and still advances the cursor", () => {
+    // A render failure is deterministic loop authoring: re-polling the same
+    // snapshot re-fails identically, so it must not wedge the repository.
+    const broken = issueLoop("broken-prompt");
+    const healthy = issueLoop("healthy-prompt");
+    const cursorWrites: Array<CursorKey> = [];
+    const cursors = Layer.succeed(CursorStore)({
+      read: () => Effect.succeed(Option.none()),
+      write: (key) =>
+        Effect.sync(() => {
+          cursorWrites.push(key);
+        }),
+    });
+    const runs = Layer.succeed(RunEngine)({
+      approve: () => Effect.die("unused"),
+      cancel: () => Effect.die("unused"),
+      inspect: () => Effect.die("unused"),
+      reconcile: () => Effect.die("unused"),
+      retry: () => Effect.die("unused"),
+      revoke: () => Effect.succeed([]),
+      submit: (submission) =>
+        Effect.succeed(
+          new Claimed({
+            eventId: submission.event.id,
+            runId: Run.RunId.make(`run-${submission.loop}`),
+          }),
+        ),
+      transcript: () => Effect.die("unused"),
+    });
+    const parser = Layer.succeed(ConfigParser)({
+      parseAgentFile: () => Effect.die("unused"),
+      parseLoopFile: () => Effect.die("unused"),
+      parseUsineYaml: () => Effect.die("unused"),
+      renderPrompt: (loop) =>
+        loop.name === broken.name
+          ? Effect.fail(
+              new ConfigFileError({
+                file: InstancePath.make(`loops/${loop.name}.md`),
+                stage: "expression",
+                expression: Option.some(Source.make("item.missing")),
+                message: "No such key: missing",
+              }),
+            )
+          : Effect.succeed(`Rendered ${loop.name}.`),
+    });
+    const github: GitHubPolling["Service"] = {
+      changes: (_repository, cursor) =>
+        Effect.succeed(
+          new RepositoryChanges({
+            cursor,
+            items: [
+              new ChangedIssue({
+                number: 28,
+                updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+              }),
+            ],
+            backlog: false,
+            nextPollAt: Option.none(),
+          }),
+        ),
+      snapshot: () =>
+        Effect.succeed(
+          new IssueSnapshot({
+            payload: issuePayload(["ready"]),
+            contentHash: ContentHash.make("c".repeat(64)),
+          }),
+        ),
+    };
+    const layer = PollingTriggers.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          cursors,
+          runs,
+          MarcbachmannCelLayer,
+          parser,
+          Layer.succeed(GitHubPolling, github),
+        ),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* PollingTriggers;
+      const cycle = yield* polling.poll(instanceWith([broken, healthy]));
+      assert.strictEqual(cycle.failures.length, 1);
+      assert.strictEqual(cycle.failures[0]?.repository, watchedRepository);
+      assert.strictEqual(cycle.failures[0]?.errorTag, "ConfigFileError");
+      assert.strictEqual(cycle.submissions.length, 1);
+      assert.strictEqual(cycle.submissions[0]?._tag, "Claimed");
+      assert.strictEqual(cursorWrites.length, 1);
     }).pipe(Effect.provide(layer));
   });
 

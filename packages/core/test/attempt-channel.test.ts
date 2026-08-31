@@ -1,16 +1,31 @@
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Result, Schema } from "effect";
-import { AttemptChannel, Attempt, Repository, StepResult } from "../src/index.ts";
+import { DateTime, Option, Result, Schema } from "effect";
+import { Agent, AttemptChannel, Attempt, Repository, StepResult } from "../src/index.ts";
+
+const agent = new Agent.Agent({
+  name: Agent.Name.make("developer"),
+  brain: new Agent.BrainSpec({
+    harness: "claude",
+    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    effort: "high",
+  }),
+  parentModel: Option.none(),
+  persona: Agent.Persona.make("Implement the task and sign every GitHub comment."),
+});
+const parentModel = Agent.ModelId.make("anthropic/claude-opus-4-6");
 
 const spec = new AttemptChannel.RunSpec({
   attemptId: Attempt.AttemptId.make("attempt-1"),
   repository: Repository.Name.make("basaltbytes/usine"),
   revision: Repository.Revision.make("main"),
   baseCommit: Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+  payload: { number: 30, title: "Agent layer" },
   task: AttemptChannel.Task.make("Implement the issue"),
+  agent,
+  parentModel: Option.some(parentModel),
 });
 
-describe("attempt channel v1", () => {
+describe("attempt channel v2", () => {
   it("round-trips a final envelope through its framed JSON schema", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,
@@ -66,7 +81,15 @@ describe("attempt channel v1", () => {
         payload,
       });
     const started = new AttemptChannel.Started();
-    const message = new AttemptChannel.AgentMessage({ message: "working" });
+    const activity = new AttemptChannel.SessionEvent({
+      event: new Agent.SessionStarted({
+        session: new Agent.ParentSession({
+          id: Agent.SessionId.make("parent-1"),
+          agent: agent.name,
+          brain: new Agent.BrainSpec({ harness: "pi", model: parentModel, effort: "high" }),
+        }),
+      }),
+    });
     const interruptedTerminal = new AttemptChannel.Interrupted();
 
     const admitAll = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) => {
@@ -79,10 +102,10 @@ describe("attempt channel v1", () => {
       return Result.succeed(progress);
     };
 
-    it("admits a legal Started → message → terminal flow", () => {
+    it("admits a legal Started → activity → terminal flow", () => {
       const outcome = admitAll([
         outbound(1, started),
-        outbound(2, message),
+        outbound(2, activity),
         outbound(3, interruptedTerminal),
       ]);
       assert(Result.isSuccess(outcome));
@@ -96,13 +119,13 @@ describe("attempt channel v1", () => {
     });
 
     it("rejects a non-contiguous sequence", () => {
-      const outcome = admitAll([outbound(1, started), outbound(3, message)]);
+      const outcome = admitAll([outbound(1, started), outbound(3, activity)]);
       assert(Result.isFailure(outcome));
       assert.match(outcome.failure.message, /non-contiguous/u);
     });
 
     it("rejects a first frame that is not Started", () => {
-      const outcome = admitAll([outbound(1, message)]);
+      const outcome = admitAll([outbound(1, activity)]);
       assert(Result.isFailure(outcome));
       assert.match(outcome.failure.message, /begin with a Started/u);
     });
@@ -117,7 +140,7 @@ describe("attempt channel v1", () => {
       const outcome = admitAll([
         outbound(1, started),
         outbound(2, interruptedTerminal),
-        outbound(3, message),
+        outbound(3, activity),
       ]);
       assert(Result.isFailure(outcome));
       assert.match(outcome.failure.message, /after its terminal envelope/u);
