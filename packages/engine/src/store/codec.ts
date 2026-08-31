@@ -63,6 +63,8 @@ export const AttemptRow = Schema.Struct({
   stepName: Step.StepName,
   worker: Worker.Name,
   number: Attempt.AttemptNumber,
+  brain: Agent.BrainSpec,
+  parentModel: Schema.NullOr(Agent.ModelId),
   startedAt: Schema.DateTimeUtcFromString,
   outcome: Schema.NullOr(Attempt.Outcome),
 });
@@ -107,6 +109,7 @@ export const encodeOutcome = Schema.encodeSync(Attempt.Outcome);
 export const encodeStepResult = Schema.encodeSync(StepResult.StepResult);
 export const encodeEnvelope = Schema.encodeSync(AttemptChannel.Envelope);
 export const encodeAgent = Schema.encodeSync(Agent.Agent);
+export const encodeBrainSpec = Schema.encodeSync(Agent.BrainSpec);
 
 const isRunStoreError = Schema.is(RunStoreError);
 
@@ -162,6 +165,8 @@ export const attemptFromRow = (row: AttemptRow): Attempt.Attempt =>
     stepName: row.stepName,
     worker: row.worker,
     number: row.number,
+    brain: row.brain,
+    parentModel: Option.fromNullishOr(row.parentModel),
     startedAt: row.startedAt,
     outcome: Option.fromNullishOr(row.outcome),
   });

@@ -367,6 +367,8 @@ describe("local worker", () => {
         stepName: Step.StepName.make("run"),
         worker: Worker.Name.make("local"),
         number: Attempt.AttemptNumber.make(1),
+        brain: Agent.brainOf(testAgent),
+        parentModel: Option.none(),
         startedAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
         outcome: Option.none(),
       }),

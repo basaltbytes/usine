@@ -2,6 +2,7 @@ import { Schema } from "effect";
 import { AttemptFailure, isAutoRetryable } from "./attempt-failure.ts";
 import { RunId } from "./run.ts";
 import { StepName } from "./step.ts";
+import { BrainSpec, ModelId } from "../agent.ts";
 import { Name as WorkerName } from "../worker.ts";
 
 /**
@@ -50,6 +51,8 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
   stepName: StepName,
   worker: WorkerName,
   number: AttemptNumber,
+  brain: BrainSpec,
+  parentModel: Schema.OptionFromNullOr(ModelId),
   startedAt: Schema.DateTimeUtc,
   outcome: Schema.Option(Outcome),
 }) {}

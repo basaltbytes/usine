@@ -66,6 +66,8 @@ describe("run store", () => {
           const started = yield* store.beginAttempt(runId, Worker.Name.make("local"));
           assert.strictEqual(started._tag, "AttemptStarted");
           if (started._tag !== "AttemptStarted") return;
+          assert.deepStrictEqual(started.execution.attempt.brain, Agent.brainOf(testAgent));
+          assert.deepStrictEqual(started.execution.attempt.parentModel, Option.none());
           assert.strictEqual(
             yield* store.failAttempt(started.execution.attempt, failure),
             number < 3,

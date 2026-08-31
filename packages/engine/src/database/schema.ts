@@ -121,11 +121,14 @@ export const attempts = snakeCase.table(
     stepName: text().$type<Step.StepName>().notNull(),
     workerName: text().$type<Worker.Name>().notNull(),
     attemptNumber: integer({ mode: "number" }).$type<Attempt.AttemptNumber>().notNull(),
+    brainJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    parentModel: text().$type<Agent.ModelId>(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
     check("usine_attempts_number", sql`${table.attemptNumber} >= 1`),
+    check("usine_attempts_brain_json_valid", sql`json_valid(${table.brainJson})`),
     check(
       "usine_attempts_outcome_json_valid",
       sql`${table.outcomeJson} is null or json_valid(${table.outcomeJson})`,

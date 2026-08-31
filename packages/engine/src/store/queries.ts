@@ -44,6 +44,7 @@ import {
   decodeWorkflowCommands,
   decodeTranscriptRows,
   encodeAgent,
+  encodeBrainSpec,
   encodeDateTime,
   encodeEnvelope,
   encodeOutcome,
@@ -139,6 +140,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
         stepName: attempts.stepName,
         worker: attempts.workerName,
         number: attempts.attemptNumber,
+        brain: attempts.brainJson,
+        parentModel: attempts.parentModel,
         startedAt: attempts.startedAt,
         outcome: attempts.outcomeJson,
       })
@@ -197,6 +200,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
         stepName: attempt.stepName,
         workerName: attempt.worker,
         attemptNumber: attempt.number,
+        brainJson: encodeBrainSpec(attempt.brain),
+        parentModel: Option.getOrNull(attempt.parentModel),
         startedAt: encodeDateTime(attempt.startedAt),
         outcomeJson: null,
       })

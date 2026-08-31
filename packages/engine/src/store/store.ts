@@ -1,4 +1,5 @@
 import {
+  Agent,
   Attempt,
   AttemptChannel,
   AttemptFailure,
@@ -224,6 +225,8 @@ const makeRunStore = Effect.gen(function* () {
           stepName: current.step.name,
           worker,
           number,
+          brain: Agent.brainOf(current.agent),
+          parentModel: current.parentModel,
           startedAt,
           outcome: Option.none(),
         });
