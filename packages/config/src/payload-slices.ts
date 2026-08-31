@@ -1,6 +1,7 @@
+import { Repository } from "@usine/core";
 import { Environment, ObjectField, ObjectType, TypeReference, Variable } from "@usine/expression";
 import { Schema } from "effect";
-import type { Stream } from "./model.ts";
+import type { ManagedRepo, Stream } from "./model.ts";
 
 const reference = Schema.decodeUnknownSync(TypeReference);
 
@@ -154,6 +155,7 @@ const pullRequest = objectType("PullRequestPayload", [
 
 const tick = objectType("Tick", [
   ["scheduledAt", "string"],
+  ["scheduledAtLocal", "string"],
   ["cron", "string"],
   ["tz", "string"],
 ]);
@@ -212,7 +214,7 @@ export const pullRequestEnvironment = environment(
   "PullRequestPayload",
 );
 
-/** Schedule payload slice: item.tick = { scheduledAt, cron, tz }. */
+/** Schedule payload slice: item.tick = { scheduledAt, scheduledAtLocal, cron, tz }. */
 export const scheduleEnvironment = environment([tick, schedule], "SchedulePayload");
 
 export const environmentFor = (stream: Stream): Environment => {
@@ -224,4 +226,17 @@ export const environmentFor = (stream: Stream): Environment => {
     case "schedule":
       return scheduleEnvironment;
   }
+};
+
+/**
+ * The CEL `repo` variable, built beside the `RepoContext` type it must match —
+ * a field added to one belongs in the other.
+ */
+export const repositoryContext = (repository: ManagedRepo): Schema.JsonObject => {
+  const { owner } = Repository.parts(repository.name);
+  return {
+    name: repository.name,
+    owner,
+    url: `https://github.com/${repository.name}`,
+  };
 };
