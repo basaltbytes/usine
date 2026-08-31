@@ -21,9 +21,11 @@ import { RunStore } from "../src/store/store.ts";
 
 const testAgent = new Agent.Agent({
   name: Agent.Name.make("developer"),
-  harness: "claude",
-  model: Agent.ModelId.make("claude-sonnet-4-6"),
-  effort: "high",
+  brain: new Agent.BrainSpec({
+    harness: "claude",
+    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    effort: "high",
+  }),
   parentModel: Option.none(),
   persona: Agent.Persona.make("Implement the task."),
 });
@@ -66,7 +68,7 @@ describe("run store", () => {
           const started = yield* store.beginAttempt(runId, Worker.Name.make("local"));
           assert.strictEqual(started._tag, "AttemptStarted");
           if (started._tag !== "AttemptStarted") return;
-          assert.deepStrictEqual(started.execution.attempt.brain, Agent.brainOf(testAgent));
+          assert.deepStrictEqual(started.execution.attempt.brain, testAgent.brain);
           assert.deepStrictEqual(started.execution.attempt.parentModel, Option.none());
           assert.strictEqual(
             yield* store.failAttempt(started.execution.attempt, failure),

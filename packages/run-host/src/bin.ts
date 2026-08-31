@@ -3,7 +3,7 @@
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { layer as agentLayer } from "@usine/agents/pi";
 import { AttemptChannel } from "@usine/core";
-import { Effect, Stdio, Stream } from "effect";
+import { Effect, Logger, Stdio, Stream } from "effect";
 import { runHost } from "./index.ts";
 import { stubLayer } from "./stub.ts";
 
@@ -23,6 +23,6 @@ const program = Effect.gen(function* () {
   }
   const useStub = args.includes("--stub") || delayFlag >= 0;
   yield* runHost().pipe(Effect.provide(useStub ? stubLayer(stubDelayMillis) : agentLayer));
-}).pipe(Effect.provide(NodeServices.layer));
+}).pipe(Effect.provide(NodeServices.layer), Effect.provideService(Logger.LogToStderr, true));
 
 NodeRuntime.runMain(program);

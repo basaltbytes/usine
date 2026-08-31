@@ -12,7 +12,7 @@ import {
 import type { Agent } from "@usine/core";
 import { and, asc, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { DateTime, Effect, Option } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import {
   approvals,
@@ -79,8 +79,8 @@ const eventRouteSelection = {
 const storedStateTag = sql`json_extract(${runs.stateJson}, '$._tag')`;
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
-const storedAgent = (agent: Agent.Agent): unknown => encodeAgent(agent);
-
+const storedAgent = (agent: Agent.Agent): Schema.Json =>
+  Schema.decodeUnknownSync(Schema.Json)(encodeAgent(agent));
 export const queriesFor = (database: RunDatabaseClient) => {
   // Keep `.execute()` explicit: RC.4's yieldable wrapper can cross an Effect
   // Workflow suspension before its final mutation is observable (ADR 0020).

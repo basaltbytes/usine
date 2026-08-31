@@ -41,9 +41,11 @@ const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", i
 const TOKEN = "one-attempt-test-token";
 const testAgent = new Agent.Agent({
   name: Agent.Name.make("developer"),
-  harness: "claude",
-  model: Agent.ModelId.make("claude-sonnet-4-6"),
-  effort: "high",
+  brain: new Agent.BrainSpec({
+    harness: "claude",
+    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    effort: "high",
+  }),
   parentModel: Option.none(),
   persona: Agent.Persona.make("Implement the task."),
 });
@@ -372,7 +374,7 @@ describe("local worker", () => {
         stepName: Step.StepName.make("run"),
         worker: Worker.Name.make("local"),
         number: Attempt.AttemptNumber.make(1),
-        brain: Agent.brainOf(testAgent),
+        brain: testAgent.brain,
         parentModel: Option.none(),
         startedAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
         outcome: Option.none(),

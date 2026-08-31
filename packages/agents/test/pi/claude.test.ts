@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Agent } from "@usine/core";
-import { Effect, Layer, Stream } from "effect";
+import { Effect, Layer, Schema, Stream } from "effect";
 import {
   ChildBackend,
   ChildRequest,
@@ -32,7 +32,7 @@ const request = (model = "claude-sonnet-4-6") =>
   });
 
 const scripted = (
-  messages: ReadonlyArray<unknown>,
+  messages: ReadonlyArray<Schema.Json>,
   models: ReadonlyArray<{ readonly value: string; readonly resolvedModel?: string }> = [
     { value: "sonnet", resolvedModel: "claude-sonnet-4-6" },
   ],
@@ -54,6 +54,13 @@ describe("Claude child backend", () => {
         input = foundInput;
         options = foundOptions;
         return scripted([
+          {
+            type: "stream_event",
+            event: {
+              type: "content_block_delta",
+              delta: { type: "text_delta", text: "Child completed the edit." },
+            },
+          },
           {
             type: "assistant",
             message: { content: [{ type: "text", text: "Child completed the edit." }] },
@@ -98,14 +105,16 @@ describe("Claude child backend", () => {
       }),
     });
 
-    return Effect.scoped(
-      Effect.gen(function* () {
-        const backend = yield* ChildBackend;
-        const error = yield* Effect.flip(backend.launch(request("claude-never-existed")));
-        assert(error instanceof UnknownModelError);
-        assert.strictEqual(error.model, "claude-never-existed");
-        assert.strictEqual(closed, true);
-      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
-    );
+    return Effect.gen(function* () {
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const backend = yield* ChildBackend;
+          const error = yield* Effect.flip(backend.launch(request("claude-never-existed")));
+          assert(error instanceof UnknownModelError);
+          assert.strictEqual(error.model, "claude-never-existed");
+        }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+      );
+      assert.strictEqual(closed, true);
+    });
   });
 });

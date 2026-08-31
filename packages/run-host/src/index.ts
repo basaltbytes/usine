@@ -80,6 +80,12 @@ export const runHost = () =>
         );
       }
       const spec = first.spec;
+      yield* Effect.annotateCurrentSpan({
+        agent: spec.agent.name,
+        attemptId: spec.attemptId,
+        repository: spec.repository,
+      });
+      yield* Effect.logInfo("Run host accepted the Start frame");
       const sequence = yield* Ref.make(1);
       const outputLock = yield* Semaphore.make(1);
 
@@ -179,6 +185,10 @@ export const runHost = () =>
         ),
       );
       if (Result.isFailure(launched)) {
+        yield* Effect.logError("Agent session failed to launch", {
+          errorTag: launched.failure._tag,
+          message: launched.failure.message,
+        });
         yield* emit(new AttemptChannel.Failed({ failure: agentFailure(launched.failure) }));
         yield* Fiber.interrupt(inputFiber);
         return;
@@ -217,12 +227,14 @@ export const runHost = () =>
           }
           yield* Ref.set(expectedInputSequence, expected + 1);
           if (command.payload._tag === "Interrupt") {
+            yield* Effect.logInfo("Run host received an Interrupt frame");
             // Start delivery before waking the terminal race. The SDK's native
             // promise keeps carrying the interrupt even when terminal cleanup
             // interrupts this command fiber immediately afterward.
             yield* Effect.forkChild(session.interrupt);
             yield* Deferred.succeed(interrupted, undefined);
           } else {
+            yield* Effect.logDebug("Run host received a Steer frame");
             yield* session.steer(command.payload.message);
           }
         }),
@@ -245,13 +257,21 @@ export const runHost = () =>
         ).pipe(Effect.result);
         if (Result.isFailure(outcome)) {
           if (Schema.is(RunHostError)(outcome.failure)) return yield* outcome.failure;
+          yield* Effect.logError("Agent session failed", {
+            errorTag: outcome.failure._tag,
+            message: outcome.failure.message,
+          });
           yield* emit(new AttemptChannel.Failed({ failure: agentFailure(outcome.failure) }));
           return;
         }
         if (outcome.success._tag === "Interrupted") {
+          yield* Effect.logInfo("Run host acknowledged the interrupted session");
           yield* emit(new AttemptChannel.Interrupted());
           return;
         }
+        yield* Effect.logInfo("Run host completed the Attempt", {
+          commits: outcome.success.value.facts.length,
+        });
         yield* emit(new AttemptChannel.Final({ result: outcome.success.value }));
       }).pipe(
         Effect.ensuring(

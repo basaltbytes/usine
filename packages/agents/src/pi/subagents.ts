@@ -52,7 +52,7 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
             id: Agent.SessionId.make(`${options.parentId}:child:${childNumber}`),
             parentId: options.parentId,
             agent: options.agent.name,
-            brain: Agent.brainOf(options.agent),
+            brain: options.agent.brain,
           });
           const request = new ChildRequest({
             session,
@@ -65,6 +65,12 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
           });
           const program = Effect.scoped(
             Effect.gen(function* () {
+              yield* Effect.annotateCurrentSpan({
+                agent: request.session.agent,
+                parentSessionId: request.session.parentId,
+                sessionId: request.session.id,
+              });
+              yield* Effect.logInfo("Delegating task to child session");
               const child = yield* options.backend.launch(request);
               const forward = yield* child.events.pipe(
                 Stream.runForEach(options.emit),
@@ -78,6 +84,9 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
                 ),
               );
               yield* Fiber.join(forward);
+              yield* Effect.logInfo("Child session returned to Pi parent", {
+                sessionId: request.session.id,
+              });
               onUpdate?.({
                 content: [{ type: "text", text: result.message }],
                 details: { childSessionId: session.id },

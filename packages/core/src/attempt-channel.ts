@@ -45,13 +45,6 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
 
 export class Started extends Schema.TaggedClass<Started>("AttemptChannel/Started")("Started", {}) {}
 
-export class AgentMessage extends Schema.TaggedClass<AgentMessage>("AttemptChannel/AgentMessage")(
-  "AgentMessage",
-  {
-    message: Schema.NonEmptyString,
-  },
-) {}
-
 /** One normalized parent or child session event, persisted in the Attempt transcript. */
 export class Activity extends Schema.TaggedClass<Activity>("AttemptChannel/Activity")("Activity", {
   activity: AgentActivity,
@@ -71,14 +64,7 @@ export class Interrupted extends Schema.TaggedClass<Interrupted>("AttemptChannel
   {},
 ) {}
 
-export const OutboundPayload = Schema.Union([
-  Started,
-  AgentMessage,
-  Activity,
-  Final,
-  Failed,
-  Interrupted,
-]);
+export const OutboundPayload = Schema.Union([Started, Activity, Final, Failed, Interrupted]);
 export type OutboundPayload = typeof OutboundPayload.Type;
 
 export class Steer extends Schema.TaggedClass<Steer>("AttemptChannel/Steer")("Steer", {

@@ -1,9 +1,9 @@
 ALTER TABLE `usine_runs` ADD `agent_json` text;--> statement-breakpoint
 ALTER TABLE `usine_runs` ADD `parent_model` text;--> statement-breakpoint
-UPDATE `usine_runs` SET `agent_json` = '{"name":"legacy-agent","harness":"pi","model":"legacy-stub","effort":"off","parentModel":null,"persona":"Created before agent context was recorded."}' WHERE `agent_json` IS NULL;--> statement-breakpoint
+UPDATE `usine_runs` SET `agent_json` = '{"name":"legacy-agent","brain":{"harness":"pi","model":"legacy-stub","effort":"off"},"parentModel":null,"persona":"Created before agent context was recorded."}' WHERE `agent_json` IS NULL;--> statement-breakpoint
 ALTER TABLE `usine_trigger_events` ADD `agent_json` text;--> statement-breakpoint
 ALTER TABLE `usine_trigger_events` ADD `parent_model` text;--> statement-breakpoint
-UPDATE `usine_trigger_events` SET `agent_json` = '{"name":"legacy-agent","harness":"pi","model":"legacy-stub","effort":"off","parentModel":null,"persona":"Created before agent context was recorded."}' WHERE `agent_json` IS NULL;--> statement-breakpoint
+UPDATE `usine_trigger_events` SET `agent_json` = '{"name":"legacy-agent","brain":{"harness":"pi","model":"legacy-stub","effort":"off"},"parentModel":null,"persona":"Created before agent context was recorded."}' WHERE `agent_json` IS NULL;--> statement-breakpoint
 PRAGMA foreign_keys=OFF;--> statement-breakpoint
 CREATE TABLE `__new_usine_runs` (
 	`run_id` text PRIMARY KEY,

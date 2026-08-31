@@ -286,9 +286,9 @@ describe("PollingTriggers", () => {
         const originalSnapshot = yield* waitForState(firstEngine, originalRun, "Waiting");
         assert.strictEqual(originalSnapshot.task, "Implement issue 28.");
         assert.strictEqual(originalSnapshot.agent.name, "developer");
-        assert.strictEqual(originalSnapshot.agent.harness, "codex");
-        assert.strictEqual(originalSnapshot.agent.model, "gpt-5.6-sol");
-        assert.strictEqual(originalSnapshot.agent.effort, "high");
+        assert.strictEqual(originalSnapshot.agent.brain.harness, "codex");
+        assert.strictEqual(originalSnapshot.agent.brain.model, "gpt-5.6-sol");
+        assert.strictEqual(originalSnapshot.agent.brain.effort, "high");
         assert.strictEqual(originalSnapshot.agent.persona, "Implement the issue.");
         assert.deepStrictEqual(
           originalSnapshot.parentModel,

@@ -41,9 +41,7 @@ export class BrainSpec extends Schema.Class<BrainSpec>("Agent/BrainSpec")({
 /** Entity: one named member of the instance's authored team roster. */
 export class Agent extends Schema.Class<Agent>("Agent")({
   name: Name,
-  harness: Harness,
-  model: ModelId,
-  effort: Effort,
+  brain: BrainSpec,
   parentModel: Schema.OptionFromNullOr(ModelId),
   persona: Persona,
 }) {}
@@ -121,10 +119,6 @@ export const Activity = Schema.Union([
   SessionFinished,
 ]);
 export type Activity = typeof Activity.Type;
-
-/** Pure deriver: the child brain declared by one rostered Agent. */
-export const brainOf = (agent: Agent): BrainSpec =>
-  new BrainSpec({ harness: agent.harness, model: agent.model, effort: agent.effort });
 
 /** Pure deriver: a per-Agent parent override wins over the instance default. */
 export const resolveParentModel = (

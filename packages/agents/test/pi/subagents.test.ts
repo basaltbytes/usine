@@ -13,9 +13,11 @@ describe("owned Pi subagents extension", () => {
   it("launches an isolated first-level child with the rostered persona", async () => {
     const agent = new Agent.Agent({
       name: Agent.Name.make("developer"),
-      harness: "claude",
-      model: Agent.ModelId.make("claude-sonnet-4-6"),
-      effort: "high",
+      brain: new Agent.BrainSpec({
+        harness: "claude",
+        model: Agent.ModelId.make("claude-sonnet-4-6"),
+        effort: "high",
+      }),
       parentModel: Option.none(),
       persona: Agent.Persona.make("Implement focused TypeScript changes."),
     });
@@ -53,15 +55,18 @@ describe("owned Pi subagents extension", () => {
       emit: (activity) => Effect.sync(() => activities.push(activity)),
       parentId: parent.id,
     });
+    // SAFETY: this extension only calls registerTool; all other ExtensionAPI members are unused.
     await extension({ registerTool: (tool) => (registered = tool) } as ExtensionAPI);
     assert(registered !== undefined);
 
+    // SAFETY: the owned subagent tool does not read ExtensionContext.
+    const context = {} as ExtensionContext;
     const result = await registered.execute(
       "tool-1",
       { task: "Add interrupt propagation." },
       undefined,
       undefined,
-      {} as ExtensionContext,
+      context,
     );
     assert.strictEqual(result.content[0]?.type, "text");
     assert.strictEqual(result.content[0]?.text, "child done");

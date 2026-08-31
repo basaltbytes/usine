@@ -35,9 +35,11 @@ import { InstanceDirectory, RunEngine, StepExecutor, Submission } from "../src/i
 const stepResult = (message: string) => new StepResult.StepResult({ message, facts: [] });
 const testAgent = new Agent.Agent({
   name: Agent.Name.make("developer"),
-  harness: "claude",
-  model: Agent.ModelId.make("claude-sonnet-4-6"),
-  effort: "high",
+  brain: new Agent.BrainSpec({
+    harness: "claude",
+    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    effort: "high",
+  }),
   parentModel: Option.none(),
   persona: Agent.Persona.make("Implement the task."),
 });

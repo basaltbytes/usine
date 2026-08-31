@@ -51,22 +51,47 @@ const repositoryApi = (repository: Repository.Name): string =>
     .map((part) => encodeURIComponent(part))
     .join("/")}`;
 
-const request = Effect.fn("agentIntegration.request")(function* <A>(options: {
-  readonly body?: unknown;
-  readonly decode: (input: unknown) => A;
+const requestJson = Effect.fn("agentIntegration.requestJson")(function* <A>(options: {
+  readonly body?: Schema.Json;
   readonly expectedStatus: number;
   readonly method?: string;
+  readonly schema: Schema.Codec<A, unknown, never>;
+  readonly token: string;
+  readonly url: string;
+}) {
+  const init: RequestInit = {
+    headers: {
+      accept: "application/vnd.github+json",
+      authorization: `Bearer ${options.token}`,
+      "content-type": "application/json",
+      "x-github-api-version": "2026-03-10",
+    },
+  };
+  if (options.method !== undefined) init.method = options.method;
+  if (options.body !== undefined) init.body = JSON.stringify(options.body);
+  const response = yield* Effect.tryPromise(() => fetch(options.url, init));
+  if (response.status !== options.expectedStatus) {
+    const detail = yield* Effect.tryPromise(() => response.text());
+    return yield* Effect.die(
+      `GitHub returned ${response.status} for ${options.method ?? "GET"} ${options.url}: ${detail}`,
+    );
+  }
+  const value = yield* Effect.tryPromise(() => response.json());
+  return yield* Schema.decodeUnknownEffect(options.schema)(value);
+});
+
+const requestEmpty = Effect.fn("agentIntegration.requestEmpty")(function* (options: {
+  readonly expectedStatus: number;
+  readonly method: string;
   readonly token: string;
   readonly url: string;
 }) {
   const response = yield* Effect.tryPromise(() =>
     fetch(options.url, {
-      ...(options.method === undefined ? {} : { method: options.method }),
-      ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
+      method: options.method,
       headers: {
         accept: "application/vnd.github+json",
         authorization: `Bearer ${options.token}`,
-        "content-type": "application/json",
         "x-github-api-version": "2026-03-10",
       },
     }),
@@ -74,12 +99,9 @@ const request = Effect.fn("agentIntegration.request")(function* <A>(options: {
   if (response.status !== options.expectedStatus) {
     const detail = yield* Effect.tryPromise(() => response.text());
     return yield* Effect.die(
-      `GitHub returned ${response.status} for ${options.method ?? "GET"} ${options.url}: ${detail}`,
+      `GitHub returned ${response.status} for ${options.method} ${options.url}: ${detail}`,
     );
   }
-  const value =
-    options.expectedStatus === 204 ? undefined : yield* Effect.tryPromise(() => response.json());
-  return options.decode(value);
 });
 
 const makeInstance = (options: {
@@ -240,9 +262,9 @@ describe("live agent loop", () => {
       const token = Redacted.value(installationToken.value);
 
       const listComments = () =>
-        request({
-          decode: Schema.decodeUnknownSync(GitHubComments),
+        requestJson({
           expectedStatus: 200,
+          schema: GitHubComments,
           token,
           url: `${api}/issues/${String(settings.issueNumber)}/comments?per_page=100`,
         });
@@ -253,8 +275,7 @@ describe("live agent loop", () => {
             ({ body }) => body?.includes(marker) === true || body?.includes(kick) === true,
           ),
           ({ id }) =>
-            request({
-              decode: () => undefined,
+            requestEmpty({
               expectedStatus: 204,
               method: "DELETE",
               token,
@@ -269,11 +290,11 @@ describe("live agent loop", () => {
         () =>
           Effect.gen(function* () {
             yield* polling.poll(instance);
-            yield* request({
+            yield* requestJson({
               body: { body: kick },
-              decode: Schema.decodeUnknownSync(GitHubComment),
               expectedStatus: 201,
               method: "POST",
+              schema: GitHubComment,
               token,
               url: `${api}/issues/${String(settings.issueNumber)}/comments`,
             });

@@ -107,9 +107,11 @@ const watchedRepositories = Effect.fn("PollingTriggers.watchedRepositories")(fun
       }
       const agent = new Agent.Agent({
         name: loaded.name,
-        harness: loaded.harness,
-        model: loaded.model,
-        effort: loaded.effort,
+        brain: new Agent.BrainSpec({
+          harness: loaded.harness,
+          model: loaded.model,
+          effort: loaded.effort,
+        }),
         parentModel: loaded.parentModel,
         persona: loaded.persona,
       });

@@ -35,10 +35,11 @@ import {
 import { subagentsExtension } from "./subagents.ts";
 
 export type PiSessionEvent = AgentSessionEvent;
+type PiMessage = Awaited<ReturnType<typeof createAgentSession>>["session"]["messages"][number];
 
 /** Narrow in-process Pi session surface consumed by the adapter. */
 export interface PiSession {
-  readonly messages: ReadonlyArray<unknown>;
+  readonly messages: ReadonlyArray<PiMessage>;
   readonly subscribe: (listener: (event: PiSessionEvent) => void) => () => void;
   readonly prompt: (prompt: string) => Promise<void>;
   readonly steer: (message: string) => Promise<void>;
@@ -89,15 +90,18 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       settingsManager,
     });
     await resourceLoader.reload();
-    const { session } = await createAgentSession({
+    const sessionOptions = {
       cwd: options.cwd,
-      ...(selected === undefined ? {} : { model: selected }),
       modelRuntime,
       resourceLoader,
       sessionManager: SessionManager.inMemory(options.cwd),
       settingsManager,
       thinkingLevel: options.thinkingLevel,
-    });
+    } as const;
+    const { session } =
+      selected === undefined
+        ? await createAgentSession(sessionOptions)
+        : await createAgentSession({ ...sessionOptions, model: selected });
     const active = session.model;
     if (active === undefined) throw new Error("Pi started without an active model");
     return {
@@ -108,36 +112,47 @@ export const piSdkLive = Layer.succeed(PiSdk)({
   },
 });
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+const PiAssistantMessage = Schema.Struct({
+  role: Schema.Literal("assistant"),
+  content: Schema.Union([Schema.String, Schema.Array(Schema.Json)]),
+});
+const PiTextBlock = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
+const decodeSerializedJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
+type PiToolStartedEvent = Extract<PiSessionEvent, { readonly type: "tool_execution_start" }>;
+type PiToolFinishedEvent = Extract<PiSessionEvent, { readonly type: "tool_execution_end" }>;
 
-const messageText = (message: unknown): string | undefined => {
-  if (!isRecord(message) || message.role !== "assistant") return undefined;
-  const content = message.content;
-  if (typeof content === "string") return content.trim() || undefined;
-  if (!Array.isArray(content)) return undefined;
-  const text = content
-    .flatMap((block) =>
-      isRecord(block) && block.type === "text" && typeof block.text === "string"
-        ? [block.text]
-        : [],
-    )
+const toolInputJson = (event: PiToolStartedEvent): Schema.Json => {
+  try {
+    return decodeSerializedJson(JSON.stringify(event.args) ?? "null");
+  } catch {
+    return String(event.args);
+  }
+};
+
+const toolOutputJson = (event: PiToolFinishedEvent): Schema.Json => {
+  try {
+    return decodeSerializedJson(JSON.stringify(event.result) ?? "null");
+  } catch {
+    return String(event.result);
+  }
+};
+
+const messageText = (message: PiMessage): string | undefined => {
+  if (!Schema.is(PiAssistantMessage)(message)) return undefined;
+  if (Schema.is(Schema.String)(message.content)) return message.content.trim() || undefined;
+  const text = message.content
+    .filter(Schema.is(PiTextBlock))
+    .map(({ text }) => text)
     .join("")
     .trim();
   return text || undefined;
 };
 
-const asJson = (value: unknown): Schema.Json => {
-  try {
-    return Schema.decodeUnknownSync(Schema.Json)(JSON.parse(JSON.stringify(value)));
-  } catch {
-    return String(value);
-  }
-};
-
-const lastMessageText = (messages: ReadonlyArray<unknown>): string | undefined => {
+const lastMessageText = (messages: ReadonlyArray<PiMessage>): string | undefined => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const text = messageText(messages[index]);
+    const message = messages[index];
+    if (message === undefined) continue;
+    const text = messageText(message);
     if (text !== undefined) return text;
   }
   return undefined;
@@ -156,7 +171,7 @@ const activityFrom = (
       session,
       callId: event.toolCallId,
       tool: event.toolName,
-      input: asJson(event.args),
+      input: toolInputJson(event),
     });
   }
   if (event.type === "tool_execution_end") {
@@ -164,7 +179,7 @@ const activityFrom = (
       session,
       callId: event.toolCallId,
       tool: event.toolName,
-      output: asJson(event.result),
+      output: toolOutputJson(event),
       isError: event.isError,
     });
   }
@@ -191,6 +206,15 @@ const makePiParent = Effect.gen(function* () {
   const launch: AgentRuntime["Service"]["launch"] = Effect.fn("PiParentRuntime.launch")(
     function* (request) {
       const parentId = Agent.SessionId.make(`parent:${request.spec.attemptId}`);
+      yield* Effect.annotateCurrentSpan({
+        agent: request.spec.agent.name,
+        attemptId: request.spec.attemptId,
+        effort: request.spec.agent.brain.effort,
+        parentModel: Option.getOrUndefined(request.spec.parentModel),
+        repository: request.spec.repository,
+        sessionId: parentId,
+      });
+      yield* Effect.logInfo("Launching Pi parent session");
       const events = yield* Queue.make<Agent.Activity, AgentSessionError | Cause.Done>();
       const emitChild = (activity: Agent.Activity) =>
         Effect.sync(() => {
@@ -210,7 +234,7 @@ const makePiParent = Effect.gen(function* () {
               }),
             ],
             model: request.spec.parentModel,
-            thinkingLevel: request.spec.agent.effort,
+            thinkingLevel: request.spec.agent.brain.effort,
           }),
         catch: (cause) =>
           parentError("launch", request, "Pi parent session failed to start", cause),
@@ -219,6 +243,7 @@ const makePiParent = Effect.gen(function* () {
         const model = Option.getOrElse(request.spec.parentModel, () =>
           Agent.ModelId.make("unknown"),
         );
+        yield* Effect.logError("Pi parent rejected an unknown model", { model });
         return yield* new UnknownModelError({
           harness: "pi",
           model,
@@ -231,7 +256,7 @@ const makePiParent = Effect.gen(function* () {
         brain: new Agent.BrainSpec({
           harness: "pi",
           model: started.model,
-          effort: request.spec.agent.effort,
+          effort: request.spec.agent.brain.effort,
         }),
       });
       const result = yield* Deferred.make<SessionResult, AgentSessionError>();
@@ -247,6 +272,11 @@ const makePiParent = Effect.gen(function* () {
 
       const fail = Effect.fn("PiParentRuntime.fail")(function* (error: AgentSessionError) {
         if (yield* Ref.getAndSet(terminal, true)) return;
+        yield* Effect.logError("Pi parent session failed", {
+          errorTag: error._tag,
+          message: error.message,
+          sessionId: parentId,
+        });
         yield* Deferred.fail(result, error);
         yield* Queue.fail(events, error);
       });
@@ -271,6 +301,7 @@ const makePiParent = Effect.gen(function* () {
             yield* Queue.offer(events, new Agent.SessionFinished({ session: parent }));
             yield* Deferred.succeed(result, new SessionResult({ message }));
             yield* Queue.end(events);
+            yield* Effect.logInfo("Pi parent session finished", { sessionId: parentId });
           }),
         ),
         Effect.catch((error) => fail(error)),
@@ -284,15 +315,25 @@ const makePiParent = Effect.gen(function* () {
       );
 
       const steer = Effect.fn("PiParentRuntime.steer")((message: string) =>
-        Effect.tryPromise({
-          try: () => started.session.steer(message),
-          catch: (cause) => parentError("steer", request, "Could not steer Pi", cause),
-        }),
+        Effect.logDebug("Steering Pi parent session", { sessionId: parentId }).pipe(
+          Effect.andThen(
+            Effect.tryPromise({
+              try: () => started.session.steer(message),
+              catch: (cause) => parentError("steer", request, "Could not steer Pi", cause),
+            }),
+          ),
+        ),
       );
-      const interrupt = Effect.tryPromise({
-        try: () => started.session.abort(),
-        catch: (cause) => parentError("interrupt", request, "Could not interrupt Pi", cause),
-      });
+      const interrupt = Effect.logInfo("Interrupting Pi parent session", {
+        sessionId: parentId,
+      }).pipe(
+        Effect.andThen(
+          Effect.tryPromise({
+            try: () => started.session.abort(),
+            catch: (cause) => parentError("interrupt", request, "Could not interrupt Pi", cause),
+          }),
+        ),
+      );
       return {
         events: Stream.fromQueue(events),
         interrupt,

@@ -4,9 +4,11 @@ import { Agent, AttemptChannel, Attempt, Repository, StepResult } from "../src/i
 
 const agent = new Agent.Agent({
   name: Agent.Name.make("developer"),
-  harness: "claude",
-  model: Agent.ModelId.make("claude-sonnet-4-6"),
-  effort: "high",
+  brain: new Agent.BrainSpec({
+    harness: "claude",
+    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    effort: "high",
+  }),
   parentModel: Option.none(),
   persona: Agent.Persona.make("Implement the task and sign every GitHub comment."),
 });
@@ -79,7 +81,6 @@ describe("attempt channel v2", () => {
         payload,
       });
     const started = new AttemptChannel.Started();
-    const message = new AttemptChannel.AgentMessage({ message: "working" });
     const activity = new AttemptChannel.Activity({
       activity: new Agent.SessionStarted({
         session: new Agent.ParentSession({
@@ -101,12 +102,11 @@ describe("attempt channel v2", () => {
       return Result.succeed(progress);
     };
 
-    it("admits a legal Started → message → terminal flow", () => {
+    it("admits a legal Started → activity → terminal flow", () => {
       const outcome = admitAll([
         outbound(1, started),
-        outbound(2, message),
-        outbound(3, activity),
-        outbound(4, interruptedTerminal),
+        outbound(2, activity),
+        outbound(3, interruptedTerminal),
       ]);
       assert(Result.isSuccess(outcome));
       assert.strictEqual(outcome.success.state, "Terminal");
@@ -119,13 +119,13 @@ describe("attempt channel v2", () => {
     });
 
     it("rejects a non-contiguous sequence", () => {
-      const outcome = admitAll([outbound(1, started), outbound(3, message)]);
+      const outcome = admitAll([outbound(1, started), outbound(3, activity)]);
       assert(Result.isFailure(outcome));
       assert.match(outcome.failure.message, /non-contiguous/u);
     });
 
     it("rejects a first frame that is not Started", () => {
-      const outcome = admitAll([outbound(1, message)]);
+      const outcome = admitAll([outbound(1, activity)]);
       assert(Result.isFailure(outcome));
       assert.match(outcome.failure.message, /begin with a Started/u);
     });
@@ -140,7 +140,7 @@ describe("attempt channel v2", () => {
       const outcome = admitAll([
         outbound(1, started),
         outbound(2, interruptedTerminal),
-        outbound(3, message),
+        outbound(3, activity),
       ]);
       assert(Result.isFailure(outcome));
       assert.match(outcome.failure.message, /after its terminal envelope/u);

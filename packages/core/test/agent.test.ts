@@ -22,9 +22,11 @@ describe("Agent brain specs", () => {
     const override = ModelId.make("anthropic/agent-parent");
     const base = {
       name: Name.make("developer"),
-      harness: "claude",
-      model: ModelId.make("claude-sonnet-4-6"),
-      effort: "high",
+      brain: new BrainSpec({
+        harness: "claude",
+        model: ModelId.make("claude-sonnet-4-6"),
+        effort: "high",
+      }),
       persona: Persona.make("Implement the issue."),
     } as const;
 

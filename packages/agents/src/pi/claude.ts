@@ -1,6 +1,7 @@
 import {
   query as openClaudeQuery,
   type Options,
+  type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Agent } from "@usine/core";
@@ -52,9 +53,9 @@ export interface ClaudeModelInfo {
 }
 
 /** Narrow vendor seam: tests never need to imitate the SDK's large Query surface. */
-export interface ClaudeQuery extends AsyncIterable<unknown> {
+export interface ClaudeQuery extends AsyncIterable<Schema.Json> {
   readonly close: () => void;
-  readonly interrupt: () => Promise<unknown>;
+  readonly interrupt: () => Promise<void>;
   readonly supportedModels: () => Promise<ReadonlyArray<ClaudeModelInfo>>;
 }
 
@@ -68,9 +69,26 @@ export class ClaudeSdk extends Context.Service<
   }
 >()("@usine/agents/pi/ClaudeSdk") {}
 
+const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
+
+const vendorMessageJson = (message: SDKMessage): Schema.Json =>
+  decodeVendorMessage(JSON.stringify(message));
+
 export const claudeSdkLive = Layer.succeed(ClaudeSdk)({
-  open: (input, options) =>
-    openClaudeQuery({ prompt: input as AsyncIterable<SDKUserMessage>, options }),
+  open: (input, options) => {
+    // SAFETY: ClaudeUserMessage is the exact streaming-input subset of SDKUserMessage.
+    const query = openClaudeQuery({ prompt: input as AsyncIterable<SDKUserMessage>, options });
+    return {
+      close: () => query.close(),
+      interrupt: async () => {
+        await query.interrupt();
+      },
+      supportedModels: () => query.supportedModels(),
+      async *[Symbol.asyncIterator]() {
+        for await (const message of query) yield vendorMessageJson(message);
+      },
+    };
+  },
 });
 
 class AsyncInput implements AsyncIterable<ClaudeUserMessage> {
@@ -109,17 +127,6 @@ const userMessage = (content: string): ClaudeUserMessage => ({
   parent_tool_use_id: null,
 });
 
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
-
-const asJson = (value: unknown): Schema.Json => {
-  try {
-    return Schema.decodeUnknownSync(Schema.Json)(JSON.parse(JSON.stringify(value)));
-  } catch {
-    return String(value);
-  }
-};
-
 const operationError = (
   operation: SessionOperationError["operation"],
   request: ChildRequest,
@@ -135,78 +142,86 @@ const operationError = (
 
 const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
   const effort = request.session.brain.effort;
-  return {
+  const shared: Omit<ClaudeQueryOptions, "effort" | "thinking"> = {
     allowDangerouslySkipPermissions: true,
     cwd: request.cwd,
-    ...(effort === "off" ? {} : { effort: effort === "minimal" ? "low" : effort }),
     includePartialMessages: true,
     model: request.session.brain.model,
     permissionMode: "bypassPermissions",
     persistSession: false,
     settingSources: ["user", "project", "local"],
-    thinking: effort === "off" ? { type: "disabled" } : { type: "adaptive" },
   };
+  return effort === "off"
+    ? { ...shared, thinking: { type: "disabled" } }
+    : {
+        ...shared,
+        effort: effort === "minimal" ? "low" : effort,
+        thinking: { type: "adaptive" },
+      };
 };
 
 const modelExists = (models: ReadonlyArray<ClaudeModelInfo>, model: Agent.ModelId): boolean =>
   models.some((candidate) => candidate.value === model || candidate.resolvedModel === model);
 
+const ClaudeTextDeltaMessage = Schema.Struct({
+  type: Schema.Literal("stream_event"),
+  event: Schema.Struct({
+    type: Schema.Literal("content_block_delta"),
+    delta: Schema.Struct({ type: Schema.Literal("text_delta"), text: Schema.NonEmptyString }),
+  }),
+});
+const ClaudeContentMessage = Schema.Struct({
+  type: Schema.Literals(["assistant", "user"]),
+  message: Schema.Struct({ content: Schema.Array(Schema.Json) }),
+});
+const ClaudeToolUseBlock = Schema.Struct({
+  type: Schema.Literal("tool_use"),
+  id: Schema.NonEmptyString,
+  name: Schema.NonEmptyString,
+  input: Schema.Json,
+});
+const ClaudeToolResultBlock = Schema.Struct({
+  type: Schema.Literal("tool_result"),
+  tool_use_id: Schema.NonEmptyString,
+  content: Schema.Json,
+  is_error: Schema.optionalKey(Schema.Boolean),
+});
+const ClaudeResultMessage = Schema.Struct({
+  type: Schema.Literal("result"),
+  subtype: Schema.String,
+  result: Schema.optionalKey(Schema.String),
+  errors: Schema.optionalKey(Schema.Array(Schema.String)),
+  queued_turn_count: Schema.optionalKey(Schema.Number),
+});
+
 const activitiesFrom = (
-  message: unknown,
+  message: Schema.Json,
   session: Agent.ChildSession,
   tools: Map<string, string>,
 ): ReadonlyArray<Agent.Activity> => {
-  if (!isRecord(message)) return [];
-  if (message.type === "stream_event" && isRecord(message.event)) {
-    const event = message.event;
-    if (
-      event.type === "content_block_delta" &&
-      isRecord(event.delta) &&
-      event.delta.type === "text_delta" &&
-      typeof event.delta.text === "string" &&
-      event.delta.text.length > 0
-    ) {
-      return [new Agent.TextOutput({ session, text: event.delta.text })];
-    }
-    return [];
+  if (Schema.is(ClaudeTextDeltaMessage)(message)) {
+    return [new Agent.TextOutput({ session, text: message.event.delta.text })];
   }
-  if ((message.type !== "assistant" && message.type !== "user") || !isRecord(message.message)) {
-    return [];
-  }
-  const content = message.message.content;
-  if (!Array.isArray(content)) return [];
+  if (!Schema.is(ClaudeContentMessage)(message)) return [];
   const activities: Array<Agent.Activity> = [];
-  for (const block of content) {
-    if (!isRecord(block) || typeof block.type !== "string") continue;
-    if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
-      activities.push(new Agent.TextOutput({ session, text: block.text }));
-    } else if (
-      block.type === "tool_use" &&
-      typeof block.id === "string" &&
-      block.id.length > 0 &&
-      typeof block.name === "string" &&
-      block.name.length > 0
-    ) {
+  for (const block of message.message.content) {
+    if (Schema.is(ClaudeToolUseBlock)(block)) {
       tools.set(block.id, block.name);
       activities.push(
         new Agent.ToolStarted({
           session,
           callId: block.id,
           tool: block.name,
-          input: asJson(block.input),
+          input: block.input,
         }),
       );
-    } else if (
-      block.type === "tool_result" &&
-      typeof block.tool_use_id === "string" &&
-      block.tool_use_id.length > 0
-    ) {
+    } else if (Schema.is(ClaudeToolResultBlock)(block)) {
       activities.push(
         new Agent.ToolFinished({
           session,
           callId: block.tool_use_id,
           tool: tools.get(block.tool_use_id) ?? "unknown",
-          output: asJson(block.content),
+          output: block.content,
           isError: block.is_error === true,
         }),
       );
@@ -220,21 +235,36 @@ const makeClaudeChild = Effect.gen(function* () {
 
   const launch: ChildBackend["Service"]["launch"] = Effect.fn("ClaudeChildBackend.launch")(
     function* (request) {
+      yield* Effect.annotateCurrentSpan({
+        agent: request.session.agent,
+        effort: request.session.brain.effort,
+        harness: request.session.brain.harness,
+        model: request.session.brain.model,
+        parentSessionId: request.session.parentId,
+        sessionId: request.session.id,
+      });
       if (request.session.brain.harness !== "claude") {
+        yield* Effect.logError("Claude child rejected an unsupported harness");
         return yield* new UnsupportedHarnessError({
           harness: request.session.brain.harness,
           message: `Claude backend cannot run ${request.session.brain.harness}`,
         });
       }
+      yield* Effect.logInfo("Launching Claude child session");
       const input = new AsyncInput();
       const query = sdk.open(input, optionsFor(request));
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          input.end();
+          query.close();
+        }),
+      );
       const models = yield* Effect.tryPromise({
         try: () => query.supportedModels(),
         catch: (cause) => operationError("launch", request, "Claude model discovery failed", cause),
       });
       if (!modelExists(models, request.session.brain.model)) {
-        input.end();
-        query.close();
+        yield* Effect.logError("Claude child rejected an unknown model");
         return yield* new UnknownModelError({
           harness: "claude",
           model: request.session.brain.model,
@@ -251,6 +281,11 @@ const makeClaudeChild = Effect.gen(function* () {
 
       const fail = Effect.fn("ClaudeChildBackend.fail")(function* (error: AgentSessionError) {
         if (yield* Ref.getAndSet(terminal, true)) return;
+        yield* Effect.logError("Claude child session failed", {
+          errorTag: error._tag,
+          message: error.message,
+          sessionId: request.session.id,
+        });
         yield* Deferred.fail(result, error);
         yield* Queue.fail(events, error);
         input.end();
@@ -264,17 +299,15 @@ const makeClaudeChild = Effect.gen(function* () {
             for (const activity of activitiesFrom(message, request.session, tools)) {
               yield* Queue.offer(events, activity);
             }
-            if (!isRecord(message) || message.type !== "result") return;
-            if (message.subtype !== "success" || typeof message.result !== "string") {
-              const detail = Array.isArray(message.errors)
-                ? message.errors.map(String).join("; ")
-                : "Claude returned an unsuccessful result";
+            if (!Schema.is(ClaudeResultMessage)(message)) return;
+            if (message.subtype !== "success" || message.result === undefined) {
+              const detail = message.errors?.join("; ") ?? "Claude returned an unsuccessful result";
               yield* fail(
                 operationError("stream", request, "Claude child session failed", new Error(detail)),
               );
               return;
             }
-            if (typeof message.queued_turn_count === "number" && message.queued_turn_count > 0) {
+            if (message.queued_turn_count !== undefined && message.queued_turn_count > 0) {
               return;
             }
             if (yield* Ref.getAndSet(terminal, true)) return;
@@ -283,6 +316,9 @@ const makeClaudeChild = Effect.gen(function* () {
             yield* Deferred.succeed(result, new SessionResult({ message: text }));
             yield* Queue.end(events);
             input.end();
+            yield* Effect.logInfo("Claude child session finished", {
+              sessionId: request.session.id,
+            });
           }),
         ),
         Effect.flatMap(() =>
@@ -304,23 +340,29 @@ const makeClaudeChild = Effect.gen(function* () {
         Effect.catch((error) => fail(error)),
       );
       yield* Effect.forkScoped(consume);
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          input.end();
-          query.close();
-        }),
-      );
 
       const steer = Effect.fn("ClaudeChildBackend.steer")((message: string) =>
-        Effect.try({
-          try: () => input.offer(userMessage(message)),
-          catch: (cause) => operationError("steer", request, "Could not steer Claude", cause),
-        }),
+        Effect.logDebug("Steering Claude child session", {
+          sessionId: request.session.id,
+        }).pipe(
+          Effect.andThen(
+            Effect.try({
+              try: () => input.offer(userMessage(message)),
+              catch: (cause) => operationError("steer", request, "Could not steer Claude", cause),
+            }),
+          ),
+        ),
       );
-      const interrupt = Effect.tryPromise({
-        try: () => query.interrupt(),
-        catch: (cause) => operationError("interrupt", request, "Could not interrupt Claude", cause),
+      const interrupt = Effect.logInfo("Interrupting Claude child session", {
+        sessionId: request.session.id,
       }).pipe(
+        Effect.andThen(
+          Effect.tryPromise({
+            try: () => query.interrupt(),
+            catch: (cause) =>
+              operationError("interrupt", request, "Could not interrupt Claude", cause),
+          }),
+        ),
         Effect.tap(() => Effect.sync(() => input.end())),
         Effect.asVoid,
       );
