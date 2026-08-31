@@ -73,7 +73,7 @@ const EngineLive = exeDevLayer(instanceDirectory, config, {
 })
 ```
 
-The composition sets the GitHub integration grant to five minutes beyond `max_attempt_minutes`. Pass `credentialGrantMinutes` to use another bounded window.
+The composition sets the GitHub integration grant to five minutes beyond `max_attempt_minutes`. Pass `credentialGrantMinutes` to use another bounded window. The scheduler also bounds every launch at `max_attempt_minutes`: a hung run host or dead link is interrupted through the normal cancel handshake and reported as a typed infrastructure failure before its credential grant lapses.
 
 The live exe.dev check requires an existing baked VM and its GitHub integration:
 

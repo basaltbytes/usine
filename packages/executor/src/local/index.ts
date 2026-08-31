@@ -1,14 +1,10 @@
 import { Attempt, AttemptChannel, AttemptFailure, Instance, Repository } from "@usine/core";
 import {
-  Array as Arr,
-  Config,
   Effect,
-  Fiber,
   FileSystem,
   Layer,
-  Option,
-  PartitionedSemaphore,
   Path,
+  type PlatformError,
   Redacted,
   Ref,
   Result,
@@ -16,18 +12,21 @@ import {
   Stream,
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { allowlistedEnvironment, collectCommand, requireSuccess } from "../child-command.ts";
 import {
   CheckoutRequest,
   CredentialProvider,
   Executor,
   ExecutorError,
   ExecutorOperationError,
-  PreparedAttempt,
+  logPreflightFailure,
+  type PreparedAttempt,
   type RunHostCommand,
-  WorktreePath,
   WorkerCapabilityError,
   type ExecutorOperation,
 } from "../index.ts";
+import { keyedLockFor } from "../keyed-lock.ts";
+import { provisionWorktree, safeSegment, type WorkspaceOps } from "../provision.ts";
 import { runHostSessionFor, type RunHostInput } from "../run-host-session.ts";
 
 export type { RunHostCommand } from "../index.ts";
@@ -47,9 +46,6 @@ interface PreparedState {
 
 const isExecutorError = Schema.is(ExecutorError);
 
-/** Every git invocation is bounded: a hung clone or fetch must stay cancellable. */
-const COMMAND_TIMEOUT = "10 minutes";
-
 /**
  * The run host gets a minimal environment, never the orchestrator's: the App
  * private key and every other orchestrator secret must not reach the agent
@@ -65,25 +61,11 @@ const HOST_ENVIRONMENT_ALLOWLIST = [
   "USER",
 ] as const;
 
-const hostEnvironment: Effect.Effect<Record<string, string>> = Effect.forEach(
-  HOST_ENVIRONMENT_ALLOWLIST,
-  (name) =>
-    Effect.map(Config.option(Config.string(name)), (value) =>
-      Option.map(value, (found) => [name, found] as const),
-    ),
-).pipe(
-  Effect.map((entries) => Object.fromEntries(Arr.getSomes(entries))),
-  // An unreadable process environment at layer build is startup breakage.
-  Effect.orDie,
-);
-
 const executorError = (
   operation: ExecutorOperation,
   message: string,
   cause: unknown,
 ): ExecutorOperationError => new ExecutorOperationError({ operation, message, cause });
-
-const safeSegment = (value: string): string => value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
 
 /** The credential must never survive into a persisted error message. */
 const scrubbed = (text: string, credential: Redacted.Redacted<string>): string =>
@@ -110,9 +92,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const fetches = yield* PartitionedSemaphore.make<string>({ permits: 1 });
+    const fetches = yield* keyedLockFor<Repository.Name>();
     const preparedStates = yield* Ref.make(new Map<Attempt.AttemptId, PreparedState>());
-    const baseEnvironment = yield* hostEnvironment;
+    const baseEnvironment = yield* allowlistedEnvironment(HOST_ENVIRONMENT_ALLOWLIST);
     const repositoryUrl =
       options.repositoryUrl ??
       ((repository: Repository.Name): string => `https://github.com/${repository}.git`);
@@ -127,52 +109,12 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       commandOptions: ChildProcess.CommandOptions = {},
     ) {
       yield* Effect.annotateCurrentSpan({ host: "local", operation });
-      const result = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const handle = yield* spawner.spawn(
-            ChildProcess.make(command, args, {
-              env: baseEnvironment,
-              extendEnv: false,
-              ...commandOptions,
-            }),
-          );
-          const stdoutFiber = yield* handle.stdout.pipe(
-            Stream.decodeText(),
-            Stream.mkString,
-            Effect.forkChild,
-          );
-          const stderrFiber = yield* handle.stderr.pipe(
-            Stream.decodeText(),
-            Stream.mkString,
-            Effect.forkChild,
-          );
-          const exitCode = yield* handle.exitCode;
-          const [stdout, stderr] = yield* Effect.all([
-            Fiber.join(stdoutFiber),
-            Fiber.join(stderrFiber),
-          ]);
-          return { exitCode, stderr, stdout } as const;
-        }),
-      ).pipe(
-        Effect.timeout(COMMAND_TIMEOUT),
-        Effect.mapError((cause) =>
-          executorError(operation, `${command} could not be executed`, cause),
-        ),
-      );
-      if (Number(result.exitCode) !== 0) {
-        yield* Effect.logWarning("Executor command exited non-zero", {
-          operation,
-          command,
-          args: args.join(" "),
-          exitCode: String(result.exitCode),
-        });
-        return yield* executorError(
-          operation,
-          `${command} exited with code ${String(result.exitCode)}`,
-          new Error(result.stderr.trim() || `${command} exited without an error message`),
-        );
-      }
-      return result.stdout;
+      const result = yield* collectCommand(spawner, operation, command, args, {
+        env: baseEnvironment,
+        extendEnv: false,
+        ...commandOptions,
+      });
+      return yield* requireSuccess(operation, "local", command, args, result);
     });
 
     const run = Effect.fn("LocalExecutor.run")(function* (
@@ -270,7 +212,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         gitVersion,
         protocolVersion: AttemptChannel.PROTOCOL_VERSION,
       });
-    });
+    }, logPreflightFailure);
 
     const prepare = Effect.fn("LocalExecutor.prepare")(function* (request: CheckoutRequest) {
       yield* Effect.annotateCurrentSpan({
@@ -294,107 +236,27 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         worktree,
       });
 
+      const remove = (target: string): Effect.Effect<void, PlatformError.PlatformError> =>
+        fileSystem.remove(target, { recursive: true, force: true });
+      const ops: WorkspaceOps<PlatformError.PlatformError | ExecutorOperationError> = {
+        ensureRoots: Effect.andThen(
+          fileSystem.makeDirectory(path.dirname(cache), { recursive: true }),
+          fileSystem.makeDirectory(path.dirname(worktree), { recursive: true }),
+        ),
+        removePath: remove,
+        cacheExists: fileSystem.exists(cache),
+        promoteStaging: fileSystem.rename(`${cache}.cloning`, cache),
+        git: (args: ReadonlyArray<string>): Effect.Effect<string, ExecutorOperationError> =>
+          executeCommand("prepare", "git", args, commandOptions),
+      };
       const prepared = yield* fetches
-        .withPermit(request.repository)(
-          Effect.gen(function* () {
-            yield* fileSystem.makeDirectory(path.dirname(cache), {
-              recursive: true,
-            });
-            yield* fileSystem.makeDirectory(path.dirname(worktree), {
-              recursive: true,
-            });
-            yield* fileSystem.remove(worktree, {
-              recursive: true,
-              force: true,
-            });
-            if (!(yield* fileSystem.exists(cache))) {
-              // Clone into a sibling staging directory and rename on success:
-              // an interrupted clone must never leave a half-initialized cache
-              // that every later fetch for this repository would poison.
-              const staging = `${cache}.cloning`;
-              yield* fileSystem.remove(staging, {
-                recursive: true,
-                force: true,
-              });
-              yield* run(
-                "prepare",
-                "git",
-                [
-                  "clone",
-                  "--bare",
-                  "--filter=blob:none",
-                  repositoryUrl(request.repository),
-                  staging,
-                ],
-                commandOptions,
-              ).pipe(
-                Effect.onError(() =>
-                  fileSystem.remove(staging, { recursive: true, force: true }).pipe(
-                    Effect.tapError((error) =>
-                      Effect.logWarning("Could not remove a partial local clone", {
-                        attemptId: request.attemptId,
-                        worker: request.worker,
-                        host: "local",
-                        staging,
-                        message: String(error),
-                      }),
-                    ),
-                    Effect.ignore,
-                  ),
-                ),
-              );
-              yield* fileSystem.rename(staging, cache);
-            } else {
-              yield* run(
-                "prepare",
-                "git",
-                [
-                  "--git-dir",
-                  cache,
-                  "remote",
-                  "set-url",
-                  "origin",
-                  repositoryUrl(request.repository),
-                ],
-                commandOptions,
-              );
-            }
-            yield* run(
-              "prepare",
-              "git",
-              ["--git-dir", cache, "fetch", "--force", "--prune", "origin", request.revision],
-              commandOptions,
-            );
-            const resolved = (yield* executeCommand(
-              "prepare",
-              "git",
-              ["--git-dir", cache, "rev-parse", "FETCH_HEAD"],
-              commandOptions,
-            )).trim();
-            const baseCommit = yield* Schema.decodeUnknownEffect(Repository.CommitSha)(
-              resolved,
-            ).pipe(
-              Effect.mapError((cause) =>
-                executorError("prepare", "git returned an invalid object id", cause),
-              ),
-            );
-            yield* run(
-              "prepare",
-              "git",
-              ["--git-dir", cache, "worktree", "add", "--detach", worktree, baseCommit],
-              commandOptions,
-            );
-            return new PreparedAttempt({
-              worker: request.worker,
-              spec: new AttemptChannel.RunSpec({
-                attemptId: request.attemptId,
-                repository: request.repository,
-                revision: request.revision,
-                baseCommit,
-                task: request.task,
-              }),
-              worktree: WorktreePath.make(worktree),
-            });
+        .withLock(request.repository)(
+          provisionWorktree({
+            request,
+            url: repositoryUrl(request.repository),
+            host: "local",
+            layout: { cache, staging: `${cache}.cloning`, worktree },
+            ops,
           }),
         )
         .pipe(

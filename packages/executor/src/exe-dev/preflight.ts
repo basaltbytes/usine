@@ -2,30 +2,24 @@ import { AttemptChannel, Worker } from "@usine/core";
 import { Effect, Ref, Schema } from "effect";
 import {
   ExecutorOperationError,
+  logPreflightFailure,
   type RunHostCommand,
   WorkerCapabilityError,
   type WorkerCapability,
 } from "../index.ts";
 import type { ExeDevCommands } from "./commands.ts";
-import type { ExeDevExecutorOptions, VmState } from "./model.ts";
+import { HomePath, SshDestination, type ExeDevExecutorOptions, type VmState } from "./model.ts";
 
 const MINIMUM_NODE_MAJOR = 22;
-const SshDestination = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/u, {
-    message: "Expected an exe.dev SSH hostname, optionally prefixed by a user",
-  }),
-);
 
-const VmList = Schema.Struct({
-  vms: Schema.Array(
-    Schema.Struct({
-      vm_name: Schema.NonEmptyString,
-      ssh_dest: SshDestination,
-      status: Schema.NonEmptyString,
-    }),
-  ),
-});
+const Vm = Schema.Struct({
+  vmName: Schema.NonEmptyString,
+  sshDest: SshDestination,
+  status: Schema.NonEmptyString,
+}).pipe(Schema.encodeKeys({ vmName: "vm_name", sshDest: "ssh_dest" }));
+const VmList = Schema.Struct({ vms: Schema.Array(Vm) });
 const decodeVmList = Schema.decodeUnknownEffect(Schema.fromJsonString(VmList));
+const decodeHome = Schema.decodeUnknownEffect(HomePath);
 
 const capabilityError = (
   worker: Worker.Name,
@@ -53,7 +47,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
         ),
       ),
     );
-    const vm = decoded.vms.find(({ vm_name: name }) => name === worker);
+    const vm = decoded.vms.find(({ vmName }) => vmName === worker);
     if (vm === undefined) {
       return yield* capabilityError(
         worker,
@@ -70,17 +64,18 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
         new Error(`VM status: ${vm.status}`),
       );
     }
-    const partial = { home: "", sshDest: vm.ssh_dest };
-    const home = (yield* commands.remote("preflight", partial, "printenv", ["HOME"])).trim();
-    if (!home.startsWith("/") || home.includes("\0") || /[\r\n]/u.test(home)) {
-      return yield* capabilityError(
-        worker,
-        "toolchain",
-        `exe.dev VM ${worker} returned an invalid home directory`,
-        new Error(home || "empty HOME"),
-      );
-    }
-    return { home, sshDest: vm.ssh_dest } satisfies VmState;
+    const reported = (yield* commands.remote("preflight", vm.sshDest, "printenv", ["HOME"])).trim();
+    const home = yield* decodeHome(reported).pipe(
+      Effect.mapError((cause) =>
+        capabilityError(
+          worker,
+          "toolchain",
+          `exe.dev VM ${worker} returned an invalid home directory`,
+          cause,
+        ),
+      ),
+    );
+    return { home, sshDest: vm.sshDest } satisfies VmState;
   });
 
   const asCapability = <A>(
@@ -102,7 +97,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       worker,
       "toolchain",
       `Worker ${worker} cannot run Git`,
-      commands.remote("preflight", vm, "git", ["--version"]),
+      commands.remote("preflight", vm.sshDest, "git", ["--version"]),
     )).trim();
     if (!gitVersion.startsWith("git version ")) {
       return yield* capabilityError(
@@ -117,7 +112,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       worker,
       "toolchain",
       `Worker ${worker} cannot run Node.js`,
-      commands.remote("preflight", vm, "node", ["--version"]),
+      commands.remote("preflight", vm.sshDest, "node", ["--version"]),
     )).trim();
     const nodeMajor = Number(/^v(?<major>\d+)/u.exec(nodeVersion)?.groups?.major ?? Number.NaN);
     if (!Number.isSafeInteger(nodeMajor) || nodeMajor < MINIMUM_NODE_MAJOR) {
@@ -133,7 +128,10 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       worker,
       "run-host",
       `Worker ${worker} cannot run ${runHost.command}`,
-      commands.remote("preflight", vm, runHost.command, [...runHost.args, "--protocol-version"]),
+      commands.remote("preflight", vm.sshDest, runHost.command, [
+        ...runHost.args,
+        "--protocol-version",
+      ]),
     )).trim();
     if (protocol !== String(AttemptChannel.PROTOCOL_VERSION)) {
       return yield* capabilityError(
@@ -149,7 +147,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
         worker,
         "harness-login",
         `${check.harness} is not logged in on Worker ${worker}`,
-        commands.remote("preflight", vm, check.command, check.args),
+        commands.remote("preflight", vm.sshDest, check.command, check.args),
       );
     }
 
@@ -176,22 +174,14 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       harnesses: options.harnessLoginChecks.map(({ harness }) => harness).join(","),
       integrations: options.githubIntegrations.length,
     });
-  });
+  }, logPreflightFailure);
 
+  // Both resolveVm failures sit inside the ExecutorError union prepare
+  // reports, so a stopped VM keeps its typed capability shape.
   const vmFor = Effect.fn("ExeDevExecutor.vmFor")(function* (worker: Worker.Name) {
     const cached = (yield* Ref.get(workers)).get(worker);
     if (cached !== undefined) return cached;
-    return yield* resolveVm(worker).pipe(
-      Effect.mapError((cause) =>
-        cause instanceof ExecutorOperationError
-          ? cause
-          : new ExecutorOperationError({
-              operation: "prepare",
-              message: `Could not resolve exe.dev Worker ${worker}`,
-              cause,
-            }),
-      ),
-    );
+    return yield* resolveVm(worker);
   });
 
   return { preflight, vmFor };

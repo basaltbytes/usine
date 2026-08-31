@@ -61,6 +61,24 @@ export const ExecutorError = Schema.Union([
 ]);
 export type ExecutorError = typeof ExecutorError.Type;
 
+/** Every preflight refusal is logged: a missing capability must be explainable from logs alone. */
+export const logPreflightFailure = <A, R>(
+  effect: Effect.Effect<A, ExecutorError, R>,
+): Effect.Effect<A, ExecutorError, R> =>
+  Effect.tapError(effect, (error) =>
+    error instanceof WorkerCapabilityError
+      ? Effect.logError("Worker preflight failed", {
+          error: error._tag,
+          message: error.message,
+          worker: error.worker,
+          capability: error.capability,
+        })
+      : Effect.logError("Worker preflight failed", {
+          error: error._tag,
+          message: error.message,
+        }),
+  );
+
 /** Process command for a one-shot run host or a preflight capability probe. */
 export interface RunHostCommand {
   readonly command: string;

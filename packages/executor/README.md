@@ -24,7 +24,9 @@ Preflight changes no remote state. It reads VM metadata through `ssh exe.dev ls 
 
 Prepare attaches the repository's integration to the VM with a bounded `--for` grant. It then fetches a bare cached clone from `github.int.exe.xyz` and creates a detached worktree for the Attempt. Launch keeps one SSH process open and carries the protocol-v1 frames on that process's standard input and output. Cleanup removes the worktree, prunes its cache registration, and detaches the integration after the last concurrent Attempt using it finishes.
 
-The first prepare on each VM after orchestrator startup sweeps abandoned Attempt worktrees and prunes cached worktree registrations left by a crash. One-shot lobby and SSH commands carry a ten-minute timeout. Cancellation also bounds interrupt persistence and delivery before escalating to a hard kill, so a parked store or remote process cannot stall shutdown.
+The first prepare on each VM after orchestrator startup sweeps abandoned Attempt worktrees and prunes cached worktree registrations left by a crash. Each sweep removal is isolated and logged: an immovable leftover never blocks its siblings or later prepares, and the sweep runs once per process regardless of partial failures. One-shot lobby and SSH commands carry a ten-minute timeout, and the SSH client sends keepalives so a dead link fails the operation instead of parking it. Cancellation also bounds interrupt persistence and delivery before escalating to a hard kill, so a parked store or remote process cannot stall shutdown; before removing a workspace, cleanup reads the run host's recorded pid on the VM and confirms the process is dead, because killing the local SSH client alone says nothing about the remote side.
+
+Concurrent Attempts against different repositories leave their integrations attached to the VM simultaneously; each grant stays time-boxed, and the refcounted release detaches an integration only after its last Attempt finishes. A failed detach is logged and left to lapse with its time-box.
 
 ```ts
 import { Repository } from "@usine/core"

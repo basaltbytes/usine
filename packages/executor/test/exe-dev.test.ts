@@ -28,7 +28,9 @@ import { TestClock } from "effect/testing";
 const ATTEMPT_ID = Attempt.AttemptId.make("remote-run/execute/1");
 const WORKER = Worker.Name.make("remote-one");
 const REPOSITORY = Repository.Name.make("acme/demo");
-const REVISION = Repository.Revision.make("main; touch /tmp/usine-injected");
+// The brand already rejects whitespace and a leading dash; what remains
+// representable ($, ;, quotes) must still die at the shell-quoting boundary.
+const REVISION = Repository.Revision.make("main;$(touch$IFS/tmp/usine-injected)");
 const COMMIT = Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567");
 const TASK = AttemptChannel.Task.make("Complete the remote task");
 const INTEGRATION = IntegrationName.make("usine-acme-demo");
@@ -54,6 +56,10 @@ interface FakeSshState {
   readonly commands: Array<StandardCommand>;
   readonly inputs: Array<AttemptChannel.InputFrame>;
   kills: number;
+  /** When set, the next `rm -rf` on the Attempt worktree exits non-zero. */
+  failWorktreeRm: boolean;
+  /** When set, `git clone` parks until killed, so a test can interrupt prepare. */
+  hangClone: boolean;
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -73,6 +79,35 @@ const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
     unref: Effect.succeed(Effect.void),
   });
 };
+
+const hangingHandle = (state: FakeSshState) =>
+  Effect.gen(function* () {
+    const exit = yield* Deferred.make<ChildProcessSpawner.ExitCode>();
+    const running = yield* Ref.make(true);
+    return ChildProcessSpawner.makeHandle({
+      pid: ChildProcessSpawner.ProcessId(3),
+      stdin: Sink.drain,
+      stdout: Stream.empty,
+      stderr: Stream.empty,
+      all: Stream.empty,
+      exitCode: Deferred.await(exit),
+      isRunning: Ref.get(running),
+      kill: () =>
+        Effect.sync(() => {
+          state.kills += 1;
+        }).pipe(
+          Effect.andThen(
+            Ref.set(running, false).pipe(
+              Effect.andThen(Deferred.succeed(exit, ChildProcessSpawner.ExitCode(137))),
+              Effect.asVoid,
+            ),
+          ),
+        ),
+      getInputFd: () => Sink.drain,
+      getOutputFd: () => Stream.empty,
+      unref: Effect.succeed(Effect.void),
+    });
+  });
 
 const remoteArgs = (command: StandardCommand): ReadonlyArray<string> => {
   const separator = command.args.indexOf("--");
@@ -195,13 +230,29 @@ const fakeSsh = (
   mode: LaunchMode = "success",
   sweepMode: SweepMode = "valid",
 ) => {
-  const state: FakeSshState = { commands: [], inputs: [], kills: 0 };
+  const state: FakeSshState = {
+    commands: [],
+    inputs: [],
+    kills: 0,
+    failWorktreeRm: false,
+    hangClone: false,
+  };
   const service = ChildProcessSpawner.make(
     Effect.fn("FakeSsh.spawn")(function* (command) {
       if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected pipeline");
       state.commands.push(command);
       const remote = remoteArgs(command);
       const remoteLine = remote[0] ?? "";
+      if (state.hangClone && remoteLine.includes("'clone'")) {
+        return yield* hangingHandle(state);
+      }
+      if (
+        state.failWorktreeRm &&
+        remoteLine.startsWith("exec 'rm' '-rf'") &&
+        remoteLine.includes("/attempts/remote-run_execute_1'")
+      ) {
+        return oneShotHandle("", 1, "rm: cannot remove: device or resource busy");
+      }
       if (remoteLine.includes("&& export GH_HOST=github.int.exe.xyz &&")) {
         return yield* interactiveHandle(command, state, mode);
       }
@@ -273,6 +324,8 @@ const runtime = (sshLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>)
   exeDevLayer({
     githubIntegrations: [integration],
     harnessLoginChecks: [harness],
+    // Pinned: the cancellation tests advance the TestClock by exactly this.
+    interruptGrace: "2 seconds",
   }).pipe(Layer.provide(sshLayer));
 
 describe("exe.dev executor", () => {
@@ -302,17 +355,64 @@ describe("exe.dev executor", () => {
     }).pipe(Effect.provide(runtime(ssh.layer)));
   });
 
-  it.effect("fails prepare before granting credentials when the sweep boundary is invalid", () => {
+  it.effect("contains an invalid sweep boundary without touching it or blocking prepare", () => {
     const ssh = fakeSsh("1", "success", "invalid-path");
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
-      const error = yield* executor.prepare(request).pipe(Effect.flip);
-      assert.strictEqual(error._tag, "ExecutorOperationError");
-      if (error._tag === "ExecutorOperationError") assert.strictEqual(error.operation, "prepare");
+      // The sweep failure is isolated: prepare proceeds, but the path outside
+      // the Worker root is never acted on.
+      const prepared = yield* executor.prepare(request);
+      assert.strictEqual(prepared.spec.attemptId, ATTEMPT_ID);
       const commandLine = ssh.state.commands.map(({ args }) => args.join(" ")).join("\n");
-      assert(!commandLine.includes("integrations attach"));
-      assert(!commandLine.includes("'clone'"));
+      assert(!commandLine.includes("/tmp/not-a-worker-child"));
+      assert(commandLine.includes("integrations attach"));
+    }).pipe(Effect.provide(runtime(ssh.layer)));
+  });
+
+  it.effect("drops the prepared state exactly once when cleanup partially fails", () => {
+    const ssh = fakeSsh("1");
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER);
+      const prepared = yield* executor.prepare(request);
+      ssh.state.failWorktreeRm = true;
+      const error = yield* executor.cleanup(prepared).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "ExecutorOperationError");
+      const detaches = () =>
+        ssh.state.commands.filter(({ args }) => args.join(" ").includes("integrations detach"))
+          .length;
+      // The grant released once despite the worktree failure...
+      assert.strictEqual(detaches(), 1);
+      const issued = ssh.state.commands.length;
+      // ...and the second cleanup is a recorded no-op, not a second release
+      // that would detach a running sibling's credentials.
+      yield* executor.cleanup(prepared);
+      assert.strictEqual(detaches(), 1);
+      assert.strictEqual(ssh.state.commands.length, issued);
+    }).pipe(Effect.provide(runtime(ssh.layer)));
+  });
+
+  it.effect("releases the credential grant when prepare is interrupted mid-clone", () => {
+    const ssh = fakeSsh("1");
+    ssh.state.hangClone = true;
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER);
+      const fiber = yield* Effect.forkChild(executor.prepare(request));
+      let spins = 0;
+      while (
+        !ssh.state.commands.some((command) => (remoteArgs(command)[0] ?? "").includes("'clone'")) &&
+        spins < 1_000
+      ) {
+        yield* Effect.yieldNow;
+        spins += 1;
+      }
+      yield* Fiber.interrupt(fiber);
+      const commandLine = ssh.state.commands.map(({ args }) => args.join(" ")).join("\n");
+      assert(commandLine.includes("integrations attach"));
+      // The compensation ran: the half-attached grant is gone.
+      assert(commandLine.includes("integrations detach"));
     }).pipe(Effect.provide(runtime(ssh.layer)));
   });
 
@@ -363,7 +463,9 @@ describe("exe.dev executor", () => {
           commandLines.some((line) => line.includes("https://github.int.exe.xyz/acme/demo.git")),
         );
         assert(commandLines.some((line) => line.includes("export GH_HOST=github.int.exe.xyz")));
-        assert(commandLines.some((line) => line.includes("'main; touch /tmp/usine-injected'")));
+        assert(
+          commandLines.some((line) => line.includes("'main;$(touch$IFS/tmp/usine-injected)'")),
+        );
         assert(commandLines.some((line) => line.includes("integrations detach usine-acme-demo")));
         assert(
           commandLines.some((line) => line.includes("attempts/abandoned-attempt")),

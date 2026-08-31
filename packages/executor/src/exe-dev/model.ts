@@ -10,6 +10,26 @@ export const IntegrationName = Schema.String.check(
 ).pipe(Schema.brand("ExeDevIntegrationName"));
 export type IntegrationName = typeof IntegrationName.Type;
 
+/**
+ * The SSH argv boundary: this string is handed to the local `ssh` client as a
+ * destination, so anything that could read as an option (`-oProxyCommand=...`)
+ * must be unrepresentable, not merely unexpected.
+ */
+export const SshDestination = Schema.String.check(
+  Schema.isPattern(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/u, {
+    message: "Expected an exe.dev SSH hostname, optionally prefixed by a user",
+  }),
+).pipe(Schema.brand("ExeDevSshDestination"));
+export type SshDestination = typeof SshDestination.Type;
+
+/** An absolute remote home directory that cannot smuggle bytes past shell quoting. */
+export const HomePath = Schema.String.check(
+  Schema.isPattern(/^\/[^\0\r\n]*$/u, {
+    message: "Expected an absolute remote home directory without control bytes",
+  }),
+).pipe(Schema.brand("ExeDevHomePath"));
+export type HomePath = typeof HomePath.Type;
+
 /** One standing exe.dev GitHub integration; only its VM attachment is per Attempt. */
 export class GitHubIntegration extends Schema.Class<GitHubIntegration>(
   "@usine/executor/ExeDevGitHubIntegration",
@@ -47,8 +67,8 @@ export interface ExeDevExecutorOptions {
 }
 
 export interface VmState {
-  readonly home: string;
-  readonly sshDest: string;
+  readonly home: HomePath;
+  readonly sshDest: SshDestination;
 }
 
 export interface PreparedState {

@@ -55,6 +55,8 @@ interface ActiveAttempt {
 }
 
 const STDERR_TAIL_BYTES = 4_096;
+/** Sending SIGKILL is its own bounded step, unrelated to the interrupt grace. */
+const KILL_TIMEOUT = "5 seconds";
 const inputFrameToJson = Schema.encodeSync(AttemptChannel.InputFrameFromJson);
 /** Strict by contract: an unknown key on a protocol frame is a rejected frame. */
 const decodeOutboundEnvelope = (line: string) =>
@@ -96,8 +98,10 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
         host: active.host,
         reason,
       });
+      // Best-effort by design: the kill failure is logged, never propagated,
+      // so it cannot mask the failure that forced the hard kill.
       yield* active.handle.kill({ killSignal: "SIGKILL" }).pipe(
-        Effect.timeout(options.interruptGrace),
+        Effect.timeout(KILL_TIMEOUT),
         Effect.tapError((error) =>
           Effect.logError("Run-host hard kill failed", {
             attemptId,
@@ -107,6 +111,7 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
             message: String(error),
           }),
         ),
+        Effect.ignore,
       );
       yield* Effect.logWarning("Run-host hard-kill signal sent", {
         attemptId,

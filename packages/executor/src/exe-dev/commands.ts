@@ -1,14 +1,14 @@
-import { Array as Arr, Config, Effect, Fiber, Option, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { ExecutorOperationError, type ExecutorOperation, type RunHostCommand } from "../index.ts";
-import type { VmState } from "./model.ts";
+import { Effect } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import {
+  allowlistedEnvironment,
+  collectCommand,
+  requireSuccess,
+  type CommandResult,
+} from "../child-command.ts";
+import type { ExecutorOperation, ExecutorOperationError, RunHostCommand } from "../index.ts";
+import type { SshDestination } from "./model.ts";
 import { shellCommand } from "./shell.ts";
-
-interface CommandResult {
-  readonly exitCode: number;
-  readonly stderr: string;
-  readonly stdout: string;
-}
 
 export interface ExeDevCommands {
   readonly environment: Record<string, string>;
@@ -23,19 +23,17 @@ export interface ExeDevCommands {
   ) => Effect.Effect<string, ExecutorOperationError>;
   readonly remoteRaw: (
     operation: ExecutorOperation,
-    vm: VmState,
+    sshDest: SshDestination,
     command: string,
     args: ReadonlyArray<string>,
   ) => Effect.Effect<CommandResult, ExecutorOperationError>;
   readonly remote: (
     operation: ExecutorOperation,
-    vm: VmState,
+    sshDest: SshDestination,
     command: string,
     args: ReadonlyArray<string>,
   ) => Effect.Effect<string, ExecutorOperationError>;
 }
-
-const COMMAND_TIMEOUT = "10 minutes";
 
 /**
  * The local SSH process receives only what SSH itself needs. In particular,
@@ -54,31 +52,16 @@ const SSH_ENVIRONMENT_ALLOWLIST = [
   "USER",
 ] as const;
 
-const sshEnvironment: Effect.Effect<Record<string, string>> = Effect.forEach(
-  SSH_ENVIRONMENT_ALLOWLIST,
-  (name) =>
-    Effect.map(Config.option(Config.string(name)), (value) =>
-      Option.map(value, (found) => [name, found] as const),
-    ),
-).pipe(
-  Effect.map((entries) => Object.fromEntries(Arr.getSomes(entries))),
-  Effect.orDie,
-);
-
-const executorError = (
-  operation: ExecutorOperation,
-  message: string,
-  cause: unknown,
-): ExecutorOperationError => new ExecutorOperationError({ operation, message, cause });
-
 export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
   configuredSsh?: RunHostCommand,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const environment = yield* sshEnvironment;
+  const environment = yield* allowlistedEnvironment(SSH_ENVIRONMENT_ALLOWLIST);
   const ssh = configuredSsh ?? {
     command: "ssh",
-    args: ["-o", "BatchMode=yes"],
+    // The keepalive pair turns a dead TCP link into a non-zero SSH exit
+    // instead of a silent forever-park: a lost VM must fail the operation.
+    args: ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4"],
   };
 
   const executeRaw = Effect.fn("ExeDevExecutor.executeRaw")(function* (
@@ -88,41 +71,10 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     args: ReadonlyArray<string>,
   ) {
     yield* Effect.annotateCurrentSpan({ host, operation });
-    return yield* Effect.scoped(
-      Effect.gen(function* () {
-        const handle = yield* spawner.spawn(
-          ChildProcess.make(command, args, {
-            env: environment,
-            extendEnv: false,
-          }),
-        );
-        const stdoutFiber = yield* handle.stdout.pipe(
-          Stream.decodeText(),
-          Stream.mkString,
-          Effect.forkChild,
-        );
-        const stderrFiber = yield* handle.stderr.pipe(
-          Stream.decodeText(),
-          Stream.mkString,
-          Effect.forkChild,
-        );
-        const exitCode = yield* handle.exitCode;
-        const [stdout, stderr] = yield* Effect.all([
-          Fiber.join(stdoutFiber),
-          Fiber.join(stderrFiber),
-        ]);
-        return {
-          exitCode: Number(exitCode),
-          stderr,
-          stdout,
-        } satisfies CommandResult;
-      }),
-    ).pipe(
-      Effect.timeout(COMMAND_TIMEOUT),
-      Effect.mapError((cause) =>
-        executorError(operation, `${command} could not be executed`, cause),
-      ),
-    );
+    return yield* collectCommand(spawner, operation, command, args, {
+      env: environment,
+      extendEnv: false,
+    });
   });
 
   const executeChecked = Effect.fn("ExeDevExecutor.executeChecked")(function* (
@@ -132,21 +84,12 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     args: ReadonlyArray<string>,
   ) {
     const result = yield* executeRaw(operation, host, command, args);
-    if (result.exitCode !== 0) {
-      yield* Effect.logWarning("exe.dev command exited non-zero", {
-        operation,
-        command,
-        exitCode: String(result.exitCode),
-      });
-      return yield* executorError(
-        operation,
-        `${command} exited with code ${String(result.exitCode)}`,
-        new Error(result.stderr.trim() || `${command} exited without an error message`),
-      );
-    }
-    return result.stdout;
+    return yield* requireSuccess(operation, host, command, args, result);
   });
 
+  // Lobby arguments ride unquoted through OpenSSH's argv join. Every value
+  // passed here must be a brand-validated token (Worker.Name,
+  // IntegrationName, CredentialGrantMinutes); never pass free-form text.
   const lobby = (
     operation: ExecutorOperation,
     args: ReadonlyArray<string>,
@@ -160,26 +103,26 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
 
   const remoteRaw = (
     operation: ExecutorOperation,
-    vm: VmState,
+    sshDest: SshDestination,
     command: string,
     args: ReadonlyArray<string>,
   ): Effect.Effect<CommandResult, ExecutorOperationError> =>
-    executeRaw(operation, vm.sshDest, ssh.command, [
+    executeRaw(operation, sshDest, ssh.command, [
       ...ssh.args,
-      vm.sshDest,
+      sshDest,
       "--",
       shellCommand(command, args),
     ]);
 
   const remote = (
     operation: ExecutorOperation,
-    vm: VmState,
+    sshDest: SshDestination,
     command: string,
     args: ReadonlyArray<string>,
   ): Effect.Effect<string, ExecutorOperationError> =>
-    executeChecked(operation, vm.sshDest, ssh.command, [
+    executeChecked(operation, sshDest, ssh.command, [
       ...ssh.args,
-      vm.sshDest,
+      sshDest,
       "--",
       shellCommand(command, args),
     ]);
