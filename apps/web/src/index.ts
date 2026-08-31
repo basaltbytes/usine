@@ -2,7 +2,8 @@
  * @usine/web — the usine web UI, served by @usine/server. Internal — never
  * published.
  *
- * Not implemented yet; the UI stack is chosen when the first UI ticket lands.
+ * The Vite entry lives in main.tsx; this marker keeps the internal package's
+ * TypeScript project explicit without exporting a public library surface.
  */
 
 export {};
