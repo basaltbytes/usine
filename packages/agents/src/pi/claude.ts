@@ -5,7 +5,7 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Agent } from "@usine/core";
-import { Context, Deferred, Effect, Layer, Option, Queue, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import {
   AgentResultError,
   ClaudeChildBackend,
@@ -261,7 +261,7 @@ const makeClaudeChild = Effect.gen(function* () {
         input.end();
       });
       const tools = new Map<string, string>();
-      yield* Queue.offer(channel.events, new Agent.SessionStarted({ session: request.session }));
+      yield* channel.emit(new Agent.SessionStarted({ session: request.session }));
       input.offer(userMessage(request.prompt));
 
       const consume = Stream.fromAsyncIterable(query, (cause) =>
@@ -270,7 +270,7 @@ const makeClaudeChild = Effect.gen(function* () {
         Stream.runForEach((message) =>
           Effect.gen(function* () {
             for (const event of sessionEventsFrom(message, request.session, tools)) {
-              yield* Queue.offer(channel.events, event);
+              yield* channel.emit(event);
             }
             if (!Schema.is(ClaudeResultMessage)(message)) return;
             if (message.subtype !== "success" || message.result === undefined) {

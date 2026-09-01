@@ -1,14 +1,21 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent } from "@usine/core";
 import { Effect, Stream } from "effect";
 import { ChildRequest, CodexChildBackend, WorkingDirectory } from "../../src/index.ts";
-import { codexAppServerLive, codexChildBackendLayer } from "../../src/pi/codex.ts";
+import { codexAppServerLive } from "../../src/pi/codex/app-server.ts";
+import { codexChildBackendLayer } from "../../src/pi/codex/codex.ts";
 
 const model = process.env.USINE_CODEX_INTEGRATION_MODEL;
 if (model === undefined || model.trim().length === 0) {
   throw new Error("USINE_CODEX_INTEGRATION_MODEL must name a model exposed by codex app-server");
 }
+
+// A full-access headless agent must never run in the developer's checkout.
+const workspace = mkdtempSync(join(tmpdir(), "usine-codex-live-"));
 
 describe("Codex child live contract", () => {
   it.live(
@@ -29,7 +36,7 @@ describe("Codex child live contract", () => {
                   effort: "low",
                 }),
               }),
-              cwd: WorkingDirectory.make(process.cwd()),
+              cwd: WorkingDirectory.make(workspace),
               prompt: "Reply with exactly CODEX_CONTRACT_OK. Do not call tools.",
             }),
           );

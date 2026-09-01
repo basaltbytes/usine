@@ -6,6 +6,9 @@
       "entry": [],
       "project": []
     },
+    "packages/agents": {
+      "entry": ["protocol-conformance/check.ts"]
+    },
     "tooling/oxlint": {
       "project": ["**/*.ts"]
     },

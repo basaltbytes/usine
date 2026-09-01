@@ -1,3 +1,6 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent } from "@usine/core";
 import { Effect, Stream } from "effect";
@@ -8,6 +11,9 @@ const model = process.env.USINE_PI_INTEGRATION_MODEL;
 if (model === undefined || model.trim().length === 0) {
   throw new Error("USINE_PI_INTEGRATION_MODEL must use Pi's provider/model syntax");
 }
+
+// A full-access headless agent must never run in the developer's checkout.
+const workspace = mkdtempSync(join(tmpdir(), "usine-pi-live-"));
 
 describe("Pi child live contract", () => {
   it.live(
@@ -28,7 +34,7 @@ describe("Pi child live contract", () => {
                   effort: "low",
                 }),
               }),
-              cwd: WorkingDirectory.make(process.cwd()),
+              cwd: WorkingDirectory.make(workspace),
               prompt: "Reply with exactly PI_CONTRACT_OK. Do not call tools.",
             }),
           );

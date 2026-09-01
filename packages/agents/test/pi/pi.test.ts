@@ -69,6 +69,16 @@ describe("Pi child backend", () => {
       messages: [],
       prompt: (value) => {
         prompt = value;
+        // Operational SDK events with no normalized shape are logged and
+        // skipped; they must never enter the queue or break the bridge.
+        listener?.({
+          type: "auto_retry_start",
+          attempt: 1,
+          maxAttempts: 3,
+          delayMs: 250,
+          errorMessage: "overloaded",
+        });
+        listener?.({ type: "auto_retry_end", success: true, attempt: 1 });
         listener?.({
           type: "message_end",
           message: { role: "assistant", content: [{ type: "text", text: "Pi child done." }] },

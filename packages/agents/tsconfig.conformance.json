@@ -1,0 +1,12 @@
+{
+  "extends": "@usine/tsconfig/base.json",
+  "include": ["${configDir}/protocol-conformance"],
+  "compilerOptions": {
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  }
+}

@@ -8,6 +8,7 @@ import {
   SessionOperationError,
   toAttemptFailure,
   UnknownModelError,
+  UnsupportedEffortError,
   WorkingDirectory,
 } from "../src/index.ts";
 
@@ -63,6 +64,12 @@ describe("agent runtime contract", () => {
         model: Agent.ModelId.make("openai-codex/gpt-5.6-sol"),
         pool: "apiKeys",
         message: "Pi model openai-codex/gpt-5.6-sol must use an API key",
+      }),
+      new UnsupportedEffortError({
+        harness: "codex",
+        model: Agent.ModelId.make("gpt-5.6-terra"),
+        effort: "max",
+        message: "Codex model gpt-5.6-terra does not support effort max",
       }),
       new AgentResultError({ sessionId, message: "ran out of turns" }),
     ];

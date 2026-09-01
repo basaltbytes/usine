@@ -42,6 +42,16 @@ export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableErro
   message: Schema.NonEmptyString,
 }) {}
 
+/** The selected model exists but does not support the rostered reasoning effort. */
+export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffortError>(
+  "@usine/agents/UnsupportedEffortError",
+)("UnsupportedEffortError", {
+  harness: Agent.Harness,
+  model: Agent.ModelId,
+  effort: Agent.Effort,
+  message: Schema.NonEmptyString,
+}) {}
+
 /** The session ran to a terminal state and reported that the work itself failed. */
 export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   "@usine/agents/AgentResultError",
@@ -67,6 +77,7 @@ export class SessionOperationError extends Schema.TaggedError<SessionOperationEr
 export const AgentSessionError = Schema.Union([
   UnknownModelError,
   PoolUnavailableError,
+  UnsupportedEffortError,
   AgentResultError,
   SessionOperationError,
 ]);
@@ -83,6 +94,7 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure.Attem
       new AttemptFailure.InfraFailure({ message: operation.message, cause: operation.cause }),
     UnknownModelError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
     PoolUnavailableError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
+    UnsupportedEffortError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
     AgentResultError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
   });
 

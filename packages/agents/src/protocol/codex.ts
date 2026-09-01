@@ -1,7 +1,10 @@
 /**
- * NodeNext-compatible view of the exact-pinned generated app-server protocol.
- * The upstream package currently omits extensions in its generated source;
- * these are the request shapes usine sends on that pinned wire version.
+ * NodeNext-compatible view of the exact-pinned generated app-server protocol
+ * (`@pwrdrvr/codex-app-server-protocol@0.144.0`, mirroring codex-cli 0.144.0).
+ * The upstream package omits extensions in its generated source, so it only
+ * resolves under bundler-style resolution; these are the request shapes usine
+ * sends on that pinned wire version. `protocol-conformance/check.ts` compiles
+ * against the real package and fails `pnpm check` when this view drifts.
  */
 export interface InitializeParams {
   readonly clientInfo: {
@@ -22,7 +25,7 @@ export interface ThreadStartParams {
   readonly model?: string | null;
   readonly allowProviderModelFallback?: boolean;
   readonly cwd?: string | null;
-  readonly approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted" | null;
+  readonly approvalPolicy?: "never" | "on-request" | "untrusted" | null;
   readonly sandbox?: "read-only" | "workspace-write" | "danger-full-access" | null;
   readonly serviceName?: string | null;
   readonly ephemeral?: boolean | null;
@@ -38,7 +41,7 @@ export interface TurnStartParams {
   readonly threadId: string;
   readonly input: ReadonlyArray<TextInput>;
   readonly cwd?: string | null;
-  readonly approvalPolicy?: "never" | "on-request" | "on-failure" | "untrusted" | null;
+  readonly approvalPolicy?: "never" | "on-request" | "untrusted" | null;
   readonly sandboxPolicy?: { readonly type: "dangerFullAccess" } | null;
   readonly effort?: string | null;
 }
