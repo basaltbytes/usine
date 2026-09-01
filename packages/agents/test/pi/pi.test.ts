@@ -1,11 +1,20 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  ToolDefinition,
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  defineTool,
+  type ExtensionAPI,
+  type ExtensionContext,
+  SessionManager,
+  SettingsManager,
+  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Agent, Attempt, AttemptChannel, Repository } from "@usine/core";
 import { Effect, Fiber, Layer, Option, Stream } from "effect";
+import { Type } from "typebox";
 import {
   AgentRuntime,
   ChildBackend,
@@ -21,6 +30,7 @@ import {
 import {
   PiSdk,
   piChildBackendLayer,
+  piParentSessionToolPolicy,
   piParentLayer,
   type PiSession,
   type PiSessionEvent,
@@ -308,6 +318,57 @@ const childLayer = Layer.succeed(ChildBackend)({
 });
 
 describe("Pi parent runtime", () => {
+  it.effect("keeps repository tools out of a real parent session", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "usine-pi-parent-tools-"))),
+      (directory) =>
+        Effect.promise(async () => {
+          const settingsManager = SettingsManager.create(directory, directory, {
+            projectTrusted: false,
+          });
+          const resourceLoader = new DefaultResourceLoader({
+            agentDir: directory,
+            cwd: directory,
+            extensionFactories: [
+              {
+                name: "test-subagents",
+                factory: (pi) =>
+                  pi.registerTool(
+                    defineTool({
+                      name: "subagent",
+                      label: "Subagent",
+                      description: "Delegate work.",
+                      parameters: Type.Object({}, { additionalProperties: false }),
+                      execute: async () => ({ content: [], details: {} }),
+                    }),
+                  ),
+              },
+            ],
+            settingsManager,
+            noExtensions: true,
+            noPromptTemplates: true,
+            noSkills: true,
+            noThemes: true,
+          });
+          await resourceLoader.reload();
+          const { session } = await createAgentSession({
+            agentDir: directory,
+            cwd: directory,
+            ...piParentSessionToolPolicy,
+            resourceLoader,
+            sessionManager: SessionManager.inMemory(directory),
+            settingsManager,
+          });
+          try {
+            assert.deepStrictEqual(session.getActiveToolNames(), ["subagent"]);
+          } finally {
+            session.dispose();
+          }
+        }),
+      (directory) => Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
+    ),
+  );
+
   it.effect("assembles the full prompt, normalizes SDK events, and forwards controls", () => {
     let options: PiStartOptions | undefined;
     let listener: ((event: PiSessionEvent) => void) | undefined;

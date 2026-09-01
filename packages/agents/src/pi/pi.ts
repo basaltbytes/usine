@@ -84,6 +84,9 @@ export type PiStartResult =
       readonly session: PiSession;
     };
 
+/** The parent orchestrates through usine extensions; harnesses own repository tools. */
+export const piParentSessionToolPolicy = { noTools: "builtin" } as const;
+
 /** Narrow SDK seam keeps vendor setup testable without module replacement. */
 export class PiSdk extends Context.Service<
   PiSdk,
@@ -128,6 +131,7 @@ export const piSdkLive = Layer.succeed(PiSdk)({
     const sessionOptions = {
       cwd: options.cwd,
       modelRuntime,
+      ...piParentSessionToolPolicy,
       resourceLoader,
       sessionManager: SessionManager.inMemory(options.cwd),
       settingsManager,
