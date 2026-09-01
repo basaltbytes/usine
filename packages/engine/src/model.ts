@@ -161,6 +161,7 @@ export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>
 )("TranscriptTailQuery", {
   attemptId: Attempt.AttemptId,
   after: TranscriptSequence,
+  limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
 /** Read the newest bounded page before a cursor, or from the current tail. */

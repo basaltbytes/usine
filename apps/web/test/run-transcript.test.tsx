@@ -1,8 +1,14 @@
 import { Agent, Attempt, AttemptChannel } from "@usine/core";
 import { TranscriptEventView, TranscriptPageCursor, TranscriptCursor } from "@usine/orchestrator";
+import { QueryClient } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import { mergeTranscript, replaceEarlierCursor, Transcript } from "../src/run-transcript.tsx";
+import {
+  mergeTranscript,
+  replaceEarlierCursor,
+  RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
+  Transcript,
+} from "../src/run-transcript.tsx";
 
 const attemptId = Attempt.AttemptId.make("attempt-31");
 const brain = new Agent.BrainSpec({
@@ -128,6 +134,53 @@ describe("run transcript", () => {
         [secondAttempt, 50],
         [firstAttempt, 100],
       ],
+    );
+  });
+
+  it("advances manual earlier-page cursors through the TanStack cache until exhaustion", () => {
+    const queryClient = new QueryClient();
+    const key = ["run", "run-31"] as const;
+    queryClient.setQueryDefaults(["run"], {
+      structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
+    });
+    queryClient.setQueryData(key, {
+      earlierTranscript: [
+        new TranscriptPageCursor({
+          attemptId,
+          before: TranscriptCursor.make(300),
+        }),
+      ],
+    });
+
+    for (const before of [200, 100] as const) {
+      queryClient.setQueryData<{ earlierTranscript: ReadonlyArray<TranscriptPageCursor> }>(
+        key,
+        (previous) => ({
+          earlierTranscript: replaceEarlierCursor(previous?.earlierTranscript ?? [], attemptId, [
+            new TranscriptPageCursor({
+              attemptId,
+              before: TranscriptCursor.make(before),
+            }),
+          ]),
+        }),
+      );
+      const current = queryClient.getQueryData<{
+        earlierTranscript: ReadonlyArray<TranscriptPageCursor>;
+      }>(key)?.earlierTranscript[0]?.before;
+      assert(current !== undefined);
+      assert.strictEqual(current, TranscriptCursor.make(before));
+    }
+
+    queryClient.setQueryData<{ earlierTranscript: ReadonlyArray<TranscriptPageCursor> }>(
+      key,
+      (previous) => ({
+        earlierTranscript: replaceEarlierCursor(previous?.earlierTranscript ?? [], attemptId, []),
+      }),
+    );
+    assert.deepStrictEqual(
+      queryClient.getQueryData<{ earlierTranscript: ReadonlyArray<TranscriptPageCursor> }>(key)
+        ?.earlierTranscript,
+      [],
     );
   });
 });

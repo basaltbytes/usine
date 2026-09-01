@@ -223,6 +223,7 @@ describe("local worker", () => {
             new TranscriptTailQuery({
               attemptId: attempt.id,
               after: firstTranscriptEntry.sequence,
+              limit: 100,
             }),
           );
           assert.deepStrictEqual(

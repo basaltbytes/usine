@@ -22,6 +22,7 @@ import {
   Submission,
   TranscriptAllQuery,
   TranscriptPageQuery,
+  TranscriptSequence,
   TranscriptTailQuery,
 } from "../src/model.ts";
 import { RunStore } from "../src/store/store.ts";
@@ -169,9 +170,19 @@ describe("run store", () => {
         );
         assert.deepStrictEqual(
           (yield* store.transcript(
-            new TranscriptTailQuery({ attemptId, after: first.sequence }),
+            new TranscriptTailQuery({ attemptId, after: first.sequence, limit: 1 }),
           )).map(({ sequence }) => sequence),
-          [2, 3],
+          [2],
+        );
+        assert.deepStrictEqual(
+          (yield* store.transcript(
+            new TranscriptTailQuery({
+              attemptId,
+              after: TranscriptSequence.make(2),
+              limit: 1,
+            }),
+          )).map(({ sequence }) => sequence),
+          [3],
         );
         assert.deepStrictEqual(
           (yield* store.transcript(

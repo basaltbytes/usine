@@ -15,6 +15,7 @@ import {
   Agent,
   Attempt,
   AttemptChannel,
+  AttemptFailure,
   Event,
   Repository,
   Run,
@@ -38,6 +39,7 @@ import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
 import {
   ColdTranscriptRequest,
   EarlierTranscriptRequest,
+  FailureView,
   Operator,
   PollCycle,
   PollingTriggers,
@@ -47,6 +49,7 @@ import {
   TailTranscriptRequest,
   TranscriptCursor,
 } from "../src/index.ts";
+import { failureView } from "../src/operator/projection.ts";
 
 const now = DateTime.makeUnsafe("2026-08-31T12:00:00.000Z");
 const runId = Run.RunId.make("run-operator-test");
@@ -216,7 +219,8 @@ const testLayer = (
     Effect.succeed(
       Match.valueTags(query, {
         TranscriptAllQuery: () => transcript,
-        TranscriptTailQuery: ({ after }) => transcript.filter((entry) => entry.sequence > after),
+        TranscriptTailQuery: ({ after, limit }) =>
+          transcript.filter((entry) => entry.sequence > after).slice(0, limit),
         TranscriptPageQuery: ({ before, limit }) => {
           const candidates = Option.match(before, {
             onNone: () => transcript,
@@ -342,13 +346,20 @@ describe("Operator", () => {
 
         const tail = yield* operator.detail(
           runId,
-          new TailTranscriptRequest({ after: TranscriptCursor.make(500) }),
+          new TailTranscriptRequest({ after: TranscriptCursor.make(1) }),
+        );
+        assert.strictEqual(tail.transcript.length, 500);
+        assert.strictEqual(tail.transcript[0]?.sequence, 2);
+        assert.strictEqual(tail.transcript.at(-1)?.sequence, 501);
+        assert.deepStrictEqual(tail.earlierTranscript, []);
+        const remainingTail = yield* operator.detail(
+          runId,
+          new TailTranscriptRequest({ after: TranscriptCursor.make(501) }),
         );
         assert.deepStrictEqual(
-          tail.transcript.map(({ sequence }) => sequence),
-          [501, 502],
+          remainingTail.transcript.map(({ sequence }) => sequence),
+          [502],
         );
-        assert.deepStrictEqual(tail.earlierTranscript, []);
 
         const earlier = yield* operator.detail(
           runId,
@@ -396,4 +407,23 @@ describe("Operator", () => {
       }).pipe(Effect.provide(testLayer(approved, overviewReads, projectionRevision)));
     }),
   );
+
+  it("removes nested infrastructure defect causes from operator failure schemas", () => {
+    const secret = "token=super-secret";
+    const view = failureView(
+      new AttemptFailure.InfraFailure({
+        message: "The worker connection failed",
+        cause: new Error(secret),
+      }),
+    );
+    const encoded = Schema.encodeUnknownSync(FailureView)(view);
+    const json = JSON.stringify(encoded);
+
+    assert.deepStrictEqual(encoded, {
+      _tag: "InfraFailure",
+      message: "The worker connection failed",
+    });
+    assert.strictEqual(json.includes("cause"), false);
+    assert.strictEqual(json.includes(secret), false);
+  });
 });

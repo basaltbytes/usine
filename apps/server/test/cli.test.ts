@@ -1,13 +1,16 @@
 import { NodeServices } from "@effect/platform-node";
-import { Effect, Option } from "effect";
+import { Effect, Layer, Option } from "effect";
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { ServeError } from "effect/unstable/http/HttpServerError";
 import { assert, describe, it } from "vitest";
 import {
   CLI_USAGE,
+  BrowserOpenError,
   CliUsageError,
   Port,
   PortInUseError,
   packageVersion,
+  openBrowser,
   parseCli,
   serverStartError,
 } from "../src/cli.ts";
@@ -66,5 +69,30 @@ describe("usine CLI", () => {
 
     assert(error instanceof PortInUseError);
     assert.strictEqual(error.port, port);
+  });
+
+  it("bounds a browser opener that never exits and configures forced cleanup", async () => {
+    let observed: ChildProcess.Command | undefined;
+    const hangingSpawner = Layer.succeed(
+      ChildProcessSpawner.ChildProcessSpawner,
+      ChildProcessSpawner.make((command) => {
+        observed = command;
+        return Effect.never;
+      }),
+    );
+    const error = await Effect.runPromise(
+      openBrowser("http://127.0.0.1:7331", "10 millis").pipe(
+        Effect.provide(hangingSpawner),
+        Effect.flip,
+      ),
+    );
+
+    assert(error instanceof BrowserOpenError);
+    assert(observed !== undefined && observed._tag === "StandardCommand");
+    assert.strictEqual(observed.options.detached, false);
+    assert.strictEqual(observed.options.forceKillAfter, "1 second");
+    assert.strictEqual(observed.options.stdin, "ignore");
+    assert.strictEqual(observed.options.stdout, "ignore");
+    assert.strictEqual(observed.options.stderr, "ignore");
   });
 });

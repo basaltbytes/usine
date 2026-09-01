@@ -548,6 +548,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const transcript = Effect.fn("RunStoreQueries.transcript")(function* (query: TranscriptQuery) {
+    yield* Effect.annotateCurrentSpan({
+      attemptId: query.attemptId,
+      query: query._tag,
+    });
+
     const cursor = Match.valueTags(query, {
       TranscriptAllQuery: ({ attemptId }) => eq(attemptTranscripts.attemptId, attemptId),
       TranscriptTailQuery: ({ attemptId, after }) =>
@@ -576,7 +581,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
     // re-sorts ascending, so callers always receive append order.
     const rows = yield* Match.valueTags(query, {
       TranscriptAllQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
-      TranscriptTailQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
+      TranscriptTailQuery: ({ limit }) =>
+        selection.orderBy(asc(attemptTranscripts.sequence)).limit(limit).execute(),
       TranscriptPageQuery: ({ limit }) =>
         selection.orderBy(desc(attemptTranscripts.sequence)).limit(limit).execute(),
     });

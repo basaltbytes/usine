@@ -2,6 +2,9 @@ import type { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestra
 import { useMemo } from "react";
 import { presentTranscriptEvent, type PresentedTranscriptEvent } from "./operator-copy.ts";
 
+/** Manual earlier-page cursor writes must pass through the TanStack cache unchanged. */
+export const RUN_DETAIL_CACHE_STRUCTURAL_SHARING = false;
+
 interface TranscriptGroup {
   readonly key: string;
   readonly sequence: number;

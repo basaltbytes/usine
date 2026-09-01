@@ -1,5 +1,5 @@
-import { Agent, AttemptFailure, Repository, Run } from "@usine/core";
-import type { NeedView, TranscriptEventView } from "@usine/orchestrator";
+import { Agent, Repository, Run } from "@usine/core";
+import type { FailureView, NeedView, TranscriptEventView } from "@usine/orchestrator";
 import { Match, Option, Schema } from "effect";
 
 export interface NeedCopy {
@@ -24,7 +24,7 @@ export interface PresentedTranscriptEvent {
 export const brainLine = (brain: Agent.BrainSpec): string =>
   `${brain.harness} · ${brain.model} · ${brain.effort}`;
 
-export const failureMessage = (failure: AttemptFailure.AttemptFailure): string =>
+export const failureMessage = (failure: FailureView): string =>
   Match.valueTags(failure, {
     InfraFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,

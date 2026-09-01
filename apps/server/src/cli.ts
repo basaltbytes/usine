@@ -1,9 +1,10 @@
 import { fileURLToPath } from "node:url";
-import { Console, Effect, FileSystem, Option, Schema } from "effect";
+import { Console, Duration, Effect, FileSystem, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { ServeError } from "effect/unstable/http/HttpServerError";
 
 export const DEFAULT_PORT = 7_331;
+export const BROWSER_OPEN_TIMEOUT = "2 seconds";
 
 export const Port = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: 65_535 }, { message: "Expected a TCP port" }),
@@ -150,11 +151,23 @@ const browserCommand = (url: string) => {
 };
 
 /** Open the setup page after the HTTP server has bound successfully. */
-export const openBrowser = Effect.fn("Cli.openBrowser")(function* (url: string) {
+export const openBrowser = Effect.fn("Cli.openBrowser")(function* (
+  url: string,
+  timeout: Duration.Input = BROWSER_OPEN_TIMEOUT,
+) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const { command, args } = browserCommand(url);
   const exitCode = yield* spawner
-    .exitCode(ChildProcess.make(command, args))
+    .exitCode(
+      ChildProcess.make(command, args, {
+        detached: false,
+        forceKillAfter: "1 second",
+        stdin: "ignore",
+        stdout: "ignore",
+        stderr: "ignore",
+      }),
+    )
+    .pipe(Effect.timeout(timeout))
     .pipe(Effect.mapError((cause) => new BrowserOpenError({ command, cause })));
   if (Number(exitCode) !== 0) {
     return yield* new BrowserOpenError({

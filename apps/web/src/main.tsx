@@ -23,7 +23,12 @@ import { Schema } from "effect";
 import { StrictMode, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { brainLine, failureMessage, needCopy } from "./operator-copy.ts";
-import { mergeTranscript, replaceEarlierCursor, Transcript } from "./run-transcript.tsx";
+import {
+  mergeTranscript,
+  replaceEarlierCursor,
+  RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
+  Transcript,
+} from "./run-transcript.tsx";
 import "./styles.css";
 
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
@@ -203,21 +208,21 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
   const [confirmCancel, setConfirmCancel] = useState(false);
   const detail = useQuery<RunDetailView>({
     queryKey: ["run", runId],
-    queryFn: () => {
+    queryFn: async () => {
       const key = ["run", runId] as const;
       const previous = queryClient.getQueryData<RunDetailView>(key);
       const cursor = previous?.transcript.at(-1)?.sequence;
       const search = cursor === undefined ? "" : `?after=${cursor}`;
-      return api(`/api/runs/${encodeURIComponent(runId)}${search}`, RunDetailView);
-    },
-    structuralSharing: (previous, next) => {
-      if (!(previous instanceof RunDetailView) || !(next instanceof RunDetailView)) return next;
+      const next = await api(`/api/runs/${encodeURIComponent(runId)}${search}`, RunDetailView);
+      const current = queryClient.getQueryData<RunDetailView>(key);
+      if (cursor === undefined || current === undefined) return next;
       return new RunDetailView({
         ...next,
-        transcript: mergeTranscript(previous.transcript, next.transcript),
-        earlierTranscript: previous.earlierTranscript,
+        transcript: mergeTranscript(current.transcript, next.transcript),
+        earlierTranscript: current.earlierTranscript,
       });
     },
+    structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
     refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
   });
   const mutation = useMutation({
@@ -241,19 +246,18 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
       ),
     onSuccess: (page, cursor) => {
       const key = ["run", runId] as const;
-      const previous = queryClient.getQueryData<RunDetailView>(key);
-      if (previous === undefined) return;
-      queryClient.setQueryData(
-        key,
-        new RunDetailView({
-          ...previous,
-          transcript: mergeTranscript(previous.transcript, page.transcript),
-          earlierTranscript: replaceEarlierCursor(
-            previous.earlierTranscript,
-            cursor.attemptId,
-            page.earlierTranscript,
-          ),
-        }),
+      queryClient.setQueryData<RunDetailView>(key, (previous) =>
+        previous === undefined
+          ? previous
+          : new RunDetailView({
+              ...page,
+              transcript: mergeTranscript(previous.transcript, page.transcript),
+              earlierTranscript: replaceEarlierCursor(
+                previous.earlierTranscript,
+                cursor.attemptId,
+                page.earlierTranscript,
+              ),
+            }),
       );
     },
   });
