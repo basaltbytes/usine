@@ -5,7 +5,7 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Agent, Attempt, AttemptChannel, Repository } from "@usine/core";
-import { Effect, Layer, Option, Stream } from "effect";
+import { Effect, Fiber, Layer, Option, Stream } from "effect";
 import {
   AgentRuntime,
   ChildBackend,
@@ -25,22 +25,73 @@ import {
   type PiSession,
   type PiSessionEvent,
   type PiStartOptions,
+  type PiStartResult,
 } from "../../src/pi/pi.ts";
 import { resolvePiPool } from "../../src/pi/authentication.ts";
 
 describe("Pi pool resolution", () => {
   it("maps ChatGPT subscription authentication to the ChatGPT pool", () => {
-    assert.strictEqual(resolvePiPool("openai-codex", "subscription"), "chatgptPlan");
+    assert.strictEqual(
+      resolvePiPool("openai-codex", { _tag: "OAuth", subscription: true }),
+      "chatgptPlan",
+    );
   });
 
   it("keeps API-key authentication in the API-key pool", () => {
-    assert.strictEqual(resolvePiPool("openai", "apiKey"), "apiKeys");
+    assert.strictEqual(resolvePiPool("openai", { _tag: "ApiKey" }), "apiKeys");
   });
 
-  it("does not misclassify an unsupported OAuth provider as API-key usage", () => {
-    assert.strictEqual(resolvePiPool("github-copilot", "oauth"), undefined);
+  it("rejects missing and unsupported OAuth credentials instead of inventing an API key", () => {
+    assert.strictEqual(resolvePiPool("openai-codex", undefined), undefined);
+    assert.strictEqual(
+      resolvePiPool("github-copilot", { _tag: "OAuth", subscription: true }),
+      undefined,
+    );
+    assert.strictEqual(
+      resolvePiPool("openai-codex", { _tag: "OAuth", subscription: false }),
+      undefined,
+    );
   });
 });
+
+const delayedPiStart = () => {
+  let resolveStart: ((result: PiStartResult) => void) | undefined;
+  let announceStart: (() => void) | undefined;
+  let announceDispose: (() => void) | undefined;
+  let disposeCount = 0;
+  const startCalled = new Promise<void>((resolve) => {
+    announceStart = resolve;
+  });
+  const disposed = new Promise<void>((resolve) => {
+    announceDispose = resolve;
+  });
+  const session: PiSession = {
+    abort: () => Promise.resolve(),
+    dispose: () => {
+      disposeCount += 1;
+      announceDispose?.();
+    },
+    messages: [],
+    prompt: () => Promise.resolve(),
+    steer: () => Promise.resolve(),
+    subscribe: () => () => undefined,
+  };
+  return {
+    disposeCount: () => disposeCount,
+    disposed,
+    resolve: (result: Omit<Extract<PiStartResult, { readonly _tag: "Started" }>, "session">) => {
+      assert(resolveStart !== undefined);
+      resolveStart({ ...result, session });
+    },
+    start: () => {
+      announceStart?.();
+      return new Promise<PiStartResult>((resolve) => {
+        resolveStart = resolve;
+      });
+    },
+    startCalled,
+  };
+};
 
 const agent = new Agent.Agent({
   name: Agent.Name.make("developer"),
@@ -194,6 +245,31 @@ describe("Pi child backend", () => {
         assert.strictEqual(error.pool, "apiKeys");
         assert.strictEqual(error.model, model);
         assert.strictEqual(disposed, true);
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect("disposes a child session that resolves after launch interruption", () => {
+    const delayed = delayedPiStart();
+    const sdk = Layer.succeed(PiSdk)({
+      start: delayed.start,
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const backend = yield* PiChildBackend;
+        const launchFiber = yield* Effect.forkChild(backend.launch(childRequest));
+        yield* Effect.promise(() => delayed.startCalled);
+        const interruptFiber = yield* Effect.forkChild(Fiber.interrupt(launchFiber));
+        yield* Effect.yieldNow;
+        delayed.resolve({
+          _tag: "Started",
+          model: childRequest.session.brain.model,
+          pool: "apiKeys",
+        });
+        yield* Effect.promise(() => delayed.disposed);
+        yield* Fiber.join(interruptFiber);
+        assert.strictEqual(delayed.disposeCount(), 1);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
     );
   });
@@ -373,7 +449,13 @@ describe("Pi parent runtime", () => {
   it.effect("rejects an OAuth parent without a known billing pool", () => {
     const model = Agent.ModelId.make("github-copilot/gpt-5.6-sol");
     const sdk = Layer.succeed(PiSdk)({
-      start: () => Promise.resolve({ _tag: "ApiKeyRequired", model }),
+      start: () =>
+        Promise.resolve({
+          _tag: "UnsupportedAuthentication",
+          authentication: { _tag: "OAuth", subscription: true },
+          model,
+          requiredPool: "apiKeys",
+        }),
     });
     return Effect.scoped(
       Effect.gen(function* () {
@@ -382,6 +464,52 @@ describe("Pi parent runtime", () => {
         assert(error instanceof PoolUnavailableError);
         assert.strictEqual(error.pool, "apiKeys");
         assert.strictEqual(error.model, model);
+      }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
+    );
+  });
+
+  it.effect("reports a missing parent credential as a terminal pool failure", () => {
+    const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    const sdk = Layer.succeed(PiSdk)({
+      start: () =>
+        Promise.resolve({
+          _tag: "AuthenticationUnavailable",
+          model,
+          requiredPool: "chatgptPlan",
+        }),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const error = yield* Effect.flip(runtime.launch(request));
+        assert(error instanceof PoolUnavailableError);
+        assert.strictEqual(error.pool, "chatgptPlan");
+        assert.strictEqual(error.model, model);
+      }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
+    );
+  });
+
+  it.effect("disposes a parent session that resolves after launch interruption", () => {
+    const delayed = delayedPiStart();
+    const sdk = Layer.succeed(PiSdk)({
+      start: delayed.start,
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const launchFiber = yield* Effect.forkChild(runtime.launch(request));
+        yield* Effect.promise(() => delayed.startCalled);
+        const interruptFiber = yield* Effect.forkChild(Fiber.interrupt(launchFiber));
+        yield* Effect.yieldNow;
+        delayed.resolve({
+          _tag: "Started",
+          model: parentModel,
+          pool: "apiKeys",
+        });
+        yield* Effect.promise(() => delayed.disposed);
+        yield* Fiber.join(interruptFiber);
+        assert.strictEqual(delayed.disposeCount(), 1);
       }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
     );
   });
