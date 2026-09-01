@@ -1,11 +1,18 @@
-import type { TranscriptEventView } from "@usine/orchestrator";
+import type {
+  TranscriptEventView,
+  TranscriptPageCursor,
+} from "@usine/orchestrator";
 import { useMemo } from "react";
+import {
+  presentTranscriptEvent,
+  type PresentedTranscriptEvent,
+} from "./operator-copy.ts";
 
 interface TranscriptGroup {
   readonly key: string;
   readonly sequence: number;
   readonly agent: string | null;
-  readonly events: ReadonlyArray<TranscriptEventView>;
+  readonly events: ReadonlyArray<PresentedTranscriptEvent>;
 }
 
 type TranscriptItem =
@@ -13,7 +20,7 @@ type TranscriptItem =
   | {
       readonly key: string;
       readonly sequence: number;
-      readonly event: TranscriptEventView;
+      readonly event: PresentedTranscriptEvent;
     };
 
 export const mergeTranscript = (
@@ -24,10 +31,26 @@ export const mergeTranscript = (
   for (const event of next) {
     if (!merged.has(event.sequence)) merged.set(event.sequence, event);
   }
-  return [...merged.values()].sort((left, right) => left.sequence - right.sequence);
+  return [...merged.values()].sort(
+    (left, right) => left.sequence - right.sequence,
+  );
 };
 
-const TranscriptEvent = ({ event }: { readonly event: TranscriptEventView }) => (
+export const replaceEarlierCursor = (
+  previous: ReadonlyArray<TranscriptPageCursor>,
+  attempted: TranscriptPageCursor["attemptId"],
+  next: ReadonlyArray<TranscriptPageCursor>,
+): ReadonlyArray<TranscriptPageCursor> =>
+  [
+    ...previous.filter(({ attemptId }) => attemptId !== attempted),
+    ...next,
+  ].sort((left, right) => left.before - right.before);
+
+const TranscriptEvent = ({
+  event,
+}: {
+  readonly event: PresentedTranscriptEvent;
+}) => (
   <article className={`transcript-event ${event.isError ? "event-error" : ""}`}>
     <header>
       <span>{event.label}</span>
@@ -43,13 +66,18 @@ const TranscriptEvent = ({ event }: { readonly event: TranscriptEventView }) => 
   </article>
 );
 
-export const Transcript = ({ events }: { readonly events: ReadonlyArray<TranscriptEventView> }) => {
+export const Transcript = ({
+  events,
+}: {
+  readonly events: ReadonlyArray<TranscriptEventView>;
+}) => {
   const feed = useMemo(() => {
     // One collapsible group per child session, anchored at its own first
     // event, so concurrent children stay distinct and the parent/child
     // interleaving stays chronological (ADR 0008: one level deep).
     const groups = new Map<string, TranscriptGroup>();
-    for (const event of events) {
+    const presented = events.map(presentTranscriptEvent);
+    for (const event of presented) {
       if (event.scope !== "child" || event.sessionId === null) continue;
       const current = groups.get(event.sessionId);
       groups.set(event.sessionId, {
@@ -60,15 +88,20 @@ export const Transcript = ({ events }: { readonly events: ReadonlyArray<Transcri
       });
     }
     const feed: Array<TranscriptItem> = [
-      ...events
+      ...presented
         .filter((event) => event.scope !== "child")
-        .map((event) => ({ key: `event:${event.sequence}`, sequence: event.sequence, event })),
+        .map((event) => ({
+          key: `event:${event.sequence}`,
+          sequence: event.sequence,
+          event,
+        })),
       ...groups.values(),
     ];
     return feed.sort((left, right) => left.sequence - right.sequence);
   }, [events]);
 
-  if (feed.length === 0) return <p className="empty-copy">Waiting for the first agent message…</p>;
+  if (feed.length === 0)
+    return <p className="empty-copy">Waiting for the first agent message…</p>;
   return (
     <div className="transcript">
       {feed.map((item) =>
@@ -77,7 +110,8 @@ export const Transcript = ({ events }: { readonly events: ReadonlyArray<Transcri
         ) : (
           <details className="child-activity" key={item.key}>
             <summary>
-              {item.agent ?? "Child"} activity <span>{item.events.length} events</span>
+              {item.agent ?? "Child"} activity{" "}
+              <span>{item.events.length} events</span>
             </summary>
             <div>
               {item.events.map((event) => (

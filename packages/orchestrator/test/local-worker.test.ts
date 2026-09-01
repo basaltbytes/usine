@@ -28,7 +28,8 @@ import {
   StepExecution,
   StepExecutor,
   Submission,
-  TranscriptQuery,
+  TranscriptAllQuery,
+  TranscriptTailQuery,
 } from "@usine/engine";
 import { stepExecutorLayer } from "../src/index.ts";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
@@ -204,11 +205,7 @@ describe("local worker", () => {
           );
 
           const transcript = yield* engine.transcript(
-            new TranscriptQuery({
-              attemptId: attempt.id,
-              after: Option.none(),
-              limit: Option.none(),
-            }),
+            new TranscriptAllQuery({ attemptId: attempt.id }),
           );
           assert.deepStrictEqual(
             transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
@@ -223,10 +220,9 @@ describe("local worker", () => {
           const firstTranscriptEntry = transcript[0];
           assert(firstTranscriptEntry !== undefined);
           const tail = yield* engine.transcript(
-            new TranscriptQuery({
+            new TranscriptTailQuery({
               attemptId: attempt.id,
-              after: Option.some(firstTranscriptEntry.sequence),
-              limit: Option.none(),
+              after: firstTranscriptEntry.sequence,
             }),
           );
           assert.deepStrictEqual(
@@ -259,11 +255,7 @@ describe("local worker", () => {
           assert(attempt !== undefined);
           for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
             const transcript = yield* engine.transcript(
-              new TranscriptQuery({
-                attemptId: attempt.id,
-                after: Option.none(),
-                limit: Option.none(),
-              }),
+              new TranscriptAllQuery({ attemptId: attempt.id }),
             );
             if (transcript.some(({ envelope }) => envelope.payload._tag === "Started")) break;
             yield* Effect.sleep("10 millis");
@@ -274,11 +266,7 @@ describe("local worker", () => {
           assert.strictEqual(canceled.attempts.length, 1);
 
           const transcript = yield* engine.transcript(
-            new TranscriptQuery({
-              attemptId: attempt.id,
-              after: Option.none(),
-              limit: Option.none(),
-            }),
+            new TranscriptAllQuery({ attemptId: attempt.id }),
           );
           assert(
             transcript.some(

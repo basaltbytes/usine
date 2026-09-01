@@ -18,17 +18,32 @@ import {
 } from "@tanstack/react-router";
 import { Run } from "@usine/core";
 import { FactoryOverview, RunDetailView } from "@usine/orchestrator";
-import type { LoopView, NeedView, RunView } from "@usine/orchestrator";
+import type {
+  LoopView,
+  NeedView,
+  RunView,
+  TranscriptPageCursor,
+} from "@usine/orchestrator";
 import { Schema } from "effect";
 import { StrictMode, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { mergeTranscript, Transcript } from "./run-transcript.tsx";
+import { brainLine, failureMessage, needCopy } from "./operator-copy.ts";
+import {
+  mergeTranscript,
+  replaceEarlierCursor,
+  Transcript,
+} from "./run-transcript.tsx";
 import "./styles.css";
 
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
-const ApiError = Schema.Struct({ error: Schema.String, message: Schema.String });
+const ApiError = Schema.Struct({
+  error: Schema.String,
+  message: Schema.String,
+});
 const isApiError = Schema.is(ApiError);
-const RunSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(Run.RunId) }));
+const RunSearch = Schema.toStandardSchemaV1(
+  Schema.Struct({ run: Schema.optional(Run.RunId) }),
+);
 const ACTIVE_OVERVIEW_REFRESH_MS = 2_000;
 const IDLE_OVERVIEW_REFRESH_MS = 15_000;
 
@@ -57,14 +72,21 @@ const overviewQuery = () => ({
   queryKey: ["overview"] as const,
   queryFn: () => api("/api/overview", FactoryOverview),
   refetchInterval: (
-    query: Query<FactoryOverview, Error, FactoryOverview, readonly ["overview"]>,
+    query: Query<
+      FactoryOverview,
+      Error,
+      FactoryOverview,
+      readonly ["overview"]
+    >,
   ) => {
     const overview = query.state.data;
     if (overview?._tag === "NeedsSetup") return false;
     const hasOpenRun = overview?.projects.some((project) =>
       project.runs.some(({ canCancel }) => canCancel),
     );
-    return hasOpenRun === true ? ACTIVE_OVERVIEW_REFRESH_MS : IDLE_OVERVIEW_REFRESH_MS;
+    return hasOpenRun === true
+      ? ACTIVE_OVERVIEW_REFRESH_MS
+      : IDLE_OVERVIEW_REFRESH_MS;
   },
 });
 
@@ -79,7 +101,10 @@ const timeAgo = (value: string): string => {
 const jsonGist = (value: Schema.Json): string => JSON.stringify(value, null, 2);
 
 const StatusMark = ({ state }: { readonly state: string }) => (
-  <span className={`status-mark state-${state.toLowerCase()}`} aria-label={state}>
+  <span
+    className={`status-mark state-${state.toLowerCase()}`}
+    aria-label={state}
+  >
     {state}
   </span>
 );
@@ -95,14 +120,25 @@ const ActionButton = ({
   readonly disabled?: boolean;
   readonly onClick: () => void;
 }) => (
-  <button className={`action ${className}`} disabled={disabled} onClick={onClick} type="button">
+  <button
+    className={`action ${className}`}
+    disabled={disabled}
+    onClick={onClick}
+    type="button"
+  >
     {children}
   </button>
 );
 
 const PausedMark = () => <span className="paused-mark">paused</span>;
 
-const RunRow = ({ run, open }: { readonly run: RunView; readonly open: () => void }) => (
+const RunRow = ({
+  run,
+  open,
+}: {
+  readonly run: RunView;
+  readonly open: () => void;
+}) => (
   <button className="run-row" onClick={open} type="button">
     <span className="run-route">
       <strong>{run.loop}</strong>
@@ -139,14 +175,15 @@ const NeedStrip = ({
       <span className="strip-label">Needs you · {needs.length}</span>
       <div className="need-items">
         {needs.map((need) => {
+          const copy = needCopy(need);
           const body = (
             <>
-              <strong>{need.title}</strong>
-              <span>{need.detail}</span>
-              {need.repository !== null && <small>{need.repository}</small>}
+              <strong>{copy.title}</strong>
+              <span>{copy.detail}</span>
+              {copy.repository !== null && <small>{copy.repository}</small>}
             </>
           );
-          const runId = need.runId;
+          const runId = copy.runId;
           return runId !== null ? (
             <button
               className="need-item"
@@ -193,7 +230,13 @@ const LoopCard = ({
   </article>
 );
 
-const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close: () => void }) => {
+const RunDrawer = ({
+  runId,
+  close,
+}: {
+  readonly runId: Run.RunId;
+  readonly close: () => void;
+}) => {
   const queryClient = useQueryClient();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const detail = useQuery({
@@ -203,18 +246,28 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
       const previous = queryClient.getQueryData<RunDetailView>(key);
       const cursor = previous?.transcript.at(-1)?.sequence;
       const search = cursor === undefined ? "" : `?after=${cursor}`;
-      const next = await api(`/api/runs/${encodeURIComponent(runId)}${search}`, RunDetailView);
-      if (previous === undefined || cursor === undefined) return next;
+      const next = await api(
+        `/api/runs/${encodeURIComponent(runId)}${search}`,
+        RunDetailView,
+      );
+      if (previous === undefined) return next;
       return new RunDetailView({
         ...next,
         transcript: mergeTranscript(previous.transcript, next.transcript),
+        earlierTranscript:
+          cursor === undefined
+            ? next.earlierTranscript
+            : previous.earlierTranscript,
       });
     },
-    refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
+    refetchInterval: (query) =>
+      query.state.data?.run.canCancel === true ? 1_000 : false,
   });
   const mutation = useMutation({
     mutationFn: (act: "approve" | "retry" | "cancel") =>
-      api(`/api/runs/${encodeURIComponent(runId)}/${act}`, ApiOk, { method: "POST" }),
+      api(`/api/runs/${encodeURIComponent(runId)}/${act}`, ApiOk, {
+        method: "POST",
+      }),
     onSuccess: async () => {
       setConfirmCancel(false);
       await Promise.all([
@@ -223,9 +276,39 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
       ]);
     },
   });
+  const earlierMutation = useMutation({
+    mutationFn: (cursor: TranscriptPageCursor) =>
+      api(
+        `/api/runs/${encodeURIComponent(runId)}?attempt=${encodeURIComponent(cursor.attemptId)}&before=${cursor.before}`,
+        RunDetailView,
+      ),
+    onSuccess: (page, cursor) => {
+      const key = ["run", runId] as const;
+      const previous = queryClient.getQueryData<RunDetailView>(key);
+      if (previous === undefined) return;
+      queryClient.setQueryData(
+        key,
+        new RunDetailView({
+          ...previous,
+          transcript: mergeTranscript(previous.transcript, page.transcript),
+          earlierTranscript: replaceEarlierCursor(
+            previous.earlierTranscript,
+            cursor.attemptId,
+            page.earlierTranscript,
+          ),
+        }),
+      );
+    },
+  });
   const run = detail.data?.run;
+  const earlier = detail.data?.earlierTranscript.at(-1);
   return (
-    <div className="drawer-shell" role="dialog" aria-modal="true" aria-label="Run detail">
+    <div
+      className="drawer-shell"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Run detail"
+    >
       <button
         className="drawer-scrim"
         onClick={close}
@@ -244,18 +327,26 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
               </p>
             )}
           </div>
-          <button className="close-button" onClick={close} type="button" aria-label="Close">
+          <button
+            className="close-button"
+            onClick={close}
+            type="button"
+            aria-label="Close"
+          >
             ×
           </button>
         </header>
-        {detail.isError && <p className="error-panel">{detail.error.message}</p>}
+        {detail.isError && (
+          <p className="error-panel">{detail.error.message}</p>
+        )}
         {run !== undefined && (
           <>
             <div className="run-summary">
               <StatusMark state={run.state} />
               <span className="annotation">{run.agent}</span>
               <span className="annotation">
-                {run.attempts.length} attempt{run.attempts.length === 1 ? "" : "s"}
+                {run.attempts.length} attempt
+                {run.attempts.length === 1 ? "" : "s"}
               </span>
             </div>
             <div className="drawer-actions">
@@ -294,33 +385,42 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
                 </ActionButton>
               )}
             </div>
-            {mutation.isError && <p className="error-panel">{mutation.error.message}</p>}
+            {mutation.isError && (
+              <p className="error-panel">{mutation.error.message}</p>
+            )}
             <section className="drawer-section">
               <h3>Task</h3>
               <p>{run.task}</p>
             </section>
             <section className="drawer-section">
               <h3>Event</h3>
-              <p className="annotation event-key">{detail.data?.eventDedupKey}</p>
-              <pre className="payload-gist">{jsonGist(detail.data?.eventPayload ?? null)}</pre>
+              <p className="annotation event-key">
+                {detail.data?.eventDedupKey}
+              </p>
+              <pre className="payload-gist">
+                {jsonGist(detail.data?.eventPayload ?? null)}
+              </pre>
             </section>
             <section className="drawer-section">
               <h3>Attempts</h3>
               <div className="attempt-list">
-                {run.attempts.length === 0 && <p className="empty-copy">No attempt has started.</p>}
+                {run.attempts.length === 0 && (
+                  <p className="empty-copy">No attempt has started.</p>
+                )}
                 {run.attempts.map((attempt) => (
                   <article className="attempt-entry" key={attempt.id}>
                     <header>
                       <strong>Attempt {attempt.number}</strong>
-                      <StatusMark state={attempt.outcome ?? "Running"} />
+                      <StatusMark state={attempt.outcome?._tag ?? "Running"} />
                     </header>
                     <p className="annotation attempt-meta">
-                      {attempt.worker} · {attempt.brain} · {timeAgo(attempt.startedAt)}
+                      {attempt.worker} · {brainLine(attempt.brain)} ·{" "}
+                      {timeAgo(attempt.startedAt)}
                     </p>
-                    {attempt.errorTag !== null && (
+                    {attempt.outcome?._tag === "Failed" && (
                       <p className="attempt-error">
-                        <strong>{attempt.errorTag}</strong>
-                        {attempt.errorMessage === null ? "" : ` — ${attempt.errorMessage}`}
+                        <strong>{attempt.outcome.failure._tag}</strong>
+                        {` — ${failureMessage(attempt.outcome.failure)}`}
                       </p>
                     )}
                   </article>
@@ -340,6 +440,18 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
             )}
             <section className="drawer-section transcript-section">
               <h3>Live transcript</h3>
+              {earlier !== undefined && (
+                <ActionButton
+                  className="load-earlier"
+                  disabled={earlierMutation.isPending}
+                  onClick={() => earlierMutation.mutate(earlier)}
+                >
+                  {earlierMutation.isPending ? "Loading…" : "Load earlier"}
+                </ActionButton>
+              )}
+              {earlierMutation.isError && (
+                <p className="error-panel">{earlierMutation.error.message}</p>
+              )}
               <Transcript events={detail.data?.transcript ?? []} />
             </section>
           </>
@@ -393,7 +505,9 @@ const FactoryScreen = () => {
         </div>
         {/* The indicator reports the trigger streams, not the server: idle
             pollers must never read as a running factory. */}
-        <div className={`live-indicator ${data._tag === "NeedsSetup" ? "idle" : ""}`}>
+        <div
+          className={`live-indicator ${data._tag === "NeedsSetup" ? "idle" : ""}`}
+        >
           <i /> {data._tag === "NeedsSetup" ? "idle" : "live"}
         </div>
       </header>
@@ -402,9 +516,11 @@ const FactoryScreen = () => {
           <p className="eyebrow">Setup required · {data.errorTag}</p>
           <h1>The floor is ready. GitHub is not connected yet.</h1>
           <p>
-            Add <code>USINE_GITHUB_APP_ID</code> and <code>USINE_GITHUB_PRIVATE_KEY</code>, or
-            create <code>.usine/github-app.json</code> with mode 0600. Then stop and rerun{" "}
-            <code>usine up</code>: the running process reads credentials only when it starts.
+            Add <code>USINE_GITHUB_APP_ID</code> and{" "}
+            <code>USINE_GITHUB_PRIVATE_KEY</code>, or create{" "}
+            <code>.usine/github-app.json</code> with mode 0600. Then stop and
+            rerun <code>usine up</code>: the running process reads credentials
+            only when it starts.
           </p>
         </section>
       )}
@@ -416,7 +532,9 @@ const FactoryScreen = () => {
               <p className="eyebrow">Observe</p>
               <h1>Projects</h1>
             </div>
-            <span className="annotation">{data.projects.length} registered</span>
+            <span className="annotation">
+              {data.projects.length} registered
+            </span>
           </header>
           <div className="projects-list">
             {data.projects.map((project) => (
@@ -425,7 +543,8 @@ const FactoryScreen = () => {
                   <div>
                     <h2>{project.repository}</h2>
                     <p className="annotation">
-                      {project.runs.length} recorded run{project.runs.length === 1 ? "" : "s"}
+                      {project.runs.length} recorded run
+                      {project.runs.length === 1 ? "" : "s"}
                     </p>
                   </div>
                   <span className={`project-status project-${project.status}`}>
@@ -437,7 +556,11 @@ const FactoryScreen = () => {
                 ) : (
                   <div className="run-list">
                     {project.runs.map((run) => (
-                      <RunRow key={run.id} run={run} open={() => openRun(run.id)} />
+                      <RunRow
+                        key={run.id}
+                        run={run}
+                        open={() => openRun(run.id)}
+                      />
                     ))}
                   </div>
                 )}
@@ -452,7 +575,9 @@ const FactoryScreen = () => {
               <h2>Loops</h2>
             </div>
           </header>
-          <p className="aside-copy">Runtime controls. Authored loop files remain untouched.</p>
+          <p className="aside-copy">
+            Runtime controls. Authored loop files remain untouched.
+          </p>
           <div className="loop-list">
             {data.loops.map((loop) => (
               <LoopCard
@@ -463,10 +588,14 @@ const FactoryScreen = () => {
               />
             ))}
           </div>
-          {pauseMutation.isError && <p className="error-panel">{pauseMutation.error.message}</p>}
+          {pauseMutation.isError && (
+            <p className="error-panel">{pauseMutation.error.message}</p>
+          )}
         </aside>
       </main>
-      {search.run !== undefined && <RunDrawer runId={search.run} close={closeRun} />}
+      {search.run !== undefined && (
+        <RunDrawer runId={search.run} close={closeRun} />
+      )}
     </div>
   );
 };

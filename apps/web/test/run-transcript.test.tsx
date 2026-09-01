@@ -1,30 +1,45 @@
-import { Attempt } from "@usine/core";
-import { TranscriptEventView } from "@usine/orchestrator";
+import { Agent, Attempt, AttemptChannel } from "@usine/core";
+import { TranscriptEventView, TranscriptPageCursor, TranscriptCursor } from "@usine/orchestrator";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import { mergeTranscript, Transcript } from "../src/run-transcript.tsx";
+import { mergeTranscript, replaceEarlierCursor, Transcript } from "../src/run-transcript.tsx";
 
 const attemptId = Attempt.AttemptId.make("attempt-31");
+const brain = new Agent.BrainSpec({
+  harness: "codex",
+  model: Agent.ModelId.make("gpt-5"),
+  effort: "high",
+});
 
 const event = (
   sequence: number,
-  label: string,
+  text: string,
   scope: "parent" | "child" | "channel" = "parent",
   session = `${scope}-session`,
-) =>
-  new TranscriptEventView({
+) => {
+  const agent = Agent.Name.make(scope === "child" ? `agent-${session}` : "developer");
+  const sessionView =
+    scope === "child"
+      ? new Agent.ChildSession({
+          id: Agent.SessionId.make(session),
+          parentId: Agent.SessionId.make("parent-session"),
+          agent,
+          brain,
+        })
+      : new Agent.ParentSession({ id: Agent.SessionId.make(session), agent, brain });
+  return new TranscriptEventView({
     sequence,
     attemptId,
     receivedAt: "2026-09-01T12:00:00.000Z",
-    scope,
-    kind: "text-output",
-    sessionId: scope === "channel" ? null : session,
-    parentId: scope === "child" ? "parent-session" : null,
-    agent: scope === "child" ? `agent-${session}` : "developer",
-    label,
-    detail: `${label} detail`,
-    isError: false,
+    direction: "outbound",
+    payload:
+      scope === "channel"
+        ? new AttemptChannel.Started({ parentModel: Agent.ModelId.make("gpt-5") })
+        : new AttemptChannel.SessionEvent({
+            event: new Agent.TextOutput({ session: sessionView, text }),
+          }),
   });
+};
 
 describe("run transcript", () => {
   it("renders parent activity inline and groups each child session one level deep", () => {
@@ -42,7 +57,7 @@ describe("run transcript", () => {
     assert.strictEqual((markup.match(/<details/g) ?? []).length, 1);
     assert.match(markup, /agent-child-session activity.*2 events/);
     assert.ok(markup.indexOf("Parent update") < markup.indexOf("activity"));
-    assert.ok(markup.indexOf("activity") < markup.indexOf("Channel notice"));
+    assert.ok(markup.indexOf("activity") < markup.indexOf("Attempt started"));
   });
 
   it("keeps concurrent child sessions distinct, each anchored at its own first event", () => {
@@ -67,11 +82,45 @@ describe("run transcript", () => {
     const merged = mergeTranscript([second, first], [second, event(3, "Third")]);
 
     assert.deepStrictEqual(
-      merged.map(({ sequence, label }) => [sequence, label]),
+      merged.map(({ sequence, payload }) => [
+        sequence,
+        payload._tag === "SessionEvent" && payload.event._tag === "TextOutput"
+          ? payload.event.text
+          : payload._tag,
+      ]),
       [
         [1, "First"],
         [2, "Second"],
         [3, "Third"],
+      ],
+    );
+  });
+
+  it("replaces only the cursor for the Attempt whose earlier page was loaded", () => {
+    const firstAttempt = Attempt.AttemptId.make("attempt-1");
+    const secondAttempt = Attempt.AttemptId.make("attempt-2");
+    const cursors = [
+      new TranscriptPageCursor({
+        attemptId: firstAttempt,
+        before: TranscriptCursor.make(100),
+      }),
+      new TranscriptPageCursor({
+        attemptId: secondAttempt,
+        before: TranscriptCursor.make(200),
+      }),
+    ];
+    const replaced = replaceEarlierCursor(cursors, secondAttempt, [
+      new TranscriptPageCursor({
+        attemptId: secondAttempt,
+        before: TranscriptCursor.make(50),
+      }),
+    ]);
+
+    assert.deepStrictEqual(
+      replaced.map(({ attemptId, before }) => [attemptId, before]),
+      [
+        [secondAttempt, 50],
+        [firstAttempt, 100],
       ],
     );
   });

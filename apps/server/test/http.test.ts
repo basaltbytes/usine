@@ -3,17 +3,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeHttpPlatform } from "@effect/platform-node";
 import { LoadedInstance, UsineConfig } from "@usine/config";
-import { Agent, Loop, Repository, Run } from "@usine/core";
+import { Agent, Attempt, Loop, Repository, Run } from "@usine/core";
 import { RunNotFoundError, RunOperationRejectedError } from "@usine/engine";
 import {
+  ApprovalNeed,
   FactoryOverview,
   LoopView,
-  NeedView,
   OperatorObservation,
   ProjectView,
   ReadyOverview,
   RunDetailView,
   RunView,
+  TranscriptAttemptNotFoundError,
 } from "@usine/orchestrator";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter } from "effect/unstable/http";
@@ -57,16 +58,14 @@ const detail = new RunDetailView({
   eventDedupKey: "issue:31",
   eventPayload: { number: 31 },
   transcript: [],
+  earlierTranscript: [],
 });
 const overview = new ReadyOverview({
   projects: [new ProjectView({ repository: repositoryName, status: "needs-you", runs: [run] })],
   loops: [new LoopView({ name: loopName, trigger: "issue", agent: agentName, paused: true })],
   needsYou: [
-    new NeedView({
+    new ApprovalNeed({
       id: `approval:${runId}`,
-      kind: "approval",
-      title: "Approval required",
-      detail: "review-issue is waiting to run on basaltbytes/usine.",
       repository: repositoryName,
       runId,
       loop: loopName,
@@ -111,6 +110,11 @@ describe("operator HTTP API", () => {
     );
     assert.strictEqual(invalidCursor.status, 400);
     assert.strictEqual((await invalidCursor.json()).error, "SchemaError");
+
+    const incompleteEarlierPage = await app.handler(
+      new Request(`http://localhost/api/runs/${runId}?before=2`),
+    );
+    assert.strictEqual(incompleteEarlierPage.status, 400);
   });
 
   it("refuses cross-site requests before their side effect while loopback origins pass", async () => {
@@ -137,7 +141,12 @@ describe("operator HTTP API", () => {
   it("maps typed engine errors onto operator-readable statuses", async () => {
     const rejecting = Layer.succeed(FactoryBackend)({
       overview: Effect.succeed(overview),
-      detail: (id: Run.RunId) => Effect.fail(new RunNotFoundError({ runId: id })),
+      detail: (id, request) =>
+        request._tag === "EarlierTranscriptRequest"
+          ? Effect.fail(
+              new TranscriptAttemptNotFoundError({ runId: id, attemptId: request.attemptId }),
+            )
+          : Effect.fail(new RunNotFoundError({ runId: id })),
       approve: (id: Run.RunId) =>
         Effect.fail(
           new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
@@ -166,6 +175,16 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(await rejected.json(), {
         error: "RunOperationRejectedError",
         message: `Cannot approve Run ${runId} while it is Running.`,
+      });
+
+      const wrongAttempt = Attempt.AttemptId.make("attempt-from-another-run");
+      const earlier = await rejectingApp.handler(
+        new Request(`http://localhost/api/runs/${runId}?attempt=${wrongAttempt}&before=2`),
+      );
+      assert.strictEqual(earlier.status, 404);
+      assert.deepStrictEqual(await earlier.json(), {
+        error: "TranscriptAttemptNotFoundError",
+        message: `Attempt ${wrongAttempt} does not belong to Run ${runId}.`,
       });
     } finally {
       await rejectingApp.dispose();

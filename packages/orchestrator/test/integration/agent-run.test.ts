@@ -14,7 +14,7 @@ import {
   UsineConfig,
 } from "@usine/config";
 import { Agent, Instance, Repository, Run, Step } from "@usine/core";
-import { RunEngine } from "@usine/engine";
+import { RunEngine, TranscriptAllQuery } from "@usine/engine";
 import { MarcbachmannCelLayer, Source } from "@usine/expression";
 import { GitHubApp, GitHubPolling, IssuePayload } from "@usine/github";
 import { localSecretsLayer } from "@usine/github/local-secrets";
@@ -344,11 +344,9 @@ describe("live agent loop", () => {
               );
               assert.match(comment.body ?? "", /— usine agent: live-contract-agent/u);
 
-              const transcript = yield* engine.transcript({
-                attemptId: attempt.id,
-                after: Option.none(),
-                limit: Option.none(),
-              });
+              const transcript = yield* engine.transcript(
+                new TranscriptAllQuery({ attemptId: attempt.id }),
+              );
               assert(
                 transcript.some(
                   ({ envelope }) =>

@@ -26,8 +26,11 @@ export {
   Submission,
   SubmissionResult,
   TranscriptEntry,
+  TranscriptAllQuery,
+  TranscriptPageQuery,
   TranscriptQuery,
   TranscriptSequence,
+  TranscriptTailQuery,
 } from "./model.ts";
 export { RunDatabase, type RunDatabaseClient } from "./database/database.ts";
 export { CursorKey } from "./cursor/model.ts";

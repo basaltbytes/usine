@@ -13,7 +13,7 @@ import {
   Worker,
 } from "@usine/core";
 import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev";
-import { RunEngine, Submission, TranscriptQuery } from "@usine/engine";
+import { RunEngine, Submission, TranscriptAllQuery } from "@usine/engine";
 import { Config, DateTime, Effect, FileSystem, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as exeDevLayer } from "../../src/exe-dev.ts";
@@ -140,11 +140,7 @@ describe("live exe.dev Worker", () => {
         assert(Option.isSome(finished.step.result));
 
         const transcript = yield* engine.transcript(
-          new TranscriptQuery({
-            attemptId: attempt.id,
-            after: Option.none(),
-            limit: Option.none(),
-          }),
+          new TranscriptAllQuery({ attemptId: attempt.id }),
         );
         assert.deepStrictEqual(
           transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
