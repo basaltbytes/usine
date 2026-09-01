@@ -49,6 +49,16 @@ describe("run-host frame diagnostics", () => {
     assert(!rendered.includes("credential-value-gh-secret"));
   });
 
+  it("redacts invalid field values from schema issue messages", () => {
+    const raw = JSON.parse(validStartedLine());
+    raw.version = "credential-version-secret";
+    const line = JSON.stringify(raw);
+    const diagnostic = invalidFrameDiagnostic(line, decodeFailure(line));
+
+    assert(diagnostic.issues.length > 0);
+    assert(!JSON.stringify(diagnostic).includes("credential-version-secret"));
+  });
+
   it("does not expose an unrecognized payload tag", () => {
     const raw = JSON.parse(validStartedLine());
     raw.payload._tag = "credential-gh-secret";
