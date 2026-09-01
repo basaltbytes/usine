@@ -46,6 +46,37 @@ use the jargon and technical term of the business but keep the sentences grounde
 eavesdropping on the conversation should understand what you are talking about even if they miss one or 
 two technical words.
 
+## No Literary Verbs For Things
+
+Objects do not have bodies or intentions. A file does not "hold" lines, a tag does not "stand on its own", a group does not "claim" files, a reference does not "carry" an attribute, a commit does not "move past" a stamp, a sentence does not "reach" a reader, a function does not "sit" in a module, a feature does not "ship". Each one reads as literary and tells the reader nothing they can act on. This applies to every kind of text: prose, docs, comments, commit messages, error messages, UI strings, chat replies.
+
+Use the plainest verb that states the fact: is, has, contains, matches, references, is not allowed, is ignored, is out of range. Name the thing, state what is true about it, and if there is something to do, say what to change. Describe what the reader sees, not what the implementation does behind it.
+
+Avoid: claims, holds, carries, reaches, stands, sits, lives, touches, names (as a verb), frames, keys, spells, ships, moves past, fails loudly, falls outside, speaks to, surfaces, lands.
+
+Real rewrites from a CLI's diagnostics:
+
+| Before | After |
+|---|---|
+| The `filegroup` `X` claims no file this list still holds. | The `filegroup` `X` matches no file. |
+| A fenced code block reaches the payload only at a section's top level. | Fenced code blocks are only supported at the top level of a section. |
+| The tag `x` cannot stand on its own. | The tag `x` must be inside a parent tag. |
+| `fields` cannot hold a `x` tag. | `x` is not allowed inside `fields`. |
+| `matrix` holds no table. | `matrix` contains no table. |
+| `why` names `p`, which this file list does not hold. | `why` references `p`, which is not in this file list. |
+| Lines 3-9 fall outside `f`, which holds 5 lines at abc123. | Lines 3-9 are out of range: `f` has 5 lines at abc123. |
+| The code reference `r` carries no `expect`. | The code reference `r` has no `expect` attribute. |
+| ...so a miscounted range fails loudly. | ...so a wrong range is reported as an error. |
+| Prose outside a section does not reach the payload. | Text outside a section is ignored. |
+| The tag `x` sits outside a section. | The tag `x` is outside a section. |
+| The document body holds sections and groups only. | Only sections and groups are allowed at the top level. |
+| The PR head moved 2 commits past the stamp, and it touches a.py. | The PR head is 2 commits ahead of the stamped commit and changes a.py. |
+| `p` carries no readable stamp. | `p` has no readable stamp. |
+| This build ships: odoo. | Available presets: odoo. |
+| Section ids key the review state. | Section ids identify the review state. |
+
+Test: someone with no context reads the sentence once and knows what is true and what to do. If they would have to guess what "holds" or "claims" means here, rewrite it.
+
 ## Punctuation Rules
 
 **Em dashes:** Maximum ONE per 500 words. The single most cited AI tell in existence. Use commas, semicolons, colons, parentheses, or new sentences instead.
@@ -126,5 +157,6 @@ Default if unknown: direct, slightly informal, contractions, occasionally starts
 9. Fabricated any specifics? → Remove or flag as hypothetical.
 10. Could any AI have written this for any person? → Add something specific.
 11. Sounds like ChatGPT? → Rewrite until the answer is no.
+12. Any object given a body or an intention (holds, claims, carries, sits, ships)? → State the fact with is/has/contains/matches.
 
 Apply all rules silently. Never mention them. Never say "as per the guidelines." Just write within these constraints.
