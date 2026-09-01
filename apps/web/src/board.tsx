@@ -13,8 +13,11 @@ const StatusMark = ({ state }: { readonly state: string }) => (
 );
 
 export const itemFailure = (item: BoardItemView): string | null => {
-  if (item.run?.state !== "Failed") return null;
-  const attempts = item.run.attempts;
+  const failedRun =
+    item.runs.find(({ state }) => state === "Failed") ??
+    (item.run?.state === "Failed" ? item.run : null);
+  if (failedRun === null) return null;
+  const attempts = failedRun.attempts;
   for (let index = attempts.length - 1; index >= 0; index -= 1) {
     const outcome = attempts[index]?.outcome;
     if (outcome?._tag === "Failed") return failureMessage(outcome.failure);
@@ -37,6 +40,8 @@ const BoardCard = ({
 }) => {
   const failure = itemFailure(item);
   const run = item.run;
+  const visibleRuns = item.runs.filter(({ state }) => state === "Waiting" || state === "Failed");
+  const runsToShow = visibleRuns.length > 0 ? visibleRuns : run === null ? [] : [run];
   const title = (
     <>
       <span className="board-item-kind">
@@ -70,16 +75,21 @@ const BoardCard = ({
           <span key={label}>{label}</span>
         ))}
       </div>
-      {run !== null && (
-        <div className="board-run-state">
-          <StatusMark state={run.state} />
-          <span className="annotation">{run.agent}</span>
-        </div>
-      )}
+      {runsToShow.map((cardRun) => (
+        <button
+          className="board-run-state"
+          key={cardRun.id}
+          onClick={() => openRun(cardRun.id)}
+          type="button"
+        >
+          <StatusMark state={cardRun.state} />
+          <span className="annotation">{cardRun.agent}</span>
+        </button>
+      ))}
       {item.needsYou && <span className="needs-you-badge">Needs you</span>}
       {failure !== null && <p className="board-card-error">{failure}</p>}
-      {run?.state === "Waiting" && (
-        <p className="board-card-note">Approval is waiting in this run.</p>
+      {visibleRuns.some(({ state }) => state === "Waiting") && (
+        <p className="board-card-note">Approval is waiting in a run on this item.</p>
       )}
     </article>
   );

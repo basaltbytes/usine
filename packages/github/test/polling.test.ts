@@ -303,6 +303,65 @@ describe("GitHubPolling", () => {
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 
+  it.effect("completes truncated Item labels before Board lane matching", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    const labels = Array.from({ length: 51 }, (_, index) => `label-${index + 1}`);
+    const finalLabel = labels.at(-1) ?? assert.fail("missing label fixture");
+    const partialPayload = {
+      ...issuePayload({
+        createdAt: "2026-08-30T10:00:00Z",
+        updatedAt: "2026-08-30T20:00:00Z",
+        commentCreatedAt: "2026-08-30T12:00:00Z",
+      }),
+      labels: { totalCount: labels.length, nodes: labels.slice(0, 50).map((name) => ({ name })) },
+    };
+    const client = HttpClient.make((request) => {
+      requests.push(request);
+      if (request.url.endsWith("/graphql")) {
+        return Effect.succeed(
+          response(request, { data: { repository: { issue: partialPayload } } }),
+        );
+      }
+      return Effect.succeed(
+        requests.length === 2
+          ? response(
+              request,
+              labels.slice(0, 50).map((name) => ({ name })),
+              {
+                headers: {
+                  link: '<https://api.github.com/repositories/1/issues/28/labels?page=2>; rel="next"',
+                },
+              },
+            )
+          : response(request, [{ name: finalLabel }]),
+      );
+    });
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const snapshot = yield* polling.snapshot(
+        repository,
+        new ChangedIssue({ number: 28, updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z") }),
+      );
+      assert.strictEqual(snapshot._tag, "IssueSnapshot");
+      if (snapshot._tag !== "IssueSnapshot") return;
+      assert.strictEqual(snapshot.payload.labels.totalCount, labels.length);
+      assert.deepStrictEqual(
+        snapshot.payload.labels.nodes.map(({ name }) => name),
+        [...labels].sort((left, right) => left.localeCompare(right)),
+      );
+      assert.strictEqual(requests.length, 3);
+      assert.strictEqual(
+        requests[1]?.url,
+        "https://api.github.com/repos/basaltbytes/usine/issues/28/labels?per_page=100",
+      );
+      assert.strictEqual(
+        requests[2]?.url,
+        "https://api.github.com/repositories/1/issues/28/labels?page=2",
+      );
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
   it.effect("classifies GraphQL rate limiting reported on HTTP 200", () => {
     const client = HttpClient.make((request) =>
       Effect.succeed(

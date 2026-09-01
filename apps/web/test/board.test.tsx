@@ -31,6 +31,23 @@ const attempt = (number: number, message: string | null) =>
 
 const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
   const itemKey = Item.ItemKey.make("github:basaltbytes/usine:33");
+  const run = new RunView({
+    id: Run.RunId.make("run-33"),
+    itemKey,
+    loop: Loop.LoopName.make("review"),
+    repository: Repository.Name.make("basaltbytes/usine"),
+    agent: Agent.Name.make("developer"),
+    state,
+    loopPaused: false,
+    openedAt: "2026-09-01T12:00:00.000Z",
+    task: "Review issue 33.",
+    attempts,
+    resultMessage: null,
+    pullRequestUrl: null,
+    canApprove: false,
+    canRetry: state === "Failed",
+    canCancel: false,
+  });
   return new BoardItemView({
     itemKey,
     kind: "issue",
@@ -39,23 +56,8 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
     url: "https://github.com/basaltbytes/usine/issues/33",
     state: "issue-open",
     labels: [],
-    run: new RunView({
-      id: Run.RunId.make("run-33"),
-      itemKey,
-      loop: Loop.LoopName.make("review"),
-      repository: Repository.Name.make("basaltbytes/usine"),
-      agent: Agent.Name.make("developer"),
-      state,
-      loopPaused: false,
-      openedAt: "2026-09-01T12:00:00.000Z",
-      task: "Review issue 33.",
-      attempts,
-      resultMessage: null,
-      pullRequestUrl: null,
-      canApprove: false,
-      canRetry: state === "Failed",
-      canCancel: false,
-    }),
+    runs: [run],
+    run,
     needsYou: state === "Failed",
   });
 };

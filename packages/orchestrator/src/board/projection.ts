@@ -128,6 +128,11 @@ const laneFor = (
 const isOpenRun = (run: RunView): boolean =>
   RunState.OPEN_STATE_TAGS.some((state) => state === run.state);
 
+const needsOperator = (run: RunView): boolean => run.state === "Waiting" || run.state === "Failed";
+
+const preferredRun = (runs: ReadonlyArray<RunView>): RunView | null =>
+  runs.find(needsOperator) ?? runs.find(isOpenRun) ?? runs[0] ?? null;
+
 export const projectBoard = Effect.fn("Board.project")(
   (
     repository: ManagedRepo,
@@ -156,19 +161,20 @@ export const projectBoard = Effect.fn("Board.project")(
         });
       }
       const lanes = effectiveLanes(repository, repositoryLabels);
-      const runsByItem = new Map<Item.ItemKey, RunView>();
+      const runsByItem = new Map<Item.ItemKey, Array<RunView>>();
       for (const run of runs) {
-        const selected = runsByItem.get(run.itemKey);
-        if (selected === undefined || (isOpenRun(run) && !isOpenRun(selected))) {
-          runsByItem.set(run.itemKey, run);
-        }
+        const itemRuns = runsByItem.get(run.itemKey) ?? [];
+        itemRuns.push(run);
+        runsByItem.set(run.itemKey, itemRuns);
       }
       const cards = items.map((item) => {
-        const run = runsByItem.get(item.itemKey) ?? null;
+        const itemRuns = runsByItem.get(item.itemKey) ?? [];
+        const run = preferredRun(itemRuns);
         return new BoardItemView({
           ...item,
+          runs: itemRuns,
           run,
-          needsYou: run?.state === "Waiting" || run?.state === "Failed",
+          needsYou: itemRuns.some(needsOperator),
         });
       });
       const grouped = new Map<BoardLaneId, Array<BoardItemView>>();

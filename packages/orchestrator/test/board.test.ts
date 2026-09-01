@@ -47,7 +47,7 @@ const item = new ItemProjection({
   },
 });
 
-const runForBoard = (id: string, state: "Waiting" | "Succeeded") =>
+const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succeeded") =>
   new RunView({
     id: Run.RunId.make(id),
     itemKey,
@@ -62,8 +62,8 @@ const runForBoard = (id: string, state: "Waiting" | "Succeeded") =>
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: state === "Waiting",
-    canRetry: false,
-    canCancel: state === "Waiting",
+    canRetry: state === "Failed",
+    canCancel: state === "Waiting" || state === "Running",
   });
 
 describe("Board projection", () => {
@@ -129,7 +129,7 @@ describe("Board projection", () => {
     }),
   );
 
-  it.effect("prefers an open Run over a newer settled Run for the same Item", () =>
+  it.effect("keeps every actionable Run while preferring it over a settled Run", () =>
     Effect.gen(function* () {
       const config = Schema.decodeUnknownSync(UsineConfig)({
         version: 1,
@@ -143,6 +143,32 @@ describe("Board projection", () => {
       const card = board.lanes[0]?.items[0];
       assert.strictEqual(card?.run?.id, waiting.id);
       assert.strictEqual(card?.needsYou, true);
+      assert.deepStrictEqual(
+        card?.runs.map(({ id }) => id),
+        [succeeded.id, waiting.id],
+      );
+    }),
+  );
+
+  it.effect("retains a Waiting and Failed Run when another Run is active", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const running = runForBoard("running-run", "Running");
+      const waiting = runForBoard("waiting-run", "Waiting");
+      const failed = runForBoard("failed-run", "Failed");
+      const board = yield* projectBoard(managed, [], [item], [running, waiting, failed]);
+      const card = board.lanes[0]?.items[0];
+      assert.strictEqual(card?.run?.id, waiting.id);
+      assert.strictEqual(card?.needsYou, true);
+      assert.deepStrictEqual(
+        card?.runs.map(({ id }) => id),
+        [running.id, waiting.id, failed.id],
+      );
     }),
   );
 
@@ -155,6 +181,7 @@ describe("Board projection", () => {
       url: "https://github.com/basaltbytes/usine/issues/33",
       state: "issue-open",
       labels: [bug],
+      runs: [],
       run: null,
       needsYou: false,
     });
@@ -202,6 +229,7 @@ describe("Board projection", () => {
       url: "https://github.com/basaltbytes/usine/issues/33",
       state: "issue-open",
       labels: [ready, bug],
+      runs: [],
       run: null,
       needsYou: false,
     });

@@ -150,6 +150,15 @@ const labelsUrl = (repository: Repository.Name): string => {
   return url.toString();
 };
 
+const itemLabelsUrl = (repository: Repository.Name, item: number): string => {
+  const { name, owner } = Repository.parts(repository);
+  const url = new URL(
+    `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${item}/labels`,
+  );
+  url.searchParams.set("per_page", "100");
+  return url.toString();
+};
+
 const newerWatermark = (cursor: PollCursor, items: ReadonlyArray<ChangedItem>) => {
   const epochs = items.map(({ updatedAt }) => DateTime.toEpochMillis(updatedAt));
   if (Option.isSome(cursor.watermark)) {
@@ -225,43 +234,51 @@ export class GitHubPolling extends Context.Service<
         } as const;
       });
 
-      const labelsPage = Effect.fn("GitHubPolling.labelsPage")(function* (url: string) {
+      const labelsPage = Effect.fn("GitHubPolling.labelsPage")(function* (
+        operation: GitHubOperation,
+        url: string,
+      ) {
         const token = yield* app.installationToken();
         const request = HttpClientRequest.get(url).pipe(authorized(token.value));
-        const response = yield* execute("list-repository-labels", request);
+        const response = yield* execute(operation, request);
         const now = yield* Clock.currentTimeMillis;
         if (response.status !== 200) {
-          return yield* statusError("list-repository-labels", response, now);
+          return yield* statusError(operation, response, now);
         }
         const decoded = yield* HttpClientResponse.schemaBodyJson(RestRepositoryLabels)(
           response,
-        ).pipe(
-          Effect.mapError((error) => invalidResponse("list-repository-labels", error.message)),
-        );
+        ).pipe(Effect.mapError((error) => invalidResponse(operation, error.message)));
         return {
           labels: decoded.map(({ name }) => name),
           next: nextPageUrl(response.headers.link),
         };
       });
 
-      const labels = Effect.fn("GitHubPolling.labels")(function* (repository: Repository.Name) {
-        yield* Effect.annotateCurrentSpan({ repository });
+      const allLabels = Effect.fn("GitHubPolling.allLabels")(function* (
+        operation: GitHubOperation,
+        initialUrl: string,
+      ) {
         const catalog: Array<RepositoryLabelName> = [];
-        let next = Option.some(labelsUrl(repository));
+        let next = Option.some(initialUrl);
         let pages = 0;
         while (Option.isSome(next) && pages < MAX_LABEL_PAGES) {
-          const page = yield* labelsPage(next.value);
+          const page = yield* labelsPage(operation, next.value);
           catalog.push(...page.labels);
           next = page.next;
           pages += 1;
         }
         if (Option.isSome(next)) {
           return yield* invalidResponse(
-            "list-repository-labels",
-            `Repository label catalog exceeded ${MAX_LABEL_PAGES} pages`,
+            operation,
+            `GitHub label list exceeded ${MAX_LABEL_PAGES} pages`,
           );
         }
         return catalog.sort((left, right) => left.localeCompare(right));
+      });
+
+      const labels = Effect.fn("GitHubPolling.labels")(function* (repository: Repository.Name) {
+        yield* Effect.annotateCurrentSpan({ repository });
+        return yield* allLabels("list-repository-labels", labelsUrl(repository));
       });
 
       const changes = Effect.fn("GitHubPolling.changes")(function* (
@@ -376,6 +393,25 @@ export class GitHubPolling extends Context.Service<
           item: ChangedItem,
         ): Effect.Effect<PayloadSnapshot, GitHubAppError> =>
           Effect.gen(function* () {
+            const completeLabels = Effect.fn("GitHubPolling.completeItemLabels")(function* (
+              payload: IssuePayload | PullRequestPayload,
+            ) {
+              if (payload.labels.nodes.length >= payload.labels.totalCount) return payload.labels;
+              yield* Effect.logDebug(
+                "Completing truncated Item label connection for Board matching",
+                {
+                  repository,
+                  item: item.number,
+                  listedLabels: payload.labels.nodes.length,
+                  totalLabels: payload.labels.totalCount,
+                },
+              );
+              const names = yield* allLabels(
+                "fetch-item-labels",
+                itemLabelsUrl(repository, item.number),
+              );
+              return { totalCount: names.length, nodes: names.map((name) => ({ name })) };
+            });
             if (item._tag === "ChangedIssue") {
               const data = yield* graphql(
                 "fetch-issue-snapshot",
@@ -391,9 +427,13 @@ export class GitHubPolling extends Context.Service<
                   `issue ${item.number} came back null — deleted, transferred, or access lost`,
                 );
               }
+              const completePayload = {
+                ...payload.value,
+                labels: yield* completeLabels(payload.value),
+              };
               return new IssueSnapshot({
-                payload: payload.value,
-                contentHash: yield* contentHash(payload.value),
+                payload: completePayload,
+                contentHash: yield* contentHash(completePayload),
               });
             }
 
@@ -411,9 +451,13 @@ export class GitHubPolling extends Context.Service<
                 `pull request ${item.number} came back null — deleted or access lost`,
               );
             }
+            const completePayload = {
+              ...payload.value,
+              labels: yield* completeLabels(payload.value),
+            };
             return new PullRequestSnapshot({
-              payload: payload.value,
-              contentHash: yield* contentHash(payload.value),
+              payload: completePayload,
+              contentHash: yield* contentHash(completePayload),
             });
           }),
       );

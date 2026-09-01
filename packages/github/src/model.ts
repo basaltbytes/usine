@@ -25,6 +25,7 @@ export const RedactedPrivateKey = Schema.RedactedFromValue(PrivateKey, { disallo
 
 export const GitHubOperation = Schema.Literals([
   "discover-installation",
+  "fetch-item-labels",
   "fetch-issue-snapshot",
   "fetch-pull-request-snapshot",
   "list-installation-repositories",

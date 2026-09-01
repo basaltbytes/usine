@@ -105,6 +105,8 @@ export class BoardItemView extends Schema.Class<BoardItemView>("@usine/orchestra
     url: Schema.NonEmptyString,
     state: LaneItemState,
     labels: Schema.Array(GitHubLabelName),
+    /** All runs retained for a card, including every action the operator can take. */
+    runs: Schema.Array(RunView),
     run: Schema.NullOr(RunView),
     needsYou: Schema.Boolean,
   },
