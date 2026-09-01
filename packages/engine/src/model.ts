@@ -21,6 +21,14 @@ export type ApprovalRequirement = Loop.ApprovalRequirement;
 export const InstanceDirectory = Instance.Directory;
 export type InstanceDirectory = Instance.Directory;
 
+/** Durable runtime state for one Loop. Authored loop files never carry this toggle. */
+export class LoopRuntimeState extends Schema.Class<LoopRuntimeState>(
+  "@usine/engine/LoopRuntimeState",
+)({
+  loop: Loop.LoopName,
+  paused: Schema.Boolean,
+}) {}
+
 /** The complete routing context needed to turn one Event into a Run. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
   event: Event.Event,
@@ -92,6 +100,22 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   parentModel: Schema.Option(Agent.ModelId),
 }) {}
 
+/** Lightweight durable projection used when listing Runs for operators. */
+export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSummary")({
+  run: Run.Run,
+  step: Step.Step,
+  attempts: Schema.Array(Attempt.Attempt),
+  repository: Repository.Name,
+  task: AttemptChannel.Task,
+  agent: Agent.Agent,
+}) {}
+
+/** Monotonic version of the durable operator projection. */
+export const ProjectionRevision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+  Schema.brand("ProjectionRevision"),
+);
+export type ProjectionRevision = typeof ProjectionRevision.Type;
+
 /** Input passed to the attempt-execution port. */
 export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/StepExecution")({
   attempt: Attempt.Attempt,
@@ -126,11 +150,16 @@ export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engin
   },
 ) {}
 
-/** Cursor query used to tail the append-only transcript. */
+/**
+ * Cursor query used to tail the append-only transcript. `limit` bounds a cold
+ * read to the newest N rows so one long Attempt cannot balloon a response;
+ * tail reads pass a cursor and stay incremental.
+ */
 export class TranscriptQuery extends Schema.Class<TranscriptQuery>("@usine/engine/TranscriptQuery")(
   {
     attemptId: Attempt.AttemptId,
     after: Schema.Option(TranscriptSequence),
+    limit: Schema.Option(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   },
 ) {}
 

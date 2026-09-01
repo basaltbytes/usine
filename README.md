@@ -17,10 +17,20 @@ The spec lives in [CONTEXT.md](./CONTEXT.md) (domain glossary) and [docs/adr/](.
 | [`@usine/executor`](./packages/executor)         | The five-operation worker contract, with local and exe.dev executors                                                            |
 | [`@usine/orchestrator`](./packages/orchestrator) | The embeddable composition: the full engine as an Effect layer, startable in-process                                            |
 | [`@usine/run-host`](./packages/run-host)         | The worker-side one-shot process that hosts a single attempt's agent session                                                    |
-| `apps/server`                                    | Thin CLI that runs the orchestrator headless and serves the web UI (private for now; publishes as `@usine/server` per ADR 0019) |
+| [`@usine/server`](./apps/server)                 | Thin `usine up` CLI that runs the orchestrator in the foreground and serves the local web UI                                   |
 | `apps/web`                                       | The web UI (never published)                                                                                                    |
 
-`effect` is exact-pinned once, in the [workspace catalog](./pnpm-workspace.yaml), and declared as a peer dependency in every published block: consumers supply `effect` themselves, so there is one Effect runtime per tree.
+`effect` is exact-pinned once, in the [workspace catalog](./pnpm-workspace.yaml), and declared as a peer dependency by the published libraries: consumers supply `effect` themselves, so there is one Effect runtime per tree.
+
+## Run a factory
+
+From an instance folder containing `usine.yaml`, `agents/`, and `loops/`:
+
+```sh
+usine up
+```
+
+The foreground process prints the local UI address. If GitHub App credentials are not available, the UI stays up in setup mode while polling and scheduling remain idle. Supply `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, or put the equivalent `app_id` and `private_key` fields in a mode-0600 `.usine/github-app.json` file.
 
 ## Development
 

@@ -15,6 +15,9 @@
     "tooling/tsconfig": {
       "entry": [],
       "project": []
+    },
+    "apps/server": {
+      "ignoreDependencies": ["@usine/web"]
     }
   }
 }

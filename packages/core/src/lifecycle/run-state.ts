@@ -101,6 +101,16 @@ const tagsOf =
 /** The open partition as `_tag` literals, for queries that filter stored rows by state. */
 export const OPEN_STATE_TAGS = tagsOf<Open>()("Pending", "Waiting", "Running");
 
+/** Every state as `_tag` literals, for read models that project stored rows by state. */
+export const STATE_TAGS = tagsOf<RunState>()(
+  "Pending",
+  "Waiting",
+  "Running",
+  "Succeeded",
+  "Failed",
+  "Canceled",
+);
+
 /**
  * The states with no started attempt, as `_tag` literals — the precondition
  * of `supersede` and `revoke`, for queries that filter stored rows by state.

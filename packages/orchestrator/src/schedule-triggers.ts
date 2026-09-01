@@ -10,7 +10,13 @@ import {
   type ScheduleTrigger,
 } from "@usine/config";
 import { Agent, AttemptChannel, Event, Item, Loop, Repository } from "@usine/core";
-import { RunEngine, type RunEngineError, SubmissionResult } from "@usine/engine";
+import {
+  type EnginePersistenceError,
+  LoopControl,
+  RunEngine,
+  type RunEngineError,
+  SubmissionResult,
+} from "@usine/engine";
 import { ExpressionEngine, type ExpressionError } from "@usine/expression";
 import {
   Clock,
@@ -72,18 +78,18 @@ const scheduleFailureLogFields = (error: ScheduleTriggerError) => {
 };
 
 /** One schedule loop whose authored Agent disappeared from the loaded roster. */
-export class ScheduleAgentFailure extends Schema.Class<ScheduleAgentFailure>(
+export class ScheduleAgentFailure extends Schema.TaggedClass<ScheduleAgentFailure>(
   "@usine/orchestrator/ScheduleAgentFailure",
-)({
+)("ScheduleAgentFailure", {
   loop: Loop.LoopName,
   agent: Agent.Name,
   message: Schema.String,
 }) {}
 
 /** One selected repository whose scheduled Tick could not be evaluated or submitted. */
-export class ScheduleTickFailure extends Schema.Class<ScheduleTickFailure>(
+export class ScheduleTickFailure extends Schema.TaggedClass<ScheduleTickFailure>(
   "@usine/orchestrator/ScheduleTickFailure",
-)({
+)("ScheduleTickFailure", {
   loop: Loop.LoopName,
   repository: Repository.Name,
   scheduledAt: Schema.DateTimeUtc,
@@ -96,9 +102,9 @@ export class ScheduleTickFailure extends Schema.Class<ScheduleTickFailure>(
  * effect's Cron.prev/next can fail inside a DST spring-forward gap even for a
  * cron that parsed cleanly. The schedule retries next cycle; siblings run.
  */
-export class ScheduleCronFailure extends Schema.Class<ScheduleCronFailure>(
+export class ScheduleCronFailure extends Schema.TaggedClass<ScheduleCronFailure>(
   "@usine/orchestrator/ScheduleCronFailure",
-)({
+)("ScheduleCronFailure", {
   loop: Loop.LoopName,
   cron: Schema.String,
   tz: Schema.String,
@@ -202,8 +208,11 @@ export class ScheduleTriggers extends Context.Service<
      * failures are isolated, logged, and reported without stopping siblings;
      * cron-math failures (DST gaps) fail only their own schedule.
      */
-    readonly tick: (instance: LoadedInstance) => Effect.Effect<ScheduleCycle>;
+    readonly tick: (
+      instance: LoadedInstance,
+    ) => Effect.Effect<ScheduleCycle, EnginePersistenceError>;
     readonly run: (instance: LoadedInstance) => Effect.Effect<never>;
+    readonly latest: Effect.Effect<Option.Option<ScheduleCycle>>;
   }
 >()("@usine/orchestrator/ScheduleTriggers") {
   static readonly layer = Layer.effect(
@@ -212,6 +221,8 @@ export class ScheduleTriggers extends Context.Service<
       const config = yield* ConfigParser;
       const expressions = yield* ExpressionEngine;
       const runs = yield* RunEngine;
+      const loops = yield* LoopControl;
+      const latestCycle = yield* Ref.make(Option.none<ScheduleCycle>());
       // Efficiency-only fired-tick memory: an empty map after a restart is
       // exactly ADR 0007's "fire the latest missed tick"; the permanent dedup
       // ledger stays the correctness guarantee.
@@ -283,7 +294,17 @@ export class ScheduleTriggers extends Context.Service<
 
       const tick = Effect.fn("ScheduleTriggers.tick")(function* (instance: LoadedInstance) {
         const now = yield* DateTime.now;
-        const schedules = watchedSchedules(instance);
+        const paused = new Set(
+          (yield* loops.states).filter((state) => state.paused).map((state) => state.loop),
+        );
+        for (const loop of instance.loops) {
+          if (loop.trigger.on === "schedule" && paused.has(loop.name)) {
+            yield* Effect.logDebug("Paused Loop skipped during schedule evaluation", {
+              loop: loop.name,
+            });
+          }
+        }
+        const schedules = watchedSchedules(instance).filter(({ loop }) => !paused.has(loop.name));
         const fired = yield* Ref.get(lastFired);
 
         const due: Array<DueTick> = [];
@@ -442,7 +463,7 @@ export class ScheduleTriggers extends Context.Service<
           return next;
         });
 
-        return new ScheduleCycle({
+        const cycle = new ScheduleCycle({
           loops: schedules.length,
           fanout: due.length,
           submissions,
@@ -451,19 +472,32 @@ export class ScheduleTriggers extends Context.Service<
           failures: [...agentFailures, ...cronFailures, ...tickFailures],
           nextTickAt: earliest(nexts),
         });
+        yield* Ref.set(latestCycle, Option.some(cycle));
+        return cycle;
       });
 
       // No Effect.fn here: `run` never returns, so a named wrapper would open
       // a span that never closes. Each cycle's span lives on `tick`.
       const run = (instance: LoadedInstance): Effect.Effect<never> =>
         Effect.gen(function* () {
-          const cycle = yield* tick(instance);
+          const result = yield* Effect.result(tick(instance));
+          if (Result.isFailure(result)) {
+            yield* Effect.logError("Schedule cycle could not read Loop runtime state; retrying", {
+              errorTag: result.failure._tag,
+              message: result.failure.message,
+              operation: result.failure.operation,
+              sleepMs: IDLE_WAKE_MILLIS,
+            });
+            yield* Effect.sleep(Duration.millis(IDLE_WAKE_MILLIS));
+            return;
+          }
+          const cycle = result.success;
           const now = yield* Clock.currentTimeMillis;
           const target = Option.match(cycle.nextTickAt, {
             onNone: () => now + IDLE_WAKE_MILLIS,
             onSome: DateTime.toEpochMillis,
           });
-          const sleepMs = Math.max(0, target - now);
+          const sleepMs = Math.min(IDLE_WAKE_MILLIS, Math.max(0, target - now));
           const summary = {
             loops: cycle.loops,
             fanout: cycle.fanout,
@@ -487,7 +521,7 @@ export class ScheduleTriggers extends Context.Service<
           yield* Effect.sleep(Duration.millis(sleepMs));
         }).pipe(Effect.forever);
 
-      return { run, tick };
+      return { latest: Ref.get(latestCycle), run, tick };
     }),
   );
 }

@@ -10,7 +10,7 @@ import {
   StepResult,
 } from "@usine/core";
 import type { Agent } from "@usine/core";
-import { and, asc, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { DateTime, Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
@@ -20,6 +20,7 @@ import {
   attempts,
   events,
   ignoredEvents,
+  projectionRevision,
   runs,
   steps,
   triggerEvents,
@@ -28,6 +29,7 @@ import {
 import {
   RunNotFoundError,
   RunSnapshot,
+  RunSummary,
   Submission,
   TranscriptQuery,
   WORKFLOW_COMMAND_PRIORITY,
@@ -39,6 +41,7 @@ import {
   decodeDiscards,
   decodeEventRoutes,
   decodeRecoverableRuns,
+  decodeProjectionRevision,
   decodeRunIds,
   decodeRunRows,
   decodeWorkflowCommands,
@@ -53,6 +56,7 @@ import {
   encodeStepResult,
   eventFromRow,
   runFromRow,
+  runSummaryFromRow,
   stepFromRow,
   submissionFromRow,
   transcriptEntryFromRow,
@@ -72,6 +76,33 @@ const eventRouteSelection = {
   task: triggerEvents.task,
   agent: triggerEvents.agentJson,
   parentModel: triggerEvents.parentModel,
+} as const;
+
+const runSelection = {
+  runId: runs.runId,
+  eventId: runs.eventId,
+  loop: runs.loopName,
+  state: runs.stateJson,
+  openedAt: runs.openedAt,
+  repository: runs.repository,
+  revision: runs.revision,
+  task: runs.task,
+  agent: runs.agentJson,
+  parentModel: runs.parentModel,
+  stepName: steps.stepName,
+  result: steps.result,
+} as const;
+
+const attemptSelection = {
+  attemptId: attempts.attemptId,
+  runId: attempts.runId,
+  stepName: attempts.stepName,
+  worker: attempts.workerName,
+  number: attempts.attemptNumber,
+  brain: attempts.brainJson,
+  parentModel: attempts.parentModel,
+  startedAt: attempts.startedAt,
+  outcome: attempts.outcomeJson,
 } as const;
 
 // The state partitions stay owned by @usine/core (`RunState.Open` and the
@@ -114,20 +145,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   const runRows = Effect.fn("RunStoreQueries.runRows")(function* (runId: Run.RunId) {
     const rows = yield* database
-      .select({
-        runId: runs.runId,
-        eventId: runs.eventId,
-        loop: runs.loopName,
-        state: runs.stateJson,
-        openedAt: runs.openedAt,
-        repository: runs.repository,
-        revision: runs.revision,
-        task: runs.task,
-        agent: runs.agentJson,
-        parentModel: runs.parentModel,
-        stepName: steps.stepName,
-        result: steps.result,
-      })
+      .select(runSelection)
       .from(runs)
       .innerJoin(steps, eq(steps.runId, runs.runId))
       .where(eq(runs.runId, runId))
@@ -137,17 +155,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   const attemptRows = Effect.fn("RunStoreQueries.attemptRows")(function* (runId: Run.RunId) {
     const rows = yield* database
-      .select({
-        attemptId: attempts.attemptId,
-        runId: attempts.runId,
-        stepName: attempts.stepName,
-        worker: attempts.workerName,
-        number: attempts.attemptNumber,
-        brain: attempts.brainJson,
-        parentModel: attempts.parentModel,
-        startedAt: attempts.startedAt,
-        outcome: attempts.outcomeJson,
-      })
+      .select(attemptSelection)
       .from(attempts)
       .where(eq(attempts.runId, runId))
       .orderBy(attempts.attemptNumber)
@@ -177,6 +185,68 @@ export const queriesFor = (database: RunDatabaseClient) => {
       agent: storedRun.agent,
       parentModel: Option.fromNullishOr(storedRun.parentModel),
     });
+  });
+
+  // Every open Run plus the newest `closedLimit` settled ones: an old Waiting
+  // run can never fall out of the operator's view, while total history stays
+  // bounded no matter how long the factory has been running.
+  const runSummaries = Effect.fn("RunStoreQueries.runSummaries")(function* (closedLimit: number) {
+    const [openRuns, closedRuns] = yield* Effect.all([
+      database
+        .select(runSelection)
+        .from(runs)
+        .innerJoin(steps, eq(steps.runId, runs.runId))
+        .where(openState)
+        .orderBy(desc(runs.openedAt), desc(runs.runId))
+        .execute()
+        .pipe(Effect.flatMap(decodeRunRows)),
+      database
+        .select(runSelection)
+        .from(runs)
+        .innerJoin(steps, eq(steps.runId, runs.runId))
+        .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
+        .orderBy(desc(runs.openedAt), desc(runs.runId))
+        .limit(closedLimit)
+        .execute()
+        .pipe(Effect.flatMap(decodeRunRows)),
+    ]);
+    const storedRuns = [...openRuns, ...closedRuns].sort(
+      (left, right) =>
+        DateTime.toEpochMillis(right.openedAt) - DateTime.toEpochMillis(left.openedAt) ||
+        (right.runId > left.runId ? 1 : -1),
+    );
+    const runIds = storedRuns.map(({ runId }) => runId);
+    const storedAttempts =
+      runIds.length === 0
+        ? []
+        : yield* database
+            .select(attemptSelection)
+            .from(attempts)
+            .where(inArray(attempts.runId, runIds))
+            .orderBy(asc(attempts.runId), asc(attempts.attemptNumber))
+            .execute()
+            .pipe(Effect.flatMap(decodeAttemptRows));
+    const attemptsByRun = new Map<Run.RunId, Array<(typeof storedAttempts)[number]>>();
+    for (const attempt of storedAttempts) {
+      const grouped = attemptsByRun.get(attempt.runId) ?? [];
+      grouped.push(attempt);
+      attemptsByRun.set(attempt.runId, grouped);
+    }
+    return storedRuns.map((row): RunSummary =>
+      runSummaryFromRow(row, attemptsByRun.get(row.runId) ?? []),
+    );
+  });
+
+  const revision = Effect.fn("RunStoreQueries.projectionRevision")(function* () {
+    const rows = yield* decodeProjectionRevision(
+      yield* database
+        .select({ revision: projectionRevision.revision })
+        .from(projectionRevision)
+        .where(eq(projectionRevision.singleton, 1))
+        .limit(1)
+        .execute(),
+    );
+    return Option.fromNullishOr(rows[0]?.revision);
   });
 
   const updateState = Effect.fn("RunStoreQueries.updateState")(function* (
@@ -486,7 +556,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           gt(attemptTranscripts.sequence, sequence),
         ),
     });
-    const rows = yield* database
+    const selection = database
       .select({
         sequence: attemptTranscripts.sequence,
         attemptId: attemptTranscripts.attemptId,
@@ -495,13 +565,18 @@ export const queriesFor = (database: RunDatabaseClient) => {
         receivedAt: attemptTranscripts.receivedAt,
       })
       .from(attemptTranscripts)
-      .where(cursor)
-      .orderBy(asc(attemptTranscripts.sequence))
-      .execute();
+      .where(cursor);
+    // A limited read walks the tail index backwards for the newest N rows and
+    // re-sorts ascending, so callers always receive append order.
+    const rows = yield* Option.match(query.limit, {
+      onNone: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
+      onSome: (limit) =>
+        selection.orderBy(desc(attemptTranscripts.sequence)).limit(limit).execute(),
+    });
     // Transcript rows are usine-owned: an unknown key is corruption, not tolerance.
-    return (yield* decodeTranscriptRows(rows, { onExcessProperty: "error" })).map(
-      transcriptEntryFromRow,
-    );
+    return (yield* decodeTranscriptRows(rows, { onExcessProperty: "error" }))
+      .map(transcriptEntryFromRow)
+      .sort((left, right) => left.sequence - right.sequence);
   });
 
   const recoverable = Effect.fn("RunStoreQueries.recoverable")(function* () {
@@ -606,7 +681,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
     recordApproval,
     requestInterrupt,
     requestWorkflowCommand,
+    revision,
     revokeUnstarted,
+    runSummaries,
     runForEvent,
     snapshot,
     transcript,

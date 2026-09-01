@@ -14,6 +14,7 @@ import {
   type TranscriptQuery,
 } from "./model.ts";
 import { RunStore } from "./store/store.ts";
+import { RunReader } from "./run-reader.ts";
 import {
   ApprovalGate,
   DurableRun,
@@ -23,6 +24,7 @@ import {
 } from "./workflow.ts";
 import { StepExecutor } from "./step-executor.ts";
 import { CursorStore } from "./cursor/store.ts";
+import { LoopControl } from "./loop-control.ts";
 
 const MAX_SETTLEMENT_POLLS = 500;
 
@@ -237,7 +239,7 @@ export class RunEngine extends Context.Service<
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,
 ): Layer.Layer<
-  CursorStore | RunEngine,
+  CursorStore | LoopControl | RunEngine | RunReader,
   RunEngineError | DatabaseError,
   Crypto.Crypto | StepExecutor | DatabaseRequirements
 > => {
@@ -256,5 +258,10 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     Layer.provideMerge(store),
   );
   const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(runtime));
-  return Layer.merge(runEngine, CursorStore.layer.pipe(Layer.provide(database)));
+  return Layer.mergeAll(
+    runEngine,
+    RunReader.layer.pipe(Layer.provide(database)),
+    CursorStore.layer.pipe(Layer.provide(database)),
+    LoopControl.layer.pipe(Layer.provide(database)),
+  );
 };

@@ -19,3 +19,4 @@ usine is a monorepo in the manywalls/atoly shape — pnpm workspaces + turbo, `a
 - Claiming the npm `usine` org is a first implementation act; if it's taken, everything above proceeds under `@usine-dev` unchanged.
 - `core` carries the attempt-channel envelope schema so `run-host` never depends on orchestrator-side packages.
 - Consumers of any published block must supply `effect` themselves at a compatible version — the peer-dependency posture trades install convenience for a single runtime in every tree.
+- **Amended 2026-09-01** (implementation of [#31](https://github.com/basaltbytes/usine/issues/31)): the peer-dependency rule applies to the published **libraries**. `@usine/server` is an application (bin `usine`, installed per instance by `create-usine`), so it carries `effect` and `@effect/platform-node` as ordinary dependencies — an app must be runnable from a plain install with no host-supplied runtime.

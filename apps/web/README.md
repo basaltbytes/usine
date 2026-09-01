@@ -2,4 +2,6 @@
 
 The usine web UI, served by `@usine/server`. Internal — never published.
 
-Stack (decided 2026-08-21): React + TypeScript + Tailwind, with TanStack Query for server state; TanStack Router is the likely router, confirmed when the first UI work lands. Not scaffolded yet — that happens with the first UI ticket.
+The first screen is the local observe-and-intervene surface: projects and recent Runs, a needs-you strip, database-backed Loop pause controls, and a Run drawer with live protocol transcripts. Parent messages stay inline; each child session's activity is grouped into its own collapsible level.
+
+The app uses React, TypeScript, TanStack Query, and TanStack Router, with hand-written CSS. Its visual system follows ADR 0015: Catppuccin Mocha tokens, Archivo signage, IBM Plex Mono annotations, a modular type scale, and restrained rules.

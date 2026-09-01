@@ -6,8 +6,10 @@ import { migrate } from "drizzle-orm/effect-sqlite-node/migrator";
 import { sql } from "drizzle-orm";
 import { Effect, FileSystem, Layer, Path } from "effect";
 import { CursorStore } from "../cursor/store.ts";
+import { LoopControl } from "../loop-control.ts";
 import { layerWithDatabase, type RunEngine } from "../engine.ts";
 import { EnginePersistenceError, type InstanceDirectory, type RunEngineError } from "../model.ts";
+import { RunReader } from "../run-reader.ts";
 import type { StepExecutor } from "../step-executor.ts";
 import { RunDatabase } from "./database.ts";
 
@@ -50,5 +52,13 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
 /** Local-first runtime backed by `.usine/runtime.sqlite`. */
 export const layer = (
   instanceDirectory: InstanceDirectory,
-): Layer.Layer<CursorStore | RunEngine, RunEngineError, StepExecutor> =>
+): Layer.Layer<CursorStore | LoopControl | RunEngine | RunReader, RunEngineError, StepExecutor> =>
   layerWithDatabase(localSqliteLayer(instanceDirectory)).pipe(Layer.provide(NodeServices.layer));
+
+/** Read-only local projection; it never reconciles workflows or starts Attempts. */
+export const observationLayer = (
+  instanceDirectory: InstanceDirectory,
+): Layer.Layer<LoopControl | RunReader, RunEngineError> => {
+  const database = localSqliteLayer(instanceDirectory);
+  return Layer.mergeAll(LoopControl.layer, RunReader.layer).pipe(Layer.provide(database));
+};

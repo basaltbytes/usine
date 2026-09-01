@@ -1,16 +1,43 @@
 {
   "name": "@usine/server",
-  "version": "0.0.0",
-  "private": true,
+  "version": "0.0.1",
   "description": "The usine orchestrator as a headless server: a thin CLI over @usine/orchestrator that serves the web UI.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/basaltbytes/usine.git",
+    "directory": "apps/server"
+  },
+  "bin": {
+    "usine": "./dist/main.js"
+  },
+  "files": [
+    "dist"
+  ],
   "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
-    "build": "tsc -b"
+    "build": "tsc -b && node scripts/copy-web.mjs",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@usine/config": "workspace:*",
+    "@usine/core": "workspace:*",
+    "@usine/expression": "workspace:*",
+    "@usine/github": "workspace:*",
+    "@usine/orchestrator": "workspace:*",
+    "effect": "catalog:"
   },
   "devDependencies": {
+    "@usine/engine": "workspace:*",
     "@usine/tsconfig": "workspace:*",
-    "typescript": "catalog:"
+    "@usine/web": "workspace:*",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "engines": {
     "node": ">=22"

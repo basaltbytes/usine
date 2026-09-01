@@ -16,6 +16,7 @@ import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { CursorKey } from "../src/cursor/model.ts";
 import { CursorStore } from "../src/cursor/store.ts";
+import { LoopControl } from "../src/loop-control.ts";
 import { InstanceDirectory, Submission } from "../src/model.ts";
 import { RunStore } from "../src/store/store.ts";
 
@@ -207,6 +208,36 @@ describe("cursor store", () => {
         // read as absent, never fail: losing a cursor is always safe.
         assert(Option.isNone(yield* store.read(key, StricterCursor)));
       }).pipe(Effect.provide(CursorStore.layer), Effect.provide(database));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("Loop runtime state", () => {
+  it.live("persists pause without changing authored Loop files", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-loop-runtime-" }),
+      );
+      const loop = Loop.LoopName.make("review");
+      const database = localSqliteLayer(directory);
+
+      yield* Effect.gen(function* () {
+        const control = yield* LoopControl;
+        assert.strictEqual(yield* control.isPaused(loop), false);
+        assert.strictEqual((yield* control.pause(loop)).paused, true);
+        assert.strictEqual((yield* control.pause(loop)).paused, true);
+      }).pipe(Effect.provide(LoopControl.layer), Effect.provide(database));
+
+      yield* Effect.gen(function* () {
+        const control = yield* LoopControl;
+        assert.strictEqual(yield* control.isPaused(loop), true);
+        assert.deepStrictEqual(
+          (yield* control.states).map((state) => [state.loop, state.paused]),
+          [[loop, true]],
+        );
+        assert.strictEqual((yield* control.unpause(loop)).paused, false);
+      }).pipe(Effect.provide(LoopControl.layer), Effect.provide(database));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

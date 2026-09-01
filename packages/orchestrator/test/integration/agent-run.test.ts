@@ -347,6 +347,7 @@ describe("live agent loop", () => {
               const transcript = yield* engine.transcript({
                 attemptId: attempt.id,
                 after: Option.none(),
+                limit: Option.none(),
               });
               assert(
                 transcript.some(

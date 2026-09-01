@@ -226,3 +226,19 @@ export const cursors = snakeCase.table(
   },
   (table) => [check("usine_cursors_value_json_valid", sql`json_valid(${table.valueJson})`)],
 );
+
+/** Operator-owned runtime toggles; deliberately separate from authored Loop files (ADR 0009). */
+export const loopRuntime = snakeCase.table("usine_loop_runtime", {
+  loopName: text().$type<Loop.LoopName>().primaryKey(),
+  paused: integer({ mode: "boolean" }).notNull(),
+});
+
+/** Singleton invalidation token for cached operator projections. */
+export const projectionRevision = snakeCase.table(
+  "usine_projection_revision",
+  {
+    singleton: integer({ mode: "number" }).primaryKey().default(1),
+    revision: integer({ mode: "number" }).notNull().default(0),
+  },
+  (table) => [check("usine_projection_revision_singleton", sql`${table.singleton} = 1`)],
+);

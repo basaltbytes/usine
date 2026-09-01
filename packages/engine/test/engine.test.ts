@@ -30,7 +30,14 @@ import {
 } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { layer } from "../src/database/local-sqlite.ts";
-import { InstanceDirectory, RunEngine, StepExecutor, Submission } from "../src/index.ts";
+import {
+  InstanceDirectory,
+  LoopControl,
+  RunEngine,
+  RunReader,
+  StepExecutor,
+  Submission,
+} from "../src/index.ts";
 
 const stepResult = (message: string) => new StepResult.StepResult({ message, facts: [] });
 const testAgent = new Agent.Agent({
@@ -151,6 +158,55 @@ describe("durable run engine", () => {
               Option.isSome(attempt.outcome) &&
               attempt.outcome.value._tag === "Succeeded",
           );
+        }).pipe(Effect.provide(runtime));
+      }),
+    ),
+  );
+
+  it.live("lists every Run newest first for operator read models", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("listed result")),
+        ]);
+        const runtime = layer(directory).pipe(Layer.provide(executorLayer(plans)));
+
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const reader = yield* RunReader;
+          const controls = yield* LoopControl;
+          const initialRevision = Option.getOrThrow(yield* reader.revision());
+          const first = yield* engine.submit(
+            submission({ number: 1, item: "listed-one", approval: "required" }),
+          );
+          const second = yield* engine.submit(submission({ number: 2, item: "listed-two" }));
+          assert.strictEqual(first._tag, "Claimed");
+          assert.strictEqual(second._tag, "Claimed");
+          if (first._tag !== "Claimed" || second._tag !== "Claimed") return;
+          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
+          yield* waitFor(engine, second.runId, ({ run }) => run.state._tag === "Succeeded");
+
+          const listed = yield* reader.list({ closedLimit: 100 });
+          assert.deepStrictEqual(
+            listed.map(({ run }) => run.id),
+            [second.runId, first.runId],
+          );
+          assert.strictEqual(listed[0]?.attempts.length, 1);
+          assert.strictEqual(
+            Option.getOrUndefined(listed[0]?.step.result ?? Option.none())?.message,
+            "listed result",
+          );
+          // The closed window bounds settled history, but an open Run — here
+          // the older Waiting one — must never fall out of the operator's view.
+          const bounded = yield* reader.list({ closedLimit: 0 });
+          assert.deepStrictEqual(
+            bounded.map(({ run }) => run.id),
+            [first.runId],
+          );
+          const runRevision = Option.getOrThrow(yield* reader.revision());
+          assert(runRevision > initialRevision);
+          yield* controls.pause(Loop.LoopName.make("review"));
+          assert(Option.getOrThrow(yield* reader.revision()) > runRevision);
         }).pipe(Effect.provide(runtime));
       }),
     ),

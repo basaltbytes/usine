@@ -17,7 +17,9 @@ import {
   ApprovalRequirement,
   EnginePersistenceError,
   IgnoreReason,
+  ProjectionRevision,
   RunStoreError,
+  RunSummary,
   Submission,
   TranscriptEntry,
   TranscriptSequence,
@@ -93,6 +95,8 @@ export const WorkflowCommandRow = Schema.Struct({
 });
 export type WorkflowCommandRow = typeof WorkflowCommandRow.Type;
 
+const ProjectionRevisionRow = Schema.Struct({ revision: ProjectionRevision });
+
 export const decodeEventRoutes = Schema.decodeUnknownEffect(Schema.Array(EventRouteRow));
 export const decodeRunRows = Schema.decodeUnknownEffect(Schema.Array(RunRow));
 export const decodeAttemptRows = Schema.decodeUnknownEffect(Schema.Array(AttemptRow));
@@ -100,6 +104,9 @@ export const decodeRecoverableRuns = Schema.decodeUnknownEffect(Schema.Array(Rec
 export const decodeRunIds = Schema.decodeUnknownEffect(Schema.Array(RunIdRow));
 export const decodeDiscards = Schema.decodeUnknownEffect(Schema.Array(DiscardRow));
 export const decodeWorkflowCommands = Schema.decodeUnknownEffect(Schema.Array(WorkflowCommandRow));
+export const decodeProjectionRevision = Schema.decodeUnknownEffect(
+  Schema.Array(ProjectionRevisionRow),
+);
 export const decodeTranscriptRows = Schema.decodeUnknownEffect(Schema.Array(TranscriptRow));
 
 export const encodePayload = Schema.encodeSync(Schema.Json);
@@ -169,6 +176,19 @@ export const attemptFromRow = (row: AttemptRow): Attempt.Attempt =>
     parentModel: Option.fromNullishOr(row.parentModel),
     startedAt: row.startedAt,
     outcome: Option.fromNullishOr(row.outcome),
+  });
+
+export const runSummaryFromRow = (
+  row: RunRow,
+  storedAttempts: ReadonlyArray<AttemptRow>,
+): RunSummary =>
+  new RunSummary({
+    run: runFromRow(row),
+    step: stepFromRow(row),
+    attempts: storedAttempts.map(attemptFromRow),
+    repository: row.repository,
+    task: row.task,
+    agent: row.agent,
   });
 
 export const transcriptEntryFromRow = (row: TranscriptRow): TranscriptEntry =>

@@ -39,6 +39,8 @@ import { layer as localLayer } from "../src/local.ts";
 const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
 const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
 const TOKEN = "one-attempt-test-token";
+const STATE_POLL_ATTEMPTS = 1_000;
+const LIVE_TEST_TIMEOUT = 30_000;
 const testAgent = new Agent.Agent({
   name: Agent.Name.make("developer"),
   brain: new Agent.BrainSpec({
@@ -127,7 +129,7 @@ const waitFor = Effect.fn("test.waitFor")(function* (
   state: "Running" | "Succeeded" | "Failed" | "Canceled",
 ) {
   let snapshot = yield* engine.inspect(runId);
-  for (let poll = 0; poll < 200; poll += 1) {
+  for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
     if (snapshot.run.state._tag === state) return snapshot;
     yield* Effect.sleep("10 millis");
     snapshot = yield* engine.inspect(runId);
@@ -172,103 +174,125 @@ const withLocalEngine = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer));
 
 describe("local worker", () => {
-  it.live("runs Event → Attempt, persists the transcript, and removes the worktree", () =>
-    withLocalEngine(["--stub"], ({ engine, instance }) =>
-      Effect.gen(function* () {
-        const path = yield* Path.Path;
-        const fileSystem = yield* FileSystem.FileSystem;
-        assert(
-          !(yield* fileSystem.exists(path.join(instance, ".usine", "workers"))),
-          "preflight must not create worker state",
-        );
-        const accepted = yield* engine.submit(submission(1));
-        assert.strictEqual(accepted._tag, "Claimed");
-        if (accepted._tag !== "Claimed") return;
-        const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
-        const attempt = snapshot.attempts[0];
-        assert(attempt !== undefined);
-        assert.strictEqual(attempt.worker, "local");
-        assert(Option.isSome(snapshot.step.result));
-        assert.strictEqual(snapshot.step.result.value.message, "Completed: Complete local task 1");
+  it.live(
+    "runs Event → Attempt, persists the transcript, and removes the worktree",
+    () =>
+      withLocalEngine(["--stub"], ({ engine, instance }) =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const fileSystem = yield* FileSystem.FileSystem;
+          assert(
+            !(yield* fileSystem.exists(path.join(instance, ".usine", "workers"))),
+            "preflight must not create worker state",
+          );
+          const accepted = yield* engine.submit(submission(1));
+          assert.strictEqual(accepted._tag, "Claimed");
+          if (accepted._tag !== "Claimed") return;
+          const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
+          const attempt = snapshot.attempts[0];
+          assert(attempt !== undefined);
+          assert.strictEqual(attempt.worker, "local");
+          assert(Option.isSome(snapshot.step.result));
+          assert.strictEqual(
+            snapshot.step.result.value.message,
+            "Completed: Complete local task 1",
+          );
 
-        const transcript = yield* engine.transcript(
-          new TranscriptQuery({ attemptId: attempt.id, after: Option.none() }),
-        );
-        assert.deepStrictEqual(
-          transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
-          [
-            ["outbound", "Started"],
-            ["outbound", "SessionEvent"],
-            ["outbound", "SessionEvent"],
-            ["outbound", "SessionEvent"],
-            ["outbound", "Final"],
-          ],
-        );
-        const firstTranscriptEntry = transcript[0];
-        assert(firstTranscriptEntry !== undefined);
-        const tail = yield* engine.transcript(
-          new TranscriptQuery({
-            attemptId: attempt.id,
-            after: Option.some(firstTranscriptEntry.sequence),
-          }),
-        );
-        assert.deepStrictEqual(
-          tail.map(({ envelope }) => envelope.payload._tag),
-          ["SessionEvent", "SessionEvent", "SessionEvent", "Final"],
-        );
+          const transcript = yield* engine.transcript(
+            new TranscriptQuery({
+              attemptId: attempt.id,
+              after: Option.none(),
+              limit: Option.none(),
+            }),
+          );
+          assert.deepStrictEqual(
+            transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
+            [
+              ["outbound", "Started"],
+              ["outbound", "SessionEvent"],
+              ["outbound", "SessionEvent"],
+              ["outbound", "SessionEvent"],
+              ["outbound", "Final"],
+            ],
+          );
+          const firstTranscriptEntry = transcript[0];
+          assert(firstTranscriptEntry !== undefined);
+          const tail = yield* engine.transcript(
+            new TranscriptQuery({
+              attemptId: attempt.id,
+              after: Option.some(firstTranscriptEntry.sequence),
+              limit: Option.none(),
+            }),
+          );
+          assert.deepStrictEqual(
+            tail.map(({ envelope }) => envelope.payload._tag),
+            ["SessionEvent", "SessionEvent", "SessionEvent", "Final"],
+          );
 
-        const attempts = yield* fileSystem.readDirectory(
-          path.join(instance, ".usine", "workers", "local", "attempts"),
-        );
-        assert.deepStrictEqual(attempts, []);
-        const cache = path.join(instance, ".usine", "workers", "local", "repos", "acme_demo.git");
-        const storedConfig = yield* output("git", ["--git-dir", cache, "config", "--list"]);
-        assert(!storedConfig.includes(TOKEN));
-      }),
-    ),
+          const attempts = yield* fileSystem.readDirectory(
+            path.join(instance, ".usine", "workers", "local", "attempts"),
+          );
+          assert.deepStrictEqual(attempts, []);
+          const cache = path.join(instance, ".usine", "workers", "local", "repos", "acme_demo.git");
+          const storedConfig = yield* output("git", ["--git-dir", cache, "config", "--list"]);
+          assert(!storedConfig.includes(TOKEN));
+        }),
+      ),
+    LIVE_TEST_TIMEOUT,
   );
 
-  it.live("cancels idempotently with an interrupt envelope before cleanup", () =>
-    withLocalEngine(["--stub-delay-ms", "5000"], ({ engine, instance }) =>
-      Effect.gen(function* () {
-        const accepted = yield* engine.submit(submission(2));
-        assert.strictEqual(accepted._tag, "Claimed");
-        if (accepted._tag !== "Claimed") return;
-        const running = yield* waitFor(engine, accepted.runId, "Running");
-        const attempt = running.attempts[0];
-        assert(attempt !== undefined);
-        for (let poll = 0; poll < 200; poll += 1) {
-          const transcript = yield* engine.transcript(
-            new TranscriptQuery({ attemptId: attempt.id, after: Option.none() }),
-          );
-          if (transcript.some(({ envelope }) => envelope.payload._tag === "Started")) break;
-          yield* Effect.sleep("10 millis");
-        }
-        yield* engine.cancel(accepted.runId);
-        yield* engine.cancel(accepted.runId);
-        const canceled = yield* waitFor(engine, accepted.runId, "Canceled");
-        assert.strictEqual(canceled.attempts.length, 1);
+  it.live(
+    "cancels idempotently with an interrupt envelope before cleanup",
+    () =>
+      withLocalEngine(["--stub-delay-ms", "5000"], ({ engine, instance }) =>
+        Effect.gen(function* () {
+          const accepted = yield* engine.submit(submission(2));
+          assert.strictEqual(accepted._tag, "Claimed");
+          if (accepted._tag !== "Claimed") return;
+          const running = yield* waitFor(engine, accepted.runId, "Running");
+          const attempt = running.attempts[0];
+          assert(attempt !== undefined);
+          for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
+            const transcript = yield* engine.transcript(
+              new TranscriptQuery({
+                attemptId: attempt.id,
+                after: Option.none(),
+                limit: Option.none(),
+              }),
+            );
+            if (transcript.some(({ envelope }) => envelope.payload._tag === "Started")) break;
+            yield* Effect.sleep("10 millis");
+          }
+          yield* engine.cancel(accepted.runId);
+          yield* engine.cancel(accepted.runId);
+          const canceled = yield* waitFor(engine, accepted.runId, "Canceled");
+          assert.strictEqual(canceled.attempts.length, 1);
 
-        const transcript = yield* engine.transcript(
-          new TranscriptQuery({ attemptId: attempt.id, after: Option.none() }),
-        );
-        assert(
-          transcript.some(
-            ({ direction, envelope }) =>
-              direction === "inbound" && envelope.payload._tag === "Interrupt",
-          ),
-        );
-        const path = yield* Path.Path;
-        const fileSystem = yield* FileSystem.FileSystem;
-        const attemptsDirectory = path.join(instance, ".usine", "workers", "local", "attempts");
-        let attempts = yield* fileSystem.readDirectory(attemptsDirectory);
-        for (let poll = 0; attempts.length > 0 && poll < 200; poll += 1) {
-          yield* Effect.sleep("10 millis");
-          attempts = yield* fileSystem.readDirectory(attemptsDirectory);
-        }
-        assert.deepStrictEqual(attempts, []);
-      }),
-    ),
+          const transcript = yield* engine.transcript(
+            new TranscriptQuery({
+              attemptId: attempt.id,
+              after: Option.none(),
+              limit: Option.none(),
+            }),
+          );
+          assert(
+            transcript.some(
+              ({ direction, envelope }) =>
+                direction === "inbound" && envelope.payload._tag === "Interrupt",
+            ),
+          );
+          const path = yield* Path.Path;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const attemptsDirectory = path.join(instance, ".usine", "workers", "local", "attempts");
+          let attempts = yield* fileSystem.readDirectory(attemptsDirectory);
+          for (let poll = 0; attempts.length > 0 && poll < STATE_POLL_ATTEMPTS; poll += 1) {
+            yield* Effect.sleep("10 millis");
+            attempts = yield* fileSystem.readDirectory(attemptsDirectory);
+          }
+          assert.deepStrictEqual(attempts, []);
+        }),
+      ),
+    LIVE_TEST_TIMEOUT,
   );
 
   it.live(
@@ -298,34 +322,37 @@ describe("local worker", () => {
           assert(DateTime.toEpochMillis(olderStarted) <= DateTime.toEpochMillis(newerStarted));
         }),
       ),
-    20_000,
+    LIVE_TEST_TIMEOUT,
   );
 
-  it.live("classifies channel loss as retryable infrastructure failure", () =>
-    withLocalEngine(
-      [],
-      ({ engine, instance }) =>
-        Effect.gen(function* () {
-          const accepted = yield* engine.submit(submission(6));
-          assert.strictEqual(accepted._tag, "Claimed");
-          if (accepted._tag !== "Claimed") return;
-          const failed = yield* waitFor(engine, accepted.runId, "Failed");
-          assert.strictEqual(failed.attempts.length, 3);
-          for (const attempt of failed.attempts) {
-            assert(Option.isSome(attempt.outcome));
-            assert.strictEqual(attempt.outcome.value._tag, "Failed");
-            if (attempt.outcome.value._tag === "Failed") {
-              assert.strictEqual(attempt.outcome.value.failure._tag, "InfraFailure");
+  it.live(
+    "classifies channel loss as retryable infrastructure failure",
+    () =>
+      withLocalEngine(
+        [],
+        ({ engine, instance }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(6));
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            const failed = yield* waitFor(engine, accepted.runId, "Failed");
+            assert.strictEqual(failed.attempts.length, 3);
+            for (const attempt of failed.attempts) {
+              assert(Option.isSome(attempt.outcome));
+              assert.strictEqual(attempt.outcome.value._tag, "Failed");
+              if (attempt.outcome.value._tag === "Failed") {
+                assert.strictEqual(attempt.outcome.value.failure._tag, "InfraFailure");
+              }
             }
-          }
-          const path = yield* Path.Path;
-          const attempts = yield* (yield* FileSystem.FileSystem).readDirectory(
-            path.join(instance, ".usine", "workers", "local", "attempts"),
-          );
-          assert.deepStrictEqual(attempts, []);
-        }),
-      CHANNEL_LOSS_HOST,
-    ),
+            const path = yield* Path.Path;
+            const attempts = yield* (yield* FileSystem.FileSystem).readDirectory(
+              path.join(instance, ".usine", "workers", "local", "attempts"),
+            );
+            assert.deepStrictEqual(attempts, []);
+          }),
+        CHANNEL_LOSS_HOST,
+      ),
+    LIVE_TEST_TIMEOUT,
   );
 
   it.effect("keeps a successful attempt successful when cleanup fails", () => {

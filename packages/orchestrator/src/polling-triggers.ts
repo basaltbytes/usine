@@ -12,6 +12,8 @@ import { AttemptChannel, Event, Item, Repository } from "@usine/core";
 import {
   CursorKey,
   CursorStore,
+  type EnginePersistenceError,
+  LoopControl,
   RunEngine,
   SubmissionResult,
   type RunEngineError,
@@ -24,7 +26,18 @@ import {
   type GitHubAppError,
   type PayloadSnapshot,
 } from "@usine/github";
-import { Clock, Context, DateTime, Duration, Effect, Layer, Option, Result, Schema } from "effect";
+import {
+  Clock,
+  Context,
+  DateTime,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Ref,
+  Result,
+  Schema,
+} from "effect";
 import {
   configFileErrorLogFields,
   type ResolvedLoop,
@@ -163,8 +176,9 @@ export class PollingTriggers extends Context.Service<
      * isolated, logged, and reported on the cycle — one bad repository never
      * stops its siblings, and only a defect stops the loop.
      */
-    readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle>;
+    readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle, EnginePersistenceError>;
     readonly run: (instance: LoadedInstance) => Effect.Effect<never>;
+    readonly latest: Effect.Effect<Option.Option<PollCycle>>;
   }
 >()("@usine/orchestrator/PollingTriggers") {
   static readonly layer = Layer.effect(
@@ -175,6 +189,8 @@ export class PollingTriggers extends Context.Service<
       const expressions = yield* ExpressionEngine;
       const github = yield* GitHubPolling;
       const runs = yield* RunEngine;
+      const loops = yield* LoopControl;
+      const latest = yield* Ref.make(Option.none<PollCycle>());
 
       const readCursor = Effect.fn("PollingTriggers.readCursor")(function* (
         watched: WatchedRepository,
@@ -351,7 +367,20 @@ export class PollingTriggers extends Context.Service<
       });
 
       const poll = Effect.fn("PollingTriggers.poll")(function* (instance: LoadedInstance) {
-        const watched = watchedRepositories(instance, yield* resolveTriggerLoops(instance));
+        const paused = new Set(
+          (yield* loops.states).filter((state) => state.paused).map((state) => state.loop),
+        );
+        for (const loop of instance.loops) {
+          if (loop.trigger.on !== "schedule" && paused.has(loop.name)) {
+            yield* Effect.logDebug("Paused Loop skipped during repository polling", {
+              loop: loop.name,
+            });
+          }
+        }
+        const resolved = (yield* resolveTriggerLoops(instance)).filter(
+          ({ loop }) => !paused.has(loop.name),
+        );
+        const watched = watchedRepositories(instance, resolved);
         const settled = yield* Effect.forEach(
           watched,
           (repository) =>
@@ -392,7 +421,7 @@ export class PollingTriggers extends Context.Service<
             }),
           );
         }
-        return new PollCycle({
+        const cycle = new PollCycle({
           repositories: watched.length,
           changedItems: cycles.reduce((sum, cycle) => sum + cycle.changedItems, 0),
           submissions: cycles.flatMap(({ submissions }) => submissions),
@@ -400,6 +429,8 @@ export class PollingTriggers extends Context.Service<
           failures: [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
           nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
         });
+        yield* Ref.set(latest, Option.some(cycle));
+        return cycle;
       });
 
       // No Effect.fn here: `run` never returns, so a named wrapper would open
@@ -407,7 +438,19 @@ export class PollingTriggers extends Context.Service<
       const run = (instance: LoadedInstance): Effect.Effect<never> =>
         Effect.gen(function* () {
           const startedAt = yield* Clock.currentTimeMillis;
-          const cycle = yield* poll(instance);
+          const result = yield* Effect.result(poll(instance));
+          if (Result.isFailure(result)) {
+            const sleepMs = instance.config.settings.pollInterval * 1_000;
+            yield* Effect.logError("Poll cycle could not read Loop runtime state; retrying", {
+              errorTag: result.failure._tag,
+              message: result.failure.message,
+              operation: result.failure.operation,
+              sleepMs,
+            });
+            yield* Effect.sleep(Duration.millis(sleepMs));
+            return;
+          }
+          const cycle = result.success;
           const intervalAt = startedAt + instance.config.settings.pollInterval * 1_000;
           const target = Option.match(cycle.nextPollAt, {
             onNone: () => intervalAt,
@@ -426,7 +469,7 @@ export class PollingTriggers extends Context.Service<
           yield* Effect.sleep(Duration.millis(sleepMs));
         }).pipe(Effect.forever);
 
-      return { poll, run };
+      return { latest: Ref.get(latest), poll, run };
     }),
   );
 }

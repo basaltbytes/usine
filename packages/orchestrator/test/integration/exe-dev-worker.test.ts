@@ -140,7 +140,11 @@ describe("live exe.dev Worker", () => {
         assert(Option.isSome(finished.step.result));
 
         const transcript = yield* engine.transcript(
-          new TranscriptQuery({ attemptId: attempt.id, after: Option.none() }),
+          new TranscriptQuery({
+            attemptId: attempt.id,
+            after: Option.none(),
+            limit: Option.none(),
+          }),
         );
         assert.deepStrictEqual(
           transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),

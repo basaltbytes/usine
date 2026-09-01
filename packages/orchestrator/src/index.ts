@@ -1,4 +1,8 @@
 /** @usine/orchestrator — embeddable trigger-to-run and worker composition. */
+export * from "./operator/model.ts";
+export * from "./operator/service.ts";
+export * from "./orchestrator.ts";
+export { idleTriggersLayer } from "./idle-triggers.ts";
 export { PollCycle, PollingTriggers, RepositoryPollFailure } from "./polling-triggers.ts";
 export {
   ScheduleAgentFailure,
