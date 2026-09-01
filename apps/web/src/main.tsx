@@ -68,6 +68,16 @@ const api = async <S extends Schema.Codec<unknown, unknown, never, unknown>>(
   return Schema.decodeUnknownPromise(schema)(await response.json());
 };
 
+const mergeRunDetail = (previous: unknown, next: unknown): unknown => {
+  if (!(previous instanceof RunDetailView) || !(next instanceof RunDetailView))
+    return next;
+  return new RunDetailView({
+    ...next,
+    transcript: mergeTranscript(previous.transcript, next.transcript),
+    earlierTranscript: previous.earlierTranscript,
+  });
+};
+
 const overviewQuery = () => ({
   queryKey: ["overview"] as const,
   queryFn: () => api("/api/overview", FactoryOverview),
@@ -239,27 +249,19 @@ const RunDrawer = ({
 }) => {
   const queryClient = useQueryClient();
   const [confirmCancel, setConfirmCancel] = useState(false);
-  const detail = useQuery({
+  const detail = useQuery<RunDetailView>({
     queryKey: ["run", runId],
-    queryFn: async () => {
+    queryFn: () => {
       const key = ["run", runId] as const;
       const previous = queryClient.getQueryData<RunDetailView>(key);
       const cursor = previous?.transcript.at(-1)?.sequence;
       const search = cursor === undefined ? "" : `?after=${cursor}`;
-      const next = await api(
+      return api(
         `/api/runs/${encodeURIComponent(runId)}${search}`,
         RunDetailView,
       );
-      if (previous === undefined) return next;
-      return new RunDetailView({
-        ...next,
-        transcript: mergeTranscript(previous.transcript, next.transcript),
-        earlierTranscript:
-          cursor === undefined
-            ? next.earlierTranscript
-            : previous.earlierTranscript,
-      });
     },
+    structuralSharing: mergeRunDetail,
     refetchInterval: (query) =>
       query.state.data?.run.canCancel === true ? 1_000 : false,
   });

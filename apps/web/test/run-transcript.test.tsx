@@ -1,8 +1,16 @@
 import { Agent, Attempt, AttemptChannel } from "@usine/core";
-import { TranscriptEventView, TranscriptPageCursor, TranscriptCursor } from "@usine/orchestrator";
+import {
+  TranscriptEventView,
+  TranscriptPageCursor,
+  TranscriptCursor,
+} from "@usine/orchestrator";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import { mergeTranscript, replaceEarlierCursor, Transcript } from "../src/run-transcript.tsx";
+import {
+  mergeTranscript,
+  replaceEarlierCursor,
+  Transcript,
+} from "../src/run-transcript.tsx";
 
 const attemptId = Attempt.AttemptId.make("attempt-31");
 const brain = new Agent.BrainSpec({
@@ -17,7 +25,9 @@ const event = (
   scope: "parent" | "child" | "channel" = "parent",
   session = `${scope}-session`,
 ) => {
-  const agent = Agent.Name.make(scope === "child" ? `agent-${session}` : "developer");
+  const agent = Agent.Name.make(
+    scope === "child" ? `agent-${session}` : "developer",
+  );
   const sessionView =
     scope === "child"
       ? new Agent.ChildSession({
@@ -26,15 +36,21 @@ const event = (
           agent,
           brain,
         })
-      : new Agent.ParentSession({ id: Agent.SessionId.make(session), agent, brain });
+      : new Agent.ParentSession({
+          id: Agent.SessionId.make(session),
+          agent,
+          brain,
+        });
   return new TranscriptEventView({
-    sequence,
+    sequence: TranscriptCursor.make(sequence),
     attemptId,
     receivedAt: "2026-09-01T12:00:00.000Z",
     direction: "outbound",
     payload:
       scope === "channel"
-        ? new AttemptChannel.Started({ parentModel: Agent.ModelId.make("gpt-5") })
+        ? new AttemptChannel.Started({
+            parentModel: Agent.ModelId.make("gpt-5"),
+          })
         : new AttemptChannel.SessionEvent({
             event: new Agent.TextOutput({ session: sessionView, text }),
           }),
@@ -72,14 +88,23 @@ describe("run transcript", () => {
     );
 
     assert.strictEqual((markup.match(/<details/g) ?? []).length, 2);
-    assert.ok(markup.indexOf("agent-child-a activity") < markup.indexOf("Parent update"));
-    assert.ok(markup.indexOf("Parent update") < markup.indexOf("agent-child-b activity"));
+    assert.ok(
+      markup.indexOf("agent-child-a activity") <
+        markup.indexOf("Parent update"),
+    );
+    assert.ok(
+      markup.indexOf("Parent update") <
+        markup.indexOf("agent-child-b activity"),
+    );
   });
 
   it("merges transcript tails by sequence without replaying an existing event", () => {
     const first = event(1, "First");
     const second = event(2, "Second");
-    const merged = mergeTranscript([second, first], [second, event(3, "Third")]);
+    const merged = mergeTranscript(
+      [second, first],
+      [second, event(3, "Third")],
+    );
 
     assert.deepStrictEqual(
       merged.map(({ sequence, payload }) => [
