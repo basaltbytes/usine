@@ -112,7 +112,6 @@ export class ReadyOverview extends Schema.TaggedClass<ReadyOverview>(
 export class NeedsSetupOverview extends Schema.TaggedClass<NeedsSetupOverview>(
   "@usine/orchestrator/NeedsSetupOverview",
 )("NeedsSetup", {
-  message: Schema.String,
   errorTag: Schema.String,
   projects: Schema.Array(ProjectView),
   loops: Schema.Array(LoopView),

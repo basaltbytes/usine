@@ -401,7 +401,11 @@ const FactoryScreen = () => {
         <section className="setup-banner">
           <p className="eyebrow">Setup required · {data.errorTag}</p>
           <h1>The floor is ready. GitHub is not connected yet.</h1>
-          <p>{data.message}</p>
+          <p>
+            Add <code>USINE_GITHUB_APP_ID</code> and <code>USINE_GITHUB_PRIVATE_KEY</code>, or
+            create <code>.usine/github-app.json</code> with mode 0600. Then stop and rerun{" "}
+            <code>usine up</code>: the running process reads credentials only when it starts.
+          </p>
         </section>
       )}
       <NeedStrip needs={data.needsYou} openRun={openRun} />

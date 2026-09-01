@@ -77,12 +77,7 @@ const observation: OperatorObservation["Service"] = {
   overview: () => Effect.succeed(overview),
   detail: () => Effect.succeed(detail),
 };
-const backend = needsSetupBackendLayer(
-  instance,
-  "SecretsFileError",
-  "Add GitHub App credentials.",
-  observation,
-);
+const backend = needsSetupBackendLayer(instance, "SecretsFileError", observation);
 const app = HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
   disableLogger: true,
 });

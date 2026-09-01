@@ -39,7 +39,12 @@ import { layer as localLayer } from "../src/local.ts";
 const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
 const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
 const TOKEN = "one-attempt-test-token";
+// Each live transition crosses real git worktree and child-process boundaries;
+// the 10-second poll horizon absorbs slow shared CI hosts while the 10 ms cadence
+// still reports the last durable state when a transition genuinely stalls.
 const STATE_POLL_ATTEMPTS = 1_000;
+// The capacity test completes three sequential run-host lifecycles, so its
+// per-test ceiling must cover more than one state-poll horizon plus cleanup.
 const LIVE_TEST_TIMEOUT = 30_000;
 const testAgent = new Agent.Agent({
   name: Agent.Name.make("developer"),

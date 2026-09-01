@@ -52,7 +52,6 @@ export const liveBackendLayer = (
 export const needsSetupBackendLayer = (
   instance: LoadedInstance,
   errorTag: string,
-  message: string,
   observation: OperatorObservation["Service"],
 ): Layer.Layer<FactoryBackend> => {
   const unavailable = new BackendUnavailableError({
@@ -63,7 +62,7 @@ export const needsSetupBackendLayer = (
     .pipe(
       Effect.map(
         ({ projects, loops, needsYou }) =>
-          new NeedsSetupOverview({ errorTag, message, projects, loops, needsYou }),
+          new NeedsSetupOverview({ errorTag, projects, loops, needsYou }),
       ),
     );
   const fail = () => Effect.fail(unavailable);
