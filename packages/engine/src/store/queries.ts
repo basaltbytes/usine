@@ -28,6 +28,7 @@ import {
 import {
   RunNotFoundError,
   RunSnapshot,
+  RunSummary,
   Submission,
   TranscriptQuery,
   WORKFLOW_COMMAND_PRIORITY,
@@ -53,6 +54,7 @@ import {
   encodeStepResult,
   eventFromRow,
   runFromRow,
+  runSummaryFromRow,
   stepFromRow,
   submissionFromRow,
   transcriptEntryFromRow,
@@ -72,6 +74,33 @@ const eventRouteSelection = {
   task: triggerEvents.task,
   agent: triggerEvents.agentJson,
   parentModel: triggerEvents.parentModel,
+} as const;
+
+const runSelection = {
+  runId: runs.runId,
+  eventId: runs.eventId,
+  loop: runs.loopName,
+  state: runs.stateJson,
+  openedAt: runs.openedAt,
+  repository: runs.repository,
+  revision: runs.revision,
+  task: runs.task,
+  agent: runs.agentJson,
+  parentModel: runs.parentModel,
+  stepName: steps.stepName,
+  result: steps.result,
+} as const;
+
+const attemptSelection = {
+  attemptId: attempts.attemptId,
+  runId: attempts.runId,
+  stepName: attempts.stepName,
+  worker: attempts.workerName,
+  number: attempts.attemptNumber,
+  brain: attempts.brainJson,
+  parentModel: attempts.parentModel,
+  startedAt: attempts.startedAt,
+  outcome: attempts.outcomeJson,
 } as const;
 
 // The state partitions stay owned by @usine/core (`RunState.Open` and the
@@ -114,20 +143,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   const runRows = Effect.fn("RunStoreQueries.runRows")(function* (runId: Run.RunId) {
     const rows = yield* database
-      .select({
-        runId: runs.runId,
-        eventId: runs.eventId,
-        loop: runs.loopName,
-        state: runs.stateJson,
-        openedAt: runs.openedAt,
-        repository: runs.repository,
-        revision: runs.revision,
-        task: runs.task,
-        agent: runs.agentJson,
-        parentModel: runs.parentModel,
-        stepName: steps.stepName,
-        result: steps.result,
-      })
+      .select(runSelection)
       .from(runs)
       .innerJoin(steps, eq(steps.runId, runs.runId))
       .where(eq(runs.runId, runId))
@@ -137,17 +153,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   const attemptRows = Effect.fn("RunStoreQueries.attemptRows")(function* (runId: Run.RunId) {
     const rows = yield* database
-      .select({
-        attemptId: attempts.attemptId,
-        runId: attempts.runId,
-        stepName: attempts.stepName,
-        worker: attempts.workerName,
-        number: attempts.attemptNumber,
-        brain: attempts.brainJson,
-        parentModel: attempts.parentModel,
-        startedAt: attempts.startedAt,
-        outcome: attempts.outcomeJson,
-      })
+      .select(attemptSelection)
       .from(attempts)
       .where(eq(attempts.runId, runId))
       .orderBy(attempts.attemptNumber)
@@ -179,13 +185,30 @@ export const queriesFor = (database: RunDatabaseClient) => {
     });
   });
 
-  const runIds = Effect.fn("RunStoreQueries.runIds")(function* () {
-    return yield* decodeRunIds(
-      yield* database
-        .select({ runId: runs.runId })
+  const runSummaries = Effect.fn("RunStoreQueries.runSummaries")(function* () {
+    const [storedRuns, storedAttempts] = yield* Effect.all([
+      database
+        .select(runSelection)
         .from(runs)
+        .innerJoin(steps, eq(steps.runId, runs.runId))
         .orderBy(desc(runs.openedAt), desc(runs.runId))
-        .execute(),
+        .execute()
+        .pipe(Effect.flatMap(decodeRunRows)),
+      database
+        .select(attemptSelection)
+        .from(attempts)
+        .orderBy(asc(attempts.runId), asc(attempts.attemptNumber))
+        .execute()
+        .pipe(Effect.flatMap(decodeAttemptRows)),
+    ]);
+    const attemptsByRun = new Map<Run.RunId, Array<(typeof storedAttempts)[number]>>();
+    for (const attempt of storedAttempts) {
+      const grouped = attemptsByRun.get(attempt.runId) ?? [];
+      grouped.push(attempt);
+      attemptsByRun.set(attempt.runId, grouped);
+    }
+    return storedRuns.map((row): RunSummary =>
+      runSummaryFromRow(row, attemptsByRun.get(row.runId) ?? []),
     );
   });
 
@@ -617,7 +640,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     requestInterrupt,
     requestWorkflowCommand,
     revokeUnstarted,
-    runIds,
+    runSummaries,
     runForEvent,
     snapshot,
     transcript,

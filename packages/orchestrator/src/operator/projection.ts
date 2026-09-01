@@ -4,6 +4,7 @@ import {
   TranscriptQuery,
   type RunEngineError,
   type RunSnapshot,
+  type RunSummary,
   type TranscriptEntry,
 } from "@usine/engine";
 import { DateTime, Effect, Option, Schema } from "effect";
@@ -36,7 +37,7 @@ const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
   });
 };
 
-export const runView = (snapshot: RunSnapshot): RunView => {
+export const runView = (snapshot: RunSummary): RunView => {
   const result = Option.getOrNull(snapshot.step.result);
   const pullRequest = result?.facts.find(
     (fact): fact is StepResult.PullRequest => fact._tag === "PullRequest",

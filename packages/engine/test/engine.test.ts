@@ -159,7 +159,9 @@ describe("durable run engine", () => {
   it.live("lists every Run newest first for operator read models", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("listed result")),
+        ]);
         const runtime = layer(directory).pipe(Layer.provide(executorLayer(plans)));
 
         yield* Effect.gen(function* () {
@@ -167,19 +169,22 @@ describe("durable run engine", () => {
           const first = yield* engine.submit(
             submission({ number: 1, item: "listed-one", approval: "required" }),
           );
-          const second = yield* engine.submit(
-            submission({ number: 2, item: "listed-two", approval: "required" }),
-          );
+          const second = yield* engine.submit(submission({ number: 2, item: "listed-two" }));
           assert.strictEqual(first._tag, "Claimed");
           assert.strictEqual(second._tag, "Claimed");
           if (first._tag !== "Claimed" || second._tag !== "Claimed") return;
           yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
-          yield* waitFor(engine, second.runId, ({ run }) => run.state._tag === "Waiting");
+          yield* waitFor(engine, second.runId, ({ run }) => run.state._tag === "Succeeded");
 
           const listed = yield* engine.list();
           assert.deepStrictEqual(
             listed.map(({ run }) => run.id),
             [second.runId, first.runId],
+          );
+          assert.strictEqual(listed[0]?.attempts.length, 1);
+          assert.strictEqual(
+            Option.getOrUndefined(listed[0]?.step.result ?? Option.none())?.message,
+            "listed result",
           );
         }).pipe(Effect.provide(runtime));
       }),

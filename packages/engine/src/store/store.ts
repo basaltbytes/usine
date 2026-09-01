@@ -19,6 +19,7 @@ import {
   Queued,
   RunOperationRejectedError,
   RunSnapshot,
+  RunSummary,
   StepExecution,
   Submission,
   TranscriptEntry,
@@ -442,10 +443,7 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("read Attempt transcript"));
 
   const list = Effect.fn("RunStore.list")(function* () {
-    const runIds = yield* queries.runIds();
-    return yield* Effect.forEach(runIds, ({ runId }) => queries.snapshot(runId), {
-      concurrency: 16,
-    });
+    return yield* queries.runSummaries();
   }, persistence("list runs"));
 
   const reconcileCompletion = Effect.fn("RunStore.reconcileCompletion")(function* (
@@ -539,7 +537,7 @@ export class RunStore extends Context.Service<
       attempt: Attempt.Attempt,
       failure: AttemptFailure.AttemptFailure,
     ) => Effect.Effect<boolean, RunStoreError>;
-    readonly list: () => Effect.Effect<ReadonlyArray<RunSnapshot>, RunStoreError>;
+    readonly list: () => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
     readonly nextQueued: (
       runId: Run.RunId,
     ) => Effect.Effect<Option.Option<Submission>, RunStoreError>;

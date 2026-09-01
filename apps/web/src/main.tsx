@@ -4,6 +4,7 @@ import "@fontsource/ibm-plex-mono/500.css";
 import {
   QueryClient,
   QueryClientProvider,
+  type Query,
   useMutation,
   useQuery,
   useQueryClient,
@@ -25,6 +26,8 @@ import "./styles.css";
 
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
 const RunSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(Run.RunId) }));
+const ACTIVE_OVERVIEW_REFRESH_MS = 2_000;
+const IDLE_OVERVIEW_REFRESH_MS = 15_000;
 
 const api = async <S extends Schema.Codec<unknown, unknown, never, unknown>>(
   path: string,
@@ -42,7 +45,16 @@ const api = async <S extends Schema.Codec<unknown, unknown, never, unknown>>(
 const overviewQuery = () => ({
   queryKey: ["overview"] as const,
   queryFn: () => api("/api/overview", FactoryOverview),
-  refetchInterval: 2_000,
+  refetchInterval: (
+    query: Query<FactoryOverview, Error, FactoryOverview, readonly ["overview"]>,
+  ) => {
+    const overview = query.state.data;
+    if (overview?._tag === "NeedsSetup") return false;
+    const hasOpenRun = overview?.projects.some((project) =>
+      project.runs.some(({ canCancel }) => canCancel),
+    );
+    return hasOpenRun === true ? ACTIVE_OVERVIEW_REFRESH_MS : IDLE_OVERVIEW_REFRESH_MS;
+  },
 });
 
 const timeAgo = (value: string): string => {

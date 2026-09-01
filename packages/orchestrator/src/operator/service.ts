@@ -34,8 +34,14 @@ const makeOperator = Effect.gen(function* () {
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const views = snapshots.map(runView);
+    const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
+    for (const view of views) {
+      const projectRuns = runsByRepository.get(view.repository) ?? [];
+      projectRuns.push(view);
+      runsByRepository.set(view.repository, projectRuns);
+    }
     const projects = instance.config.repos.map(({ name }) => {
-      const projectRuns = views.filter((run) => run.repository === name);
+      const projectRuns = runsByRepository.get(name) ?? [];
       const status: ProjectStatus = projectRuns.some(
         (run) => run.state === "Waiting" || run.state === "Failed",
       )

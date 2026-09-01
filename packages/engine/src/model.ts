@@ -100,6 +100,16 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   parentModel: Schema.Option(Agent.ModelId),
 }) {}
 
+/** Lightweight durable projection used when listing every Run for operators. */
+export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSummary")({
+  run: Run.Run,
+  step: Step.Step,
+  attempts: Schema.Array(Attempt.Attempt),
+  repository: Repository.Name,
+  task: AttemptChannel.Task,
+  agent: Agent.Agent,
+}) {}
+
 /** Input passed to the attempt-execution port. */
 export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/StepExecution")({
   attempt: Attempt.Attempt,

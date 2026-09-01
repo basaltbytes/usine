@@ -18,6 +18,7 @@ import {
   EnginePersistenceError,
   IgnoreReason,
   RunStoreError,
+  RunSummary,
   Submission,
   TranscriptEntry,
   TranscriptSequence,
@@ -169,6 +170,19 @@ export const attemptFromRow = (row: AttemptRow): Attempt.Attempt =>
     parentModel: Option.fromNullishOr(row.parentModel),
     startedAt: row.startedAt,
     outcome: Option.fromNullishOr(row.outcome),
+  });
+
+export const runSummaryFromRow = (
+  row: RunRow,
+  storedAttempts: ReadonlyArray<AttemptRow>,
+): RunSummary =>
+  new RunSummary({
+    run: runFromRow(row),
+    step: stepFromRow(row),
+    attempts: storedAttempts.map(attemptFromRow),
+    repository: row.repository,
+    task: row.task,
+    agent: row.agent,
   });
 
 export const transcriptEntryFromRow = (row: TranscriptRow): TranscriptEntry =>

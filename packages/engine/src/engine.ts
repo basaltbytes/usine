@@ -8,6 +8,7 @@ import {
   AttemptCancellationError,
   type RunEngineError,
   type RunSnapshot,
+  type RunSummary,
   type Submission,
   type SubmissionResult,
   type TranscriptEntry,
@@ -218,7 +219,7 @@ export class RunEngine extends Context.Service<
     ) => Effect.Effect<void, RunEngineError>;
     readonly cancel: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
     readonly inspect: (runId: Run.RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
-    readonly list: () => Effect.Effect<ReadonlyArray<RunSnapshot>, RunEngineError>;
+    readonly list: () => Effect.Effect<ReadonlyArray<RunSummary>, RunEngineError>;
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     readonly retry: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
     readonly revoke: (

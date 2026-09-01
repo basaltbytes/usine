@@ -19,6 +19,7 @@ export {
   RunNotFoundError,
   RunOperationRejectedError,
   RunSnapshot,
+  RunSummary,
   StepExecution,
   Submission,
   SubmissionResult,
