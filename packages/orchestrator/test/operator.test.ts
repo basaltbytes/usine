@@ -15,6 +15,7 @@ import {
   Agent,
   Attempt,
   AttemptChannel,
+  AttemptFailure,
   Event,
   Repository,
   Run,
@@ -30,19 +31,25 @@ import {
   RunReader,
   RunSnapshot,
   TranscriptEntry,
+  type TranscriptQuery,
   TranscriptSequence,
 } from "@usine/engine";
 import { Source } from "@usine/expression";
-import { DateTime, Effect, Layer, Option, Ref, Schema } from "effect";
+import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
 import {
+  ColdTranscriptRequest,
+  EarlierTranscriptRequest,
+  FailureView,
   Operator,
   PollCycle,
   PollingTriggers,
   RepositoryPollFailure,
   ScheduleCycle,
   ScheduleTriggers,
+  TailTranscriptRequest,
   TranscriptCursor,
 } from "../src/index.ts";
+import { failureView } from "../src/operator/projection.ts";
 
 const now = DateTime.makeUnsafe("2026-08-31T12:00:00.000Z");
 const runId = Run.RunId.make("run-operator-test");
@@ -98,7 +105,11 @@ const snapshot = new RunSnapshot({
     state: new RunState.Waiting(),
     openedAt: now,
   }),
-  step: new Step.Step({ runId, name: Step.StepName.make("run"), result: Option.none() }),
+  step: new Step.Step({
+    runId,
+    name: Step.StepName.make("run"),
+    result: Option.none(),
+  }),
   attempts: [
     new Attempt.Attempt({
       id: attemptId,
@@ -171,6 +182,27 @@ const transcript = [
     }),
     receivedAt: now,
   }),
+  ...Array.from({ length: 500 }, (_, index) => {
+    const sequence = index + 3;
+    return new TranscriptEntry({
+      sequence: TranscriptSequence.make(sequence),
+      attemptId,
+      direction: "outbound",
+      envelope: new AttemptChannel.OutboundEnvelope({
+        version: 3,
+        attemptId,
+        sequence: AttemptChannel.Sequence.make(sequence),
+        sentAt: now,
+        payload: new AttemptChannel.SessionEvent({
+          event: new Agent.TextOutput({
+            session: parent,
+            text: `Parent update ${sequence}`,
+          }),
+        }),
+      }),
+      receivedAt: now,
+    });
+  }),
 ];
 
 interface RecordedApproval {
@@ -183,11 +215,19 @@ const testLayer = (
   overviewReads: Ref.Ref<number>,
   projectionRevision: Ref.Ref<Option.Option<ProjectionRevision>>,
 ) => {
-  const readTranscript = ({ after }: { readonly after: Option.Option<TranscriptSequence> }) =>
+  const readTranscript = (query: TranscriptQuery) =>
     Effect.succeed(
-      Option.match(after, {
-        onNone: () => transcript,
-        onSome: (cursor) => transcript.filter((entry) => entry.sequence > cursor),
+      Match.valueTags(query, {
+        TranscriptAllQuery: () => transcript,
+        TranscriptTailQuery: ({ after, limit }) =>
+          transcript.filter((entry) => entry.sequence > after).slice(0, limit),
+        TranscriptPageQuery: ({ before, limit }) => {
+          const candidates = Option.match(before, {
+            onNone: () => transcript,
+            onSome: (cursor) => transcript.filter((entry) => entry.sequence < cursor),
+          });
+          return candidates.slice(-limit);
+        },
       }),
     );
   const runs = Layer.succeed(RunEngine)({
@@ -202,7 +242,11 @@ const testLayer = (
   });
   const reader = Layer.succeed(RunReader)({
     inspect: () => Effect.succeed(snapshot),
-    list: () => Ref.updateAndGet(overviewReads, (reads) => reads + 1).pipe(Effect.as([snapshot])),
+    list: () =>
+      Ref.updateAndGet(overviewReads, (reads) => reads + 1).pipe(
+        Effect.andThen(Effect.yieldNow),
+        Effect.as([snapshot]),
+      ),
     revision: () => Ref.get(projectionRevision),
     transcript: readTranscript,
   });
@@ -263,8 +307,11 @@ describe("Operator", () => {
       const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       yield* Effect.gen(function* () {
         const operator = yield* Operator;
-        const overview = yield* operator.overview(instance);
-        yield* operator.overview(instance);
+        const [overview] = yield* Effect.all(
+          [operator.overview(instance), operator.overview(instance)],
+          { concurrency: "unbounded" },
+        );
+        assert(overview !== undefined);
         assert.strictEqual(yield* Ref.get(overviewReads), 1);
         yield* Ref.set(projectionRevision, Option.some(ProjectionRevision.make(2)));
         yield* operator.overview(instance);
@@ -274,29 +321,72 @@ describe("Operator", () => {
         yield* operator.overview(instance);
         yield* operator.overview(instance);
         assert.strictEqual(yield* Ref.get(overviewReads), 4);
+        // Bypassing the cache also clears its old token: once revision
+        // tracking recovers, the first request must rebuild the projection.
+        yield* Ref.set(projectionRevision, Option.some(ProjectionRevision.make(2)));
+        yield* operator.overview(instance);
+        assert.strictEqual(yield* Ref.get(overviewReads), 5);
         assert.strictEqual(overview.projects[0]?.status, "needs-you");
         assert.strictEqual(overview.loops[0]?.paused, true);
         assert.strictEqual(overview.projects[0]?.runs[0]?.loopPaused, true);
         assert.deepStrictEqual(
-          overview.needsYou.map(({ kind }) => kind),
-          ["approval", "poll-failure"],
+          overview.needsYou.map(({ _tag }) => _tag),
+          ["ApprovalNeed", "PollFailureNeed"],
         );
 
-        const detail = yield* operator.detail(runId);
+        const detail = yield* operator.detail(runId, new ColdTranscriptRequest());
         assert.strictEqual(detail.eventDedupKey, snapshot.event.dedupKey);
         assert.deepStrictEqual(detail.eventPayload, { number: 31 });
         assert.strictEqual(detail.run.attempts[0]?.number, 1);
-        assert.strictEqual(detail.transcript[0]?.scope, "parent");
-        assert.strictEqual(detail.transcript[0]?.detail, "Parent update");
-        assert.strictEqual(detail.transcript[1]?.scope, "child");
-        assert.strictEqual(detail.transcript[1]?.parentId, parent.id);
-        assert.strictEqual(detail.transcript[1]?.sessionId, child.id);
+        assert.strictEqual(detail.transcript.length, 500);
+        assert.strictEqual(detail.transcript[0]?.sequence, 3);
+        assert.strictEqual(detail.transcript[0]?.payload._tag, "SessionEvent");
+        assert.strictEqual(detail.earlierTranscript[0]?.attemptId, attemptId);
+        assert.strictEqual(detail.earlierTranscript[0]?.before, 3);
 
-        const tail = yield* operator.detail(runId, Option.some(TranscriptCursor.make(1)));
-        assert.deepStrictEqual(
-          tail.transcript.map(({ sequence }) => sequence),
-          [2],
+        const tail = yield* operator.detail(
+          runId,
+          new TailTranscriptRequest({ after: TranscriptCursor.make(1) }),
         );
+        assert.strictEqual(tail.transcript.length, 500);
+        assert.strictEqual(tail.transcript[0]?.sequence, 2);
+        assert.strictEqual(tail.transcript.at(-1)?.sequence, 501);
+        assert.deepStrictEqual(tail.earlierTranscript, []);
+        const remainingTail = yield* operator.detail(
+          runId,
+          new TailTranscriptRequest({ after: TranscriptCursor.make(501) }),
+        );
+        assert.deepStrictEqual(
+          remainingTail.transcript.map(({ sequence }) => sequence),
+          [502],
+        );
+
+        const earlier = yield* operator.detail(
+          runId,
+          new EarlierTranscriptRequest({
+            attemptId,
+            before: TranscriptCursor.make(3),
+          }),
+        );
+        assert.deepStrictEqual(
+          earlier.transcript.map(({ sequence }) => sequence),
+          [1, 2],
+        );
+        const childPayload = earlier.transcript[1]?.payload;
+        assert(childPayload?._tag === "SessionEvent");
+        assert.strictEqual(childPayload.event.session._tag, "ChildSession");
+        assert.strictEqual(childPayload.event.session.id, child.id);
+        assert.deepStrictEqual(earlier.earlierTranscript, []);
+        const wrongAttempt = yield* operator
+          .detail(
+            runId,
+            new EarlierTranscriptRequest({
+              attemptId: Attempt.AttemptId.make("another-attempt"),
+              before: TranscriptCursor.make(3),
+            }),
+          )
+          .pipe(Effect.flip);
+        assert.strictEqual(wrongAttempt._tag, "TranscriptAttemptNotFoundError");
 
         yield* operator.approve(runId);
         const approvals = yield* Ref.get(approved);
@@ -317,4 +407,23 @@ describe("Operator", () => {
       }).pipe(Effect.provide(testLayer(approved, overviewReads, projectionRevision)));
     }),
   );
+
+  it("removes nested infrastructure defect causes from operator failure schemas", () => {
+    const secret = "token=super-secret";
+    const view = failureView(
+      new AttemptFailure.InfraFailure({
+        message: "The worker connection failed",
+        cause: new Error(secret),
+      }),
+    );
+    const encoded = Schema.encodeUnknownSync(FailureView)(view);
+    const json = JSON.stringify(encoded);
+
+    assert.deepStrictEqual(encoded, {
+      _tag: "InfraFailure",
+      message: "The worker connection failed",
+    });
+    assert.strictEqual(json.includes("cause"), false);
+    assert.strictEqual(json.includes(secret), false);
+  });
 });

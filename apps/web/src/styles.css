@@ -612,6 +612,13 @@ h3,
   gap: 0.75rem;
 }
 
+.transcript-section > .load-earlier {
+  margin-bottom: 1rem;
+  border-color: var(--surface-1);
+  background: transparent;
+  color: var(--subtext);
+}
+
 .transcript-event {
   padding: 0.85rem 1rem;
   border-left: 2px solid var(--blue);

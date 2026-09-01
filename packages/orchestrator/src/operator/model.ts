@@ -1,6 +1,18 @@
-import { Agent, Attempt, Loop, Repository, Run, RunState } from "@usine/core";
+import {
+  Agent,
+  Attempt,
+  AttemptChannel,
+  AttemptFailure,
+  Loop,
+  Repository,
+  Run,
+  RunState,
+  Worker,
+} from "@usine/core";
 import { TranscriptSequence } from "@usine/engine";
 import { Schema } from "effect";
+import { RepositoryPollFailure } from "../polling-triggers.ts";
+import { ScheduleFailure } from "../schedule-triggers.ts";
 
 /** Cursor for tailing the append-only transcript without replaying older events. */
 export const TranscriptCursor = TranscriptSequence;
@@ -9,31 +21,53 @@ export type TranscriptCursor = TranscriptSequence;
 export const ProjectStatus = Schema.Literals(["clear", "active", "needs-you"]);
 export type ProjectStatus = typeof ProjectStatus.Type;
 
-export const NeedKind = Schema.Literals([
-  "approval",
-  "run-failure",
-  "poll-failure",
-  "schedule-failure",
-]);
-export type NeedKind = typeof NeedKind.Type;
-
-export const TranscriptScope = Schema.Literals(["parent", "child", "channel"]);
-export type TranscriptScope = typeof TranscriptScope.Type;
-
 export const RunStateTag = Schema.Literals(RunState.STATE_TAGS);
 export type RunStateTag = typeof RunStateTag.Type;
 
 const NullableString = Schema.NullOr(Schema.String);
 
+/** Operator-safe failure variants. Infrastructure defect causes never cross this boundary. */
+export class InfraFailureView extends Schema.TaggedClass<InfraFailureView>(
+  "@usine/orchestrator/InfraFailureView",
+)("InfraFailure", { message: Schema.String }) {}
+
+export class AgentFailureView extends Schema.TaggedClass<AgentFailureView>(
+  "@usine/orchestrator/AgentFailureView",
+)("AgentFailure", { message: Schema.String }) {}
+
+export class RunawayFailureView extends Schema.TaggedClass<RunawayFailureView>(
+  "@usine/orchestrator/RunawayFailureView",
+)("RunawayFailure", { ceiling: AttemptFailure.RunawayCeiling }) {}
+
+export const FailureView = Schema.Union([InfraFailureView, AgentFailureView, RunawayFailureView]);
+export type FailureView = typeof FailureView.Type;
+
+export class SucceededAttemptView extends Schema.TaggedClass<SucceededAttemptView>(
+  "@usine/orchestrator/SucceededAttemptView",
+)("Succeeded", {}) {}
+
+export class FailedAttemptView extends Schema.TaggedClass<FailedAttemptView>(
+  "@usine/orchestrator/FailedAttemptView",
+)("Failed", { failure: FailureView }) {}
+
+export class CanceledAttemptView extends Schema.TaggedClass<CanceledAttemptView>(
+  "@usine/orchestrator/CanceledAttemptView",
+)("Canceled", {}) {}
+
+export const AttemptOutcomeView = Schema.Union([
+  SucceededAttemptView,
+  FailedAttemptView,
+  CanceledAttemptView,
+]);
+export type AttemptOutcomeView = typeof AttemptOutcomeView.Type;
+
 export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/AttemptView")({
   id: Attempt.AttemptId,
   number: Attempt.AttemptNumber,
-  worker: Schema.String,
-  brain: Schema.String,
+  worker: Worker.Name,
+  brain: Agent.BrainSpec,
   startedAt: Schema.String,
-  outcome: NullableString,
-  errorTag: NullableString,
-  errorMessage: NullableString,
+  outcome: Schema.NullOr(AttemptOutcomeView),
 }) {}
 
 export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView")({
@@ -66,30 +100,107 @@ export class LoopView extends Schema.Class<LoopView>("@usine/orchestrator/LoopVi
   paused: Schema.Boolean,
 }) {}
 
-export class NeedView extends Schema.Class<NeedView>("@usine/orchestrator/NeedView")({
+export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
+  "@usine/orchestrator/ApprovalNeed",
+)("ApprovalNeed", {
   id: Schema.String,
-  kind: NeedKind,
-  title: Schema.String,
-  detail: Schema.String,
-  repository: Schema.NullOr(Repository.Name),
-  runId: Schema.NullOr(Run.RunId),
-  loop: Schema.NullOr(Loop.LoopName),
+  repository: Repository.Name,
+  runId: Run.RunId,
+  loop: Loop.LoopName,
 }) {}
+
+export class RunFailureNeed extends Schema.TaggedClass<RunFailureNeed>(
+  "@usine/orchestrator/RunFailureNeed",
+)("RunFailureNeed", {
+  id: Schema.String,
+  repository: Repository.Name,
+  runId: Run.RunId,
+  loop: Loop.LoopName,
+  failure: FailureView,
+}) {}
+
+export class PollFailureNeed extends Schema.TaggedClass<PollFailureNeed>(
+  "@usine/orchestrator/PollFailureNeed",
+)("PollFailureNeed", {
+  id: Schema.String,
+  failure: RepositoryPollFailure,
+}) {}
+
+export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>(
+  "@usine/orchestrator/ScheduleFailureNeed",
+)("ScheduleFailureNeed", {
+  id: Schema.String,
+  failure: ScheduleFailure,
+}) {}
+
+export const NeedView = Schema.Union([
+  ApprovalNeed,
+  RunFailureNeed,
+  PollFailureNeed,
+  ScheduleFailureNeed,
+]);
+export type NeedView = typeof NeedView.Type;
+
+export class FailedTranscriptView extends Schema.TaggedClass<FailedTranscriptView>(
+  "@usine/orchestrator/FailedTranscriptView",
+)("Failed", { failure: FailureView }) {}
+
+export const TranscriptPayload = Schema.Union([
+  AttemptChannel.Started,
+  AttemptChannel.SessionEvent,
+  AttemptChannel.Final,
+  FailedTranscriptView,
+  AttemptChannel.Interrupted,
+  AttemptChannel.Steer,
+  AttemptChannel.Interrupt,
+]);
+export type TranscriptPayload = typeof TranscriptPayload.Type;
 
 export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
   "@usine/orchestrator/TranscriptEventView",
 )({
-  sequence: Schema.Int,
+  sequence: TranscriptCursor,
   attemptId: Attempt.AttemptId,
   receivedAt: Schema.String,
-  scope: TranscriptScope,
-  kind: Schema.String,
-  sessionId: NullableString,
-  parentId: NullableString,
-  agent: NullableString,
-  label: Schema.String,
-  detail: Schema.String,
-  isError: Schema.Boolean,
+  direction: AttemptChannel.Direction,
+  payload: TranscriptPayload,
+}) {}
+
+/** Cursor for loading one earlier page without mixing Attempts across Runs. */
+export class TranscriptPageCursor extends Schema.Class<TranscriptPageCursor>(
+  "@usine/orchestrator/TranscriptPageCursor",
+)({
+  attemptId: Attempt.AttemptId,
+  before: TranscriptCursor,
+}) {}
+
+export class ColdTranscriptRequest extends Schema.TaggedClass<ColdTranscriptRequest>(
+  "@usine/orchestrator/ColdTranscriptRequest",
+)("ColdTranscriptRequest", {}) {}
+
+export class TailTranscriptRequest extends Schema.TaggedClass<TailTranscriptRequest>(
+  "@usine/orchestrator/TailTranscriptRequest",
+)("TailTranscriptRequest", { after: TranscriptCursor }) {}
+
+export class EarlierTranscriptRequest extends Schema.TaggedClass<EarlierTranscriptRequest>(
+  "@usine/orchestrator/EarlierTranscriptRequest",
+)("EarlierTranscriptRequest", {
+  attemptId: Attempt.AttemptId,
+  before: TranscriptCursor,
+}) {}
+
+export const TranscriptRequest = Schema.Union([
+  ColdTranscriptRequest,
+  TailTranscriptRequest,
+  EarlierTranscriptRequest,
+]);
+export type TranscriptRequest = typeof TranscriptRequest.Type;
+
+export class TranscriptAttemptNotFoundError extends Schema.TaggedError<TranscriptAttemptNotFoundError>(
+  "@usine/orchestrator/TranscriptAttemptNotFoundError",
+)("TranscriptAttemptNotFoundError", {
+  runId: Run.RunId,
+  attemptId: Attempt.AttemptId,
 }) {}
 
 export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestrator/RunDetailView")(
@@ -98,6 +209,7 @@ export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestra
     eventDedupKey: Schema.String,
     eventPayload: Schema.Json,
     transcript: Schema.Array(TranscriptEventView),
+    earlierTranscript: Schema.Array(TranscriptPageCursor),
   },
 ) {}
 
@@ -112,8 +224,7 @@ export class ReadyOverview extends Schema.TaggedClass<ReadyOverview>(
 export class NeedsSetupOverview extends Schema.TaggedClass<NeedsSetupOverview>(
   "@usine/orchestrator/NeedsSetupOverview",
 )("NeedsSetup", {
-  message: Schema.String,
-  errorTag: Schema.String,
+  errorTag: Schema.NonEmptyString,
   projects: Schema.Array(ProjectView),
   loops: Schema.Array(LoopView),
   needsYou: Schema.Array(NeedView),

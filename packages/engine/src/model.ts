@@ -150,18 +150,36 @@ export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engin
   },
 ) {}
 
-/**
- * Cursor query used to tail the append-only transcript. `limit` bounds a cold
- * read to the newest N rows so one long Attempt cannot balloon a response;
- * tail reads pass a cursor and stay incremental.
- */
-export class TranscriptQuery extends Schema.Class<TranscriptQuery>("@usine/engine/TranscriptQuery")(
-  {
-    attemptId: Attempt.AttemptId,
-    after: Schema.Option(TranscriptSequence),
-    limit: Schema.Option(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
-  },
-) {}
+/** Read every row for one Attempt. Intended for execution and diagnostic consumers. */
+export class TranscriptAllQuery extends Schema.TaggedClass<TranscriptAllQuery>(
+  "@usine/engine/TranscriptAllQuery",
+)("TranscriptAllQuery", { attemptId: Attempt.AttemptId }) {}
+
+/** Read rows appended after a cursor while tailing a live Attempt. */
+export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>(
+  "@usine/engine/TranscriptTailQuery",
+)("TranscriptTailQuery", {
+  attemptId: Attempt.AttemptId,
+  after: TranscriptSequence,
+  limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+}) {}
+
+/** Read the newest bounded page before a cursor, or from the current tail. */
+export class TranscriptPageQuery extends Schema.TaggedClass<TranscriptPageQuery>(
+  "@usine/engine/TranscriptPageQuery",
+)("TranscriptPageQuery", {
+  attemptId: Attempt.AttemptId,
+  before: Schema.Option(TranscriptSequence),
+  limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+}) {}
+
+/** Illegal combinations of full, tail, and backward-page reads are unrepresentable. */
+export const TranscriptQuery = Schema.Union([
+  TranscriptAllQuery,
+  TranscriptTailQuery,
+  TranscriptPageQuery,
+]);
+export type TranscriptQuery = typeof TranscriptQuery.Type;
 
 export class RunNotFoundError extends Schema.TaggedError<RunNotFoundError>(
   "@usine/engine/RunNotFoundError",

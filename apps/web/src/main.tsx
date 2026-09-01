@@ -18,15 +18,24 @@ import {
 } from "@tanstack/react-router";
 import { Run } from "@usine/core";
 import { FactoryOverview, RunDetailView } from "@usine/orchestrator";
-import type { LoopView, NeedView, RunView } from "@usine/orchestrator";
+import type { LoopView, NeedView, RunView, TranscriptPageCursor } from "@usine/orchestrator";
 import { Schema } from "effect";
 import { StrictMode, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { mergeTranscript, Transcript } from "./run-transcript.tsx";
+import { brainLine, failureMessage, needCopy } from "./operator-copy.ts";
+import {
+  mergeTranscript,
+  replaceEarlierCursor,
+  RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
+  Transcript,
+} from "./run-transcript.tsx";
 import "./styles.css";
 
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
-const ApiError = Schema.Struct({ error: Schema.String, message: Schema.String });
+const ApiError = Schema.Struct({
+  error: Schema.String,
+  message: Schema.String,
+});
 const isApiError = Schema.is(ApiError);
 const RunSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(Run.RunId) }));
 const ACTIVE_OVERVIEW_REFRESH_MS = 2_000;
@@ -139,14 +148,15 @@ const NeedStrip = ({
       <span className="strip-label">Needs you · {needs.length}</span>
       <div className="need-items">
         {needs.map((need) => {
+          const copy = needCopy(need);
           const body = (
             <>
-              <strong>{need.title}</strong>
-              <span>{need.detail}</span>
-              {need.repository !== null && <small>{need.repository}</small>}
+              <strong>{copy.title}</strong>
+              <span>{copy.detail}</span>
+              {copy.repository !== null && <small>{copy.repository}</small>}
             </>
           );
-          const runId = need.runId;
+          const runId = copy.runId;
           return runId !== null ? (
             <button
               className="need-item"
@@ -196,7 +206,7 @@ const LoopCard = ({
 const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close: () => void }) => {
   const queryClient = useQueryClient();
   const [confirmCancel, setConfirmCancel] = useState(false);
-  const detail = useQuery({
+  const detail = useQuery<RunDetailView>({
     queryKey: ["run", runId],
     queryFn: async () => {
       const key = ["run", runId] as const;
@@ -204,17 +214,22 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
       const cursor = previous?.transcript.at(-1)?.sequence;
       const search = cursor === undefined ? "" : `?after=${cursor}`;
       const next = await api(`/api/runs/${encodeURIComponent(runId)}${search}`, RunDetailView);
-      if (previous === undefined || cursor === undefined) return next;
+      const current = queryClient.getQueryData<RunDetailView>(key);
+      if (cursor === undefined || current === undefined) return next;
       return new RunDetailView({
         ...next,
-        transcript: mergeTranscript(previous.transcript, next.transcript),
+        transcript: mergeTranscript(current.transcript, next.transcript),
+        earlierTranscript: current.earlierTranscript,
       });
     },
+    structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
     refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
   });
   const mutation = useMutation({
     mutationFn: (act: "approve" | "retry" | "cancel") =>
-      api(`/api/runs/${encodeURIComponent(runId)}/${act}`, ApiOk, { method: "POST" }),
+      api(`/api/runs/${encodeURIComponent(runId)}/${act}`, ApiOk, {
+        method: "POST",
+      }),
     onSuccess: async () => {
       setConfirmCancel(false);
       await Promise.all([
@@ -223,7 +238,31 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
       ]);
     },
   });
+  const earlierMutation = useMutation({
+    mutationFn: (cursor: TranscriptPageCursor) =>
+      api(
+        `/api/runs/${encodeURIComponent(runId)}?attempt=${encodeURIComponent(cursor.attemptId)}&before=${cursor.before}`,
+        RunDetailView,
+      ),
+    onSuccess: (page, cursor) => {
+      const key = ["run", runId] as const;
+      queryClient.setQueryData<RunDetailView>(key, (previous) =>
+        previous === undefined
+          ? previous
+          : new RunDetailView({
+              ...page,
+              transcript: mergeTranscript(previous.transcript, page.transcript),
+              earlierTranscript: replaceEarlierCursor(
+                previous.earlierTranscript,
+                cursor.attemptId,
+                page.earlierTranscript,
+              ),
+            }),
+      );
+    },
+  });
   const run = detail.data?.run;
+  const earlier = detail.data?.earlierTranscript.at(-1);
   return (
     <div className="drawer-shell" role="dialog" aria-modal="true" aria-label="Run detail">
       <button
@@ -255,7 +294,8 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
               <StatusMark state={run.state} />
               <span className="annotation">{run.agent}</span>
               <span className="annotation">
-                {run.attempts.length} attempt{run.attempts.length === 1 ? "" : "s"}
+                {run.attempts.length} attempt
+                {run.attempts.length === 1 ? "" : "s"}
               </span>
             </div>
             <div className="drawer-actions">
@@ -312,15 +352,15 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
                   <article className="attempt-entry" key={attempt.id}>
                     <header>
                       <strong>Attempt {attempt.number}</strong>
-                      <StatusMark state={attempt.outcome ?? "Running"} />
+                      <StatusMark state={attempt.outcome?._tag ?? "Running"} />
                     </header>
                     <p className="annotation attempt-meta">
-                      {attempt.worker} · {attempt.brain} · {timeAgo(attempt.startedAt)}
+                      {attempt.worker} · {brainLine(attempt.brain)} · {timeAgo(attempt.startedAt)}
                     </p>
-                    {attempt.errorTag !== null && (
+                    {attempt.outcome?._tag === "Failed" && (
                       <p className="attempt-error">
-                        <strong>{attempt.errorTag}</strong>
-                        {attempt.errorMessage === null ? "" : ` — ${attempt.errorMessage}`}
+                        <strong>{attempt.outcome.failure._tag}</strong>
+                        {` — ${failureMessage(attempt.outcome.failure)}`}
                       </p>
                     )}
                   </article>
@@ -340,6 +380,18 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
             )}
             <section className="drawer-section transcript-section">
               <h3>Live transcript</h3>
+              {earlier !== undefined && (
+                <ActionButton
+                  className="load-earlier"
+                  disabled={earlierMutation.isPending}
+                  onClick={() => earlierMutation.mutate(earlier)}
+                >
+                  {earlierMutation.isPending ? "Loading…" : "Load earlier"}
+                </ActionButton>
+              )}
+              {earlierMutation.isError && (
+                <p className="error-panel">{earlierMutation.error.message}</p>
+              )}
               <Transcript events={detail.data?.transcript ?? []} />
             </section>
           </>
@@ -401,7 +453,11 @@ const FactoryScreen = () => {
         <section className="setup-banner">
           <p className="eyebrow">Setup required · {data.errorTag}</p>
           <h1>The floor is ready. GitHub is not connected yet.</h1>
-          <p>{data.message}</p>
+          <p>
+            Add <code>USINE_GITHUB_APP_ID</code> and <code>USINE_GITHUB_PRIVATE_KEY</code>, or
+            create <code>.usine/github-app.json</code> with mode 0600. Then stop and rerun{" "}
+            <code>usine up</code>: the running process reads credentials only when it starts.
+          </p>
         </section>
       )}
       <NeedStrip needs={data.needsYou} openRun={openRun} />
@@ -421,7 +477,8 @@ const FactoryScreen = () => {
                   <div>
                     <h2>{project.repository}</h2>
                     <p className="annotation">
-                      {project.runs.length} recorded run{project.runs.length === 1 ? "" : "s"}
+                      {project.runs.length} recorded run
+                      {project.runs.length === 1 ? "" : "s"}
                     </p>
                   </div>
                   <span className={`project-status project-${project.status}`}>

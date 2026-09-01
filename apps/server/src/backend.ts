@@ -6,10 +6,10 @@ import type {
   OperatorObservation,
   OperatorError,
   RunDetailView,
-  TranscriptCursor,
+  TranscriptRequest,
 } from "@usine/orchestrator";
 import { NeedsSetupOverview } from "@usine/orchestrator";
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Context, Effect, Layer, Schema } from "effect";
 
 export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailableError>(
   "@usine/server/BackendUnavailableError",
@@ -25,7 +25,7 @@ export class FactoryBackend extends Context.Service<
     readonly overview: Effect.Effect<FactoryOverview, BackendError>;
     readonly detail: (
       runId: Run.RunId,
-      after: Option.Option<TranscriptCursor>,
+      request: TranscriptRequest,
     ) => Effect.Effect<RunDetailView, BackendError>;
     readonly approve: (runId: Run.RunId) => Effect.Effect<void, BackendError>;
     readonly retry: (runId: Run.RunId) => Effect.Effect<void, BackendError>;
@@ -52,7 +52,6 @@ export const liveBackendLayer = (
 export const needsSetupBackendLayer = (
   instance: LoadedInstance,
   errorTag: string,
-  message: string,
   observation: OperatorObservation["Service"],
 ): Layer.Layer<FactoryBackend> => {
   const unavailable = new BackendUnavailableError({
@@ -63,7 +62,7 @@ export const needsSetupBackendLayer = (
     .pipe(
       Effect.map(
         ({ projects, loops, needsYou }) =>
-          new NeedsSetupOverview({ errorTag, message, projects, loops, needsYou }),
+          new NeedsSetupOverview({ errorTag, projects, loops, needsYou }),
       ),
     );
   const fail = () => Effect.fail(unavailable);

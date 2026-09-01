@@ -17,7 +17,14 @@ import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { CursorKey } from "../src/cursor/model.ts";
 import { CursorStore } from "../src/cursor/store.ts";
 import { LoopControl } from "../src/loop-control.ts";
-import { InstanceDirectory, Submission } from "../src/model.ts";
+import {
+  InstanceDirectory,
+  Submission,
+  TranscriptAllQuery,
+  TranscriptPageQuery,
+  TranscriptSequence,
+  TranscriptTailQuery,
+} from "../src/model.ts";
 import { RunStore } from "../src/store/store.ts";
 
 const testAgent = new Agent.Agent({
@@ -127,12 +134,75 @@ describe("run store", () => {
             payload: new AttemptChannel.Started({ parentModel: effectiveParentModel }),
           }),
         );
+        const parent = new Agent.ParentSession({
+          id: Agent.SessionId.make("store-parent"),
+          agent: testAgent.name,
+          brain: testAgent.brain,
+        });
+        for (const sequence of [2, 3] as const) {
+          yield* store.appendTranscript(
+            "outbound",
+            new AttemptChannel.OutboundEnvelope({
+              version: AttemptChannel.PROTOCOL_VERSION,
+              attemptId,
+              sequence: AttemptChannel.Sequence.make(sequence),
+              sentAt: DateTime.makeUnsafe(`2026-08-25T00:00:0${sequence}Z`),
+              payload: new AttemptChannel.SessionEvent({
+                event: new Agent.TextOutput({ session: parent, text: `update ${sequence}` }),
+              }),
+            }),
+          );
+        }
 
         const snapshot = yield* store.snapshot(runId);
         assert.deepStrictEqual(snapshot.attempts[0]?.brain, testAgent.brain);
         assert.deepStrictEqual(
           snapshot.attempts[0]?.parentModel,
           Option.some(effectiveParentModel),
+        );
+        const all = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
+        const first = all[0];
+        const last = all[2];
+        assert(first !== undefined && last !== undefined);
+        assert.deepStrictEqual(
+          all.map(({ sequence }) => sequence),
+          [1, 2, 3],
+        );
+        assert.deepStrictEqual(
+          (yield* store.transcript(
+            new TranscriptTailQuery({ attemptId, after: first.sequence, limit: 1 }),
+          )).map(({ sequence }) => sequence),
+          [2],
+        );
+        assert.deepStrictEqual(
+          (yield* store.transcript(
+            new TranscriptTailQuery({
+              attemptId,
+              after: TranscriptSequence.make(2),
+              limit: 1,
+            }),
+          )).map(({ sequence }) => sequence),
+          [3],
+        );
+        assert.deepStrictEqual(
+          (yield* store.transcript(
+            new TranscriptPageQuery({
+              attemptId,
+              before: Option.none(),
+              limit: 2,
+            }),
+          )).map(({ sequence }) => sequence),
+          [2, 3],
+        );
+        assert.deepStrictEqual(
+          (yield* store.transcript(
+            new TranscriptPageQuery({
+              attemptId,
+              before: Option.some(last.sequence),
+              limit: 2,
+            }),
+          )).map(({ sequence }) => sequence),
+          [1, 2],
         );
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
     }).pipe(Effect.provide(NodeServices.layer)),

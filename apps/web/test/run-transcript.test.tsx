@@ -1,30 +1,57 @@
-import { Attempt } from "@usine/core";
-import { TranscriptEventView } from "@usine/orchestrator";
+import { Agent, Attempt, AttemptChannel } from "@usine/core";
+import { TranscriptEventView, TranscriptPageCursor, TranscriptCursor } from "@usine/orchestrator";
+import { QueryClient } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import { mergeTranscript, Transcript } from "../src/run-transcript.tsx";
+import {
+  mergeTranscript,
+  replaceEarlierCursor,
+  RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
+  Transcript,
+} from "../src/run-transcript.tsx";
 
 const attemptId = Attempt.AttemptId.make("attempt-31");
+const brain = new Agent.BrainSpec({
+  harness: "codex",
+  model: Agent.ModelId.make("gpt-5"),
+  effort: "high",
+});
 
 const event = (
   sequence: number,
-  label: string,
+  text: string,
   scope: "parent" | "child" | "channel" = "parent",
   session = `${scope}-session`,
-) =>
-  new TranscriptEventView({
-    sequence,
+) => {
+  const agent = Agent.Name.make(scope === "child" ? `agent-${session}` : "developer");
+  const sessionView =
+    scope === "child"
+      ? new Agent.ChildSession({
+          id: Agent.SessionId.make(session),
+          parentId: Agent.SessionId.make("parent-session"),
+          agent,
+          brain,
+        })
+      : new Agent.ParentSession({
+          id: Agent.SessionId.make(session),
+          agent,
+          brain,
+        });
+  return new TranscriptEventView({
+    sequence: TranscriptCursor.make(sequence),
     attemptId,
     receivedAt: "2026-09-01T12:00:00.000Z",
-    scope,
-    kind: "text-output",
-    sessionId: scope === "channel" ? null : session,
-    parentId: scope === "child" ? "parent-session" : null,
-    agent: scope === "child" ? `agent-${session}` : "developer",
-    label,
-    detail: `${label} detail`,
-    isError: false,
+    direction: "outbound",
+    payload:
+      scope === "channel"
+        ? new AttemptChannel.Started({
+            parentModel: Agent.ModelId.make("gpt-5"),
+          })
+        : new AttemptChannel.SessionEvent({
+            event: new Agent.TextOutput({ session: sessionView, text }),
+          }),
   });
+};
 
 describe("run transcript", () => {
   it("renders parent activity inline and groups each child session one level deep", () => {
@@ -42,7 +69,7 @@ describe("run transcript", () => {
     assert.strictEqual((markup.match(/<details/g) ?? []).length, 1);
     assert.match(markup, /agent-child-session activity.*2 events/);
     assert.ok(markup.indexOf("Parent update") < markup.indexOf("activity"));
-    assert.ok(markup.indexOf("activity") < markup.indexOf("Channel notice"));
+    assert.ok(markup.indexOf("activity") < markup.indexOf("Attempt started"));
   });
 
   it("keeps concurrent child sessions distinct, each anchored at its own first event", () => {
@@ -67,12 +94,93 @@ describe("run transcript", () => {
     const merged = mergeTranscript([second, first], [second, event(3, "Third")]);
 
     assert.deepStrictEqual(
-      merged.map(({ sequence, label }) => [sequence, label]),
+      merged.map(({ sequence, payload }) => [
+        sequence,
+        payload._tag === "SessionEvent" && payload.event._tag === "TextOutput"
+          ? payload.event.text
+          : payload._tag,
+      ]),
       [
         [1, "First"],
         [2, "Second"],
         [3, "Third"],
       ],
+    );
+  });
+
+  it("replaces only the cursor for the Attempt whose earlier page was loaded", () => {
+    const firstAttempt = Attempt.AttemptId.make("attempt-1");
+    const secondAttempt = Attempt.AttemptId.make("attempt-2");
+    const cursors = [
+      new TranscriptPageCursor({
+        attemptId: firstAttempt,
+        before: TranscriptCursor.make(100),
+      }),
+      new TranscriptPageCursor({
+        attemptId: secondAttempt,
+        before: TranscriptCursor.make(200),
+      }),
+    ];
+    const replaced = replaceEarlierCursor(cursors, secondAttempt, [
+      new TranscriptPageCursor({
+        attemptId: secondAttempt,
+        before: TranscriptCursor.make(50),
+      }),
+    ]);
+
+    assert.deepStrictEqual(
+      replaced.map(({ attemptId, before }) => [attemptId, before]),
+      [
+        [secondAttempt, 50],
+        [firstAttempt, 100],
+      ],
+    );
+  });
+
+  it("advances manual earlier-page cursors through the TanStack cache until exhaustion", () => {
+    const queryClient = new QueryClient();
+    const key = ["run", "run-31"] as const;
+    queryClient.setQueryDefaults(["run"], {
+      structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
+    });
+    queryClient.setQueryData(key, {
+      earlierTranscript: [
+        new TranscriptPageCursor({
+          attemptId,
+          before: TranscriptCursor.make(300),
+        }),
+      ],
+    });
+
+    for (const before of [200, 100] as const) {
+      queryClient.setQueryData<{ earlierTranscript: ReadonlyArray<TranscriptPageCursor> }>(
+        key,
+        (previous) => ({
+          earlierTranscript: replaceEarlierCursor(previous?.earlierTranscript ?? [], attemptId, [
+            new TranscriptPageCursor({
+              attemptId,
+              before: TranscriptCursor.make(before),
+            }),
+          ]),
+        }),
+      );
+      const current = queryClient.getQueryData<{
+        earlierTranscript: ReadonlyArray<TranscriptPageCursor>;
+      }>(key)?.earlierTranscript[0]?.before;
+      assert(current !== undefined);
+      assert.strictEqual(current, TranscriptCursor.make(before));
+    }
+
+    queryClient.setQueryData<{ earlierTranscript: ReadonlyArray<TranscriptPageCursor> }>(
+      key,
+      (previous) => ({
+        earlierTranscript: replaceEarlierCursor(previous?.earlierTranscript ?? [], attemptId, []),
+      }),
+    );
+    assert.deepStrictEqual(
+      queryClient.getQueryData<{ earlierTranscript: ReadonlyArray<TranscriptPageCursor> }>(key)
+        ?.earlierTranscript,
+      [],
     );
   });
 });

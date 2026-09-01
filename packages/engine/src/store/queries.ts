@@ -10,9 +10,9 @@ import {
   StepResult,
 } from "@usine/core";
 import type { Agent } from "@usine/core";
-import { and, asc, desc, eq, gt, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { DateTime, Effect, Option, Schema } from "effect";
+import { DateTime, Effect, Match, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import {
   approvals,
@@ -548,13 +548,24 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const transcript = Effect.fn("RunStoreQueries.transcript")(function* (query: TranscriptQuery) {
-    const cursor = Option.match(query.after, {
-      onNone: () => eq(attemptTranscripts.attemptId, query.attemptId),
-      onSome: (sequence) =>
-        and(
-          eq(attemptTranscripts.attemptId, query.attemptId),
-          gt(attemptTranscripts.sequence, sequence),
-        ),
+    yield* Effect.annotateCurrentSpan({
+      attemptId: query.attemptId,
+      query: query._tag,
+    });
+
+    const cursor = Match.valueTags(query, {
+      TranscriptAllQuery: ({ attemptId }) => eq(attemptTranscripts.attemptId, attemptId),
+      TranscriptTailQuery: ({ attemptId, after }) =>
+        and(eq(attemptTranscripts.attemptId, attemptId), gt(attemptTranscripts.sequence, after)),
+      TranscriptPageQuery: ({ attemptId, before }) =>
+        Option.match(before, {
+          onNone: () => eq(attemptTranscripts.attemptId, attemptId),
+          onSome: (sequence) =>
+            and(
+              eq(attemptTranscripts.attemptId, attemptId),
+              lt(attemptTranscripts.sequence, sequence),
+            ),
+        }),
     });
     const selection = database
       .select({
@@ -568,9 +579,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .where(cursor);
     // A limited read walks the tail index backwards for the newest N rows and
     // re-sorts ascending, so callers always receive append order.
-    const rows = yield* Option.match(query.limit, {
-      onNone: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
-      onSome: (limit) =>
+    const rows = yield* Match.valueTags(query, {
+      TranscriptAllQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
+      TranscriptTailQuery: ({ limit }) =>
+        selection.orderBy(asc(attemptTranscripts.sequence)).limit(limit).execute(),
+      TranscriptPageQuery: ({ limit }) =>
         selection.orderBy(desc(attemptTranscripts.sequence)).limit(limit).execute(),
     });
     // Transcript rows are usine-owned: an unknown key is corruption, not tolerance.

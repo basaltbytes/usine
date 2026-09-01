@@ -28,7 +28,8 @@ import {
   StepExecution,
   StepExecutor,
   Submission,
-  TranscriptQuery,
+  TranscriptAllQuery,
+  TranscriptTailQuery,
 } from "@usine/engine";
 import { stepExecutorLayer } from "../src/index.ts";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
@@ -39,7 +40,12 @@ import { layer as localLayer } from "../src/local.ts";
 const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
 const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
 const TOKEN = "one-attempt-test-token";
+// Each live transition crosses real git worktree and child-process boundaries;
+// the 10-second poll horizon absorbs slow shared CI hosts while the 10 ms cadence
+// still reports the last durable state when a transition genuinely stalls.
 const STATE_POLL_ATTEMPTS = 1_000;
+// The capacity test completes three sequential run-host lifecycles, so its
+// per-test ceiling must cover more than one state-poll horizon plus cleanup.
 const LIVE_TEST_TIMEOUT = 30_000;
 const testAgent = new Agent.Agent({
   name: Agent.Name.make("developer"),
@@ -199,11 +205,7 @@ describe("local worker", () => {
           );
 
           const transcript = yield* engine.transcript(
-            new TranscriptQuery({
-              attemptId: attempt.id,
-              after: Option.none(),
-              limit: Option.none(),
-            }),
+            new TranscriptAllQuery({ attemptId: attempt.id }),
           );
           assert.deepStrictEqual(
             transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
@@ -218,10 +220,10 @@ describe("local worker", () => {
           const firstTranscriptEntry = transcript[0];
           assert(firstTranscriptEntry !== undefined);
           const tail = yield* engine.transcript(
-            new TranscriptQuery({
+            new TranscriptTailQuery({
               attemptId: attempt.id,
-              after: Option.some(firstTranscriptEntry.sequence),
-              limit: Option.none(),
+              after: firstTranscriptEntry.sequence,
+              limit: 100,
             }),
           );
           assert.deepStrictEqual(
@@ -254,11 +256,7 @@ describe("local worker", () => {
           assert(attempt !== undefined);
           for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
             const transcript = yield* engine.transcript(
-              new TranscriptQuery({
-                attemptId: attempt.id,
-                after: Option.none(),
-                limit: Option.none(),
-              }),
+              new TranscriptAllQuery({ attemptId: attempt.id }),
             );
             if (transcript.some(({ envelope }) => envelope.payload._tag === "Started")) break;
             yield* Effect.sleep("10 millis");
@@ -269,11 +267,7 @@ describe("local worker", () => {
           assert.strictEqual(canceled.attempts.length, 1);
 
           const transcript = yield* engine.transcript(
-            new TranscriptQuery({
-              attemptId: attempt.id,
-              after: Option.none(),
-              limit: Option.none(),
-            }),
+            new TranscriptAllQuery({ attemptId: attempt.id }),
           );
           assert(
             transcript.some(

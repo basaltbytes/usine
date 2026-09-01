@@ -1,16 +1,35 @@
 import { createServer } from "node:http";
 import { resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
-import { Loop, Run } from "@usine/core";
-import { FactoryOverview, RunDetailView, TranscriptCursor } from "@usine/orchestrator";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Attempt, Loop, Run } from "@usine/core";
+import {
+  ColdTranscriptRequest,
+  EarlierTranscriptRequest,
+  FactoryOverview,
+  RunDetailView,
+  TailTranscriptRequest,
+  TranscriptCursor,
+  type TranscriptRequest,
+} from "@usine/orchestrator";
+import { Effect, Layer, Match, Schema } from "effect";
 import { HttpBody, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { FactoryBackend, type BackendError } from "./backend.ts";
 
 const PathRun = Schema.Struct({ runId: Run.RunId });
 const PathLoop = Schema.Struct({ loop: Loop.LoopName });
 const TranscriptCursorFromString = Schema.FiniteFromString.pipe(Schema.decodeTo(TranscriptCursor));
-const RunDetailSearch = Schema.Struct({ after: Schema.optional(TranscriptCursorFromString) });
+const RunDetailSearch = Schema.Union([
+  Schema.Struct({ _tag: Schema.Literal("ColdTranscriptRequest") }),
+  Schema.Struct({
+    _tag: Schema.Literal("TailTranscriptRequest"),
+    after: TranscriptCursorFromString,
+  }),
+  Schema.Struct({
+    _tag: Schema.Literal("EarlierTranscriptRequest"),
+    attemptId: Attempt.AttemptId,
+    before: TranscriptCursorFromString,
+  }),
+]);
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
 const ApiError = Schema.Struct({ error: Schema.String, message: Schema.String });
 const ok = HttpServerResponse.schemaJson(ApiOk);
@@ -26,6 +45,11 @@ const errorResponse = (error: RouteError) => {
         return {
           status: 409,
           message: `Cannot ${error.operation} Run ${error.runId} while it is ${error.state}.`,
+        } as const;
+      case "TranscriptAttemptNotFoundError":
+        return {
+          status: 404,
+          message: `Attempt ${error.attemptId} does not belong to Run ${error.runId}.`,
         } as const;
       case "BackendUnavailableError":
         return { status: 503, message: error.message } as const;
@@ -116,6 +140,33 @@ const loopAction = (
     }),
   );
 
+const transcriptRequest = (
+  request: HttpServerRequest.HttpServerRequest,
+): Effect.Effect<TranscriptRequest, Schema.SchemaError> => {
+  const params = new URL(request.url, "http://localhost").searchParams;
+  const after = params.get("after");
+  const before = params.get("before");
+  const attemptId = params.get("attempt");
+  const input: unknown =
+    after === null && before === null && attemptId === null
+      ? { _tag: "ColdTranscriptRequest" }
+      : after !== null && before === null && attemptId === null
+        ? { _tag: "TailTranscriptRequest", after }
+        : after === null && before !== null && attemptId !== null
+          ? { _tag: "EarlierTranscriptRequest", attemptId, before }
+          : { _tag: "InvalidTranscriptRequest" };
+  return Schema.decodeUnknownEffect(RunDetailSearch)(input, { onExcessProperty: "error" }).pipe(
+    Effect.map((search) =>
+      Match.valueTags(search, {
+        ColdTranscriptRequest: () => new ColdTranscriptRequest(),
+        TailTranscriptRequest: ({ after }) => new TailTranscriptRequest({ after }),
+        EarlierTranscriptRequest: ({ attemptId, before }) =>
+          new EarlierTranscriptRequest({ attemptId, before }),
+      }),
+    ),
+  );
+};
+
 export const apiRoutes = HttpRouter.addAll([
   HttpRouter.route(
     "GET",
@@ -132,11 +183,8 @@ export const apiRoutes = HttpRouter.addAll([
       Effect.gen(function* () {
         const backend = yield* FactoryBackend;
         const { runId } = yield* HttpRouter.schemaPathParams(PathRun);
-        const { after } = yield* Schema.decodeUnknownEffect(RunDetailSearch)({
-          after: new URL(request.url, "http://localhost").searchParams.get("after") ?? undefined,
-        });
         return yield* HttpServerResponse.schemaJson(RunDetailView)(
-          yield* backend.detail(runId, Option.fromUndefinedOr(after)),
+          yield* backend.detail(runId, yield* transcriptRequest(request)),
         );
       }),
     ),

@@ -1,11 +1,15 @@
-import type { TranscriptEventView } from "@usine/orchestrator";
+import type { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator";
 import { useMemo } from "react";
+import { presentTranscriptEvent, type PresentedTranscriptEvent } from "./operator-copy.ts";
+
+/** Manual earlier-page cursor writes must pass through the TanStack cache unchanged. */
+export const RUN_DETAIL_CACHE_STRUCTURAL_SHARING = false;
 
 interface TranscriptGroup {
   readonly key: string;
   readonly sequence: number;
   readonly agent: string | null;
-  readonly events: ReadonlyArray<TranscriptEventView>;
+  readonly events: ReadonlyArray<PresentedTranscriptEvent>;
 }
 
 type TranscriptItem =
@@ -13,7 +17,7 @@ type TranscriptItem =
   | {
       readonly key: string;
       readonly sequence: number;
-      readonly event: TranscriptEventView;
+      readonly event: PresentedTranscriptEvent;
     };
 
 export const mergeTranscript = (
@@ -27,7 +31,16 @@ export const mergeTranscript = (
   return [...merged.values()].sort((left, right) => left.sequence - right.sequence);
 };
 
-const TranscriptEvent = ({ event }: { readonly event: TranscriptEventView }) => (
+export const replaceEarlierCursor = (
+  previous: ReadonlyArray<TranscriptPageCursor>,
+  attempted: TranscriptPageCursor["attemptId"],
+  next: ReadonlyArray<TranscriptPageCursor>,
+): ReadonlyArray<TranscriptPageCursor> =>
+  [...previous.filter(({ attemptId }) => attemptId !== attempted), ...next].sort(
+    (left, right) => left.before - right.before,
+  );
+
+const TranscriptEvent = ({ event }: { readonly event: PresentedTranscriptEvent }) => (
   <article className={`transcript-event ${event.isError ? "event-error" : ""}`}>
     <header>
       <span>{event.label}</span>
@@ -49,7 +62,8 @@ export const Transcript = ({ events }: { readonly events: ReadonlyArray<Transcri
     // event, so concurrent children stay distinct and the parent/child
     // interleaving stays chronological (ADR 0008: one level deep).
     const groups = new Map<string, TranscriptGroup>();
-    for (const event of events) {
+    const presented = events.map(presentTranscriptEvent);
+    for (const event of presented) {
       if (event.scope !== "child" || event.sessionId === null) continue;
       const current = groups.get(event.sessionId);
       groups.set(event.sessionId, {
@@ -60,9 +74,13 @@ export const Transcript = ({ events }: { readonly events: ReadonlyArray<Transcri
       });
     }
     const feed: Array<TranscriptItem> = [
-      ...events
+      ...presented
         .filter((event) => event.scope !== "child")
-        .map((event) => ({ key: `event:${event.sequence}`, sequence: event.sequence, event })),
+        .map((event) => ({
+          key: `event:${event.sequence}`,
+          sequence: event.sequence,
+          event,
+        })),
       ...groups.values(),
     ];
     return feed.sort((left, right) => left.sequence - right.sequence);
