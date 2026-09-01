@@ -31,6 +31,5 @@ argument-hint: <issue-or-pr number> [notes]
 5. **Surface** — README per touched package; changesets for every package whose published
    surface changed, siblings included; PR body through `public-facing-copy`.
 
-6. **Ship** — gate green, push, CI green on the PR. `pnpm dlx balade generate <PR> --budget high` then
-   `pnpm dlx balade check`; commit the walkthrough under `.agents/walkthroughs/` stamped at the head
-   it documents. A generator caution is a review finding: fix it, restamp, push again.
+6. **Ship** — gate green, push, CI green on the PR. The balade GitHub App generates
+   `.agents/walkthroughs/` in CI; never write or refresh those files by hand.
