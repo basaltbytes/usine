@@ -83,7 +83,7 @@ describe("run store", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.live("writes the effective Started models back onto the Attempt", () =>
+  it.live("writes the effective parent model back onto the Attempt", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
@@ -107,11 +107,6 @@ describe("run store", () => {
         parentModel: Option.none(),
       });
       const runId = Run.RunId.make("started-run");
-      const effectiveBrain = new Agent.BrainSpec({
-        harness: "codex",
-        model: Agent.ModelId.make("gpt-5.6-terra"),
-        effort: "medium",
-      });
       const effectiveParentModel = Agent.ModelId.make("openai/gpt-5.6-sol");
 
       yield* Effect.gen(function* () {
@@ -128,17 +123,12 @@ describe("run store", () => {
             attemptId,
             sequence: AttemptChannel.Sequence.make(1),
             sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
-            payload: new AttemptChannel.Started({
-              spawned: new AttemptChannel.SpawnedSpec({
-                brain: effectiveBrain,
-                parentModel: effectiveParentModel,
-              }),
-            }),
+            payload: new AttemptChannel.Started({ parentModel: effectiveParentModel }),
           }),
         );
 
         const snapshot = yield* store.snapshot(runId);
-        assert.deepStrictEqual(snapshot.attempts[0]?.brain, effectiveBrain);
+        assert.deepStrictEqual(snapshot.attempts[0]?.brain, testAgent.brain);
         assert.deepStrictEqual(
           snapshot.attempts[0]?.parentModel,
           Option.some(effectiveParentModel),

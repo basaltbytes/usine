@@ -87,9 +87,7 @@ describe("attempt channel v3", () => {
         sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
         payload,
       });
-    const started = new AttemptChannel.Started({
-      spawned: new AttemptChannel.SpawnedSpec({ brain: agent.brain, parentModel }),
-    });
+    const started = new AttemptChannel.Started({ parentModel });
     const sessionEvent = new AttemptChannel.SessionEvent({
       event: new Agent.SessionStarted({
         session: new Agent.ParentSession({

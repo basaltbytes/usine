@@ -190,14 +190,7 @@ export const runHost = () =>
         return;
       }
       const session = launched.success;
-      yield* emit(
-        new AttemptChannel.Started({
-          spawned: new AttemptChannel.SpawnedSpec({
-            brain: spec.agent.brain,
-            parentModel: session.session.brain.model,
-          }),
-        }),
-      );
+      yield* emit(new AttemptChannel.Started({ parentModel: session.session.brain.model }));
       const eventFiber = yield* session.events.pipe(
         Stream.runForEach((event) => emit(new AttemptChannel.SessionEvent({ event }))),
         Effect.forkChild,

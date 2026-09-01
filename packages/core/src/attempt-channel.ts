@@ -43,14 +43,14 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
   parentModel: Schema.OptionFromNullOr(ModelId),
 }) {}
 
-/** The effective models selected when the run host successfully launches an Attempt. */
-export class SpawnedSpec extends Schema.Class<SpawnedSpec>("AttemptChannel/SpawnedSpec")({
-  brain: Agent.fields.brain,
-  parentModel: ModelId,
-}) {}
-
+/**
+ * The parent model the SDK actually selected at launch — the one effective
+ * value the run host knows that the roster may not declare. Child sessions
+ * spawn later; their effective brains ride the transcript's `SessionStarted`
+ * events (declare by roster, observe by record).
+ */
 export class Started extends Schema.TaggedClass<Started>("AttemptChannel/Started")("Started", {
-  spawned: SpawnedSpec,
+  parentModel: ModelId,
 }) {}
 
 /** One normalized parent or child session event, persisted in the Attempt transcript. */

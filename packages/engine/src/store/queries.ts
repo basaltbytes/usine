@@ -222,16 +222,13 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
-  const updateAttemptSpawnedSpec = Effect.fn("RunStoreQueries.updateAttemptSpawnedSpec")(function* (
+  const updateAttemptParentModel = Effect.fn("RunStoreQueries.updateAttemptParentModel")(function* (
     attemptId: Attempt.AttemptId,
-    spawned: AttemptChannel.SpawnedSpec,
+    parentModel: Agent.ModelId,
   ) {
     yield* database
       .update(attempts)
-      .set({
-        brainJson: encodeBrainSpec(spawned.brain),
-        parentModel: spawned.parentModel,
-      })
+      .set({ parentModel })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
   });
@@ -614,7 +611,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     snapshot,
     transcript,
     updateStepResult,
-    updateAttemptSpawnedSpec,
+    updateAttemptParentModel,
     updateState,
   } as const;
 };

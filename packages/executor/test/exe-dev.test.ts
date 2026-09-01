@@ -171,10 +171,7 @@ const interactiveHandle = (command: StandardCommand, state: FakeSshState, mode: 
                 sequence: AttemptChannel.Sequence.make(1),
                 sentAt: DateTime.makeUnsafe("2026-08-31T12:00:00Z"),
                 payload: new AttemptChannel.Started({
-                  spawned: new AttemptChannel.SpawnedSpec({
-                    brain: input.spec.agent.brain,
-                    parentModel: TEST_SESSION.brain.model,
-                  }),
+                  parentModel: TEST_SESSION.brain.model,
                 }),
               }),
             );
