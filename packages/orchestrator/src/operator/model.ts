@@ -1,3 +1,4 @@
+import { Agent, Attempt, Loop, Repository, Run, RunState } from "@usine/core";
 import { TranscriptSequence } from "@usine/engine";
 import { Schema } from "effect";
 
@@ -19,11 +20,14 @@ export type NeedKind = typeof NeedKind.Type;
 export const TranscriptScope = Schema.Literals(["parent", "child", "channel"]);
 export type TranscriptScope = typeof TranscriptScope.Type;
 
+export const RunStateTag = Schema.Literals(RunState.STATE_TAGS);
+export type RunStateTag = typeof RunStateTag.Type;
+
 const NullableString = Schema.NullOr(Schema.String);
 
 export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/AttemptView")({
-  id: Schema.String,
-  number: Schema.Int,
+  id: Attempt.AttemptId,
+  number: Attempt.AttemptNumber,
   worker: Schema.String,
   brain: Schema.String,
   startedAt: Schema.String,
@@ -33,11 +37,12 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
 }) {}
 
 export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView")({
-  id: Schema.String,
-  loop: Schema.String,
-  repository: Schema.String,
-  agent: Schema.String,
-  state: Schema.String,
+  id: Run.RunId,
+  loop: Loop.LoopName,
+  repository: Repository.Name,
+  agent: Agent.Name,
+  state: RunStateTag,
+  loopPaused: Schema.Boolean,
   openedAt: Schema.String,
   task: Schema.String,
   attempts: Schema.Array(AttemptView),
@@ -49,15 +54,15 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
 }) {}
 
 export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/ProjectView")({
-  repository: Schema.String,
+  repository: Repository.Name,
   status: ProjectStatus,
   runs: Schema.Array(RunView),
 }) {}
 
 export class LoopView extends Schema.Class<LoopView>("@usine/orchestrator/LoopView")({
-  name: Schema.String,
+  name: Loop.LoopName,
   trigger: Schema.String,
-  agent: Schema.String,
+  agent: Agent.Name,
   paused: Schema.Boolean,
 }) {}
 
@@ -66,16 +71,16 @@ export class NeedView extends Schema.Class<NeedView>("@usine/orchestrator/NeedVi
   kind: NeedKind,
   title: Schema.String,
   detail: Schema.String,
-  repository: NullableString,
-  runId: NullableString,
-  loop: NullableString,
+  repository: Schema.NullOr(Repository.Name),
+  runId: Schema.NullOr(Run.RunId),
+  loop: Schema.NullOr(Loop.LoopName),
 }) {}
 
 export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
   "@usine/orchestrator/TranscriptEventView",
 )({
   sequence: Schema.Int,
-  attemptId: Schema.String,
+  attemptId: Attempt.AttemptId,
   receivedAt: Schema.String,
   scope: TranscriptScope,
   kind: Schema.String,

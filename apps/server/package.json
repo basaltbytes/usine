@@ -33,6 +33,7 @@
     "effect": "catalog:"
   },
   "devDependencies": {
+    "@usine/engine": "workspace:*",
     "@usine/tsconfig": "workspace:*",
     "@usine/web": "workspace:*",
     "typescript": "catalog:",

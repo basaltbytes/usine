@@ -78,18 +78,18 @@ const scheduleFailureLogFields = (error: ScheduleTriggerError) => {
 };
 
 /** One schedule loop whose authored Agent disappeared from the loaded roster. */
-export class ScheduleAgentFailure extends Schema.Class<ScheduleAgentFailure>(
+export class ScheduleAgentFailure extends Schema.TaggedClass<ScheduleAgentFailure>(
   "@usine/orchestrator/ScheduleAgentFailure",
-)({
+)("ScheduleAgentFailure", {
   loop: Loop.LoopName,
   agent: Agent.Name,
   message: Schema.String,
 }) {}
 
 /** One selected repository whose scheduled Tick could not be evaluated or submitted. */
-export class ScheduleTickFailure extends Schema.Class<ScheduleTickFailure>(
+export class ScheduleTickFailure extends Schema.TaggedClass<ScheduleTickFailure>(
   "@usine/orchestrator/ScheduleTickFailure",
-)({
+)("ScheduleTickFailure", {
   loop: Loop.LoopName,
   repository: Repository.Name,
   scheduledAt: Schema.DateTimeUtc,
@@ -102,9 +102,9 @@ export class ScheduleTickFailure extends Schema.Class<ScheduleTickFailure>(
  * effect's Cron.prev/next can fail inside a DST spring-forward gap even for a
  * cron that parsed cleanly. The schedule retries next cycle; siblings run.
  */
-export class ScheduleCronFailure extends Schema.Class<ScheduleCronFailure>(
+export class ScheduleCronFailure extends Schema.TaggedClass<ScheduleCronFailure>(
   "@usine/orchestrator/ScheduleCronFailure",
-)({
+)("ScheduleCronFailure", {
   loop: Loop.LoopName,
   cron: Schema.String,
   tz: Schema.String,

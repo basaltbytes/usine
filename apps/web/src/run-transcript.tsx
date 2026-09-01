@@ -4,6 +4,7 @@ import { useMemo } from "react";
 interface TranscriptGroup {
   readonly key: string;
   readonly sequence: number;
+  readonly agent: string | null;
   readonly events: ReadonlyArray<TranscriptEventView>;
 }
 
@@ -44,13 +45,17 @@ const TranscriptEvent = ({ event }: { readonly event: TranscriptEventView }) => 
 
 export const Transcript = ({ events }: { readonly events: ReadonlyArray<TranscriptEventView> }) => {
   const feed = useMemo(() => {
+    // One collapsible group per child session, anchored at its own first
+    // event, so concurrent children stay distinct and the parent/child
+    // interleaving stays chronological (ADR 0008: one level deep).
     const groups = new Map<string, TranscriptGroup>();
     for (const event of events) {
-      if (event.scope !== "child" || event.parentId === null) continue;
-      const current = groups.get(event.parentId);
-      groups.set(event.parentId, {
-        key: `child:${event.parentId}`,
+      if (event.scope !== "child" || event.sessionId === null) continue;
+      const current = groups.get(event.sessionId);
+      groups.set(event.sessionId, {
+        key: `child:${event.sessionId}`,
         sequence: Math.min(current?.sequence ?? event.sequence, event.sequence),
+        agent: current?.agent ?? event.agent,
         events: [...(current?.events ?? []), event],
       });
     }
@@ -72,7 +77,7 @@ export const Transcript = ({ events }: { readonly events: ReadonlyArray<Transcri
         ) : (
           <details className="child-activity" key={item.key}>
             <summary>
-              Child activity <span>{item.events.length} events</span>
+              {item.agent ?? "Child"} activity <span>{item.events.length} events</span>
             </summary>
             <div>
               {item.events.map((event) => (

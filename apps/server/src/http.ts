@@ -4,7 +4,7 @@ import { NodeHttpServer } from "@effect/platform-node";
 import { Loop, Run } from "@usine/core";
 import { FactoryOverview, RunDetailView, TranscriptCursor } from "@usine/orchestrator";
 import { Effect, Layer, Option, Schema } from "effect";
-import { HttpBody, HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import { HttpBody, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { FactoryBackend, type BackendError } from "./backend.ts";
 
 const PathRun = Schema.Struct({ runId: Run.RunId });
@@ -51,8 +51,40 @@ const errorResponse = (error: RouteError) => {
   ).pipe(Effect.orDie);
 };
 
+const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
+
+/**
+ * Cross-site request forgery guard. Browsers attach `Origin` to every
+ * cross-origin request — including the "simple" POSTs this API accepts — so a
+ * present, non-loopback origin can only be another site driving the
+ * operator's browser, and its side effect must be refused before the handler
+ * runs. Requests without the header (curl, same-origin GETs) pass through.
+ */
+const crossSiteOrigin = (request: HttpServerRequest.HttpServerRequest): boolean => {
+  const origin = request.headers.origin;
+  if (origin === undefined) return false;
+  try {
+    return !LOOPBACK_HOSTS.has(new URL(origin).hostname);
+  } catch {
+    return true;
+  }
+};
+
 const handled = <A, E extends RouteError, R>(effect: Effect.Effect<A, E, R>) =>
-  effect.pipe(Effect.catch(errorResponse));
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    if (crossSiteOrigin(request)) {
+      yield* Effect.logWarning("Cross-site request to the operator API was refused", {
+        origin: request.headers.origin,
+        url: request.url,
+      });
+      return yield* HttpServerResponse.schemaJson(ApiError)(
+        { error: "CrossSiteRequestError", message: "Cross-site requests are refused." },
+        { status: 403 },
+      ).pipe(Effect.orDie);
+    }
+    return yield* effect.pipe(Effect.catch(errorResponse));
+  });
 
 const runAction = (
   action: (
@@ -148,7 +180,12 @@ export const staticRoutes = (webRoot: string) => {
           return HttpServerResponse.text("Not found", { status: 404 });
         }
         return yield* HttpServerResponse.file(asset).pipe(
-          Effect.catch(() => Effect.succeed(HttpServerResponse.text("Not found", { status: 404 }))),
+          Effect.catch((error) =>
+            Effect.logDebug("Static asset could not be served", {
+              asset,
+              message: String(error),
+            }).pipe(Effect.as(HttpServerResponse.text("Not found", { status: 404 }))),
+          ),
         );
       }),
     ),

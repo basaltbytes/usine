@@ -1,4 +1,4 @@
-import { RunState, StepResult } from "@usine/core";
+import { Agent, AttemptChannel, AttemptFailure, Loop, RunState, StepResult } from "@usine/core";
 import {
   RunReader,
   TranscriptQuery,
@@ -7,7 +7,7 @@ import {
   type RunSummary,
   type TranscriptEntry,
 } from "@usine/engine";
-import { DateTime, Effect, Option, Schema } from "effect";
+import { DateTime, Effect, Match, Option, Schema } from "effect";
 import {
   AttemptView,
   RunView,
@@ -16,11 +16,26 @@ import {
   type TranscriptScope,
 } from "./model.ts";
 
-const jsonDetail = (value: Schema.Json): string => JSON.stringify(value, null, 2) ?? "null";
+/**
+ * Newest rows one cold drawer open ships per Attempt; a "load earlier" page
+ * over the same cursor is deliberately deferred until the dogfood needs it.
+ */
+export const COLD_TRANSCRIPT_LIMIT = 500;
 
-const failureMessage = (failure: { readonly _tag: string; readonly message?: string }): string =>
-  failure.message ??
-  (failure._tag === "RunawayFailure" ? "Attempt exceeded its safety ceiling" : failure._tag);
+const jsonDetail = (value: Schema.Json): string => JSON.stringify(value, null, 2);
+
+const brainLine = (brain: {
+  readonly harness: string;
+  readonly model: string;
+  readonly effort: string;
+}): string => `${brain.harness} · ${brain.model} · ${brain.effort}`;
+
+const failureMessage = (failure: AttemptFailure.AttemptFailure): string =>
+  Match.valueTags(failure, {
+    InfraFailure: ({ message }) => message,
+    AgentFailure: ({ message }) => message,
+    RunawayFailure: ({ ceiling }) => `Runaway guard tripped its ${ceiling} ceiling`,
+  });
 
 const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
   const outcome = Option.getOrNull(attempt.outcome);
@@ -29,7 +44,7 @@ const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
     id: attempt.id,
     number: attempt.number,
     worker: attempt.worker,
-    brain: `${attempt.brain.harness} · ${attempt.brain.model} · ${attempt.brain.effort}`,
+    brain: brainLine(attempt.brain),
     startedAt: DateTime.formatIso(attempt.startedAt),
     outcome: outcome?._tag ?? null,
     errorTag: failure?._tag ?? null,
@@ -37,7 +52,7 @@ const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
   });
 };
 
-export const runView = (snapshot: RunSummary): RunView => {
+export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<Loop.LoopName>): RunView => {
   const result = Option.getOrNull(snapshot.step.result);
   const pullRequest = result?.facts.find(
     (fact): fact is StepResult.PullRequest => fact._tag === "PullRequest",
@@ -48,6 +63,7 @@ export const runView = (snapshot: RunSummary): RunView => {
     repository: snapshot.repository,
     agent: snapshot.agent.name,
     state: snapshot.run.state._tag,
+    loopPaused: pausedLoops.has(snapshot.run.loop),
     openedAt: DateTime.formatIso(snapshot.run.openedAt),
     task: snapshot.task,
     attempts: snapshot.attempts.map(attemptView),
@@ -59,73 +75,101 @@ export const runView = (snapshot: RunSummary): RunView => {
   });
 };
 
-const transcriptEvent = (entry: TranscriptEntry): TranscriptEventView => {
-  const payload = entry.envelope.payload;
-  let scope: TranscriptScope = "channel";
-  let sessionId: string | null = null;
-  let parentId: string | null = null;
-  let agent: string | null = null;
-  let label: string = payload._tag;
-  let detail = "";
-  let isError = false;
+interface ProjectedTranscriptEvent {
+  readonly scope: TranscriptScope;
+  readonly kind: string;
+  readonly sessionId: string | null;
+  readonly parentId: string | null;
+  readonly agent: string | null;
+  readonly label: string;
+  readonly detail: string;
+  readonly isError: boolean;
+}
 
-  if (payload._tag === "SessionEvent") {
-    const event = payload.event;
-    const session = event.session;
-    scope = session._tag === "ChildSession" ? "child" : "parent";
-    sessionId = session.id;
-    parentId = session._tag === "ChildSession" ? session.parentId : null;
-    agent = session.agent;
-    switch (event._tag) {
-      case "SessionStarted":
-        label = `${session.agent} started`;
-        detail = `${session.brain.harness} · ${session.brain.model} · ${session.brain.effort}`;
-        break;
-      case "TextOutput":
-        label = session.agent;
-        detail = event.text;
-        break;
-      case "ToolStarted":
-        label = `${event.tool} started`;
-        detail = jsonDetail(event.input);
-        break;
-      case "ToolFinished":
-        label = `${event.tool} ${event.isError ? "failed" : "finished"}`;
-        detail = jsonDetail(event.output);
-        isError = event.isError;
-        break;
-      case "SessionFinished":
-        label = `${session.agent} finished`;
-        break;
-    }
-  } else if (payload._tag === "Final") {
-    label = "Attempt finished";
-    detail = payload.result.message;
-  } else if (payload._tag === "Failed") {
-    label = payload.failure._tag;
-    detail = failureMessage(payload.failure);
-    isError = true;
-  } else if (payload._tag === "Steer") {
-    label = "Operator message";
-    detail = payload.message;
-  } else if (payload._tag === "Interrupted") {
-    detail = "The run host acknowledged the interrupt.";
-  }
+const channelEvent = (kind: string, label: string, detail: string, isError = false) => ({
+  scope: "channel" as const,
+  kind,
+  sessionId: null,
+  parentId: null,
+  agent: null,
+  label,
+  detail,
+  isError,
+});
 
-  return new TranscriptEventView({
+const rateLimitWindow = (
+  name: string,
+  window: Option.Option<Agent.RateLimitWindow>,
+): ReadonlyArray<string> =>
+  Option.match(window, {
+    onNone: () => [],
+    onSome: ({ usedPercent }) => [`${name} ${usedPercent}% used`],
+  });
+
+const projectSessionEvent = (event: Agent.SessionEvent): ProjectedTranscriptEvent => {
+  const session = event.session;
+  const scope: TranscriptScope = session._tag === "ChildSession" ? "child" : "parent";
+  const base = {
+    scope,
+    kind: event._tag,
+    sessionId: session.id,
+    parentId: session._tag === "ChildSession" ? session.parentId : null,
+    agent: session.agent,
+    detail: "",
+    isError: false,
+  };
+  return Match.valueTags(event, {
+    SessionStarted: () => ({
+      ...base,
+      label: `${session.agent} started`,
+      detail: brainLine(session.brain),
+    }),
+    TextOutput: ({ text }) => ({ ...base, label: session.agent, detail: text }),
+    ToolStarted: ({ tool, input }) => ({
+      ...base,
+      label: `${tool} started`,
+      detail: jsonDetail(input),
+    }),
+    ToolFinished: ({ tool, output, isError }) => ({
+      ...base,
+      label: `${tool} ${isError ? "failed" : "finished"}`,
+      detail: jsonDetail(output),
+      isError,
+    }),
+    PoolRateLimitsUpdated: ({ pool, rateLimits }) => ({
+      ...base,
+      label: `${pool} rate limits updated`,
+      detail: [
+        ...rateLimitWindow("primary", rateLimits.primary),
+        ...rateLimitWindow("secondary", rateLimits.secondary),
+      ].join(" · "),
+    }),
+    SessionFinished: () => ({ ...base, label: `${session.agent} finished` }),
+  });
+};
+
+const projectPayload = (
+  payload: AttemptChannel.OutboundPayload | AttemptChannel.InboundPayload,
+): ProjectedTranscriptEvent =>
+  Match.valueTags(payload, {
+    Started: ({ parentModel }) => channelEvent("Started", "Attempt started", parentModel),
+    SessionEvent: ({ event }) => projectSessionEvent(event),
+    Final: ({ result }) => channelEvent("Final", "Attempt finished", result.message),
+    Failed: ({ failure }) => channelEvent("Failed", failure._tag, failureMessage(failure), true),
+    Interrupted: () =>
+      channelEvent("Interrupted", "Interrupted", "The run host acknowledged the interrupt."),
+    Steer: ({ message }) => channelEvent("Steer", "Operator message", message),
+    Interrupt: () =>
+      channelEvent("Interrupt", "Interrupt", "The operator asked the run host to stop."),
+  });
+
+const transcriptEvent = (entry: TranscriptEntry): TranscriptEventView =>
+  new TranscriptEventView({
     sequence: entry.sequence,
     attemptId: entry.attemptId,
     receivedAt: DateTime.formatIso(entry.receivedAt),
-    scope,
-    kind: payload._tag === "SessionEvent" ? payload.event._tag : payload._tag,
-    sessionId,
-    parentId,
-    agent,
-    label,
-    detail,
-    isError,
+    ...projectPayload(entry.envelope.payload),
   });
-};
 
 export const readTranscript: (
   runs: RunReader["Service"],
@@ -140,9 +184,12 @@ export const readTranscript: (
     after: Option.Option<TranscriptCursor> = Option.none(),
   ): Effect.Effect<ReadonlyArray<TranscriptEventView>, RunStoreError> =>
     Effect.gen(function* () {
+      // A cold read (no cursor) is capped per Attempt so one long transcript
+      // cannot balloon the response; a tail read replays nothing anyway.
+      const limit = Option.isNone(after) ? Option.some(COLD_TRANSCRIPT_LIMIT) : Option.none();
       const entries = yield* Effect.forEach(
         snapshot.attempts,
-        (attempt) => runs.transcript(new TranscriptQuery({ attemptId: attempt.id, after })),
+        (attempt) => runs.transcript(new TranscriptQuery({ attemptId: attempt.id, after, limit })),
         { concurrency: 4 },
       );
       return entries

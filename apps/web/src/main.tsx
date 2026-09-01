@@ -26,9 +26,22 @@ import { mergeTranscript, Transcript } from "./run-transcript.tsx";
 import "./styles.css";
 
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
+const ApiError = Schema.Struct({ error: Schema.String, message: Schema.String });
+const isApiError = Schema.is(ApiError);
 const RunSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(Run.RunId) }));
 const ACTIVE_OVERVIEW_REFRESH_MS = 2_000;
 const IDLE_OVERVIEW_REFRESH_MS = 15_000;
+
+const errorMessage = async (response: Response): Promise<string> => {
+  const body = await response.text();
+  try {
+    const parsed: unknown = JSON.parse(body);
+    if (isApiError(parsed)) return parsed.message;
+  } catch {
+    // Not the ApiError envelope; fall through to the raw body.
+  }
+  return body || `Request failed with status ${response.status}`;
+};
 
 const api = async <S extends Schema.Codec<unknown, unknown, never, unknown>>(
   path: string,
@@ -36,10 +49,7 @@ const api = async <S extends Schema.Codec<unknown, unknown, never, unknown>>(
   init?: RequestInit,
 ): Promise<S["Type"]> => {
   const response = await fetch(path, init);
-  if (!response.ok) {
-    const message = await response.text();
-    throw new Error(message || `Request failed with status ${response.status}`);
-  }
+  if (!response.ok) throw new Error(await errorMessage(response));
   return Schema.decodeUnknownPromise(schema)(await response.json());
 };
 
@@ -66,7 +76,7 @@ const timeAgo = (value: string): string => {
   return `${Math.floor(elapsed / 86_400_000)}d`;
 };
 
-const jsonGist = (value: Schema.Json): string => JSON.stringify(value, null, 2) ?? "null";
+const jsonGist = (value: Schema.Json): string => JSON.stringify(value, null, 2);
 
 const StatusMark = ({ state }: { readonly state: string }) => (
   <span className={`status-mark state-${state.toLowerCase()}`} aria-label={state}>
@@ -90,11 +100,16 @@ const ActionButton = ({
   </button>
 );
 
+const PausedMark = () => <span className="paused-mark">paused</span>;
+
 const RunRow = ({ run, open }: { readonly run: RunView; readonly open: () => void }) => (
   <button className="run-row" onClick={open} type="button">
     <span className="run-route">
       <strong>{run.loop}</strong>
-      <small>{run.agent}</small>
+      <small>
+        {run.agent}
+        {run.loopPaused && <PausedMark />}
+      </small>
     </span>
     <StatusMark state={run.state} />
     <span className="annotation">{timeAgo(run.openedAt)}</span>
@@ -109,7 +124,7 @@ const NeedStrip = ({
   openRun,
 }: {
   readonly needs: ReadonlyArray<NeedView>;
-  readonly openRun: (runId: string) => void;
+  readonly openRun: (runId: Run.RunId) => void;
 }) => {
   if (needs.length === 0) {
     return (
@@ -123,25 +138,36 @@ const NeedStrip = ({
     <section className="needs-strip" aria-label="Items needing intervention">
       <span className="strip-label">Needs you · {needs.length}</span>
       <div className="need-items">
-        {needs.map((need) => (
-          <button
-            className="need-item"
-            disabled={need.runId === null}
-            key={need.id}
-            onClick={() => need.runId !== null && openRun(need.runId)}
-            type="button"
-          >
-            <strong>{need.title}</strong>
-            <span>{need.detail}</span>
-            {need.repository !== null && <small>{need.repository}</small>}
-          </button>
-        ))}
+        {needs.map((need) => {
+          const body = (
+            <>
+              <strong>{need.title}</strong>
+              <span>{need.detail}</span>
+              {need.repository !== null && <small>{need.repository}</small>}
+            </>
+          );
+          const runId = need.runId;
+          return runId !== null ? (
+            <button
+              className="need-item"
+              key={need.id}
+              onClick={() => openRun(runId)}
+              type="button"
+            >
+              {body}
+            </button>
+          ) : (
+            <article className="need-item need-notice" key={need.id}>
+              {body}
+            </article>
+          );
+        })}
       </div>
     </section>
   );
 };
 
-const LoopControl = ({
+const LoopCard = ({
   loop,
   act,
   pending,
@@ -167,7 +193,7 @@ const LoopControl = ({
   </article>
 );
 
-const RunDrawer = ({ runId, close }: { readonly runId: string; readonly close: () => void }) => {
+const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close: () => void }) => {
   const queryClient = useQueryClient();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const detail = useQuery({
@@ -214,6 +240,7 @@ const RunDrawer = ({ runId, close }: { readonly runId: string; readonly close: (
             {run !== undefined && (
               <p className="annotation">
                 {run.repository} · {run.id}
+                {run.loopPaused && <PausedMark />}
               </p>
             )}
           </div>
@@ -288,7 +315,7 @@ const RunDrawer = ({ runId, close }: { readonly runId: string; readonly close: (
                       <StatusMark state={attempt.outcome ?? "Running"} />
                     </header>
                     <p className="annotation attempt-meta">
-                      {attempt.worker} · {attempt.brain} · started {timeAgo(attempt.startedAt)} ago
+                      {attempt.worker} · {attempt.brain} · {timeAgo(attempt.startedAt)}
                     </p>
                     {attempt.errorTag !== null && (
                       <p className="attempt-error">
@@ -336,7 +363,7 @@ const FactoryScreen = () => {
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["overview"] }),
   });
-  const openRun = (runId: string) => navigate({ search: { run: runId } });
+  const openRun = (runId: Run.RunId) => navigate({ search: { run: runId } });
   const closeRun = () => navigate({ search: {} });
 
   if (overview.isPending)
@@ -422,7 +449,7 @@ const FactoryScreen = () => {
           <p className="aside-copy">Runtime controls. Authored loop files remain untouched.</p>
           <div className="loop-list">
             {data.loops.map((loop) => (
-              <LoopControl
+              <LoopCard
                 key={loop.name}
                 loop={loop}
                 pending={pauseMutation.isPending || data._tag === "NeedsSetup"}

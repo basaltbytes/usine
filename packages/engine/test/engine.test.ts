@@ -175,7 +175,7 @@ describe("durable run engine", () => {
           const engine = yield* RunEngine;
           const reader = yield* RunReader;
           const controls = yield* LoopControl;
-          const initialRevision = yield* reader.revision();
+          const initialRevision = Option.getOrThrow(yield* reader.revision());
           const first = yield* engine.submit(
             submission({ number: 1, item: "listed-one", approval: "required" }),
           );
@@ -186,7 +186,7 @@ describe("durable run engine", () => {
           yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
           yield* waitFor(engine, second.runId, ({ run }) => run.state._tag === "Succeeded");
 
-          const listed = yield* reader.list();
+          const listed = yield* reader.list({ closedLimit: 100 });
           assert.deepStrictEqual(
             listed.map(({ run }) => run.id),
             [second.runId, first.runId],
@@ -196,10 +196,17 @@ describe("durable run engine", () => {
             Option.getOrUndefined(listed[0]?.step.result ?? Option.none())?.message,
             "listed result",
           );
-          const runRevision = yield* reader.revision();
+          // The closed window bounds settled history, but an open Run — here
+          // the older Waiting one — must never fall out of the operator's view.
+          const bounded = yield* reader.list({ closedLimit: 0 });
+          assert.deepStrictEqual(
+            bounded.map(({ run }) => run.id),
+            [first.runId],
+          );
+          const runRevision = Option.getOrThrow(yield* reader.revision());
           assert(runRevision > initialRevision);
           yield* controls.pause(Loop.LoopName.make("review"));
-          assert((yield* reader.revision()) > runRevision);
+          assert(Option.getOrThrow(yield* reader.revision()) > runRevision);
         }).pipe(Effect.provide(runtime));
       }),
     ),

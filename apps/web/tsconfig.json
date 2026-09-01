@@ -1,6 +1,6 @@
 {
   "extends": "@usine/tsconfig/base.json",
-  "include": ["src", "vite.config.ts"],
+  "include": ["src", "test", "vite.config.ts"],
   "compilerOptions": {
     "jsx": "react-jsx",
     "module": "ESNext",

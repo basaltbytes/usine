@@ -4,16 +4,14 @@ import {
   LoopControl,
   RunEngine,
   RunReader,
+  type LoopRuntimeState,
+  type EnginePersistenceError,
   type RunEngineError,
   type RunStoreError,
 } from "@usine/engine";
-import { Context, DateTime, Effect, Layer, Option, Ref } from "effect";
+import { Context, DateTime, Effect, Layer, Match, Option, Ref } from "effect";
 import { PollingTriggers } from "../polling-triggers.ts";
-import {
-  ScheduleAgentFailure,
-  ScheduleCronFailure,
-  ScheduleTriggers,
-} from "../schedule-triggers.ts";
+import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import {
   LoopView,
   NeedView,
@@ -26,11 +24,22 @@ import {
 import { readTranscript, runView } from "./projection.ts";
 
 export type OperatorError = RunEngineError;
+export type OperatorObservationError = RunStoreError;
+
+/** Settled Runs kept in the overview beside every open one; history stays bounded. */
+const OVERVIEW_CLOSED_RUNS = 100;
 
 interface CachedOverview {
   readonly token: string;
   readonly overview: ReadyOverview;
 }
+
+const scheduleFailureTitle = (failure: ScheduleFailure): string =>
+  Match.valueTags(failure, {
+    ScheduleAgentFailure: ({ _tag }) => _tag,
+    ScheduleCronFailure: ({ _tag }) => _tag,
+    ScheduleTickFailure: ({ errorTag }) => errorTag,
+  });
 
 const makeOperatorObservation = Effect.gen(function* () {
   const reader = yield* RunReader;
@@ -52,24 +61,29 @@ const makeOperatorObservation = Effect.gen(function* () {
       onNone: () => [],
       onSome: ({ failures }) => failures,
     });
-    const token = JSON.stringify([
-      revision,
-      instance.config.repos.map(({ name }) => name),
-      instance.loops.map(({ name, agent, trigger }) => [name, agent, trigger.on]),
-      pollFailures,
-      scheduleFailures,
-    ]);
+    // A missing invalidation singleton means staleness is undetectable, so the
+    // cache is bypassed entirely rather than trusted.
+    const token = Option.map(revision, (value) =>
+      JSON.stringify([
+        value,
+        instance.config.repos.map(({ name }) => name),
+        instance.loops.map(({ name, agent, trigger }) => [name, agent, trigger.on]),
+        pollFailures,
+        scheduleFailures,
+      ]),
+    );
     const cached = yield* Ref.get(cache);
-    if (Option.isSome(cached) && cached.value.token === token) {
+    if (Option.isSome(token) && Option.isSome(cached) && cached.value.token === token.value) {
       yield* Effect.logDebug("Reusing unchanged operator overview", { revision });
       return cached.value.overview;
     }
 
-    const [snapshots, states] = yield* Effect.all([reader.list(), controls.states] as const, {
-      concurrency: "unbounded",
-    });
+    const [snapshots, states] = yield* Effect.all(
+      [reader.list({ closedLimit: OVERVIEW_CLOSED_RUNS }), controls.states] as const,
+      { concurrency: "unbounded" },
+    );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const views = snapshots.map(runView);
+    const views = snapshots.map((snapshot) => runView(snapshot, paused));
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
       const projectRuns = runsByRepository.get(view.repository) ?? [];
@@ -128,7 +142,7 @@ const makeOperatorObservation = Effect.gen(function* () {
     pollFailures.forEach((failure, index) => {
       needsYou.push(
         new NeedView({
-          id: `poll-failure:${failure.repository}:${index}`,
+          id: `poll-failure:${failure.repository}:${failure.errorTag}:${index}`,
           kind: "poll-failure",
           title: failure.errorTag,
           detail: failure.message,
@@ -139,28 +153,26 @@ const makeOperatorObservation = Effect.gen(function* () {
       );
     });
     scheduleFailures.forEach((failure, index) => {
-      const title =
-        "errorTag" in failure
-          ? failure.errorTag
-          : failure instanceof ScheduleCronFailure
-            ? "ScheduleCronFailure"
-            : failure instanceof ScheduleAgentFailure
-              ? "ScheduleAgentFailure"
-              : "ScheduleFailure";
       needsYou.push(
         new NeedView({
-          id: `schedule-failure:${failure.loop}:${index}`,
+          id: `schedule-failure:${failure.loop}:${failure._tag}:${index}`,
           kind: "schedule-failure",
-          title,
+          title: scheduleFailureTitle(failure),
           detail: failure.message,
-          repository: "repository" in failure ? failure.repository : null,
+          repository: failure._tag === "ScheduleTickFailure" ? failure.repository : null,
           runId: null,
           loop: failure.loop,
         }),
       );
     });
     const projected = new ReadyOverview({ projects, loops, needsYou });
-    yield* Ref.set(cache, Option.some({ token, overview: projected }));
+    yield* Option.match(token, {
+      onNone: () =>
+        Effect.logWarning(
+          "Projection revision singleton is missing; the overview cache is bypassed",
+        ),
+      onSome: (value) => Ref.set(cache, Option.some({ token: value, overview: projected })),
+    });
     yield* Effect.logDebug("Refreshed operator overview", {
       revision,
       runs: views.length,
@@ -174,9 +186,13 @@ const makeOperatorObservation = Effect.gen(function* () {
     after: Option.Option<TranscriptCursor> = Option.none(),
   ) {
     yield* Effect.annotateCurrentSpan({ runId });
-    const snapshot = yield* reader.inspect(runId);
+    const [snapshot, states] = yield* Effect.all(
+      [reader.inspect(runId), controls.states] as const,
+      { concurrency: "unbounded" },
+    );
+    const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     return new RunDetailView({
-      run: runView(snapshot),
+      run: runView(snapshot, paused),
       eventDedupKey: snapshot.event.dedupKey,
       eventPayload: snapshot.event.payload,
       transcript: yield* readTranscript(reader, snapshot, after),
@@ -189,7 +205,15 @@ const makeOperatorObservation = Effect.gen(function* () {
 /** Read-only operator surface; safe to build without trigger execution. */
 export class OperatorObservation extends Context.Service<
   OperatorObservation,
-  Effect.Success<typeof makeOperatorObservation>
+  {
+    readonly overview: (
+      instance: LoadedInstance,
+    ) => Effect.Effect<ReadyOverview, OperatorObservationError>;
+    readonly detail: (
+      runId: Run.RunId,
+      after?: Option.Option<TranscriptCursor>,
+    ) => Effect.Effect<RunDetailView, OperatorObservationError>;
+  }
 >()("@usine/orchestrator/OperatorObservation") {
   static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation);
 }
@@ -224,21 +248,37 @@ const makeOperator = Effect.gen(function* () {
   const cancel = Effect.fn("Operator.cancel")(function* (runId: Run.RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.cancel(runId);
+    yield* Effect.logInfo("Operator canceled Run", { runId });
   });
 
-  const pause = Effect.fn("Operator.pause")((loop: Loop.LoopName) => controls.pause(loop));
-  const unpause = Effect.fn("Operator.unpause")((loop: Loop.LoopName) => controls.unpause(loop));
+  const pause = Effect.fn("Operator.pause")(function* (loop: Loop.LoopName) {
+    yield* Effect.annotateCurrentSpan({ loop });
+    return yield* controls.pause(loop);
+  });
+  const unpause = Effect.fn("Operator.unpause")(function* (loop: Loop.LoopName) {
+    yield* Effect.annotateCurrentSpan({ loop });
+    return yield* controls.unpause(loop);
+  });
 
   return { ...observation, approve, cancel, pause, retry, unpause } as const;
 });
 
 /** Observe-and-intervene application service; transports only translate this API. */
-export class Operator extends Context.Service<Operator, Effect.Success<typeof makeOperator>>()(
-  "@usine/orchestrator/Operator",
-) {
+export class Operator extends Context.Service<
+  Operator,
+  OperatorObservation["Service"] & {
+    readonly approve: (runId: Run.RunId) => Effect.Effect<void, OperatorError>;
+    readonly retry: (runId: Run.RunId) => Effect.Effect<void, OperatorError>;
+    readonly cancel: (runId: Run.RunId) => Effect.Effect<void, OperatorError>;
+    readonly pause: (
+      loop: Loop.LoopName,
+    ) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+    readonly unpause: (
+      loop: Loop.LoopName,
+    ) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+  }
+>()("@usine/orchestrator/Operator") {
   static readonly layer = Layer.effect(Operator, makeOperator).pipe(
     Layer.provide(OperatorObservation.layer),
   );
 }
-
-export type OperatorObservationError = RunStoreError;

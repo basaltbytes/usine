@@ -199,7 +199,11 @@ describe("local worker", () => {
           );
 
           const transcript = yield* engine.transcript(
-            new TranscriptQuery({ attemptId: attempt.id, after: Option.none() }),
+            new TranscriptQuery({
+              attemptId: attempt.id,
+              after: Option.none(),
+              limit: Option.none(),
+            }),
           );
           assert.deepStrictEqual(
             transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
@@ -217,6 +221,7 @@ describe("local worker", () => {
             new TranscriptQuery({
               attemptId: attempt.id,
               after: Option.some(firstTranscriptEntry.sequence),
+              limit: Option.none(),
             }),
           );
           assert.deepStrictEqual(
@@ -249,7 +254,11 @@ describe("local worker", () => {
           assert(attempt !== undefined);
           for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
             const transcript = yield* engine.transcript(
-              new TranscriptQuery({ attemptId: attempt.id, after: Option.none() }),
+              new TranscriptQuery({
+                attemptId: attempt.id,
+                after: Option.none(),
+                limit: Option.none(),
+              }),
             );
             if (transcript.some(({ envelope }) => envelope.payload._tag === "Started")) break;
             yield* Effect.sleep("10 millis");
@@ -260,7 +269,11 @@ describe("local worker", () => {
           assert.strictEqual(canceled.attempts.length, 1);
 
           const transcript = yield* engine.transcript(
-            new TranscriptQuery({ attemptId: attempt.id, after: Option.none() }),
+            new TranscriptQuery({
+              attemptId: attempt.id,
+              after: Option.none(),
+              limit: Option.none(),
+            }),
           );
           assert(
             transcript.some(

@@ -10,7 +10,7 @@ import {
   StepResult,
 } from "@usine/core";
 import type { Agent } from "@usine/core";
-import { and, asc, desc, eq, gt, inArray, isNull, ne, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { DateTime, Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
@@ -187,22 +187,45 @@ export const queriesFor = (database: RunDatabaseClient) => {
     });
   });
 
-  const runSummaries = Effect.fn("RunStoreQueries.runSummaries")(function* () {
-    const [storedRuns, storedAttempts] = yield* Effect.all([
+  // Every open Run plus the newest `closedLimit` settled ones: an old Waiting
+  // run can never fall out of the operator's view, while total history stays
+  // bounded no matter how long the factory has been running.
+  const runSummaries = Effect.fn("RunStoreQueries.runSummaries")(function* (closedLimit: number) {
+    const [openRuns, closedRuns] = yield* Effect.all([
       database
         .select(runSelection)
         .from(runs)
         .innerJoin(steps, eq(steps.runId, runs.runId))
+        .where(openState)
         .orderBy(desc(runs.openedAt), desc(runs.runId))
         .execute()
         .pipe(Effect.flatMap(decodeRunRows)),
       database
-        .select(attemptSelection)
-        .from(attempts)
-        .orderBy(asc(attempts.runId), asc(attempts.attemptNumber))
+        .select(runSelection)
+        .from(runs)
+        .innerJoin(steps, eq(steps.runId, runs.runId))
+        .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
+        .orderBy(desc(runs.openedAt), desc(runs.runId))
+        .limit(closedLimit)
         .execute()
-        .pipe(Effect.flatMap(decodeAttemptRows)),
+        .pipe(Effect.flatMap(decodeRunRows)),
     ]);
+    const storedRuns = [...openRuns, ...closedRuns].sort(
+      (left, right) =>
+        DateTime.toEpochMillis(right.openedAt) - DateTime.toEpochMillis(left.openedAt) ||
+        (right.runId > left.runId ? 1 : -1),
+    );
+    const runIds = storedRuns.map(({ runId }) => runId);
+    const storedAttempts =
+      runIds.length === 0
+        ? []
+        : yield* database
+            .select(attemptSelection)
+            .from(attempts)
+            .where(inArray(attempts.runId, runIds))
+            .orderBy(asc(attempts.runId), asc(attempts.attemptNumber))
+            .execute()
+            .pipe(Effect.flatMap(decodeAttemptRows));
     const attemptsByRun = new Map<Run.RunId, Array<(typeof storedAttempts)[number]>>();
     for (const attempt of storedAttempts) {
       const grouped = attemptsByRun.get(attempt.runId) ?? [];
@@ -533,7 +556,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           gt(attemptTranscripts.sequence, sequence),
         ),
     });
-    const rows = yield* database
+    const selection = database
       .select({
         sequence: attemptTranscripts.sequence,
         attemptId: attemptTranscripts.attemptId,
@@ -542,13 +565,18 @@ export const queriesFor = (database: RunDatabaseClient) => {
         receivedAt: attemptTranscripts.receivedAt,
       })
       .from(attemptTranscripts)
-      .where(cursor)
-      .orderBy(asc(attemptTranscripts.sequence))
-      .execute();
+      .where(cursor);
+    // A limited read walks the tail index backwards for the newest N rows and
+    // re-sorts ascending, so callers always receive append order.
+    const rows = yield* Option.match(query.limit, {
+      onNone: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
+      onSome: (limit) =>
+        selection.orderBy(desc(attemptTranscripts.sequence)).limit(limit).execute(),
+    });
     // Transcript rows are usine-owned: an unknown key is corruption, not tolerance.
-    return (yield* decodeTranscriptRows(rows, { onExcessProperty: "error" })).map(
-      transcriptEntryFromRow,
-    );
+    return (yield* decodeTranscriptRows(rows, { onExcessProperty: "error" }))
+      .map(transcriptEntryFromRow)
+      .sort((left, right) => left.sequence - right.sequence);
   });
 
   const recoverable = Effect.fn("RunStoreQueries.recoverable")(function* () {

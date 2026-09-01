@@ -66,9 +66,20 @@ const up = Effect.scoped(
     const context = yield* Layer.build(runtime);
     const operator = Context.get(context, Operator);
     const orchestrator = Context.get(context, Orchestrator);
-    yield* Effect.forkScoped(orchestrator.run(instance));
     yield* Console.log(`usine is running at ${url}`);
-    return yield* Layer.launch(serverLayer(liveBackendLayer(instance, operator), webRoot, PORT));
+    // Racing instead of forking: a defect in either the trigger streams or the
+    // HTTP server takes the whole process down loudly, never leaving a green
+    // "live" UI over a dead factory.
+    return yield* Effect.raceFirst(
+      Layer.launch(serverLayer(liveBackendLayer(instance, operator), webRoot, PORT)),
+      orchestrator
+        .run(instance)
+        .pipe(
+          Effect.tapCause((cause) =>
+            Effect.logFatal("Trigger streams stopped; shutting the server down", { cause }),
+          ),
+        ),
+    );
   }),
 );
 

@@ -100,7 +100,7 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   parentModel: Schema.Option(Agent.ModelId),
 }) {}
 
-/** Lightweight durable projection used when listing every Run for operators. */
+/** Lightweight durable projection used when listing Runs for operators. */
 export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSummary")({
   run: Run.Run,
   step: Step.Step,
@@ -150,11 +150,16 @@ export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engin
   },
 ) {}
 
-/** Cursor query used to tail the append-only transcript. */
+/**
+ * Cursor query used to tail the append-only transcript. `limit` bounds a cold
+ * read to the newest N rows so one long Attempt cannot balloon a response;
+ * tail reads pass a cursor and stay incremental.
+ */
 export class TranscriptQuery extends Schema.Class<TranscriptQuery>("@usine/engine/TranscriptQuery")(
   {
     attemptId: Attempt.AttemptId,
     after: Schema.Option(TranscriptSequence),
+    limit: Schema.Option(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
   },
 ) {}
 

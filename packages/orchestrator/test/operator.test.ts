@@ -173,10 +173,15 @@ const transcript = [
   }),
 ];
 
+interface RecordedApproval {
+  readonly runId: Run.RunId;
+  readonly event: Event.Event;
+}
+
 const testLayer = (
-  approved: Ref.Ref<ReadonlyArray<Run.RunId>>,
+  approved: Ref.Ref<ReadonlyArray<RecordedApproval>>,
   overviewReads: Ref.Ref<number>,
-  projectionRevision: Ref.Ref<ProjectionRevision>,
+  projectionRevision: Ref.Ref<Option.Option<ProjectionRevision>>,
 ) => {
   const readTranscript = ({ after }: { readonly after: Option.Option<TranscriptSequence> }) =>
     Effect.succeed(
@@ -186,7 +191,7 @@ const testLayer = (
       }),
     );
   const runs = Layer.succeed(RunEngine)({
-    approve: (id) => Ref.update(approved, (ids) => [...ids, id]),
+    approve: (id, event) => Ref.update(approved, (entries) => [...entries, { runId: id, event }]),
     cancel: () => Effect.void,
     inspect: () => Effect.succeed(snapshot),
     reconcile: () => Effect.void,
@@ -253,19 +258,25 @@ const testLayer = (
 describe("Operator", () => {
   it.effect("projects needs-you state and protocol child activity without recursive nesting", () =>
     Effect.gen(function* () {
-      const approved = yield* Ref.make<ReadonlyArray<Run.RunId>>([]);
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
       const overviewReads = yield* Ref.make(0);
-      const projectionRevision = yield* Ref.make(ProjectionRevision.make(1));
+      const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       yield* Effect.gen(function* () {
         const operator = yield* Operator;
         const overview = yield* operator.overview(instance);
         yield* operator.overview(instance);
         assert.strictEqual(yield* Ref.get(overviewReads), 1);
-        yield* Ref.set(projectionRevision, ProjectionRevision.make(2));
+        yield* Ref.set(projectionRevision, Option.some(ProjectionRevision.make(2)));
         yield* operator.overview(instance);
         assert.strictEqual(yield* Ref.get(overviewReads), 2);
+        // A missing invalidation singleton must bypass the cache entirely.
+        yield* Ref.set(projectionRevision, Option.none());
+        yield* operator.overview(instance);
+        yield* operator.overview(instance);
+        assert.strictEqual(yield* Ref.get(overviewReads), 4);
         assert.strictEqual(overview.projects[0]?.status, "needs-you");
         assert.strictEqual(overview.loops[0]?.paused, true);
+        assert.strictEqual(overview.projects[0]?.runs[0]?.loopPaused, true);
         assert.deepStrictEqual(
           overview.needsYou.map(({ kind }) => kind),
           ["approval", "poll-failure"],
@@ -288,7 +299,21 @@ describe("Operator", () => {
         );
 
         yield* operator.approve(runId);
-        assert.deepStrictEqual(yield* Ref.get(approved), [runId]);
+        const approvals = yield* Ref.get(approved);
+        const recorded = approvals[0];
+        assert(recorded !== undefined);
+        assert.strictEqual(recorded.runId, runId);
+        // The approval Event the waiting run consumes must be recorded whole:
+        // deterministic identity for idempotent re-approval, typed payload.
+        assert.strictEqual<string>(recorded.event.id, recorded.event.dedupKey);
+        assert.strictEqual<string>(
+          recorded.event.dedupKey,
+          JSON.stringify(["operator-approval", runId]),
+        );
+        assert.deepStrictEqual(recorded.event.payload, {
+          runId,
+          decision: "approved",
+        });
       }).pipe(Effect.provide(testLayer(approved, overviewReads, projectionRevision)));
     }),
   );

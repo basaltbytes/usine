@@ -16,7 +16,9 @@ const makeOrchestrator = Effect.gen(function* () {
 /** The embeddable full runtime: polling, schedules, engine-facing operator acts. */
 export class Orchestrator extends Context.Service<
   Orchestrator,
-  Effect.Success<typeof makeOrchestrator>
+  {
+    readonly run: (instance: LoadedInstance) => Effect.Effect<never>;
+  }
 >()("@usine/orchestrator/Orchestrator") {
   static readonly layer = Layer.effect(Orchestrator, makeOrchestrator);
 }
