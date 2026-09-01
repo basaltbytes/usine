@@ -18,6 +18,8 @@ export interface SessionChannel {
   readonly result: Deferred.Deferred<SessionResult, AgentSessionError>;
   readonly isTerminal: Effect.Effect<boolean>;
   readonly onTerminal: (cleanup: () => void) => void;
+  /** Offers one event, logging instead of silently dropping it after the terminal transition. */
+  readonly emit: (event: Agent.SessionEvent) => Effect.Effect<void>;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
   readonly finish: (session: Agent.Session, message: string) => Effect.Effect<void>;
 }
@@ -32,6 +34,18 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   const runCleanups = Effect.sync(() => {
     for (const cleanup of cleanups.splice(0)) cleanup();
   });
+
+  const emit = (event: Agent.SessionEvent) =>
+    Queue.offer(events, event).pipe(
+      Effect.flatMap((accepted) =>
+        accepted
+          ? Effect.void
+          : Effect.logWarning(`${options.label} dropped an event after the terminal transition`, {
+              event: event._tag,
+              sessionId: options.sessionId,
+            }),
+      ),
+    );
 
   const fail = Effect.fn("SessionChannel.fail")(function* (error: AgentSessionError) {
     if (yield* Ref.getAndSet(terminal, true)) return;
@@ -64,6 +78,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     onTerminal: (cleanup: () => void) => {
       cleanups.push(cleanup);
     },
+    emit,
     fail,
     finish,
   } satisfies SessionChannel;

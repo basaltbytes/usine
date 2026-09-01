@@ -32,11 +32,23 @@ export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** The roster names a valid usine harness that this backend does not implement. */
-export class UnsupportedHarnessError extends Schema.TaggedError<UnsupportedHarnessError>(
-  "@usine/agents/UnsupportedHarnessError",
-)("UnsupportedHarnessError", {
+/** The worker cannot run this brain from the billing pool required by its harness. */
+export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableError>(
+  "@usine/agents/PoolUnavailableError",
+)("PoolUnavailableError", {
   harness: Agent.Harness,
+  model: Agent.ModelId,
+  pool: Agent.Pool,
+  message: Schema.NonEmptyString,
+}) {}
+
+/** The selected model exists but does not support the rostered reasoning effort. */
+export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffortError>(
+  "@usine/agents/UnsupportedEffortError",
+)("UnsupportedEffortError", {
+  harness: Agent.Harness,
+  model: Agent.ModelId,
+  effort: Agent.Effort,
   message: Schema.NonEmptyString,
 }) {}
 
@@ -64,7 +76,8 @@ export class SessionOperationError extends Schema.TaggedError<SessionOperationEr
 
 export const AgentSessionError = Schema.Union([
   UnknownModelError,
-  UnsupportedHarnessError,
+  PoolUnavailableError,
+  UnsupportedEffortError,
   AgentResultError,
   SessionOperationError,
 ]);
@@ -80,27 +93,45 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure.Attem
     SessionOperationError: (operation) =>
       new AttemptFailure.InfraFailure({ message: operation.message, cause: operation.cause }),
     UnknownModelError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
-    UnsupportedHarnessError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
+    PoolUnavailableError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
+    UnsupportedEffortError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
     AgentResultError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
   });
 
 /** Live SDK session. Its event stream and controls are backend-independent. */
 export interface RunningSession {
+  readonly session: Agent.Session;
   readonly events: Stream.Stream<Agent.SessionEvent, AgentSessionError>;
   readonly result: Effect.Effect<SessionResult, AgentSessionError>;
   readonly steer: (message: string) => Effect.Effect<void, AgentSessionError>;
   readonly interrupt: Effect.Effect<void, AgentSessionError>;
 }
 
-/** Stable first-level child seam implemented initially by the Claude Agent SDK. */
-export class ChildBackend extends Context.Service<
-  ChildBackend,
-  {
-    readonly launch: (
-      request: ChildRequest,
-    ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;
-  }
->()("@usine/agents/ChildBackend") {}
+export interface ChildBackendService {
+  readonly launch: (
+    request: ChildRequest,
+  ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;
+}
+
+/** Stable first-level child seam selected by the authored BrainSpec harness. */
+export class ChildBackend extends Context.Service<ChildBackend, ChildBackendService>()(
+  "@usine/agents/ChildBackend",
+) {}
+
+/** Concrete Claude child implementation consumed by the harness dispatcher. */
+export class ClaudeChildBackend extends Context.Service<ClaudeChildBackend, ChildBackendService>()(
+  "@usine/agents/ClaudeChildBackend",
+) {}
+
+/** Concrete Codex child implementation consumed by the harness dispatcher. */
+export class CodexChildBackend extends Context.Service<CodexChildBackend, ChildBackendService>()(
+  "@usine/agents/CodexChildBackend",
+) {}
+
+/** Concrete Pi child implementation consumed by the harness dispatcher. */
+export class PiChildBackend extends Context.Service<PiChildBackend, ChildBackendService>()(
+  "@usine/agents/PiChildBackend",
+) {}
 
 /** Stable parent seam consumed by the run host. */
 export class AgentRuntime extends Context.Service<

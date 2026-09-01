@@ -354,7 +354,7 @@ describe("live agent loop", () => {
                     envelope.payload._tag === "SessionEvent" &&
                     envelope.payload.event.session._tag === "ChildSession",
                 ),
-                "the transcript must expose child activity one level deep",
+                "the transcript must expose child session events one level deep",
               );
             }),
           () => removeTestComments,

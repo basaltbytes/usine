@@ -4,10 +4,11 @@ import { Option, Schema } from "effect";
 import {
   AgentResultError,
   ChildRequest,
+  PoolUnavailableError,
   SessionOperationError,
   toAttemptFailure,
   UnknownModelError,
-  UnsupportedHarnessError,
+  UnsupportedEffortError,
   WorkingDirectory,
 } from "../src/index.ts";
 
@@ -52,16 +53,27 @@ describe("agent runtime contract", () => {
     );
     assert.strictEqual(infra._tag, "InfraFailure");
 
-    const declared = [
+    const terminal = [
       new UnknownModelError({
         harness: "claude",
         model: Agent.ModelId.make("claude-never-existed"),
         message: "Claude does not expose model claude-never-existed",
       }),
-      new UnsupportedHarnessError({ harness: "codex", message: "no codex child yet" }),
+      new PoolUnavailableError({
+        harness: "pi",
+        model: Agent.ModelId.make("openai-codex/gpt-5.6-sol"),
+        pool: "apiKeys",
+        message: "Pi model openai-codex/gpt-5.6-sol must use an API key",
+      }),
+      new UnsupportedEffortError({
+        harness: "codex",
+        model: Agent.ModelId.make("gpt-5.6-terra"),
+        effort: "max",
+        message: "Codex model gpt-5.6-terra does not support effort max",
+      }),
       new AgentResultError({ sessionId, message: "ran out of turns" }),
     ];
-    for (const error of declared) {
+    for (const error of terminal) {
       assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
     }
   });

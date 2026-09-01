@@ -60,7 +60,7 @@ export class ParentSession extends Schema.TaggedClass<ParentSession>("Agent/Pare
   },
 ) {}
 
-/** Child session descriptor. Exactly one parent id keeps activity nesting one level deep. */
+/** Child session descriptor. Exactly one parent id keeps session nesting one level deep. */
 export class ChildSession extends Schema.TaggedClass<ChildSession>("Agent/ChildSession")(
   "ChildSession",
   {
@@ -110,12 +110,41 @@ export class SessionFinished extends Schema.TaggedClass<SessionFinished>("Agent/
   { session: Session },
 ) {}
 
+/** Billing source whose native meter produced a usage or health observation. */
+export const Pool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPlan"] as const);
+export type Pool = typeof Pool.Type;
+
+export class RateLimitWindow extends Schema.Class<RateLimitWindow>("Agent/RateLimitWindow")({
+  usedPercent: Schema.Number,
+  windowDurationMinutes: Schema.OptionFromNullOr(Schema.Number),
+  resetsAt: Schema.OptionFromNullOr(Schema.DateTimeUtc),
+}) {}
+
+export class RateLimitsSnapshot extends Schema.Class<RateLimitsSnapshot>(
+  "Agent/RateLimitsSnapshot",
+)({
+  limitId: Schema.OptionFromNullOr(Schema.String),
+  limitName: Schema.OptionFromNullOr(Schema.String),
+  primary: Schema.OptionFromNullOr(RateLimitWindow),
+  secondary: Schema.OptionFromNullOr(RateLimitWindow),
+}) {}
+
+/** Latest native billing-pool rate windows observed during one session. */
+export class PoolRateLimitsUpdated extends Schema.TaggedClass<PoolRateLimitsUpdated>(
+  "Agent/PoolRateLimitsUpdated",
+)("PoolRateLimitsUpdated", {
+  session: Session,
+  pool: Pool,
+  rateLimits: RateLimitsSnapshot,
+}) {}
+
 /** Normalized events emitted by every parent and child SDK backend. */
 export const SessionEvent = Schema.Union([
   SessionStarted,
   TextOutput,
   ToolStarted,
   ToolFinished,
+  PoolRateLimitsUpdated,
   SessionFinished,
 ]);
 export type SessionEvent = typeof SessionEvent.Type;

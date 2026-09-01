@@ -44,6 +44,7 @@ export const stubLayer = (delayMillis = 0) =>
                 new Agent.TextOutput({ session, text: `Steer received: ${message}` }),
               ).pipe(Effect.asVoid);
             return {
+              session,
               events: Stream.fromQueue(events),
               interrupt: Effect.void,
               result: Deferred.await(result),

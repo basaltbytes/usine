@@ -425,7 +425,16 @@ const makeRunStore = Effect.gen(function* () {
     direction: AttemptChannel.Direction,
     envelope: AttemptChannel.Envelope,
   ) {
-    yield* queries.appendTranscript(direction, envelope, yield* DateTime.now);
+    const receivedAt = yield* DateTime.now;
+    yield* database.transaction((transaction) =>
+      Effect.gen(function* () {
+        const tx = queriesFor(transaction);
+        if (direction === "outbound" && envelope.payload._tag === "Started") {
+          yield* tx.updateAttemptParentModel(envelope.attemptId, envelope.payload.parentModel);
+        }
+        yield* tx.appendTranscript(direction, envelope, receivedAt);
+      }),
+    );
   }, persistence("append Attempt transcript"));
 
   const transcript = Effect.fn("RunStore.transcript")(function* (query: TranscriptQuery) {

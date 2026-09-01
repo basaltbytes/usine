@@ -83,6 +83,60 @@ describe("run store", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.live("writes the effective parent model back onto the Attempt", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-started-" }),
+      );
+      const submission = new Submission({
+        event: new Event.Event({
+          id: Event.EventId.make("started-event"),
+          dedupKey: Event.DedupKey.make("started/event/revision"),
+          payload: {},
+          receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
+        }),
+        itemKey: Item.ItemKey.make("started-item"),
+        loop: Loop.LoopName.make("started-loop"),
+        step: Step.StepName.make("started-step"),
+        approval: "none",
+        repository: Repository.Name.make("basaltbytes/usine"),
+        revision: Repository.Revision.make("started-revision"),
+        task: AttemptChannel.Task.make("Record the selected models"),
+        agent: testAgent,
+        parentModel: Option.none(),
+      });
+      const runId = Run.RunId.make("started-run");
+      const effectiveParentModel = Agent.ModelId.make("openai/gpt-5.6-sol");
+
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore;
+        yield* store.recordAndClaim(submission, runId);
+        const started = yield* store.beginAttempt(runId, Worker.Name.make("local"));
+        assert.strictEqual(started._tag, "AttemptStarted");
+        if (started._tag !== "AttemptStarted") return;
+        const attemptId = started.execution.attempt.id;
+        yield* store.appendTranscript(
+          "outbound",
+          new AttemptChannel.OutboundEnvelope({
+            version: AttemptChannel.PROTOCOL_VERSION,
+            attemptId,
+            sequence: AttemptChannel.Sequence.make(1),
+            sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
+            payload: new AttemptChannel.Started({ parentModel: effectiveParentModel }),
+          }),
+        );
+
+        const snapshot = yield* store.snapshot(runId);
+        assert.deepStrictEqual(snapshot.attempts[0]?.brain, testAgent.brain);
+        assert.deepStrictEqual(
+          snapshot.attempts[0]?.parentModel,
+          Option.some(effectiveParentModel),
+        );
+      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.live("reports a run closed while queued instead of starting an attempt", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

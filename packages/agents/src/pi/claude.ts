@@ -5,15 +5,15 @@ import {
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { Agent } from "@usine/core";
-import { Context, Deferred, Effect, Layer, Option, Queue, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import {
   AgentResultError,
+  ClaudeChildBackend,
   ChildBackend,
   type ChildRequest,
   type RunningSession,
   SessionOperationError,
   UnknownModelError,
-  UnsupportedHarnessError,
 } from "../runtime.ts";
 import { sessionChannel } from "./session.ts";
 
@@ -231,13 +231,6 @@ const makeClaudeChild = Effect.gen(function* () {
         parentSessionId: request.session.parentId,
         sessionId: request.session.id,
       });
-      if (request.session.brain.harness !== "claude") {
-        yield* Effect.logError("Claude child rejected an unsupported harness");
-        return yield* new UnsupportedHarnessError({
-          harness: request.session.brain.harness,
-          message: `Claude backend cannot run ${request.session.brain.harness}`,
-        });
-      }
       yield* Effect.logInfo("Launching Claude child session");
       const input = new AsyncInput();
       const query = sdk.open(input, optionsFor(request));
@@ -268,7 +261,7 @@ const makeClaudeChild = Effect.gen(function* () {
         input.end();
       });
       const tools = new Map<string, string>();
-      yield* Queue.offer(channel.events, new Agent.SessionStarted({ session: request.session }));
+      yield* channel.emit(new Agent.SessionStarted({ session: request.session }));
       input.offer(userMessage(request.prompt));
 
       const consume = Stream.fromAsyncIterable(query, (cause) =>
@@ -277,7 +270,7 @@ const makeClaudeChild = Effect.gen(function* () {
         Stream.runForEach((message) =>
           Effect.gen(function* () {
             for (const event of sessionEventsFrom(message, request.session, tools)) {
-              yield* Queue.offer(channel.events, event);
+              yield* channel.emit(event);
             }
             if (!Schema.is(ClaudeResultMessage)(message)) return;
             if (message.subtype !== "success" || message.result === undefined) {
@@ -345,6 +338,7 @@ const makeClaudeChild = Effect.gen(function* () {
         Effect.asVoid,
       );
       return {
+        session: request.session,
         events: Stream.fromQueue(channel.events),
         interrupt,
         result: Deferred.await(channel.result),
@@ -356,3 +350,4 @@ const makeClaudeChild = Effect.gen(function* () {
 });
 
 export const claudeChildLayer = Layer.effect(ChildBackend, makeClaudeChild);
+export const claudeChildBackendLayer = Layer.effect(ClaudeChildBackend, makeClaudeChild);

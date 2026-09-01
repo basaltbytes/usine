@@ -222,6 +222,17 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
+  const updateAttemptParentModel = Effect.fn("RunStoreQueries.updateAttemptParentModel")(function* (
+    attemptId: Attempt.AttemptId,
+    parentModel: Agent.ModelId,
+  ) {
+    yield* database
+      .update(attempts)
+      .set({ parentModel })
+      .where(eq(attempts.attemptId, attemptId))
+      .execute();
+  });
+
   const updateStepResult = Effect.fn("RunStoreQueries.updateStepResult")(function* (
     runId: Run.RunId,
     stepName: Step.StepName,
@@ -600,6 +611,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     snapshot,
     transcript,
     updateStepResult,
+    updateAttemptParentModel,
     updateState,
   } as const;
 };

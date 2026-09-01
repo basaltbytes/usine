@@ -15,12 +15,15 @@ import {
   type AgentSessionError,
   AgentRuntime,
   ChildBackend,
+  type ChildRequest,
   type LaunchRequest,
+  PiChildBackend,
+  PoolUnavailableError,
   type RunningSession,
   SessionOperationError,
   UnknownModelError,
 } from "../runtime.ts";
-import { sessionChannel } from "./session.ts";
+import { type SessionChannel, sessionChannel } from "./session.ts";
 import { subagentsExtension } from "./subagents.ts";
 
 export type PiSessionEvent = AgentSessionEvent;
@@ -44,6 +47,7 @@ export interface PiStartOptions {
 }
 
 export type PiStartResult =
+  | { readonly _tag: "ApiKeyRequired"; readonly model: Agent.ModelId }
   | { readonly _tag: "UnknownModel" }
   | { readonly _tag: "Started"; readonly model: Agent.ModelId; readonly session: PiSession };
 
@@ -105,9 +109,14 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       session.dispose();
       throw new Error("Pi started without an active model");
     }
+    const model = Agent.ModelId.make(`${active.provider}/${active.id}`);
+    if (modelRuntime.isUsingOAuth(active.provider)) {
+      session.dispose();
+      return { _tag: "ApiKeyRequired", model };
+    }
     return {
       _tag: "Started",
-      model: Agent.ModelId.make(`${active.provider}/${active.id}`),
+      model,
       session,
     };
   },
@@ -161,7 +170,7 @@ const lastMessageText = (messages: ReadonlyArray<PiMessage>): string | undefined
 
 const sessionEventFrom = (
   event: PiSessionEvent,
-  session: Agent.ParentSession,
+  session: Agent.Session,
 ): Agent.SessionEvent | undefined => {
   if (event.type === "message_end") {
     const text = messageText(event.message);
@@ -200,6 +209,200 @@ const parentError = (
     cause,
   });
 
+const childError = (
+  operation: SessionOperationError["operation"],
+  request: ChildRequest,
+  message: string,
+  cause: unknown,
+) =>
+  new SessionOperationError({
+    operation,
+    sessionId: Option.some(request.session.id),
+    message,
+    cause,
+  });
+
+/**
+ * Bridges the Pi SDK's synchronous subscriber onto one session channel.
+ * Normalized events reach the queue on the SDK's own tick — no async hop, so
+ * nothing can trail the prompt's resolution — while operational events with
+ * no normalized shape (retry backoffs, compactions) are logged through the
+ * launch fiber's captured services so a silent wait stays explainable.
+ */
+const subscribeSession = (piSession: PiSession, session: Agent.Session, channel: SessionChannel) =>
+  Effect.gen(function* () {
+    const context = yield* Effect.context<never>();
+    const log = Effect.runForkWith(context);
+    let lastText: string | undefined;
+    const unsubscribe = piSession.subscribe((event) => {
+      if (event.type === "auto_retry_start") {
+        log(
+          Effect.logWarning("Pi session is backing off before a retry", {
+            attempt: event.attempt,
+            delayMillis: event.delayMs,
+            errorMessage: event.errorMessage,
+            maxAttempts: event.maxAttempts,
+            sessionId: session.id,
+          }),
+        );
+        return;
+      }
+      if (event.type === "auto_retry_end") {
+        log(
+          Effect.logInfo("Pi session finished retrying", {
+            attempt: event.attempt,
+            finalError: event.finalError,
+            sessionId: session.id,
+            success: event.success,
+          }),
+        );
+        return;
+      }
+      if (event.type === "compaction_start" || event.type === "compaction_end") {
+        log(
+          Effect.logInfo("Pi session context compaction", {
+            phase: event.type,
+            reason: event.reason,
+            sessionId: session.id,
+          }),
+        );
+        return;
+      }
+      const sessionEvent = sessionEventFrom(event, session);
+      if (sessionEvent === undefined) return;
+      if (sessionEvent._tag === "TextOutput") lastText = sessionEvent.text;
+      if (!Queue.offerUnsafe(channel.events, sessionEvent)) {
+        log(
+          Effect.logWarning("Dropped a Pi session event after the terminal transition", {
+            event: sessionEvent._tag,
+            sessionId: session.id,
+          }),
+        );
+      }
+    });
+    channel.onTerminal(unsubscribe);
+    return { lastText: () => lastText, unsubscribe };
+  });
+
+const makePiChild = Effect.gen(function* () {
+  const sdk = yield* PiSdk;
+
+  const launch: PiChildBackend["Service"]["launch"] = Effect.fn("PiChildBackend.launch")(
+    function* (request) {
+      yield* Effect.annotateCurrentSpan({
+        agent: request.session.agent,
+        effort: request.session.brain.effort,
+        harness: request.session.brain.harness,
+        model: request.session.brain.model,
+        parentSessionId: request.session.parentId,
+        sessionId: request.session.id,
+      });
+      yield* Effect.logInfo("Launching Pi child session");
+      const started = yield* Effect.tryPromise({
+        try: () =>
+          sdk.start({
+            cwd: request.cwd,
+            extensions: [],
+            model: Option.some(request.session.brain.model),
+            thinkingLevel: request.session.brain.effort,
+          }),
+        catch: (cause) => childError("launch", request, "Pi child session failed to start", cause),
+      });
+      if (started._tag === "UnknownModel") {
+        yield* Effect.logError("Pi child rejected an unknown model", {
+          model: request.session.brain.model,
+        });
+        return yield* new UnknownModelError({
+          harness: "pi",
+          model: request.session.brain.model,
+          message: `Pi does not expose model ${request.session.brain.model}`,
+        });
+      }
+      if (started._tag === "ApiKeyRequired") {
+        yield* Effect.logError("Pi child model is not backed by the API-key pool", {
+          model: started.model,
+          pool: "apiKeys",
+        });
+        return yield* new PoolUnavailableError({
+          harness: "pi",
+          model: started.model,
+          pool: "apiKeys",
+          message: `Pi model ${started.model} must use an API key`,
+        });
+      }
+      const session = new Agent.ChildSession({
+        id: request.session.id,
+        parentId: request.session.parentId,
+        agent: request.session.agent,
+        brain: new Agent.BrainSpec({
+          harness: "pi",
+          model: started.model,
+          effort: request.session.brain.effort,
+        }),
+      });
+      const channel = yield* sessionChannel({
+        label: "Pi child session",
+        sessionId: session.id,
+      });
+      yield* channel.emit(new Agent.SessionStarted({ session }));
+      const subscription = yield* subscribeSession(started.session, session, channel);
+      // Registered before the prompt fiber forks so scope close interrupts
+      // the fiber first and disposes the SDK session second.
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          subscription.unsubscribe();
+          started.session.dispose();
+        }),
+      );
+      yield* Effect.tryPromise({
+        try: () => started.session.prompt(request.prompt),
+        catch: (cause) => childError("stream", request, "Pi child session failed", cause),
+      }).pipe(
+        Effect.flatMap(() =>
+          channel.finish(
+            session,
+            subscription.lastText() ??
+              lastMessageText(started.session.messages) ??
+              "Pi child session completed",
+          ),
+        ),
+        Effect.catch((error) => channel.fail(error)),
+        Effect.forkScoped,
+      );
+
+      const steer = Effect.fn("PiChildBackend.steer")((message: string) =>
+        Effect.logDebug("Steering Pi child session", { sessionId: session.id }).pipe(
+          Effect.andThen(
+            Effect.tryPromise({
+              try: () => started.session.steer(message),
+              catch: (cause) => childError("steer", request, "Could not steer Pi child", cause),
+            }),
+          ),
+        ),
+      );
+      const interrupt = Effect.logInfo("Interrupting Pi child session", {
+        sessionId: session.id,
+      }).pipe(
+        Effect.andThen(
+          Effect.tryPromise({
+            try: () => started.session.abort(),
+            catch: (cause) =>
+              childError("interrupt", request, "Could not interrupt Pi child", cause),
+          }),
+        ),
+      );
+      return {
+        session,
+        events: Stream.fromQueue(channel.events),
+        interrupt,
+        result: Deferred.await(channel.result),
+        steer,
+      } satisfies RunningSession;
+    },
+  );
+  return PiChildBackend.of({ launch });
+});
+
 const makePiParent = Effect.gen(function* () {
   const children = yield* ChildBackend;
   const sdk = yield* PiSdk;
@@ -231,17 +434,6 @@ const makePiParent = Effect.gen(function* () {
             Effect.flatMap(Fiber.join),
           ),
         );
-      const emitChild = (event: Agent.SessionEvent) =>
-        Queue.offer(channel.events, event).pipe(
-          Effect.flatMap((accepted) =>
-            accepted
-              ? Effect.void
-              : Effect.logWarning("Dropped a child session event after the parent terminal", {
-                  sessionId: parentId,
-                  event: event._tag,
-                }),
-          ),
-        );
       const started = yield* Effect.tryPromise({
         try: () =>
           sdk.start({
@@ -251,7 +443,7 @@ const makePiParent = Effect.gen(function* () {
                 agent: request.spec.agent,
                 backend: children,
                 cwd: request.cwd,
-                emit: emitChild,
+                emit: channel.emit,
                 parentId,
                 run: runChild,
               }),
@@ -273,6 +465,18 @@ const makePiParent = Effect.gen(function* () {
           message: `Pi does not expose model ${model}`,
         });
       }
+      if (started._tag === "ApiKeyRequired") {
+        yield* Effect.logError("Pi parent model is not backed by the API-key pool", {
+          model: started.model,
+          pool: "apiKeys",
+        });
+        return yield* new PoolUnavailableError({
+          harness: "pi",
+          model: started.model,
+          pool: "apiKeys",
+          message: `Pi model ${started.model} must use an API key`,
+        });
+      }
       const parent = new Agent.ParentSession({
         id: parentId,
         agent: request.spec.agent.name,
@@ -282,17 +486,16 @@ const makePiParent = Effect.gen(function* () {
           effort: request.spec.agent.brain.effort,
         }),
       });
-      let lastText: string | undefined;
-      yield* Queue.offer(channel.events, new Agent.SessionStarted({ session: parent }));
-      const unsubscribe = started.session.subscribe((event) => {
-        const sessionEvent = sessionEventFrom(event, parent);
-        if (sessionEvent === undefined) return;
-        if (sessionEvent._tag === "TextOutput") lastText = sessionEvent.text;
-        // The subscription is removed on the terminal transition, so a false
-        // return can only occur in the transition's own instant.
-        Queue.offerUnsafe(channel.events, sessionEvent);
-      });
-      channel.onTerminal(unsubscribe);
+      yield* channel.emit(new Agent.SessionStarted({ session: parent }));
+      const subscription = yield* subscribeSession(started.session, parent, channel);
+      // Registered before the run fiber forks so scope close interrupts the
+      // fiber first and disposes the SDK session second.
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          subscription.unsubscribe();
+          started.session.dispose();
+        }),
+      );
 
       const prompt = assemblePrompt({
         repository: request.spec.repository,
@@ -308,18 +511,14 @@ const makePiParent = Effect.gen(function* () {
         Effect.flatMap(() =>
           channel.finish(
             parent,
-            lastText ?? lastMessageText(started.session.messages) ?? "Pi parent session completed",
+            subscription.lastText() ??
+              lastMessageText(started.session.messages) ??
+              "Pi parent session completed",
           ),
         ),
         Effect.catch((error) => channel.fail(error)),
       );
       yield* Effect.forkScoped(run);
-      yield* Effect.addFinalizer(() =>
-        Effect.sync(() => {
-          unsubscribe();
-          started.session.dispose();
-        }),
-      );
 
       const steer = Effect.fn("PiParentRuntime.steer")((message: string) =>
         Effect.logDebug("Steering Pi parent session", { sessionId: parentId }).pipe(
@@ -342,6 +541,7 @@ const makePiParent = Effect.gen(function* () {
         ),
       );
       return {
+        session: parent,
         events: Stream.fromQueue(channel.events),
         interrupt,
         result: Deferred.await(channel.result),
@@ -353,3 +553,4 @@ const makePiParent = Effect.gen(function* () {
 });
 
 export const piParentLayer = Layer.effect(AgentRuntime, makePiParent);
+export const piChildBackendLayer = Layer.effect(PiChildBackend, makePiChild);

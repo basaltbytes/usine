@@ -170,7 +170,9 @@ const interactiveHandle = (command: StandardCommand, state: FakeSshState, mode: 
                 attemptId: input.spec.attemptId,
                 sequence: AttemptChannel.Sequence.make(1),
                 sentAt: DateTime.makeUnsafe("2026-08-31T12:00:00Z"),
-                payload: new AttemptChannel.Started(),
+                payload: new AttemptChannel.Started({
+                  parentModel: TEST_SESSION.brain.model,
+                }),
               }),
             );
             if (mode === "success" || mode === "final-nonzero") {

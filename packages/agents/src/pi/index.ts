@@ -1,14 +1,27 @@
-/** Node-only Pi parent plus Claude child adapters. */
+/** Node-only Pi parent plus all harness child adapters. */
 
 import { Layer } from "effect";
-import { claudeChildLayer, claudeSdkLive } from "./claude.ts";
-import { piParentLayer, piSdkLive } from "./pi.ts";
+import { claudeChildBackendLayer, claudeSdkLive } from "./claude.ts";
+import { childDispatcherLayer } from "./children.ts";
+import { codexAppServerLive } from "./codex/app-server.ts";
+import { codexChildBackendLayer } from "./codex/codex.ts";
+import { piChildBackendLayer, piParentLayer, piSdkLive } from "./pi.ts";
 
 export * from "./claude.ts";
+export * from "./children.ts";
+export * from "./codex/app-server.ts";
+export * from "./codex/codex.ts";
 export * from "./pi.ts";
 export * from "./subagents.ts";
 
-const childLive = claudeChildLayer.pipe(Layer.provide(claudeSdkLive));
+const childImplementations = Layer.merge(
+  claudeChildBackendLayer.pipe(Layer.provide(claudeSdkLive)),
+  Layer.merge(
+    codexChildBackendLayer.pipe(Layer.provide(codexAppServerLive)),
+    piChildBackendLayer.pipe(Layer.provide(piSdkLive)),
+  ),
+);
+const childLive = childDispatcherLayer.pipe(Layer.provide(childImplementations));
 
-/** Production in-process agent runtime: Pi parent with the owned Claude child backend. */
+/** Production in-process agent runtime: Pi parent with the three harness child backends. */
 export const layer = piParentLayer.pipe(Layer.provide(Layer.merge(piSdkLive, childLive)));
