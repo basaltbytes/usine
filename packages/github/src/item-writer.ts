@@ -6,21 +6,33 @@ import { API_ROOT, authorized, invalidResponse, statusError, transportError } fr
 import type { GitHubAppError } from "./model.ts";
 
 const LabelResponse = Schema.Array(Schema.Struct({ name: Schema.NonEmptyString }));
+const LabelNames = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique());
+
+/** Lane-scoped label changes. Labels outside these two sets are never rewritten. */
+export class ItemLabelMutation extends Schema.Class<ItemLabelMutation>(
+  "@usine/github/ItemLabelMutation",
+)({
+  add: LabelNames.check(Schema.isNonEmpty()),
+  remove: LabelNames,
+}) {}
 
 const labelsUrl = (repository: Repository.Name, item: number): string => {
   const { name, owner } = Repository.parts(repository);
   return `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${item}/labels`;
 };
 
+const labelUrl = (repository: Repository.Name, item: number, label: string): string =>
+  `${labelsUrl(repository, item)}/${encodeURIComponent(label)}`;
+
 /** Authenticated GitHub Item writes used by the Board trigger surface. */
 export class GitHubItemWriter extends Context.Service<
   GitHubItemWriter,
   {
-    /** Replaces the Item's applied labels without deleting repository label definitions. */
-    readonly setLabels: (
+    /** Adds/removes only the named labels; every other applied label is preserved. */
+    readonly updateLabels: (
       repository: Repository.Name,
       item: Item.Number,
-      labels: ReadonlyArray<string>,
+      mutation: ItemLabelMutation,
     ) => Effect.Effect<ReadonlyArray<string>, GitHubAppError>;
   }
 >()("@usine/github/GitHubItemWriter") {
@@ -31,34 +43,69 @@ export class GitHubItemWriter extends Context.Service<
         const app = yield* GitHubApp;
         const http = yield* HttpClient.HttpClient;
 
+        const send = Effect.fn("GitHubItemWriter.sendLabelUpdate")(function* (
+          request: HttpClientRequest.HttpClientRequest,
+        ) {
+          return yield* http
+            .execute(request)
+            .pipe(Effect.mapError((error) => transportError("update-item-labels", error)));
+        });
+
+        const decode = (response: HttpClientResponse.HttpClientResponse) =>
+          HttpClientResponse.schemaBodyJson(LabelResponse)(response).pipe(
+            Effect.mapError((error) => invalidResponse("update-item-labels", error.message)),
+          );
+
         return {
-          setLabels: Effect.fn("GitHubItemWriter.setLabels")(function* (
+          updateLabels: Effect.fn("GitHubItemWriter.updateLabels")(function* (
             repository: Repository.Name,
             item: Item.Number,
-            labels: ReadonlyArray<string>,
+            mutation: ItemLabelMutation,
           ) {
             yield* Effect.annotateCurrentSpan({ repository, item });
             const token = yield* app.installationToken();
-            const request = HttpClientRequest.put(labelsUrl(repository, item)).pipe(
-              HttpClientRequest.bodyJsonUnsafe({ labels }),
-              authorized(token.value),
+            const addResponse = yield* send(
+              HttpClientRequest.post(labelsUrl(repository, item)).pipe(
+                HttpClientRequest.bodyJsonUnsafe({ labels: mutation.add }),
+                authorized(token.value),
+              ),
             );
-            const response = yield* http
-              .execute(request)
-              .pipe(Effect.mapError((error) => transportError("set-item-labels", error)));
-            if (response.status < 200 || response.status >= 300) {
+            if (addResponse.status < 200 || addResponse.status >= 300) {
               return yield* statusError(
-                "set-item-labels",
-                response,
+                "update-item-labels",
+                addResponse,
                 yield* Clock.currentTimeMillis,
               );
             }
-            const applied = yield* HttpClientResponse.schemaBodyJson(LabelResponse)(response).pipe(
-              Effect.mapError((error) => invalidResponse("set-item-labels", error.message)),
-            );
-            yield* Effect.logInfo("GitHub Item labels replaced from a Board move", {
+            let applied = yield* decode(addResponse);
+            for (const label of mutation.remove) {
+              const removeResponse = yield* send(
+                HttpClientRequest.delete(labelUrl(repository, item, label)).pipe(
+                  authorized(token.value),
+                ),
+              );
+              if (removeResponse.status === 404) {
+                yield* Effect.logDebug("Lane label was already absent during Board move", {
+                  repository,
+                  item,
+                  label,
+                });
+                continue;
+              }
+              if (removeResponse.status < 200 || removeResponse.status >= 300) {
+                return yield* statusError(
+                  "update-item-labels",
+                  removeResponse,
+                  yield* Clock.currentTimeMillis,
+                );
+              }
+              applied = yield* decode(removeResponse);
+            }
+            yield* Effect.logInfo("GitHub Item lane labels updated from a Board move", {
               repository,
               item,
+              addedLabels: mutation.add.join(", "),
+              removedLabels: mutation.remove.join(", "),
               labels: applied.map(({ name }) => name).join(", "),
             });
             return applied.map(({ name }) => name);

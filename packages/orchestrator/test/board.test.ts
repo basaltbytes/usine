@@ -3,7 +3,7 @@ import { GitHubLabelName, LabelLaneSource, LaneName, UsineConfig } from "@usine/
 import { Item, Repository } from "@usine/core";
 import { ItemContentHash, ItemNumber, ItemProjection, ItemProjectionSource } from "@usine/engine";
 import { Effect, Schema } from "effect";
-import { labelsForBoardMove, projectBoard } from "../src/board/projection.ts";
+import { labelMutationForBoardMove, projectBoard } from "../src/board/projection.ts";
 import {
   BoardItemView,
   BoardLaneId,
@@ -63,13 +63,53 @@ describe("Board projection", () => {
       });
       const managed = config.repos[0];
       assert(managed !== undefined);
-      const board = yield* projectBoard(managed, [item], []);
+      const board = yield* projectBoard(managed, [], [item], []);
       assert.strictEqual(board.lanes[0]?.items.length, 0);
       assert.strictEqual(board.lanes[1]?.items[0]?.itemKey, itemKey);
+      assert.deepStrictEqual(board.failures, []);
     }),
   );
 
-  it("swaps authored lane labels and retains unrelated labels", () => {
+  it.effect("proposes lanes from unused repository labels when there are no Items", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository }],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const board = yield* projectBoard(managed, [review, bug], [], []);
+      assert.deepStrictEqual(
+        board.lanes.map(({ name }) => name),
+        [bug, review, "Unmapped"],
+      );
+    }),
+  );
+
+  it.effect("quarantines one malformed Item projection and keeps its sibling", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const malformed = new ItemProjection({
+        itemKey: Item.ItemKey.make("github:basaltbytes/usine:34"),
+        repository,
+        source: ItemProjectionSource.make("issue"),
+        number: ItemNumber.make(34),
+        contentHash: ItemContentHash.make("malformed-34"),
+        payload: { number: 34 },
+      });
+      const board = yield* projectBoard(managed, [], [malformed, item], []);
+      assert.strictEqual(board.lanes[0]?.items[0]?.itemKey, itemKey);
+      assert.strictEqual(board.failures.length, 1);
+      assert.strictEqual(board.failures[0]?.itemKey, malformed.itemKey);
+    }),
+  );
+
+  it("derives an authored lane mutation without trusting truncated card labels", () => {
     const card = new BoardItemView({
       itemKey,
       kind: "issue",
@@ -77,7 +117,7 @@ describe("Board projection", () => {
       title: "Board lanes",
       url: "https://github.com/basaltbytes/usine/issues/33",
       state: "issue-open",
-      labels: [ready, bug],
+      labels: [bug],
       run: null,
       needsYou: false,
     });
@@ -98,6 +138,7 @@ describe("Board projection", () => {
       items: [],
     });
     const board = new BoardView({
+      failures: [],
       lanes: [
         source,
         target,
@@ -110,7 +151,9 @@ describe("Board projection", () => {
         }),
       ],
     });
-    assert.deepStrictEqual(labelsForBoardMove(board, card, target), [bug, review]);
+    const mutation = labelMutationForBoardMove(board, card, target);
+    assert.deepStrictEqual(mutation.add, [review]);
+    assert.deepStrictEqual(mutation.remove, [ready]);
   });
 
   it("removes only the current proposed lane label", () => {
@@ -141,7 +184,9 @@ describe("Board projection", () => {
       origin: "proposed",
       items: [],
     });
-    const board = new BoardView({ lanes: [source, target] });
-    assert.deepStrictEqual(labelsForBoardMove(board, card, target), [bug, review]);
+    const board = new BoardView({ failures: [], lanes: [source, target] });
+    const mutation = labelMutationForBoardMove(board, card, target);
+    assert.deepStrictEqual(mutation.add, [review]);
+    assert.deepStrictEqual(mutation.remove, [ready]);
   });
 });

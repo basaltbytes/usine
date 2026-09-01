@@ -12,8 +12,9 @@ const StatusMark = ({ state }: { readonly state: string }) => (
   </span>
 );
 
-const itemFailure = (item: BoardItemView): string | null => {
-  const attempts = item.run?.attempts ?? [];
+export const itemFailure = (item: BoardItemView): string | null => {
+  if (item.run?.state !== "Failed") return null;
+  const attempts = item.run.attempts;
   for (let index = attempts.length - 1; index >= 0; index -= 1) {
     const outcome = attempts[index]?.outcome;
     if (outcome?._tag === "Failed") return failureMessage(outcome.failure);
@@ -180,6 +181,17 @@ export const ProjectBoard = ({
         </div>
         {project.status === "needs-you" && <span className="needs-you-badge">Needs you</span>}
       </header>
+      {project.board.failures.length > 0 && (
+        <section className="board-error error-panel" aria-label="Board projection failures">
+          <strong>
+            {project.board.failures.length} Item projection
+            {project.board.failures.length === 1 ? " was" : "s were"} quarantined
+          </strong>
+          {project.board.failures.map((failure) => (
+            <p key={failure.itemKey}>{failure.message}</p>
+          ))}
+        </section>
+      )}
       <div className="board-lanes" aria-label={`${project.repository} project board`}>
         {project.board.lanes.map((lane) => (
           <BoardLane

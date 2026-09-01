@@ -82,8 +82,6 @@ const errorResponse = (error: RouteError) => {
           status: 409,
           message: `Board Lane ${error.lane} is derived from Item state and cannot accept label moves.`,
         } as const;
-      case "BoardProjectionError":
-        return { status: 500, message: "The Board projection could not be read." } as const;
       case "InstallationDiscoveryError":
       case "AppPermissionError":
         return { status: 503, message: error.message } as const;

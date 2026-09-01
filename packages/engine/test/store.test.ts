@@ -24,6 +24,11 @@ import {
   ItemProjectionSource,
 } from "../src/item-projection/model.ts";
 import { ItemProjectionReader, ItemProjectionWriter } from "../src/item-projection/service.ts";
+import { RepositoryLabelProjection } from "../src/repository-label-projection/model.ts";
+import {
+  RepositoryLabelProjectionReader,
+  RepositoryLabelProjectionWriter,
+} from "../src/repository-label-projection/service.ts";
 import {
   InstanceDirectory,
   Submission,
@@ -295,6 +300,45 @@ describe("Item projections", () => {
         assert.deepStrictEqual(yield* reader.list(repository), [item]);
 
         assert.strictEqual(yield* writer.upsert(item), false);
+        assert.deepStrictEqual(yield* runs.revision(), changed);
+      }).pipe(Effect.provide(services));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("repository label projections", () => {
+  it.live("stores the complete catalog and invalidates only changed operator reads", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-label-projection-" }),
+      );
+      const repository = Repository.Name.make("basaltbytes/usine");
+      const projection = new RepositoryLabelProjection({
+        repository,
+        labels: ["bug", "unused-ready-label"],
+      });
+      const database = localSqliteLayer(directory);
+      const services = Layer.mergeAll(
+        RepositoryLabelProjectionReader.layer,
+        RepositoryLabelProjectionWriter.layer,
+        RunReader.layer,
+      ).pipe(Layer.provide(database));
+
+      yield* Effect.gen(function* () {
+        const reader = yield* RepositoryLabelProjectionReader;
+        const writer = yield* RepositoryLabelProjectionWriter;
+        const runs = yield* RunReader;
+        const before = yield* runs.revision();
+        assert(Option.isSome(before));
+
+        assert.strictEqual(yield* writer.replace(projection), true);
+        const changed = yield* runs.revision();
+        assert(Option.isSome(changed));
+        assert.strictEqual(changed.value, before.value + 1);
+        assert.deepStrictEqual(yield* reader.get(repository), Option.some(projection));
+
+        assert.strictEqual(yield* writer.replace(projection), false);
         assert.deepStrictEqual(yield* runs.revision(), changed);
       }).pipe(Effect.provide(services));
     }).pipe(Effect.provide(NodeServices.layer)),

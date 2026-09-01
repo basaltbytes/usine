@@ -10,6 +10,8 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 
 `ItemProjectionReader` and `ItemProjectionWriter` store the latest issue and pull-request snapshots already fetched by trigger polling. Board consumers can read that projection after a restart without making a second GitHub query. Item writes update the shared projection revision only when the content hash changes.
 
+`RepositoryLabelProjectionReader` and `RepositoryLabelProjectionWriter` store the complete label catalog observed during repository polling. Repositories with no Items can still receive proposed Board lanes, and the catalog remains available after a restart. Catalog writes update the projection revision only when the label set changes.
+
 ## Runtime rules
 
 - Approval-gated Runs wait for an approval Event before their first Attempt.

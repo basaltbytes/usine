@@ -24,6 +24,7 @@ import {
   PollCursor,
   PullRequestPayload,
   PullRequestSnapshot,
+  RepositoryLabelName,
   RepositoryChanges,
   RepositoryNotModified,
   TIMESTAMP_FIELDS,
@@ -37,6 +38,8 @@ const WATERMARK_OVERLAP_MS = 5_000;
 const RATE_LIMIT_PRESSURE_THRESHOLD = 100;
 /** Bounds one cycle's REST walk; the watermark resumes the remainder next cycle. */
 const MAX_CHANGE_PAGES = 10;
+/** A pathological catalog cannot turn one repository poll into an unbounded walk. */
+const MAX_LABEL_PAGES = 100;
 /** GraphQL rate limiting sometimes omits reset headers; wait at least this long. */
 const GRAPHQL_RATE_LIMIT_FALLBACK_MS = 60_000;
 
@@ -46,6 +49,7 @@ const RestChangedItem = Schema.Struct({
   pullRequest: Schema.optionalKey(Schema.Unknown),
 }).pipe(Schema.encodeKeys({ updatedAt: "updated_at", pullRequest: "pull_request" }));
 const RestChangedItems = Schema.Array(RestChangedItem);
+const RestRepositoryLabels = Schema.Array(Schema.Struct({ name: RepositoryLabelName }));
 
 /** The GraphQL transport envelope; `errors` arrives on HTTP 200 and must be read. */
 const GraphqlEnvelope = Schema.Struct({
@@ -137,6 +141,15 @@ const changesUrl = (repository: Repository.Name, cursor: PollCursor): string => 
   return url.toString();
 };
 
+const labelsUrl = (repository: Repository.Name): string => {
+  const { name, owner } = Repository.parts(repository);
+  const url = new URL(
+    `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/labels`,
+  );
+  url.searchParams.set("per_page", "100");
+  return url.toString();
+};
+
 const newerWatermark = (cursor: PollCursor, items: ReadonlyArray<ChangedItem>) => {
   const epochs = items.map(({ updatedAt }) => DateTime.toEpochMillis(updatedAt));
   if (Option.isSome(cursor.watermark)) {
@@ -164,6 +177,9 @@ export class GitHubPolling extends Context.Service<
       repository: Repository.Name,
       cursor: PollCursor,
     ) => Effect.Effect<ChangeDetection, GitHubAppError>;
+    readonly labels: (
+      repository: Repository.Name,
+    ) => Effect.Effect<ReadonlyArray<RepositoryLabelName>, GitHubAppError>;
     readonly snapshot: (
       repository: Repository.Name,
       item: ChangedItem,
@@ -207,6 +223,45 @@ export class GitHubPolling extends Context.Service<
           items: toChangedItems(decoded),
           next: nextPageUrl(response.headers.link),
         } as const;
+      });
+
+      const labelsPage = Effect.fn("GitHubPolling.labelsPage")(function* (url: string) {
+        const token = yield* app.installationToken();
+        const request = HttpClientRequest.get(url).pipe(authorized(token.value));
+        const response = yield* execute("list-repository-labels", request);
+        const now = yield* Clock.currentTimeMillis;
+        if (response.status !== 200) {
+          return yield* statusError("list-repository-labels", response, now);
+        }
+        const decoded = yield* HttpClientResponse.schemaBodyJson(RestRepositoryLabels)(
+          response,
+        ).pipe(
+          Effect.mapError((error) => invalidResponse("list-repository-labels", error.message)),
+        );
+        return {
+          labels: decoded.map(({ name }) => name),
+          next: nextPageUrl(response.headers.link),
+        };
+      });
+
+      const labels = Effect.fn("GitHubPolling.labels")(function* (repository: Repository.Name) {
+        yield* Effect.annotateCurrentSpan({ repository });
+        const catalog: Array<RepositoryLabelName> = [];
+        let next = Option.some(labelsUrl(repository));
+        let pages = 0;
+        while (Option.isSome(next) && pages < MAX_LABEL_PAGES) {
+          const page = yield* labelsPage(next.value);
+          catalog.push(...page.labels);
+          next = page.next;
+          pages += 1;
+        }
+        if (Option.isSome(next)) {
+          return yield* invalidResponse(
+            "list-repository-labels",
+            `Repository label catalog exceeded ${MAX_LABEL_PAGES} pages`,
+          );
+        }
+        return catalog.sort((left, right) => left.localeCompare(right));
       });
 
       const changes = Effect.fn("GitHubPolling.changes")(function* (
@@ -363,7 +418,7 @@ export class GitHubPolling extends Context.Service<
           }),
       );
 
-      return { changes, snapshot };
+      return { changes, labels, snapshot };
     }),
   );
 }

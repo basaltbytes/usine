@@ -7,4 +7,4 @@
 "@usine/server": minor
 ---
 
-Add per-repository Board lane maps, durable projections of GitHub Items already fetched by polling, live Run data on Board cards, and label-backed card moves through the operator API.
+Add per-repository Board lane maps, durable projections of GitHub Items and repository labels from polling, live Run data on Board cards, quarantined Item diagnostics, and lane-scoped label moves through the operator API.

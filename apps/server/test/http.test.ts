@@ -70,7 +70,7 @@ const overview = new ReadyOverview({
       repository: repositoryName,
       status: "needs-you",
       runs: [run],
-      board: new BoardView({ lanes: [] }),
+      board: new BoardView({ failures: [], lanes: [] }),
     }),
   ],
   loops: [new LoopView({ name: loopName, trigger: "issue", agent: agentName, paused: true })],

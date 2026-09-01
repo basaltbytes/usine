@@ -3,6 +3,7 @@ import { Event, Loop, Run } from "@usine/core";
 import {
   ItemProjectionReader,
   LoopControl,
+  RepositoryLabelProjectionReader,
   RunEngine,
   RunReader,
   type EnginePersistenceError,
@@ -13,7 +14,7 @@ import {
 } from "@usine/engine";
 import { GitHubItemWriter, type GitHubAppError } from "@usine/github";
 import { Context, DateTime, Effect, Layer, Option, SynchronizedRef } from "effect";
-import { labelsForBoardMove, projectBoard } from "../board/projection.ts";
+import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import { PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import {
@@ -25,7 +26,7 @@ import {
   type BoardLaneReadOnlyError,
   BoardLaneReadOnlyError as BoardLaneReadOnly,
   type BoardMove,
-  type BoardProjectionError,
+  BoardProjectionNeed,
   type BoardProjectNotFoundError,
   BoardProjectNotFoundError as BoardProjectNotFound,
   ColdTranscriptRequest,
@@ -47,15 +48,11 @@ export type BoardMoveError =
   | BoardItemNotFoundError
   | BoardLaneNotFoundError
   | BoardLaneReadOnlyError
-  | BoardProjectionError
   | BoardProjectNotFoundError
   | EnginePersistenceError
   | GitHubAppError;
 export type OperatorError = RunEngineError | TranscriptAttemptNotFoundError | BoardMoveError;
-export type OperatorObservationError =
-  | RunStoreError
-  | TranscriptAttemptNotFoundError
-  | BoardProjectionError;
+export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFoundError;
 
 /** Settled Runs kept in the overview beside every open one; history stays bounded. */
 const OVERVIEW_CLOSED_RUNS = 100;
@@ -69,6 +66,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const reader = yield* RunReader;
   const controls = yield* LoopControl;
   const itemReader = yield* ItemProjectionReader;
+  const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const polling = yield* PollingTriggers;
   const schedules = yield* ScheduleTriggers;
   const cache = yield* SynchronizedRef.make(Option.none<CachedOverview>());
@@ -97,15 +95,26 @@ const makeOperatorObservation = Effect.gen(function* () {
         Effect.gen(function* () {
           const { name } = repository;
           const projectRuns = runsByRepository.get(name) ?? [];
-          const status: ProjectStatus = projectRuns.some(
-            (run) => run.state === "Waiting" || run.state === "Failed",
-          )
-            ? "needs-you"
-            : projectRuns.some((run) => run.canCancel)
-              ? "active"
-              : "clear";
-          const boardItems = yield* itemReader.list(name);
-          const board = yield* projectBoard(repository, boardItems, projectRuns);
+          const [boardItems, labelProjection] = yield* Effect.all(
+            [itemReader.list(name), repositoryLabels.get(name)] as const,
+            { concurrency: "unbounded" },
+          );
+          const board = yield* projectBoard(
+            repository,
+            Option.match(labelProjection, {
+              onNone: () => [],
+              onSome: ({ labels }) => labels,
+            }),
+            boardItems,
+            projectRuns,
+          );
+          const status: ProjectStatus =
+            board.failures.length > 0 ||
+            projectRuns.some((run) => run.state === "Waiting" || run.state === "Failed")
+              ? "needs-you"
+              : projectRuns.some((run) => run.canCancel)
+                ? "active"
+                : "clear";
           return new ProjectView({ repository: name, status, runs: projectRuns, board });
         }),
       { concurrency: 4 },
@@ -142,6 +151,16 @@ const makeOperatorObservation = Effect.gen(function* () {
             runId: run.id,
             loop: run.loop,
             failure: attempt.outcome.failure,
+          }),
+        );
+      }
+    }
+    for (const project of projects) {
+      for (const failure of project.board.failures) {
+        needsYou.push(
+          new BoardProjectionNeed({
+            id: `board-projection:${failure.repository}:${failure.itemKey}`,
+            failure,
           }),
         );
       }
@@ -270,6 +289,7 @@ const makeOperator = Effect.gen(function* () {
   const runs = yield* RunEngine;
   const controls = yield* LoopControl;
   const items = yield* ItemProjectionReader;
+  const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const github = yield* GitHubItemWriter;
 
   const approve = Effect.fn("Operator.approve")(function* (runId: Run.RunId) {
@@ -322,7 +342,19 @@ const makeOperator = Effect.gen(function* () {
     if (repository === undefined) {
       return yield* new BoardProjectNotFound({ repository: move.repository });
     }
-    const board = yield* projectBoard(repository, yield* items.list(move.repository), []);
+    const [storedItems, labelProjection] = yield* Effect.all(
+      [items.list(move.repository), repositoryLabels.get(move.repository)] as const,
+      { concurrency: "unbounded" },
+    );
+    const board = yield* projectBoard(
+      repository,
+      Option.match(labelProjection, {
+        onNone: () => [],
+        onSome: ({ labels }) => labels,
+      }),
+      storedItems,
+      [],
+    );
     const item = board.lanes
       .flatMap(({ items: laneItems }) => laneItems)
       .find(({ number }) => number === move.item);
@@ -336,20 +368,8 @@ const makeOperator = Effect.gen(function* () {
     if (target._tag === "ReadOnlyBoardLane") {
       return yield* new BoardLaneReadOnly({ repository: move.repository, lane: move.toLane });
     }
-    const labels = labelsForBoardMove(board, item, target);
-    const current = [...item.labels].sort((left, right) => left.localeCompare(right));
-    if (
-      labels.length === current.length &&
-      labels.every((label, index) => label === current[index])
-    ) {
-      yield* Effect.logInfo("Board move skipped because Item labels already match the Lane", {
-        repository: move.repository,
-        item: move.item,
-        lane: move.toLane,
-      });
-      return;
-    }
-    yield* github.setLabels(move.repository, move.item, labels);
+    const mutation = labelMutationForBoardMove(board, item, target);
+    yield* github.updateLabels(move.repository, move.item, mutation);
   });
 
   return { ...observation, approve, cancel, moveBoardItem, pause, retry, unpause } as const;

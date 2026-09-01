@@ -25,6 +25,11 @@ export const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set([
 export const EntityTag = Schema.NonEmptyString.pipe(Schema.brand("GitHubEntityTag"));
 export type EntityTag = typeof EntityTag.Type;
 
+export const RepositoryLabelName = Schema.NonEmptyString.pipe(
+  Schema.brand("GitHubRepositoryLabelName"),
+);
+export type RepositoryLabelName = typeof RepositoryLabelName.Type;
+
 /** Efficiency-only REST cursor. Losing it is safe because Event dedup is permanent. */
 export class PollCursor extends Schema.Class<PollCursor>("@usine/github/PollCursor")({
   entityTag: Schema.OptionFromNullOr(EntityTag),

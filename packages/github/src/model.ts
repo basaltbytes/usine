@@ -28,10 +28,11 @@ export const GitHubOperation = Schema.Literals([
   "fetch-issue-snapshot",
   "fetch-pull-request-snapshot",
   "list-installation-repositories",
+  "list-repository-labels",
   "mint-installation-token",
   "mint-worker-token",
   "poll-repository-changes",
-  "set-item-labels",
+  "update-item-labels",
 ]);
 export type GitHubOperation = typeof GitHubOperation.Type;
 

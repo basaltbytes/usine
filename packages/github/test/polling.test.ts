@@ -276,6 +276,33 @@ describe("GitHubPolling", () => {
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 
+  it.effect("walks the complete repository label catalog for Board lane proposals", () => {
+    const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    const client = HttpClient.make((request) => {
+      requests.push(request);
+      return Effect.succeed(
+        requests.length === 1
+          ? response(request, [{ name: "ready" }], {
+              headers: {
+                link: '<https://api.github.com/repositories/1/labels?page=2>; rel="next"',
+              },
+            })
+          : response(request, [{ name: "bug" }]),
+      );
+    });
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      assert.deepStrictEqual((yield* polling.labels(repository)).map(String), ["bug", "ready"]);
+      assert.strictEqual(requests.length, 2);
+      assert.strictEqual(
+        requests[0]?.url,
+        "https://api.github.com/repos/basaltbytes/usine/labels?per_page=100",
+      );
+      assert.strictEqual(requests[1]?.url, "https://api.github.com/repositories/1/labels?page=2");
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
   it.effect("classifies GraphQL rate limiting reported on HTTP 200", () => {
     const client = HttpClient.make((request) =>
       Effect.succeed(

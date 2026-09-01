@@ -9,8 +9,8 @@ import {
 } from "@usine/config";
 import { Item } from "@usine/core";
 import type { ItemProjection } from "@usine/engine";
-import { IssuePayload, PullRequestPayload } from "@usine/github";
-import { Effect, Schema } from "effect";
+import { IssuePayload, ItemLabelMutation, PullRequestPayload } from "@usine/github";
+import { Effect, Result, Schema } from "effect";
 import {
   BoardItemView,
   BoardLaneId,
@@ -93,10 +93,10 @@ const labelSources = (sources: ReadonlyArray<LaneSource>): ReadonlyArray<GitHubL
 const stateSources = (sources: ReadonlyArray<LaneSource>): ReadonlyArray<LaneItemState> =>
   sources.flatMap((source) => ("state" in source ? [source.state] : []));
 
-const proposedLanes = (items: ReadonlyArray<ProjectedItem>): ReadonlyArray<LaneDefinition> => {
-  const labels = [...new Set(items.flatMap(({ labels }) => labels))].sort((left, right) =>
-    left.localeCompare(right),
-  );
+const proposedLanes = (repositoryLabels: ReadonlyArray<string>): ReadonlyArray<LaneDefinition> => {
+  const labels = [...repositoryLabels]
+    .sort((left, right) => left.localeCompare(right))
+    .map((label) => GitHubLabelName.make(label));
   return labels.map((label) => ({
     lane: new Lane({
       name: LaneName.make(label),
@@ -108,11 +108,11 @@ const proposedLanes = (items: ReadonlyArray<ProjectedItem>): ReadonlyArray<LaneD
 
 const effectiveLanes = (
   repository: ManagedRepo,
-  items: ReadonlyArray<ProjectedItem>,
+  repositoryLabels: ReadonlyArray<string>,
 ): ReadonlyArray<LaneDefinition> =>
   repository.lanes.length > 0
     ? repository.lanes.map((lane) => ({ lane, origin: "authored" }))
-    : proposedLanes(items);
+    : proposedLanes(repositoryLabels);
 
 const laneId = (definition: LaneDefinition): BoardLaneId =>
   BoardLaneId.make(`${definition.origin}:${definition.lane.name}`);
@@ -128,12 +128,31 @@ const laneFor = (
 export const projectBoard = Effect.fn("Board.project")(
   (
     repository: ManagedRepo,
+    repositoryLabels: ReadonlyArray<string>,
     storedItems: ReadonlyArray<ItemProjection>,
     runs: ReadonlyArray<RunView>,
-  ): Effect.Effect<BoardView, BoardProjectionError> =>
+  ): Effect.Effect<BoardView> =>
     Effect.gen(function* () {
-      const items = yield* Effect.forEach(storedItems, projectedItem);
-      const lanes = effectiveLanes(repository, items);
+      yield* Effect.annotateCurrentSpan({ repository: repository.name });
+      const results = yield* Effect.forEach(storedItems, (item) =>
+        projectedItem(item).pipe(Effect.result),
+      );
+      const items: Array<ProjectedItem> = [];
+      const failures: Array<BoardProjectionError> = [];
+      for (const result of results) {
+        if (Result.isSuccess(result)) {
+          items.push(result.success);
+          continue;
+        }
+        failures.push(result.failure);
+        yield* Effect.logError("Item projection quarantined from Board; siblings continue", {
+          repository: result.failure.repository,
+          itemKey: result.failure.itemKey,
+          errorTag: result.failure._tag,
+          message: result.failure.message,
+        });
+      }
+      const lanes = effectiveLanes(repository, repositoryLabels);
       const runsByItem = new Map<Item.ItemKey, RunView>();
       for (const run of runs) {
         if (!runsByItem.has(run.itemKey)) runsByItem.set(run.itemKey, run);
@@ -157,6 +176,7 @@ export const projectBoard = Effect.fn("Board.project")(
       const sortItems = (values: Array<BoardItemView>) =>
         values.sort((left, right) => right.number - left.number);
       return new BoardView({
+        failures,
         lanes: [
           ...lanes.map((definition) => {
             const labels = labelSources(definition.lane.sources);
@@ -183,22 +203,26 @@ export const projectBoard = Effect.fn("Board.project")(
     }),
 );
 
-export const labelsForBoardMove = (
+export const labelMutationForBoardMove = (
   board: BoardView,
   item: BoardItemView,
   target: WritableBoardLaneView,
-): ReadonlyArray<string> => {
+): ItemLabelMutation => {
   const current = board.lanes.find(({ items }) =>
     items.some(({ itemKey }) => itemKey === item.itemKey),
   );
-  const mapped = new Set(
+  const laneOwned = new Set(
     current?.origin === "proposed"
       ? labelSources(current.sources)
       : board.lanes
           .filter(({ origin }) => origin === "authored")
           .flatMap(({ sources }) => labelSources(sources)),
   );
-  return [...item.labels.filter((label) => !mapped.has(label)), ...target.labels].sort(
-    (left, right) => left.localeCompare(right),
-  );
+  const targetLabels = new Set(target.labels);
+  return new ItemLabelMutation({
+    add: [...targetLabels].sort((left, right) => left.localeCompare(right)),
+    remove: [...laneOwned]
+      .filter((label) => !targetLabels.has(label))
+      .sort((left, right) => left.localeCompare(right)),
+  });
 };

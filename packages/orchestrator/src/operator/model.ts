@@ -132,8 +132,17 @@ export class ReadOnlyBoardLaneView extends Schema.TaggedClass<ReadOnlyBoardLaneV
 export const BoardLaneView = Schema.Union([WritableBoardLaneView, ReadOnlyBoardLaneView]);
 export type BoardLaneView = typeof BoardLaneView.Type;
 
+export class BoardProjectionError extends Schema.TaggedError<BoardProjectionError>(
+  "@usine/orchestrator/BoardProjectionError",
+)("BoardProjectionError", {
+  repository: Repository.Name,
+  itemKey: Item.ItemKey,
+  message: Schema.NonEmptyString,
+}) {}
+
 export class BoardView extends Schema.Class<BoardView>("@usine/orchestrator/BoardView")({
   lanes: Schema.Array(BoardLaneView),
+  failures: Schema.Array(BoardProjectionError),
 }) {}
 
 export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/ProjectView")({
@@ -176,14 +185,6 @@ export class BoardLaneReadOnlyError extends Schema.TaggedError<BoardLaneReadOnly
   lane: BoardLaneId,
 }) {}
 
-export class BoardProjectionError extends Schema.TaggedError<BoardProjectionError>(
-  "@usine/orchestrator/BoardProjectionError",
-)("BoardProjectionError", {
-  repository: Repository.Name,
-  itemKey: Item.ItemKey,
-  message: Schema.NonEmptyString,
-}) {}
-
 export class LoopView extends Schema.Class<LoopView>("@usine/orchestrator/LoopView")({
   name: Loop.LoopName,
   trigger: Schema.String,
@@ -217,6 +218,13 @@ export class PollFailureNeed extends Schema.TaggedClass<PollFailureNeed>(
   failure: RepositoryPollFailure,
 }) {}
 
+export class BoardProjectionNeed extends Schema.TaggedClass<BoardProjectionNeed>(
+  "@usine/orchestrator/BoardProjectionNeed",
+)("BoardProjectionNeed", {
+  id: Schema.String,
+  failure: BoardProjectionError,
+}) {}
+
 export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>(
   "@usine/orchestrator/ScheduleFailureNeed",
 )("ScheduleFailureNeed", {
@@ -226,6 +234,7 @@ export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>
 
 export const NeedView = Schema.Union([
   ApprovalNeed,
+  BoardProjectionNeed,
   RunFailureNeed,
   PollFailureNeed,
   ScheduleFailureNeed,

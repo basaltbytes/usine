@@ -1,6 +1,6 @@
 /** @usine/github — GitHub App identity and scoped installation tokens. */
 export { GitHubApp } from "./github-app.ts";
-export { GitHubItemWriter } from "./item-writer.ts";
+export { GitHubItemWriter, ItemLabelMutation } from "./item-writer.ts";
 export {
   AppAuthenticationError,
   AppCredentials,
@@ -45,6 +45,7 @@ export {
   PollCursor,
   PullRequestPayload,
   PullRequestSnapshot,
+  RepositoryLabelName,
   RepositoryChanges,
   RepositoryNotModified,
 } from "./polling/model.ts";

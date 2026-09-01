@@ -5,6 +5,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 import {
   GitHubApp,
   GitHubItemWriter,
+  ItemLabelMutation,
   Installation,
   InstallationId,
   InstallationToken,
@@ -29,14 +30,38 @@ const appLayer = Layer.succeed(GitHubApp)({
 const LabelRequest = Schema.Struct({ labels: Schema.Array(Schema.String) });
 
 describe("GitHubItemWriter", () => {
-  it.effect("replaces an issue or pull request's labels in one idempotent request", () => {
+  it.effect("mutates only lane labels while preserving truncated and concurrent labels", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
+    // The polled Item slice would expose only the first 50 of these labels.
+    const unrelated = Array.from({ length: 60 }, (_, index) => `unrelated-${index}`);
+    const current = new Set([...unrelated, "ready"]);
+    let concurrentAdded = false;
     const client = HttpClient.make((request) => {
       requests.push(request);
+      if (request.method === "POST") {
+        assert.strictEqual(request.body._tag, "Uint8Array");
+        if (request.body._tag === "Uint8Array") {
+          const body = Schema.decodeUnknownSync(LabelRequest)(
+            JSON.parse(new TextDecoder().decode(request.body.body)),
+          );
+          body.labels.forEach((label) => current.add(label));
+        }
+        // Simulate an unrelated label arriving after the stale projection and
+        // during the multi-request lane move.
+        current.add("concurrent-label");
+        concurrentAdded = true;
+      } else if (request.method === "DELETE") {
+        const removed = current.delete(decodeURIComponent(request.url.split("/").at(-1) ?? ""));
+        if (!removed) {
+          return Effect.succeed(
+            HttpClientResponse.fromWeb(request, new Response(null, { status: 404 })),
+          );
+        }
+      }
       return Effect.succeed(
         HttpClientResponse.fromWeb(
           request,
-          new Response(JSON.stringify([{ name: "ready-for-review" }, { name: "bug" }]), {
+          new Response(JSON.stringify([...current].map((name) => ({ name }))), {
             status: 200,
             headers: { "content-type": "application/json" },
           }),
@@ -50,25 +75,45 @@ describe("GitHubItemWriter", () => {
 
     return Effect.gen(function* () {
       const writer = yield* GitHubItemWriter;
-      const applied = yield* writer.setLabels(repository, Item.Number.make(33), [
-        "ready-for-review",
-        "bug",
-      ]);
-      assert.deepStrictEqual(applied, ["ready-for-review", "bug"]);
-      const request = requests[0];
-      assert(request !== undefined);
-      assert.strictEqual(request.method, "PUT");
+      const applied = yield* writer.updateLabels(
+        repository,
+        Item.Number.make(33),
+        new ItemLabelMutation({
+          add: ["ready-for-review"],
+          remove: ["ready", "stale-lane-label"],
+        }),
+      );
+      assert.strictEqual(concurrentAdded, true);
+      assert.strictEqual(requests.length, 3);
+      assert.deepStrictEqual(
+        requests.map(({ method }) => method),
+        ["POST", "DELETE", "DELETE"],
+      );
+      const addRequest = requests[0];
+      assert(addRequest !== undefined);
       assert.strictEqual(
-        request.url,
+        addRequest.url,
         "https://api.github.com/repos/basaltbytes/usine/issues/33/labels",
       );
-      assert.strictEqual(request.headers.authorization, "Bearer item-writer-token");
-      assert.strictEqual(request.body._tag, "Uint8Array");
-      if (request.body._tag !== "Uint8Array") return;
+      assert.strictEqual(addRequest.headers.authorization, "Bearer item-writer-token");
+      assert.strictEqual(addRequest.body._tag, "Uint8Array");
+      if (addRequest.body._tag !== "Uint8Array") return;
       const body = Schema.decodeUnknownSync(LabelRequest)(
-        JSON.parse(new TextDecoder().decode(request.body.body)),
+        JSON.parse(new TextDecoder().decode(addRequest.body.body)),
       );
-      assert.deepStrictEqual(body.labels, ["ready-for-review", "bug"]);
+      assert.deepStrictEqual(body.labels, ["ready-for-review"]);
+      assert.strictEqual(
+        requests[1]?.url,
+        "https://api.github.com/repos/basaltbytes/usine/issues/33/labels/ready",
+      );
+      assert.strictEqual(
+        requests[2]?.url,
+        "https://api.github.com/repos/basaltbytes/usine/issues/33/labels/stale-lane-label",
+      );
+      assert.strictEqual(applied.includes("ready"), false);
+      assert.strictEqual(applied.includes("ready-for-review"), true);
+      assert.strictEqual(applied.includes("concurrent-label"), true);
+      assert(unrelated.every((label) => applied.includes(label)));
     }).pipe(Effect.provide(layer));
   });
 });

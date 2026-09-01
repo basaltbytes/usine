@@ -16,7 +16,7 @@ import {
   Selector,
   UsineConfig,
 } from "@usine/config";
-import { Instance, Run, Step } from "@usine/core";
+import { Instance, Repository, Run, Step } from "@usine/core";
 import {
   Claimed,
   CursorKey,
@@ -24,6 +24,8 @@ import {
   ItemProjectionWriter,
   LoopControl,
   LoopRuntimeState,
+  RepositoryLabelProjectionReader,
+  RepositoryLabelProjectionWriter,
   RunEngine,
   StepExecutor,
 } from "@usine/engine";
@@ -39,6 +41,7 @@ import {
   PollCursor,
   RepositoryNotModified,
   RepositoryChanges,
+  RepositoryLabelName,
   type IssuePayload,
 } from "@usine/github";
 import {
@@ -58,7 +61,7 @@ import {
 import { TestClock } from "effect/testing";
 import { PollingTriggers } from "../src/index.ts";
 
-const watchedRepository = "basaltbytes/usine";
+const watchedRepository = Repository.Name.make("basaltbytes/usine");
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
   version: 1,
@@ -180,6 +183,10 @@ const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
   upsert: () => Effect.succeed(true),
 });
 
+const repositoryLabelProjectionWriterLayer = Layer.succeed(RepositoryLabelProjectionWriter)({
+  replace: () => Effect.succeed(true),
+});
+
 const schedulerLayer = (
   github: GitHubPolling["Service"],
   states: ReadonlyArray<LoopRuntimeState> = [],
@@ -209,6 +216,7 @@ const schedulerLayer = (
     cursors,
     expressions,
     itemProjectionWriterLayer,
+    repositoryLabelProjectionWriterLayer,
     parser,
     runs,
     loopControlLayer(states),
@@ -230,6 +238,7 @@ describe("PollingTriggers", () => {
             nextPollAt: Option.some(DateTime.makeUnsafe(now + 120_000)),
           });
         }),
+      labels: () => Effect.succeed([]),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
 
@@ -254,6 +263,7 @@ describe("PollingTriggers", () => {
         changeRequests += 1;
         return Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() }));
       },
+      labels: () => Effect.succeed([]),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
     const state = new LoopRuntimeState({ loop: loop.name, paused: true });
@@ -304,6 +314,7 @@ describe("PollingTriggers", () => {
                 nextPollAt: Option.none(),
               });
             }),
+          labels: () => Effect.succeed([RepositoryLabelName.make("unused-repository-label")]),
           snapshot: () =>
             Effect.gen(function* () {
               yield* Ref.update(snapshotCalls, (count) => count + 1);
@@ -324,6 +335,7 @@ describe("PollingTriggers", () => {
         const firstPolling = Context.get(firstContext, PollingTriggers);
         const firstEngine = Context.get(firstContext, RunEngine);
         const firstCursors = Context.get(firstContext, CursorStore);
+        const firstLabels = Context.get(firstContext, RepositoryLabelProjectionReader);
 
         yield* firstCursors.write(
           CursorKey.make(`github-poll:${watchedRepository}`),
@@ -342,6 +354,9 @@ describe("PollingTriggers", () => {
         assert.strictEqual(originalSnapshot.agent.brain.model, "gpt-5.6-sol");
         assert.strictEqual(originalSnapshot.agent.brain.effort, "high");
         assert.strictEqual(originalSnapshot.agent.persona, "Implement the issue.");
+        const projectedLabels = yield* firstLabels.get(watchedRepository);
+        assert(Option.isSome(projectedLabels));
+        assert.deepStrictEqual(projectedLabels.value.labels, ["unused-repository-label"]);
         assert.deepStrictEqual(
           originalSnapshot.parentModel,
           Option.some(ModelId.make("anthropic/instance-parent")),
@@ -360,6 +375,11 @@ describe("PollingTriggers", () => {
         );
         const secondPolling = Context.get(secondContext, PollingTriggers);
         const secondEngine = Context.get(secondContext, RunEngine);
+        const secondLabels = Context.get(secondContext, RepositoryLabelProjectionReader);
+
+        const restoredLabels = yield* secondLabels.get(watchedRepository);
+        assert(Option.isSome(restoredLabels));
+        assert.deepStrictEqual(restoredLabels.value.labels, ["unused-repository-label"]);
 
         const afterRestart = yield* secondPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(afterRestart), originalRun);
@@ -465,6 +485,7 @@ describe("PollingTriggers", () => {
                 nextPollAt: Option.none(),
               }),
             ),
+      labels: () => Effect.succeed([]),
       snapshot: () =>
         Effect.succeed(
           new IssueSnapshot({
@@ -499,6 +520,7 @@ describe("PollingTriggers", () => {
         Layer.mergeAll(
           cursors,
           itemProjectionWriterLayer,
+          repositoryLabelProjectionWriterLayer,
           runs,
           MarcbachmannCelLayer,
           parser,
@@ -581,6 +603,7 @@ describe("PollingTriggers", () => {
             nextPollAt: Option.none(),
           }),
         ),
+      labels: () => Effect.succeed([]),
       snapshot: () =>
         Effect.succeed(
           new IssueSnapshot({
@@ -594,6 +617,7 @@ describe("PollingTriggers", () => {
         Layer.mergeAll(
           cursors,
           itemProjectionWriterLayer,
+          repositoryLabelProjectionWriterLayer,
           runs,
           MarcbachmannCelLayer,
           parser,
@@ -660,6 +684,7 @@ describe("PollingTriggers", () => {
               nextPollAt: Option.none(),
             }),
           ),
+        labels: () => Effect.succeed([]),
         snapshot: (repository, item) =>
           Effect.succeed(
             new IssueSnapshot({

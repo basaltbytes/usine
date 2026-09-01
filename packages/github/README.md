@@ -83,14 +83,15 @@ Pass a `CoveredProject` to `GitHubApp.workerToken`. GitHub must confirm in the t
 
 ## Poll repository changes
 
-`GitHubPollingLayer` supplies the two operations the orchestrator needs:
+`GitHubPollingLayer` supplies the operations the orchestrator needs:
 
 - `changes(repository, cursor)` makes one conditional Issues REST request. It returns changed issue and pull-request numbers, the next ETag and watermark, plus any rate-limit delay GitHub requested.
+- `labels(repository)` reads every page of the repository label catalog for Board lane proposals.
 - `snapshot(repository, item)` fetches the issue or pull-request payload through GraphQL and computes its SHA-256 content hash. The stored payload retains timestamps, while the hash excludes timestamp fields at every nesting level.
 
 The REST cursor overlaps its watermark by five seconds. Repeated items are expected; the engine's permanent Event ledger owns deduplication. Provide `GitHubPollingLayer` with `GitHubApp`, an Effect HTTP client, and `Crypto.Crypto`. The package root remains platform-free.
 
-`GitHubItemWriter.setLabels(repository, item, labels)` replaces the labels applied to an issue or pull request with one GitHub request. It never deletes label definitions from the repository. The service requires `GitHubApp` and an Effect HTTP client.
+`GitHubItemWriter.updateLabels(repository, item, mutation)` adds destination lane labels and removes only explicitly lane-owned labels from an issue or pull request. It never replaces the complete applied-label set or deletes repository label definitions, so unrelated and concurrently added labels survive stale or truncated Item projections. The service requires `GitHubApp` and an Effect HTTP client.
 
 ## Real-App integration check
 

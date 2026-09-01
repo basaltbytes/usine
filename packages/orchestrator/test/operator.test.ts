@@ -33,6 +33,7 @@ import {
   ItemProjectionReader,
   ItemProjectionSource,
   ProjectionRevision,
+  RepositoryLabelProjectionReader,
   RunEngine,
   RunReader,
   RunSnapshot,
@@ -40,7 +41,7 @@ import {
   type TranscriptQuery,
   TranscriptSequence,
 } from "@usine/engine";
-import { GitHubItemWriter } from "@usine/github";
+import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github";
 import { Source } from "@usine/expression";
 import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
 import {
@@ -234,7 +235,7 @@ interface RecordedApproval {
 
 const testLayer = (
   approved: Ref.Ref<ReadonlyArray<RecordedApproval>>,
-  movedLabels: Ref.Ref<ReadonlyArray<string>>,
+  movedLabels: Ref.Ref<ItemLabelMutation | null>,
   overviewReads: Ref.Ref<number>,
   projectionRevision: Ref.Ref<Option.Option<ProjectionRevision>>,
 ) => {
@@ -310,10 +311,22 @@ const testLayer = (
             closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
           },
         }),
+        new ItemProjection({
+          itemKey: Item.ItemKey.make("github:basaltbytes/usine:32"),
+          repository,
+          source: ItemProjectionSource.make("issue"),
+          number: ItemNumber.make(32),
+          contentHash: ItemContentHash.make("malformed-issue-32"),
+          payload: { number: 32 },
+        }),
       ]),
   });
+  const repositoryLabelReader = Layer.succeed(RepositoryLabelProjectionReader)({
+    get: () => Effect.succeed(Option.none()),
+  });
   const github = Layer.succeed(GitHubItemWriter)({
-    setLabels: (_repository, _item, labels) => Ref.set(movedLabels, labels).pipe(Effect.as(labels)),
+    updateLabels: (_repository, _item, mutation) =>
+      Ref.set(movedLabels, mutation).pipe(Effect.as(mutation.add)),
   });
   const polling = Layer.succeed(PollingTriggers)({
     poll: () => Effect.die("unused"),
@@ -360,6 +373,7 @@ const testLayer = (
     controls,
     github,
     itemReader,
+    repositoryLabelReader,
     polling,
     schedules,
   );
@@ -370,7 +384,7 @@ describe("Operator", () => {
   it.effect("projects needs-you state and protocol child activity without recursive nesting", () =>
     Effect.gen(function* () {
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
-      const movedLabels = yield* Ref.make<ReadonlyArray<string>>([]);
+      const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
       const overviewReads = yield* Ref.make(0);
       const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       yield* Effect.gen(function* () {
@@ -400,9 +414,14 @@ describe("Operator", () => {
         assert.strictEqual(overview.projects[0]?.board.lanes[0]?.name, "Ready");
         assert.strictEqual(overview.projects[0]?.board.lanes[0]?.items[0]?.run?.id, runId);
         assert.strictEqual(overview.projects[0]?.board.lanes[0]?.items[0]?.needsYou, true);
+        assert.strictEqual(overview.projects[0]?.board.failures.length, 1);
+        assert.strictEqual(
+          overview.projects[0]?.board.failures[0]?.itemKey,
+          "github:basaltbytes/usine:32",
+        );
         assert.deepStrictEqual(
           overview.needsYou.map(({ _tag }) => _tag),
-          ["ApprovalNeed", "PollFailureNeed"],
+          ["ApprovalNeed", "BoardProjectionNeed", "PollFailureNeed"],
         );
 
         const detail = yield* operator.detail(runId, new ColdTranscriptRequest());
@@ -483,7 +502,10 @@ describe("Operator", () => {
             toLane: BoardLaneId.make("authored:In review"),
           }),
         );
-        assert.deepStrictEqual(yield* Ref.get(movedLabels), ["bug", "ready-for-review"]);
+        const mutation = yield* Ref.get(movedLabels);
+        assert(mutation !== null);
+        assert.deepStrictEqual(mutation.add, ["ready-for-review"]);
+        assert.deepStrictEqual(mutation.remove, ["ready"]);
       }).pipe(Effect.provide(testLayer(approved, movedLabels, overviewReads, projectionRevision)));
     }),
   );

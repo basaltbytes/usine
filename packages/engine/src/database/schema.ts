@@ -246,6 +246,21 @@ export const itemProjections = snakeCase.table(
   ],
 );
 
+/** Latest complete GitHub label catalog for each managed repository. */
+export const repositoryLabelProjections = snakeCase.table(
+  "usine_repository_label_projections",
+  {
+    repository: text().$type<Repository.Name>().primaryKey(),
+    labelsJson: text({ mode: "json" }).$type<unknown>().notNull(),
+  },
+  (table) => [
+    check(
+      "usine_repository_label_projections_labels_json_valid",
+      sql`json_valid(${table.labelsJson})`,
+    ),
+  ],
+);
+
 /** Operator-owned runtime toggles; deliberately separate from authored Loop files (ADR 0009). */
 export const loopRuntime = snakeCase.table("usine_loop_runtime", {
   loopName: text().$type<Loop.LoopName>().primaryKey(),

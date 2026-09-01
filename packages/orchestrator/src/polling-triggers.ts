@@ -19,6 +19,8 @@ import {
   ItemProjectionSource,
   ItemProjectionWriter,
   LoopControl,
+  RepositoryLabelProjection,
+  RepositoryLabelProjectionWriter,
   RunEngine,
   SubmissionResult,
   type RunEngineError,
@@ -195,6 +197,7 @@ export class PollingTriggers extends Context.Service<
       const expressions = yield* ExpressionEngine;
       const github = yield* GitHubPolling;
       const items = yield* ItemProjectionWriter;
+      const repositoryLabels = yield* RepositoryLabelProjectionWriter;
       const runs = yield* RunEngine;
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
@@ -350,7 +353,19 @@ export class PollingTriggers extends Context.Service<
       ) {
         yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
         const cursor = yield* readCursor(watched);
-        const detected = yield* github.changes(watched.repository.name, cursor);
+        const [detected, labels] = yield* Effect.all(
+          [
+            github.changes(watched.repository.name, cursor),
+            github.labels(watched.repository.name),
+          ] as const,
+          { concurrency: "unbounded" },
+        );
+        yield* repositoryLabels.replace(
+          new RepositoryLabelProjection({
+            repository: watched.repository.name,
+            labels: labels.map(String),
+          }),
+        );
         if (detected._tag === "RepositoryNotModified") {
           yield* Effect.logDebug("Repository unchanged (304)", {
             repository: watched.repository.name,
