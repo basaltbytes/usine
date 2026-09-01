@@ -3,10 +3,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeHttpPlatform } from "@effect/platform-node";
 import { LoadedInstance, UsineConfig } from "@usine/config";
-import { Agent, Attempt, Loop, Repository, Run } from "@usine/core";
+import { Agent, Attempt, Item, Loop, Repository, Run } from "@usine/core";
 import { RunNotFoundError, RunOperationRejectedError } from "@usine/engine";
 import {
   ApprovalNeed,
+  BoardLaneId,
+  type BoardMove,
+  BoardView,
   FactoryOverview,
   LoopView,
   OperatorObservation,
@@ -39,6 +42,7 @@ const instance = new LoadedInstance({
 });
 const run = new RunView({
   id: runId,
+  itemKey: Item.ItemKey.make("issue:31"),
   loop: loopName,
   repository: repositoryName,
   agent: agentName,
@@ -61,7 +65,14 @@ const detail = new RunDetailView({
   earlierTranscript: [],
 });
 const overview = new ReadyOverview({
-  projects: [new ProjectView({ repository: repositoryName, status: "needs-you", runs: [run] })],
+  projects: [
+    new ProjectView({
+      repository: repositoryName,
+      status: "needs-you",
+      runs: [run],
+      board: new BoardView({ lanes: [] }),
+    }),
+  ],
   loops: [new LoopView({ name: loopName, trigger: "issue", agent: agentName, paused: true })],
   needsYou: [
     new ApprovalNeed({
@@ -139,6 +150,7 @@ describe("operator HTTP API", () => {
   });
 
   it("maps typed engine errors onto operator-readable statuses", async () => {
+    let moved: BoardMove | undefined;
     const rejecting = Layer.succeed(FactoryBackend)({
       overview: Effect.succeed(overview),
       detail: (id, request) =>
@@ -153,6 +165,7 @@ describe("operator HTTP API", () => {
         ),
       retry: () => Effect.void,
       cancel: () => Effect.void,
+      moveBoardItem: (move) => Effect.sync(() => void (moved = move)),
       pause: () => Effect.void,
       unpause: () => Effect.void,
     });
@@ -186,6 +199,18 @@ describe("operator HTTP API", () => {
         error: "TranscriptAttemptNotFoundError",
         message: `Attempt ${wrongAttempt} does not belong to Run ${runId}.`,
       });
+
+      const move = await rejectingApp.handler(
+        new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ toLane: BoardLaneId.make("authored:Review") }),
+        }),
+      );
+      assert.strictEqual(move.status, 200);
+      assert.strictEqual(moved?.repository, repositoryName);
+      assert.strictEqual(moved?.item, 31);
+      assert.strictEqual(moved?.toLane, "authored:Review");
     } finally {
       await rejectingApp.dispose();
     }

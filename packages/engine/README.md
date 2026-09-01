@@ -8,6 +8,8 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 
 `LoopControl` keeps runtime pause state in the same database. Pausing or unpausing a Loop never edits its authored Markdown file. `RunReader.list()` returns lightweight durable Run summaries newest first for observe-and-intervene surfaces, without loading Event payloads or issuing one snapshot read per Run. `RunReader.revision()` lets callers reuse an unchanged projection without rescanning history.
 
+`ItemProjectionReader` and `ItemProjectionWriter` store the latest issue and pull-request snapshots already fetched by trigger polling. Board consumers can read that projection after a restart without making a second GitHub query. Item writes update the shared projection revision only when the content hash changes.
+
 ## Runtime rules
 
 - Approval-gated Runs wait for an approval Event before their first Attempt.

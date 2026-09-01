@@ -66,6 +66,7 @@ export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<Loop.Loop
   );
   return new RunView({
     id: snapshot.run.id,
+    itemKey: snapshot.itemKey,
     loop: snapshot.run.loop,
     repository: snapshot.repository,
     agent: snapshot.agent.name,

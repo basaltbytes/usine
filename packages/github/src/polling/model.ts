@@ -92,7 +92,7 @@ const emptyConnection = { totalCount: 0, nodes: [] } as const;
 
 const Actor = Schema.Struct({ login: Schema.NonEmptyString });
 const NullableActor = Schema.NullOr(Actor);
-const Label = Schema.Struct({ name: Schema.String });
+const Label = Schema.Struct({ name: Schema.NonEmptyString });
 const Labels = Schema.Struct({ totalCount: NonNegativeInt, nodes: Schema.Array(Label) });
 const IssueComment = Schema.Struct({
   author: NullableActor,

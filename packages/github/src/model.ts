@@ -31,6 +31,7 @@ export const GitHubOperation = Schema.Literals([
   "mint-installation-token",
   "mint-worker-token",
   "poll-repository-changes",
+  "set-item-labels",
 ]);
 export type GitHubOperation = typeof GitHubOperation.Type;
 

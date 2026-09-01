@@ -6,10 +6,8 @@ export const ItemProjectionSource = Schema.NonEmptyString.pipe(
 );
 export type ItemProjectionSource = typeof ItemProjectionSource.Type;
 
-export const ItemNumber = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
-  Schema.brand("ItemNumber"),
-);
-export type ItemNumber = typeof ItemNumber.Type;
+export const ItemNumber = Item.Number;
+export type ItemNumber = Item.Number;
 
 export const ItemContentHash = Schema.NonEmptyString.pipe(Schema.brand("ItemContentHash"));
 export type ItemContentHash = typeof ItemContentHash.Type;

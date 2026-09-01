@@ -27,6 +27,11 @@ import {
 import {
   LoopControl,
   LoopRuntimeState,
+  ItemContentHash,
+  ItemNumber,
+  ItemProjection,
+  ItemProjectionReader,
+  ItemProjectionSource,
   ProjectionRevision,
   RunEngine,
   RunReader,
@@ -35,10 +40,13 @@ import {
   type TranscriptQuery,
   TranscriptSequence,
 } from "@usine/engine";
+import { GitHubItemWriter } from "@usine/github";
 import { Source } from "@usine/expression";
 import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
 import {
   ColdTranscriptRequest,
+  BoardLaneId,
+  BoardMove,
   EarlierTranscriptRequest,
   FailureView,
   Operator,
@@ -57,6 +65,7 @@ const runId = Run.RunId.make("run-operator-test");
 const attemptId = Attempt.AttemptId.make("attempt-operator-test");
 const loopName = LoopName.make("review-issue");
 const repository = Repository.Name.make("basaltbytes/usine");
+const itemKey = Item.ItemKey.make("github:basaltbytes/usine:31");
 const brain = new Agent.BrainSpec({
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
@@ -65,7 +74,18 @@ const brain = new Agent.BrainSpec({
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
   version: 1,
-  repos: [{ name: repository }],
+  repos: [
+    {
+      name: repository,
+      lanes: [
+        { name: "Ready", sources: [{ label: "ready" }] },
+        {
+          name: "In review",
+          sources: [{ label: "ready-for-review" }, { state: "pr-open" }],
+        },
+      ],
+    },
+  ],
 });
 const agentFile = new AgentFile({
   name: AgentName.make("developer"),
@@ -99,7 +119,7 @@ const snapshot = new RunSnapshot({
     payload: { number: 31 },
     receivedAt: now,
   }),
-  itemKey: Item.ItemKey.make("github:basaltbytes/usine:31"),
+  itemKey,
   run: new Run.Run({
     id: runId,
     eventId: Event.EventId.make("event-operator-test"),
@@ -214,6 +234,7 @@ interface RecordedApproval {
 
 const testLayer = (
   approved: Ref.Ref<ReadonlyArray<RecordedApproval>>,
+  movedLabels: Ref.Ref<ReadonlyArray<string>>,
   overviewReads: Ref.Ref<number>,
   projectionRevision: Ref.Ref<Option.Option<ProjectionRevision>>,
 ) => {
@@ -258,6 +279,42 @@ const testLayer = (
     states: Effect.succeed([new LoopRuntimeState({ loop: loopName, paused: true })]),
     unpause: () => Effect.succeed(new LoopRuntimeState({ loop: loopName, paused: false })),
   });
+  const itemReader = Layer.succeed(ItemProjectionReader)({
+    list: () =>
+      Effect.succeed([
+        new ItemProjection({
+          itemKey,
+          repository,
+          source: ItemProjectionSource.make("issue"),
+          number: ItemNumber.make(31),
+          contentHash: ItemContentHash.make("issue-31"),
+          payload: {
+            number: 31,
+            title: "Board lanes",
+            body: "Build the Board.",
+            url: "https://github.com/basaltbytes/usine/issues/31",
+            state: "OPEN",
+            stateReason: null,
+            createdAt: "2026-08-31T10:00:00Z",
+            updatedAt: "2026-08-31T12:00:00Z",
+            closedAt: null,
+            author: { login: "PhilDL" },
+            issueType: null,
+            milestone: null,
+            labels: {
+              totalCount: 2,
+              nodes: [{ name: "ready" }, { name: "bug" }],
+            },
+            assignees: { totalCount: 0, nodes: [] },
+            comments: { totalCount: 0, nodes: [] },
+            closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
+          },
+        }),
+      ]),
+  });
+  const github = Layer.succeed(GitHubItemWriter)({
+    setLabels: (_repository, _item, labels) => Ref.set(movedLabels, labels).pipe(Effect.as(labels)),
+  });
   const polling = Layer.succeed(PollingTriggers)({
     poll: () => Effect.die("unused"),
     run: () => Effect.never,
@@ -297,7 +354,15 @@ const testLayer = (
       ),
     ),
   });
-  const dependencies = Layer.mergeAll(runs, reader, controls, polling, schedules);
+  const dependencies = Layer.mergeAll(
+    runs,
+    reader,
+    controls,
+    github,
+    itemReader,
+    polling,
+    schedules,
+  );
   return Operator.layer.pipe(Layer.provide(dependencies));
 };
 
@@ -305,6 +370,7 @@ describe("Operator", () => {
   it.effect("projects needs-you state and protocol child activity without recursive nesting", () =>
     Effect.gen(function* () {
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const movedLabels = yield* Ref.make<ReadonlyArray<string>>([]);
       const overviewReads = yield* Ref.make(0);
       const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       yield* Effect.gen(function* () {
@@ -331,6 +397,9 @@ describe("Operator", () => {
         assert.strictEqual(overview.projects[0]?.status, "needs-you");
         assert.strictEqual(overview.loops[0]?.paused, true);
         assert.strictEqual(overview.projects[0]?.runs[0]?.loopPaused, true);
+        assert.strictEqual(overview.projects[0]?.board.lanes[0]?.name, "Ready");
+        assert.strictEqual(overview.projects[0]?.board.lanes[0]?.items[0]?.run?.id, runId);
+        assert.strictEqual(overview.projects[0]?.board.lanes[0]?.items[0]?.needsYou, true);
         assert.deepStrictEqual(
           overview.needsYou.map(({ _tag }) => _tag),
           ["ApprovalNeed", "PollFailureNeed"],
@@ -406,7 +475,16 @@ describe("Operator", () => {
           runId,
           decision: "approved",
         });
-      }).pipe(Effect.provide(testLayer(approved, overviewReads, projectionRevision)));
+        yield* operator.moveBoardItem(
+          instance,
+          new BoardMove({
+            repository,
+            item: Item.Number.make(31),
+            toLane: BoardLaneId.make("authored:In review"),
+          }),
+        );
+        assert.deepStrictEqual(yield* Ref.get(movedLabels), ["bug", "ready-for-review"]);
+      }).pipe(Effect.provide(testLayer(approved, movedLabels, overviewReads, projectionRevision)));
     }),
   );
 

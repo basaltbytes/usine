@@ -10,7 +10,7 @@ Everything lives in the `lifecycle` cluster: a deduplicated Event opens a Run, t
 | --- | --- |
 | `Event`, `Run`, `Step`, `Attempt` | Entities — the four ledger rows, identity plus validated construction |
 | `EventId`, `RunId`, `AttemptId` | Value objects — branded ids; identities that cannot be swapped for each other |
-| `DedupKey`, `ItemKey`, `LoopName`, `StepName`, `AttemptNumber` | Value objects — branded primitives carrying a domain constraint |
+| `DedupKey`, `ItemKey`, `Item.Number`, `LoopName`, `StepName`, `AttemptNumber` | Value objects — branded primitives carrying a domain constraint; Item numbers are positive integers |
 | `Instance.Directory`, `Repository.Name`, `Repository.Revision`, `Repository.CommitSha` | Shared value objects — paths and validated Git identities |
 | `Worker.Name`, `Worker.Kind` | Value objects — a Worker identity and its local or exe.dev adapter kind |
 | `Agent.Agent`, `Agent.BrainSpec` | Agent values — a named persona, its child brain, and optional Pi parent-model override |

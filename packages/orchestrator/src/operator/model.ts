@@ -3,12 +3,14 @@ import {
   Attempt,
   AttemptChannel,
   AttemptFailure,
+  Item,
   Loop,
   Repository,
   Run,
   RunState,
   Worker,
 } from "@usine/core";
+import { GitHubLabelName, LaneItemState, LaneName, LaneSource } from "@usine/config";
 import { TranscriptSequence } from "@usine/engine";
 import { Schema } from "effect";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
@@ -72,6 +74,7 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
 
 export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView")({
   id: Run.RunId,
+  itemKey: Item.ItemKey,
   loop: Loop.LoopName,
   repository: Repository.Name,
   agent: Agent.Name,
@@ -87,10 +90,98 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   canCancel: Schema.Boolean,
 }) {}
 
+export const BoardLaneId = Schema.NonEmptyString.pipe(Schema.brand("BoardLaneId"));
+export type BoardLaneId = typeof BoardLaneId.Type;
+
+export const BoardLaneOrigin = Schema.Literals(["authored", "proposed", "fallback"]);
+export type BoardLaneOrigin = typeof BoardLaneOrigin.Type;
+
+export class BoardItemView extends Schema.Class<BoardItemView>("@usine/orchestrator/BoardItemView")(
+  {
+    itemKey: Item.ItemKey,
+    kind: Schema.Literals(["issue", "pr"]),
+    number: Item.Number,
+    title: Schema.String,
+    url: Schema.NonEmptyString,
+    state: LaneItemState,
+    labels: Schema.Array(GitHubLabelName),
+    run: Schema.NullOr(RunView),
+    needsYou: Schema.Boolean,
+  },
+) {}
+
+const BoardLaneViewFields = {
+  id: BoardLaneId,
+  name: LaneName,
+  sources: Schema.Array(LaneSource),
+  origin: BoardLaneOrigin,
+  items: Schema.Array(BoardItemView),
+} as const;
+
+export class WritableBoardLaneView extends Schema.TaggedClass<WritableBoardLaneView>(
+  "@usine/orchestrator/WritableBoardLaneView",
+)("WritableBoardLane", {
+  ...BoardLaneViewFields,
+  labels: Schema.Array(GitHubLabelName).check(Schema.isNonEmpty()),
+}) {}
+
+export class ReadOnlyBoardLaneView extends Schema.TaggedClass<ReadOnlyBoardLaneView>(
+  "@usine/orchestrator/ReadOnlyBoardLaneView",
+)("ReadOnlyBoardLane", BoardLaneViewFields) {}
+
+export const BoardLaneView = Schema.Union([WritableBoardLaneView, ReadOnlyBoardLaneView]);
+export type BoardLaneView = typeof BoardLaneView.Type;
+
+export class BoardView extends Schema.Class<BoardView>("@usine/orchestrator/BoardView")({
+  lanes: Schema.Array(BoardLaneView),
+}) {}
+
 export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/ProjectView")({
   repository: Repository.Name,
   status: ProjectStatus,
   runs: Schema.Array(RunView),
+  board: BoardView,
+}) {}
+
+export class BoardMove extends Schema.Class<BoardMove>("@usine/orchestrator/BoardMove")({
+  repository: Repository.Name,
+  item: Item.Number,
+  toLane: BoardLaneId,
+}) {}
+
+export class BoardProjectNotFoundError extends Schema.TaggedError<BoardProjectNotFoundError>(
+  "@usine/orchestrator/BoardProjectNotFoundError",
+)("BoardProjectNotFoundError", {
+  repository: Repository.Name,
+}) {}
+
+export class BoardItemNotFoundError extends Schema.TaggedError<BoardItemNotFoundError>(
+  "@usine/orchestrator/BoardItemNotFoundError",
+)("BoardItemNotFoundError", {
+  repository: Repository.Name,
+  item: Item.Number,
+}) {}
+
+export class BoardLaneNotFoundError extends Schema.TaggedError<BoardLaneNotFoundError>(
+  "@usine/orchestrator/BoardLaneNotFoundError",
+)("BoardLaneNotFoundError", {
+  repository: Repository.Name,
+  lane: BoardLaneId,
+}) {}
+
+export class BoardLaneReadOnlyError extends Schema.TaggedError<BoardLaneReadOnlyError>(
+  "@usine/orchestrator/BoardLaneReadOnlyError",
+)("BoardLaneReadOnlyError", {
+  repository: Repository.Name,
+  lane: BoardLaneId,
+}) {}
+
+export class BoardProjectionError extends Schema.TaggedError<BoardProjectionError>(
+  "@usine/orchestrator/BoardProjectionError",
+)("BoardProjectionError", {
+  repository: Repository.Name,
+  itemKey: Item.ItemKey,
+  message: Schema.NonEmptyString,
 }) {}
 
 export class LoopView extends Schema.Class<LoopView>("@usine/orchestrator/LoopView")({

@@ -90,6 +90,8 @@ Pass a `CoveredProject` to `GitHubApp.workerToken`. GitHub must confirm in the t
 
 The REST cursor overlaps its watermark by five seconds. Repeated items are expected; the engine's permanent Event ledger owns deduplication. Provide `GitHubPollingLayer` with `GitHubApp`, an Effect HTTP client, and `Crypto.Crypto`. The package root remains platform-free.
 
+`GitHubItemWriter.setLabels(repository, item, labels)` replaces the labels applied to an issue or pull request with one GitHub request. It never deletes label definitions from the repository. The service requires `GitHubApp` and an Effect HTTP client.
+
 ## Real-App integration check
 
 Run the opt-in integration test against a disposable issue in a repository covered by the App:

@@ -16,12 +16,14 @@ import {
   RouterProvider,
   useNavigate,
 } from "@tanstack/react-router";
-import { Run } from "@usine/core";
+import { Repository, Run } from "@usine/core";
 import { FactoryOverview, RunDetailView } from "@usine/orchestrator";
-import type { LoopView, NeedView, RunView, TranscriptPageCursor } from "@usine/orchestrator";
+import type { LoopView, NeedView, ProjectView, TranscriptPageCursor } from "@usine/orchestrator";
 import { Schema } from "effect";
 import { StrictMode, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { ApiOk, api } from "./api.ts";
+import { ProjectBoard } from "./board.tsx";
 import { brainLine, failureMessage, needCopy } from "./operator-copy.ts";
 import {
   mergeTranscript,
@@ -31,36 +33,20 @@ import {
 } from "./run-transcript.tsx";
 import "./styles.css";
 
-const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
-const ApiError = Schema.Struct({
-  error: Schema.String,
-  message: Schema.String,
-});
-const isApiError = Schema.is(ApiError);
-const RunSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(Run.RunId) }));
+const FactorySearch = Schema.toStandardSchemaV1(
+  Schema.Struct({
+    run: Schema.optional(Run.RunId),
+    project: Schema.optional(Repository.Name),
+    view: Schema.optional(Schema.Literal("configuration")),
+  }),
+);
 const ACTIVE_OVERVIEW_REFRESH_MS = 2_000;
 const IDLE_OVERVIEW_REFRESH_MS = 15_000;
 
-const errorMessage = async (response: Response): Promise<string> => {
-  const body = await response.text();
-  try {
-    const parsed: unknown = JSON.parse(body);
-    if (isApiError(parsed)) return parsed.message;
-  } catch {
-    // Not the ApiError envelope; fall through to the raw body.
-  }
-  return body || `Request failed with status ${response.status}`;
-};
-
-const api = async <S extends Schema.Codec<unknown, unknown, never, unknown>>(
-  path: string,
-  schema: S,
-  init?: RequestInit,
-): Promise<S["Type"]> => {
-  const response = await fetch(path, init);
-  if (!response.ok) throw new Error(await errorMessage(response));
-  return Schema.decodeUnknownPromise(schema)(await response.json());
-};
+interface ContextSearch {
+  project?: Repository.Name;
+  view?: "configuration";
+}
 
 const overviewQuery = () => ({
   queryKey: ["overview"] as const,
@@ -110,23 +96,6 @@ const ActionButton = ({
 );
 
 const PausedMark = () => <span className="paused-mark">paused</span>;
-
-const RunRow = ({ run, open }: { readonly run: RunView; readonly open: () => void }) => (
-  <button className="run-row" onClick={open} type="button">
-    <span className="run-route">
-      <strong>{run.loop}</strong>
-      <small>
-        {run.agent}
-        {run.loopPaused && <PausedMark />}
-      </small>
-    </span>
-    <StatusMark state={run.state} />
-    <span className="annotation">{timeAgo(run.openedAt)}</span>
-    <span className="row-arrow" aria-hidden="true">
-      ↗
-    </span>
-  </button>
-);
 
 const NeedStrip = ({
   needs,
@@ -401,6 +370,83 @@ const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close
   );
 };
 
+const ProjectIndex = ({
+  projects,
+  open,
+}: {
+  readonly projects: ReadonlyArray<ProjectView>;
+  readonly open: (repository: Repository.Name) => void;
+}) => (
+  <main className="projects-panel project-index">
+    <header className="section-heading">
+      <div>
+        <p className="eyebrow">Observe</p>
+        <h1>Projects</h1>
+      </div>
+      <span className="annotation">{projects.length} registered</span>
+    </header>
+    <div className="project-grid">
+      {projects.map((project) => {
+        const itemCount = project.board.lanes.reduce((total, lane) => total + lane.items.length, 0);
+        const needsYou = project.board.lanes.reduce(
+          (total, lane) => total + lane.items.filter((item) => item.needsYou).length,
+          0,
+        );
+        return (
+          <button
+            className="project-tile"
+            key={project.repository}
+            onClick={() => open(project.repository)}
+            type="button"
+          >
+            <span className="project-tile-heading">
+              <strong>{project.repository}</strong>
+              <span className={`project-status project-${project.status}`}>{project.status}</span>
+            </span>
+            <span className="annotation">
+              {itemCount} item{itemCount === 1 ? "" : "s"} · {project.board.lanes.length} lanes
+            </span>
+            {project.status === "needs-you" && (
+              <span className="needs-you-badge">
+                {needsYou > 0 ? `${needsYou} need you` : "Needs you"}
+              </span>
+            )}
+            <span className="project-open">Open board →</span>
+          </button>
+        );
+      })}
+    </div>
+  </main>
+);
+
+const Configuration = ({
+  loops,
+  pending,
+  act,
+  error,
+}: {
+  readonly loops: ReadonlyArray<LoopView>;
+  readonly pending: boolean;
+  readonly act: (loop: LoopView) => void;
+  readonly error: string | null;
+}) => (
+  <main className="configuration-panel">
+    <header className="section-heading">
+      <div>
+        <p className="eyebrow">Configuration</p>
+        <h1>Loops</h1>
+      </div>
+    </header>
+    <p className="aside-copy">Runtime controls. Authored loop files remain untouched.</p>
+    <div className="loop-list">
+      {loops.map((loop) => (
+        <LoopCard key={loop.name} loop={loop} pending={pending} act={act} />
+      ))}
+    </div>
+    {error !== null && <p className="error-panel">{error}</p>}
+  </main>
+);
+
 const FactoryScreen = () => {
   const navigate = useNavigate({ from: "/" });
   const search = indexRoute.useSearch();
@@ -415,8 +461,11 @@ const FactoryScreen = () => {
       ),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["overview"] }),
   });
-  const openRun = (runId: Run.RunId) => navigate({ search: { run: runId } });
-  const closeRun = () => navigate({ search: {} });
+  const contextSearch: ContextSearch = {};
+  if (search.project !== undefined) contextSearch.project = search.project;
+  if (search.view !== undefined) contextSearch.view = search.view;
+  const openRun = (runId: Run.RunId) => navigate({ search: { ...contextSearch, run: runId } });
+  const closeRun = () => navigate({ search: contextSearch });
 
   if (overview.isPending)
     return (
@@ -443,6 +492,22 @@ const FactoryScreen = () => {
             <small>Factory floor · local</small>
           </div>
         </div>
+        <nav className="main-nav" aria-label="Operator views">
+          <button
+            className={search.view === undefined ? "active" : ""}
+            onClick={() => navigate({ search: {} })}
+            type="button"
+          >
+            Projects
+          </button>
+          <button
+            className={search.view === "configuration" ? "active" : ""}
+            onClick={() => navigate({ search: { view: "configuration" } })}
+            type="button"
+          >
+            Configuration
+          </button>
+        </nav>
         {/* The indicator reports the trigger streams, not the server: idle
             pollers must never read as a running factory. */}
         <div className={`live-indicator ${data._tag === "NeedsSetup" ? "idle" : ""}`}>
@@ -461,64 +526,37 @@ const FactoryScreen = () => {
         </section>
       )}
       <NeedStrip needs={data.needsYou} openRun={openRun} />
-      <main className="floor-grid">
-        <section className="projects-panel">
-          <header className="section-heading">
-            <div>
-              <p className="eyebrow">Observe</p>
-              <h1>Projects</h1>
-            </div>
-            <span className="annotation">{data.projects.length} registered</span>
-          </header>
-          <div className="projects-list">
-            {data.projects.map((project) => (
-              <article className="project" key={project.repository}>
-                <header>
-                  <div>
-                    <h2>{project.repository}</h2>
-                    <p className="annotation">
-                      {project.runs.length} recorded run
-                      {project.runs.length === 1 ? "" : "s"}
-                    </p>
-                  </div>
-                  <span className={`project-status project-${project.status}`}>
-                    {project.status}
-                  </span>
-                </header>
-                {project.runs.length === 0 ? (
-                  <p className="empty-copy">No runs yet.</p>
-                ) : (
-                  <div className="run-list">
-                    {project.runs.map((run) => (
-                      <RunRow key={run.id} run={run} open={() => openRun(run.id)} />
-                    ))}
-                  </div>
-                )}
-              </article>
-            ))}
-          </div>
-        </section>
-        <aside className="loops-panel">
-          <header className="section-heading">
-            <div>
-              <p className="eyebrow">Intervene</p>
-              <h2>Loops</h2>
-            </div>
-          </header>
-          <p className="aside-copy">Runtime controls. Authored loop files remain untouched.</p>
-          <div className="loop-list">
-            {data.loops.map((loop) => (
-              <LoopCard
-                key={loop.name}
-                loop={loop}
-                pending={pauseMutation.isPending || data._tag === "NeedsSetup"}
-                act={(value) => pauseMutation.mutate(value)}
-              />
-            ))}
-          </div>
-          {pauseMutation.isError && <p className="error-panel">{pauseMutation.error.message}</p>}
-        </aside>
-      </main>
+      {search.view === "configuration" ? (
+        <Configuration
+          loops={data.loops}
+          pending={pauseMutation.isPending || data._tag === "NeedsSetup"}
+          act={(value) => pauseMutation.mutate(value)}
+          error={pauseMutation.isError ? pauseMutation.error.message : null}
+        />
+      ) : search.project === undefined ? (
+        <ProjectIndex
+          projects={data.projects}
+          open={(project) => navigate({ search: { project } })}
+        />
+      ) : (
+        (() => {
+          const project = data.projects.find(({ repository }) => repository === search.project);
+          return project === undefined ? (
+            <main className="boot-screen error-panel">
+              <span>NOT FOUND</span>
+              <p>{search.project} is not a registered project.</p>
+              <ActionButton onClick={() => navigate({ search: {} })}>Back to projects</ActionButton>
+            </main>
+          ) : (
+            <ProjectBoard
+              project={project}
+              disabled={data._tag === "NeedsSetup"}
+              back={() => navigate({ search: {} })}
+              openRun={openRun}
+            />
+          );
+        })()
+      )}
       {search.run !== undefined && <RunDrawer runId={search.run} close={closeRun} />}
     </div>
   );
@@ -528,7 +566,7 @@ const rootRoute = createRootRoute();
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  validateSearch: RunSearch,
+  validateSearch: FactorySearch,
   component: FactoryScreen,
 });
 const router = createRouter({ routeTree: rootRoute.addChildren([indexRoute]) });

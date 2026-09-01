@@ -148,6 +148,30 @@ h3,
   box-shadow: none;
 }
 
+.main-nav {
+  display: flex;
+  align-self: stretch;
+  gap: 0.25rem;
+}
+
+.main-nav button {
+  padding: 0 1rem;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--subtext);
+  font-size: var(--step--1);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.main-nav button.active {
+  border-bottom-color: var(--mauve);
+  color: var(--text);
+}
+
 .needs-strip {
   display: grid;
   grid-template-columns: minmax(8rem, 0.2fr) 1fr;
@@ -302,6 +326,62 @@ h3,
   gap: 2rem;
 }
 
+.project-index,
+.configuration-panel,
+.board-panel {
+  max-width: 104rem;
+  margin: 0 auto;
+  padding: clamp(1.5rem, 3vw, 3rem);
+}
+
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(22rem, 100%), 1fr));
+  gap: 1rem;
+}
+
+.project-tile {
+  display: grid;
+  gap: 1rem;
+  min-height: 12rem;
+  padding: 1.25rem;
+  border: 1px solid var(--surface-1);
+  background: var(--mantle);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.project-tile:hover {
+  border-color: var(--lavender);
+  transform: translateY(-2px);
+}
+
+.project-tile-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.project-tile-heading strong {
+  overflow-wrap: anywhere;
+  font-size: var(--step-1);
+}
+
+.project-open {
+  align-self: end;
+  color: var(--lavender);
+  font-size: var(--step--1);
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.configuration-panel {
+  max-width: 58rem;
+}
+
 .project {
   border-top: 1px solid var(--surface-1);
 }
@@ -330,6 +410,18 @@ h3,
   padding: 0.2rem 0.5rem;
   border: 1px solid currentColor;
   line-height: 1;
+  text-transform: uppercase;
+}
+
+.needs-you-badge {
+  width: max-content;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid var(--yellow);
+  background: rgb(249 226 175 / 10%);
+  color: var(--yellow);
+  font:
+    500 var(--step--1) "IBM Plex Mono",
+    monospace;
   text-transform: uppercase;
 }
 
@@ -703,6 +795,17 @@ h3,
 }
 
 @media (max-width: 850px) {
+  .masthead {
+    flex-wrap: wrap;
+    gap: 1rem;
+  }
+
+  .main-nav {
+    order: 3;
+    width: 100%;
+    min-height: 2.75rem;
+  }
+
   .needs-strip,
   .floor-grid {
     grid-template-columns: 1fr;

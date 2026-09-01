@@ -7,7 +7,7 @@ import {
   observationLayer as localObservationLayer,
 } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression";
-import { GitHubApp, GitHubPolling } from "@usine/github";
+import { GitHubApp, GitHubItemWriter, GitHubPolling } from "@usine/github";
 import { executableCommand } from "@usine/run-host/executable";
 import { Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
@@ -65,8 +65,12 @@ export const runtimeLayer = (
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
   );
+  const itemWriter = GitHubItemWriter.layer.pipe(
+    Layer.provide(app),
+    Layer.provide(FetchHttpClient.layer),
+  );
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-  const dependencies = Layer.mergeAll(engine, MarcbachmannCelLayer, parser, polling);
+  const dependencies = Layer.mergeAll(engine, itemWriter, MarcbachmannCelLayer, parser, polling);
   const triggers = Layer.mergeAll(PollingTriggers.layer, ScheduleTriggers.layer).pipe(
     Layer.provide(dependencies),
   );

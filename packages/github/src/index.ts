@@ -1,5 +1,6 @@
 /** @usine/github — GitHub App identity and scoped installation tokens. */
 export { GitHubApp } from "./github-app.ts";
+export { GitHubItemWriter } from "./item-writer.ts";
 export {
   AppAuthenticationError,
   AppCredentials,
