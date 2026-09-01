@@ -7,7 +7,7 @@ import {
   type LaneSource,
   type ManagedRepo,
 } from "@usine/config";
-import { Item } from "@usine/core";
+import { Item, RunState } from "@usine/core";
 import type { ItemProjection } from "@usine/engine";
 import { IssuePayload, ItemLabelMutation, PullRequestPayload } from "@usine/github";
 import { Effect, Result, Schema } from "effect";
@@ -125,6 +125,9 @@ const laneFor = (
     labelSources(lane.sources).some((label) => item.labels.includes(label)),
   ) ?? lanes.find(({ lane }) => stateSources(lane.sources).includes(item.state));
 
+const isOpenRun = (run: RunView): boolean =>
+  RunState.OPEN_STATE_TAGS.some((state) => state === run.state);
+
 export const projectBoard = Effect.fn("Board.project")(
   (
     repository: ManagedRepo,
@@ -155,7 +158,10 @@ export const projectBoard = Effect.fn("Board.project")(
       const lanes = effectiveLanes(repository, repositoryLabels);
       const runsByItem = new Map<Item.ItemKey, RunView>();
       for (const run of runs) {
-        if (!runsByItem.has(run.itemKey)) runsByItem.set(run.itemKey, run);
+        const selected = runsByItem.get(run.itemKey);
+        if (selected === undefined || (isOpenRun(run) && !isOpenRun(selected))) {
+          runsByItem.set(run.itemKey, run);
+        }
       }
       const cards = items.map((item) => {
         const run = runsByItem.get(item.itemKey) ?? null;

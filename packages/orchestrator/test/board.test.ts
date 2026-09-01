@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { GitHubLabelName, LabelLaneSource, LaneName, UsineConfig } from "@usine/config";
-import { Item, Repository } from "@usine/core";
+import { Agent, Item, Loop, Repository, Run } from "@usine/core";
 import { ItemContentHash, ItemNumber, ItemProjection, ItemProjectionSource } from "@usine/engine";
 import { Effect, Schema } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../src/board/projection.ts";
@@ -9,6 +9,7 @@ import {
   BoardLaneId,
   BoardView,
   ReadOnlyBoardLaneView,
+  RunView,
   WritableBoardLaneView,
 } from "../src/operator/model.ts";
 
@@ -45,6 +46,25 @@ const item = new ItemProjection({
     closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
   },
 });
+
+const runForBoard = (id: string, state: "Waiting" | "Succeeded") =>
+  new RunView({
+    id: Run.RunId.make(id),
+    itemKey,
+    loop: Loop.LoopName.make(`loop-${id}`),
+    repository,
+    agent: Agent.Name.make("developer"),
+    state,
+    loopPaused: false,
+    openedAt: "2026-09-01T12:00:00.000Z",
+    task: "Build the Board.",
+    attempts: [],
+    resultMessage: null,
+    pullRequestUrl: null,
+    canApprove: state === "Waiting",
+    canRetry: false,
+    canCancel: state === "Waiting",
+  });
 
 describe("Board projection", () => {
   it.effect("gives label lanes precedence over state lanes", () =>
@@ -106,6 +126,23 @@ describe("Board projection", () => {
       assert.strictEqual(board.lanes[0]?.items[0]?.itemKey, itemKey);
       assert.strictEqual(board.failures.length, 1);
       assert.strictEqual(board.failures[0]?.itemKey, malformed.itemKey);
+    }),
+  );
+
+  it.effect("prefers an open Run over a newer settled Run for the same Item", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const waiting = runForBoard("waiting-run", "Waiting");
+      const succeeded = runForBoard("newer-succeeded-run", "Succeeded");
+      const board = yield* projectBoard(managed, [], [item], [succeeded, waiting]);
+      const card = board.lanes[0]?.items[0];
+      assert.strictEqual(card?.run?.id, waiting.id);
+      assert.strictEqual(card?.needsYou, true);
     }),
   );
 
