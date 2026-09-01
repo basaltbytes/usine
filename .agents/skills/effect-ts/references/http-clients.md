@@ -127,22 +127,25 @@ const GitHubClient = Layer.effect(
 
 ## Error Handling
 
+Every client call fails with one class, `HttpClientError`, whose `_tag` is `"HttpClientError"`. `RequestError` and `ResponseError` are type aliases over its `reason` union, not tags, so `Effect.catchTag("ResponseError", ...)` never matches. Branch on `error.reason._tag` (`TransportError | EncodeError | InvalidUrlError | StatusCodeError | DecodeError | EmptyBodyError`), or on `error.response`, which is `HttpClientResponse | undefined`. An undefined response means the server never answered:
+
 ```typescript
 const program = Effect.gen(function* () {
   const response = yield* HttpClient.get("https://api.example.com/data")
   return yield* HttpClientResponse.schemaBodyJson(Data)(response)
 }).pipe(
-  Effect.catchTag("RequestError", (e) =>
-    Effect.fail(`Network error: ${e.reason}`)
-  ),
-  Effect.catchTag("ResponseError", (e) =>
-    Effect.fail(`HTTP ${e.response.status}: ${e.reason}`)
+  Effect.catchTag("HttpClientError", (error) =>
+    new ApiError({
+      status: Option.fromNullOr(error.response?.status),
+      message: error.response === undefined
+        ? "The request could not be sent"
+        : `Rejected with status ${error.response.status}`,
+    })
   ),
 )
 ```
 
-- `RequestError`: network failures, DNS errors, timeouts
-- `ResponseError`: non-2xx status (with `filterStatusOk`) or body parsing failures
+`filterStatusOk` exists on the response (`HttpClientResponse.filterStatusOk(response)`) and as a client transform (`HttpClient.filterStatusOk(client)`). Apply it to the client, so every call in the service converts a non-2xx status to an error the same way.
 
 ## Retries
 
@@ -253,7 +256,8 @@ program.pipe(Effect.provide(GitHubApi.live), Effect.runPromise)
 | JSON body | `HttpClientRequest.schemaBodyJson(Schema)(data)` |
 | Decode response | `HttpClientResponse.schemaBodyJson(Schema)(response)` |
 | Status matching | `HttpClientResponse.matchStatus(response, { ... })` |
-| Filter 2xx | `HttpClientResponse.filterStatusOk(response)` |
+| Filter 2xx | `HttpClientResponse.filterStatusOk(response)` or `HttpClient.filterStatusOk(client)` |
+| Catch errors | `Effect.catchTag("HttpClientError", ...)`; branch on `error.reason._tag` / `error.response` |
 | Base URL | `HttpClient.mapRequest(HttpClientRequest.prependUrl(url))` |
 | Retry transient | `HttpClient.retryTransient({ times: 3 })` |
 | Provide client | `Effect.provide(FetchHttpClient.layer)` |

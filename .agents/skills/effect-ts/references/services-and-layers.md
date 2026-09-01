@@ -6,6 +6,7 @@
 - [Layer Implementations](#layer-implementations)
 - [Service-Driven Development](#service-driven-development)
 - [Test Implementations](#test-implementations)
+- [Vendor Seams](#vendor-seams)
 - [Providing Layers](#providing-layers)
 - [Layer Memoization](#layer-memoization)
 - [Sharing Layers Between Tests](#sharing-layers-between-tests)
@@ -60,6 +61,11 @@ class UserNotFoundError extends Schema.TaggedError<UserNotFoundError>("UserNotFo
   { id: UserId }
 ) {}
 
+class UsersUnavailableError extends Schema.TaggedError<UsersUnavailableError>("UsersUnavailableError")(
+  "UsersUnavailableError",
+  { status: Schema.optional(Schema.Number) }
+) {}
+
 class Analytics extends Context.Service<
   Analytics,
   { readonly track: (event: string, data: Record<string, unknown>) => Effect.Effect<void> }
@@ -68,7 +74,7 @@ class Analytics extends Context.Service<
 class Users extends Context.Service<
   Users,
   {
-    readonly findById: (id: UserId) => Effect.Effect<User, UserNotFoundError>
+    readonly findById: (id: UserId) => Effect.Effect<User, UserNotFoundError | UsersUnavailableError>
     readonly all: () => Effect.Effect<readonly User[]>
   }
 >()("@app/Users") {
@@ -84,12 +90,14 @@ class Users extends Context.Service<
           const response = yield* http.get(`https://api.example.com/users/${id}`)
           return yield* HttpClientResponse.schemaBodyJson(User)(response)
         },
-        // The pipeline argument receives (effect, ...args) — args are in scope
+        // The pipeline argument receives (effect, ...args), so args are in scope.
+        // Every HTTP failure has the tag "HttpClientError"; branch on
+        // error.response, which is undefined when the server never answered.
         (effect, id) =>
-          Effect.catchTag(effect, "ResponseError", (error) =>
-            error.response.status === 404
+          Effect.catchTag(effect, "HttpClientError", (error) =>
+            error.response?.status === 404
               ? new UserNotFoundError({ id })
-              : Effect.die(error)
+              : new UsersUnavailableError({ status: error.response?.status })
           ),
       )
 
@@ -215,6 +223,12 @@ class Database extends Context.Service<
   })
 }
 ```
+
+## Vendor Seams
+
+Wrap each vendor SDK in a `Context.Service` that exposes only what the app uses (`PiSdk.start(options)`, `CodexAppServer.open(request)` returning a small interface). Provide the real one with `Layer.succeed(Tag)({ ... })`, and inject scripted fakes through a test layer instead of mocking the module. `Tag.of({ ... })` builds a correctly-typed service value outside a layer.
+
+Make something a service only if a second implementation exists: a test fake, or a variant per platform. An internal helper with one implementation, provided in one place, is a service nobody can substitute. Write it as a plain function evaluated once at layer build. A bad input then fails during layer composition, and the operation that used it has one fewer error in its union.
 
 ## Providing Layers
 

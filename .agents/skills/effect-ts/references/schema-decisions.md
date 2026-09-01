@@ -53,10 +53,11 @@ const Capability = Schema.Struct({
 })
 type Capability = typeof Capability.Type
 
-// With optional + default
+// With decoding defaults. Schema.optional takes one argument in v4; defaults
+// come from the withDecodingDefault* family.
 const Config = Schema.Struct({
-  timeout: Schema.optional(Schema.Number, { default: () => 5000 }),
-  retries: Schema.optional(Schema.Number, { default: () => 3 }),
+  timeout: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(5000))),
+  retries: Schema.Number.pipe(Schema.withDecodingDefaultKey(Effect.succeed(3))),
 })
 ```
 
@@ -127,10 +128,9 @@ import { Schema } from "effect"
 const UserId = Schema.String.pipe(Schema.brand("UserId"))
 
 // GOOD: brand with real constraints
-const UserId = Schema.NonEmptyString.pipe(
-  Schema.pattern(/^usr_[a-z0-9]+$/),
-  Schema.brand("UserId")
-)
+const UserId = Schema.NonEmptyString.check(
+  Schema.isPattern(/^usr_[a-z0-9]+$/u)
+).pipe(Schema.brand("UserId"))
 type UserId = typeof UserId.Type
 
 // GOOD: numeric brand with range
@@ -140,6 +140,8 @@ const Port = Schema.Int.pipe(
 )
 type Port = typeof Port.Type
 ```
+
+Add constraints to the fields the domain reads. A strict regex on a field no code reads costs maintenance and buys nothing; `NonEmptyString` is enough there.
 
 ## Migration Patterns
 

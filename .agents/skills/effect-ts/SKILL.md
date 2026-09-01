@@ -1,6 +1,6 @@
 ---
 name: effect-ts
-description: "Write idiomatic Effect v4 TypeScript following official best practices from effect-solutions and the Effect source. Use when writing, reviewing, or refactoring Effect code: services (Context.Service), layers and dependency injection, error handling (Schema.TaggedError), data modeling (Schema.Class, branded types, variants), testing (@effect/vitest), HTTP clients (effect/unstable/http), CLI tools (effect/unstable/cli), config, observability, and project setup. Triggers on: 'Effect', 'effect-ts', '@effect/', 'Schema', 'ServiceMap', 'Context.Service', 'Layer', 'Effect.gen', 'Effect.fn', 'TaggedError', 'branded types', or any Effect-TS related code."
+description: "Write idiomatic Effect v4 TypeScript following official best practices from effect-solutions and the Effect source. Use when writing, reviewing, or refactoring Effect code: services (Context.Service), layers and dependency injection, error handling (Schema.TaggedError), data modeling (Schema.Class, branded types, variants), concurrency and runtime (fibers, queues, locks, bridging into callbacks), testing (@effect/vitest), HTTP clients (effect/unstable/http), CLI tools (effect/unstable/cli), child processes, config, observability, and project setup. Triggers on: 'Effect', 'effect-ts', '@effect/', 'Schema', 'ServiceMap', 'Context.Service', 'Layer', 'Effect.gen', 'Effect.fn', 'TaggedError', 'branded types', 'Fiber', 'Queue', 'Semaphore', 'runPromise', or any Effect-TS related code."
 ---
 
 # Effect-TS (v4)
@@ -13,14 +13,11 @@ Every API name in this skill is verified against `effect@4.0.0-rc.111`, the vers
 
 ## Source-First Rule
 
-When working in any repo that uses Effect (`effect` or `@effect/*` in package/dependency files), reference the official Effect source before writing, reviewing, or refactoring Effect code. Do not rely on stale memory, blog posts, or high-level docs alone.
+When working in any repo that uses Effect (`effect` or `@effect/*` in package/dependency files), verify against the Effect source before writing, reviewing, or refactoring Effect code. Do not rely on stale memory, blog posts, or high-level docs alone.
 
-- If the `effect_source` tool is available, use it for `status`, `hydrate`, and `search` instead of hand-rolled shell commands.
-- First check for a repo-local shallow source mirror at `.agent-sources/effect/`.
-- If it is missing, create it before doing Effect work:
-  `mkdir -p .agent-sources && git clone --depth 1 --filter=blob:none https://github.com/effect-ts/effect.git .agent-sources/effect`
-- Keep the mirror out of product commits. If needed, add `.agent-sources/` to `.git/info/exclude`, not the project `.gitignore`, unless Joel explicitly wants it committed.
-- Search the mirror for current patterns and APIs, especially under `packages/effect/src/` and package tests/examples, before calling something an Effect best practice.
+- **API names and signatures**: grep the installed pinned package first, at `node_modules/.pnpm/effect@<pinned>*/node_modules/effect/dist/*.d.ts` (plus `src/` and `internal/` for semantics). It is the exact version the code compiles against. Cite the `.d.ts` or source line when you state how something behaves.
+- **Behavior**: for a question about what the code does at runtime, such as how a decoder treats an absent key or what a stream emits for a blank line, prove it with a throwaway `node --input-type=module` probe against the installed package. Do not answer it by reading alone.
+- **Broader reading** (tests, examples, implementation context): use the repo-local shallow mirror at `.agent-sources/effect/`; create it if missing with `mkdir -p .agent-sources && git clone --depth 1 --filter=blob:none https://github.com/effect-ts/effect.git .agent-sources/effect` (or the `effect_source` tool if available). The mirror follows upstream main, which is usually ahead of the pinned version. When the two disagree, the installed package is correct. Keep the mirror out of product commits via `.git/info/exclude`, not the project `.gitignore`.
 
 ## Local Source References
 
@@ -64,6 +61,8 @@ const fetchWithRetry = Effect.fn("fetchWithRetry")(
   )
 )
 ```
+
+Exception: do not wrap a loop that never returns (`Effect.forever`) in a named `Effect.fn`. Its span never closes and every cycle nests under it. Name the per-cycle operation instead. Let `Effect.fn` infer its return type; declare the public signature on the service tag.
 
 ## Context.Service
 
@@ -209,7 +208,7 @@ const recovered2 = program.pipe(
 
 See [references/error-handling.md](references/error-handling.md) for defects, Schema.Defect, and recovery patterns.
 
-At layer boundaries, translate defects too: a port whose contract is a typed error channel should convert anything else escaping its adapter with `Effect.catchDefect` into one of its own typed errors — vendor crashes never cross into domain code.
+Do not convert defects into typed errors inside adapters: that turns a bug into a retryable domain failure. Use `Effect.catchDefect` only at a boundary that requires serializable errors, such as a wire channel's `InfraFailure({ cause: Schema.Defect() })`, keep the original cause, and do not mark the result retryable. See [references/error-handling.md](references/error-handling.md).
 
 ## Layer Composition
 
@@ -270,6 +269,13 @@ const program = fetchData.pipe(
 )
 ```
 
+Write logs so that a reader can tell from them why nothing happened, not just what happened:
+
+- Annotate every `Effect.fn` span with domain ids: `Effect.annotateCurrentSpan({ runId, repository })`.
+- Log before discarding an error. Use `Effect.tapError(logError), Effect.ignore` rather than a bare `Effect.ignore`.
+- Build log fields from a result union with `Match.valueTags`, where each variant returns its own fields, instead of using `""` as a placeholder.
+- Log every decision: skips, resets, backoffs, and terminal outcomes at info; idle summaries at debug; config mistakes at warning.
+
 ## Anti-Patterns
 
 | Do Not | Do Instead |
@@ -283,6 +289,15 @@ const program = fetchData.pipe(
 | `Option.getOrThrow(...)` | `Option.match({ onNone, onSome })` or `Option.getOrElse` |
 | `Effect.Service` (v3) / `ServiceMap.Service` (earlier v4 RC) | `Context.Service` (rc.111) |
 | `Schema.TaggedErrorClass(...)` (earlier v4 RC) | `Schema.TaggedError<Self>("Tag")("Tag", {...})` (rc.111) |
+| `Effect.fork` / `Effect.forkDaemon` (v3 — fails at runtime) | `Effect.forkChild` / `forkScoped` / `forkIn` / `forkDetach` |
+| `Option.fromNullable` (v3) | `Option.fromNullishOr` (or `fromNullOr` for null-only) |
+| `Schema.pattern` / `minLength` / `maxLength` (v3) | `.check(Schema.isPattern(re, { message }))` / `isMinLength` / `isMaxLength` |
+| `Schema.optional(S, { default })` (v3) | `Schema.withDecodingDefaultKey(Effect.succeed(v))` |
+| `Effect.makeSemaphore` (v3) | `Semaphore.make` (standalone module) |
+| `Schema.NullOr` for maybe-absent keys | `Schema.optionalKey` — `NullOr` keys stay required |
+| `Effect.catchTag("RequestError" / "ResponseError")` | `Effect.catchTag("HttpClientError", ...)`, branch on `reason` / `response` |
+| `Effect.runPromise` inside vendor callbacks | Context-carrying runner ([runtime-and-concurrency](references/runtime-and-concurrency.md)) |
+| `import { Command } from "@effect/platform"` (v3) | `effect/unstable/process` `ChildProcess` + `ChildProcessSpawner` |
 | Scatter `Effect.provide` calls | Provide once at app entry |
 | Call parameterized layer constructors inline | Store layers in constants (memoization) |
 
@@ -295,8 +310,9 @@ Load these as needed for deeper patterns:
 - **[Schema Decisions](references/schema-decisions.md)**: Schema.Class vs Struct vs TaggedClass decision flowchart, migration patterns
 - **[Error Handling](references/error-handling.md)**: Schema.TaggedError, catch/catchTag/catchTags, defects, Schema.Defect, TypeId/refail patterns
 - **[Testing](references/testing.md)**: @effect/vitest setup, it.effect/it.live/it.layer, TestClock, Effect.flip, FiberRef isolation, worked example
-- **[HTTP Clients](references/http-clients.md)**: HttpClient, request building, response decoding, middleware, retries, typed API service
+- **[HTTP Clients](references/http-clients.md)**: HttpClient, request building, response decoding, middleware, retries, HttpClientError handling, typed API service
 - **[CLI](references/cli.md)**: Command.make, Arguments, Flags, subcommands, worked task manager example
 - **[Config](references/config.md)**: Config module, schema validation, ConfigProvider, Redacted, config layers
-- **[Processes & Scopes](references/processes.md)**: Fork types, Scope.extend, Command for child processes, killable background tasks
+- **[Runtime & Concurrency](references/runtime-and-concurrency.md)**: fork family, bridging into vendor callbacks, loop shapes and per-item isolation, timeouts, cleanup/compensation, locks, SynchronizedRef caching, queues
+- **[Child Processes & Scopes](references/processes.md)**: ChildProcess/ChildProcessSpawner, spawn option gotchas, output streams, Scope.extend, killable background tasks
 - **[Setup](references/setup.md)**: tsconfig, Effect Language Service, project structure, module settings

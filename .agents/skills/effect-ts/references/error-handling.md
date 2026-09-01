@@ -43,6 +43,14 @@ type AppError = typeof AppError.Type
 
 **Every distinct failure reason deserves its own error type.** Don't collapse multiple failure modes into generic errors like `NotFoundError`. Use `UserNotFoundError`, `ChannelNotFoundError`, etc. with relevant context fields.
 
+**Package conventions:**
+- Class name equals the tag (`ExpressionCheckError`, tagged `"ExpressionCheckError"`).
+- Namespace the schema identifier in the first constructor argument (`"@pkg/ExpressionCheckError"`). The runtime `_tag` stays the bare name.
+- Each package exports one failure union (`ConfigError`, `EngineError`) built with `Schema.Union([...])`.
+- `Schema.TaggedError` supplies a default `message`; declare a `message` field only when it adds information the tag does not.
+- **Split error types by whether the caller should retry.** Callers decide that from the error type: a vendor or child-process problem is a retryable infra error, while an agent-reported failure or a bad config is not. Mapping both to one type either wastes retries on failures that will never succeed, or stops a run that would have succeeded on the next attempt.
+- **Delete error types that can no longer occur.** When an exhaustive dispatcher or a narrowed input type makes a failure impossible, remove the error class, its union member, and its imports.
+
 ## Yieldable Errors
 
 `Schema.TaggedError` values are yieldable. Return them directly in generators without wrapping in `Effect.fail`:
@@ -129,6 +137,13 @@ const main = Effect.gen(function* () {
 
 **When to catch defects:** Almost never. Only at system boundaries for logging/diagnostics. Use `Effect.exit` to inspect or `Effect.catchDefect` if you must recover (e.g., plugin sandboxing).
 
+**Do not convert defects into ordinary typed failures.** Catching every defect in an adapter and re-throwing it as a typed error turns a bug into a retryable domain failure with an invented message. Use `catchDefect` in two places only: a boundary that requires serializable errors, such as a wire channel's `InfraFailure({ cause: Schema.Defect() })`, and a port where "the code around the agent crashed" is a real outcome the caller handles. In both, keep the original cause and do not mark the result retryable.
+
+More rules from review:
+- Do not define a typed error for a branch that cannot happen. An in-memory SHA-256 digest that fails is a violated invariant, so use `Effect.orDie` and delete the error type.
+- Operator configuration mistakes are typed errors at the parse boundary, not `Effect.die` at layer build. Only programmer defects crash.
+- Do not re-validate a contract the types already guarantee. A branded or union input needs no second check.
+
 ## Schema.Defect for Unknown Errors
 
 Wrap unknown errors from external libraries with `Schema.Defect`:
@@ -188,29 +203,23 @@ export class NotFoundError extends Schema.TaggedError<NotFoundError>("NotFoundEr
 }
 ```
 
-### Static refail Helper (from @effect/cluster)
+### Refail Combinators Guarded by the Package Union
 
-Create a static method that maps any error into your domain error:
+Map foreign errors into the package's failure union without double-wrapping your own:
 
 ```typescript
-import { Cause, Effect, Schema } from "effect"
+const isEngineError = Schema.is(EngineError) // the package's exported union
 
-class PersistenceError extends Schema.TaggedError<PersistenceError>("PersistenceError")(
-  "PersistenceError",
-  { cause: Schema.Defect() }
-) {
-  static refail<A, E, R>(
-    effect: Effect.Effect<A, E, R>
-  ): Effect.Effect<A, PersistenceError, R> {
-    return Effect.catchCause(effect, (cause) =>
-      Effect.fail(new PersistenceError({ cause: Cause.squash(cause) }))
+export const persistence = (operation: string) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, EngineError, R> =>
+    Effect.mapError(effect, (error) =>
+      isEngineError(error) ? error : new EnginePersistenceError({ operation, cause: error })
     )
-  }
-}
-
-// Usage: wrap any database call
-const safeQuery = PersistenceError.refail(rawDbCall)
 ```
+
+Apply it through `Effect.fn`'s second (pipeline) argument on each service method instead of wrapping every function body. Use `Schema.is(Union)` as the guard rather than a chain of `instanceof` checks.
+
+To read a message out of an unknown vendor cause, decode it: `Schema.decodeUnknownOption(Schema.Struct({ message: Schema.NonEmptyString }))(cause)`, then `Option.match`.
 
 ### Effect.flip (Swap Success/Error for Testing)
 

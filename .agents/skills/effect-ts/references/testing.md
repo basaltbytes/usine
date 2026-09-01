@@ -8,6 +8,7 @@
 - [Providing Layers](#providing-layers)
 - [TestClock](#testclock)
 - [Test Modifiers](#test-modifiers)
+- [Assertion Discipline](#assertion-discipline)
 - [Logging in Tests](#logging-in-tests)
 - [Worked Example](#worked-example)
 
@@ -90,6 +91,8 @@ it.live("real clock", () =>
 )
 ```
 
+Integration tests through `it.live` need an explicit vitest timeout as the third argument: `it.live("contract", fn, 180_000)`. The default is 5 seconds, which is shorter than any real agent call. One contract test that was required to pass before merge failed on that timeout the first time anyone ran it, which is how we found out it had never been run. Keep live tests out of the default run with `--exclude 'test/integration/**'` and separate `test:integration:*` scripts, and run them once before you call them done.
+
 ### Scoped Resources
 
 Scoping is automatic in v4. The scope closes when the test ends:
@@ -150,6 +153,13 @@ it.effect.skip("temporarily disabled", () => /* ... */)
 it.effect.only("focus on this", () => /* ... */)
 it.effect.fails("known bug, expected to fail", () => /* ... */)
 ```
+
+## Assertion Discipline
+
+- Narrow a `Schema.Union` of failure classes with `assert(failure instanceof ScheduleTickFailure)` or `Schema.is` before reading variant-specific fields.
+- Under `noUncheckedIndexedAccess`, assert existence instead of using `!`: `const first = failures[0]; assert(first !== undefined)` (the `assert` from `@effect/vitest` narrows), or `failures[0] ?? assert.fail("no failure recorded")`.
+- An assertion inside an `if` passes when the condition is false: `if (Option.isSome(x)) expect(...)` tests nothing when `x` is `None`. Assert the shape first, then the contents.
+- After `Effect.forkChild`, one `Effect.yieldNow` is not enough to guarantee the forked fiber ran; the test passes or fails depending on the op budget. Wait on the condition you actually care about, or drive `TestClock`, and set the `TestClock` time explicitly when the test depends on it.
 
 ## Logging in Tests
 

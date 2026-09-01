@@ -113,6 +113,19 @@ const port = yield* Config.int("PORT").pipe(
 const optionalKey = yield* Config.option(Config.string("OPTIONAL_KEY"))
 ```
 
+Compose several independently-optional variables with `Config.all`:
+
+```typescript
+const settings = yield* Config.all({
+  appId: Config.option(Config.schema(AppId, "APP_ID")),
+  privateKey: Config.option(Config.redacted("PRIVATE_KEY")),
+})
+```
+
+A missing variable is fine; a variable that is set but invalid is an error. `Config.option` turns a missing variable into `Option.none()`. A variable that is present and fails validation must fail the load instead of falling back to a default, because the operator set it and expects it to be used.
+
+To build a `Record<string, string>` from an allowlist of optional variables, read each with `Config.option`, collect the present ones with `Arr.getSomes`, and `Effect.orDie` the remaining `ConfigError`: if the process environment cannot be read, the app cannot start anyway.
+
 ## Validation with Schema
 
 Use `Config.schema` for type-safe validation:
@@ -168,7 +181,7 @@ const program = Effect.gen(function* () {
 })
 ```
 
-Use `Schema.Redacted(Schema.String)` in config schemas:
+Use `Schema.Redacted(Schema.String)` in config schemas. `Schema.Redacted` validates its label, so a second declaration of the same redacted schema with a different label, or none, rejects values built from the first. Export one schema constant per secret and import it everywhere. `Schema.RedactedFromValue` converts an already-decoded raw value into a `Redacted`.
 
 ```typescript
 class DatabaseConfig extends Context.Service<

@@ -1,38 +1,55 @@
-# Process and Scope Management
+# Child Processes & Scopes
 
-Adapted from [artimath/effect-skills](https://github.com/artimath/effect-skills) (MIT), updated for Effect v4.
+Verified against `effect@4.0.0-rc.111`. v4 has no `Command` module; the `@effect/platform` `Command` API is v3. Child processes are in `effect/unstable/process`. For fork variants, see [runtime-and-concurrency.md](runtime-and-concurrency.md#fork-family).
 
 ## Table of Contents
 
-- [Fork Types](#fork-types)
+- [Spawning with ChildProcess](#spawning-with-childprocess)
+- [Spawn Option Gotchas](#spawn-option-gotchas)
+- [Reading Output Streams](#reading-output-streams)
 - [Scope Patterns](#scope-patterns)
-- [Command (Child Processes)](#command-child-processes)
-- [Scope.extend](#scopeextend)
-- [Killable Background Process Example](#killable-background-process-example)
+- [Killable Background Process](#killable-background-process)
 
-## Fork Types
-
-| Type | Lifetime | Cleanup | Use Case |
-|------|----------|---------|----------|
-| `Effect.fork` | Dies with parent fiber | Automatic | Concurrent work within a scope |
-| `Effect.forkScoped` | Dies with scope | Auto-registered | Server workers, scoped tasks |
-| `Effect.forkDaemon` | Independent | **Manual required** | Background tasks outliving parent |
-| `Effect.forkChild` | Dies with parent | Automatic | Child tasks for TestClock |
+## Spawning with ChildProcess
 
 ```typescript
-import { Effect, Fiber, Scope } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process"
+import { Effect, Stream } from "effect"
 
-// fork: dies with parent
-const fiber = yield* Effect.fork(myEffect)
-const result = yield* Fiber.join(fiber)
-
-// forkScoped: dies when scope closes
-yield* Effect.forkScoped(backgroundLoop)
-
-// forkDaemon: outlives parent, YOU must clean up
-const fiber = yield* Effect.forkDaemon(work)
-yield* scope.addFinalizer(() => Fiber.interrupt(fiber))
+const runCommand = Effect.gen(function* () {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const handle = yield* spawner.spawn(
+    ChildProcess.make("git", ["status"], {
+      env,               // allowlisted environment
+      extendEnv: false,  // do NOT inherit the host env
+      detached: false,
+      forceKillAfter: "10 seconds",
+    }),
+  )
+  const stdout = yield* handle.stdout.pipe(Stream.decodeText(), Stream.mkString)
+  const exitCode = yield* handle.exitCode
+  return { exitCode, stdout }
+}).pipe(Effect.scoped) // process killed when the scope closes
 ```
+
+The Node implementation comes from `@effect/platform-node` (`NodeServices.layer`). To type a service value in a helper signature, use the tag's `"Service"` projection: `spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]`. The exported name on its own is the tag class, which has no `.spawn` method.
+
+## Spawn Option Gotchas
+
+Both of these were review blockers:
+
+- **`detached` defaults to `true` on non-Windows.** The child gets its own process group, so killing the parent process group does not kill the child. Pass `detached: false` unless you want the child to outlive the parent.
+- **`forceKillAfter` has no default.** Without it, a graceful kill waits indefinitely on a process that ignores SIGTERM. Set it to get a SIGTERM, then a SIGKILL after the timeout.
+
+Set the child environment explicitly with `env` and `extendEnv: false`, so the child gets an allowlist instead of the whole host environment.
+
+## Reading Output Streams
+
+`Stream.decodeText()` then `Stream.mkString` for whole-output capture, or `Stream.splitLines` for line protocols.
+
+**`Stream.splitLines` emits `""` for blank lines**: `\n\n` produces an empty element. A line-protocol decoder that fails on any undecodable line therefore fails on a stray newline. Skip blank lines, and log then skip lines the protocol does not need (see [data-modeling.md](data-modeling.md#strict-vs-lenient-decoding) on strict vs lenient decoding).
+
+Writing to stdin: `Stream.make(new TextEncoder().encode(input)).pipe(Stream.run(handle.stdin))`.
 
 ## Scope Patterns
 
@@ -43,11 +60,11 @@ yield* scope.addFinalizer(() => Fiber.interrupt(fiber))
 ```typescript
 const output = yield* Effect.scoped(
   Effect.gen(function* () {
-    const process = yield* startProcess(cmd)
-    return yield* collectOutput(process.stdout)
+    const handle = yield* spawnProcess(cmd)
+    return yield* collectOutput(handle.stdout)
   })
 )
-// Process auto-killed when scope exits
+// process auto-killed when scope exits
 ```
 
 ### Manual (Long-Lived, Killable)
@@ -57,19 +74,15 @@ Use `Scope.make()` for external lifetime control:
 ```typescript
 import { Effect, Scope, Exit } from "effect"
 
-// Create a scope WE control
 const scope = yield* Scope.make()
-
-// Start resource in OUR scope
-const process = yield* startProcess(cmd).pipe(Scope.extend(scope))
-
-// Later, to tear down:
+const handle = yield* spawnProcess(cmd).pipe(Scope.extend(scope))
+// later, to tear down:
 yield* Scope.close(scope, Exit.void)
 ```
 
-### acquireRelease
+`Scope.extend` ties the resource to the scope and removes `Scope` from the effect's requirements.
 
-For resources needing setup and cleanup:
+### acquireRelease
 
 ```typescript
 const connection = yield* Effect.acquireRelease(
@@ -78,149 +91,31 @@ const connection = yield* Effect.acquireRelease(
 )
 ```
 
-## Command (Child Processes)
-
-Use `@effect/platform` Command service instead of raw `child_process`:
+## Killable Background Process
 
 ```typescript
-import { Command } from "@effect/platform"
-import { Effect, Stream, Chunk } from "effect"
-
-const runCommand = Effect.gen(function* () {
-  const cmd = Command.make("git", "status")
-  const proc = yield* Command.start(cmd)
-
-  // Read stdout as text
-  const outputChunks = yield* proc.stdout.pipe(
-    Stream.decodeText(),
-    Stream.runCollect,
-  )
-  const output = Chunk.toReadonlyArray(outputChunks).join("")
-
-  // Wait for exit
-  const exitCode = yield* proc.exitCode
-
-  return { exitCode, output }
-}).pipe(Effect.scoped) // auto-cleanup
-```
-
-### Writing to stdin
-
-```typescript
-const runWithInput = (command: string, input: string) =>
-  Effect.gen(function* () {
-    const cmd = Command.make("bash", "-c", command)
-    const proc = yield* Command.start(cmd)
-
-    // Write to stdin
-    yield* Stream.make(new TextEncoder().encode(input)).pipe(
-      Stream.run(proc.stdin)
-    )
-
-    const output = yield* proc.stdout.pipe(
-      Stream.decodeText(),
-      Stream.runCollect,
-    )
-
-    return {
-      exitCode: yield* proc.exitCode,
-      output: Chunk.toReadonlyArray(output).join(""),
-    }
-  }).pipe(Effect.scoped)
-```
-
-### Process interface
-
-```typescript
-interface Process {
-  readonly pid: ProcessId
-  readonly exitCode: Effect<ExitCode>       // waits for completion
-  readonly isRunning: Effect<boolean>
-  readonly kill: (signal?: Signal) => Effect<void>
-  readonly stdout: Stream<Uint8Array>
-  readonly stderr: Stream<Uint8Array>
-  readonly stdin: Sink<void, Uint8Array>
-}
-```
-
-**Why Command over child_process.spawn:**
-- Scoped cleanup (process killed on scope close)
-- Stream-based stdin/stdout
-- Effect error handling
-- No manual timeout/cleanup logic
-
-## Scope.extend
-
-Ties a resource's lifetime to a specific scope and removes `Scope` from the effect's requirements:
-
-```typescript
-// Before: Effect<Process, E, CommandExecutor | Scope>
-const scoped = Command.start(cmd)
-
-// After: Effect<Process, E, CommandExecutor>  (Scope satisfied)
-const extended = scoped.pipe(Scope.extend(myScope))
-```
-
-## Killable Background Process Example
-
-```typescript
-import { Effect, Scope, Exit, Ref, HashMap, Stream, Chunk } from "effect"
-import { Command } from "@effect/platform"
-
-interface BackgroundShell {
-  readonly id: string
-  readonly process: Process
-  readonly scope: Scope.CloseableScope
-  readonly output: string
-  readonly isComplete: boolean
-  readonly exitCode?: number
-}
-
 const startBackground = (command: string) =>
   Effect.gen(function* () {
-    const id = `shell-${crypto.randomUUID()}`
     const scope = yield* Scope.make()
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const handle = yield* spawner
+      .spawn(ChildProcess.make("bash", ["-c", command], { detached: false, forceKillAfter: "10 seconds" }))
+      .pipe(Scope.extend(scope))
 
-    const cmd = Command.make("bash", "-c", command)
-    const process = yield* Command.start(cmd).pipe(Scope.extend(scope))
-
-    // Fork ONLY the output collection (not the scoped acquisition)
-    yield* Effect.forkDaemon(
+    // Fork ONLY the output collection, never the scoped acquisition
+    yield* Effect.forkDetach(
       Effect.gen(function* () {
-        const stdout = yield* process.stdout.pipe(
-          Stream.decodeText(), Stream.runCollect,
-        )
-        const exitCode = yield* process.exitCode
+        const stdout = yield* handle.stdout.pipe(Stream.decodeText(), Stream.mkString)
+        const exitCode = yield* handle.exitCode
         // store results...
       }).pipe(Effect.ignore)
     )
 
-    return { id, process, scope }
+    return { handle, scope }
   })
 
-const killShell = (shell: BackgroundShell) =>
-  Effect.gen(function* () {
-    if (!shell.isComplete) {
-      yield* shell.process.kill("SIGTERM")
-    }
-    yield* Scope.close(shell.scope, Exit.void)
-  })
+const kill = (shell: { handle: Handle; scope: Scope.CloseableScope }) =>
+  Scope.close(shell.scope, Exit.void)
 ```
 
-## Common Anti-Pattern
-
-```typescript
-// BAD: process trapped inside daemon's scope, unreachable from outside
-yield* Effect.forkDaemon(
-  Effect.scoped(
-    Effect.gen(function* () {
-      const process = yield* Command.start(cmd) // can't access this!
-    })
-  )
-)
-
-// GOOD: manual scope, fork only the work
-const scope = yield* Scope.make()
-const process = yield* Command.start(cmd).pipe(Scope.extend(scope))
-yield* Effect.forkDaemon(collectOutput(process)) // fork only collection
-```
+Anti-pattern: acquiring the process inside a detached fiber's own `Effect.scoped` makes it unreachable from outside that fiber. Acquire it into a scope you control, and fork only the output collection.
