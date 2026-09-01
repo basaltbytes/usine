@@ -24,14 +24,11 @@ export interface PresentedTranscriptEvent {
 export const brainLine = (brain: Agent.BrainSpec): string =>
   `${brain.harness} · ${brain.model} · ${brain.effort}`;
 
-export const failureMessage = (
-  failure: AttemptFailure.AttemptFailure,
-): string =>
+export const failureMessage = (failure: AttemptFailure.AttemptFailure): string =>
   Match.valueTags(failure, {
     InfraFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,
-    RunawayFailure: ({ ceiling }) =>
-      `Runaway guard tripped its ${ceiling} ceiling`,
+    RunawayFailure: ({ ceiling }) => `Runaway guard tripped its ${ceiling} ceiling`,
   });
 
 export const needCopy = (need: NeedView): NeedCopy =>
@@ -55,19 +52,14 @@ export const needCopy = (need: NeedView): NeedCopy =>
       runId: null,
     }),
     ScheduleFailureNeed: ({ failure }) => ({
-      title:
-        failure._tag === "ScheduleTickFailure"
-          ? failure.errorTag
-          : failure._tag,
+      title: failure._tag === "ScheduleTickFailure" ? failure.errorTag : failure._tag,
       detail: failure.message,
-      repository:
-        failure._tag === "ScheduleTickFailure" ? failure.repository : null,
+      repository: failure._tag === "ScheduleTickFailure" ? failure.repository : null,
       runId: null,
     }),
   });
 
-const jsonDetail = (value: Schema.Json): string =>
-  JSON.stringify(value, null, 2);
+const jsonDetail = (value: Schema.Json): string => JSON.stringify(value, null, 2);
 
 const rateLimitWindow = (
   name: string,
@@ -83,10 +75,7 @@ const sessionPresentation = (
 ): Omit<PresentedTranscriptEvent, "sequence" | "receivedAt"> => {
   const session = event.session;
   const base = {
-    scope:
-      session._tag === "ChildSession"
-        ? ("child" as const)
-        : ("parent" as const),
+    scope: session._tag === "ChildSession" ? ("child" as const) : ("parent" as const),
     sessionId: session.id,
     parentId: session._tag === "ChildSession" ? session.parentId : null,
     agent: session.agent,
@@ -123,9 +112,7 @@ const sessionPresentation = (
   });
 };
 
-export const presentTranscriptEvent = (
-  event: TranscriptEventView,
-): PresentedTranscriptEvent => ({
+export const presentTranscriptEvent = (event: TranscriptEventView): PresentedTranscriptEvent => ({
   sequence: event.sequence,
   receivedAt: event.receivedAt,
   ...Match.valueTags(event.payload, {
@@ -138,8 +125,7 @@ export const presentTranscriptEvent = (
       detail: parentModel,
       isError: false,
     }),
-    SessionEvent: ({ event: sessionEvent }) =>
-      sessionPresentation(sessionEvent),
+    SessionEvent: ({ event: sessionEvent }) => sessionPresentation(sessionEvent),
     Final: ({ result }) => ({
       scope: "channel" as const,
       sessionId: null,

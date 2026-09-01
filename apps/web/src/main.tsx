@@ -18,21 +18,12 @@ import {
 } from "@tanstack/react-router";
 import { Run } from "@usine/core";
 import { FactoryOverview, RunDetailView } from "@usine/orchestrator";
-import type {
-  LoopView,
-  NeedView,
-  RunView,
-  TranscriptPageCursor,
-} from "@usine/orchestrator";
+import type { LoopView, NeedView, RunView, TranscriptPageCursor } from "@usine/orchestrator";
 import { Schema } from "effect";
 import { StrictMode, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { brainLine, failureMessage, needCopy } from "./operator-copy.ts";
-import {
-  mergeTranscript,
-  replaceEarlierCursor,
-  Transcript,
-} from "./run-transcript.tsx";
+import { mergeTranscript, replaceEarlierCursor, Transcript } from "./run-transcript.tsx";
 import "./styles.css";
 
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
@@ -41,9 +32,7 @@ const ApiError = Schema.Struct({
   message: Schema.String,
 });
 const isApiError = Schema.is(ApiError);
-const RunSearch = Schema.toStandardSchemaV1(
-  Schema.Struct({ run: Schema.optional(Run.RunId) }),
-);
+const RunSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(Run.RunId) }));
 const ACTIVE_OVERVIEW_REFRESH_MS = 2_000;
 const IDLE_OVERVIEW_REFRESH_MS = 15_000;
 
@@ -68,35 +57,18 @@ const api = async <S extends Schema.Codec<unknown, unknown, never, unknown>>(
   return Schema.decodeUnknownPromise(schema)(await response.json());
 };
 
-const mergeRunDetail = (previous: unknown, next: unknown): unknown => {
-  if (!(previous instanceof RunDetailView) || !(next instanceof RunDetailView))
-    return next;
-  return new RunDetailView({
-    ...next,
-    transcript: mergeTranscript(previous.transcript, next.transcript),
-    earlierTranscript: previous.earlierTranscript,
-  });
-};
-
 const overviewQuery = () => ({
   queryKey: ["overview"] as const,
   queryFn: () => api("/api/overview", FactoryOverview),
   refetchInterval: (
-    query: Query<
-      FactoryOverview,
-      Error,
-      FactoryOverview,
-      readonly ["overview"]
-    >,
+    query: Query<FactoryOverview, Error, FactoryOverview, readonly ["overview"]>,
   ) => {
     const overview = query.state.data;
     if (overview?._tag === "NeedsSetup") return false;
     const hasOpenRun = overview?.projects.some((project) =>
       project.runs.some(({ canCancel }) => canCancel),
     );
-    return hasOpenRun === true
-      ? ACTIVE_OVERVIEW_REFRESH_MS
-      : IDLE_OVERVIEW_REFRESH_MS;
+    return hasOpenRun === true ? ACTIVE_OVERVIEW_REFRESH_MS : IDLE_OVERVIEW_REFRESH_MS;
   },
 });
 
@@ -111,10 +83,7 @@ const timeAgo = (value: string): string => {
 const jsonGist = (value: Schema.Json): string => JSON.stringify(value, null, 2);
 
 const StatusMark = ({ state }: { readonly state: string }) => (
-  <span
-    className={`status-mark state-${state.toLowerCase()}`}
-    aria-label={state}
-  >
+  <span className={`status-mark state-${state.toLowerCase()}`} aria-label={state}>
     {state}
   </span>
 );
@@ -130,25 +99,14 @@ const ActionButton = ({
   readonly disabled?: boolean;
   readonly onClick: () => void;
 }) => (
-  <button
-    className={`action ${className}`}
-    disabled={disabled}
-    onClick={onClick}
-    type="button"
-  >
+  <button className={`action ${className}`} disabled={disabled} onClick={onClick} type="button">
     {children}
   </button>
 );
 
 const PausedMark = () => <span className="paused-mark">paused</span>;
 
-const RunRow = ({
-  run,
-  open,
-}: {
-  readonly run: RunView;
-  readonly open: () => void;
-}) => (
+const RunRow = ({ run, open }: { readonly run: RunView; readonly open: () => void }) => (
   <button className="run-row" onClick={open} type="button">
     <span className="run-route">
       <strong>{run.loop}</strong>
@@ -240,13 +198,7 @@ const LoopCard = ({
   </article>
 );
 
-const RunDrawer = ({
-  runId,
-  close,
-}: {
-  readonly runId: Run.RunId;
-  readonly close: () => void;
-}) => {
+const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close: () => void }) => {
   const queryClient = useQueryClient();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const detail = useQuery<RunDetailView>({
@@ -256,14 +208,17 @@ const RunDrawer = ({
       const previous = queryClient.getQueryData<RunDetailView>(key);
       const cursor = previous?.transcript.at(-1)?.sequence;
       const search = cursor === undefined ? "" : `?after=${cursor}`;
-      return api(
-        `/api/runs/${encodeURIComponent(runId)}${search}`,
-        RunDetailView,
-      );
+      return api(`/api/runs/${encodeURIComponent(runId)}${search}`, RunDetailView);
     },
-    structuralSharing: mergeRunDetail,
-    refetchInterval: (query) =>
-      query.state.data?.run.canCancel === true ? 1_000 : false,
+    structuralSharing: (previous, next) => {
+      if (!(previous instanceof RunDetailView) || !(next instanceof RunDetailView)) return next;
+      return new RunDetailView({
+        ...next,
+        transcript: mergeTranscript(previous.transcript, next.transcript),
+        earlierTranscript: previous.earlierTranscript,
+      });
+    },
+    refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
   });
   const mutation = useMutation({
     mutationFn: (act: "approve" | "retry" | "cancel") =>
@@ -305,12 +260,7 @@ const RunDrawer = ({
   const run = detail.data?.run;
   const earlier = detail.data?.earlierTranscript.at(-1);
   return (
-    <div
-      className="drawer-shell"
-      role="dialog"
-      aria-modal="true"
-      aria-label="Run detail"
-    >
+    <div className="drawer-shell" role="dialog" aria-modal="true" aria-label="Run detail">
       <button
         className="drawer-scrim"
         onClick={close}
@@ -329,18 +279,11 @@ const RunDrawer = ({
               </p>
             )}
           </div>
-          <button
-            className="close-button"
-            onClick={close}
-            type="button"
-            aria-label="Close"
-          >
+          <button className="close-button" onClick={close} type="button" aria-label="Close">
             ×
           </button>
         </header>
-        {detail.isError && (
-          <p className="error-panel">{detail.error.message}</p>
-        )}
+        {detail.isError && <p className="error-panel">{detail.error.message}</p>}
         {run !== undefined && (
           <>
             <div className="run-summary">
@@ -387,28 +330,20 @@ const RunDrawer = ({
                 </ActionButton>
               )}
             </div>
-            {mutation.isError && (
-              <p className="error-panel">{mutation.error.message}</p>
-            )}
+            {mutation.isError && <p className="error-panel">{mutation.error.message}</p>}
             <section className="drawer-section">
               <h3>Task</h3>
               <p>{run.task}</p>
             </section>
             <section className="drawer-section">
               <h3>Event</h3>
-              <p className="annotation event-key">
-                {detail.data?.eventDedupKey}
-              </p>
-              <pre className="payload-gist">
-                {jsonGist(detail.data?.eventPayload ?? null)}
-              </pre>
+              <p className="annotation event-key">{detail.data?.eventDedupKey}</p>
+              <pre className="payload-gist">{jsonGist(detail.data?.eventPayload ?? null)}</pre>
             </section>
             <section className="drawer-section">
               <h3>Attempts</h3>
               <div className="attempt-list">
-                {run.attempts.length === 0 && (
-                  <p className="empty-copy">No attempt has started.</p>
-                )}
+                {run.attempts.length === 0 && <p className="empty-copy">No attempt has started.</p>}
                 {run.attempts.map((attempt) => (
                   <article className="attempt-entry" key={attempt.id}>
                     <header>
@@ -416,8 +351,7 @@ const RunDrawer = ({
                       <StatusMark state={attempt.outcome?._tag ?? "Running"} />
                     </header>
                     <p className="annotation attempt-meta">
-                      {attempt.worker} · {brainLine(attempt.brain)} ·{" "}
-                      {timeAgo(attempt.startedAt)}
+                      {attempt.worker} · {brainLine(attempt.brain)} · {timeAgo(attempt.startedAt)}
                     </p>
                     {attempt.outcome?._tag === "Failed" && (
                       <p className="attempt-error">
@@ -507,9 +441,7 @@ const FactoryScreen = () => {
         </div>
         {/* The indicator reports the trigger streams, not the server: idle
             pollers must never read as a running factory. */}
-        <div
-          className={`live-indicator ${data._tag === "NeedsSetup" ? "idle" : ""}`}
-        >
+        <div className={`live-indicator ${data._tag === "NeedsSetup" ? "idle" : ""}`}>
           <i /> {data._tag === "NeedsSetup" ? "idle" : "live"}
         </div>
       </header>
@@ -518,11 +450,9 @@ const FactoryScreen = () => {
           <p className="eyebrow">Setup required · {data.errorTag}</p>
           <h1>The floor is ready. GitHub is not connected yet.</h1>
           <p>
-            Add <code>USINE_GITHUB_APP_ID</code> and{" "}
-            <code>USINE_GITHUB_PRIVATE_KEY</code>, or create{" "}
-            <code>.usine/github-app.json</code> with mode 0600. Then stop and
-            rerun <code>usine up</code>: the running process reads credentials
-            only when it starts.
+            Add <code>USINE_GITHUB_APP_ID</code> and <code>USINE_GITHUB_PRIVATE_KEY</code>, or
+            create <code>.usine/github-app.json</code> with mode 0600. Then stop and rerun{" "}
+            <code>usine up</code>: the running process reads credentials only when it starts.
           </p>
         </section>
       )}
@@ -534,9 +464,7 @@ const FactoryScreen = () => {
               <p className="eyebrow">Observe</p>
               <h1>Projects</h1>
             </div>
-            <span className="annotation">
-              {data.projects.length} registered
-            </span>
+            <span className="annotation">{data.projects.length} registered</span>
           </header>
           <div className="projects-list">
             {data.projects.map((project) => (
@@ -558,11 +486,7 @@ const FactoryScreen = () => {
                 ) : (
                   <div className="run-list">
                     {project.runs.map((run) => (
-                      <RunRow
-                        key={run.id}
-                        run={run}
-                        open={() => openRun(run.id)}
-                      />
+                      <RunRow key={run.id} run={run} open={() => openRun(run.id)} />
                     ))}
                   </div>
                 )}
@@ -577,9 +501,7 @@ const FactoryScreen = () => {
               <h2>Loops</h2>
             </div>
           </header>
-          <p className="aside-copy">
-            Runtime controls. Authored loop files remain untouched.
-          </p>
+          <p className="aside-copy">Runtime controls. Authored loop files remain untouched.</p>
           <div className="loop-list">
             {data.loops.map((loop) => (
               <LoopCard
@@ -590,14 +512,10 @@ const FactoryScreen = () => {
               />
             ))}
           </div>
-          {pauseMutation.isError && (
-            <p className="error-panel">{pauseMutation.error.message}</p>
-          )}
+          {pauseMutation.isError && <p className="error-panel">{pauseMutation.error.message}</p>}
         </aside>
       </main>
-      {search.run !== undefined && (
-        <RunDrawer runId={search.run} close={closeRun} />
-      )}
+      {search.run !== undefined && <RunDrawer runId={search.run} close={closeRun} />}
     </div>
   );
 };

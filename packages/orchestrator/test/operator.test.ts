@@ -216,21 +216,18 @@ const testLayer = (
     Effect.succeed(
       Match.valueTags(query, {
         TranscriptAllQuery: () => transcript,
-        TranscriptTailQuery: ({ after }) =>
-          transcript.filter((entry) => entry.sequence > after),
+        TranscriptTailQuery: ({ after }) => transcript.filter((entry) => entry.sequence > after),
         TranscriptPageQuery: ({ before, limit }) => {
           const candidates = Option.match(before, {
             onNone: () => transcript,
-            onSome: (cursor) =>
-              transcript.filter((entry) => entry.sequence < cursor),
+            onSome: (cursor) => transcript.filter((entry) => entry.sequence < cursor),
           });
           return candidates.slice(-limit);
         },
       }),
     );
   const runs = Layer.succeed(RunEngine)({
-    approve: (id, event) =>
-      Ref.update(approved, (entries) => [...entries, { runId: id, event }]),
+    approve: (id, event) => Ref.update(approved, (entries) => [...entries, { runId: id, event }]),
     cancel: () => Effect.void,
     inspect: () => Effect.succeed(snapshot),
     reconcile: () => Effect.void,
@@ -251,13 +248,9 @@ const testLayer = (
   });
   const controls = Layer.succeed(LoopControl)({
     isPaused: () => Effect.succeed(true),
-    pause: () =>
-      Effect.succeed(new LoopRuntimeState({ loop: loopName, paused: true })),
-    states: Effect.succeed([
-      new LoopRuntimeState({ loop: loopName, paused: true }),
-    ]),
-    unpause: () =>
-      Effect.succeed(new LoopRuntimeState({ loop: loopName, paused: false })),
+    pause: () => Effect.succeed(new LoopRuntimeState({ loop: loopName, paused: true })),
+    states: Effect.succeed([new LoopRuntimeState({ loop: loopName, paused: true })]),
+    unpause: () => Effect.succeed(new LoopRuntimeState({ loop: loopName, paused: false })),
   });
   const polling = Layer.succeed(PollingTriggers)({
     poll: () => Effect.die("unused"),
@@ -298,141 +291,109 @@ const testLayer = (
       ),
     ),
   });
-  const dependencies = Layer.mergeAll(
-    runs,
-    reader,
-    controls,
-    polling,
-    schedules,
-  );
+  const dependencies = Layer.mergeAll(runs, reader, controls, polling, schedules);
   return Operator.layer.pipe(Layer.provide(dependencies));
 };
 
 describe("Operator", () => {
-  it.effect(
-    "projects needs-you state and protocol child activity without recursive nesting",
-    () =>
-      Effect.gen(function* () {
-        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
-        const overviewReads = yield* Ref.make(0);
-        const projectionRevision = yield* Ref.make(
-          Option.some(ProjectionRevision.make(1)),
+  it.effect("projects needs-you state and protocol child activity without recursive nesting", () =>
+    Effect.gen(function* () {
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const overviewReads = yield* Ref.make(0);
+      const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      yield* Effect.gen(function* () {
+        const operator = yield* Operator;
+        const [overview] = yield* Effect.all(
+          [operator.overview(instance), operator.overview(instance)],
+          { concurrency: "unbounded" },
         );
-        yield* Effect.gen(function* () {
-          const operator = yield* Operator;
-          const [overview] = yield* Effect.all(
-            [operator.overview(instance), operator.overview(instance)],
-            { concurrency: "unbounded" },
-          );
-          assert(overview !== undefined);
-          assert.strictEqual(yield* Ref.get(overviewReads), 1);
-          yield* Ref.set(
-            projectionRevision,
-            Option.some(ProjectionRevision.make(2)),
-          );
-          yield* operator.overview(instance);
-          assert.strictEqual(yield* Ref.get(overviewReads), 2);
-          // A missing invalidation singleton must bypass the cache entirely.
-          yield* Ref.set(projectionRevision, Option.none());
-          yield* operator.overview(instance);
-          yield* operator.overview(instance);
-          assert.strictEqual(yield* Ref.get(overviewReads), 4);
-          // Bypassing the cache also clears its old token: once revision
-          // tracking recovers, the first request must rebuild the projection.
-          yield* Ref.set(
-            projectionRevision,
-            Option.some(ProjectionRevision.make(2)),
-          );
-          yield* operator.overview(instance);
-          assert.strictEqual(yield* Ref.get(overviewReads), 5);
-          assert.strictEqual(overview.projects[0]?.status, "needs-you");
-          assert.strictEqual(overview.loops[0]?.paused, true);
-          assert.strictEqual(overview.projects[0]?.runs[0]?.loopPaused, true);
-          assert.deepStrictEqual(
-            overview.needsYou.map(({ _tag }) => _tag),
-            ["ApprovalNeed", "PollFailureNeed"],
-          );
+        assert(overview !== undefined);
+        assert.strictEqual(yield* Ref.get(overviewReads), 1);
+        yield* Ref.set(projectionRevision, Option.some(ProjectionRevision.make(2)));
+        yield* operator.overview(instance);
+        assert.strictEqual(yield* Ref.get(overviewReads), 2);
+        // A missing invalidation singleton must bypass the cache entirely.
+        yield* Ref.set(projectionRevision, Option.none());
+        yield* operator.overview(instance);
+        yield* operator.overview(instance);
+        assert.strictEqual(yield* Ref.get(overviewReads), 4);
+        // Bypassing the cache also clears its old token: once revision
+        // tracking recovers, the first request must rebuild the projection.
+        yield* Ref.set(projectionRevision, Option.some(ProjectionRevision.make(2)));
+        yield* operator.overview(instance);
+        assert.strictEqual(yield* Ref.get(overviewReads), 5);
+        assert.strictEqual(overview.projects[0]?.status, "needs-you");
+        assert.strictEqual(overview.loops[0]?.paused, true);
+        assert.strictEqual(overview.projects[0]?.runs[0]?.loopPaused, true);
+        assert.deepStrictEqual(
+          overview.needsYou.map(({ _tag }) => _tag),
+          ["ApprovalNeed", "PollFailureNeed"],
+        );
 
-          const detail = yield* operator.detail(
-            runId,
-            new ColdTranscriptRequest(),
-          );
-          assert.strictEqual(detail.eventDedupKey, snapshot.event.dedupKey);
-          assert.deepStrictEqual(detail.eventPayload, { number: 31 });
-          assert.strictEqual(detail.run.attempts[0]?.number, 1);
-          assert.strictEqual(detail.transcript.length, 500);
-          assert.strictEqual(detail.transcript[0]?.sequence, 3);
-          assert.strictEqual(
-            detail.transcript[0]?.payload._tag,
-            "SessionEvent",
-          );
-          assert.strictEqual(detail.earlierTranscript[0]?.attemptId, attemptId);
-          assert.strictEqual(detail.earlierTranscript[0]?.before, 3);
+        const detail = yield* operator.detail(runId, new ColdTranscriptRequest());
+        assert.strictEqual(detail.eventDedupKey, snapshot.event.dedupKey);
+        assert.deepStrictEqual(detail.eventPayload, { number: 31 });
+        assert.strictEqual(detail.run.attempts[0]?.number, 1);
+        assert.strictEqual(detail.transcript.length, 500);
+        assert.strictEqual(detail.transcript[0]?.sequence, 3);
+        assert.strictEqual(detail.transcript[0]?.payload._tag, "SessionEvent");
+        assert.strictEqual(detail.earlierTranscript[0]?.attemptId, attemptId);
+        assert.strictEqual(detail.earlierTranscript[0]?.before, 3);
 
-          const tail = yield* operator.detail(
-            runId,
-            new TailTranscriptRequest({ after: TranscriptCursor.make(500) }),
-          );
-          assert.deepStrictEqual(
-            tail.transcript.map(({ sequence }) => sequence),
-            [501, 502],
-          );
-          assert.deepStrictEqual(tail.earlierTranscript, []);
+        const tail = yield* operator.detail(
+          runId,
+          new TailTranscriptRequest({ after: TranscriptCursor.make(500) }),
+        );
+        assert.deepStrictEqual(
+          tail.transcript.map(({ sequence }) => sequence),
+          [501, 502],
+        );
+        assert.deepStrictEqual(tail.earlierTranscript, []);
 
-          const earlier = yield* operator.detail(
+        const earlier = yield* operator.detail(
+          runId,
+          new EarlierTranscriptRequest({
+            attemptId,
+            before: TranscriptCursor.make(3),
+          }),
+        );
+        assert.deepStrictEqual(
+          earlier.transcript.map(({ sequence }) => sequence),
+          [1, 2],
+        );
+        const childPayload = earlier.transcript[1]?.payload;
+        assert(childPayload?._tag === "SessionEvent");
+        assert.strictEqual(childPayload.event.session._tag, "ChildSession");
+        assert.strictEqual(childPayload.event.session.id, child.id);
+        assert.deepStrictEqual(earlier.earlierTranscript, []);
+        const wrongAttempt = yield* operator
+          .detail(
             runId,
             new EarlierTranscriptRequest({
-              attemptId,
+              attemptId: Attempt.AttemptId.make("another-attempt"),
               before: TranscriptCursor.make(3),
             }),
-          );
-          assert.deepStrictEqual(
-            earlier.transcript.map(({ sequence }) => sequence),
-            [1, 2],
-          );
-          const childPayload = earlier.transcript[1]?.payload;
-          assert(childPayload?._tag === "SessionEvent");
-          assert.strictEqual(childPayload.event.session._tag, "ChildSession");
-          assert.strictEqual(childPayload.event.session.id, child.id);
-          assert.deepStrictEqual(earlier.earlierTranscript, []);
-          const wrongAttempt = yield* operator
-            .detail(
-              runId,
-              new EarlierTranscriptRequest({
-                attemptId: Attempt.AttemptId.make("another-attempt"),
-                before: TranscriptCursor.make(3),
-              }),
-            )
-            .pipe(Effect.flip);
-          assert.strictEqual(
-            wrongAttempt._tag,
-            "TranscriptAttemptNotFoundError",
-          );
+          )
+          .pipe(Effect.flip);
+        assert.strictEqual(wrongAttempt._tag, "TranscriptAttemptNotFoundError");
 
-          yield* operator.approve(runId);
-          const approvals = yield* Ref.get(approved);
-          const recorded = approvals[0];
-          assert(recorded !== undefined);
-          assert.strictEqual(recorded.runId, runId);
-          // The approval Event the waiting run consumes must be recorded whole:
-          // deterministic identity for idempotent re-approval, typed payload.
-          assert.strictEqual<string>(
-            recorded.event.id,
-            recorded.event.dedupKey,
-          );
-          assert.strictEqual<string>(
-            recorded.event.dedupKey,
-            JSON.stringify(["operator-approval", runId]),
-          );
-          assert.deepStrictEqual(recorded.event.payload, {
-            runId,
-            decision: "approved",
-          });
-        }).pipe(
-          Effect.provide(
-            testLayer(approved, overviewReads, projectionRevision),
-          ),
+        yield* operator.approve(runId);
+        const approvals = yield* Ref.get(approved);
+        const recorded = approvals[0];
+        assert(recorded !== undefined);
+        assert.strictEqual(recorded.runId, runId);
+        // The approval Event the waiting run consumes must be recorded whole:
+        // deterministic identity for idempotent re-approval, typed payload.
+        assert.strictEqual<string>(recorded.event.id, recorded.event.dedupKey);
+        assert.strictEqual<string>(
+          recorded.event.dedupKey,
+          JSON.stringify(["operator-approval", runId]),
         );
-      }),
+        assert.deepStrictEqual(recorded.event.payload, {
+          runId,
+          decision: "approved",
+        });
+      }).pipe(Effect.provide(testLayer(approved, overviewReads, projectionRevision)));
+    }),
   );
 });

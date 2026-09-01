@@ -141,7 +141,7 @@ export const serverStartError = (port: Port, error: ServeError) =>
     ? new PortInUseError({ port })
     : new ServerStartError({ port, cause: error.cause });
 
-const browserCommand = (url: string): { readonly command: string; readonly args: string[] } => {
+const browserCommand = (url: string) => {
   if (process.platform === "darwin") return { command: "open", args: [url] };
   if (process.platform === "win32") {
     return { command: "cmd.exe", args: ["/c", "start", "", url] };

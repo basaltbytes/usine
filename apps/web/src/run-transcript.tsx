@@ -1,12 +1,6 @@
-import type {
-  TranscriptEventView,
-  TranscriptPageCursor,
-} from "@usine/orchestrator";
+import type { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator";
 import { useMemo } from "react";
-import {
-  presentTranscriptEvent,
-  type PresentedTranscriptEvent,
-} from "./operator-copy.ts";
+import { presentTranscriptEvent, type PresentedTranscriptEvent } from "./operator-copy.ts";
 
 interface TranscriptGroup {
   readonly key: string;
@@ -31,9 +25,7 @@ export const mergeTranscript = (
   for (const event of next) {
     if (!merged.has(event.sequence)) merged.set(event.sequence, event);
   }
-  return [...merged.values()].sort(
-    (left, right) => left.sequence - right.sequence,
-  );
+  return [...merged.values()].sort((left, right) => left.sequence - right.sequence);
 };
 
 export const replaceEarlierCursor = (
@@ -41,16 +33,11 @@ export const replaceEarlierCursor = (
   attempted: TranscriptPageCursor["attemptId"],
   next: ReadonlyArray<TranscriptPageCursor>,
 ): ReadonlyArray<TranscriptPageCursor> =>
-  [
-    ...previous.filter(({ attemptId }) => attemptId !== attempted),
-    ...next,
-  ].sort((left, right) => left.before - right.before);
+  [...previous.filter(({ attemptId }) => attemptId !== attempted), ...next].sort(
+    (left, right) => left.before - right.before,
+  );
 
-const TranscriptEvent = ({
-  event,
-}: {
-  readonly event: PresentedTranscriptEvent;
-}) => (
+const TranscriptEvent = ({ event }: { readonly event: PresentedTranscriptEvent }) => (
   <article className={`transcript-event ${event.isError ? "event-error" : ""}`}>
     <header>
       <span>{event.label}</span>
@@ -66,11 +53,7 @@ const TranscriptEvent = ({
   </article>
 );
 
-export const Transcript = ({
-  events,
-}: {
-  readonly events: ReadonlyArray<TranscriptEventView>;
-}) => {
+export const Transcript = ({ events }: { readonly events: ReadonlyArray<TranscriptEventView> }) => {
   const feed = useMemo(() => {
     // One collapsible group per child session, anchored at its own first
     // event, so concurrent children stay distinct and the parent/child
@@ -100,8 +83,7 @@ export const Transcript = ({
     return feed.sort((left, right) => left.sequence - right.sequence);
   }, [events]);
 
-  if (feed.length === 0)
-    return <p className="empty-copy">Waiting for the first agent message…</p>;
+  if (feed.length === 0) return <p className="empty-copy">Waiting for the first agent message…</p>;
   return (
     <div className="transcript">
       {feed.map((item) =>
@@ -110,8 +92,7 @@ export const Transcript = ({
         ) : (
           <details className="child-activity" key={item.key}>
             <summary>
-              {item.agent ?? "Child"} activity{" "}
-              <span>{item.events.length} events</span>
+              {item.agent ?? "Child"} activity <span>{item.events.length} events</span>
             </summary>
             <div>
               {item.events.map((event) => (

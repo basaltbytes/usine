@@ -26,9 +26,7 @@ export type RunStateTag = typeof RunStateTag.Type;
 
 const NullableString = Schema.NullOr(Schema.String);
 
-export class AttemptView extends Schema.Class<AttemptView>(
-  "@usine/orchestrator/AttemptView",
-)({
+export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/AttemptView")({
   id: Attempt.AttemptId,
   number: Attempt.AttemptNumber,
   worker: Worker.Name,
@@ -37,9 +35,7 @@ export class AttemptView extends Schema.Class<AttemptView>(
   outcome: Schema.NullOr(Attempt.Outcome),
 }) {}
 
-export class RunView extends Schema.Class<RunView>(
-  "@usine/orchestrator/RunView",
-)({
+export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView")({
   id: Run.RunId,
   loop: Loop.LoopName,
   repository: Repository.Name,
@@ -56,17 +52,13 @@ export class RunView extends Schema.Class<RunView>(
   canCancel: Schema.Boolean,
 }) {}
 
-export class ProjectView extends Schema.Class<ProjectView>(
-  "@usine/orchestrator/ProjectView",
-)({
+export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/ProjectView")({
   repository: Repository.Name,
   status: ProjectStatus,
   runs: Schema.Array(RunView),
 }) {}
 
-export class LoopView extends Schema.Class<LoopView>(
-  "@usine/orchestrator/LoopView",
-)({
+export class LoopView extends Schema.Class<LoopView>("@usine/orchestrator/LoopView")({
   name: Loop.LoopName,
   trigger: Schema.String,
   agent: Agent.Name,
@@ -167,15 +159,15 @@ export class TranscriptAttemptNotFoundError extends Schema.TaggedError<Transcrip
   attemptId: Attempt.AttemptId,
 }) {}
 
-export class RunDetailView extends Schema.Class<RunDetailView>(
-  "@usine/orchestrator/RunDetailView",
-)({
-  run: RunView,
-  eventDedupKey: Schema.String,
-  eventPayload: Schema.Json,
-  transcript: Schema.Array(TranscriptEventView),
-  earlierTranscript: Schema.Array(TranscriptPageCursor),
-}) {}
+export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestrator/RunDetailView")(
+  {
+    run: RunView,
+    eventDedupKey: Schema.String,
+    eventPayload: Schema.Json,
+    transcript: Schema.Array(TranscriptEventView),
+    earlierTranscript: Schema.Array(TranscriptPageCursor),
+  },
+) {}
 
 export class ReadyOverview extends Schema.TaggedClass<ReadyOverview>(
   "@usine/orchestrator/ReadyOverview",
@@ -194,8 +186,5 @@ export class NeedsSetupOverview extends Schema.TaggedClass<NeedsSetupOverview>(
   needsYou: Schema.Array(NeedView),
 }) {}
 
-export const FactoryOverview = Schema.Union([
-  ReadyOverview,
-  NeedsSetupOverview,
-]);
+export const FactoryOverview = Schema.Union([ReadyOverview, NeedsSetupOverview]);
 export type FactoryOverview = typeof FactoryOverview.Type;

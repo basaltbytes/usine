@@ -10,22 +10,9 @@ import {
   type RunEngineError,
   type RunStoreError,
 } from "@usine/engine";
-import {
-  Context,
-  DateTime,
-  Effect,
-  Layer,
-  Option,
-  SynchronizedRef,
-} from "effect";
-import {
-  PollingTriggers,
-  type RepositoryPollFailure,
-} from "../polling-triggers.ts";
-import {
-  ScheduleTriggers,
-  type ScheduleFailure,
-} from "../schedule-triggers.ts";
+import { Context, DateTime, Effect, Layer, Option, SynchronizedRef } from "effect";
+import { PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
+import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import {
   ApprovalNeed,
   ColdTranscriptRequest,
@@ -44,9 +31,7 @@ import {
 import { readTranscript, runView } from "./projection.ts";
 
 export type OperatorError = RunEngineError | TranscriptAttemptNotFoundError;
-export type OperatorObservationError =
-  | RunStoreError
-  | TranscriptAttemptNotFoundError;
+export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFoundError;
 
 /** Settled Runs kept in the overview beside every open one; history stays bounded. */
 const OVERVIEW_CLOSED_RUNS = 100;
@@ -70,15 +55,10 @@ const makeOperatorObservation = Effect.gen(function* () {
     revision: Option.Option<ProjectionRevision>,
   ) {
     const [snapshots, states] = yield* Effect.all(
-      [
-        reader.list({ closedLimit: OVERVIEW_CLOSED_RUNS }),
-        controls.states,
-      ] as const,
+      [reader.list({ closedLimit: OVERVIEW_CLOSED_RUNS }), controls.states] as const,
       { concurrency: "unbounded" },
     );
-    const paused = new Set(
-      states.filter((state) => state.paused).map((state) => state.loop),
-    );
+    const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const views = snapshots.map((snapshot) => runView(snapshot, paused));
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
@@ -120,9 +100,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       } else if (run.state === "Failed") {
         const attempt = run.attempts.at(-1);
         if (attempt?.outcome?._tag !== "Failed") {
-          return yield* Effect.die(
-            new Error(`Failed Run ${run.id} has no failed Attempt`),
-          );
+          return yield* Effect.die(new Error(`Failed Run ${run.id} has no failed Attempt`));
         }
         needsYou.push(
           new RunFailureNeed({
@@ -181,11 +159,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           JSON.stringify([
             value,
             instance.config.repos.map(({ name }) => name),
-            instance.loops.map(({ name, agent, trigger }) => [
-              name,
-              agent,
-              trigger.on,
-            ]),
+            instance.loops.map(({ name, agent, trigger }) => [name, agent, trigger.on]),
             pollFailures,
             scheduleFailures,
           ]),
@@ -214,10 +188,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           scheduleFailures,
           revision,
         );
-        return [
-          projected,
-          Option.some({ token: token.value, overview: projected }),
-        ] as const;
+        return [projected, Option.some({ token: token.value, overview: projected })] as const;
       }),
     ),
   );
@@ -231,9 +202,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       [reader.inspect(runId), controls.states] as const,
       { concurrency: "unbounded" },
     );
-    const paused = new Set(
-      states.filter((state) => state.paused).map((state) => state.loop),
-    );
+    const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const transcript = yield* readTranscript(reader, snapshot, request);
     return new RunDetailView({
       run: runView(snapshot, paused),
@@ -260,10 +229,7 @@ export class OperatorObservation extends Context.Service<
     ) => Effect.Effect<RunDetailView, OperatorObservationError>;
   }
 >()("@usine/orchestrator/OperatorObservation") {
-  static readonly layer = Layer.effect(
-    OperatorObservation,
-    makeOperatorObservation,
-  );
+  static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation);
 }
 
 const makeOperator = Effect.gen(function* () {
@@ -274,9 +240,7 @@ const makeOperator = Effect.gen(function* () {
   const approve = Effect.fn("Operator.approve")(function* (runId: Run.RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     const receivedAt = yield* DateTime.now;
-    const dedupKey = Event.DedupKey.make(
-      JSON.stringify(["operator-approval", runId]),
-    );
+    const dedupKey = Event.DedupKey.make(JSON.stringify(["operator-approval", runId]));
     yield* runs.approve(
       runId,
       new Event.Event({
@@ -305,9 +269,7 @@ const makeOperator = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ loop });
     return yield* controls.pause(loop);
   });
-  const unpause = Effect.fn("Operator.unpause")(function* (
-    loop: Loop.LoopName,
-  ) {
+  const unpause = Effect.fn("Operator.unpause")(function* (loop: Loop.LoopName) {
     yield* Effect.annotateCurrentSpan({ loop });
     return yield* controls.unpause(loop);
   });
