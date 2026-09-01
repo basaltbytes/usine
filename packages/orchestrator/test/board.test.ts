@@ -18,34 +18,38 @@ const itemKey = Item.ItemKey.make("github:basaltbytes/usine:33");
 const ready = GitHubLabelName.make("ready-for-agent");
 const review = GitHubLabelName.make("ready-for-review");
 const bug = GitHubLabelName.make("bug");
-const item = new ItemProjection({
-  itemKey,
-  repository,
-  source: ItemProjectionSource.make("issue"),
-  number: ItemNumber.make(33),
-  contentHash: ItemContentHash.make("issue-33"),
-  payload: {
-    number: 33,
-    title: "Board lanes",
-    body: "Build the Board.",
-    url: "https://github.com/basaltbytes/usine/issues/33",
-    state: "OPEN",
-    stateReason: null,
-    createdAt: "2026-09-01T10:00:00Z",
-    updatedAt: "2026-09-01T12:00:00Z",
-    closedAt: null,
-    author: { login: "PhilDL" },
-    issueType: null,
-    milestone: null,
-    labels: {
-      totalCount: 2,
-      nodes: [{ name: ready }, { name: bug }],
+const reviewLane = LaneName.make("ready-for-review");
+const itemWithLabels = (labels: ReadonlyArray<GitHubLabelName>) =>
+  new ItemProjection({
+    itemKey,
+    repository,
+    source: ItemProjectionSource.make("issue"),
+    number: ItemNumber.make(33),
+    contentHash: ItemContentHash.make(`issue-33:${labels.join(",")}`),
+    payload: {
+      number: 33,
+      title: "Board lanes",
+      body: "Build the Board.",
+      url: "https://github.com/basaltbytes/usine/issues/33",
+      state: "OPEN",
+      stateReason: null,
+      createdAt: "2026-09-01T10:00:00Z",
+      updatedAt: "2026-09-01T12:00:00Z",
+      closedAt: null,
+      author: { login: "PhilDL" },
+      issueType: null,
+      milestone: null,
+      labels: {
+        totalCount: labels.length,
+        nodes: labels.map((name) => ({ name })),
+      },
+      assignees: { totalCount: 0, nodes: [] },
+      comments: { totalCount: 0, nodes: [] },
+      closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
     },
-    assignees: { totalCount: 0, nodes: [] },
-    comments: { totalCount: 0, nodes: [] },
-    closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
-  },
-});
+  });
+
+const item = itemWithLabels([ready, bug]);
 
 const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succeeded") =>
   new RunView({
@@ -215,43 +219,36 @@ describe("Board projection", () => {
         }),
       ],
     });
-    const mutation = labelMutationForBoardMove(board, card, target);
+    const mutation = labelMutationForBoardMove(board, target);
     assert.deepStrictEqual(mutation.add, [review]);
     assert.deepStrictEqual(mutation.remove, [ready]);
   });
 
-  it("removes only the current proposed lane label", () => {
-    const card = new BoardItemView({
-      itemKey,
-      kind: "issue",
-      number: Item.Number.make(33),
-      title: "Board lanes",
-      url: "https://github.com/basaltbytes/usine/issues/33",
-      state: "issue-open",
-      labels: [ready, bug],
-      runs: [],
-      run: null,
-      needsYou: false,
-    });
-    const source = new WritableBoardLaneView({
-      id: BoardLaneId.make("proposed:Ready"),
-      name: LaneName.make("Ready"),
-      sources: [new LabelLaneSource({ label: ready })],
-      labels: [ready],
-      origin: "proposed",
-      items: [card],
-    });
-    const target = new WritableBoardLaneView({
-      id: BoardLaneId.make("proposed:Review"),
-      name: LaneName.make("Review"),
-      sources: [new LabelLaneSource({ label: review })],
-      labels: [review],
-      origin: "proposed",
-      items: [],
-    });
-    const board = new BoardView({ failures: [], lanes: [source, target] });
-    const mutation = labelMutationForBoardMove(board, card, target);
-    assert.deepStrictEqual(mutation.add, [review]);
-    assert.deepStrictEqual(mutation.remove, [ready]);
-  });
+  it.effect("moves a proposed card to the selected Lane after re-projection", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository }],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const board = yield* projectBoard(managed, [bug, ready, review], [item], []);
+      const target = board.lanes.find(({ name }) => name === reviewLane);
+      assert(target !== undefined && target._tag === "WritableBoardLane");
+
+      const mutation = labelMutationForBoardMove(board, target);
+      assert.deepStrictEqual(mutation.add, [review]);
+      assert.deepStrictEqual(mutation.remove, [bug, ready]);
+
+      const moved = yield* projectBoard(
+        managed,
+        [bug, ready, review],
+        [itemWithLabels([review])],
+        [],
+      );
+      const targetAfterMove = moved.lanes.find(({ name }) => name === reviewLane);
+      assert(targetAfterMove !== undefined);
+      assert.strictEqual(targetAfterMove.items[0]?.itemKey, itemKey);
+    }),
+  );
 });

@@ -217,18 +217,12 @@ export const projectBoard = Effect.fn("Board.project")(
 
 export const labelMutationForBoardMove = (
   board: BoardView,
-  item: BoardItemView,
   target: WritableBoardLaneView,
 ): ItemLabelMutation => {
-  const current = board.lanes.find(({ items }) =>
-    items.some(({ itemKey }) => itemKey === item.itemKey),
-  );
   const laneOwned = new Set(
-    current?.origin === "proposed"
-      ? labelSources(current.sources)
-      : board.lanes
-          .filter(({ origin }) => origin === "authored")
-          .flatMap(({ sources }) => labelSources(sources)),
+    board.lanes
+      .filter(({ origin }) => origin === target.origin)
+      .flatMap(({ sources }) => labelSources(sources)),
   );
   const targetLabels = new Set(target.labels);
   return new ItemLabelMutation({

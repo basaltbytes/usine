@@ -368,7 +368,7 @@ const makeOperator = Effect.gen(function* () {
     if (target._tag === "ReadOnlyBoardLane") {
       return yield* new BoardLaneReadOnly({ repository: move.repository, lane: move.toLane });
     }
-    const mutation = labelMutationForBoardMove(board, item, target);
+    const mutation = labelMutationForBoardMove(board, target);
     yield* github.updateLabels(move.repository, move.item, mutation);
   });
 
