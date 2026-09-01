@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, Attempt, AttemptChannel } from "@usine/core";
 import { DateTime, Result, Schema } from "effect";
-import { invalidFrameDiagnostic } from "../src/run-host-session.ts";
+import { invalidFrameDiagnostic } from "../src/invalid-frame.ts";
 
 const validStartedLine = () =>
   Schema.encodeSync(AttemptChannel.OutboundEnvelopeFromJson)(
