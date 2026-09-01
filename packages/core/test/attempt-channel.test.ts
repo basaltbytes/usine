@@ -60,6 +60,51 @@ describe("attempt channel v3", () => {
     assert.deepStrictEqual(decoded, envelope);
   });
 
+  it("round-trips rate-limit reset dates through its framed JSON schema", () => {
+    const session = new Agent.ParentSession({
+      id: Agent.SessionId.make("parent-1"),
+      agent: agent.name,
+      brain: new Agent.BrainSpec({ harness: "pi", model: parentModel, effort: "high" }),
+    });
+    const envelope = new AttemptChannel.OutboundEnvelope({
+      version: AttemptChannel.PROTOCOL_VERSION,
+      attemptId: spec.attemptId,
+      sequence: AttemptChannel.Sequence.make(1),
+      sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
+      payload: new AttemptChannel.SessionEvent({
+        event: new Agent.PoolRateLimitsUpdated({
+          session,
+          pool: "chatgptPlan",
+          rateLimits: new Agent.RateLimitsSnapshot({
+            limitId: Option.some("codex"),
+            limitName: Option.some("ChatGPT"),
+            primary: Option.some(
+              new Agent.RateLimitWindow({
+                usedPercent: 24,
+                windowDurationMinutes: Option.some(300),
+                resetsAt: Option.some(DateTime.makeUnsafe("2026-09-07T02:25:59Z")),
+              }),
+            ),
+            secondary: Option.some(
+              new Agent.RateLimitWindow({
+                usedPercent: 0,
+                windowDurationMinutes: Option.none(),
+                resetsAt: Option.none(),
+              }),
+            ),
+          }),
+        }),
+      }),
+    });
+
+    const encoded = Schema.encodeSync(AttemptChannel.OutboundEnvelopeFromJson)(envelope);
+    const decoded = Schema.decodeUnknownSync(AttemptChannel.OutboundEnvelopeFromJson)(encoded, {
+      onExcessProperty: "error",
+    });
+
+    assert.deepStrictEqual(decoded, envelope);
+  });
+
   it("rejects credentials smuggled into a RunSpec frame", () => {
     const encoded = Schema.encodeSync(AttemptChannel.InputFrameFromJson)(
       new AttemptChannel.Start({ version: AttemptChannel.PROTOCOL_VERSION, spec }),
