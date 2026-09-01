@@ -21,6 +21,7 @@ import {
   Claimed,
   CursorKey,
   CursorStore,
+  ItemProjectionWriter,
   LoopControl,
   LoopRuntimeState,
   RunEngine,
@@ -175,6 +176,10 @@ const loopControlLayer = (states: ReadonlyArray<LoopRuntimeState> = []) =>
     unpause: () => Effect.die("unused"),
   });
 
+const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
+  upsert: () => Effect.succeed(true),
+});
+
 const schedulerLayer = (
   github: GitHubPolling["Service"],
   states: ReadonlyArray<LoopRuntimeState> = [],
@@ -203,6 +208,7 @@ const schedulerLayer = (
   const dependencies = Layer.mergeAll(
     cursors,
     expressions,
+    itemProjectionWriterLayer,
     parser,
     runs,
     loopControlLayer(states),
@@ -231,28 +237,33 @@ describe("PollingTriggers", () => {
       const polling = yield* PollingTriggers;
       const fiber = yield* Effect.forkChild(polling.run(instanceWith([issueLoop("start-dev")])));
       yield* Effect.yieldNow;
-      assert.strictEqual(changeRequests, 1);
-      yield* TestClock.adjust("119 seconds");
-      assert.strictEqual(changeRequests, 1);
-      yield* TestClock.adjust("1 second");
       assert.strictEqual(changeRequests, 2);
+      yield* TestClock.adjust("119 seconds");
+      assert.strictEqual(changeRequests, 2);
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual(changeRequests, 4);
       yield* Fiber.interrupt(fiber);
     }).pipe(Effect.provide(schedulerLayer(github)));
   });
 
-  it.effect("skips paused Loops without polling GitHub and exposes the latest cycle", () => {
+  it.effect("keeps Board projection polling while paused Loops open no Runs", () => {
     const loop = issueLoop("paused-issues");
+    let changeRequests = 0;
     const github: GitHubPolling["Service"] = {
-      changes: () => Effect.die("a paused Loop must not poll GitHub"),
-      snapshot: () => Effect.die("a paused Loop has no snapshots"),
+      changes: (_repository, cursor) => {
+        changeRequests += 1;
+        return Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() }));
+      },
+      snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
     const state = new LoopRuntimeState({ loop: loop.name, paused: true });
 
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
       const cycle = yield* polling.poll(instanceWith([loop]));
-      assert.strictEqual(cycle.repositories, 0);
+      assert.strictEqual(cycle.repositories, 2);
       assert.strictEqual(cycle.submissions.length, 0);
+      assert.strictEqual(changeRequests, 2);
       const latest = yield* polling.latest;
       assert(Option.isSome(latest));
       assert.strictEqual(latest.value, cycle);
@@ -321,8 +332,8 @@ describe("PollingTriggers", () => {
         );
 
         const coldStart = yield* firstPolling.poll(firstInstance);
-        assert.strictEqual(coldStart.repositories, 1);
-        assert.strictEqual(coldStart.changedItems, 1);
+        assert.strictEqual(coldStart.repositories, 2);
+        assert.strictEqual(coldStart.changedItems, 2);
         const originalRun = claimedRun(coldStart);
         const originalSnapshot = yield* waitForState(firstEngine, originalRun, "Waiting");
         assert.strictEqual(originalSnapshot.task, "Implement issue 28.");
@@ -370,8 +381,10 @@ describe("PollingTriggers", () => {
         const newLoopRun = newLoopColdStart.submissions[1];
         assert(newLoopRun !== undefined && newLoopRun._tag === "Claimed");
         yield* waitForState(secondEngine, newLoopRun.runId, "Waiting");
-        const resetCursor = (yield* Ref.get(seenCursors))[3];
-        assert(resetCursor !== undefined && Option.isNone(resetCursor.entityTag));
+        assert.strictEqual(
+          (yield* Ref.get(seenCursors)).filter(({ entityTag }) => Option.isNone(entityTag)).length,
+          3,
+        );
 
         yield* Ref.set(state, {
           hash: ContentHash.make("b".repeat(64)),
@@ -397,11 +410,13 @@ describe("PollingTriggers", () => {
           assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
         }
 
-        assert.deepStrictEqual(
-          yield* Ref.get(seenRepositories),
-          Array.from({ length: 6 }, () => watchedRepository),
+        const repositories = yield* Ref.get(seenRepositories);
+        assert.strictEqual(repositories.filter((name) => name === watchedRepository).length, 6);
+        assert.strictEqual(
+          repositories.filter((name) => name === "basaltbytes/unwatched").length,
+          6,
         );
-        assert.strictEqual(yield* Ref.get(snapshotCalls), 6);
+        assert.strictEqual(yield* Ref.get(snapshotCalls), 12);
         yield* Scope.close(secondScope, Exit.void);
       }).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -483,6 +498,7 @@ describe("PollingTriggers", () => {
       Layer.provide(
         Layer.mergeAll(
           cursors,
+          itemProjectionWriterLayer,
           runs,
           MarcbachmannCelLayer,
           parser,
@@ -577,6 +593,7 @@ describe("PollingTriggers", () => {
       Layer.provide(
         Layer.mergeAll(
           cursors,
+          itemProjectionWriterLayer,
           runs,
           MarcbachmannCelLayer,
           parser,
@@ -594,7 +611,7 @@ describe("PollingTriggers", () => {
       assert.strictEqual(cycle.failures[0]?.errorTag, "ConfigFileError");
       assert.strictEqual(cycle.submissions.length, 1);
       assert.strictEqual(cycle.submissions[0]?._tag, "Claimed");
-      assert.strictEqual(cursorWrites.length, 1);
+      assert.strictEqual(cursorWrites.length, 2);
     }).pipe(Effect.provide(layer));
   });
 

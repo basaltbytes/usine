@@ -13,6 +13,11 @@ import {
   CursorKey,
   CursorStore,
   type EnginePersistenceError,
+  ItemContentHash,
+  ItemNumber,
+  ItemProjection,
+  ItemProjectionSource,
+  ItemProjectionWriter,
   LoopControl,
   RunEngine,
   SubmissionResult,
@@ -57,6 +62,7 @@ type WatchKey = typeof WatchKey.Type;
 class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   "@usine/orchestrator/StoredPollCursor",
 )({
+  boardVersion: Schema.Literal(1),
   cursor: PollCursor,
   watches: Schema.Array(WatchKey).check(Schema.isUnique()),
 }) {}
@@ -124,11 +130,11 @@ const watchedRepositories = (
   instance: LoadedInstance,
   resolved: ReadonlyArray<ResolvedLoop>,
 ): ReadonlyArray<WatchedRepository> =>
-  instance.config.repos.flatMap((repository) => {
+  instance.config.repos.map((repository) => {
     const loops = resolved.filter(
       ({ loop }) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
     );
-    return loops.length === 0 ? [] : [{ repository, loops, watches: loops.map(watchKey).sort() }];
+    return { repository, loops, watches: loops.map(watchKey).sort() };
   });
 
 const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKey>): boolean =>
@@ -188,6 +194,7 @@ export class PollingTriggers extends Context.Service<
       const config = yield* ConfigParser;
       const expressions = yield* ExpressionEngine;
       const github = yield* GitHubPolling;
+      const items = yield* ItemProjectionWriter;
       const runs = yield* RunEngine;
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
@@ -213,7 +220,7 @@ export class PollingTriggers extends Context.Service<
           cursors.write(
             cursorKey(watched.repository),
             StoredPollCursor,
-            new StoredPollCursor({ cursor, watches: watched.watches }),
+            new StoredPollCursor({ boardVersion: 1, cursor, watches: watched.watches }),
           ),
       );
 
@@ -226,21 +233,35 @@ export class PollingTriggers extends Context.Service<
           item: item.number,
         });
         const loops = watched.loops.filter(({ loop }) => loop.trigger.on === itemStream(item));
-        if (loops.length === 0) {
-          return { submissions: [], revokedRuns: 0, failures: [] } satisfies ItemCycle;
-        }
-
         const snapshot = yield* github.snapshot(watched.repository.name, item);
         // Both snapshot variants carry their payload; the union needs no recheck.
         const payload: Schema.JsonObject = snapshot.payload;
         const context = { repo: repositoryContext(watched.repository), item: payload };
         const stableItemKey = itemKey(watched.repository, item);
+        yield* items.upsert(
+          new ItemProjection({
+            itemKey: stableItemKey,
+            repository: watched.repository.name,
+            source: ItemProjectionSource.make(itemStream(item)),
+            number: ItemNumber.make(item.number),
+            contentHash: ItemContentHash.make(snapshot.contentHash),
+            payload,
+          }),
+        );
         yield* Effect.logDebug("Fetched changed-item snapshot", {
           repository: watched.repository.name,
           item: item.number,
           stream: itemStream(item),
           contentHash: snapshot.contentHash,
         });
+        if (loops.length === 0) {
+          yield* Effect.logDebug("Item projected without any matching repository Loop", {
+            repository: watched.repository.name,
+            item: item.number,
+            stream: itemStream(item),
+          });
+          return { submissions: [], revokedRuns: 0, failures: [] } satisfies ItemCycle;
+        }
         const submissions: Array<SubmissionResult> = [];
         const failures: Array<RepositoryPollFailure> = [];
         let revokedRuns = 0;

@@ -15,6 +15,7 @@ import {
 } from "./model.ts";
 import { RunStore } from "./store/store.ts";
 import { RunReader } from "./run-reader.ts";
+import { ItemProjectionReader, ItemProjectionWriter } from "./item-projection/service.ts";
 import {
   ApprovalGate,
   DurableRun,
@@ -239,7 +240,7 @@ export class RunEngine extends Context.Service<
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,
 ): Layer.Layer<
-  CursorStore | LoopControl | RunEngine | RunReader,
+  CursorStore | ItemProjectionReader | ItemProjectionWriter | LoopControl | RunEngine | RunReader,
   RunEngineError | DatabaseError,
   Crypto.Crypto | StepExecutor | DatabaseRequirements
 > => {
@@ -262,6 +263,8 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     runEngine,
     RunReader.layer.pipe(Layer.provide(database)),
     CursorStore.layer.pipe(Layer.provide(database)),
+    ItemProjectionReader.layer.pipe(Layer.provide(database)),
+    ItemProjectionWriter.layer.pipe(Layer.provide(database)),
     LoopControl.layer.pipe(Layer.provide(database)),
   );
 };

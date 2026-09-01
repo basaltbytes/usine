@@ -17,6 +17,7 @@ import {
   AttemptChannel,
   AttemptFailure,
   Event,
+  Item,
   Repository,
   Run,
   RunState,
@@ -98,6 +99,7 @@ const snapshot = new RunSnapshot({
     payload: { number: 31 },
     receivedAt: now,
   }),
+  itemKey: Item.ItemKey.make("github:basaltbytes/usine:31"),
   run: new Run.Run({
     id: runId,
     eventId: Event.EventId.make("event-operator-test"),

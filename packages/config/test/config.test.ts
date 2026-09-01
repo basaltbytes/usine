@@ -39,6 +39,7 @@ describe("ConfigParser", () => {
       expect(config.settings.maxChildren).toBe(4);
       expect(config.workers).toHaveLength(1);
       expect(config.workers[0]?.name).toBe("local");
+      expect(config.repos).toEqual([]);
       expect(config.webhooks.mode).toBe("off");
       expect(Option.isNone(config.operator)).toBe(true);
 
@@ -71,6 +72,48 @@ describe("ConfigParser", () => {
         .pipe(Effect.flip);
       expect(failure.stage).toBe("schema");
       expect(failure.message).toContain('["enabled"]');
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("parses one exclusive per-repository lane map", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const configured = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        [
+          "version: 1",
+          "repos:",
+          "  - name: basaltbytes/usine",
+          "    lanes:",
+          "      - name: Ready",
+          "        sources:",
+          "          - label: ready-for-agent",
+          "      - name: In review",
+          "        sources:",
+          "          - state: pr-open",
+          "          - label: ready-for-review",
+        ].join("\n"),
+      );
+
+      expect(configured.repos[0]?.lanes.map(({ name }) => name)).toEqual(["Ready", "In review"]);
+
+      const duplicate = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          [
+            "version: 1",
+            "repos:",
+            "  - name: basaltbytes/usine",
+            "    lanes:",
+            "      - name: Ready",
+            "        sources: [{ label: ready-for-agent }]",
+            "      - name: Also ready",
+            "        sources: [{ label: ready-for-agent }]",
+          ].join("\n"),
+        )
+        .pipe(Effect.flip);
+      expect(duplicate.stage).toBe("schema");
+      expect(duplicate.message).toContain("every lane source to be mapped once");
     }).pipe(Effect.provide(parserLayer)),
   );
 

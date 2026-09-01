@@ -90,6 +90,7 @@ export type SubmissionResult = typeof SubmissionResult.Type;
 /** Observable durable projection for one Run. */
 export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSnapshot")({
   event: Event.Event,
+  itemKey: Item.ItemKey,
   run: Run.Run,
   step: Step.Step,
   attempts: Schema.Array(Attempt.Attempt),
@@ -102,6 +103,7 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
 
 /** Lightweight durable projection used when listing Runs for operators. */
 export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSummary")({
+  itemKey: Item.ItemKey,
   run: Run.Run,
   step: Step.Step,
   attempts: Schema.Array(Attempt.Attempt),

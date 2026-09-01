@@ -44,6 +44,7 @@ export const EventRouteRow = Schema.Struct({
 export type EventRouteRow = typeof EventRouteRow.Type;
 
 export const RunRow = Schema.Struct({
+  itemKey: Item.ItemKey,
   repository: Repository.Name,
   revision: Repository.Revision,
   task: AttemptChannel.Task,
@@ -183,6 +184,7 @@ export const runSummaryFromRow = (
   storedAttempts: ReadonlyArray<AttemptRow>,
 ): RunSummary =>
   new RunSummary({
+    itemKey: row.itemKey,
     run: runFromRow(row),
     step: stepFromRow(row),
     attempts: storedAttempts.map(attemptFromRow),

@@ -69,6 +69,45 @@ export const RegistryTag = nonBlankString("Expected a non-blank registry tag").p
 );
 export type RegistryTag = typeof RegistryTag.Type;
 
+export const LaneName = nonBlankString("Expected a non-blank lane name").pipe(
+  Schema.brand("LaneName"),
+);
+export type LaneName = typeof LaneName.Type;
+
+export const GitHubLabelName = nonBlankString("Expected a non-blank GitHub label name").pipe(
+  Schema.brand("GitHubLabelName"),
+);
+export type GitHubLabelName = typeof GitHubLabelName.Type;
+
+export const LaneItemState = Schema.Literals([
+  "issue-open",
+  "issue-closed",
+  "pr-open",
+  "pr-closed",
+  "pr-merged",
+]);
+export type LaneItemState = typeof LaneItemState.Type;
+
+export class LabelLaneSource extends Schema.Class<LabelLaneSource>("@usine/config/LabelLaneSource")(
+  {
+    label: GitHubLabelName,
+  },
+) {}
+
+export class StateLaneSource extends Schema.Class<StateLaneSource>("@usine/config/StateLaneSource")(
+  {
+    state: LaneItemState,
+  },
+) {}
+
+export const LaneSource = Schema.Union([LabelLaneSource, StateLaneSource]);
+export type LaneSource = typeof LaneSource.Type;
+
+export class Lane extends Schema.Class<Lane>("@usine/config/Lane")({
+  name: LaneName,
+  sources: Schema.Array(LaneSource).check(Schema.isNonEmpty()),
+}) {}
+
 export const ModelId = CoreAgent.ModelId;
 export type ModelId = CoreAgent.ModelId;
 
@@ -94,11 +133,25 @@ const uniqueNames = Schema.makeFilter<ReadonlyArray<{ readonly name: string }>>(
   { message: "Expected unique names" },
 );
 
+const laneSourceKey = (source: LaneSource): string =>
+  "label" in source ? `label:${source.label}` : `state:${source.state}`;
+
+const uniqueLaneSources = Schema.makeFilter<ReadonlyArray<Lane>>(
+  (lanes) => {
+    const keys = lanes.flatMap(({ sources }) => sources.map(laneSourceKey));
+    return new Set(keys).size === keys.length;
+  },
+  { message: "Expected every lane source to be mapped once" },
+);
+
+const Lanes = Schema.Array(Lane).check(uniqueNames, uniqueLaneSources);
+
 export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/ManagedRepo")({
   name: RepoName,
   tags: Schema.Array(RegistryTag)
     .check(Schema.isUnique())
     .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+  lanes: Lanes.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}
 
 export const WorkerKind = CoreWorker.Kind;

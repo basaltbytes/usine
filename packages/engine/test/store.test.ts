@@ -12,11 +12,18 @@ import {
   Step,
   Worker,
 } from "@usine/core";
-import { DateTime, Effect, FileSystem, Option, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { CursorKey } from "../src/cursor/model.ts";
 import { CursorStore } from "../src/cursor/store.ts";
 import { LoopControl } from "../src/loop-control.ts";
+import {
+  ItemContentHash,
+  ItemNumber,
+  ItemProjection,
+  ItemProjectionSource,
+} from "../src/item-projection/model.ts";
+import { ItemProjectionReader, ItemProjectionWriter } from "../src/item-projection/service.ts";
 import {
   InstanceDirectory,
   Submission,
@@ -25,6 +32,7 @@ import {
   TranscriptSequence,
   TranscriptTailQuery,
 } from "../src/model.ts";
+import { RunReader } from "../src/run-reader.ts";
 import { RunStore } from "../src/store/store.ts";
 
 const testAgent = new Agent.Agent({
@@ -84,6 +92,7 @@ describe("run store", () => {
           );
         }
         const snapshot = yield* store.snapshot(runId);
+        assert.strictEqual(snapshot.itemKey, submission.itemKey);
         assert.strictEqual(snapshot.run.state._tag, "Failed");
         assert.strictEqual(snapshot.attempts.length, 3);
         assert(snapshot.attempts.every((attempt) => Option.isSome(attempt.outcome)));
@@ -245,6 +254,49 @@ describe("run store", () => {
         const snapshot = yield* store.snapshot(runId);
         assert.strictEqual(snapshot.attempts.length, 0);
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("Item projections", () => {
+  it.live("stores the latest polled Item without invalidating unchanged operator reads", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-item-projection-" }),
+      );
+      const repository = Repository.Name.make("basaltbytes/usine");
+      const item = new ItemProjection({
+        itemKey: Item.ItemKey.make("github:basaltbytes/usine:33"),
+        repository,
+        source: ItemProjectionSource.make("issue"),
+        number: ItemNumber.make(33),
+        contentHash: ItemContentHash.make("content-1"),
+        payload: { number: 33, title: "Board lanes" },
+      });
+      const database = localSqliteLayer(directory);
+      const services = Layer.mergeAll(
+        ItemProjectionReader.layer,
+        ItemProjectionWriter.layer,
+        RunReader.layer,
+      ).pipe(Layer.provide(database));
+
+      yield* Effect.gen(function* () {
+        const reader = yield* ItemProjectionReader;
+        const writer = yield* ItemProjectionWriter;
+        const runs = yield* RunReader;
+        const before = yield* runs.revision();
+        assert(Option.isSome(before));
+
+        assert.strictEqual(yield* writer.upsert(item), true);
+        const changed = yield* runs.revision();
+        assert(Option.isSome(changed));
+        assert.strictEqual(changed.value, before.value + 1);
+        assert.deepStrictEqual(yield* reader.list(repository), [item]);
+
+        assert.strictEqual(yield* writer.upsert(item), false);
+        assert.deepStrictEqual(yield* runs.revision(), changed);
+      }).pipe(Effect.provide(services));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });
