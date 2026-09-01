@@ -23,6 +23,7 @@ import {
   SessionOperationError,
   UnknownModelError,
 } from "../runtime.ts";
+import { resolvePiPool, type PiPool } from "./authentication.ts";
 import { type SessionChannel, sessionChannel } from "./session.ts";
 import { subagentsExtension } from "./subagents.ts";
 
@@ -49,7 +50,12 @@ export interface PiStartOptions {
 export type PiStartResult =
   | { readonly _tag: "ApiKeyRequired"; readonly model: Agent.ModelId }
   | { readonly _tag: "UnknownModel" }
-  | { readonly _tag: "Started"; readonly model: Agent.ModelId; readonly session: PiSession };
+  | {
+      readonly _tag: "Started";
+      readonly model: Agent.ModelId;
+      readonly pool: PiPool;
+      readonly session: PiSession;
+    };
 
 /** Narrow SDK seam keeps vendor setup testable without module replacement. */
 export class PiSdk extends Context.Service<
@@ -110,13 +116,20 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       throw new Error("Pi started without an active model");
     }
     const model = Agent.ModelId.make(`${active.provider}/${active.id}`);
-    if (modelRuntime.isUsingOAuth(active.provider)) {
+    const authentication = modelRuntime.isUsingSubscription(active.provider)
+      ? "subscription"
+      : modelRuntime.isUsingOAuth(active.provider)
+        ? "oauth"
+        : "apiKey";
+    const pool = resolvePiPool(active.provider, authentication);
+    if (pool === undefined) {
       session.dispose();
       return { _tag: "ApiKeyRequired", model };
     }
     return {
       _tag: "Started",
       model,
+      pool,
       session,
     };
   },
@@ -126,7 +139,10 @@ const PiAssistantMessage = Schema.Struct({
   role: Schema.Literal("assistant"),
   content: Schema.Union([Schema.String, Schema.Array(Schema.Json)]),
 });
-const PiTextBlock = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
+const PiTextBlock = Schema.Struct({
+  type: Schema.Literal("text"),
+  text: Schema.String,
+});
 const decodeSerializedJson = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Json));
 type PiToolStartedEvent = Extract<PiSessionEvent, { readonly type: "tool_execution_start" }>;
 type PiToolFinishedEvent = Extract<PiSessionEvent, { readonly type: "tool_execution_end" }>;
@@ -330,6 +346,20 @@ const makePiChild = Effect.gen(function* () {
           message: `Pi model ${started.model} must use an API key`,
         });
       }
+      if (started.pool !== "apiKeys") {
+        started.session.dispose();
+        yield* Effect.logError("Pi child resolved to an unsupported billing pool", {
+          model: started.model,
+          requiredPool: "apiKeys",
+          resolvedPool: started.pool,
+        });
+        return yield* new PoolUnavailableError({
+          harness: "pi",
+          model: started.model,
+          pool: "apiKeys",
+          message: `Pi child model ${started.model} must use an API key`,
+        });
+      }
       const session = new Agent.ChildSession({
         id: request.session.id,
         parentId: request.session.parentId,
@@ -371,7 +401,9 @@ const makePiChild = Effect.gen(function* () {
       );
 
       const steer = Effect.fn("PiChildBackend.steer")((message: string) =>
-        Effect.logDebug("Steering Pi child session", { sessionId: session.id }).pipe(
+        Effect.logDebug("Steering Pi child session", {
+          sessionId: session.id,
+        }).pipe(
           Effect.andThen(
             Effect.tryPromise({
               try: () => started.session.steer(message),
@@ -419,7 +451,10 @@ const makePiParent = Effect.gen(function* () {
         sessionId: parentId,
       });
       yield* Effect.logInfo("Launching Pi parent session");
-      const channel = yield* sessionChannel({ label: "Pi parent session", sessionId: parentId });
+      const channel = yield* sessionChannel({
+        label: "Pi parent session",
+        sessionId: parentId,
+      });
       // The Pi tool callback runs outside any usine fiber. Child programs must
       // still carry this fiber's services (stderr logging, tracing) and die
       // with this launch scope, so the extension receives a runner instead of
@@ -477,6 +512,11 @@ const makePiParent = Effect.gen(function* () {
           message: `Pi model ${started.model} must use an API key`,
         });
       }
+      yield* Effect.annotateCurrentSpan({ parentPool: started.pool });
+      yield* Effect.logInfo("Pi parent session authenticated", {
+        model: started.model,
+        pool: started.pool,
+      });
       const parent = new Agent.ParentSession({
         id: parentId,
         agent: request.spec.agent.name,
@@ -521,7 +561,9 @@ const makePiParent = Effect.gen(function* () {
       yield* Effect.forkScoped(run);
 
       const steer = Effect.fn("PiParentRuntime.steer")((message: string) =>
-        Effect.logDebug("Steering Pi parent session", { sessionId: parentId }).pipe(
+        Effect.logDebug("Steering Pi parent session", {
+          sessionId: parentId,
+        }).pipe(
           Effect.andThen(
             Effect.tryPromise({
               try: () => started.session.steer(message),

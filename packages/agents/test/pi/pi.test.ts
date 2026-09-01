@@ -26,6 +26,21 @@ import {
   type PiSessionEvent,
   type PiStartOptions,
 } from "../../src/pi/pi.ts";
+import { resolvePiPool } from "../../src/pi/authentication.ts";
+
+describe("Pi pool resolution", () => {
+  it("maps ChatGPT subscription authentication to the ChatGPT pool", () => {
+    assert.strictEqual(resolvePiPool("openai-codex", "subscription"), "chatgptPlan");
+  });
+
+  it("keeps API-key authentication in the API-key pool", () => {
+    assert.strictEqual(resolvePiPool("openai", "apiKey"), "apiKeys");
+  });
+
+  it("does not misclassify an unsupported OAuth provider as API-key usage", () => {
+    assert.strictEqual(resolvePiPool("github-copilot", "oauth"), undefined);
+  });
+});
 
 const agent = new Agent.Agent({
   name: Agent.Name.make("developer"),
@@ -81,7 +96,10 @@ describe("Pi child backend", () => {
         listener?.({ type: "auto_retry_end", success: true, attempt: 1 });
         listener?.({
           type: "message_end",
-          message: { role: "assistant", content: [{ type: "text", text: "Pi child done." }] },
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Pi child done." }],
+          },
         });
         return Promise.resolve();
       },
@@ -98,7 +116,12 @@ describe("Pi child backend", () => {
     const sdk = Layer.succeed(PiSdk)({
       start: (found) => {
         options = found;
-        return Promise.resolve({ _tag: "Started", model: effectiveModel, session });
+        return Promise.resolve({
+          _tag: "Started",
+          model: effectiveModel,
+          pool: "apiKeys",
+          session,
+        });
       },
     });
 
@@ -143,8 +166,25 @@ describe("Pi child backend", () => {
 
   it.effect("rejects a child model outside the API-key pool", () => {
     const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    let disposed = false;
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => {
+        disposed = true;
+      },
+      messages: [],
+      prompt: () => Promise.resolve(),
+      steer: () => Promise.resolve(),
+      subscribe: () => () => undefined,
+    };
     const sdk = Layer.succeed(PiSdk)({
-      start: () => Promise.resolve({ _tag: "ApiKeyRequired", model }),
+      start: () =>
+        Promise.resolve({
+          _tag: "Started",
+          model,
+          pool: "chatgptPlan",
+          session,
+        }),
     });
     return Effect.scoped(
       Effect.gen(function* () {
@@ -153,6 +193,7 @@ describe("Pi child backend", () => {
         assert(error instanceof PoolUnavailableError);
         assert.strictEqual(error.pool, "apiKeys");
         assert.strictEqual(error.model, model);
+        assert.strictEqual(disposed, true);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
     );
   });
@@ -208,7 +249,10 @@ describe("Pi parent runtime", () => {
         prompt = value;
         listener?.({
           type: "message_end",
-          message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "done" }],
+          },
         });
         listener?.({
           type: "tool_execution_start",
@@ -237,7 +281,12 @@ describe("Pi parent runtime", () => {
     const sdk = Layer.succeed(PiSdk)({
       start: (found) => {
         options = found;
-        return Promise.resolve({ _tag: "Started", model: parentModel, session });
+        return Promise.resolve({
+          _tag: "Started",
+          model: parentModel,
+          pool: "apiKeys",
+          session,
+        });
       },
     });
 
@@ -281,8 +330,48 @@ describe("Pi parent runtime", () => {
     );
   });
 
-  it.effect("rejects a parent model outside the API-key pool", () => {
+  it.effect("runs a parent model from the ChatGPT subscription pool", () => {
     const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    let listener: ((event: PiSessionEvent) => void) | undefined;
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => undefined,
+      messages: [],
+      prompt: () => {
+        listener?.({
+          type: "message_end",
+          message: { role: "assistant", content: "subscription parent done" },
+        });
+        return Promise.resolve();
+      },
+      steer: () => Promise.resolve(),
+      subscribe: (found) => {
+        listener = found;
+        return () => undefined;
+      },
+    };
+    const sdk = Layer.succeed(PiSdk)({
+      start: () =>
+        Promise.resolve({
+          _tag: "Started",
+          model,
+          pool: "chatgptPlan",
+          session,
+        }),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const running = yield* runtime.launch(request);
+        const result = yield* running.result;
+        assert.strictEqual(running.session.brain.model, model);
+        assert.strictEqual(result.message, "subscription parent done");
+      }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
+    );
+  });
+
+  it.effect("rejects an OAuth parent without a known billing pool", () => {
+    const model = Agent.ModelId.make("github-copilot/gpt-5.6-sol");
     const sdk = Layer.succeed(PiSdk)({
       start: () => Promise.resolve({ _tag: "ApiKeyRequired", model }),
     });
@@ -314,7 +403,12 @@ describe("Pi parent runtime", () => {
     const sdk = Layer.succeed(PiSdk)({
       start: (found) => {
         options = found;
-        return Promise.resolve({ _tag: "Started", model: parentModel, session });
+        return Promise.resolve({
+          _tag: "Started",
+          model: parentModel,
+          pool: "apiKeys",
+          session,
+        });
       },
     });
     let sawLaunchContext = false;
@@ -341,7 +435,9 @@ describe("Pi parent runtime", () => {
         let registered: ToolDefinition | undefined;
         yield* Effect.promise(async () => {
           // SAFETY: this extension only calls registerTool; other members are unused.
-          await extension.factory({ registerTool: (tool) => (registered = tool) } as ExtensionAPI);
+          await extension.factory({
+            registerTool: (tool) => (registered = tool),
+          } as ExtensionAPI);
         });
         assert(registered !== undefined);
         const result = yield* Effect.promise(() =>
