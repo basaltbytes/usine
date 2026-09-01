@@ -9,6 +9,7 @@ import {
   Ref,
   Result,
   Schema,
+  SchemaIssue,
   Scope,
   Stream,
   type PlatformError,
@@ -66,6 +67,132 @@ const decodeOutboundEnvelope = (line: string) =>
   });
 const isExecutorError = Schema.is(ExecutorError);
 const encoder = new TextEncoder();
+
+const SAFE_TAG_VALUES = [
+  "Started",
+  "SessionEvent",
+  "Final",
+  "Failed",
+  "Interrupted",
+  "SessionStarted",
+  "TextOutput",
+  "ToolStarted",
+  "ToolFinished",
+  "PoolRateLimitsUpdated",
+  "SessionFinished",
+] as const;
+const SafeFrameTag = Schema.Literals(SAFE_TAG_VALUES);
+const FramePreview = Schema.Struct({
+  version: Schema.optionalKey(Schema.Int),
+  payload: Schema.optionalKey(
+    Schema.Struct({
+      _tag: Schema.optionalKey(Schema.String),
+      event: Schema.optionalKey(Schema.Struct({ _tag: Schema.optionalKey(Schema.String) })),
+    }),
+  ),
+});
+const decodeJsonOption = Schema.decodeUnknownOption(Schema.fromJsonString(Schema.Json));
+const decodeFramePreviewOption = Schema.decodeUnknownOption(FramePreview);
+const decodeSafeFrameTagOption = Schema.decodeUnknownOption(SafeFrameTag);
+const SAFE_PATH_SEGMENTS = new Set([
+  "version",
+  "attemptId",
+  "sequence",
+  "sentAt",
+  "payload",
+  "_tag",
+  "event",
+  "session",
+  "id",
+  "parentId",
+  "agent",
+  "brain",
+  "harness",
+  "model",
+  "effort",
+  "callId",
+  "tool",
+  "input",
+  "output",
+  "isError",
+  "text",
+  "pool",
+  "rateLimits",
+  "parentModel",
+  "result",
+  "failure",
+]);
+
+type FrameSource = "effect-log" | "json" | "non-json";
+
+export interface InvalidFrameDiagnostic {
+  readonly byteLength: number;
+  readonly eventTag: string | undefined;
+  readonly issues: ReadonlyArray<{ readonly message: string; readonly path: string }>;
+  readonly payloadTag: string | undefined;
+  readonly source: FrameSource;
+  readonly version: number | undefined;
+}
+
+const formatSchemaIssues = SchemaIssue.makeFormatterStandardSchemaV1();
+type FormattedIssuePath = NonNullable<
+  ReturnType<typeof formatSchemaIssues>["issues"][number]["path"]
+>;
+
+const safeIssuePath = (path: FormattedIssuePath): string =>
+  path
+    .map((segment) => {
+      const value = String(segment);
+      return SAFE_PATH_SEGMENTS.has(value) ? value : "<unexpected>";
+    })
+    .join(".");
+
+/** Redacted frame diagnostics: shape and schema metadata only, never frame content. */
+export const invalidFrameDiagnostic = (line: string, cause: unknown): InvalidFrameDiagnostic => {
+  const byteLength = encoder.encode(line).byteLength;
+  const parsed = decodeJsonOption(line);
+  if (Option.isNone(parsed)) {
+    return {
+      byteLength,
+      eventTag: undefined,
+      issues: [],
+      payloadTag: undefined,
+      source: /^\[\d{2}:\d{2}:\d{2}[.\]]/u.test(line) ? "effect-log" : "non-json",
+      version: undefined,
+    };
+  }
+  const preview = decodeFramePreviewOption(parsed.value);
+  const issues = Schema.isSchemaError(cause)
+    ? formatSchemaIssues(cause.issue).issues.map((issue) => ({
+        message: issue.message.slice(0, 200),
+        path: safeIssuePath(issue.path ?? []),
+      }))
+    : [];
+  return {
+    byteLength,
+    eventTag: Option.flatMap(preview, ({ payload }) =>
+      decodeSafeFrameTagOption(payload?.event?._tag),
+    ).pipe(Option.getOrUndefined),
+    issues,
+    payloadTag: Option.flatMap(preview, ({ payload }) =>
+      decodeSafeFrameTagOption(payload?._tag),
+    ).pipe(Option.getOrUndefined),
+    source: "json",
+    version: Option.map(preview, ({ version }) => version).pipe(Option.getOrUndefined),
+  };
+};
+
+const invalidFrameMessage = (diagnostic: InvalidFrameDiagnostic): string => {
+  if (diagnostic.source !== "json") {
+    return diagnostic.source === "effect-log"
+      ? "The run host wrote a log line to its protocol output"
+      : "The run host emitted malformed JSON";
+  }
+  const first = diagnostic.issues[0];
+  return first === undefined
+    ? "The run host emitted a schema-invalid frame"
+    : `The run host emitted a schema-invalid frame at ${first.path || "<root>"}: ${first.message}`;
+};
 
 const frame = (input: AttemptChannel.InputFrame): Uint8Array =>
   encoder.encode(`${inputFrameToJson(input)}\n`);
@@ -280,9 +407,17 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
                 // credential from the line before it is decoded or persisted.
                 const line = scrub(rawLine);
                 const envelope = yield* decodeOutboundEnvelope(line).pipe(
-                  Effect.mapError((cause) =>
-                    infrastructureFailure("The run host emitted an invalid frame", cause),
-                  ),
+                  Effect.catch((cause) => {
+                    const diagnostic = invalidFrameDiagnostic(line, cause);
+                    return Effect.logError("Run host emitted an invalid frame", {
+                      attemptId,
+                      ...diagnostic,
+                    }).pipe(
+                      Effect.andThen(
+                        Effect.fail(infrastructureFailure(invalidFrameMessage(diagnostic), cause)),
+                      ),
+                    );
+                  }),
                 );
                 const admitted = AttemptChannel.admit(
                   yield* Ref.get(progress),
