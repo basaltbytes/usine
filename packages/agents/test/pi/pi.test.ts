@@ -203,6 +203,7 @@ describe("Pi child backend", () => {
         assert.strictEqual(interrupted, true);
         assert.deepStrictEqual(options?.extensions, []);
         assert.deepStrictEqual(options?.model, Option.some(childRequest.session.brain.model));
+        assert.strictEqual(options?.toolMode, "repository");
         assert.deepStrictEqual(
           events.map((event) => event._tag),
           ["SessionStarted", "TextOutput", "SessionFinished"],
@@ -445,6 +446,7 @@ describe("Pi parent runtime", () => {
         assert.strictEqual(steer, "Check the failing test.");
         assert.strictEqual(interrupted, true);
         assert.strictEqual(options?.extensions.length, 1);
+        assert.strictEqual(options?.toolMode, "orchestration");
         assert.deepStrictEqual(
           events.map((event) => event._tag),
           ["SessionStarted", "TextOutput", "ToolStarted", "ToolFinished", "SessionFinished"],

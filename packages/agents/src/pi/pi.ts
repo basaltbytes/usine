@@ -75,6 +75,7 @@ const makePiChild = Effect.gen(function* () {
             model: Option.some(request.session.brain.model),
             signal,
             thinkingLevel: request.session.brain.effort,
+            toolMode: "repository",
           }),
         (cause) => childError("launch", request, "Pi child session failed to start", cause),
         (acquired) =>
@@ -255,6 +256,7 @@ const makePiParent = Effect.gen(function* () {
             model: request.spec.parentModel,
             signal,
             thinkingLevel: request.spec.agent.brain.effort,
+            toolMode: "orchestration",
           }),
         (cause) => parentError("launch", request, "Pi parent session failed to start", cause),
         (acquired) =>

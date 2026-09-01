@@ -38,6 +38,7 @@ export interface PiStartOptions {
   readonly model: Option.Option<Agent.ModelId>;
   readonly signal: AbortSignal;
   readonly thinkingLevel: Agent.Effort;
+  readonly toolMode: "orchestration" | "repository";
 }
 
 export type PiStartResult =
@@ -107,16 +108,19 @@ export const piSdkLive = Layer.succeed(PiSdk)({
     const sessionOptions = {
       cwd: options.cwd,
       modelRuntime,
-      ...piParentSessionToolPolicy,
       resourceLoader,
       sessionManager: SessionManager.inMemory(options.cwd),
       settingsManager,
       thinkingLevel: options.thinkingLevel,
     } as const;
+    const toolScopedSessionOptions =
+      options.toolMode === "orchestration"
+        ? { ...sessionOptions, ...piParentSessionToolPolicy }
+        : sessionOptions;
     const { session } =
       selected === undefined
-        ? await createAgentSession(sessionOptions)
-        : await createAgentSession({ ...sessionOptions, model: selected });
+        ? await createAgentSession(toolScopedSessionOptions)
+        : await createAgentSession({ ...toolScopedSessionOptions, model: selected });
     let ownershipTransferred = false;
     try {
       const active = session.model;
