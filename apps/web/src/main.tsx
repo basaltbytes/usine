@@ -391,8 +391,10 @@ const FactoryScreen = () => {
             <small>Factory floor · local</small>
           </div>
         </div>
-        <div className="live-indicator">
-          <i /> live
+        {/* The indicator reports the trigger streams, not the server: idle
+            pollers must never read as a running factory. */}
+        <div className={`live-indicator ${data._tag === "NeedsSetup" ? "idle" : ""}`}>
+          <i /> {data._tag === "NeedsSetup" ? "idle" : "live"}
         </div>
       </header>
       {data._tag === "NeedsSetup" && (

@@ -54,7 +54,7 @@ const up = Effect.scoped(
       const backend = needsSetupBackendLayer(
         instance,
         error._tag,
-        `${error.message} Add USINE_GITHUB_APP_ID and USINE_GITHUB_PRIVATE_KEY, or create .usine/github-app.json with mode 0600.`,
+        `${error.message}. Add USINE_GITHUB_APP_ID and USINE_GITHUB_PRIVATE_KEY, or create .usine/github-app.json with mode 0600.`,
         Context.get(observationContext, OperatorObservation),
       );
       return yield* Layer.launch(serverLayer(backend, webRoot, PORT));

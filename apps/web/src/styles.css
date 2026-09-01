@@ -139,6 +139,15 @@ h3,
   box-shadow: 0 0 1rem var(--green);
 }
 
+.live-indicator.idle {
+  color: var(--overlay);
+}
+
+.live-indicator.idle i {
+  background: var(--overlay);
+  box-shadow: none;
+}
+
 .needs-strip {
   display: grid;
   grid-template-columns: minmax(8rem, 0.2fr) 1fr;
