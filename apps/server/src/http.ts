@@ -136,7 +136,7 @@ export const apiRoutes = HttpRouter.addAll([
   ),
 ]);
 
-const staticRoutes = (webRoot: string) => {
+export const staticRoutes = (webRoot: string) => {
   const assetsRoot = resolve(webRoot, "assets");
   return HttpRouter.addAll([
     HttpRouter.route("GET", "/", HttpServerResponse.file(resolve(webRoot, "index.html"))),

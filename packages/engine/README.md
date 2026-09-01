@@ -6,7 +6,7 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 
 `CursorStore` keeps typed keys with JSON values in that database. Trigger adapters use it for efficiency-only cursors such as GitHub watermarks and ETags; deleting a cursor causes a safe replay because the Event ledger remains the source of deduplication.
 
-`LoopControl` keeps runtime pause state in the same database. Pausing or unpausing a Loop never edits its authored Markdown file. `RunEngine.list()` returns lightweight durable Run summaries newest first for observe-and-intervene surfaces, without loading Event payloads or issuing one snapshot read per Run.
+`LoopControl` keeps runtime pause state in the same database. Pausing or unpausing a Loop never edits its authored Markdown file. `RunReader.list()` returns lightweight durable Run summaries newest first for observe-and-intervene surfaces, without loading Event payloads or issuing one snapshot read per Run. `RunReader.revision()` lets callers reuse an unchanged projection without rescanning history.
 
 ## Runtime rules
 

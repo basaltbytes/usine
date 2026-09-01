@@ -110,6 +110,12 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
   agent: Agent.Agent,
 }) {}
 
+/** Monotonic version of the durable operator projection. */
+export const ProjectionRevision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+  Schema.brand("ProjectionRevision"),
+);
+export type ProjectionRevision = typeof ProjectionRevision.Type;
+
 /** Input passed to the attempt-execution port. */
 export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/StepExecution")({
   attempt: Attempt.Attempt,

@@ -127,7 +127,6 @@ const fakeLayer = (
     approve: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
-    list: () => Effect.die("unused"),
     reconcile: () => Effect.die("unused"),
     retry: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),

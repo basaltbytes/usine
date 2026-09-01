@@ -1,0 +1,87 @@
+import type { TranscriptEventView } from "@usine/orchestrator";
+import { useMemo } from "react";
+
+interface TranscriptGroup {
+  readonly key: string;
+  readonly sequence: number;
+  readonly events: ReadonlyArray<TranscriptEventView>;
+}
+
+type TranscriptItem =
+  | TranscriptGroup
+  | {
+      readonly key: string;
+      readonly sequence: number;
+      readonly event: TranscriptEventView;
+    };
+
+export const mergeTranscript = (
+  previous: ReadonlyArray<TranscriptEventView>,
+  next: ReadonlyArray<TranscriptEventView>,
+): ReadonlyArray<TranscriptEventView> => {
+  const merged = new Map(previous.map((event) => [event.sequence, event]));
+  for (const event of next) {
+    if (!merged.has(event.sequence)) merged.set(event.sequence, event);
+  }
+  return [...merged.values()].sort((left, right) => left.sequence - right.sequence);
+};
+
+const TranscriptEvent = ({ event }: { readonly event: TranscriptEventView }) => (
+  <article className={`transcript-event ${event.isError ? "event-error" : ""}`}>
+    <header>
+      <span>{event.label}</span>
+      <time>
+        {new Date(event.receivedAt).toLocaleTimeString([], {
+          hour: "2-digit",
+          minute: "2-digit",
+          second: "2-digit",
+        })}
+      </time>
+    </header>
+    {event.detail !== "" && <pre>{event.detail}</pre>}
+  </article>
+);
+
+export const Transcript = ({ events }: { readonly events: ReadonlyArray<TranscriptEventView> }) => {
+  const feed = useMemo(() => {
+    const groups = new Map<string, TranscriptGroup>();
+    for (const event of events) {
+      if (event.scope !== "child" || event.parentId === null) continue;
+      const current = groups.get(event.parentId);
+      groups.set(event.parentId, {
+        key: `child:${event.parentId}`,
+        sequence: Math.min(current?.sequence ?? event.sequence, event.sequence),
+        events: [...(current?.events ?? []), event],
+      });
+    }
+    const feed: Array<TranscriptItem> = [
+      ...events
+        .filter((event) => event.scope !== "child")
+        .map((event) => ({ key: `event:${event.sequence}`, sequence: event.sequence, event })),
+      ...groups.values(),
+    ];
+    return feed.sort((left, right) => left.sequence - right.sequence);
+  }, [events]);
+
+  if (feed.length === 0) return <p className="empty-copy">Waiting for the first agent message…</p>;
+  return (
+    <div className="transcript">
+      {feed.map((item) =>
+        "event" in item ? (
+          <TranscriptEvent event={item.event} key={item.key} />
+        ) : (
+          <details className="child-activity" key={item.key}>
+            <summary>
+              Child activity <span>{item.events.length} events</span>
+            </summary>
+            <div>
+              {item.events.map((event) => (
+                <TranscriptEvent event={event} key={event.sequence} />
+              ))}
+            </div>
+          </details>
+        ),
+      )}
+    </div>
+  );
+};

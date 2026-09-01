@@ -232,3 +232,13 @@ export const loopRuntime = snakeCase.table("usine_loop_runtime", {
   loopName: text().$type<Loop.LoopName>().primaryKey(),
   paused: integer({ mode: "boolean" }).notNull(),
 });
+
+/** Singleton invalidation token for cached operator projections. */
+export const projectionRevision = snakeCase.table(
+  "usine_projection_revision",
+  {
+    singleton: integer({ mode: "number" }).primaryKey().default(1),
+    revision: integer({ mode: "number" }).notNull().default(0),
+  },
+  (table) => [check("usine_projection_revision_singleton", sql`${table.singleton} = 1`)],
+);

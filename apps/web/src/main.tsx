@@ -18,10 +18,11 @@ import {
 } from "@tanstack/react-router";
 import { Run } from "@usine/core";
 import { FactoryOverview, RunDetailView } from "@usine/orchestrator";
-import type { LoopView, NeedView, RunView, TranscriptEventView } from "@usine/orchestrator";
+import type { LoopView, NeedView, RunView } from "@usine/orchestrator";
 import { Schema } from "effect";
-import { StrictMode, useMemo, useState, type ReactNode } from "react";
+import { StrictMode, useState, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { mergeTranscript, Transcript } from "./run-transcript.tsx";
 import "./styles.css";
 
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
@@ -166,73 +167,6 @@ const LoopControl = ({
   </article>
 );
 
-interface TranscriptGroup {
-  readonly key: string;
-  readonly sequence: number;
-  readonly parentId: string;
-  readonly events: ReadonlyArray<TranscriptEventView>;
-}
-
-const TranscriptEvent = ({ event }: { readonly event: TranscriptEventView }) => (
-  <article className={`transcript-event ${event.isError ? "event-error" : ""}`}>
-    <header>
-      <span>{event.label}</span>
-      <time>
-        {new Date(event.receivedAt).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })}
-      </time>
-    </header>
-    {event.detail !== "" && <pre>{event.detail}</pre>}
-  </article>
-);
-
-const Transcript = ({ events }: { readonly events: ReadonlyArray<TranscriptEventView> }) => {
-  const feed = useMemo(() => {
-    const groups = new Map<string, TranscriptGroup>();
-    for (const event of events) {
-      if (event.scope !== "child" || event.parentId === null) continue;
-      const current = groups.get(event.parentId);
-      groups.set(event.parentId, {
-        key: `child:${event.parentId}`,
-        sequence: Math.min(current?.sequence ?? event.sequence, event.sequence),
-        parentId: event.parentId,
-        events: [...(current?.events ?? []), event],
-      });
-    }
-    return [
-      ...events
-        .filter((event) => event.scope !== "child")
-        .map((event) => ({ key: `event:${event.sequence}`, sequence: event.sequence, event })),
-      ...groups.values(),
-    ].sort((left, right) => left.sequence - right.sequence);
-  }, [events]);
-
-  if (feed.length === 0) return <p className="empty-copy">Waiting for the first agent message…</p>;
-  return (
-    <div className="transcript">
-      {feed.map((item) =>
-        "event" in item ? (
-          <TranscriptEvent event={item.event} key={item.key} />
-        ) : (
-          <details className="child-activity" key={item.key}>
-            <summary>
-              Child activity <span>{item.events.length} events</span>
-            </summary>
-            <div>
-              {item.events.map((event) => (
-                <TranscriptEvent event={event} key={event.sequence} />
-              ))}
-            </div>
-          </details>
-        ),
-      )}
-    </div>
-  );
-};
-
 const RunDrawer = ({ runId, close }: { readonly runId: string; readonly close: () => void }) => {
   const queryClient = useQueryClient();
   const [confirmCancel, setConfirmCancel] = useState(false);
@@ -245,12 +179,10 @@ const RunDrawer = ({ runId, close }: { readonly runId: string; readonly close: (
       const search = cursor === undefined ? "" : `?after=${cursor}`;
       const next = await api(`/api/runs/${encodeURIComponent(runId)}${search}`, RunDetailView);
       if (previous === undefined || cursor === undefined) return next;
-      const seen = new Set(previous.transcript.map(({ sequence }) => sequence));
-      const transcript = [
-        ...previous.transcript,
-        ...next.transcript.filter(({ sequence }) => !seen.has(sequence)),
-      ].sort((left, right) => left.sequence - right.sequence);
-      return new RunDetailView({ ...next, transcript });
+      return new RunDetailView({
+        ...next,
+        transcript: mergeTranscript(previous.transcript, next.transcript),
+      });
     },
     refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
   });

@@ -7,8 +7,8 @@ import { Instance } from "@usine/core";
 import { GitHubCredentials } from "@usine/github";
 import { loadLocalCredentials } from "@usine/github/local-secrets";
 import { MarcbachmannCelLayer } from "@usine/expression";
-import { Operator, Orchestrator } from "@usine/orchestrator";
-import { runtimeLayer } from "@usine/orchestrator/local";
+import { Operator, OperatorObservation, Orchestrator } from "@usine/orchestrator";
+import { operatorObservationLayer, runtimeLayer } from "@usine/orchestrator/local";
 import { Console, Context, Effect, Layer, Result, Schema } from "effect";
 import { liveBackendLayer, needsSetupBackendLayer } from "./backend.ts";
 import { serverLayer } from "./http.ts";
@@ -50,10 +50,12 @@ const up = Effect.scoped(
         instanceDirectory: directory,
       });
       yield* Console.log(`usine is waiting for GitHub App setup at ${url}`);
+      const observationContext = yield* Layer.build(operatorObservationLayer(directory));
       const backend = needsSetupBackendLayer(
         instance,
         error._tag,
         `${error.message} Add USINE_GITHUB_APP_ID and USINE_GITHUB_PRIVATE_KEY, or create .usine/github-app.json with mode 0600.`,
+        Context.get(observationContext, OperatorObservation),
       );
       return yield* Layer.launch(serverLayer(backend, webRoot, PORT));
     }

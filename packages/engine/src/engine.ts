@@ -8,13 +8,13 @@ import {
   AttemptCancellationError,
   type RunEngineError,
   type RunSnapshot,
-  type RunSummary,
   type Submission,
   type SubmissionResult,
   type TranscriptEntry,
   type TranscriptQuery,
 } from "./model.ts";
 import { RunStore } from "./store/store.ts";
+import { RunReader } from "./run-reader.ts";
 import {
   ApprovalGate,
   DurableRun,
@@ -163,10 +163,6 @@ const makeRunEngine = Effect.gen(function* () {
     return yield* store.snapshot(runId);
   });
 
-  const list = Effect.fn("RunEngine.list")(function* () {
-    return yield* store.list();
-  });
-
   const transcript = Effect.fn("RunEngine.transcript")(function* (query: TranscriptQuery) {
     return yield* store.transcript(query);
   });
@@ -202,7 +198,7 @@ const makeRunEngine = Effect.gen(function* () {
 
   yield* reconcile();
 
-  return { approve, cancel, inspect, list, reconcile, retry, revoke, submit, transcript } as const;
+  return { approve, cancel, inspect, reconcile, retry, revoke, submit, transcript } as const;
 });
 
 /**
@@ -219,7 +215,6 @@ export class RunEngine extends Context.Service<
     ) => Effect.Effect<void, RunEngineError>;
     readonly cancel: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
     readonly inspect: (runId: Run.RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
-    readonly list: () => Effect.Effect<ReadonlyArray<RunSummary>, RunEngineError>;
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     readonly retry: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
     readonly revoke: (
@@ -244,7 +239,7 @@ export class RunEngine extends Context.Service<
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,
 ): Layer.Layer<
-  CursorStore | LoopControl | RunEngine,
+  CursorStore | LoopControl | RunEngine | RunReader,
   RunEngineError | DatabaseError,
   Crypto.Crypto | StepExecutor | DatabaseRequirements
 > => {
@@ -265,6 +260,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(runtime));
   return Layer.mergeAll(
     runEngine,
+    RunReader.layer.pipe(Layer.provide(database)),
     CursorStore.layer.pipe(Layer.provide(database)),
     LoopControl.layer.pipe(Layer.provide(database)),
   );

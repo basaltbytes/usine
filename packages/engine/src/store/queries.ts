@@ -20,6 +20,7 @@ import {
   attempts,
   events,
   ignoredEvents,
+  projectionRevision,
   runs,
   steps,
   triggerEvents,
@@ -40,6 +41,7 @@ import {
   decodeDiscards,
   decodeEventRoutes,
   decodeRecoverableRuns,
+  decodeProjectionRevision,
   decodeRunIds,
   decodeRunRows,
   decodeWorkflowCommands,
@@ -210,6 +212,18 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return storedRuns.map((row): RunSummary =>
       runSummaryFromRow(row, attemptsByRun.get(row.runId) ?? []),
     );
+  });
+
+  const revision = Effect.fn("RunStoreQueries.projectionRevision")(function* () {
+    const rows = yield* decodeProjectionRevision(
+      yield* database
+        .select({ revision: projectionRevision.revision })
+        .from(projectionRevision)
+        .where(eq(projectionRevision.singleton, 1))
+        .limit(1)
+        .execute(),
+    );
+    return Option.fromNullishOr(rows[0]?.revision);
   });
 
   const updateState = Effect.fn("RunStoreQueries.updateState")(function* (
@@ -639,6 +653,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     recordApproval,
     requestInterrupt,
     requestWorkflowCommand,
+    revision,
     revokeUnstarted,
     runSummaries,
     runForEvent,

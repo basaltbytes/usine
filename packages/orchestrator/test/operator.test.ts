@@ -25,7 +25,9 @@ import {
 import {
   LoopControl,
   LoopRuntimeState,
+  ProjectionRevision,
   RunEngine,
+  RunReader,
   RunSnapshot,
   TranscriptEntry,
   TranscriptSequence,
@@ -171,23 +173,33 @@ const transcript = [
   }),
 ];
 
-const testLayer = (approved: Ref.Ref<ReadonlyArray<Run.RunId>>) => {
+const testLayer = (
+  approved: Ref.Ref<ReadonlyArray<Run.RunId>>,
+  overviewReads: Ref.Ref<number>,
+  projectionRevision: Ref.Ref<ProjectionRevision>,
+) => {
+  const readTranscript = ({ after }: { readonly after: Option.Option<TranscriptSequence> }) =>
+    Effect.succeed(
+      Option.match(after, {
+        onNone: () => transcript,
+        onSome: (cursor) => transcript.filter((entry) => entry.sequence > cursor),
+      }),
+    );
   const runs = Layer.succeed(RunEngine)({
     approve: (id) => Ref.update(approved, (ids) => [...ids, id]),
     cancel: () => Effect.void,
     inspect: () => Effect.succeed(snapshot),
-    list: () => Effect.succeed([snapshot]),
     reconcile: () => Effect.void,
     retry: () => Effect.void,
     revoke: () => Effect.succeed([]),
     submit: () => Effect.die("unused"),
-    transcript: ({ after }) =>
-      Effect.succeed(
-        Option.match(after, {
-          onNone: () => transcript,
-          onSome: (cursor) => transcript.filter((entry) => entry.sequence > cursor),
-        }),
-      ),
+    transcript: readTranscript,
+  });
+  const reader = Layer.succeed(RunReader)({
+    inspect: () => Effect.succeed(snapshot),
+    list: () => Ref.updateAndGet(overviewReads, (reads) => reads + 1).pipe(Effect.as([snapshot])),
+    revision: () => Ref.get(projectionRevision),
+    transcript: readTranscript,
   });
   const controls = Layer.succeed(LoopControl)({
     isPaused: () => Effect.succeed(true),
@@ -234,7 +246,7 @@ const testLayer = (approved: Ref.Ref<ReadonlyArray<Run.RunId>>) => {
       ),
     ),
   });
-  const dependencies = Layer.mergeAll(runs, controls, polling, schedules);
+  const dependencies = Layer.mergeAll(runs, reader, controls, polling, schedules);
   return Operator.layer.pipe(Layer.provide(dependencies));
 };
 
@@ -244,9 +256,16 @@ describe("Operator", () => {
     () =>
       Effect.gen(function* () {
         const approved = yield* Ref.make<ReadonlyArray<Run.RunId>>([]);
+        const overviewReads = yield* Ref.make(0);
+        const projectionRevision = yield* Ref.make(ProjectionRevision.make(1));
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
           const overview = yield* operator.overview(instance);
+          yield* operator.overview(instance);
+          assert.strictEqual(yield* Ref.get(overviewReads), 1);
+          yield* Ref.set(projectionRevision, ProjectionRevision.make(2));
+          yield* operator.overview(instance);
+          assert.strictEqual(yield* Ref.get(overviewReads), 2);
           assert.strictEqual(overview.projects[0]?.status, "needs-you");
           assert.strictEqual(overview.loops[0]?.paused, true);
           assert.deepStrictEqual(
@@ -272,7 +291,7 @@ describe("Operator", () => {
 
           yield* operator.approve(runId);
           assert.deepStrictEqual(yield* Ref.get(approved), [runId]);
-        }).pipe(Effect.provide(testLayer(approved)));
+        }).pipe(Effect.provide(testLayer(approved, overviewReads, projectionRevision)));
       }),
   );
 });

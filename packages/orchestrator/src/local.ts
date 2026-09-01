@@ -2,14 +2,18 @@ import { NodeServices } from "@effect/platform-node";
 import { ConfigParser, type LoadedInstance, type UsineConfig } from "@usine/config";
 import type { Instance } from "@usine/core";
 import { layer as localExecutorLayer, type LocalExecutorOptions } from "@usine/executor/local";
-import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
+import {
+  layer as localEngineLayer,
+  observationLayer as localObservationLayer,
+} from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression";
 import { GitHubApp, GitHubPolling } from "@usine/github";
 import { executableCommand } from "@usine/run-host/executable";
 import { Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { gitHubCredentialLayer } from "./credentials.ts";
-import { Operator } from "./operator/service.ts";
+import { idleTriggersLayer } from "./idle-triggers.ts";
+import { Operator, OperatorObservation } from "./operator/service.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
@@ -30,6 +34,12 @@ export const layer = (
   const stepExecutor = stepExecutorLayer(config).pipe(Layer.provide(executor));
   return localEngineLayer(instanceDirectory).pipe(Layer.provide(stepExecutor));
 };
+
+/** Read-only local operator composition used while trigger credentials are unavailable. */
+export const operatorObservationLayer = (instanceDirectory: Instance.Directory) =>
+  OperatorObservation.layer.pipe(
+    Layer.provide(Layer.mergeAll(localObservationLayer(instanceDirectory), idleTriggersLayer)),
+  );
 
 /**
  * Complete Node composition for one loaded local factory. The caller still

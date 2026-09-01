@@ -30,7 +30,14 @@ import {
 } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { layer } from "../src/database/local-sqlite.ts";
-import { InstanceDirectory, RunEngine, StepExecutor, Submission } from "../src/index.ts";
+import {
+  InstanceDirectory,
+  LoopControl,
+  RunEngine,
+  RunReader,
+  StepExecutor,
+  Submission,
+} from "../src/index.ts";
 
 const stepResult = (message: string) => new StepResult.StepResult({ message, facts: [] });
 const testAgent = new Agent.Agent({
@@ -166,6 +173,9 @@ describe("durable run engine", () => {
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
+          const reader = yield* RunReader;
+          const controls = yield* LoopControl;
+          const initialRevision = yield* reader.revision();
           const first = yield* engine.submit(
             submission({ number: 1, item: "listed-one", approval: "required" }),
           );
@@ -176,7 +186,7 @@ describe("durable run engine", () => {
           yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
           yield* waitFor(engine, second.runId, ({ run }) => run.state._tag === "Succeeded");
 
-          const listed = yield* engine.list();
+          const listed = yield* reader.list();
           assert.deepStrictEqual(
             listed.map(({ run }) => run.id),
             [second.runId, first.runId],
@@ -186,6 +196,10 @@ describe("durable run engine", () => {
             Option.getOrUndefined(listed[0]?.step.result ?? Option.none())?.message,
             "listed result",
           );
+          const runRevision = yield* reader.revision();
+          assert(runRevision > initialRevision);
+          yield* controls.pause(Loop.LoopName.make("review"));
+          assert((yield* reader.revision()) > runRevision);
         }).pipe(Effect.provide(runtime));
       }),
     ),

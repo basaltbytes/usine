@@ -1,9 +1,9 @@
 import { RunState, StepResult } from "@usine/core";
 import {
-  RunEngine,
+  RunReader,
   TranscriptQuery,
-  type RunEngineError,
   type RunSnapshot,
+  type RunStoreError,
   type RunSummary,
   type TranscriptEntry,
 } from "@usine/engine";
@@ -128,17 +128,17 @@ const transcriptEvent = (entry: TranscriptEntry): TranscriptEventView => {
 };
 
 export const readTranscript: (
-  runs: RunEngine["Service"],
+  runs: RunReader["Service"],
   snapshot: RunSnapshot,
   after?: Option.Option<TranscriptCursor>,
-) => Effect.Effect<ReadonlyArray<TranscriptEventView>, RunEngineError> = Effect.fn(
+) => Effect.Effect<ReadonlyArray<TranscriptEventView>, RunStoreError> = Effect.fn(
   "Operator.readTranscript",
 )(
   (
-    runs: RunEngine["Service"],
+    runs: RunReader["Service"],
     snapshot: RunSnapshot,
     after: Option.Option<TranscriptCursor> = Option.none(),
-  ): Effect.Effect<ReadonlyArray<TranscriptEventView>, RunEngineError> =>
+  ): Effect.Effect<ReadonlyArray<TranscriptEventView>, RunStoreError> =>
     Effect.gen(function* () {
       const entries = yield* Effect.forEach(
         snapshot.attempts,

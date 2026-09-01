@@ -2,7 +2,7 @@
 
 `@usine/orchestrator` connects loaded loop files to GitHub polling, the durable run engine, and configured workers for [usine](https://github.com/basaltbytes/usine).
 
-Its platform-free root exports the complete embeddable application surface: `PollingTriggers`, `ScheduleTriggers`, `Orchestrator`, and `Operator`. `Orchestrator.run(instance)` runs both trigger streams; `Operator` provides run observation, protocol-v2 transcript projection, approve/retry/cancel, and database-backed Loop pause/unpause. The latest polling and schedule failures remain visible through `Operator.overview(instance)` after their sibling work continues.
+Its platform-free root exports the complete embeddable application surface: `PollingTriggers`, `ScheduleTriggers`, `Orchestrator`, and `Operator`. `Orchestrator.run(instance)` runs both trigger streams; `Operator` provides run observation, protocol-v2 transcript projection, approve/retry/cancel, and database-backed Loop pause/unpause. `OperatorObservation` exposes the same read-only projection without constructing execution services. The latest polling and schedule failures remain visible through `Operator.overview(instance)` after their sibling work continues.
 
 ## Polling triggers
 
@@ -56,7 +56,7 @@ const EngineLive = localLayer(instanceDirectory, config, {
 
 Provide `CredentialProvider` to `EngineLive`, then request `RunEngine` from the resulting Effect layer. The local composition caches repositories under `<instance>/.usine/workers/<worker>/repos` and removes Attempt worktrees after completion or cancellation.
 
-For the whole local application, `runtimeLayer(instanceDirectory, instance, options)` additionally composes GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It requires only `GitHubCredentials`; the server or another host owns how those credentials are loaded.
+For the whole local application, `runtimeLayer(instanceDirectory, instance, options)` additionally composes GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It requires only `GitHubCredentials`; the server or another host owns how those credentials are loaded. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance surfaces: it reads durable Runs and Loop runtime state while trigger execution remains idle.
 
 For an exe.dev Worker, use the `@usine/orchestrator/exe-dev` composition. It keeps the engine and SQLite runtime local while the unchanged Worker contract runs on the named VM:
 

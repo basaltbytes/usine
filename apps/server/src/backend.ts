@@ -3,11 +3,12 @@ import { Loop, Run } from "@usine/core";
 import type {
   FactoryOverview,
   Operator,
+  OperatorObservation,
   OperatorError,
   RunDetailView,
   TranscriptCursor,
 } from "@usine/orchestrator";
-import { LoopView, NeedsSetupOverview, ProjectView } from "@usine/orchestrator";
+import { NeedsSetupOverview } from "@usine/orchestrator";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 
 export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailableError>(
@@ -52,31 +53,23 @@ export const needsSetupBackendLayer = (
   instance: LoadedInstance,
   errorTag: string,
   message: string,
+  observation: OperatorObservation["Service"],
 ): Layer.Layer<FactoryBackend> => {
   const unavailable = new BackendUnavailableError({
     message: "GitHub App setup is required before operator actions are available.",
   });
-  const overview = new NeedsSetupOverview({
-    errorTag,
-    message,
-    projects: instance.config.repos.map(
-      ({ name }) => new ProjectView({ repository: name, status: "clear", runs: [] }),
-    ),
-    loops: instance.loops.map(
-      (loop) =>
-        new LoopView({
-          name: loop.name,
-          trigger: loop.trigger.on,
-          agent: loop.agent,
-          paused: false,
-        }),
-    ),
-    needsYou: [],
-  });
+  const overview = observation
+    .overview(instance)
+    .pipe(
+      Effect.map(
+        ({ projects, loops, needsYou }) =>
+          new NeedsSetupOverview({ errorTag, message, projects, loops, needsYou }),
+      ),
+    );
   const fail = () => Effect.fail(unavailable);
   return Layer.succeed(FactoryBackend)({
-    overview: Effect.succeed(overview),
-    detail: fail,
+    overview,
+    detail: observation.detail,
     approve: fail,
     retry: fail,
     cancel: fail,
