@@ -28,7 +28,9 @@ import {
 import { ExpressionEngine, type ExpressionError } from "@usine/expression";
 import {
   GitHubPolling,
+  EntityTag,
   PollCursor,
+  RepositoryLabelCatalog,
   type ChangedItem,
   type GitHubAppError,
   type PayloadSnapshot,
@@ -64,8 +66,9 @@ type WatchKey = typeof WatchKey.Type;
 class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   "@usine/orchestrator/StoredPollCursor",
 )({
-  boardVersion: Schema.Literal(1),
+  boardVersion: Schema.Literal(2),
   cursor: PollCursor,
+  labelEntityTag: Schema.OptionFromNullOr(EntityTag),
   watches: Schema.Array(WatchKey).check(Schema.isUnique()),
 }) {}
 
@@ -202,29 +205,33 @@ export class PollingTriggers extends Context.Service<
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
 
+      const emptyCursor = (watches: ReadonlyArray<WatchKey>) =>
+        new StoredPollCursor({
+          boardVersion: 2,
+          cursor: PollCursor.empty,
+          labelEntityTag: Option.none(),
+          watches,
+        });
+
       const readCursor = Effect.fn("PollingTriggers.readCursor")(function* (
         watched: WatchedRepository,
       ) {
         const stored = yield* cursors.read(cursorKey(watched.repository), StoredPollCursor);
-        if (Option.isNone(stored)) return PollCursor.empty;
+        if (Option.isNone(stored)) return emptyCursor(watched.watches);
         if (!sameWatches(stored.value.watches, watched.watches)) {
           yield* Effect.logInfo("Watched loops changed; re-polling the repository from scratch", {
             repository: watched.repository.name,
             previousWatches: stored.value.watches.length,
             currentWatches: watched.watches.length,
           });
-          return PollCursor.empty;
+          return emptyCursor(watched.watches);
         }
-        return stored.value.cursor;
+        return stored.value;
       });
 
       const writeCursor = Effect.fn("PollingTriggers.writeCursor")(
-        (watched: WatchedRepository, cursor: PollCursor) =>
-          cursors.write(
-            cursorKey(watched.repository),
-            StoredPollCursor,
-            new StoredPollCursor({ boardVersion: 1, cursor, watches: watched.watches }),
-          ),
+        (watched: WatchedRepository, cursor: StoredPollCursor) =>
+          cursors.write(cursorKey(watched.repository), StoredPollCursor, cursor),
       );
 
       const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* (
@@ -352,21 +359,40 @@ export class PollingTriggers extends Context.Service<
         watched: WatchedRepository,
       ) {
         yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
-        const cursor = yield* readCursor(watched);
-        const [detected, labels] = yield* Effect.all(
+        const stored = yield* readCursor(watched);
+        const [detected, labelDetection] = yield* Effect.all(
           [
-            github.changes(watched.repository.name, cursor),
-            github.labels(watched.repository.name),
+            github.changes(watched.repository.name, stored.cursor),
+            github.labels(watched.repository.name, stored.labelEntityTag),
           ] as const,
           { concurrency: "unbounded" },
         );
-        yield* repositoryLabels.replace(
-          new RepositoryLabelProjection({
+        const labelEntityTag =
+          labelDetection instanceof RepositoryLabelCatalog
+            ? labelDetection.entityTag
+            : stored.labelEntityTag;
+        if (labelDetection instanceof RepositoryLabelCatalog) {
+          yield* repositoryLabels.replace(
+            new RepositoryLabelProjection({
+              repository: watched.repository.name,
+              labels: labelDetection.labels.map(String),
+            }),
+          );
+        } else {
+          yield* Effect.logDebug("Repository label catalog unchanged (304)", {
             repository: watched.repository.name,
-            labels: labels.map(String),
-          }),
-        );
+          });
+        }
+        const nextCursor = new StoredPollCursor({
+          boardVersion: 2,
+          cursor: detected.cursor,
+          labelEntityTag,
+          watches: watched.watches,
+        });
         if (detected._tag === "RepositoryNotModified") {
+          if (labelDetection instanceof RepositoryLabelCatalog) {
+            yield* writeCursor(watched, nextCursor);
+          }
           yield* Effect.logDebug("Repository unchanged (304)", {
             repository: watched.repository.name,
           });
@@ -392,7 +418,7 @@ export class PollingTriggers extends Context.Service<
         // Advancing is the commit point: every changed item was fetched,
         // evaluated, and submitted/revoked successfully. A prior failure
         // leaves the old cursor so the next cycle safely re-polls.
-        yield* writeCursor(watched, detected.cursor);
+        yield* writeCursor(watched, nextCursor);
         return {
           changedItems: detected.items.length,
           submissions: itemCycles.flatMap(({ submissions }) => submissions),

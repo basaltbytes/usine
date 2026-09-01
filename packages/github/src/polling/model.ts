@@ -30,6 +30,25 @@ export const RepositoryLabelName = Schema.NonEmptyString.pipe(
 );
 export type RepositoryLabelName = typeof RepositoryLabelName.Type;
 
+/** A complete label catalog and the ETag for its canonical REST URL. */
+export class RepositoryLabelCatalog extends Schema.Class<RepositoryLabelCatalog>(
+  "@usine/github/RepositoryLabelCatalog",
+)({
+  entityTag: Schema.OptionFromNullOr(EntityTag),
+  labels: Schema.Array(RepositoryLabelName).check(Schema.isUnique()),
+}) {}
+
+/** GitHub confirmed that the catalog named by its ETag has not changed. */
+export class RepositoryLabelsNotModified extends Schema.TaggedClass<RepositoryLabelsNotModified>(
+  "@usine/github/RepositoryLabelsNotModified",
+)("RepositoryLabelsNotModified", {}) {}
+
+export const RepositoryLabelDetection = Schema.Union([
+  RepositoryLabelCatalog,
+  RepositoryLabelsNotModified,
+]);
+export type RepositoryLabelDetection = typeof RepositoryLabelDetection.Type;
+
 /** Efficiency-only REST cursor. Losing it is safe because Event dedup is permanent. */
 export class PollCursor extends Schema.Class<PollCursor>("@usine/github/PollCursor")({
   entityTag: Schema.OptionFromNullOr(EntityTag),

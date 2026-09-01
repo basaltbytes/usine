@@ -45,7 +45,10 @@ export {
   PollCursor,
   PullRequestPayload,
   PullRequestSnapshot,
+  RepositoryLabelCatalog,
+  RepositoryLabelDetection,
   RepositoryLabelName,
+  RepositoryLabelsNotModified,
   RepositoryChanges,
   RepositoryNotModified,
 } from "./polling/model.ts";

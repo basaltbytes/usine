@@ -13,6 +13,8 @@ import {
   InstallationToken,
   InstallationWide,
   PollCursor,
+  RepositoryLabelCatalog,
+  RepositoryLabelsNotModified,
 } from "../src/index.ts";
 
 const repository = Repository.Name.make("basaltbytes/usine");
@@ -284,22 +286,34 @@ describe("GitHubPolling", () => {
         requests.length === 1
           ? response(request, [{ name: "ready" }], {
               headers: {
+                etag: 'W/"labels-1"',
                 link: '<https://api.github.com/repositories/1/labels?page=2>; rel="next"',
               },
             })
-          : response(request, [{ name: "bug" }]),
+          : requests.length === 2
+            ? response(request, [{ name: "bug" }])
+            : response(request, null, { status: 304 }),
       );
     });
 
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
-      assert.deepStrictEqual((yield* polling.labels(repository)).map(String), ["bug", "ready"]);
+      const catalog = yield* polling.labels(repository, Option.none());
+      assert(catalog instanceof RepositoryLabelCatalog);
+      if (!(catalog instanceof RepositoryLabelCatalog)) return;
+      assert(Option.isSome(catalog.entityTag));
+      if (Option.isNone(catalog.entityTag)) return;
+      assert.deepStrictEqual(catalog.labels.map(String), ["bug", "ready"]);
       assert.strictEqual(requests.length, 2);
       assert.strictEqual(
         requests[0]?.url,
         "https://api.github.com/repos/basaltbytes/usine/labels?per_page=100",
       );
       assert.strictEqual(requests[1]?.url, "https://api.github.com/repositories/1/labels?page=2");
+      const unchanged = yield* polling.labels(repository, catalog.entityTag);
+      assert(unchanged instanceof RepositoryLabelsNotModified);
+      assert.strictEqual(requests.length, 3);
+      assert.strictEqual(requests[2]?.headers["if-none-match"], catalog.entityTag.value);
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 

@@ -39,6 +39,8 @@ import {
   GitHubPolling,
   IssueSnapshot,
   PollCursor,
+  RepositoryLabelCatalog,
+  RepositoryLabelsNotModified,
   RepositoryNotModified,
   RepositoryChanges,
   RepositoryLabelName,
@@ -62,6 +64,10 @@ import { TestClock } from "effect/testing";
 import { PollingTriggers } from "../src/index.ts";
 
 const watchedRepository = Repository.Name.make("basaltbytes/usine");
+const emptyLabelCatalog = new RepositoryLabelCatalog({
+  entityTag: Option.none(),
+  labels: [],
+});
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
   version: 1,
@@ -238,7 +244,7 @@ describe("PollingTriggers", () => {
             nextPollAt: Option.some(DateTime.makeUnsafe(now + 120_000)),
           });
         }),
-      labels: () => Effect.succeed([]),
+      labels: () => Effect.succeed(emptyLabelCatalog),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
 
@@ -263,7 +269,7 @@ describe("PollingTriggers", () => {
         changeRequests += 1;
         return Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() }));
       },
-      labels: () => Effect.succeed([]),
+      labels: () => Effect.succeed(emptyLabelCatalog),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
     const state = new LoopRuntimeState({ loop: loop.name, paused: true });
@@ -293,6 +299,7 @@ describe("PollingTriggers", () => {
           payload: issuePayload(["ready"]),
         });
         const seenCursors = yield* Ref.make<ReadonlyArray<PollCursor>>([]);
+        const seenLabelEntityTags = yield* Ref.make<ReadonlyArray<Option.Option<EntityTag>>>([]);
         const seenRepositories = yield* Ref.make<ReadonlyArray<string>>([]);
         const snapshotCalls = yield* Ref.make(0);
         const changed = new ChangedIssue({
@@ -314,7 +321,15 @@ describe("PollingTriggers", () => {
                 nextPollAt: Option.none(),
               });
             }),
-          labels: () => Effect.succeed([RepositoryLabelName.make("unused-repository-label")]),
+          labels: (_repository, entityTag) =>
+            Effect.gen(function* () {
+              yield* Ref.update(seenLabelEntityTags, (values) => [...values, entityTag]);
+              if (Option.isSome(entityTag)) return new RepositoryLabelsNotModified();
+              return new RepositoryLabelCatalog({
+                entityTag: Option.some(EntityTag.make('W/"labels"')),
+                labels: [RepositoryLabelName.make("unused-repository-label")],
+              });
+            }),
           snapshot: () =>
             Effect.gen(function* () {
               yield* Ref.update(snapshotCalls, (count) => count + 1);
@@ -366,6 +381,7 @@ describe("PollingTriggers", () => {
 
         const duplicate = yield* firstPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(duplicate), originalRun);
+        assert.strictEqual((yield* Ref.get(seenLabelEntityTags)).filter(Option.isSome).length, 2);
         yield* Scope.close(firstScope, Exit.void);
 
         const secondScope = yield* Scope.make();
@@ -383,6 +399,7 @@ describe("PollingTriggers", () => {
 
         const afterRestart = yield* secondPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(afterRestart), originalRun);
+        assert.strictEqual((yield* Ref.get(seenLabelEntityTags)).filter(Option.isSome).length, 4);
         const restoredSnapshot = yield* secondEngine.inspect(originalRun);
         assert.strictEqual(restoredSnapshot.task, "Implement issue 28.");
         assert.strictEqual(restoredSnapshot.agent.name, "developer");
@@ -485,7 +502,7 @@ describe("PollingTriggers", () => {
                 nextPollAt: Option.none(),
               }),
             ),
-      labels: () => Effect.succeed([]),
+      labels: () => Effect.succeed(emptyLabelCatalog),
       snapshot: () =>
         Effect.succeed(
           new IssueSnapshot({
@@ -603,7 +620,7 @@ describe("PollingTriggers", () => {
             nextPollAt: Option.none(),
           }),
         ),
-      labels: () => Effect.succeed([]),
+      labels: () => Effect.succeed(emptyLabelCatalog),
       snapshot: () =>
         Effect.succeed(
           new IssueSnapshot({
@@ -684,7 +701,7 @@ describe("PollingTriggers", () => {
               nextPollAt: Option.none(),
             }),
           ),
-        labels: () => Effect.succeed([]),
+        labels: () => Effect.succeed(emptyLabelCatalog),
         snapshot: (repository, item) =>
           Effect.succeed(
             new IssueSnapshot({

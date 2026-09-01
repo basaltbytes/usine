@@ -24,6 +24,8 @@ import {
   PollCursor,
   PullRequestPayload,
   PullRequestSnapshot,
+  RepositoryLabelCatalog,
+  RepositoryLabelsNotModified,
   RepositoryLabelName,
   RepositoryChanges,
   RepositoryNotModified,
@@ -188,7 +190,8 @@ export class GitHubPolling extends Context.Service<
     ) => Effect.Effect<ChangeDetection, GitHubAppError>;
     readonly labels: (
       repository: Repository.Name,
-    ) => Effect.Effect<ReadonlyArray<RepositoryLabelName>, GitHubAppError>;
+      entityTag: Option.Option<EntityTag>,
+    ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
     readonly snapshot: (
       repository: Repository.Name,
       item: ChangedItem,
@@ -276,9 +279,55 @@ export class GitHubPolling extends Context.Service<
         return catalog.sort((left, right) => left.localeCompare(right));
       });
 
-      const labels = Effect.fn("GitHubPolling.labels")(function* (repository: Repository.Name) {
+      const labels = Effect.fn("GitHubPolling.labels")(function* (
+        repository: Repository.Name,
+        entityTag: Option.Option<EntityTag>,
+      ) {
         yield* Effect.annotateCurrentSpan({ repository });
-        return yield* allLabels("list-repository-labels", labelsUrl(repository));
+        const token = yield* app.installationToken();
+        let request = HttpClientRequest.get(labelsUrl(repository)).pipe(authorized(token.value));
+        if (Option.isSome(entityTag)) {
+          request = HttpClientRequest.setHeader(request, "if-none-match", entityTag.value);
+        }
+        const response = yield* execute("list-repository-labels", request);
+        const now = yield* Clock.currentTimeMillis;
+        if (response.status === 304) return new RepositoryLabelsNotModified();
+        if (response.status !== 200) {
+          return yield* statusError("list-repository-labels", response, now);
+        }
+        const firstPage = yield* HttpClientResponse.schemaBodyJson(RestRepositoryLabels)(
+          response,
+        ).pipe(
+          Effect.mapError((error) => invalidResponse("list-repository-labels", error.message)),
+        );
+        const catalog = firstPage.map(({ name }) => name);
+        let next = nextPageUrl(response.headers.link);
+        let pages = 1;
+        while (Option.isSome(next) && pages < MAX_LABEL_PAGES) {
+          const page = yield* labelsPage("list-repository-labels", next.value);
+          catalog.push(...page.labels);
+          next = page.next;
+          pages += 1;
+        }
+        if (Option.isSome(next)) {
+          return yield* invalidResponse(
+            "list-repository-labels",
+            `GitHub label list exceeded ${MAX_LABEL_PAGES} pages`,
+          );
+        }
+        const catalogEntityTag = Schema.decodeUnknownOption(EntityTag)(response.headers.etag);
+        if (Option.isNone(catalogEntityTag)) {
+          yield* Effect.logWarning(
+            "GitHub omitted the label catalog ETag; next poll is unconditional",
+            {
+              repository,
+            },
+          );
+        }
+        return new RepositoryLabelCatalog({
+          entityTag: catalogEntityTag,
+          labels: catalog.sort((left, right) => left.localeCompare(right)),
+        });
       });
 
       const changes = Effect.fn("GitHubPolling.changes")(function* (
