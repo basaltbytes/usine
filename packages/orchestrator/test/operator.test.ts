@@ -141,7 +141,7 @@ const transcript = [
     attemptId,
     direction: "outbound",
     envelope: new AttemptChannel.OutboundEnvelope({
-      version: 2,
+      version: 3,
       attemptId,
       sequence: AttemptChannel.Sequence.make(1),
       sentAt: now,
@@ -156,7 +156,7 @@ const transcript = [
     attemptId,
     direction: "outbound",
     envelope: new AttemptChannel.OutboundEnvelope({
-      version: 2,
+      version: 3,
       attemptId,
       sequence: AttemptChannel.Sequence.make(2),
       sentAt: now,
@@ -251,47 +251,45 @@ const testLayer = (
 };
 
 describe("Operator", () => {
-  it.effect(
-    "projects needs-you state and protocol-v2 child activity without recursive nesting",
-    () =>
-      Effect.gen(function* () {
-        const approved = yield* Ref.make<ReadonlyArray<Run.RunId>>([]);
-        const overviewReads = yield* Ref.make(0);
-        const projectionRevision = yield* Ref.make(ProjectionRevision.make(1));
-        yield* Effect.gen(function* () {
-          const operator = yield* Operator;
-          const overview = yield* operator.overview(instance);
-          yield* operator.overview(instance);
-          assert.strictEqual(yield* Ref.get(overviewReads), 1);
-          yield* Ref.set(projectionRevision, ProjectionRevision.make(2));
-          yield* operator.overview(instance);
-          assert.strictEqual(yield* Ref.get(overviewReads), 2);
-          assert.strictEqual(overview.projects[0]?.status, "needs-you");
-          assert.strictEqual(overview.loops[0]?.paused, true);
-          assert.deepStrictEqual(
-            overview.needsYou.map(({ kind }) => kind),
-            ["approval", "poll-failure"],
-          );
+  it.effect("projects needs-you state and protocol child activity without recursive nesting", () =>
+    Effect.gen(function* () {
+      const approved = yield* Ref.make<ReadonlyArray<Run.RunId>>([]);
+      const overviewReads = yield* Ref.make(0);
+      const projectionRevision = yield* Ref.make(ProjectionRevision.make(1));
+      yield* Effect.gen(function* () {
+        const operator = yield* Operator;
+        const overview = yield* operator.overview(instance);
+        yield* operator.overview(instance);
+        assert.strictEqual(yield* Ref.get(overviewReads), 1);
+        yield* Ref.set(projectionRevision, ProjectionRevision.make(2));
+        yield* operator.overview(instance);
+        assert.strictEqual(yield* Ref.get(overviewReads), 2);
+        assert.strictEqual(overview.projects[0]?.status, "needs-you");
+        assert.strictEqual(overview.loops[0]?.paused, true);
+        assert.deepStrictEqual(
+          overview.needsYou.map(({ kind }) => kind),
+          ["approval", "poll-failure"],
+        );
 
-          const detail = yield* operator.detail(runId);
-          assert.strictEqual(detail.eventDedupKey, snapshot.event.dedupKey);
-          assert.deepStrictEqual(detail.eventPayload, { number: 31 });
-          assert.strictEqual(detail.run.attempts[0]?.number, 1);
-          assert.strictEqual(detail.transcript[0]?.scope, "parent");
-          assert.strictEqual(detail.transcript[0]?.detail, "Parent update");
-          assert.strictEqual(detail.transcript[1]?.scope, "child");
-          assert.strictEqual(detail.transcript[1]?.parentId, parent.id);
-          assert.strictEqual(detail.transcript[1]?.sessionId, child.id);
+        const detail = yield* operator.detail(runId);
+        assert.strictEqual(detail.eventDedupKey, snapshot.event.dedupKey);
+        assert.deepStrictEqual(detail.eventPayload, { number: 31 });
+        assert.strictEqual(detail.run.attempts[0]?.number, 1);
+        assert.strictEqual(detail.transcript[0]?.scope, "parent");
+        assert.strictEqual(detail.transcript[0]?.detail, "Parent update");
+        assert.strictEqual(detail.transcript[1]?.scope, "child");
+        assert.strictEqual(detail.transcript[1]?.parentId, parent.id);
+        assert.strictEqual(detail.transcript[1]?.sessionId, child.id);
 
-          const tail = yield* operator.detail(runId, Option.some(TranscriptCursor.make(1)));
-          assert.deepStrictEqual(
-            tail.transcript.map(({ sequence }) => sequence),
-            [2],
-          );
+        const tail = yield* operator.detail(runId, Option.some(TranscriptCursor.make(1)));
+        assert.deepStrictEqual(
+          tail.transcript.map(({ sequence }) => sequence),
+          [2],
+        );
 
-          yield* operator.approve(runId);
-          assert.deepStrictEqual(yield* Ref.get(approved), [runId]);
-        }).pipe(Effect.provide(testLayer(approved, overviewReads, projectionRevision)));
-      }),
+        yield* operator.approve(runId);
+        assert.deepStrictEqual(yield* Ref.get(approved), [runId]);
+      }).pipe(Effect.provide(testLayer(approved, overviewReads, projectionRevision)));
+    }),
   );
 });

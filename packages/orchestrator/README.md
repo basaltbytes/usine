@@ -2,7 +2,7 @@
 
 `@usine/orchestrator` connects loaded loop files to GitHub polling, the durable run engine, and configured workers for [usine](https://github.com/basaltbytes/usine).
 
-Its platform-free root exports the complete embeddable application surface: `PollingTriggers`, `ScheduleTriggers`, `Orchestrator`, and `Operator`. `Orchestrator.run(instance)` runs both trigger streams; `Operator` provides run observation, protocol-v2 transcript projection, approve/retry/cancel, and database-backed Loop pause/unpause. `OperatorObservation` exposes the same read-only projection without constructing execution services. The latest polling and schedule failures remain visible through `Operator.overview(instance)` after their sibling work continues.
+Its platform-free root exports the complete embeddable application surface: `PollingTriggers`, `ScheduleTriggers`, `Orchestrator`, and `Operator`. `Orchestrator.run(instance)` runs both trigger streams; `Operator` provides run observation, protocol transcript projection, approve/retry/cancel, and database-backed Loop pause/unpause. `OperatorObservation` exposes the same read-only projection without constructing execution services. The latest polling and schedule failures remain visible through `Operator.overview(instance)` after their sibling work continues.
 
 ## Polling triggers
 
