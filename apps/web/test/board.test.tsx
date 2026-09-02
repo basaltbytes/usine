@@ -13,7 +13,7 @@ import {
   SucceededAttemptView,
 } from "@usine/orchestrator";
 import { assert, describe, it } from "vitest";
-import { itemFailure, orderLanes, runsWithoutCard } from "../src/board.tsx";
+import { applyMove, itemFailure, laneUnder, orderLanes, runsWithoutCard } from "../src/board.tsx";
 
 const brain = new Agent.BrainSpec({
   harness: "codex",
@@ -139,6 +139,40 @@ describe("Board lane order", () => {
         lane("unmapped", "fallback"),
       ]).map(({ id }) => id),
       ["unmapped", "ready", "review"],
+    );
+  });
+});
+
+describe("Board drag targets", () => {
+  const lane = (id: string, items: ReadonlyArray<BoardItemView>) =>
+    new ReadOnlyBoardLaneView({
+      id: BoardLaneId.make(id),
+      name: LaneName.make(id),
+      sources: [],
+      origin: "authored",
+      items,
+    });
+
+  it("routes a drop on a card to that card's lane, and a drop on a lane to the lane itself", () => {
+    const carded = itemWithRun("Succeeded", [attempt(1, null)]);
+    const lanes = [lane("ready", []), lane("review", [carded])];
+    assert.strictEqual(laneUnder(carded.itemKey, lanes)?.id, "review");
+    assert.strictEqual(laneUnder(BoardLaneId.make("ready"), lanes)?.id, "ready");
+    assert.strictEqual(laneUnder(BoardLaneId.make("elsewhere"), lanes), undefined);
+  });
+
+  it("shows a pending move in its target lane until the poll catches up", () => {
+    const carded = itemWithRun("Succeeded", [attempt(1, null)]);
+    const moved = applyMove([lane("ready", []), lane("review", [carded])], {
+      itemKey: carded.itemKey,
+      toLane: BoardLaneId.make("ready"),
+    });
+    assert.deepStrictEqual(
+      moved.map(({ id, items }) => [id, items.length]),
+      [
+        ["ready", 1],
+        ["review", 0],
+      ],
     );
   });
 });
