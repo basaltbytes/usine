@@ -257,13 +257,17 @@ export class GitHubPolling extends Context.Service<
         };
       });
 
-      const allLabels = Effect.fn("GitHubPolling.allLabels")(function* (
+      /** Walks the pages after an already-fetched first one; one cap for every label walk. */
+      const remainingLabelPages = Effect.fn("GitHubPolling.remainingLabelPages")(function* (
         operation: GitHubOperation,
-        initialUrl: string,
+        firstPage: {
+          readonly labels: ReadonlyArray<RepositoryLabelName>;
+          readonly next: Option.Option<string>;
+        },
       ) {
-        const catalog: Array<RepositoryLabelName> = [];
-        let next = Option.some(initialUrl);
-        let pages = 0;
+        const catalog = [...firstPage.labels];
+        let next = firstPage.next;
+        let pages = 1;
         while (Option.isSome(next) && pages < MAX_LABEL_PAGES) {
           const page = yield* labelsPage(operation, next.value);
           catalog.push(...page.labels);
@@ -277,6 +281,13 @@ export class GitHubPolling extends Context.Service<
           );
         }
         return catalog.sort((left, right) => left.localeCompare(right));
+      });
+
+      const allLabels = Effect.fn("GitHubPolling.allLabels")(function* (
+        operation: GitHubOperation,
+        initialUrl: string,
+      ) {
+        return yield* remainingLabelPages(operation, yield* labelsPage(operation, initialUrl));
       });
 
       const labels = Effect.fn("GitHubPolling.labels")(function* (
@@ -300,21 +311,10 @@ export class GitHubPolling extends Context.Service<
         ).pipe(
           Effect.mapError((error) => invalidResponse("list-repository-labels", error.message)),
         );
-        const catalog = firstPage.map(({ name }) => name);
-        let next = nextPageUrl(response.headers.link);
-        let pages = 1;
-        while (Option.isSome(next) && pages < MAX_LABEL_PAGES) {
-          const page = yield* labelsPage("list-repository-labels", next.value);
-          catalog.push(...page.labels);
-          next = page.next;
-          pages += 1;
-        }
-        if (Option.isSome(next)) {
-          return yield* invalidResponse(
-            "list-repository-labels",
-            `GitHub label list exceeded ${MAX_LABEL_PAGES} pages`,
-          );
-        }
+        const catalog = yield* remainingLabelPages("list-repository-labels", {
+          labels: firstPage.map(({ name }) => name),
+          next: nextPageUrl(response.headers.link),
+        });
         const catalogEntityTag = Schema.decodeUnknownOption(EntityTag)(response.headers.etag);
         if (Option.isNone(catalogEntityTag)) {
           yield* Effect.logWarning(
@@ -324,10 +324,7 @@ export class GitHubPolling extends Context.Service<
             },
           );
         }
-        return new RepositoryLabelCatalog({
-          entityTag: catalogEntityTag,
-          labels: catalog.sort((left, right) => left.localeCompare(right)),
-        });
+        return new RepositoryLabelCatalog({ entityTag: catalogEntityTag, labels: catalog });
       });
 
       const changes = Effect.fn("GitHubPolling.changes")(function* (

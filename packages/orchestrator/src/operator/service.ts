@@ -57,6 +57,9 @@ export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFound
 /** Settled Runs kept in the overview beside every open one; history stays bounded. */
 const OVERVIEW_CLOSED_RUNS = 100;
 
+/** Newest Items projected onto a Board; older ones fall off instead of growing the overview. */
+const OVERVIEW_BOARD_ITEMS = 500;
+
 interface CachedOverview {
   readonly token: string;
   readonly overview: ReadyOverview;
@@ -96,7 +99,10 @@ const makeOperatorObservation = Effect.gen(function* () {
           const { name } = repository;
           const projectRuns = runsByRepository.get(name) ?? [];
           const [boardItems, labelProjection] = yield* Effect.all(
-            [itemReader.list(name), repositoryLabels.get(name)] as const,
+            [
+              itemReader.list(name, { limit: OVERVIEW_BOARD_ITEMS }),
+              repositoryLabels.get(name),
+            ] as const,
             { concurrency: "unbounded" },
           );
           const board = yield* projectBoard(
@@ -329,48 +335,65 @@ const makeOperator = Effect.gen(function* () {
     return yield* controls.unpause(loop);
   });
 
-  const moveBoardItem = Effect.fn("Operator.moveBoardItem")(function* (
-    instance: LoadedInstance,
-    move: BoardMove,
-  ) {
-    yield* Effect.annotateCurrentSpan({
-      repository: move.repository,
-      item: move.item,
-      lane: move.toLane,
-    });
-    const repository = instance.config.repos.find(({ name }) => name === move.repository);
-    if (repository === undefined) {
-      return yield* new BoardProjectNotFound({ repository: move.repository });
-    }
-    const [storedItems, labelProjection] = yield* Effect.all(
-      [items.list(move.repository), repositoryLabels.get(move.repository)] as const,
-      { concurrency: "unbounded" },
-    );
-    const board = yield* projectBoard(
-      repository,
-      Option.match(labelProjection, {
-        onNone: () => [],
-        onSome: ({ labels }) => labels,
+  const moveBoardItem = Effect.fn("Operator.moveBoardItem")(
+    function* (instance: LoadedInstance, move: BoardMove) {
+      yield* Effect.annotateCurrentSpan({
+        repository: move.repository,
+        item: move.item,
+        lane: move.toLane,
+      });
+      const repository = instance.config.repos.find(({ name }) => name === move.repository);
+      if (repository === undefined) {
+        return yield* new BoardProjectNotFound({ repository: move.repository });
+      }
+      const [storedItems, labelProjection] = yield* Effect.all(
+        [
+          items.list(move.repository, { limit: OVERVIEW_BOARD_ITEMS }),
+          repositoryLabels.get(move.repository),
+        ] as const,
+        { concurrency: "unbounded" },
+      );
+      const board = yield* projectBoard(
+        repository,
+        Option.match(labelProjection, {
+          onNone: () => [],
+          onSome: ({ labels }) => labels,
+        }),
+        storedItems,
+        [],
+      );
+      const source = board.lanes.find(({ items: laneItems }) =>
+        laneItems.some(({ number }) => number === move.item),
+      );
+      if (source === undefined) {
+        return yield* new BoardItemNotFound({ repository: move.repository, item: move.item });
+      }
+      const target = board.lanes.find(({ id }) => id === move.toLane);
+      if (target === undefined) {
+        return yield* new BoardLaneNotFound({ repository: move.repository, lane: move.toLane });
+      }
+      if (target._tag === "ReadOnlyBoardLane") {
+        return yield* new BoardLaneReadOnly({ repository: move.repository, lane: move.toLane });
+      }
+      const mutation = labelMutationForBoardMove(board, target);
+      const applied = yield* github.updateLabels(move.repository, move.item, mutation);
+      yield* Effect.logInfo("Operator moved a Board card; the next poll projects the new lane", {
+        repository: move.repository,
+        item: move.item,
+        fromLane: source.id,
+        toLane: target.id,
+        addedLabels: mutation.add.join(", "),
+        removedLabels: mutation.remove.join(", "),
+        labels: applied.join(", "),
+      });
+    },
+    Effect.tapError((error) =>
+      Effect.logWarning("Board move rejected", {
+        errorTag: error._tag,
+        message: error.message,
       }),
-      storedItems,
-      [],
-    );
-    const item = board.lanes
-      .flatMap(({ items: laneItems }) => laneItems)
-      .find(({ number }) => number === move.item);
-    if (item === undefined) {
-      return yield* new BoardItemNotFound({ repository: move.repository, item: move.item });
-    }
-    const target = board.lanes.find(({ id }) => id === move.toLane);
-    if (target === undefined) {
-      return yield* new BoardLaneNotFound({ repository: move.repository, lane: move.toLane });
-    }
-    if (target._tag === "ReadOnlyBoardLane") {
-      return yield* new BoardLaneReadOnly({ repository: move.repository, lane: move.toLane });
-    }
-    const mutation = labelMutationForBoardMove(board, target);
-    yield* github.updateLabels(move.repository, move.item, mutation);
-  });
+    ),
+  );
 
   return { ...observation, approve, cancel, moveBoardItem, pause, retry, unpause } as const;
 });

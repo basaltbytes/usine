@@ -510,6 +510,46 @@ describe("Operator", () => {
     }),
   );
 
+  it.effect(
+    "rejects Board moves onto unknown projects, Items, Lanes, and state-derived Lanes",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
+        const overviewReads = yield* Ref.make(0);
+        const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const rejected = (target: Repository.Name, item: number, toLane: string) =>
+            operator
+              .moveBoardItem(
+                instance,
+                new BoardMove({
+                  repository: target,
+                  item: Item.Number.make(item),
+                  toLane: BoardLaneId.make(toLane),
+                }),
+              )
+              .pipe(Effect.flip);
+          const unknownProject = yield* rejected(
+            Repository.Name.make("basaltbytes/elsewhere"),
+            31,
+            "authored:In review",
+          );
+          assert.strictEqual(unknownProject._tag, "BoardProjectNotFoundError");
+          const unknownItem = yield* rejected(repository, 404, "authored:In review");
+          assert.strictEqual(unknownItem._tag, "BoardItemNotFoundError");
+          const unknownLane = yield* rejected(repository, 31, "authored:Nowhere");
+          assert.strictEqual(unknownLane._tag, "BoardLaneNotFoundError");
+          const stateLane = yield* rejected(repository, 31, "fallback:unmapped");
+          assert.strictEqual(stateLane._tag, "BoardLaneReadOnlyError");
+          assert.strictEqual(yield* Ref.get(movedLabels), null);
+        }).pipe(
+          Effect.provide(testLayer(approved, movedLabels, overviewReads, projectionRevision)),
+        );
+      }),
+  );
+
   it("removes nested infrastructure defect causes from operator failure schemas", () => {
     const secret = "token=super-secret";
     const view = failureView(

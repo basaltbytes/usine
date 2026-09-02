@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Item, Repository, Run } from "@usine/core";
-import type { BoardItemView, BoardLaneView, ProjectView } from "@usine/orchestrator";
+import type { BoardItemView, BoardLaneView, ProjectView, RunView } from "@usine/orchestrator";
 import { useState } from "react";
 import { ApiOk, api } from "./api.ts";
 import { failureMessage } from "./operator-copy.ts";
@@ -150,6 +150,28 @@ const BoardLane = ({
   );
 };
 
+/** Runs whose Item has no card yet (schedule Runs, quarantined Items) stay reachable here. */
+export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> => {
+  const carded = new Set(
+    project.board.lanes.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
+  );
+  return project.runs.filter(({ itemKey }) => !carded.has(itemKey));
+};
+
+const UncardedRunRow = ({ run, open }: { readonly run: RunView; readonly open: () => void }) => (
+  <button className="run-row" onClick={open} type="button">
+    <span className="run-route">
+      <strong>{run.loop}</strong>
+      <small>{run.agent}</small>
+    </span>
+    <StatusMark state={run.state} />
+    <span className="annotation">{run.itemKey}</span>
+    <span className="row-arrow" aria-hidden="true">
+      ↗
+    </span>
+  </button>
+);
+
 export const ProjectBoard = ({
   project,
   disabled,
@@ -163,6 +185,7 @@ export const ProjectBoard = ({
 }) => {
   const queryClient = useQueryClient();
   const [dragged, setDragged] = useState<Item.Number | null>(null);
+  const uncarded = runsWithoutCard(project);
   const move = useMutation({
     mutationFn: ({ item, lane }: { readonly item: Item.Number; readonly lane: BoardLaneView }) => {
       const { owner, name } = Repository.parts(project.repository);
@@ -217,6 +240,21 @@ export const ProjectBoard = ({
         ))}
       </div>
       {move.isError && <p className="board-error error-panel">{move.error.message}</p>}
+      {uncarded.length > 0 && (
+        <section className="board-uncarded" aria-label="Runs without a Board card">
+          <header>
+            <h2>Runs without a card</h2>
+            <span className="annotation">
+              {uncarded.length} run{uncarded.length === 1 ? "" : "s"}
+            </span>
+          </header>
+          <div className="run-list">
+            {uncarded.map((run) => (
+              <UncardedRunRow key={run.id} run={run} open={() => openRun(run.id)} />
+            ))}
+          </div>
+        </section>
+      )}
     </main>
   );
 };

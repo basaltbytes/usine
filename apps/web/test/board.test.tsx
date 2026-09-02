@@ -1,14 +1,19 @@
 import { Agent, Attempt, Item, Loop, Repository, Run, Worker } from "@usine/core";
+import { LaneName } from "@usine/config";
 import {
   AgentFailureView,
   AttemptView,
   BoardItemView,
+  BoardLaneId,
+  BoardView,
   FailedAttemptView,
+  ProjectView,
+  ReadOnlyBoardLaneView,
   RunView,
   SucceededAttemptView,
 } from "@usine/orchestrator";
 import { assert, describe, it } from "vitest";
-import { itemFailure } from "../src/board.tsx";
+import { itemFailure, runsWithoutCard } from "../src/board.tsx";
 
 const brain = new Agent.BrainSpec({
   harness: "codex",
@@ -76,6 +81,43 @@ describe("Board Run failure copy", () => {
         itemWithRun("Failed", [attempt(1, "old failure"), attempt(2, "current failure")]),
       ),
       "current failure",
+    );
+  });
+});
+
+describe("Runs without a Board card", () => {
+  it("lists only the Runs whose Item has no card", () => {
+    const carded = itemWithRun("Succeeded", [attempt(1, null)]);
+    const cardedRun = carded.runs[0];
+    assert(cardedRun !== undefined);
+    const scheduled = new RunView({
+      ...cardedRun,
+      id: Run.RunId.make("run-schedule"),
+      itemKey: Item.ItemKey.make('["github","basaltbytes/usine"]'),
+      loop: Loop.LoopName.make("nightly"),
+      state: "Running",
+      canCancel: true,
+    });
+    const project = new ProjectView({
+      repository: Repository.Name.make("basaltbytes/usine"),
+      status: "active",
+      runs: [cardedRun, scheduled],
+      board: new BoardView({
+        failures: [],
+        lanes: [
+          new ReadOnlyBoardLaneView({
+            id: BoardLaneId.make("fallback:unmapped"),
+            name: LaneName.make("Unmapped"),
+            sources: [],
+            origin: "fallback",
+            items: [carded],
+          }),
+        ],
+      }),
+    });
+    assert.deepStrictEqual(
+      runsWithoutCard(project).map(({ id }) => id),
+      [scheduled.id],
     );
   });
 });

@@ -297,7 +297,7 @@ describe("Item projections", () => {
         const changed = yield* runs.revision();
         assert(Option.isSome(changed));
         assert.strictEqual(changed.value, before.value + 1);
-        assert.deepStrictEqual(yield* reader.list(repository), [item]);
+        assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [item]);
 
         assert.strictEqual(yield* writer.upsert(item), false);
         assert.deepStrictEqual(yield* runs.revision(), changed);

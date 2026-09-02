@@ -38,7 +38,11 @@ export {
   ItemProjection,
   ItemProjectionSource,
 } from "./item-projection/model.ts";
-export { ItemProjectionReader, ItemProjectionWriter } from "./item-projection/service.ts";
+export {
+  type ItemProjectionListOptions,
+  ItemProjectionReader,
+  ItemProjectionWriter,
+} from "./item-projection/service.ts";
 export { RepositoryLabelProjection } from "./repository-label-projection/model.ts";
 export {
   RepositoryLabelProjectionReader,

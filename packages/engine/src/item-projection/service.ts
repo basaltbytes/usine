@@ -1,5 +1,5 @@
 import { Repository } from "@usine/core";
-import { asc, eq, ne } from "drizzle-orm";
+import { desc, eq, ne } from "drizzle-orm";
 import { Context, Effect, Layer, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import { itemProjections } from "../database/schema.ts";
@@ -23,10 +23,19 @@ const persistence =
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, EnginePersistenceError, R> =>
     Effect.mapError(effect, (cause) => new EnginePersistenceError({ operation, cause }));
 
+/** Newest Items first; the bound keeps a long-lived repository's Board response finite. */
+export interface ItemProjectionListOptions {
+  readonly limit: number;
+}
+
 const makeReader = Effect.gen(function* () {
   const database = yield* RunDatabase;
   return {
-    list: Effect.fn("ItemProjectionReader.list")(function* (repository: Repository.Name) {
+    list: Effect.fn("ItemProjectionReader.list")(function* (
+      repository: Repository.Name,
+      options: ItemProjectionListOptions,
+    ) {
+      yield* Effect.annotateCurrentSpan({ repository, limit: options.limit });
       const rows = yield* database
         .select({
           itemKey: itemProjections.itemKey,
@@ -38,7 +47,8 @@ const makeReader = Effect.gen(function* () {
         })
         .from(itemProjections)
         .where(eq(itemProjections.repository, repository))
-        .orderBy(asc(itemProjections.itemNumber))
+        .orderBy(desc(itemProjections.itemNumber))
+        .limit(options.limit)
         .execute();
       return (yield* decodeRows(rows, { onExcessProperty: "error" })).map(
         (row) => new ItemProjection(row),
@@ -101,8 +111,10 @@ const makeWriter = Effect.gen(function* () {
 export class ItemProjectionReader extends Context.Service<
   ItemProjectionReader,
   {
+    /** The newest `limit` Item projections of one repository, highest number first. */
     readonly list: (
       repository: Repository.Name,
+      options: ItemProjectionListOptions,
     ) => Effect.Effect<ReadonlyArray<ItemProjection>, EnginePersistenceError>;
   }
 >()("@usine/engine/ItemProjectionReader") {

@@ -154,3 +154,19 @@
   max-width: 48rem;
   margin-top: 1rem;
 }
+
+.board-uncarded {
+  margin-top: 2rem;
+}
+
+.board-uncarded > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding-bottom: 0.5rem;
+}
+
+.board-uncarded h2 {
+  margin: 0;
+  font-size: var(--step-0);
+}
