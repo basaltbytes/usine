@@ -192,6 +192,14 @@ const BoardLane = ({
   );
 };
 
+/** The fallback lane holds every unrouted Item, so it leads the board: a drag into an
+ * authored lane must not cross every column first. Authored and proposed lanes keep
+ * their configured order. */
+export const orderLanes = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<BoardLaneView> => [
+  ...lanes.filter(({ origin }) => origin === "fallback"),
+  ...lanes.filter(({ origin }) => origin !== "fallback"),
+];
+
 /** Runs whose Item has no card yet (schedule Runs, quarantined Items) stay reachable here. */
 export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> => {
   const carded = new Set(
@@ -300,7 +308,7 @@ export const ProjectBoard = ({
         className="flex gap-3 overflow-x-auto pb-3 overscroll-x-contain scrollbar-thin"
         aria-label={`${project.repository} project board`}
       >
-        {project.board.lanes.map((lane) => (
+        {orderLanes(project.board.lanes).map((lane) => (
           <BoardLane
             key={lane.id}
             lane={lane}
