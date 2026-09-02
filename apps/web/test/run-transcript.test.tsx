@@ -1,10 +1,12 @@
 import { Agent, Attempt, AttemptChannel } from "@usine/core";
+import { Option } from "effect";
 import { TranscriptEventView, TranscriptPageCursor, TranscriptCursor } from "@usine/orchestrator";
 import { QueryClient } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import {
   mergeTranscript,
+  poolMeters,
   replaceEarlierCursor,
   RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
   Transcript,
@@ -53,7 +55,46 @@ const event = (
   });
 };
 
+const rateLimits = (sequence: number, usedPercent: number) =>
+  new TranscriptEventView({
+    sequence: TranscriptCursor.make(sequence),
+    attemptId,
+    receivedAt: "2026-09-01T12:00:00.000Z",
+    direction: "outbound",
+    payload: new AttemptChannel.SessionEvent({
+      event: new Agent.PoolRateLimitsUpdated({
+        session: new Agent.ParentSession({
+          id: Agent.SessionId.make("parent-session"),
+          agent: Agent.Name.make("developer"),
+          brain,
+        }),
+        pool: "chatgptPlan",
+        rateLimits: new Agent.RateLimitsSnapshot({
+          limitId: Option.none(),
+          limitName: Option.none(),
+          primary: Option.some(
+            new Agent.RateLimitWindow({
+              usedPercent,
+              windowDurationMinutes: Option.none(),
+              resetsAt: Option.none(),
+            }),
+          ),
+          secondary: Option.none(),
+        }),
+      }),
+    }),
+  });
+
 describe("run transcript", () => {
+  it("keeps rate-limit updates out of the feed and folds them into one meter per pool", () => {
+    const events = [event(1, "Parent update"), rateLimits(2, 25), rateLimits(3, 31)];
+    const markup = renderToStaticMarkup(<Transcript events={events} />);
+    assert.ok(!markup.includes("rate limits"));
+    assert.deepStrictEqual(poolMeters(events), [
+      { pool: "chatgptPlan", primaryUsedPercent: 31, secondaryUsedPercent: null },
+    ]);
+  });
+
   it("renders parent activity inline and groups each child session one level deep", () => {
     const markup = renderToStaticMarkup(
       <Transcript
