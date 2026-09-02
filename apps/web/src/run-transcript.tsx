@@ -1,5 +1,12 @@
+import { CaretRightIcon } from "@phosphor-icons/react";
 import type { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator";
 import { useMemo } from "react";
+import { Bubble, BubbleContent } from "@/components/ui/bubble";
+import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
+import { Markdown } from "@/components/markdown";
+import { cn } from "@/lib/utils";
 import { presentTranscriptEvent, type PresentedTranscriptEvent } from "./operator-copy.ts";
 
 /** Manual earlier-page cursor writes must pass through the TanStack cache unchanged. */
@@ -41,19 +48,38 @@ export const replaceEarlierCursor = (
   );
 
 const TranscriptEvent = ({ event }: { readonly event: PresentedTranscriptEvent }) => (
-  <article className={`transcript-event ${event.isError ? "event-error" : ""}`}>
-    <header>
-      <span>{event.label}</span>
-      <time>
-        {new Date(event.receivedAt).toLocaleTimeString([], {
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        })}
-      </time>
-    </header>
-    {event.detail !== "" && <pre>{event.detail}</pre>}
-  </article>
+  <Message>
+    <MessageContent>
+      <MessageHeader
+        className={cn("justify-between gap-3 px-0", event.isError && "text-destructive")}
+      >
+        <span className="truncate">{event.label}</span>
+        <time className="shrink-0 font-mono tabular-nums">
+          {new Date(event.receivedAt).toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          })}
+        </time>
+      </MessageHeader>
+      {event.detail !== "" && (
+        <Bubble variant={event.isError ? "destructive" : "muted"} className="max-w-full">
+          {event.format === "markdown" ? (
+            <BubbleContent className="w-full">
+              <Markdown>{event.detail}</Markdown>
+            </BubbleContent>
+          ) : (
+            <BubbleContent
+              render={<pre />}
+              className="max-h-64 w-full overflow-y-auto font-mono text-[0.625rem]/relaxed whitespace-pre-wrap wrap-anywhere"
+            >
+              {event.detail}
+            </BubbleContent>
+          )}
+        </Bubble>
+      )}
+    </MessageContent>
+  </Message>
 );
 
 export const Transcript = ({ events }: { readonly events: ReadonlyArray<TranscriptEventView> }) => {
@@ -86,23 +112,35 @@ export const Transcript = ({ events }: { readonly events: ReadonlyArray<Transcri
     return feed.sort((left, right) => left.sequence - right.sequence);
   }, [events]);
 
-  if (feed.length === 0) return <p className="empty-copy">Waiting for the first agent message…</p>;
+  if (feed.length === 0) return <p className="text-muted-foreground">No transcript events yet.</p>;
   return (
-    <div className="transcript">
+    <div className="flex flex-col gap-3">
       {feed.map((item) =>
         "event" in item ? (
           <TranscriptEvent event={item.event} key={item.key} />
         ) : (
-          <details className="child-activity" key={item.key}>
-            <summary>
-              {item.agent ?? "Child"} activity <span>{item.events.length} events</span>
-            </summary>
-            <div>
+          <Collapsible className="rounded-md border" key={item.key}>
+            <CollapsibleTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full justify-between rounded-b-none font-mono data-[panel-open]:[&_svg]:rotate-90"
+                />
+              }
+            >
+              <span className="inline-flex items-center gap-1.5">
+                <CaretRightIcon className="transition-transform" aria-hidden="true" />
+                {item.agent ?? "Child"} activity
+              </span>
+              <span className="text-muted-foreground">{item.events.length} events</span>
+            </CollapsibleTrigger>
+            <CollapsibleContent className="flex flex-col gap-3 border-t p-2.5">
               {item.events.map((event) => (
                 <TranscriptEvent event={event} key={event.sequence} />
               ))}
-            </div>
-          </details>
+            </CollapsibleContent>
+          </Collapsible>
         ),
       )}
     </div>

@@ -18,6 +18,8 @@ export interface PresentedTranscriptEvent {
   readonly agent: string | null;
   readonly label: string;
   readonly detail: string;
+  /** Markdown carries prose written for a reader; plain carries protocol payloads shown verbatim. */
+  readonly format: "markdown" | "plain";
   readonly isError: boolean;
 }
 
@@ -86,6 +88,7 @@ const sessionPresentation = (
     parentId: session._tag === "ChildSession" ? session.parentId : null,
     agent: session.agent,
     detail: "",
+    format: "plain" as const,
     isError: false,
   };
   return Match.valueTags(event, {
@@ -94,7 +97,12 @@ const sessionPresentation = (
       label: `${session.agent} started`,
       detail: brainLine(session.brain),
     }),
-    TextOutput: ({ text }) => ({ ...base, label: session.agent, detail: text }),
+    TextOutput: ({ text }) => ({
+      ...base,
+      label: session.agent,
+      detail: text,
+      format: "markdown" as const,
+    }),
     ToolStarted: ({ tool, input }) => ({
       ...base,
       label: `${tool} started`,
@@ -129,6 +137,7 @@ export const presentTranscriptEvent = (event: TranscriptEventView): PresentedTra
       agent: null,
       label: "Attempt started",
       detail: parentModel,
+      format: "plain" as const,
       isError: false,
     }),
     SessionEvent: ({ event: sessionEvent }) => sessionPresentation(sessionEvent),
@@ -139,6 +148,7 @@ export const presentTranscriptEvent = (event: TranscriptEventView): PresentedTra
       agent: null,
       label: "Attempt finished",
       detail: result.message,
+      format: "markdown" as const,
       isError: false,
     }),
     Failed: ({ failure }) => ({
@@ -148,6 +158,7 @@ export const presentTranscriptEvent = (event: TranscriptEventView): PresentedTra
       agent: null,
       label: failure._tag,
       detail: failureMessage(failure),
+      format: "plain" as const,
       isError: true,
     }),
     Interrupted: () => ({
@@ -157,6 +168,7 @@ export const presentTranscriptEvent = (event: TranscriptEventView): PresentedTra
       agent: null,
       label: "Interrupted",
       detail: "The run host acknowledged the interrupt.",
+      format: "plain" as const,
       isError: false,
     }),
     Steer: ({ message }) => ({
@@ -166,6 +178,7 @@ export const presentTranscriptEvent = (event: TranscriptEventView): PresentedTra
       agent: null,
       label: "Operator message",
       detail: message,
+      format: "markdown" as const,
       isError: false,
     }),
     Interrupt: () => ({
@@ -175,6 +188,7 @@ export const presentTranscriptEvent = (event: TranscriptEventView): PresentedTra
       agent: null,
       label: "Interrupt",
       detail: "The operator asked the run host to stop.",
+      format: "plain" as const,
       isError: false,
     }),
   }),

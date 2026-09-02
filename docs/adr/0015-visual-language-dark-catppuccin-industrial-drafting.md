@@ -9,3 +9,7 @@ The structure was settled ([ADR 0008](./0008-web-ui-projects-kanban-spine.md)); 
 - Catppuccin Mocha is the token source (base/crust/surface neutrals, peach as the accent, red/yellow/green/blue for run states); state colors stay semantic, not decorative.
 - Light mode is out of scope for v1 — the language is designed dark-first; nothing precludes a Latte counterpart later since colors enter as tokens.
 - Prototype (five skins, switchable) lives on the `prototype/ui-visual-language` branch as the primary source of the exploration.
+
+## Amendment (2026-09-02, #78)
+
+The token and component source moved to the shadcn registry: a preset generated in `apps/web/components.json` supplies the neutrals, radii, and type (Geist for text, Geist Mono for headings and identifiers), with the dark `foreground`, `primary`, and `secondary` tokens pulled to Catppuccin Mocha text, mauve, and surface0. Archivo and IBM Plex Mono are gone; the palette, dark-first stance, flat ruled sections, and semantic run-state colors stand. `apps/web/README.md` carries the working rules.

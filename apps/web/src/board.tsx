@@ -1,16 +1,31 @@
+import { ArrowUpRightIcon } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Item, Repository, Run } from "@usine/core";
 import type { BoardItemView, BoardLaneView, ProjectView, RunView } from "@usine/orchestrator";
 import { useState } from "react";
+import { ErrorAlert } from "@/components/error-alert";
+import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { cn } from "@/lib/utils";
 import { ApiOk, api } from "./api.ts";
 import { failureMessage } from "./operator-copy.ts";
-import "./board.css";
-
-const StatusMark = ({ state }: { readonly state: string }) => (
-  <span className={`status-mark state-${state.toLowerCase()}`} aria-label={state}>
-    {state}
-  </span>
-);
 
 export const itemFailure = (item: BoardItemView): string | null => {
   const failedRun =
@@ -42,17 +57,16 @@ const BoardCard = ({
   const run = item.run;
   const visibleRuns = item.runs.filter(({ state }) => state === "Waiting" || state === "Failed");
   const runsToShow = visibleRuns.length > 0 ? visibleRuns : run === null ? [] : [run];
-  const title = (
-    <>
-      <span className="board-item-kind">
-        {item.kind === "pr" ? "PR" : "Issue"} #{item.number}
-      </span>
-      <strong>{item.title}</strong>
-    </>
-  );
+  const titleClass =
+    "h-auto justify-start p-0 text-left text-xs/relaxed font-medium whitespace-normal text-card-foreground hover:text-primary";
   return (
-    <article
-      className={`board-card${item.needsYou ? " board-card-needs-you" : ""}`}
+    <Card
+      size="sm"
+      className={cn(
+        "gap-2.5",
+        draggable && "cursor-grab active:cursor-grabbing",
+        item.needsYou && "ring-needs-you/50",
+      )}
       draggable={draggable}
       onDragStart={(event) => {
         event.dataTransfer.effectAllowed = "move";
@@ -61,37 +75,58 @@ const BoardCard = ({
       }}
       onDragEnd={endDrag}
     >
-      {run === null ? (
-        <a className="board-card-title" href={item.url} target="_blank" rel="noreferrer">
-          {title}
-        </a>
-      ) : (
-        <button className="board-card-title" onClick={() => openRun(run.id)} type="button">
-          {title}
-        </button>
+      <CardHeader className="gap-0.5">
+        <CardDescription className="font-mono">
+          {item.kind === "pr" ? "PR" : "Issue"} #{item.number}
+        </CardDescription>
+        <CardTitle className="font-sans text-xs/relaxed">
+          {run === null ? (
+            <Button
+              variant="link"
+              className={titleClass}
+              nativeButton={false}
+              render={<a href={item.url} target="_blank" rel="noreferrer" />}
+            >
+              {item.title}
+            </Button>
+          ) : (
+            <Button variant="link" className={titleClass} onClick={() => openRun(run.id)}>
+              {item.title}
+            </Button>
+          )}
+        </CardTitle>
+      </CardHeader>
+      {(item.labels.length > 0 || runsToShow.length > 0 || item.needsYou || failure !== null) && (
+        <CardContent className="flex flex-col items-start gap-2">
+          {item.labels.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {item.labels.map((label) => (
+                <Badge variant="outline" key={label}>
+                  {label}
+                </Badge>
+              ))}
+            </div>
+          )}
+          {runsToShow.map((cardRun) => (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-2 gap-2"
+              key={cardRun.id}
+              onClick={() => openRun(cardRun.id)}
+            >
+              <StatusBadge state={cardRun.state} />
+              <span className="text-muted-foreground">{cardRun.agent}</span>
+            </Button>
+          ))}
+          {item.needsYou && <NeedsYouBadge />}
+          {failure !== null && <p className="text-destructive wrap-anywhere">{failure}</p>}
+          {visibleRuns.some(({ state }) => state === "Waiting") && (
+            <p className="text-needs-you">A run on this item is waiting for approval.</p>
+          )}
+        </CardContent>
       )}
-      <div className="board-card-labels">
-        {item.labels.map((label) => (
-          <span key={label}>{label}</span>
-        ))}
-      </div>
-      {runsToShow.map((cardRun) => (
-        <button
-          className="board-run-state"
-          key={cardRun.id}
-          onClick={() => openRun(cardRun.id)}
-          type="button"
-        >
-          <StatusMark state={cardRun.state} />
-          <span className="annotation">{cardRun.agent}</span>
-        </button>
-      ))}
-      {item.needsYou && <span className="needs-you-badge">Needs you</span>}
-      {failure !== null && <p className="board-card-error">{failure}</p>}
-      {visibleRuns.some(({ state }) => state === "Waiting") && (
-        <p className="board-card-note">Approval is waiting in a run on this item.</p>
-      )}
-    </article>
+    </Card>
   );
 };
 
@@ -114,8 +149,13 @@ const BoardLane = ({
 }) => {
   const writable = lane._tag === "WritableBoardLane";
   return (
-    <section
-      className={`board-lane${writable && dragged !== null ? " board-lane-target" : ""}`}
+    <Card
+      size="sm"
+      aria-label={`${lane.name} lane`}
+      className={cn(
+        "w-72 shrink-0 bg-muted/30 transition-shadow",
+        writable && dragged !== null && "ring-run-active",
+      )}
       onDragOver={(event) => {
         if (writable && !pending) event.preventDefault();
       }}
@@ -124,17 +164,19 @@ const BoardLane = ({
         if (writable && dragged !== null && !pending) drop(dragged, lane);
       }}
     >
-      <header>
-        <div>
-          <h2>{lane.name}</h2>
-          <span className="annotation">
-            {lane.items.length} item{lane.items.length === 1 ? "" : "s"}
-          </span>
-        </div>
-        <span className="lane-origin">{lane.origin}</span>
-      </header>
-      <div className="board-cards">
-        {lane.items.length === 0 && <p className="empty-copy">No items.</p>}
+      <CardHeader>
+        <CardTitle className="wrap-anywhere">{lane.name}</CardTitle>
+        <CardDescription>
+          {lane.items.length} item{lane.items.length === 1 ? "" : "s"}
+        </CardDescription>
+        <CardAction>
+          <Badge variant="secondary" className="font-mono">
+            {lane.origin}
+          </Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex min-h-40 flex-col gap-2">
+        {lane.items.length === 0 && <p className="text-muted-foreground">No items.</p>}
         {lane.items.map((item) => (
           <BoardCard
             key={item.itemKey}
@@ -145,8 +187,8 @@ const BoardLane = ({
             openRun={openRun}
           />
         ))}
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -158,29 +200,68 @@ export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> =>
   return project.runs.filter(({ itemKey }) => !carded.has(itemKey));
 };
 
-const UncardedRunRow = ({ run, open }: { readonly run: RunView; readonly open: () => void }) => (
-  <button className="run-row" onClick={open} type="button">
-    <span className="run-route">
-      <strong>{run.loop}</strong>
-      <small>{run.agent}</small>
-    </span>
-    <StatusMark state={run.state} />
-    <span className="annotation">{run.itemKey}</span>
-    <span className="row-arrow" aria-hidden="true">
-      ↗
-    </span>
-  </button>
+const UncardedRuns = ({
+  runs,
+  openRun,
+}: {
+  readonly runs: ReadonlyArray<RunView>;
+  readonly openRun: (runId: Run.RunId) => void;
+}) => (
+  <Card className="max-w-5xl">
+    <CardHeader>
+      <CardTitle>Runs without a card</CardTitle>
+      <CardDescription>
+        {runs.length} run{runs.length === 1 ? "" : "s"} whose Item has no card on this board
+      </CardDescription>
+    </CardHeader>
+    <CardContent>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Loop</TableHead>
+            <TableHead>Agent</TableHead>
+            <TableHead>Item</TableHead>
+            <TableHead>State</TableHead>
+            <TableHead className="w-0" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {runs.map((run) => (
+            <TableRow key={run.id} className="cursor-pointer" onClick={() => openRun(run.id)}>
+              <TableCell className="font-mono font-medium">{run.loop}</TableCell>
+              <TableCell className="font-mono">{run.agent}</TableCell>
+              <TableCell className="max-w-64 truncate font-mono">{run.itemKey}</TableCell>
+              <TableCell>
+                <StatusBadge state={run.state} />
+              </TableCell>
+              <TableCell className="text-right">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Open run ${run.id}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openRun(run.id);
+                  }}
+                >
+                  <ArrowUpRightIcon aria-hidden="true" />
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </CardContent>
+  </Card>
 );
 
 export const ProjectBoard = ({
   project,
   disabled,
-  back,
   openRun,
 }: {
   readonly project: ProjectView;
   readonly disabled: boolean;
-  readonly back: () => void;
   readonly openRun: (runId: Run.RunId) => void;
 }) => {
   const queryClient = useQueryClient();
@@ -203,29 +284,22 @@ export const ProjectBoard = ({
     onSettled: () => setDragged(null),
   });
   return (
-    <main className="board-panel">
-      <header className="board-heading">
-        <div>
-          <button className="back-button" onClick={back} type="button">
-            ← Projects
-          </button>
-          <p className="eyebrow">Project board</p>
-          <h1>{project.repository}</h1>
-        </div>
-        {project.status === "needs-you" && <span className="needs-you-badge">Needs you</span>}
+    <main className="flex flex-col gap-4 px-4 py-6 sm:px-6">
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-heading text-xl font-medium wrap-anywhere">{project.repository}</h1>
+        {project.status === "needs-you" && <NeedsYouBadge />}
       </header>
       {project.board.failures.length > 0 && (
-        <section className="board-error error-panel" aria-label="Board projection failures">
-          <strong>
-            {project.board.failures.length} Item projection
-            {project.board.failures.length === 1 ? " was" : "s were"} quarantined
-          </strong>
-          {project.board.failures.map((failure) => (
-            <p key={failure.itemKey}>{failure.message}</p>
-          ))}
-        </section>
+        <ErrorAlert
+          className="max-w-3xl"
+          title={`${project.board.failures.length} Item projection${project.board.failures.length === 1 ? " was" : "s were"} quarantined`}
+          message={project.board.failures.map((failure) => failure.message).join("\n")}
+        />
       )}
-      <div className="board-lanes" aria-label={`${project.repository} project board`}>
+      <div
+        className="flex gap-3 overflow-x-auto pb-3 overscroll-x-contain scrollbar-thin"
+        aria-label={`${project.repository} project board`}
+      >
         {project.board.lanes.map((lane) => (
           <BoardLane
             key={lane.id}
@@ -239,22 +313,8 @@ export const ProjectBoard = ({
           />
         ))}
       </div>
-      {move.isError && <p className="board-error error-panel">{move.error.message}</p>}
-      {uncarded.length > 0 && (
-        <section className="board-uncarded" aria-label="Runs without a Board card">
-          <header>
-            <h2>Runs without a card</h2>
-            <span className="annotation">
-              {uncarded.length} run{uncarded.length === 1 ? "" : "s"}
-            </span>
-          </header>
-          <div className="run-list">
-            {uncarded.map((run) => (
-              <UncardedRunRow key={run.id} run={run} open={() => openRun(run.id)} />
-            ))}
-          </div>
-        </section>
-      )}
+      {move.isError && <ErrorAlert className="max-w-3xl" message={move.error.message} />}
+      {uncarded.length > 0 && <UncardedRuns runs={uncarded} openRun={openRun} />}
     </main>
   );
 };
