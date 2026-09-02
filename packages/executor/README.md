@@ -14,6 +14,8 @@ The Node adapter at `@usine/executor/local` does the following for each Attempt:
 
 `LocalExecutorOptions.runHost` can override the child command for another compatible host. The adapter otherwise launches the executable shipped by `@usine/run-host` and rejects a protocol-version mismatch during preflight.
 
+The adapter sets `TURBO_CACHE_DIR` to `.usine/workers/<worker>/turbo` for the run host. Startup cache sweeps prune only the `*.git` cache directories the adapter itself creates under `repos/`; every other entry is skipped and logged at debug level, and each sweep ends with an info log of pruned, skipped, and failed counts.
+
 The local layer requires Effect `FileSystem`, `Path`, and `ChildProcessSpawner` services plus a `CredentialProvider`. Everything is 0.x, so APIs may change. Supply `effect` at the version pinned by the usine workspace.
 
 ## exe.dev Worker
