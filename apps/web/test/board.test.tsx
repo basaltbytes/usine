@@ -13,7 +13,7 @@ import {
   SucceededAttemptView,
 } from "@usine/orchestrator";
 import { assert, describe, it } from "vitest";
-import { itemFailure, runsWithoutCard } from "../src/board.tsx";
+import { itemFailure, orderLanes, runsWithoutCard } from "../src/board.tsx";
 
 const brain = new Agent.BrainSpec({
   harness: "codex",
@@ -118,6 +118,27 @@ describe("Runs without a Board card", () => {
     assert.deepStrictEqual(
       runsWithoutCard(project).map(({ id }) => id),
       [scheduled.id],
+    );
+  });
+});
+
+describe("Board lane order", () => {
+  it("puts the fallback lane first so its cards can be dragged into the authored lanes", () => {
+    const lane = (id: string, origin: "authored" | "proposed" | "fallback") =>
+      new ReadOnlyBoardLaneView({
+        id: BoardLaneId.make(id),
+        name: LaneName.make(id),
+        sources: [],
+        origin,
+        items: [],
+      });
+    assert.deepStrictEqual(
+      orderLanes([
+        lane("ready", "authored"),
+        lane("review", "authored"),
+        lane("unmapped", "fallback"),
+      ]).map(({ id }) => id),
+      ["unmapped", "ready", "review"],
     );
   });
 });
