@@ -78,13 +78,13 @@
   --chart-3: oklch(0.666 0.179 58.318);
   --chart-4: oklch(0.555 0.163 48.998);
   --chart-5: oklch(0.473 0.137 46.201);
-  --sidebar: oklch(0.212 0.019 322.12);
-  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar: oklch(0.172 0.011 326); /* one step above --background, not a frame */
+  --sidebar-foreground: #cdd6f4; /* Catppuccin Mocha text */
   --sidebar-primary: oklch(0.667 0.295 322.15);
   --sidebar-primary-foreground: oklch(0.977 0.017 320.058);
-  --sidebar-accent: oklch(0.263 0.024 320.12);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-accent: oklch(0.235 0.018 322);
+  --sidebar-accent-foreground: #cdd6f4;
+  --sidebar-border: oklch(1 0 0 / 6%);
   --sidebar-ring: oklch(0.542 0.034 322.5);
   --run-succeeded: #a6e3a1; /* Catppuccin Mocha green */
   --run-active: #89b4fa; /* Catppuccin Mocha blue */

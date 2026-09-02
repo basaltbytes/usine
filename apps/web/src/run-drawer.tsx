@@ -247,7 +247,7 @@ export const RunDrawer = ({
                   )}
                 </Section>
               )}
-              <Section title="Live transcript">
+              <Section title="Transcript">
                 {earlier !== undefined && (
                   <Button
                     variant="outline"

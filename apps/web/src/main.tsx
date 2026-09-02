@@ -41,6 +41,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Empty,
   EmptyContent,
@@ -49,18 +50,18 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty";
-import {
-  Item,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemFooter,
-  ItemGroup,
-  ItemTitle,
-} from "@/components/ui/item";
+import { Item, ItemContent, ItemDescription, ItemFooter, ItemTitle } from "@/components/ui/item";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { api } from "./api.ts";
 import { ProjectBoard } from "./board.tsx";
@@ -137,7 +138,7 @@ const NeedStrip = ({
       {needs.length > 0 ? (
         <Badge className="bg-needs-you font-mono text-background">{needs.length}</Badge>
       ) : (
-        <p className="text-muted-foreground">Nothing is blocked. The floor is moving.</p>
+        <p className="text-muted-foreground">No item needs intervention.</p>
       )}
     </div>
     {needs.length > 0 && (
@@ -188,45 +189,85 @@ const ProjectIndex = ({
   readonly projects: ReadonlyArray<ProjectView>;
   readonly open: (repository: Repository.Name) => void;
 }) => (
-  <main className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
-    <header className="mb-4 flex items-baseline justify-between gap-3">
-      <h1 className="font-heading text-xl font-medium">Projects</h1>
-      <p className="text-muted-foreground">{projects.length} registered</p>
-    </header>
-    <ItemGroup className="gap-0 divide-y border-y">
-      {projects.map((project) => {
-        const itemCount = project.board.lanes.reduce((total, lane) => total + lane.items.length, 0);
-        const needsYou = project.board.lanes.reduce(
-          (total, lane) => total + lane.items.filter((item) => item.needsYou).length,
-          0,
-        );
-        return (
-          <Item
-            key={project.repository}
-            className="cursor-pointer rounded-none py-3 text-left hover:bg-muted"
-            render={<button type="button" onClick={() => open(project.repository)} />}
-          >
-            <ItemContent>
-              <ItemTitle className="font-heading text-sm wrap-anywhere">
-                {project.repository}
-              </ItemTitle>
-              <ItemDescription>
-                {itemCount} item{itemCount === 1 ? "" : "s"} across {project.board.lanes.length}{" "}
-                lane{project.board.lanes.length === 1 ? "" : "s"}
-              </ItemDescription>
-            </ItemContent>
-            <ItemActions>
-              {project.status === "needs-you" ? (
-                <NeedsYouBadge count={needsYou} />
-              ) : (
-                <StatusBadge state={project.status} />
-              )}
-              <ArrowRightIcon className="text-muted-foreground" aria-hidden="true" />
-            </ItemActions>
-          </Item>
-        );
-      })}
-    </ItemGroup>
+  <main className="flex flex-col gap-4 p-4 sm:p-6">
+    <Card className="max-w-5xl">
+      <CardHeader>
+        <CardTitle>Projects</CardTitle>
+        <CardDescription>
+          {projects.length} registered repositor{projects.length === 1 ? "y" : "ies"}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        {projects.length === 0 ? (
+          <Empty>
+            <EmptyHeader>
+              <EmptyTitle>No project registered</EmptyTitle>
+              <EmptyDescription>
+                Add a repository under <code>repos</code> in <code>usine.yaml</code> and restart{" "}
+                <code>usine up</code>.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Repository</TableHead>
+                <TableHead className="text-right">Items</TableHead>
+                <TableHead className="text-right">Lanes</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className="w-0" />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {projects.map((project) => {
+                const itemCount = project.board.lanes.reduce(
+                  (total, lane) => total + lane.items.length,
+                  0,
+                );
+                const needsYou = project.board.lanes.reduce(
+                  (total, lane) => total + lane.items.filter((item) => item.needsYou).length,
+                  0,
+                );
+                return (
+                  <TableRow
+                    key={project.repository}
+                    className="cursor-pointer"
+                    onClick={() => open(project.repository)}
+                  >
+                    <TableCell className="font-mono font-medium">{project.repository}</TableCell>
+                    <TableCell className="text-right tabular-nums">{itemCount}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {project.board.lanes.length}
+                    </TableCell>
+                    <TableCell>
+                      {project.status === "needs-you" ? (
+                        <NeedsYouBadge count={needsYou} />
+                      ) : (
+                        <StatusBadge state={project.status} />
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={`Open ${project.repository}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          open(project.repository);
+                        }}
+                      >
+                        <ArrowRightIcon aria-hidden="true" />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
   </main>
 );
 
@@ -241,42 +282,56 @@ const Configuration = ({
   readonly act: (loop: LoopView) => void;
   readonly error: string | null;
 }) => (
-  <main className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
-    <header className="mb-4">
-      <h1 className="font-heading text-xl font-medium">Loops</h1>
-      <p className="max-w-prose text-muted-foreground">
-        Runtime controls. Authored loop files remain untouched.
-      </p>
-    </header>
-    <ItemGroup className="gap-0 divide-y border-y">
-      {loops.map((loop) => (
-        <Item key={loop.name} className="rounded-none py-3">
-          <ItemContent>
-            <ItemTitle className="font-heading text-sm">{loop.name}</ItemTitle>
-            <ItemDescription className="font-mono">
-              {loop.trigger} → {loop.agent}
-            </ItemDescription>
-          </ItemContent>
-          <ItemActions>
-            {loop.paused && <Badge variant="outline">paused</Badge>}
-            <Button
-              variant={loop.paused ? "default" : "outline"}
-              size="sm"
-              disabled={pending}
-              onClick={() => act(loop)}
-            >
-              {loop.paused ? (
-                <PlayIcon data-icon="inline-start" aria-hidden="true" />
-              ) : (
-                <PauseIcon data-icon="inline-start" aria-hidden="true" />
-              )}
-              {loop.paused ? "Unpause" : "Pause"}
-            </Button>
-          </ItemActions>
-        </Item>
-      ))}
-    </ItemGroup>
-    {error !== null && <ErrorAlert className="mt-4" message={error} />}
+  <main className="flex flex-col gap-4 p-4 sm:p-6">
+    <Card className="max-w-5xl">
+      <CardHeader>
+        <CardTitle>Loops</CardTitle>
+        <CardDescription>
+          {loops.length} loop{loops.length === 1 ? "" : "s"}
+        </CardDescription>
+      </CardHeader>
+      <CardContent>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Loop</TableHead>
+              <TableHead>Trigger</TableHead>
+              <TableHead>Agent</TableHead>
+              <TableHead>State</TableHead>
+              <TableHead className="w-0" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {loops.map((loop) => (
+              <TableRow key={loop.name}>
+                <TableCell className="font-mono font-medium">{loop.name}</TableCell>
+                <TableCell className="font-mono">{loop.trigger}</TableCell>
+                <TableCell className="font-mono">{loop.agent}</TableCell>
+                <TableCell>
+                  <Badge variant="outline">{loop.paused ? "paused" : "active"}</Badge>
+                </TableCell>
+                <TableCell className="text-right">
+                  <Button
+                    variant={loop.paused ? "default" : "outline"}
+                    size="sm"
+                    disabled={pending}
+                    onClick={() => act(loop)}
+                  >
+                    {loop.paused ? (
+                      <PlayIcon data-icon="inline-start" aria-hidden="true" />
+                    ) : (
+                      <PauseIcon data-icon="inline-start" aria-hidden="true" />
+                    )}
+                    {loop.paused ? "Unpause" : "Pause"}
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
+    {error !== null && <ErrorAlert className="max-w-5xl" message={error} />}
   </main>
 );
 
@@ -300,10 +355,11 @@ const FactoryScreen = () => {
   const openRun = (runId: Run.RunId) => navigate({ search: { ...contextSearch, run: runId } });
   const closeRun = () => navigate({ search: contextSearch });
 
-  if (overview.isPending)
-    return <BootScreen title="Usine" description="Opening the factory floor…" />;
+  if (overview.isPending) return <BootScreen title="Usine" description="Loading…" />;
   if (overview.isError)
-    return <BootScreen title="Offline" description={overview.error.message} tone="error" />;
+    return (
+      <BootScreen title="Server unreachable" description={overview.error.message} tone="error" />
+    );
   const data = overview.data;
   const live = data._tag !== "NeedsSetup";
   return (
@@ -357,15 +413,13 @@ const FactoryScreen = () => {
         {data._tag === "NeedsSetup" && (
           <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 sm:px-6">
             <WarningIcon weight="fill" className="text-needs-you" />
-            <AlertTitle className="text-sm">
-              The floor is ready. GitHub is not connected yet.
-            </AlertTitle>
+            <AlertTitle className="text-sm">GitHub App credentials are missing</AlertTitle>
             <AlertDescription className="max-w-prose">
               <p>
-                Setup required: {data.errorTag}. Add <code>USINE_GITHUB_APP_ID</code> and{" "}
+                {data.errorTag}. Set <code>USINE_GITHUB_APP_ID</code> and{" "}
                 <code>USINE_GITHUB_PRIVATE_KEY</code>, or create <code>.usine/github-app.json</code>{" "}
-                with mode 0600. Then stop and rerun <code>usine up</code>: the running process reads
-                credentials only when it starts.
+                with mode 0600, then restart <code>usine up</code>. Credentials are read at startup
+                only.
               </p>
             </AlertDescription>
           </Alert>
@@ -388,7 +442,7 @@ const FactoryScreen = () => {
             const project = data.projects.find(({ repository }) => repository === search.project);
             return project === undefined ? (
               <BootScreen
-                title="Not found"
+                title="Project not found"
                 description={`${search.project} is not a registered project.`}
                 tone="error"
               >

@@ -7,16 +7,22 @@ import { ErrorAlert } from "@/components/error-alert";
 import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Item as ItemRow,
-  ItemActions,
-  ItemContent,
-  ItemDescription,
-  ItemGroup,
-  ItemTitle,
-} from "@/components/ui/item";
-import { Separator } from "@/components/ui/separator";
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { ApiOk, api } from "./api.ts";
 import { failureMessage } from "./operator-copy.ts";
@@ -116,7 +122,7 @@ const BoardCard = ({
           {item.needsYou && <NeedsYouBadge />}
           {failure !== null && <p className="text-destructive wrap-anywhere">{failure}</p>}
           {visibleRuns.some(({ state }) => state === "Waiting") && (
-            <p className="text-needs-you">Approval is waiting in a run on this item.</p>
+            <p className="text-needs-you">A run on this item is waiting for approval.</p>
           )}
         </CardContent>
       )}
@@ -143,11 +149,12 @@ const BoardLane = ({
 }) => {
   const writable = lane._tag === "WritableBoardLane";
   return (
-    <section
+    <Card
+      size="sm"
       aria-label={`${lane.name} lane`}
       className={cn(
-        "flex w-72 shrink-0 flex-col gap-3 rounded-lg border bg-card/40 p-3 transition-colors",
-        writable && dragged !== null && "border-run-active",
+        "w-72 shrink-0 bg-muted/30 transition-shadow",
+        writable && dragged !== null && "ring-run-active",
       )}
       onDragOver={(event) => {
         if (writable && !pending) event.preventDefault();
@@ -157,19 +164,18 @@ const BoardLane = ({
         if (writable && dragged !== null && !pending) drop(dragged, lane);
       }}
     >
-      <header className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="font-heading text-sm font-medium wrap-anywhere">{lane.name}</h2>
-          <p className="text-muted-foreground">
-            {lane.items.length} item{lane.items.length === 1 ? "" : "s"}
-          </p>
-        </div>
-        <Badge variant="secondary" className="font-mono">
-          {lane.origin}
-        </Badge>
-      </header>
-      <Separator />
-      <div className="flex min-h-40 flex-col gap-2">
+      <CardHeader>
+        <CardTitle className="wrap-anywhere">{lane.name}</CardTitle>
+        <CardDescription>
+          {lane.items.length} item{lane.items.length === 1 ? "" : "s"}
+        </CardDescription>
+        <CardAction>
+          <Badge variant="secondary" className="font-mono">
+            {lane.origin}
+          </Badge>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="flex min-h-40 flex-col gap-2">
         {lane.items.length === 0 && <p className="text-muted-foreground">No items.</p>}
         {lane.items.map((item) => (
           <BoardCard
@@ -181,8 +187,8 @@ const BoardLane = ({
             openRun={openRun}
           />
         ))}
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 };
 
@@ -194,23 +200,59 @@ export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> =>
   return project.runs.filter(({ itemKey }) => !carded.has(itemKey));
 };
 
-const UncardedRunRow = ({ run, open }: { readonly run: RunView; readonly open: () => void }) => (
-  <ItemRow
-    size="sm"
-    className="cursor-pointer rounded-none text-left hover:bg-muted"
-    render={<button type="button" onClick={open} />}
-  >
-    <ItemContent>
-      <ItemTitle className="font-heading">{run.loop}</ItemTitle>
-      <ItemDescription className="font-mono">
-        {run.agent} · {run.itemKey}
-      </ItemDescription>
-    </ItemContent>
-    <ItemActions>
-      <StatusBadge state={run.state} />
-      <ArrowUpRightIcon className="text-muted-foreground" aria-hidden="true" />
-    </ItemActions>
-  </ItemRow>
+const UncardedRuns = ({
+  runs,
+  openRun,
+}: {
+  readonly runs: ReadonlyArray<RunView>;
+  readonly openRun: (runId: Run.RunId) => void;
+}) => (
+  <Card className="max-w-5xl">
+    <CardHeader>
+      <CardTitle>Runs without a card</CardTitle>
+      <CardDescription>
+        {runs.length} run{runs.length === 1 ? "" : "s"} whose Item has no card on this board
+      </CardDescription>
+    </CardHeader>
+    <CardContent>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Loop</TableHead>
+            <TableHead>Agent</TableHead>
+            <TableHead>Item</TableHead>
+            <TableHead>State</TableHead>
+            <TableHead className="w-0" />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {runs.map((run) => (
+            <TableRow key={run.id} className="cursor-pointer" onClick={() => openRun(run.id)}>
+              <TableCell className="font-mono font-medium">{run.loop}</TableCell>
+              <TableCell className="font-mono">{run.agent}</TableCell>
+              <TableCell className="max-w-64 truncate font-mono">{run.itemKey}</TableCell>
+              <TableCell>
+                <StatusBadge state={run.state} />
+              </TableCell>
+              <TableCell className="text-right">
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={`Open run ${run.id}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openRun(run.id);
+                  }}
+                >
+                  <ArrowUpRightIcon aria-hidden="true" />
+                </Button>
+              </TableCell>
+            </TableRow>
+          ))}
+        </TableBody>
+      </Table>
+    </CardContent>
+  </Card>
 );
 
 export const ProjectBoard = ({
@@ -272,21 +314,7 @@ export const ProjectBoard = ({
         ))}
       </div>
       {move.isError && <ErrorAlert className="max-w-3xl" message={move.error.message} />}
-      {uncarded.length > 0 && (
-        <section className="max-w-3xl" aria-label="Runs without a Board card">
-          <header className="flex items-baseline justify-between gap-3 pb-2">
-            <h2 className="font-heading text-sm font-medium">Runs without a card</h2>
-            <p className="text-muted-foreground">
-              {uncarded.length} run{uncarded.length === 1 ? "" : "s"}
-            </p>
-          </header>
-          <ItemGroup className="gap-0 divide-y border-y">
-            {uncarded.map((run) => (
-              <UncardedRunRow key={run.id} run={run} open={() => openRun(run.id)} />
-            ))}
-          </ItemGroup>
-        </section>
-      )}
+      {uncarded.length > 0 && <UncardedRuns runs={uncarded} openRun={openRun} />}
     </main>
   );
 };

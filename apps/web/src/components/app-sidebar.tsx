@@ -46,17 +46,13 @@ export const AppSidebar = ({
             >
               U
             </span>
-            <span className="grid leading-tight">
-              <span className="font-heading text-sm font-medium">Usine</span>
-              <span className="text-[0.625rem] text-muted-foreground">Factory floor · local</span>
-            </span>
+            <span className="font-heading text-sm font-medium">Usine</span>
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
     </SidebarHeader>
     <SidebarContent>
       <SidebarGroup>
-        <SidebarGroupLabel>Observe</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
             <SidebarMenuItem>
@@ -96,7 +92,7 @@ export const AppSidebar = ({
         </SidebarGroupContent>
       </SidebarGroup>
       <SidebarGroup>
-        <SidebarGroupLabel>Configure</SidebarGroupLabel>
+        <SidebarGroupLabel>Configuration</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
             <SidebarMenuItem>

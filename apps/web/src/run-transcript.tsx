@@ -112,8 +112,7 @@ export const Transcript = ({ events }: { readonly events: ReadonlyArray<Transcri
     return feed.sort((left, right) => left.sequence - right.sequence);
   }, [events]);
 
-  if (feed.length === 0)
-    return <p className="text-muted-foreground">Waiting for the first agent message…</p>;
+  if (feed.length === 0) return <p className="text-muted-foreground">No transcript events yet.</p>;
   return (
     <div className="flex flex-col gap-3">
       {feed.map((item) =>
