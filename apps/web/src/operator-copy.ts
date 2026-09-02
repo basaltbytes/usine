@@ -45,6 +45,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository,
       runId,
     }),
+    BoardProjectionNeed: ({ failure }) => ({
+      title: "Item projection quarantined",
+      detail: failure.message,
+      repository: failure.repository,
+      runId: null,
+    }),
     PollFailureNeed: ({ failure }) => ({
       title: failure.errorTag,
       detail: failure.message,

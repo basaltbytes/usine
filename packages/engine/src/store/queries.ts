@@ -79,6 +79,7 @@ const eventRouteSelection = {
 } as const;
 
 const runSelection = {
+  itemKey: triggerEvents.itemKey,
   runId: runs.runId,
   eventId: runs.eventId,
   loop: runs.loopName,
@@ -147,6 +148,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     const rows = yield* database
       .select(runSelection)
       .from(runs)
+      .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
       .innerJoin(steps, eq(steps.runId, runs.runId))
       .where(eq(runs.runId, runId))
       .execute();
@@ -176,6 +178,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     }
     return new RunSnapshot({
       event: eventFromRow(route),
+      itemKey: route.itemKey,
       run: runFromRow(storedRun),
       step: stepFromRow(storedRun),
       attempts: storedAttempts.map(attemptFromRow),
@@ -195,6 +198,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       database
         .select(runSelection)
         .from(runs)
+        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
         .innerJoin(steps, eq(steps.runId, runs.runId))
         .where(openState)
         .orderBy(desc(runs.openedAt), desc(runs.runId))
@@ -203,6 +207,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       database
         .select(runSelection)
         .from(runs)
+        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
         .innerJoin(steps, eq(steps.runId, runs.runId))
         .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
         .orderBy(desc(runs.openedAt), desc(runs.runId))

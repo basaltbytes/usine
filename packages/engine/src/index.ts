@@ -32,6 +32,22 @@ export {
   TranscriptSequence,
   TranscriptTailQuery,
 } from "./model.ts";
+export {
+  ItemContentHash,
+  ItemNumber,
+  ItemProjection,
+  ItemProjectionSource,
+} from "./item-projection/model.ts";
+export {
+  type ItemProjectionListOptions,
+  ItemProjectionReader,
+  ItemProjectionWriter,
+} from "./item-projection/service.ts";
+export { RepositoryLabelProjection } from "./repository-label-projection/model.ts";
+export {
+  RepositoryLabelProjectionReader,
+  RepositoryLabelProjectionWriter,
+} from "./repository-label-projection/service.ts";
 export { RunDatabase, type RunDatabaseClient } from "./database/database.ts";
 export { CursorKey } from "./cursor/model.ts";
 export { CursorStore } from "./cursor/store.ts";

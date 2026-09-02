@@ -16,13 +16,16 @@ import {
   Selector,
   UsineConfig,
 } from "@usine/config";
-import { Instance, Run, Step } from "@usine/core";
+import { Instance, Repository, Run, Step } from "@usine/core";
 import {
   Claimed,
   CursorKey,
   CursorStore,
+  ItemProjectionWriter,
   LoopControl,
   LoopRuntimeState,
+  RepositoryLabelProjectionReader,
+  RepositoryLabelProjectionWriter,
   RunEngine,
   StepExecutor,
 } from "@usine/engine";
@@ -34,10 +37,14 @@ import {
   EntityTag,
   GitHubApiError,
   GitHubPolling,
+  GitHubRateLimitError,
   IssueSnapshot,
   PollCursor,
+  RepositoryLabelCatalog,
+  RepositoryLabelsNotModified,
   RepositoryNotModified,
   RepositoryChanges,
+  RepositoryLabelName,
   type IssuePayload,
 } from "@usine/github";
 import {
@@ -57,7 +64,11 @@ import {
 import { TestClock } from "effect/testing";
 import { PollingTriggers } from "../src/index.ts";
 
-const watchedRepository = "basaltbytes/usine";
+const watchedRepository = Repository.Name.make("basaltbytes/usine");
+const emptyLabelCatalog = new RepositoryLabelCatalog({
+  entityTag: Option.none(),
+  labels: [],
+});
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
   version: 1,
@@ -175,6 +186,14 @@ const loopControlLayer = (states: ReadonlyArray<LoopRuntimeState> = []) =>
     unpause: () => Effect.die("unused"),
   });
 
+const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
+  upsert: () => Effect.succeed(true),
+});
+
+const repositoryLabelProjectionWriterLayer = Layer.succeed(RepositoryLabelProjectionWriter)({
+  replace: () => Effect.succeed(true),
+});
+
 const schedulerLayer = (
   github: GitHubPolling["Service"],
   states: ReadonlyArray<LoopRuntimeState> = [],
@@ -203,6 +222,8 @@ const schedulerLayer = (
   const dependencies = Layer.mergeAll(
     cursors,
     expressions,
+    itemProjectionWriterLayer,
+    repositoryLabelProjectionWriterLayer,
     parser,
     runs,
     loopControlLayer(states),
@@ -224,6 +245,7 @@ describe("PollingTriggers", () => {
             nextPollAt: Option.some(DateTime.makeUnsafe(now + 120_000)),
           });
         }),
+      labels: () => Effect.succeed(emptyLabelCatalog),
       snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
 
@@ -231,33 +253,177 @@ describe("PollingTriggers", () => {
       const polling = yield* PollingTriggers;
       const fiber = yield* Effect.forkChild(polling.run(instanceWith([issueLoop("start-dev")])));
       yield* Effect.yieldNow;
-      assert.strictEqual(changeRequests, 1);
-      yield* TestClock.adjust("119 seconds");
-      assert.strictEqual(changeRequests, 1);
-      yield* TestClock.adjust("1 second");
       assert.strictEqual(changeRequests, 2);
+      yield* TestClock.adjust("119 seconds");
+      assert.strictEqual(changeRequests, 2);
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual(changeRequests, 4);
       yield* Fiber.interrupt(fiber);
     }).pipe(Effect.provide(schedulerLayer(github)));
   });
 
-  it.effect("skips paused Loops without polling GitHub and exposes the latest cycle", () => {
+  it.effect("keeps Board projection polling while paused Loops open no Runs", () => {
     const loop = issueLoop("paused-issues");
+    let changeRequests = 0;
     const github: GitHubPolling["Service"] = {
-      changes: () => Effect.die("a paused Loop must not poll GitHub"),
-      snapshot: () => Effect.die("a paused Loop has no snapshots"),
+      changes: (_repository, cursor) => {
+        changeRequests += 1;
+        return Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() }));
+      },
+      labels: () => Effect.succeed(emptyLabelCatalog),
+      snapshot: () => Effect.die("an unchanged repository has no snapshots"),
     };
     const state = new LoopRuntimeState({ loop: loop.name, paused: true });
 
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
       const cycle = yield* polling.poll(instanceWith([loop]));
-      assert.strictEqual(cycle.repositories, 0);
+      assert.strictEqual(cycle.repositories, 2);
       assert.strictEqual(cycle.submissions.length, 0);
+      assert.strictEqual(changeRequests, 2);
       const latest = yield* polling.latest;
       assert(Option.isSome(latest));
       assert.strictEqual(latest.value, cycle);
     }).pipe(Effect.provide(schedulerLayer(github, [state])));
   });
+
+  it.effect("turns a rate-limited label catalog into a backoff, not a failed cycle", () => {
+    const github: GitHubPolling["Service"] = {
+      changes: (_repository, cursor) =>
+        Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+      labels: () =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          return yield* new GitHubRateLimitError({
+            operation: "list-repository-labels",
+            retryAt: DateTime.makeUnsafe(now + 90_000),
+            message: "secondary rate limit",
+          });
+        }),
+      snapshot: () => Effect.die("an unchanged repository has no snapshots"),
+    };
+
+    return Effect.gen(function* () {
+      const polling = yield* PollingTriggers;
+      const cycle = yield* polling.poll(instanceWith([issueLoop("start-dev")]));
+      assert.strictEqual(cycle.repositories, 2);
+      assert.strictEqual(cycle.failures.length, 0);
+      const now = yield* Clock.currentTimeMillis;
+      assert(Option.isSome(cycle.nextPollAt));
+      assert.strictEqual(DateTime.toEpochMillis(cycle.nextPollAt.value), now + 90_000);
+    }).pipe(Effect.provide(schedulerLayer(github)));
+  });
+
+  it.live("keeps firing Loops and advancing the cursor when the label catalog request fails", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = Instance.Directory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-polling-" }),
+      );
+      const catalogFails = yield* Ref.make(false);
+      const hash = yield* Ref.make(ContentHash.make("a".repeat(64)));
+      const cursorsSeen = yield* Ref.make<ReadonlyArray<Option.Option<EntityTag>>>([]);
+      const cursorsReturned = yield* Ref.make<ReadonlyArray<EntityTag>>([]);
+      const labelEntityTagsSeen = yield* Ref.make<ReadonlyArray<Option.Option<EntityTag>>>([]);
+      const catalogEntityTag = EntityTag.make('W/"labels"');
+      const changed = new ChangedIssue({
+        number: 28,
+        updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+      });
+      const recordFor =
+        <A>(repository: Repository.Name, ref: Ref.Ref<ReadonlyArray<A>>) =>
+        (value: A) =>
+          repository === watchedRepository
+            ? Ref.update(ref, (values) => [...values, value])
+            : Effect.void;
+      const github: GitHubPolling["Service"] = {
+        changes: (repository, cursor) =>
+          Effect.gen(function* () {
+            yield* recordFor(repository, cursorsSeen)(cursor.entityTag);
+            const entityTag = EntityTag.make(
+              `W/"${repository}-${String((yield* Ref.get(cursorsReturned)).length)}"`,
+            );
+            yield* recordFor(repository, cursorsReturned)(entityTag);
+            return new RepositoryChanges({
+              cursor: new PollCursor({
+                entityTag: Option.some(entityTag),
+                watermark: Option.some(changed.updatedAt),
+              }),
+              items: [changed],
+              backlog: false,
+              nextPollAt: Option.none(),
+            });
+          }),
+        labels: (repository, entityTag) =>
+          Effect.gen(function* () {
+            yield* recordFor(repository, labelEntityTagsSeen)(entityTag);
+            if (yield* Ref.get(catalogFails)) {
+              return yield* new GitHubApiError({
+                operation: "list-repository-labels",
+                status: Option.some(502),
+                message: "label catalog unavailable",
+              });
+            }
+            return new RepositoryLabelCatalog({
+              entityTag: Option.some(catalogEntityTag),
+              labels: [RepositoryLabelName.make("ready")],
+            });
+          }),
+        snapshot: () =>
+          Effect.gen(function* () {
+            return new IssueSnapshot({
+              payload: issuePayload(["ready"]),
+              contentHash: yield* Ref.get(hash),
+            });
+          }),
+      };
+      const context = yield* Layer.build(runtimeLayer(directory, github));
+      const polling = Context.get(context, PollingTriggers);
+      const engine = Context.get(context, RunEngine);
+      const labels = Context.get(context, RepositoryLabelProjectionReader);
+      const instance = instanceWith([issueLoop("start-dev")]);
+
+      const healthy = yield* polling.poll(instance);
+      assert.strictEqual(healthy.failures.length, 0);
+      const firstRun = claimedRun(healthy);
+      yield* waitForState(engine, firstRun, "Waiting");
+
+      // The item changes while the catalog endpoint is down: the Loop must still fire.
+      yield* Ref.set(catalogFails, true);
+      yield* Ref.set(hash, ContentHash.make("b".repeat(64)));
+      const degraded = yield* polling.poll(instance);
+      assert.strictEqual(degraded.changedItems, 2);
+      const secondRun = claimedRun(degraded);
+      assert.notStrictEqual(secondRun, firstRun);
+      yield* waitForState(engine, secondRun, "Waiting");
+      assert.deepStrictEqual(
+        degraded.failures
+          .map(({ repository, errorTag }) => ({ repository, errorTag }))
+          .sort((left, right) => left.repository.localeCompare(right.repository)),
+        [
+          { repository: Repository.Name.make("basaltbytes/unwatched"), errorTag: "GitHubApiError" },
+          { repository: watchedRepository, errorTag: "GitHubApiError" },
+        ],
+      );
+
+      // The stored catalog and its ETag survive the failed request.
+      const retained = yield* labels.get(watchedRepository);
+      assert(Option.isSome(retained));
+      assert.deepStrictEqual(retained.value.labels, ["ready"]);
+
+      // The next cycle proves both commit points: the item cursor advanced
+      // past the degraded poll, and the catalog ETag is still sent.
+      const recovered = yield* polling.poll(instance);
+      assert.strictEqual(claimedRun(recovered), secondRun);
+      const seen = yield* Ref.get(cursorsSeen);
+      const returned = yield* Ref.get(cursorsReturned);
+      assert.deepStrictEqual(seen[2], Option.some(returned[1]));
+      assert.deepStrictEqual(
+        (yield* Ref.get(labelEntityTagsSeen))[2],
+        Option.some(catalogEntityTag),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 
   it.live(
     "deduplicates snapshots across restart and emits new Events only for new matching content",
@@ -272,6 +438,7 @@ describe("PollingTriggers", () => {
           payload: issuePayload(["ready"]),
         });
         const seenCursors = yield* Ref.make<ReadonlyArray<PollCursor>>([]);
+        const seenLabelEntityTags = yield* Ref.make<ReadonlyArray<Option.Option<EntityTag>>>([]);
         const seenRepositories = yield* Ref.make<ReadonlyArray<string>>([]);
         const snapshotCalls = yield* Ref.make(0);
         const changed = new ChangedIssue({
@@ -291,6 +458,15 @@ describe("PollingTriggers", () => {
                 items: [changed],
                 backlog: false,
                 nextPollAt: Option.none(),
+              });
+            }),
+          labels: (_repository, entityTag) =>
+            Effect.gen(function* () {
+              yield* Ref.update(seenLabelEntityTags, (values) => [...values, entityTag]);
+              if (Option.isSome(entityTag)) return new RepositoryLabelsNotModified();
+              return new RepositoryLabelCatalog({
+                entityTag: Option.some(EntityTag.make('W/"labels"')),
+                labels: [RepositoryLabelName.make("unused-repository-label")],
               });
             }),
           snapshot: () =>
@@ -313,6 +489,7 @@ describe("PollingTriggers", () => {
         const firstPolling = Context.get(firstContext, PollingTriggers);
         const firstEngine = Context.get(firstContext, RunEngine);
         const firstCursors = Context.get(firstContext, CursorStore);
+        const firstLabels = Context.get(firstContext, RepositoryLabelProjectionReader);
 
         yield* firstCursors.write(
           CursorKey.make(`github-poll:${watchedRepository}`),
@@ -321,8 +498,8 @@ describe("PollingTriggers", () => {
         );
 
         const coldStart = yield* firstPolling.poll(firstInstance);
-        assert.strictEqual(coldStart.repositories, 1);
-        assert.strictEqual(coldStart.changedItems, 1);
+        assert.strictEqual(coldStart.repositories, 2);
+        assert.strictEqual(coldStart.changedItems, 2);
         const originalRun = claimedRun(coldStart);
         const originalSnapshot = yield* waitForState(firstEngine, originalRun, "Waiting");
         assert.strictEqual(originalSnapshot.task, "Implement issue 28.");
@@ -331,6 +508,9 @@ describe("PollingTriggers", () => {
         assert.strictEqual(originalSnapshot.agent.brain.model, "gpt-5.6-sol");
         assert.strictEqual(originalSnapshot.agent.brain.effort, "high");
         assert.strictEqual(originalSnapshot.agent.persona, "Implement the issue.");
+        const projectedLabels = yield* firstLabels.get(watchedRepository);
+        assert(Option.isSome(projectedLabels));
+        assert.deepStrictEqual(projectedLabels.value.labels, ["unused-repository-label"]);
         assert.deepStrictEqual(
           originalSnapshot.parentModel,
           Option.some(ModelId.make("anthropic/instance-parent")),
@@ -340,6 +520,7 @@ describe("PollingTriggers", () => {
 
         const duplicate = yield* firstPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(duplicate), originalRun);
+        assert.strictEqual((yield* Ref.get(seenLabelEntityTags)).filter(Option.isSome).length, 2);
         yield* Scope.close(firstScope, Exit.void);
 
         const secondScope = yield* Scope.make();
@@ -349,9 +530,15 @@ describe("PollingTriggers", () => {
         );
         const secondPolling = Context.get(secondContext, PollingTriggers);
         const secondEngine = Context.get(secondContext, RunEngine);
+        const secondLabels = Context.get(secondContext, RepositoryLabelProjectionReader);
+
+        const restoredLabels = yield* secondLabels.get(watchedRepository);
+        assert(Option.isSome(restoredLabels));
+        assert.deepStrictEqual(restoredLabels.value.labels, ["unused-repository-label"]);
 
         const afterRestart = yield* secondPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(afterRestart), originalRun);
+        assert.strictEqual((yield* Ref.get(seenLabelEntityTags)).filter(Option.isSome).length, 4);
         const restoredSnapshot = yield* secondEngine.inspect(originalRun);
         assert.strictEqual(restoredSnapshot.task, "Implement issue 28.");
         assert.strictEqual(restoredSnapshot.agent.name, "developer");
@@ -370,8 +557,10 @@ describe("PollingTriggers", () => {
         const newLoopRun = newLoopColdStart.submissions[1];
         assert(newLoopRun !== undefined && newLoopRun._tag === "Claimed");
         yield* waitForState(secondEngine, newLoopRun.runId, "Waiting");
-        const resetCursor = (yield* Ref.get(seenCursors))[3];
-        assert(resetCursor !== undefined && Option.isNone(resetCursor.entityTag));
+        assert.strictEqual(
+          (yield* Ref.get(seenCursors)).filter(({ entityTag }) => Option.isNone(entityTag)).length,
+          3,
+        );
 
         yield* Ref.set(state, {
           hash: ContentHash.make("b".repeat(64)),
@@ -397,11 +586,13 @@ describe("PollingTriggers", () => {
           assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
         }
 
-        assert.deepStrictEqual(
-          yield* Ref.get(seenRepositories),
-          Array.from({ length: 6 }, () => watchedRepository),
+        const repositories = yield* Ref.get(seenRepositories);
+        assert.strictEqual(repositories.filter((name) => name === watchedRepository).length, 6);
+        assert.strictEqual(
+          repositories.filter((name) => name === "basaltbytes/unwatched").length,
+          6,
         );
-        assert.strictEqual(yield* Ref.get(snapshotCalls), 6);
+        assert.strictEqual(yield* Ref.get(snapshotCalls), 12);
         yield* Scope.close(secondScope, Exit.void);
       }).pipe(Effect.provide(NodeServices.layer)),
   );
@@ -450,6 +641,7 @@ describe("PollingTriggers", () => {
                 nextPollAt: Option.none(),
               }),
             ),
+      labels: () => Effect.succeed(emptyLabelCatalog),
       snapshot: () =>
         Effect.succeed(
           new IssueSnapshot({
@@ -483,6 +675,8 @@ describe("PollingTriggers", () => {
       Layer.provide(
         Layer.mergeAll(
           cursors,
+          itemProjectionWriterLayer,
+          repositoryLabelProjectionWriterLayer,
           runs,
           MarcbachmannCelLayer,
           parser,
@@ -565,6 +759,7 @@ describe("PollingTriggers", () => {
             nextPollAt: Option.none(),
           }),
         ),
+      labels: () => Effect.succeed(emptyLabelCatalog),
       snapshot: () =>
         Effect.succeed(
           new IssueSnapshot({
@@ -577,6 +772,8 @@ describe("PollingTriggers", () => {
       Layer.provide(
         Layer.mergeAll(
           cursors,
+          itemProjectionWriterLayer,
+          repositoryLabelProjectionWriterLayer,
           runs,
           MarcbachmannCelLayer,
           parser,
@@ -594,7 +791,7 @@ describe("PollingTriggers", () => {
       assert.strictEqual(cycle.failures[0]?.errorTag, "ConfigFileError");
       assert.strictEqual(cycle.submissions.length, 1);
       assert.strictEqual(cycle.submissions[0]?._tag, "Claimed");
-      assert.strictEqual(cursorWrites.length, 1);
+      assert.strictEqual(cursorWrites.length, 2);
     }).pipe(Effect.provide(layer));
   });
 
@@ -643,6 +840,7 @@ describe("PollingTriggers", () => {
               nextPollAt: Option.none(),
             }),
           ),
+        labels: () => Effect.succeed(emptyLabelCatalog),
         snapshot: (repository, item) =>
           Effect.succeed(
             new IssueSnapshot({

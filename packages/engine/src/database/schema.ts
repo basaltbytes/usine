@@ -227,6 +227,40 @@ export const cursors = snakeCase.table(
   (table) => [check("usine_cursors_value_json_valid", sql`json_valid(${table.valueJson})`)],
 );
 
+/** Latest trigger-owned payload for each Item, projected for operator reads. */
+export const itemProjections = snakeCase.table(
+  "usine_item_projections",
+  {
+    itemKey: text().$type<Item.ItemKey>().primaryKey(),
+    repository: text().$type<Repository.Name>().notNull(),
+    source: text().notNull(),
+    itemNumber: integer({ mode: "number" }).notNull(),
+    contentHash: text().notNull(),
+    payloadJson: text({ mode: "json" }).$type<unknown>().notNull(),
+  },
+  (table) => [
+    check("usine_item_projections_number", sql`${table.itemNumber} >= 1`),
+    check("usine_item_projections_payload_json_valid", sql`json_valid(${table.payloadJson})`),
+    uniqueIndex("usine_item_projection_number").on(table.repository, table.itemNumber),
+    index("usine_item_projection_repository").on(table.repository, table.itemNumber),
+  ],
+);
+
+/** Latest complete GitHub label catalog for each managed repository. */
+export const repositoryLabelProjections = snakeCase.table(
+  "usine_repository_label_projections",
+  {
+    repository: text().$type<Repository.Name>().primaryKey(),
+    labelsJson: text({ mode: "json" }).$type<unknown>().notNull(),
+  },
+  (table) => [
+    check(
+      "usine_repository_label_projections_labels_json_valid",
+      sql`json_valid(${table.labelsJson})`,
+    ),
+  ],
+);
+
 /** Operator-owned runtime toggles; deliberately separate from authored Loop files (ADR 0009). */
 export const loopRuntime = snakeCase.table("usine_loop_runtime", {
   loopName: text().$type<Loop.LoopName>().primaryKey(),

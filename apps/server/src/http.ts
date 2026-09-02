@@ -1,8 +1,10 @@
 import { createServer } from "node:http";
 import { resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
-import { Attempt, Loop, Run } from "@usine/core";
+import { Attempt, Item, Loop, Repository, Run } from "@usine/core";
 import {
+  BoardLaneId,
+  BoardMove,
   ColdTranscriptRequest,
   EarlierTranscriptRequest,
   FactoryOverview,
@@ -17,6 +19,15 @@ import { FactoryBackend, type BackendError } from "./backend.ts";
 
 const PathRun = Schema.Struct({ runId: Run.RunId });
 const PathLoop = Schema.Struct({ loop: Loop.LoopName });
+const RepositoryPart = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9_.-]+$/u, { message: "Expected a repository path segment" }),
+);
+const PathBoardItem = Schema.Struct({
+  owner: RepositoryPart,
+  repository: RepositoryPart,
+  item: Schema.FiniteFromString.pipe(Schema.decodeTo(Item.Number)),
+});
+const BoardMoveBody = Schema.Struct({ toLane: BoardLaneId });
 const TranscriptCursorFromString = Schema.FiniteFromString.pipe(Schema.decodeTo(TranscriptCursor));
 const RunDetailSearch = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("ColdTranscriptRequest") }),
@@ -34,7 +45,11 @@ const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
 const ApiError = Schema.Struct({ error: Schema.String, message: Schema.String });
 const ok = HttpServerResponse.schemaJson(ApiOk);
 
-type RouteError = BackendError | HttpBody.HttpBodyError | Schema.SchemaError;
+class InvalidRequestError extends Schema.TaggedError<InvalidRequestError>(
+  "@usine/server/InvalidRequestError",
+)("InvalidRequestError", { message: Schema.String }) {}
+
+type RouteError = BackendError | HttpBody.HttpBodyError | InvalidRequestError | Schema.SchemaError;
 
 const errorResponse = (error: RouteError) => {
   const response = (() => {
@@ -53,6 +68,28 @@ const errorResponse = (error: RouteError) => {
         } as const;
       case "BackendUnavailableError":
         return { status: 503, message: error.message } as const;
+      case "BoardProjectNotFoundError":
+        return { status: 404, message: `Project ${error.repository} was not found.` } as const;
+      case "BoardItemNotFoundError":
+        return {
+          status: 404,
+          message: `Item ${error.repository}#${error.item} was not found on the Board.`,
+        } as const;
+      case "BoardLaneNotFoundError":
+        return { status: 404, message: `Board Lane ${error.lane} was not found.` } as const;
+      case "BoardLaneReadOnlyError":
+        return {
+          status: 409,
+          message: `Board Lane ${error.lane} is derived from Item state and cannot accept label moves.`,
+        } as const;
+      case "InstallationDiscoveryError":
+      case "AppPermissionError":
+        return { status: 503, message: error.message } as const;
+      case "GitHubApiError":
+      case "InvalidGitHubResponseError":
+        return { status: 502, message: error.message } as const;
+      case "GitHubRateLimitError":
+        return { status: 503, message: error.message } as const;
       case "EnginePersistenceError":
         return {
           status: 500,
@@ -65,6 +102,8 @@ const errorResponse = (error: RouteError) => {
         } as const;
       case "SchemaError":
         return { status: 400, message: `Invalid request: ${error.message}` } as const;
+      case "InvalidRequestError":
+        return { status: 400, message: error.message } as const;
       case "HttpBodyError":
         return { status: 500, message: "The server could not encode its response." } as const;
     }
@@ -167,6 +206,19 @@ const transcriptRequest = (
   );
 };
 
+const boardMove = Effect.fn("Http.boardMove")(function* () {
+  const { owner, repository: name, item } = yield* HttpRouter.schemaPathParams(PathBoardItem);
+  const repository = yield* Schema.decodeUnknownEffect(Repository.Name)(`${owner}/${name}`);
+  const { toLane } = yield* HttpServerRequest.schemaBodyJson(BoardMoveBody, {
+    onExcessProperty: "error",
+  }).pipe(
+    Effect.mapError(
+      (error) => new InvalidRequestError({ message: `Invalid request: ${error.message}` }),
+    ),
+  );
+  return new BoardMove({ repository, item, toLane });
+});
+
 export const apiRoutes = HttpRouter.addAll([
   HttpRouter.route(
     "GET",
@@ -193,6 +245,17 @@ export const apiRoutes = HttpRouter.addAll([
     "POST",
     "/api/runs/:runId/approve",
     runAction((backend, id) => backend.approve(id)),
+  ),
+  HttpRouter.route(
+    "POST",
+    "/api/projects/:owner/:repository/items/:item/lane",
+    handled(
+      Effect.gen(function* () {
+        const backend = yield* FactoryBackend;
+        yield* backend.moveBoardItem(yield* boardMove());
+        return yield* ok({ ok: true });
+      }),
+    ),
   ),
   HttpRouter.route(
     "POST",

@@ -1,7 +1,9 @@
 import type { LoadedInstance } from "@usine/config";
 import { Event, Loop, Run } from "@usine/core";
 import {
+  ItemProjectionReader,
   LoopControl,
+  RepositoryLabelProjectionReader,
   RunEngine,
   RunReader,
   type EnginePersistenceError,
@@ -10,11 +12,23 @@ import {
   type RunEngineError,
   type RunStoreError,
 } from "@usine/engine";
+import { GitHubItemWriter, type GitHubAppError } from "@usine/github";
 import { Context, DateTime, Effect, Layer, Option, SynchronizedRef } from "effect";
+import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import { PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import {
   ApprovalNeed,
+  type BoardItemNotFoundError,
+  BoardItemNotFoundError as BoardItemNotFound,
+  type BoardLaneNotFoundError,
+  BoardLaneNotFoundError as BoardLaneNotFound,
+  type BoardLaneReadOnlyError,
+  BoardLaneReadOnlyError as BoardLaneReadOnly,
+  type BoardMove,
+  BoardProjectionNeed,
+  type BoardProjectNotFoundError,
+  BoardProjectNotFoundError as BoardProjectNotFound,
   ColdTranscriptRequest,
   LoopView,
   PollFailureNeed,
@@ -30,11 +44,21 @@ import {
 } from "./model.ts";
 import { readTranscript, runView } from "./projection.ts";
 
-export type OperatorError = RunEngineError | TranscriptAttemptNotFoundError;
+export type BoardMoveError =
+  | BoardItemNotFoundError
+  | BoardLaneNotFoundError
+  | BoardLaneReadOnlyError
+  | BoardProjectNotFoundError
+  | EnginePersistenceError
+  | GitHubAppError;
+export type OperatorError = RunEngineError | TranscriptAttemptNotFoundError | BoardMoveError;
 export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFoundError;
 
 /** Settled Runs kept in the overview beside every open one; history stays bounded. */
 const OVERVIEW_CLOSED_RUNS = 100;
+
+/** Newest Items projected onto a Board; older ones fall off instead of growing the overview. */
+const OVERVIEW_BOARD_ITEMS = 500;
 
 interface CachedOverview {
   readonly token: string;
@@ -44,6 +68,8 @@ interface CachedOverview {
 const makeOperatorObservation = Effect.gen(function* () {
   const reader = yield* RunReader;
   const controls = yield* LoopControl;
+  const itemReader = yield* ItemProjectionReader;
+  const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const polling = yield* PollingTriggers;
   const schedules = yield* ScheduleTriggers;
   const cache = yield* SynchronizedRef.make(Option.none<CachedOverview>());
@@ -66,17 +92,39 @@ const makeOperatorObservation = Effect.gen(function* () {
       projectRuns.push(view);
       runsByRepository.set(view.repository, projectRuns);
     }
-    const projects = instance.config.repos.map(({ name }) => {
-      const projectRuns = runsByRepository.get(name) ?? [];
-      const status: ProjectStatus = projectRuns.some(
-        (run) => run.state === "Waiting" || run.state === "Failed",
-      )
-        ? "needs-you"
-        : projectRuns.some((run) => run.canCancel)
-          ? "active"
-          : "clear";
-      return new ProjectView({ repository: name, status, runs: projectRuns });
-    });
+    const projects = yield* Effect.forEach(
+      instance.config.repos,
+      (repository) =>
+        Effect.gen(function* () {
+          const { name } = repository;
+          const projectRuns = runsByRepository.get(name) ?? [];
+          const [boardItems, labelProjection] = yield* Effect.all(
+            [
+              itemReader.list(name, { limit: OVERVIEW_BOARD_ITEMS }),
+              repositoryLabels.get(name),
+            ] as const,
+            { concurrency: "unbounded" },
+          );
+          const board = yield* projectBoard(
+            repository,
+            Option.match(labelProjection, {
+              onNone: () => [],
+              onSome: ({ labels }) => labels,
+            }),
+            boardItems,
+            projectRuns,
+          );
+          const status: ProjectStatus =
+            board.failures.length > 0 ||
+            projectRuns.some((run) => run.state === "Waiting" || run.state === "Failed")
+              ? "needs-you"
+              : projectRuns.some((run) => run.canCancel)
+                ? "active"
+                : "clear";
+          return new ProjectView({ repository: name, status, runs: projectRuns, board });
+        }),
+      { concurrency: 4 },
+    );
     const loops = instance.loops.map(
       (loop) =>
         new LoopView({
@@ -109,6 +157,16 @@ const makeOperatorObservation = Effect.gen(function* () {
             runId: run.id,
             loop: run.loop,
             failure: attempt.outcome.failure,
+          }),
+        );
+      }
+    }
+    for (const project of projects) {
+      for (const failure of project.board.failures) {
+        needsYou.push(
+          new BoardProjectionNeed({
+            id: `board-projection:${failure.repository}:${failure.itemKey}`,
+            failure,
           }),
         );
       }
@@ -158,7 +216,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         const token = Option.map(revision, (value) =>
           JSON.stringify([
             value,
-            instance.config.repos.map(({ name }) => name),
+            instance.config.repos.map(({ name, lanes }) => [name, lanes]),
             instance.loops.map(({ name, agent, trigger }) => [name, agent, trigger.on]),
             pollFailures,
             scheduleFailures,
@@ -236,6 +294,9 @@ const makeOperator = Effect.gen(function* () {
   const observation = yield* OperatorObservation;
   const runs = yield* RunEngine;
   const controls = yield* LoopControl;
+  const items = yield* ItemProjectionReader;
+  const repositoryLabels = yield* RepositoryLabelProjectionReader;
+  const github = yield* GitHubItemWriter;
 
   const approve = Effect.fn("Operator.approve")(function* (runId: Run.RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
@@ -274,7 +335,67 @@ const makeOperator = Effect.gen(function* () {
     return yield* controls.unpause(loop);
   });
 
-  return { ...observation, approve, cancel, pause, retry, unpause } as const;
+  const moveBoardItem = Effect.fn("Operator.moveBoardItem")(
+    function* (instance: LoadedInstance, move: BoardMove) {
+      yield* Effect.annotateCurrentSpan({
+        repository: move.repository,
+        item: move.item,
+        lane: move.toLane,
+      });
+      const repository = instance.config.repos.find(({ name }) => name === move.repository);
+      if (repository === undefined) {
+        return yield* new BoardProjectNotFound({ repository: move.repository });
+      }
+      const [storedItems, labelProjection] = yield* Effect.all(
+        [
+          items.list(move.repository, { limit: OVERVIEW_BOARD_ITEMS }),
+          repositoryLabels.get(move.repository),
+        ] as const,
+        { concurrency: "unbounded" },
+      );
+      const board = yield* projectBoard(
+        repository,
+        Option.match(labelProjection, {
+          onNone: () => [],
+          onSome: ({ labels }) => labels,
+        }),
+        storedItems,
+        [],
+      );
+      const source = board.lanes.find(({ items: laneItems }) =>
+        laneItems.some(({ number }) => number === move.item),
+      );
+      if (source === undefined) {
+        return yield* new BoardItemNotFound({ repository: move.repository, item: move.item });
+      }
+      const target = board.lanes.find(({ id }) => id === move.toLane);
+      if (target === undefined) {
+        return yield* new BoardLaneNotFound({ repository: move.repository, lane: move.toLane });
+      }
+      if (target._tag === "ReadOnlyBoardLane") {
+        return yield* new BoardLaneReadOnly({ repository: move.repository, lane: move.toLane });
+      }
+      const mutation = labelMutationForBoardMove(board, target);
+      const applied = yield* github.updateLabels(move.repository, move.item, mutation);
+      yield* Effect.logInfo("Operator moved a Board card; the next poll projects the new lane", {
+        repository: move.repository,
+        item: move.item,
+        fromLane: source.id,
+        toLane: target.id,
+        addedLabels: mutation.add.join(", "),
+        removedLabels: mutation.remove.join(", "),
+        labels: applied.join(", "),
+      });
+    },
+    Effect.tapError((error) =>
+      Effect.logWarning("Board move rejected", {
+        errorTag: error._tag,
+        message: error.message,
+      }),
+    ),
+  );
+
+  return { ...observation, approve, cancel, moveBoardItem, pause, retry, unpause } as const;
 });
 
 /** Observe-and-intervene application service; transports only translate this API. */
@@ -284,6 +405,10 @@ export class Operator extends Context.Service<
     readonly approve: (runId: Run.RunId) => Effect.Effect<void, OperatorError>;
     readonly retry: (runId: Run.RunId) => Effect.Effect<void, OperatorError>;
     readonly cancel: (runId: Run.RunId) => Effect.Effect<void, OperatorError>;
+    readonly moveBoardItem: (
+      instance: LoadedInstance,
+      move: BoardMove,
+    ) => Effect.Effect<void, BoardMoveError>;
     readonly pause: (
       loop: Loop.LoopName,
     ) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;

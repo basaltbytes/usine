@@ -9,6 +9,23 @@ Reads and edits the authored files in a [usine](https://github.com/basaltbytes/u
 
 Authored keys are snake_case (`poll_interval`, `max_concurrent_attempts`); the decoded domain types expose camelCase fields (`pollInterval`, `maxConcurrentAttempts`). The rename is part of the schema, so edits encode back to the authored casing.
 
+Each managed repository can define an exclusive Board lane map. A lane accepts one or more GitHub label or Item-state sources:
+
+```yaml
+repos:
+  - name: acme/widget
+    lanes:
+      - name: Ready
+        sources:
+          - label: ready-for-agent
+      - name: In review
+        sources:
+          - label: ready-for-review
+          - state: pr-open
+```
+
+Valid state sources are `issue-open`, `issue-closed`, `pr-open`, `pr-closed`, and `pr-merged`. Lane names and sources must be unique within the repository. Repositories without an authored map receive proposed lanes from the labels observed during GitHub polling.
+
 `workers` must contain at least one uniquely named worker. If the key is absent, the parser supplies one local worker named `local` with a concurrency limit of one. Set `kind` to `local` or `exe.dev` to select its executor, and set `max_concurrent_attempts` to control how many Attempts it can run at once.
 
 `InstanceFolder.load` takes an `Instance.Directory` (from `@usine/core`) and returns one atomic `LoadedInstance` snapshot. An invalid `usine.yaml` fails the load with a `FactoryConfigError`; an invalid loop enters `quarantinedLoops` with a `ConfigFileError` naming the file and stage, without blocking valid siblings. Invalid agents appear in `invalidAgents`, and loops that name them are quarantined. A `LoadedInstance` always satisfies its own reference rule: every loaded loop names a rostered agent and registered selector entries, enforced at construction. The `ConfigError` union covers both failure types.

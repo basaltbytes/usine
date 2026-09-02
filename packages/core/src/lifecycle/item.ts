@@ -6,3 +6,9 @@ import { Schema } from "effect";
  */
 export const ItemKey = Schema.NonEmptyString.pipe(Schema.brand("ItemKey"));
 export type ItemKey = typeof ItemKey.Type;
+
+/** Positive repository-local number for an issue-like Item. */
+export const Number = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+  Schema.brand("ItemNumber"),
+);
+export type Number = typeof Number.Type;

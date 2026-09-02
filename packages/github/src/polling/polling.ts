@@ -24,6 +24,9 @@ import {
   PollCursor,
   PullRequestPayload,
   PullRequestSnapshot,
+  RepositoryLabelCatalog,
+  RepositoryLabelsNotModified,
+  RepositoryLabelName,
   RepositoryChanges,
   RepositoryNotModified,
   TIMESTAMP_FIELDS,
@@ -37,6 +40,8 @@ const WATERMARK_OVERLAP_MS = 5_000;
 const RATE_LIMIT_PRESSURE_THRESHOLD = 100;
 /** Bounds one cycle's REST walk; the watermark resumes the remainder next cycle. */
 const MAX_CHANGE_PAGES = 10;
+/** A pathological catalog cannot turn one repository poll into an unbounded walk. */
+const MAX_LABEL_PAGES = 100;
 /** GraphQL rate limiting sometimes omits reset headers; wait at least this long. */
 const GRAPHQL_RATE_LIMIT_FALLBACK_MS = 60_000;
 
@@ -46,6 +51,7 @@ const RestChangedItem = Schema.Struct({
   pullRequest: Schema.optionalKey(Schema.Unknown),
 }).pipe(Schema.encodeKeys({ updatedAt: "updated_at", pullRequest: "pull_request" }));
 const RestChangedItems = Schema.Array(RestChangedItem);
+const RestRepositoryLabels = Schema.Array(Schema.Struct({ name: RepositoryLabelName }));
 
 /** The GraphQL transport envelope; `errors` arrives on HTTP 200 and must be read. */
 const GraphqlEnvelope = Schema.Struct({
@@ -137,6 +143,24 @@ const changesUrl = (repository: Repository.Name, cursor: PollCursor): string => 
   return url.toString();
 };
 
+const labelsUrl = (repository: Repository.Name): string => {
+  const { name, owner } = Repository.parts(repository);
+  const url = new URL(
+    `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/labels`,
+  );
+  url.searchParams.set("per_page", "100");
+  return url.toString();
+};
+
+const itemLabelsUrl = (repository: Repository.Name, item: number): string => {
+  const { name, owner } = Repository.parts(repository);
+  const url = new URL(
+    `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${item}/labels`,
+  );
+  url.searchParams.set("per_page", "100");
+  return url.toString();
+};
+
 const newerWatermark = (cursor: PollCursor, items: ReadonlyArray<ChangedItem>) => {
   const epochs = items.map(({ updatedAt }) => DateTime.toEpochMillis(updatedAt));
   if (Option.isSome(cursor.watermark)) {
@@ -164,6 +188,10 @@ export class GitHubPolling extends Context.Service<
       repository: Repository.Name,
       cursor: PollCursor,
     ) => Effect.Effect<ChangeDetection, GitHubAppError>;
+    readonly labels: (
+      repository: Repository.Name,
+      entityTag: Option.Option<EntityTag>,
+    ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
     readonly snapshot: (
       repository: Repository.Name,
       item: ChangedItem,
@@ -207,6 +235,96 @@ export class GitHubPolling extends Context.Service<
           items: toChangedItems(decoded),
           next: nextPageUrl(response.headers.link),
         } as const;
+      });
+
+      const labelsPage = Effect.fn("GitHubPolling.labelsPage")(function* (
+        operation: GitHubOperation,
+        url: string,
+      ) {
+        const token = yield* app.installationToken();
+        const request = HttpClientRequest.get(url).pipe(authorized(token.value));
+        const response = yield* execute(operation, request);
+        const now = yield* Clock.currentTimeMillis;
+        if (response.status !== 200) {
+          return yield* statusError(operation, response, now);
+        }
+        const decoded = yield* HttpClientResponse.schemaBodyJson(RestRepositoryLabels)(
+          response,
+        ).pipe(Effect.mapError((error) => invalidResponse(operation, error.message)));
+        return {
+          labels: decoded.map(({ name }) => name),
+          next: nextPageUrl(response.headers.link),
+        };
+      });
+
+      /** Walks the pages after an already-fetched first one; one cap for every label walk. */
+      const remainingLabelPages = Effect.fn("GitHubPolling.remainingLabelPages")(function* (
+        operation: GitHubOperation,
+        firstPage: {
+          readonly labels: ReadonlyArray<RepositoryLabelName>;
+          readonly next: Option.Option<string>;
+        },
+      ) {
+        const catalog = [...firstPage.labels];
+        let next = firstPage.next;
+        let pages = 1;
+        while (Option.isSome(next) && pages < MAX_LABEL_PAGES) {
+          const page = yield* labelsPage(operation, next.value);
+          catalog.push(...page.labels);
+          next = page.next;
+          pages += 1;
+        }
+        if (Option.isSome(next)) {
+          return yield* invalidResponse(
+            operation,
+            `GitHub label list exceeded ${MAX_LABEL_PAGES} pages`,
+          );
+        }
+        return catalog.sort((left, right) => left.localeCompare(right));
+      });
+
+      const allLabels = Effect.fn("GitHubPolling.allLabels")(function* (
+        operation: GitHubOperation,
+        initialUrl: string,
+      ) {
+        return yield* remainingLabelPages(operation, yield* labelsPage(operation, initialUrl));
+      });
+
+      const labels = Effect.fn("GitHubPolling.labels")(function* (
+        repository: Repository.Name,
+        entityTag: Option.Option<EntityTag>,
+      ) {
+        yield* Effect.annotateCurrentSpan({ repository });
+        const token = yield* app.installationToken();
+        let request = HttpClientRequest.get(labelsUrl(repository)).pipe(authorized(token.value));
+        if (Option.isSome(entityTag)) {
+          request = HttpClientRequest.setHeader(request, "if-none-match", entityTag.value);
+        }
+        const response = yield* execute("list-repository-labels", request);
+        const now = yield* Clock.currentTimeMillis;
+        if (response.status === 304) return new RepositoryLabelsNotModified();
+        if (response.status !== 200) {
+          return yield* statusError("list-repository-labels", response, now);
+        }
+        const firstPage = yield* HttpClientResponse.schemaBodyJson(RestRepositoryLabels)(
+          response,
+        ).pipe(
+          Effect.mapError((error) => invalidResponse("list-repository-labels", error.message)),
+        );
+        const catalog = yield* remainingLabelPages("list-repository-labels", {
+          labels: firstPage.map(({ name }) => name),
+          next: nextPageUrl(response.headers.link),
+        });
+        const catalogEntityTag = Schema.decodeUnknownOption(EntityTag)(response.headers.etag);
+        if (Option.isNone(catalogEntityTag)) {
+          yield* Effect.logWarning(
+            "GitHub omitted the label catalog ETag; next poll is unconditional",
+            {
+              repository,
+            },
+          );
+        }
+        return new RepositoryLabelCatalog({ entityTag: catalogEntityTag, labels: catalog });
       });
 
       const changes = Effect.fn("GitHubPolling.changes")(function* (
@@ -321,6 +439,25 @@ export class GitHubPolling extends Context.Service<
           item: ChangedItem,
         ): Effect.Effect<PayloadSnapshot, GitHubAppError> =>
           Effect.gen(function* () {
+            const completeLabels = Effect.fn("GitHubPolling.completeItemLabels")(function* (
+              payload: IssuePayload | PullRequestPayload,
+            ) {
+              if (payload.labels.nodes.length >= payload.labels.totalCount) return payload.labels;
+              yield* Effect.logDebug(
+                "Completing truncated Item label connection for Board matching",
+                {
+                  repository,
+                  item: item.number,
+                  listedLabels: payload.labels.nodes.length,
+                  totalLabels: payload.labels.totalCount,
+                },
+              );
+              const names = yield* allLabels(
+                "fetch-item-labels",
+                itemLabelsUrl(repository, item.number),
+              );
+              return { totalCount: names.length, nodes: names.map((name) => ({ name })) };
+            });
             if (item._tag === "ChangedIssue") {
               const data = yield* graphql(
                 "fetch-issue-snapshot",
@@ -336,9 +473,13 @@ export class GitHubPolling extends Context.Service<
                   `issue ${item.number} came back null — deleted, transferred, or access lost`,
                 );
               }
+              const completePayload = {
+                ...payload.value,
+                labels: yield* completeLabels(payload.value),
+              };
               return new IssueSnapshot({
-                payload: payload.value,
-                contentHash: yield* contentHash(payload.value),
+                payload: completePayload,
+                contentHash: yield* contentHash(completePayload),
               });
             }
 
@@ -356,14 +497,18 @@ export class GitHubPolling extends Context.Service<
                 `pull request ${item.number} came back null — deleted or access lost`,
               );
             }
+            const completePayload = {
+              ...payload.value,
+              labels: yield* completeLabels(payload.value),
+            };
             return new PullRequestSnapshot({
-              payload: payload.value,
-              contentHash: yield* contentHash(payload.value),
+              payload: completePayload,
+              contentHash: yield* contentHash(completePayload),
             });
           }),
       );
 
-      return { changes, snapshot };
+      return { changes, labels, snapshot };
     }),
   );
 }

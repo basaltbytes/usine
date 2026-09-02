@@ -2,6 +2,7 @@ import type { LoadedInstance } from "@usine/config";
 import { Loop, Run } from "@usine/core";
 import type {
   FactoryOverview,
+  BoardMove,
   Operator,
   OperatorObservation,
   OperatorError,
@@ -30,6 +31,7 @@ export class FactoryBackend extends Context.Service<
     readonly approve: (runId: Run.RunId) => Effect.Effect<void, BackendError>;
     readonly retry: (runId: Run.RunId) => Effect.Effect<void, BackendError>;
     readonly cancel: (runId: Run.RunId) => Effect.Effect<void, BackendError>;
+    readonly moveBoardItem: (move: BoardMove) => Effect.Effect<void, BackendError>;
     readonly pause: (loop: Loop.LoopName) => Effect.Effect<void, BackendError>;
     readonly unpause: (loop: Loop.LoopName) => Effect.Effect<void, BackendError>;
   }
@@ -45,6 +47,7 @@ export const liveBackendLayer = (
     approve: operator.approve,
     retry: operator.retry,
     cancel: operator.cancel,
+    moveBoardItem: (move) => operator.moveBoardItem(instance, move),
     pause: (loop) => operator.pause(loop).pipe(Effect.asVoid),
     unpause: (loop) => operator.unpause(loop).pipe(Effect.asVoid),
   });
@@ -72,6 +75,7 @@ export const needsSetupBackendLayer = (
     approve: fail,
     retry: fail,
     cancel: fail,
+    moveBoardItem: fail,
     pause: fail,
     unpause: fail,
   });

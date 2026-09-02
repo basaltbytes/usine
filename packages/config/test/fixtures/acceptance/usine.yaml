@@ -3,4 +3,11 @@ version: 1
 repos:
   - name: basaltbytes/usine
     tags: [active]
+    lanes:
+      - name: Ready
+        sources:
+          - label: ready-for-agent
+      - name: In review
+        sources:
+          - state: pr-open
 settings: {}

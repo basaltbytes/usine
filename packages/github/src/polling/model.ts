@@ -25,6 +25,30 @@ export const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set([
 export const EntityTag = Schema.NonEmptyString.pipe(Schema.brand("GitHubEntityTag"));
 export type EntityTag = typeof EntityTag.Type;
 
+export const RepositoryLabelName = Schema.NonEmptyString.pipe(
+  Schema.brand("GitHubRepositoryLabelName"),
+);
+export type RepositoryLabelName = typeof RepositoryLabelName.Type;
+
+/** A complete label catalog and the ETag for its canonical REST URL. */
+export class RepositoryLabelCatalog extends Schema.Class<RepositoryLabelCatalog>(
+  "@usine/github/RepositoryLabelCatalog",
+)({
+  entityTag: Schema.OptionFromNullOr(EntityTag),
+  labels: Schema.Array(RepositoryLabelName).check(Schema.isUnique()),
+}) {}
+
+/** GitHub confirmed that the catalog named by its ETag has not changed. */
+export class RepositoryLabelsNotModified extends Schema.TaggedClass<RepositoryLabelsNotModified>(
+  "@usine/github/RepositoryLabelsNotModified",
+)("RepositoryLabelsNotModified", {}) {}
+
+export const RepositoryLabelDetection = Schema.Union([
+  RepositoryLabelCatalog,
+  RepositoryLabelsNotModified,
+]);
+export type RepositoryLabelDetection = typeof RepositoryLabelDetection.Type;
+
 /** Efficiency-only REST cursor. Losing it is safe because Event dedup is permanent. */
 export class PollCursor extends Schema.Class<PollCursor>("@usine/github/PollCursor")({
   entityTag: Schema.OptionFromNullOr(EntityTag),
@@ -92,7 +116,7 @@ const emptyConnection = { totalCount: 0, nodes: [] } as const;
 
 const Actor = Schema.Struct({ login: Schema.NonEmptyString });
 const NullableActor = Schema.NullOr(Actor);
-const Label = Schema.Struct({ name: Schema.String });
+const Label = Schema.Struct({ name: Schema.NonEmptyString });
 const Labels = Schema.Struct({ totalCount: NonNegativeInt, nodes: Schema.Array(Label) });
 const IssueComment = Schema.Struct({
   author: NullableActor,
