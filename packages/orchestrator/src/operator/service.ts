@@ -1,3 +1,4 @@
+import { GitHubLabelName } from "@usine/config";
 import type { LoadedInstance } from "@usine/config";
 import { Event, Loop, Run } from "@usine/core";
 import {
@@ -41,6 +42,7 @@ import {
   type TranscriptRequest,
   type NeedView,
   type ProjectStatus,
+  LabelView,
 } from "./model.ts";
 import { readTranscript, runView } from "./projection.ts";
 
@@ -105,12 +107,13 @@ const makeOperatorObservation = Effect.gen(function* () {
             ] as const,
             { concurrency: "unbounded" },
           );
+          const catalog = Option.match(labelProjection, {
+            onNone: () => [],
+            onSome: ({ labels }) => labels,
+          });
           const board = yield* projectBoard(
             repository,
-            Option.match(labelProjection, {
-              onNone: () => [],
-              onSome: ({ labels }) => labels,
-            }),
+            catalog.map(({ name }) => name),
             boardItems,
             projectRuns,
           );
@@ -121,7 +124,20 @@ const makeOperatorObservation = Effect.gen(function* () {
               : projectRuns.some((run) => run.canCancel)
                 ? "active"
                 : "clear";
-          return new ProjectView({ repository: name, status, runs: projectRuns, board });
+          return new ProjectView({
+            repository: name,
+            status,
+            runs: projectRuns,
+            board,
+            labels: catalog.map(
+              ({ name: label, color, description }) =>
+                new LabelView({
+                  name: GitHubLabelName.make(label),
+                  color: Option.getOrNull(color),
+                  description: Option.getOrNull(description),
+                }),
+            ),
+          });
         }),
       { concurrency: 4 },
     );
@@ -357,7 +373,7 @@ const makeOperator = Effect.gen(function* () {
         repository,
         Option.match(labelProjection, {
           onNone: () => [],
-          onSome: ({ labels }) => labels,
+          onSome: ({ labels }) => labels.map(({ name }) => name),
         }),
         storedItems,
         [],

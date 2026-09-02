@@ -102,6 +102,7 @@ describe("Runs without a Board card", () => {
       repository: Repository.Name.make("basaltbytes/usine"),
       status: "active",
       runs: [cardedRun, scheduled],
+      labels: [],
       board: new BoardView({
         failures: [],
         lanes: [

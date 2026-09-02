@@ -284,14 +284,14 @@ describe("GitHubPolling", () => {
       requests.push(request);
       return Effect.succeed(
         requests.length === 1
-          ? response(request, [{ name: "ready" }], {
+          ? response(request, [{ name: "ready", color: "0E8A16", description: "Ready to start" }], {
               headers: {
                 etag: 'W/"labels-1"',
                 link: '<https://api.github.com/repositories/1/labels?page=2>; rel="next"',
               },
             })
           : requests.length === 2
-            ? response(request, [{ name: "bug" }])
+            ? response(request, [{ name: "bug", color: "d73a4a", description: null }])
             : response(request, null, { status: 304 }),
       );
     });
@@ -303,7 +303,17 @@ describe("GitHubPolling", () => {
       if (!(catalog instanceof RepositoryLabelCatalog)) return;
       assert(Option.isSome(catalog.entityTag));
       if (Option.isNone(catalog.entityTag)) return;
-      assert.deepStrictEqual(catalog.labels.map(String), ["bug", "ready"]);
+      assert.deepStrictEqual(
+        catalog.labels.map(({ name, color, description }) => [
+          name,
+          color,
+          Option.getOrNull(description),
+        ]),
+        [
+          ["bug", "d73a4a", null],
+          ["ready", "0E8A16", "Ready to start"],
+        ],
+      );
       assert.strictEqual(requests.length, 2);
       assert.strictEqual(
         requests[0]?.url,
@@ -340,14 +350,14 @@ describe("GitHubPolling", () => {
         requests.length === 2
           ? response(
               request,
-              labels.slice(0, 50).map((name) => ({ name })),
+              labels.slice(0, 50).map((name) => ({ name, color: "ededed", description: null })),
               {
                 headers: {
                   link: '<https://api.github.com/repositories/1/issues/28/labels?page=2>; rel="next"',
                 },
               },
             )
-          : response(request, [{ name: finalLabel }]),
+          : response(request, [{ name: finalLabel, color: "ededed", description: null }]),
       );
     });
 

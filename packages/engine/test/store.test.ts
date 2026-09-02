@@ -24,7 +24,10 @@ import {
   ItemProjectionSource,
 } from "../src/item-projection/model.ts";
 import { ItemProjectionReader, ItemProjectionWriter } from "../src/item-projection/service.ts";
-import { RepositoryLabelProjection } from "../src/repository-label-projection/model.ts";
+import {
+  RepositoryLabel,
+  RepositoryLabelProjection,
+} from "../src/repository-label-projection/model.ts";
 import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
@@ -316,7 +319,18 @@ describe("repository label projections", () => {
       const repository = Repository.Name.make("basaltbytes/usine");
       const projection = new RepositoryLabelProjection({
         repository,
-        labels: ["bug", "unused-ready-label"],
+        labels: [
+          new RepositoryLabel({
+            name: "bug",
+            color: Option.some("d73a4a"),
+            description: Option.some("Something is broken"),
+          }),
+          new RepositoryLabel({
+            name: "unused-ready-label",
+            color: Option.none(),
+            description: Option.none(),
+          }),
+        ],
       });
       const database = localSqliteLayer(directory);
       const services = Layer.mergeAll(

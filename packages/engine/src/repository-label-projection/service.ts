@@ -4,12 +4,23 @@ import { Context, Effect, Layer, Option, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import { repositoryLabelProjections } from "../database/schema.ts";
 import { EnginePersistenceError } from "../model.ts";
-import { RepositoryLabelProjection } from "./model.ts";
+import { RepositoryLabel, RepositoryLabelProjection } from "./model.ts";
 
+/** Rows written before colors were kept hold bare names; they read as colorless labels. */
+const LegacyLabelNames = Schema.Array(Schema.String);
+const isLegacyLabelNames = Schema.is(LegacyLabelNames);
 const RepositoryLabelProjectionRow = Schema.Struct({
   repository: Repository.Name,
-  labels: RepositoryLabelProjection.fields.labels,
+  labels: Schema.Union([RepositoryLabelProjection.fields.labels, LegacyLabelNames]),
 });
+const storedLabels = (
+  labels: (typeof RepositoryLabelProjectionRow.Type)["labels"],
+): ReadonlyArray<RepositoryLabel> =>
+  isLegacyLabelNames(labels)
+    ? labels.map(
+        (name) => new RepositoryLabel({ name, color: Option.none(), description: Option.none() }),
+      )
+    : labels;
 
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(RepositoryLabelProjectionRow));
 const encodeLabels = Schema.encodeSync(RepositoryLabelProjection.fields.labels);
@@ -36,7 +47,12 @@ const makeReader = Effect.gen(function* () {
       const row = decoded[0];
       return row === undefined
         ? Option.none<RepositoryLabelProjection>()
-        : Option.some(new RepositoryLabelProjection(row));
+        : Option.some(
+            new RepositoryLabelProjection({
+              repository: row.repository,
+              labels: storedLabels(row.labels),
+            }),
+          );
     }, persistence("read repository label projection")),
   } as const;
 });

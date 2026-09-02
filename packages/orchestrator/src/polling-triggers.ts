@@ -19,6 +19,7 @@ import {
   ItemProjectionSource,
   ItemProjectionWriter,
   LoopControl,
+  RepositoryLabel,
   RepositoryLabelProjection,
   RepositoryLabelProjectionWriter,
   RunEngine,
@@ -67,7 +68,7 @@ type WatchKey = typeof WatchKey.Type;
 class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   "@usine/orchestrator/StoredPollCursor",
 )({
-  boardVersion: Schema.Literal(2),
+  boardVersion: Schema.Literal(3),
   cursor: PollCursor,
   labelEntityTag: Schema.OptionFromNullOr(EntityTag),
   watches: Schema.Array(WatchKey).check(Schema.isUnique()),
@@ -217,7 +218,7 @@ export class PollingTriggers extends Context.Service<
 
       const emptyCursor = (watches: ReadonlyArray<WatchKey>) =>
         new StoredPollCursor({
-          boardVersion: 2,
+          boardVersion: 3,
           cursor: PollCursor.empty,
           labelEntityTag: Option.none(),
           watches,
@@ -419,7 +420,10 @@ export class PollingTriggers extends Context.Service<
         yield* repositoryLabels.replace(
           new RepositoryLabelProjection({
             repository: watched.repository.name,
-            labels: detection.labels.map(String),
+            labels: detection.labels.map(
+              ({ name, color, description }) =>
+                new RepositoryLabel({ name, color: Option.some(color), description }),
+            ),
           }),
         );
         return { ...unchanged, labelEntityTag: detection.entityTag, stored: true };
@@ -439,7 +443,7 @@ export class PollingTriggers extends Context.Service<
         );
         const catalog = yield* applyLabelCatalog(watched, stored, labelResult);
         const nextCursor = new StoredPollCursor({
-          boardVersion: 2,
+          boardVersion: 3,
           cursor: detected.cursor,
           labelEntityTag: catalog.labelEntityTag,
           watches: watched.watches,

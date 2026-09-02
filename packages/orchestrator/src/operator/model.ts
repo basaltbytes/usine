@@ -147,11 +147,20 @@ export class BoardView extends Schema.Class<BoardView>("@usine/orchestrator/Boar
   failures: Schema.Array(BoardProjectionError),
 }) {}
 
+/** A repository label as GitHub shows it; color is null for catalogs stored before colors were kept. */
+export class LabelView extends Schema.Class<LabelView>("@usine/orchestrator/LabelView")({
+  name: GitHubLabelName,
+  color: Schema.NullOr(Schema.String),
+  description: Schema.NullOr(Schema.String),
+}) {}
+
 export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/ProjectView")({
   repository: Repository.Name,
   status: ProjectStatus,
   runs: Schema.Array(RunView),
   board: BoardView,
+  /** The repository's label catalog, for coloring badges on cards and lanes. */
+  labels: Schema.Array(LabelView),
 }) {}
 
 export class BoardMove extends Schema.Class<BoardMove>("@usine/orchestrator/BoardMove")({

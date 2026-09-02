@@ -43,7 +43,11 @@ export {
   ItemProjectionReader,
   ItemProjectionWriter,
 } from "./item-projection/service.ts";
-export { RepositoryLabelProjection } from "./repository-label-projection/model.ts";
+export {
+  RepositoryLabel,
+  RepositoryLabelColor,
+  RepositoryLabelProjection,
+} from "./repository-label-projection/model.ts";
 export {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,

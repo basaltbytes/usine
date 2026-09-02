@@ -24,7 +24,9 @@ import {
   PollCursor,
   PullRequestPayload,
   PullRequestSnapshot,
+  RepositoryLabel,
   RepositoryLabelCatalog,
+  RepositoryLabelColor,
   RepositoryLabelsNotModified,
   RepositoryLabelName,
   RepositoryChanges,
@@ -51,7 +53,20 @@ const RestChangedItem = Schema.Struct({
   pullRequest: Schema.optionalKey(Schema.Unknown),
 }).pipe(Schema.encodeKeys({ updatedAt: "updated_at", pullRequest: "pull_request" }));
 const RestChangedItems = Schema.Array(RestChangedItem);
-const RestRepositoryLabels = Schema.Array(Schema.Struct({ name: RepositoryLabelName }));
+const RestRepositoryLabels = Schema.Array(
+  Schema.Struct({
+    name: RepositoryLabelName,
+    color: RepositoryLabelColor,
+    description: Schema.NullOr(Schema.String),
+  }),
+);
+
+const catalogLabel = ({
+  name,
+  color,
+  description,
+}: (typeof RestRepositoryLabels.Type)[number]): RepositoryLabel =>
+  new RepositoryLabel({ name, color, description: Option.fromNullishOr(description) });
 
 /** The GraphQL transport envelope; `errors` arrives on HTTP 200 and must be read. */
 const GraphqlEnvelope = Schema.Struct({
@@ -252,7 +267,7 @@ export class GitHubPolling extends Context.Service<
           response,
         ).pipe(Effect.mapError((error) => invalidResponse(operation, error.message)));
         return {
-          labels: decoded.map(({ name }) => name),
+          labels: decoded.map(catalogLabel),
           next: nextPageUrl(response.headers.link),
         };
       });
@@ -261,7 +276,7 @@ export class GitHubPolling extends Context.Service<
       const remainingLabelPages = Effect.fn("GitHubPolling.remainingLabelPages")(function* (
         operation: GitHubOperation,
         firstPage: {
-          readonly labels: ReadonlyArray<RepositoryLabelName>;
+          readonly labels: ReadonlyArray<RepositoryLabel>;
           readonly next: Option.Option<string>;
         },
       ) {
@@ -280,7 +295,7 @@ export class GitHubPolling extends Context.Service<
             `GitHub label list exceeded ${MAX_LABEL_PAGES} pages`,
           );
         }
-        return catalog.sort((left, right) => left.localeCompare(right));
+        return catalog.sort((left, right) => left.name.localeCompare(right.name));
       });
 
       const allLabels = Effect.fn("GitHubPolling.allLabels")(function* (
@@ -312,7 +327,7 @@ export class GitHubPolling extends Context.Service<
           Effect.mapError((error) => invalidResponse("list-repository-labels", error.message)),
         );
         const catalog = yield* remainingLabelPages("list-repository-labels", {
-          labels: firstPage.map(({ name }) => name),
+          labels: firstPage.map(catalogLabel),
           next: nextPageUrl(response.headers.link),
         });
         const catalogEntityTag = Schema.decodeUnknownOption(EntityTag)(response.headers.etag);
@@ -456,7 +471,7 @@ export class GitHubPolling extends Context.Service<
                 "fetch-item-labels",
                 itemLabelsUrl(repository, item.number),
               );
-              return { totalCount: names.length, nodes: names.map((name) => ({ name })) };
+              return { totalCount: names.length, nodes: names.map(({ name }) => ({ name })) };
             });
             if (item._tag === "ChangedIssue") {
               const data = yield* graphql(
