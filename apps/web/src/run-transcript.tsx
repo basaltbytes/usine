@@ -5,6 +5,7 @@ import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Message, MessageContent, MessageHeader } from "@/components/ui/message";
+import { Markdown } from "@/components/markdown";
 import { cn } from "@/lib/utils";
 import { presentTranscriptEvent, type PresentedTranscriptEvent } from "./operator-copy.ts";
 
@@ -63,12 +64,18 @@ const TranscriptEvent = ({ event }: { readonly event: PresentedTranscriptEvent }
       </MessageHeader>
       {event.detail !== "" && (
         <Bubble variant={event.isError ? "destructive" : "muted"} className="max-w-full">
-          <BubbleContent
-            render={<pre />}
-            className="max-h-64 w-full overflow-y-auto font-mono text-[0.625rem]/relaxed whitespace-pre-wrap wrap-anywhere"
-          >
-            {event.detail}
-          </BubbleContent>
+          {event.format === "markdown" ? (
+            <BubbleContent className="w-full">
+              <Markdown>{event.detail}</Markdown>
+            </BubbleContent>
+          ) : (
+            <BubbleContent
+              render={<pre />}
+              className="max-h-64 w-full overflow-y-auto font-mono text-[0.625rem]/relaxed whitespace-pre-wrap wrap-anywhere"
+            >
+              {event.detail}
+            </BubbleContent>
+          )}
         </Bubble>
       )}
     </MessageContent>

@@ -6,6 +6,7 @@ import type { TranscriptPageCursor } from "@usine/orchestrator";
 import type { Schema } from "effect";
 import { useState, type ReactNode } from "react";
 import { ErrorAlert } from "@/components/error-alert";
+import { Markdown } from "@/components/markdown";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -193,7 +194,7 @@ export const RunDrawer = ({
                 <ErrorAlert className="mx-6 mt-4" message={mutation.error.message} />
               )}
               <Section title="Task">
-                <p className="max-w-prose whitespace-pre-wrap">{run.task}</p>
+                <Markdown className="max-w-prose">{run.task}</Markdown>
               </Section>
               <Section title="Event">
                 <p className="font-mono text-muted-foreground wrap-anywhere">
@@ -232,7 +233,7 @@ export const RunDrawer = ({
               </Section>
               {run.resultMessage !== null && (
                 <Section title="Result">
-                  <p className="max-w-prose whitespace-pre-wrap">{run.resultMessage}</p>
+                  <Markdown className="max-w-prose">{run.resultMessage}</Markdown>
                   {run.pullRequestUrl !== null && (
                     <Button
                       variant="link"

@@ -1,6 +1,5 @@
 import {
   ArrowRightIcon,
-  CircleIcon,
   PauseIcon,
   PlayIcon,
   WarningCircleIcon,
@@ -18,6 +17,7 @@ import {
   createRootRoute,
   createRoute,
   createRouter,
+  Link,
   RouterProvider,
   useNavigate,
 } from "@tanstack/react-router";
@@ -27,10 +27,19 @@ import type { LoopView, NeedView, ProjectView } from "@usine/orchestrator";
 import { Schema } from "effect";
 import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
+import { AppSidebar } from "@/components/app-sidebar";
 import { ErrorAlert } from "@/components/error-alert";
 import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import {
   Empty,
@@ -49,8 +58,9 @@ import {
   ItemGroup,
   ItemTitle,
 } from "@/components/ui/item";
+import { Separator } from "@/components/ui/separator";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { Spinner } from "@/components/ui/spinner";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 import { api } from "./api.ts";
 import { ProjectBoard } from "./board.tsx";
@@ -297,95 +307,108 @@ const FactoryScreen = () => {
   const data = overview.data;
   const live = data._tag !== "NeedsSetup";
   return (
-    <div className="flex min-h-svh flex-col">
-      <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b px-4 py-3 sm:px-6">
-        <div className="flex items-center gap-2.5">
-          <span
-            className="grid size-7 place-items-center rounded-md bg-primary font-heading text-sm font-semibold text-primary-foreground"
-            aria-hidden="true"
-          >
-            U
-          </span>
-          <div className="leading-tight">
-            <p className="font-heading text-sm font-medium">Usine</p>
-            <p className="text-[0.625rem] text-muted-foreground">Factory floor · local</p>
-          </div>
-        </div>
-        <Tabs
-          value={search.view ?? "projects"}
-          onValueChange={(value: string) =>
-            navigate({ search: value === "configuration" ? { view: "configuration" } : {} })
-          }
-        >
-          <TabsList variant="line" aria-label="Operator views">
-            <TabsTrigger value="projects">Projects</TabsTrigger>
-            <TabsTrigger value="configuration">Configuration</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        {/* The indicator reports the trigger streams, not the server: idle
-            pollers must never read as a running factory. */}
-        <Badge
-          variant="outline"
-          className={cn("ml-auto font-mono", live ? "text-run-succeeded" : "text-muted-foreground")}
-        >
-          <CircleIcon weight="fill" aria-hidden="true" />
-          {live ? "live" : "idle"}
-        </Badge>
-      </header>
-      {data._tag === "NeedsSetup" && (
-        <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 sm:px-6">
-          <WarningIcon weight="fill" className="text-needs-you" />
-          <AlertTitle className="text-sm">
-            The floor is ready. GitHub is not connected yet.
-          </AlertTitle>
-          <AlertDescription className="max-w-prose">
-            <p>
-              Setup required: {data.errorTag}. Add <code>USINE_GITHUB_APP_ID</code> and{" "}
-              <code>USINE_GITHUB_PRIVATE_KEY</code>, or create <code>.usine/github-app.json</code>{" "}
-              with mode 0600. Then stop and rerun <code>usine up</code>: the running process reads
-              credentials only when it starts.
-            </p>
-          </AlertDescription>
-        </Alert>
-      )}
-      <NeedStrip needs={data.needsYou} openRun={openRun} />
-      {search.view === "configuration" ? (
-        <Configuration
-          loops={data.loops}
-          pending={pauseMutation.isPending || data._tag === "NeedsSetup"}
-          act={(value) => pauseMutation.mutate(value)}
-          error={pauseMutation.isError ? pauseMutation.error.message : null}
-        />
-      ) : search.project === undefined ? (
-        <ProjectIndex
-          projects={data.projects}
-          open={(project) => navigate({ search: { project } })}
-        />
-      ) : (
-        (() => {
-          const project = data.projects.find(({ repository }) => repository === search.project);
-          return project === undefined ? (
-            <BootScreen
-              title="Not found"
-              description={`${search.project} is not a registered project.`}
-              tone="error"
-            >
-              <Button variant="outline" onClick={() => navigate({ search: {} })}>
-                Back to projects
-              </Button>
-            </BootScreen>
-          ) : (
-            <ProjectBoard
-              project={project}
-              disabled={data._tag === "NeedsSetup"}
-              back={() => navigate({ search: {} })}
-              openRun={openRun}
-            />
-          );
-        })()
-      )}
-      {search.run !== undefined && <RunDrawer runId={search.run} close={closeRun} />}
-    </div>
+    <SidebarProvider>
+      <AppSidebar
+        projects={data.projects}
+        view={search.view ?? "projects"}
+        project={search.project}
+        needsYou={data.needsYou.length}
+        live={live}
+      />
+      <SidebarInset>
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+          <SidebarTrigger className="-ml-1" />
+          <Separator
+            orientation="vertical"
+            className="mr-2 data-vertical:h-4 data-vertical:self-auto"
+          />
+          <Breadcrumb>
+            <BreadcrumbList>
+              {search.view === "configuration" ? (
+                <>
+                  <BreadcrumbItem>
+                    <BreadcrumbLink render={<Link to="/" search={{ view: "configuration" }} />}>
+                      Configuration
+                    </BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem>
+                    <BreadcrumbPage>Loops</BreadcrumbPage>
+                  </BreadcrumbItem>
+                </>
+              ) : search.project === undefined ? (
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Projects</BreadcrumbPage>
+                </BreadcrumbItem>
+              ) : (
+                <>
+                  <BreadcrumbItem>
+                    <BreadcrumbLink render={<Link to="/" search={{}} />}>Projects</BreadcrumbLink>
+                  </BreadcrumbItem>
+                  <BreadcrumbSeparator />
+                  <BreadcrumbItem>
+                    <BreadcrumbPage className="font-mono">{search.project}</BreadcrumbPage>
+                  </BreadcrumbItem>
+                </>
+              )}
+            </BreadcrumbList>
+          </Breadcrumb>
+        </header>
+        {data._tag === "NeedsSetup" && (
+          <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 sm:px-6">
+            <WarningIcon weight="fill" className="text-needs-you" />
+            <AlertTitle className="text-sm">
+              The floor is ready. GitHub is not connected yet.
+            </AlertTitle>
+            <AlertDescription className="max-w-prose">
+              <p>
+                Setup required: {data.errorTag}. Add <code>USINE_GITHUB_APP_ID</code> and{" "}
+                <code>USINE_GITHUB_PRIVATE_KEY</code>, or create <code>.usine/github-app.json</code>{" "}
+                with mode 0600. Then stop and rerun <code>usine up</code>: the running process reads
+                credentials only when it starts.
+              </p>
+            </AlertDescription>
+          </Alert>
+        )}
+        <NeedStrip needs={data.needsYou} openRun={openRun} />
+        {search.view === "configuration" ? (
+          <Configuration
+            loops={data.loops}
+            pending={pauseMutation.isPending || data._tag === "NeedsSetup"}
+            act={(value) => pauseMutation.mutate(value)}
+            error={pauseMutation.isError ? pauseMutation.error.message : null}
+          />
+        ) : search.project === undefined ? (
+          <ProjectIndex
+            projects={data.projects}
+            open={(project) => navigate({ search: { project } })}
+          />
+        ) : (
+          (() => {
+            const project = data.projects.find(({ repository }) => repository === search.project);
+            return project === undefined ? (
+              <BootScreen
+                title="Not found"
+                description={`${search.project} is not a registered project.`}
+                tone="error"
+              >
+                <Button variant="outline" onClick={() => navigate({ search: {} })}>
+                  Back to projects
+                </Button>
+              </BootScreen>
+            ) : (
+              <ProjectBoard
+                project={project}
+                disabled={data._tag === "NeedsSetup"}
+                back={() => navigate({ search: {} })}
+                openRun={openRun}
+              />
+            );
+          })()
+        )}
+        {search.run !== undefined && <RunDrawer runId={search.run} close={closeRun} />}
+      </SidebarInset>
+    </SidebarProvider>
   );
 };
 
