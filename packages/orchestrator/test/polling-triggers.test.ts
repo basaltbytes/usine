@@ -44,6 +44,8 @@ import {
   RepositoryLabelsNotModified,
   RepositoryNotModified,
   RepositoryChanges,
+  RepositoryLabel,
+  RepositoryLabelColor,
   RepositoryLabelName,
   type IssuePayload,
 } from "@usine/github";
@@ -366,7 +368,13 @@ describe("PollingTriggers", () => {
             }
             return new RepositoryLabelCatalog({
               entityTag: Option.some(catalogEntityTag),
-              labels: [RepositoryLabelName.make("ready")],
+              labels: [
+                new RepositoryLabel({
+                  name: RepositoryLabelName.make("ready"),
+                  color: RepositoryLabelColor.make("0E8A16"),
+                  description: Option.none(),
+                }),
+              ],
             });
           }),
         snapshot: () =>
@@ -409,7 +417,10 @@ describe("PollingTriggers", () => {
       // The stored catalog and its ETag survive the failed request.
       const retained = yield* labels.get(watchedRepository);
       assert(Option.isSome(retained));
-      assert.deepStrictEqual(retained.value.labels, ["ready"]);
+      assert.deepStrictEqual(
+        retained.value.labels.map(({ name }) => name),
+        ["ready"],
+      );
 
       // The next cycle proves both commit points: the item cursor advanced
       // past the degraded poll, and the catalog ETag is still sent.
@@ -466,7 +477,13 @@ describe("PollingTriggers", () => {
               if (Option.isSome(entityTag)) return new RepositoryLabelsNotModified();
               return new RepositoryLabelCatalog({
                 entityTag: Option.some(EntityTag.make('W/"labels"')),
-                labels: [RepositoryLabelName.make("unused-repository-label")],
+                labels: [
+                  new RepositoryLabel({
+                    name: RepositoryLabelName.make("unused-repository-label"),
+                    color: RepositoryLabelColor.make("5319E7"),
+                    description: Option.some("kept for the restart test"),
+                  }),
+                ],
               });
             }),
           snapshot: () =>
@@ -510,7 +527,10 @@ describe("PollingTriggers", () => {
         assert.strictEqual(originalSnapshot.agent.persona, "Implement the issue.");
         const projectedLabels = yield* firstLabels.get(watchedRepository);
         assert(Option.isSome(projectedLabels));
-        assert.deepStrictEqual(projectedLabels.value.labels, ["unused-repository-label"]);
+        assert.deepStrictEqual(
+          projectedLabels.value.labels.map(({ name }) => name),
+          ["unused-repository-label"],
+        );
         assert.deepStrictEqual(
           originalSnapshot.parentModel,
           Option.some(ModelId.make("anthropic/instance-parent")),
@@ -534,7 +554,14 @@ describe("PollingTriggers", () => {
 
         const restoredLabels = yield* secondLabels.get(watchedRepository);
         assert(Option.isSome(restoredLabels));
-        assert.deepStrictEqual(restoredLabels.value.labels, ["unused-repository-label"]);
+        assert.deepStrictEqual(
+          restoredLabels.value.labels.map(({ name, color, description }) => [
+            name,
+            Option.getOrNull(color),
+            Option.getOrNull(description),
+          ]),
+          [["unused-repository-label", "5319E7", "kept for the restart test"]],
+        );
 
         const afterRestart = yield* secondPolling.poll(firstInstance);
         assert.strictEqual(claimedRun(afterRestart), originalRun);

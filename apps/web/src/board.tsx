@@ -21,9 +21,16 @@ import { CSS } from "@dnd-kit/utilities";
 import { ArrowUpRightIcon } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Item, Repository, Run } from "@usine/core";
-import type { BoardItemView, BoardLaneView, ProjectView, RunView } from "@usine/orchestrator";
+import type {
+  BoardItemView,
+  BoardLaneView,
+  LabelView,
+  ProjectView,
+  RunView,
+} from "@usine/orchestrator";
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
+import { LabelBadge } from "@/components/label-badge";
 import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -108,11 +115,15 @@ export const applyMove = (
   });
 };
 
+type LabelCatalog = ReadonlyMap<string, LabelView>;
+
 const CardBody = ({
   item,
+  catalog,
   openRun,
 }: {
   readonly item: BoardItemView;
+  readonly catalog: LabelCatalog;
   readonly openRun: (runId: Run.RunId) => void;
 }) => {
   const failure = itemFailure(item);
@@ -149,9 +160,7 @@ const CardBody = ({
           {item.labels.length > 0 && (
             <div className="flex flex-wrap gap-1">
               {item.labels.map((label) => (
-                <Badge variant="outline" key={label}>
-                  {label}
-                </Badge>
+                <LabelBadge key={label} name={label} label={catalog.get(label)} />
               ))}
             </div>
           )}
@@ -182,10 +191,12 @@ const cardClass = (needsYou: boolean) => cn("gap-2.5", needsYou && "ring-needs-y
 
 const BoardCard = ({
   item,
+  catalog,
   disabled,
   openRun,
 }: {
   readonly item: BoardItemView;
+  readonly catalog: LabelCatalog;
   readonly disabled: boolean;
   readonly openRun: (runId: Run.RunId) => void;
 }) => {
@@ -206,18 +217,20 @@ const BoardCard = ({
       {...attributes}
       {...listeners}
     >
-      <CardBody item={item} openRun={openRun} />
+      <CardBody item={item} catalog={catalog} openRun={openRun} />
     </Card>
   );
 };
 
 const BoardLane = ({
   lane,
+  catalog,
   dragging,
   pending,
   openRun,
 }: {
   readonly lane: BoardLaneView;
+  readonly catalog: LabelCatalog;
   readonly dragging: boolean;
   readonly pending: boolean;
   readonly openRun: (runId: Run.RunId) => void;
@@ -244,9 +257,11 @@ const BoardLane = ({
           <CardAction className="flex flex-wrap justify-end gap-1">
             {lane.sources.map((source) =>
               "label" in source ? (
-                <Badge variant="outline" key={`label:${source.label}`}>
-                  {source.label}
-                </Badge>
+                <LabelBadge
+                  key={`label:${source.label}`}
+                  name={source.label}
+                  label={catalog.get(source.label)}
+                />
               ) : (
                 <Badge variant="secondary" className="font-mono" key={`state:${source.state}`}>
                   {source.state}
@@ -263,7 +278,13 @@ const BoardLane = ({
         >
           {lane.items.length === 0 && <p className="text-muted-foreground">No items.</p>}
           {lane.items.map((item) => (
-            <BoardCard key={item.itemKey} item={item} disabled={pending} openRun={openRun} />
+            <BoardCard
+              key={item.itemKey}
+              item={item}
+              catalog={catalog}
+              disabled={pending}
+              openRun={openRun}
+            />
           ))}
         </SortableContext>
       </CardContent>
@@ -368,6 +389,7 @@ export const ProjectBoard = ({
     onSettled: () => setPendingMove(null),
   });
   const lanes = applyMove(orderLanes(project.board.lanes), pendingMove);
+  const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
   const pending = disabled || move.isPending;
   const onDragStart = ({ active: dragged }: DragStartEvent) => {
     const item = lanes.flatMap(({ items }) => items).find(({ itemKey }) => itemKey === dragged.id);
@@ -412,6 +434,7 @@ export const ProjectBoard = ({
             <BoardLane
               key={lane.id}
               lane={lane}
+              catalog={catalog}
               dragging={active !== null}
               pending={pending}
               openRun={openRun}
@@ -421,7 +444,7 @@ export const ProjectBoard = ({
         <DragOverlay>
           {active !== null && (
             <Card size="sm" className={cn(cardClass(active.needsYou), "cursor-grabbing shadow-lg")}>
-              <CardBody item={active} openRun={openRun} />
+              <CardBody item={active} catalog={catalog} openRun={openRun} />
             </Card>
           )}
         </DragOverlay>

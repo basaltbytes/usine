@@ -71,6 +71,7 @@ const overview = new ReadyOverview({
       status: "needs-you",
       runs: [run],
       board: new BoardView({ failures: [], lanes: [] }),
+      labels: [],
     }),
   ],
   loops: [new LoopView({ name: loopName, trigger: "issue", agent: agentName, paused: true })],
