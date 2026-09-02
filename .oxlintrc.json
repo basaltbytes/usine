@@ -15,7 +15,8 @@
     "unicorn/filename-case": [
       "error",
       {
-        "case": "kebabCase"
+        "case": "kebabCase",
+        "ignore": ["^__root\\.tsx$", "^\\$[a-z]+\\.tsx$"]
       }
     ],
     "usine/no-chained-type-assertions": "error",
@@ -79,5 +80,12 @@
       }
     }
   ],
-  "ignorePatterns": ["**/dist/**", ".agent-sources/**", ".agents/**", ".claude/**", "docs/**"]
+  "ignorePatterns": [
+    "**/dist/**",
+    ".agent-sources/**",
+    ".agents/**",
+    ".claude/**",
+    "docs/**",
+    "**/route-tree.gen.ts"
+  ]
 }

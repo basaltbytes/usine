@@ -19,6 +19,7 @@ import {
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { projectParams } from "../overview.ts";
 
 export type OperatorView = "projects" | "configuration";
 
@@ -39,7 +40,7 @@ export const AppSidebar = ({
     <SidebarHeader>
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton size="lg" render={<Link to="/" search={{}} />}>
+          <SidebarMenuButton size="lg" render={<Link to="/" />}>
             <span
               className="grid size-8 shrink-0 place-items-center rounded-md bg-primary font-heading text-sm font-semibold text-primary-foreground"
               aria-hidden="true"
@@ -58,7 +59,7 @@ export const AppSidebar = ({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={view === "projects" && project === undefined}
-                render={<Link to="/" search={{}} />}
+                render={<Link to="/" />}
               >
                 <KanbanIcon aria-hidden="true" />
                 <span>Projects</span>
@@ -72,7 +73,12 @@ export const AppSidebar = ({
                     <SidebarMenuSubItem key={entry.repository}>
                       <SidebarMenuSubButton
                         isActive={project === entry.repository}
-                        render={<Link to="/" search={{ project: entry.repository }} />}
+                        render={
+                          <Link
+                            to="/projects/$owner/$name"
+                            params={projectParams(entry.repository)}
+                          />
+                        }
                       >
                         <span className="truncate">{entry.repository}</span>
                         {entry.status === "needs-you" && (
@@ -98,7 +104,7 @@ export const AppSidebar = ({
             <SidebarMenuItem>
               <SidebarMenuButton
                 isActive={view === "configuration"}
-                render={<Link to="/" search={{ view: "configuration" }} />}
+                render={<Link to="/configuration/loops" />}
               >
                 <SlidersHorizontalIcon aria-hidden="true" />
                 <span>Loops</span>

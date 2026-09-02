@@ -1,5 +1,6 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "@tanstack/react-router";
 import type { Run } from "@usine/core";
 import { RunDetailView } from "@usine/orchestrator";
 import type { TranscriptPageCursor } from "@usine/orchestrator";
@@ -33,6 +34,13 @@ import {
   RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
   Transcript,
 } from "./run-transcript.tsx";
+
+/** Opens the drawer over the current screen by writing the run id into the root search. */
+export const useOpenRun = () => {
+  const navigate = useNavigate();
+  return (runId: Run.RunId) =>
+    void navigate({ to: ".", search: (previous) => ({ ...previous, run: runId }) });
+};
 
 const timeAgo = (value: string): string => {
   const elapsed = Math.max(0, Date.now() - Date.parse(value));
