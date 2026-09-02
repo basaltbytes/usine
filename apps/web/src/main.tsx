@@ -400,7 +400,6 @@ const FactoryScreen = () => {
               <ProjectBoard
                 project={project}
                 disabled={data._tag === "NeedsSetup"}
-                back={() => navigate({ search: {} })}
                 openRun={openRun}
               />
             );

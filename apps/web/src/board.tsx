@@ -1,4 +1,4 @@
-import { ArrowLeftIcon, ArrowUpRightIcon } from "@phosphor-icons/react";
+import { ArrowUpRightIcon } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Item, Repository, Run } from "@usine/core";
 import type { BoardItemView, BoardLaneView, ProjectView, RunView } from "@usine/orchestrator";
@@ -51,7 +51,8 @@ const BoardCard = ({
   const run = item.run;
   const visibleRuns = item.runs.filter(({ state }) => state === "Waiting" || state === "Failed");
   const runsToShow = visibleRuns.length > 0 ? visibleRuns : run === null ? [] : [run];
-  const titleClass = "text-left font-medium text-card-foreground hover:text-primary";
+  const titleClass =
+    "h-auto justify-start p-0 text-left text-xs/relaxed font-medium whitespace-normal text-card-foreground hover:text-primary";
   return (
     <Card
       size="sm"
@@ -74,13 +75,18 @@ const BoardCard = ({
         </CardDescription>
         <CardTitle className="font-sans text-xs/relaxed">
           {run === null ? (
-            <a className={titleClass} href={item.url} target="_blank" rel="noreferrer">
+            <Button
+              variant="link"
+              className={titleClass}
+              nativeButton={false}
+              render={<a href={item.url} target="_blank" rel="noreferrer" />}
+            >
               {item.title}
-            </a>
+            </Button>
           ) : (
-            <button className={titleClass} onClick={() => openRun(run.id)} type="button">
+            <Button variant="link" className={titleClass} onClick={() => openRun(run.id)}>
               {item.title}
-            </button>
+            </Button>
           )}
         </CardTitle>
       </CardHeader>
@@ -96,15 +102,16 @@ const BoardCard = ({
             </div>
           )}
           {runsToShow.map((cardRun) => (
-            <button
-              className="inline-flex items-center gap-2 text-left"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="-ml-2 gap-2"
               key={cardRun.id}
               onClick={() => openRun(cardRun.id)}
-              type="button"
             >
               <StatusBadge state={cardRun.state} />
               <span className="text-muted-foreground">{cardRun.agent}</span>
-            </button>
+            </Button>
           ))}
           {item.needsYou && <NeedsYouBadge />}
           {failure !== null && <p className="text-destructive wrap-anywhere">{failure}</p>}
@@ -209,12 +216,10 @@ const UncardedRunRow = ({ run, open }: { readonly run: RunView; readonly open: (
 export const ProjectBoard = ({
   project,
   disabled,
-  back,
   openRun,
 }: {
   readonly project: ProjectView;
   readonly disabled: boolean;
-  readonly back: () => void;
   readonly openRun: (runId: Run.RunId) => void;
 }) => {
   const queryClient = useQueryClient();
@@ -238,14 +243,8 @@ export const ProjectBoard = ({
   });
   return (
     <main className="flex flex-col gap-4 px-4 py-6 sm:px-6">
-      <header className="flex flex-wrap items-end justify-between gap-3">
-        <div className="flex flex-col items-start gap-2">
-          <Button variant="ghost" size="sm" className="-ml-2" onClick={back}>
-            <ArrowLeftIcon data-icon="inline-start" aria-hidden="true" />
-            Projects
-          </Button>
-          <h1 className="font-heading text-xl font-medium wrap-anywhere">{project.repository}</h1>
-        </div>
+      <header className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="font-heading text-xl font-medium wrap-anywhere">{project.repository}</h1>
         {project.status === "needs-you" && <NeedsYouBadge />}
       </header>
       {project.board.failures.length > 0 && (
