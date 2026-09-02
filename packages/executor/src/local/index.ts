@@ -26,7 +26,13 @@ import {
   type ExecutorOperation,
 } from "../index.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
-import { provisionWorktree, safeSegment, type WorkspaceOps } from "../provision.ts";
+import {
+  cacheDirectoryName,
+  isCacheDirectoryName,
+  provisionWorktree,
+  safeSegment,
+  type WorkspaceOps,
+} from "../provision.ts";
 import { runHostSessionFor, type RunHostInput } from "../run-host-session.ts";
 
 export type { RunHostCommand } from "../index.ts";
@@ -149,29 +155,49 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           }
           const reposRoot = path.join(workersRoot, worker, "repos");
           if (yield* fileSystem.exists(reposRoot)) {
-            const caches = yield* fileSystem.readDirectory(reposRoot);
-            for (const cache of caches) {
-              const cachePath = path.join(reposRoot, cache);
-              if (!(yield* fileSystem.exists(path.join(cachePath, "HEAD")))) {
-                yield* Effect.logDebug("Skipping non-bare entry during the local cache sweep", {
+            const entries = yield* fileSystem.readDirectory(reposRoot);
+            let pruned = 0;
+            let skipped = 0;
+            let failed = 0;
+            for (const entry of entries) {
+              if (!isCacheDirectoryName(entry)) {
+                yield* Effect.logDebug("Skipping a non-cache entry during the local cache sweep", {
                   worker,
                   host: "local",
-                  cache,
+                  entry,
                 });
+                skipped += 1;
                 continue;
               }
-              yield* run("cleanup", "git", ["--git-dir", cachePath, "worktree", "prune"]).pipe(
+              const result = yield* run("cleanup", "git", [
+                "--git-dir",
+                path.join(reposRoot, entry),
+                "worktree",
+                "prune",
+              ]).pipe(
                 Effect.tapError((error) =>
                   Effect.logWarning("Could not prune a bare cache during the sweep", {
                     worker,
                     host: "local",
-                    cache,
+                    cache: entry,
                     message: error.message,
                   }),
                 ),
-                Effect.ignore,
+                Effect.result,
               );
+              if (Result.isSuccess(result)) {
+                pruned += 1;
+              } else {
+                failed += 1;
+              }
             }
+            yield* Effect.logInfo("Local cache sweep completed", {
+              worker,
+              host: "local",
+              pruned,
+              skipped,
+              failed,
+            });
           }
         }
       },
@@ -227,7 +253,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       });
       const credential = yield* credentials.issue(request.repository, request.attemptId);
       const workerRoot = path.join(workersRoot, request.worker);
-      const cache = path.join(workerRoot, "repos", `${safeSegment(request.repository)}.git`);
+      const cache = path.join(workerRoot, "repos", cacheDirectoryName(request.repository));
       const worktree = path.join(workerRoot, "attempts", safeSegment(request.attemptId));
       const environment = credentialEnvironment(baseEnvironment, credential);
       const commandOptions = { env: environment, extendEnv: false } as const;
@@ -318,6 +344,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           cause: new Error("prepared Attempt state missing"),
         });
       }
+      // A linked worktree's git common dir is the bare cache itself, and Turbo
+      // places its cache next to the common dir, so an unscoped run from the
+      // worktree writes `repos/.turbo` beside the bare caches. Pin the cache to
+      // the Worker instead: it is shared across that Worker's Attempts, and it
+      // stays out of the directory the startup sweep treats as cache storage.
       const turboCache = path.join(workersRoot, prepared.worker, "turbo");
       yield* Effect.logInfo("Launching the run host", {
         attemptId,

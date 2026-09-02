@@ -193,7 +193,7 @@ const withLocalEngine = <A, E, R>(
 
 describe("local worker", () => {
   it.live(
-    "prunes bare caches while ignoring a stray .turbo directory",
+    "prunes bare caches while ignoring stray files and directories under repos/",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -207,6 +207,9 @@ describe("local worker", () => {
         const abandoned = path.join(workerRoot, "attempts", "abandoned");
         const turbo = path.join(reposRoot, ".turbo");
         const turboMarker = path.join(turbo, "marker");
+        // A plain file must not abort the sweep: probing `<entry>/HEAD` on it
+        // fails with ENOTDIR before any cache gets pruned.
+        const strayFile = path.join(reposRoot, ".DS_Store");
         yield* fileSystem.makeDirectory(reposRoot, { recursive: true });
         yield* run("git", ["clone", "--bare", remote, cache]);
         const commit = (yield* output("git", [
@@ -219,6 +222,7 @@ describe("local worker", () => {
         yield* fileSystem.remove(abandoned, { recursive: true, force: true });
         yield* fileSystem.makeDirectory(turbo, { recursive: true });
         yield* fileSystem.writeFileString(turboMarker, "keep");
+        yield* fileSystem.writeFileString(strayFile, "keep");
         const registrationsBefore = yield* output("git", [
           "--git-dir",
           cache,
@@ -255,24 +259,24 @@ describe("local worker", () => {
         ]);
         assert(!registrationsAfter.includes(abandoned));
         assert(yield* fileSystem.exists(turboMarker));
+        assert(yield* fileSystem.exists(strayFile));
         const skipped = logs.filter(({ message }) =>
-          message.includes("Skipping non-bare entry during the local cache sweep"),
+          message.includes("Skipping a non-cache entry during the local cache sweep"),
         );
         assert.deepStrictEqual(
           skipped.map(({ level }) => level),
-          ["Debug"],
+          ["Debug", "Debug"],
         );
-        assert(
-          !logs.some(({ message }) =>
-            message.includes("Could not prune a bare cache during the sweep"),
-          ),
-        );
+        // Issue #84's acceptance criterion: a startup with stray entries logs
+        // no cleanup warning at all, whatever the message says.
+        const alarming = logs.filter(({ level }) => ["Warn", "Error", "Fatal"].includes(level));
+        assert.deepStrictEqual(alarming, []);
       }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,
   );
 
   it.live(
-    "keeps Turbo's linked-worktree cache outside bare repository storage",
+    "points the run host's TURBO_CACHE_DIR at a worker-scoped directory outside repos/",
     () =>
       withLocalEngine(
         ["--stub"],
@@ -286,7 +290,6 @@ describe("local worker", () => {
             const fileSystem = yield* FileSystem.FileSystem;
             const workerRoot = path.join(instance, ".usine", "workers", "local");
             assert(yield* fileSystem.exists(path.join(workerRoot, "turbo", "test-marker")));
-            assert(!(yield* fileSystem.exists(path.join(workerRoot, "repos", ".turbo"))));
           }),
         TURBO_CACHE_HOST,
       ),

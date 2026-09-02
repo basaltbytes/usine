@@ -9,6 +9,21 @@ import {
 
 export const safeSegment = (value: string): string => value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
 
+const CACHE_DIRECTORY_SUFFIX = ".git";
+
+/** The bare cache directory name every adapter mints for a repository under `repos/`. */
+export const cacheDirectoryName = (repository: Repository.Name): string =>
+  `${safeSegment(repository)}${CACHE_DIRECTORY_SUFFIX}`;
+
+/**
+ * Whether a `repos/` entry is one of our bare caches, decided by the name we
+ * mint rather than by probing its contents: a `HEAD` lookup fails with
+ * ENOTDIR on a stray file, and a `.cloning` staging leftover or a tool's
+ * scratch directory must never be handed to `git worktree prune`.
+ */
+export const isCacheDirectoryName = (entry: string): boolean =>
+  entry.length > CACHE_DIRECTORY_SUFFIX.length && entry.endsWith(CACHE_DIRECTORY_SUFFIX);
+
 const decodeCommit = Schema.decodeUnknownEffect(Repository.CommitSha);
 
 export interface WorkspaceLayout {
