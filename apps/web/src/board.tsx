@@ -1,5 +1,4 @@
 import {
-  closestCorners,
   DndContext,
   DragOverlay,
   KeyboardSensor,
@@ -17,6 +16,7 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
+import { pointerWithin, rectIntersection, type CollisionDetection } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { ArrowUpRightIcon } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -81,6 +81,13 @@ const laneOf = (
   lanes: ReadonlyArray<BoardLaneView>,
 ): BoardLaneView | undefined =>
   lanes.find((lane) => lane.items.some((item) => item.itemKey === itemKey));
+
+/** The lane under the pointer wins; corner distance would hand a tall empty lane's drop to the
+ * cards of the lane next to it. Intersection is the fallback for keyboard moves. */
+const dropCollision: CollisionDetection = (args) => {
+  const within = pointerWithin(args);
+  return within.length > 0 ? within : rectIntersection(args);
+};
 
 export interface PendingMove {
   readonly itemKey: Item.ItemKey;
@@ -233,11 +240,21 @@ const BoardLane = ({
         <CardDescription>
           {lane.items.length} item{lane.items.length === 1 ? "" : "s"}
         </CardDescription>
-        <CardAction>
-          <Badge variant="secondary" className="font-mono">
-            {lane.origin}
-          </Badge>
-        </CardAction>
+        {lane.sources.length > 0 && (
+          <CardAction className="flex flex-wrap justify-end gap-1">
+            {lane.sources.map((source) =>
+              "label" in source ? (
+                <Badge variant="outline" key={`label:${source.label}`}>
+                  {source.label}
+                </Badge>
+              ) : (
+                <Badge variant="secondary" className="font-mono" key={`state:${source.state}`}>
+                  {source.state}
+                </Badge>
+              ),
+            )}
+          </CardAction>
+        )}
       </CardHeader>
       <CardContent className="flex min-h-40 flex-col gap-2">
         <SortableContext
@@ -382,7 +399,7 @@ export const ProjectBoard = ({
       )}
       <DndContext
         sensors={sensors}
-        collisionDetection={closestCorners}
+        collisionDetection={dropCollision}
         onDragStart={onDragStart}
         onDragEnd={onDragEnd}
         onDragCancel={() => setActive(null)}
