@@ -90,6 +90,7 @@ interface PendingRequest {
 
 const repositoryTrustOverride = (cwd: string): string =>
   `projects.${JSON.stringify(cwd)}.trust_level="untrusted"`;
+const disableRecursiveAgentsOverride = "features.multi_agent=false";
 
 export const codexAppServerCommand = (
   cwd: string,
@@ -107,7 +108,14 @@ export const codexAppServerCommand = (
   };
   return ChildProcess.make(
     "codex",
-    ["app-server", "--stdio", "-c", repositoryTrustOverride(cwd)],
+    [
+      "app-server",
+      "--stdio",
+      "-c",
+      repositoryTrustOverride(cwd),
+      "-c",
+      disableRecursiveAgentsOverride,
+    ],
     stdin === undefined ? options : { ...options, stdin },
   );
 };

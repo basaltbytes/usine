@@ -61,9 +61,9 @@ describe("agent runtime contract", () => {
       }),
       new PoolUnavailableError({
         harness: "pi",
-        model: Agent.ModelId.make("openai-codex/gpt-5.6-sol"),
+        model: Agent.ModelId.make("github-copilot/gpt-5.6-sol"),
         pool: "apiKeys",
-        message: "Pi model openai-codex/gpt-5.6-sol must use an API key",
+        message: "Pi model github-copilot/gpt-5.6-sol must use an API key",
       }),
       new UnsupportedEffortError({
         harness: "codex",
