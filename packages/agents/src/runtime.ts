@@ -32,7 +32,7 @@ export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** The worker cannot run this brain from the billing pool required by its harness. */
+/** The selected credential cannot draw from the billing pool required by this session. */
 export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableError>(
   "@usine/agents/PoolUnavailableError",
 )("PoolUnavailableError", {

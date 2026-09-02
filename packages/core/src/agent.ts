@@ -117,7 +117,7 @@ export type Pool = typeof Pool.Type;
 export class RateLimitWindow extends Schema.Class<RateLimitWindow>("Agent/RateLimitWindow")({
   usedPercent: Schema.Number,
   windowDurationMinutes: Schema.OptionFromNullOr(Schema.Number),
-  resetsAt: Schema.OptionFromNullOr(Schema.DateTimeUtc),
+  resetsAt: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
 }) {}
 
 export class RateLimitsSnapshot extends Schema.Class<RateLimitsSnapshot>(

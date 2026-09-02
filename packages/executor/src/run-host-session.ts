@@ -15,6 +15,7 @@ import {
 } from "effect";
 import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner";
 import { ExecutorError, ExecutorOperationError, type PreparedAttempt } from "./index.ts";
+import { invalidFrameDiagnostic, invalidFrameMessage } from "./invalid-frame.ts";
 
 export interface SpawnedRunHost {
   readonly handle: ChildProcessHandle;
@@ -280,9 +281,17 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
                 // credential from the line before it is decoded or persisted.
                 const line = scrub(rawLine);
                 const envelope = yield* decodeOutboundEnvelope(line).pipe(
-                  Effect.mapError((cause) =>
-                    infrastructureFailure("The run host emitted an invalid frame", cause),
-                  ),
+                  Effect.catch((cause) => {
+                    const diagnostic = invalidFrameDiagnostic(line, cause);
+                    return Effect.logError("Run host emitted an invalid frame", {
+                      attemptId,
+                      ...diagnostic,
+                    }).pipe(
+                      Effect.andThen(
+                        Effect.fail(infrastructureFailure(invalidFrameMessage(diagnostic), cause)),
+                      ),
+                    );
+                  }),
                 );
                 const admitted = AttemptChannel.admit(
                   yield* Ref.get(progress),

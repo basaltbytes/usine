@@ -100,7 +100,7 @@ const awaitStdinLines = (process: FakeProcess, count: number) =>
   });
 
 describe("Codex app-server transport", () => {
-  it("starts outside the worktree, untrusted, in the host's process group with a bounded kill", () => {
+  it("starts outside the worktree with repository trust and recursive agents disabled", () => {
     const command = codexAppServerCommand("/workspace/repo");
     assert.strictEqual(command._tag, "StandardCommand");
     if (command._tag !== "StandardCommand") return;
@@ -112,6 +112,8 @@ describe("Codex app-server transport", () => {
       "--stdio",
       "-c",
       'projects."/workspace/repo".trust_level="untrusted"',
+      "-c",
+      "features.multi_agent=false",
     ]);
   });
 

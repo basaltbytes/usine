@@ -1,11 +1,20 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
-import type {
-  ExtensionAPI,
-  ExtensionContext,
-  ToolDefinition,
+import {
+  createAgentSession,
+  DefaultResourceLoader,
+  defineTool,
+  type ExtensionAPI,
+  type ExtensionContext,
+  SessionManager,
+  SettingsManager,
+  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Agent, Attempt, AttemptChannel, Repository } from "@usine/core";
-import { Effect, Layer, Option, Stream } from "effect";
+import { Effect, Fiber, Layer, Option, Stream } from "effect";
+import { Type } from "typebox";
 import {
   AgentRuntime,
   ChildBackend,
@@ -21,11 +30,78 @@ import {
 import {
   PiSdk,
   piChildBackendLayer,
+  piParentSessionToolPolicy,
   piParentLayer,
   type PiSession,
   type PiSessionEvent,
   type PiStartOptions,
+  type PiStartResult,
 } from "../../src/pi/pi.ts";
+import { resolvePiPool } from "../../src/pi/authentication.ts";
+
+describe("Pi pool resolution", () => {
+  it("maps ChatGPT subscription authentication to the ChatGPT pool", () => {
+    assert.strictEqual(
+      resolvePiPool("openai-codex", { _tag: "OAuth", subscription: true }),
+      "chatgptPlan",
+    );
+  });
+
+  it("keeps API-key authentication in the API-key pool", () => {
+    assert.strictEqual(resolvePiPool("openai", { _tag: "ApiKey" }), "apiKeys");
+  });
+
+  it("rejects missing and unsupported OAuth credentials instead of inventing an API key", () => {
+    assert.strictEqual(resolvePiPool("openai-codex", undefined), undefined);
+    assert.strictEqual(
+      resolvePiPool("github-copilot", { _tag: "OAuth", subscription: true }),
+      undefined,
+    );
+    assert.strictEqual(
+      resolvePiPool("openai-codex", { _tag: "OAuth", subscription: false }),
+      undefined,
+    );
+  });
+});
+
+const delayedPiStart = () => {
+  let resolveStart: ((result: PiStartResult) => void) | undefined;
+  let announceStart: (() => void) | undefined;
+  let announceDispose: (() => void) | undefined;
+  let disposeCount = 0;
+  const startCalled = new Promise<void>((resolve) => {
+    announceStart = resolve;
+  });
+  const disposed = new Promise<void>((resolve) => {
+    announceDispose = resolve;
+  });
+  const session: PiSession = {
+    abort: () => Promise.resolve(),
+    dispose: () => {
+      disposeCount += 1;
+      announceDispose?.();
+    },
+    messages: [],
+    prompt: () => Promise.resolve(),
+    steer: () => Promise.resolve(),
+    subscribe: () => () => undefined,
+  };
+  return {
+    disposeCount: () => disposeCount,
+    disposed,
+    resolve: (result: Omit<Extract<PiStartResult, { readonly _tag: "Started" }>, "session">) => {
+      assert(resolveStart !== undefined);
+      resolveStart({ ...result, session });
+    },
+    start: () => {
+      announceStart?.();
+      return new Promise<PiStartResult>((resolve) => {
+        resolveStart = resolve;
+      });
+    },
+    startCalled,
+  };
+};
 
 const agent = new Agent.Agent({
   name: Agent.Name.make("developer"),
@@ -81,7 +157,10 @@ describe("Pi child backend", () => {
         listener?.({ type: "auto_retry_end", success: true, attempt: 1 });
         listener?.({
           type: "message_end",
-          message: { role: "assistant", content: [{ type: "text", text: "Pi child done." }] },
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "Pi child done." }],
+          },
         });
         return Promise.resolve();
       },
@@ -98,7 +177,12 @@ describe("Pi child backend", () => {
     const sdk = Layer.succeed(PiSdk)({
       start: (found) => {
         options = found;
-        return Promise.resolve({ _tag: "Started", model: effectiveModel, session });
+        return Promise.resolve({
+          _tag: "Started",
+          model: effectiveModel,
+          pool: "apiKeys",
+          session,
+        });
       },
     });
 
@@ -119,6 +203,7 @@ describe("Pi child backend", () => {
         assert.strictEqual(interrupted, true);
         assert.deepStrictEqual(options?.extensions, []);
         assert.deepStrictEqual(options?.model, Option.some(childRequest.session.brain.model));
+        assert.strictEqual(options?.toolMode, "repository");
         assert.deepStrictEqual(
           events.map((event) => event._tag),
           ["SessionStarted", "TextOutput", "SessionFinished"],
@@ -143,8 +228,25 @@ describe("Pi child backend", () => {
 
   it.effect("rejects a child model outside the API-key pool", () => {
     const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    let disposed = false;
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => {
+        disposed = true;
+      },
+      messages: [],
+      prompt: () => Promise.resolve(),
+      steer: () => Promise.resolve(),
+      subscribe: () => () => undefined,
+    };
     const sdk = Layer.succeed(PiSdk)({
-      start: () => Promise.resolve({ _tag: "ApiKeyRequired", model }),
+      start: () =>
+        Promise.resolve({
+          _tag: "Started",
+          model,
+          pool: "chatgptPlan",
+          session,
+        }),
     });
     return Effect.scoped(
       Effect.gen(function* () {
@@ -153,6 +255,32 @@ describe("Pi child backend", () => {
         assert(error instanceof PoolUnavailableError);
         assert.strictEqual(error.pool, "apiKeys");
         assert.strictEqual(error.model, model);
+        assert.strictEqual(disposed, true);
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect("disposes a child session that resolves after launch interruption", () => {
+    const delayed = delayedPiStart();
+    const sdk = Layer.succeed(PiSdk)({
+      start: delayed.start,
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const backend = yield* PiChildBackend;
+        const launchFiber = yield* Effect.forkChild(backend.launch(childRequest));
+        yield* Effect.promise(() => delayed.startCalled);
+        const interruptFiber = yield* Effect.forkChild(Fiber.interrupt(launchFiber));
+        yield* Effect.yieldNow;
+        delayed.resolve({
+          _tag: "Started",
+          model: childRequest.session.brain.model,
+          pool: "apiKeys",
+        });
+        yield* Effect.promise(() => delayed.disposed);
+        yield* Fiber.join(interruptFiber);
+        assert.strictEqual(delayed.disposeCount(), 1);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
     );
   });
@@ -191,6 +319,57 @@ const childLayer = Layer.succeed(ChildBackend)({
 });
 
 describe("Pi parent runtime", () => {
+  it.effect("keeps repository tools out of a real parent session", () =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => mkdtempSync(join(tmpdir(), "usine-pi-parent-tools-"))),
+      (directory) =>
+        Effect.promise(async () => {
+          const settingsManager = SettingsManager.create(directory, directory, {
+            projectTrusted: false,
+          });
+          const resourceLoader = new DefaultResourceLoader({
+            agentDir: directory,
+            cwd: directory,
+            extensionFactories: [
+              {
+                name: "test-subagents",
+                factory: (pi) =>
+                  pi.registerTool(
+                    defineTool({
+                      name: "subagent",
+                      label: "Subagent",
+                      description: "Delegate work.",
+                      parameters: Type.Object({}, { additionalProperties: false }),
+                      execute: async () => ({ content: [], details: {} }),
+                    }),
+                  ),
+              },
+            ],
+            settingsManager,
+            noExtensions: true,
+            noPromptTemplates: true,
+            noSkills: true,
+            noThemes: true,
+          });
+          await resourceLoader.reload();
+          const { session } = await createAgentSession({
+            agentDir: directory,
+            cwd: directory,
+            ...piParentSessionToolPolicy,
+            resourceLoader,
+            sessionManager: SessionManager.inMemory(directory),
+            settingsManager,
+          });
+          try {
+            assert.deepStrictEqual(session.getActiveToolNames(), ["subagent"]);
+          } finally {
+            session.dispose();
+          }
+        }),
+      (directory) => Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
+    ),
+  );
+
   it.effect("assembles the full prompt, normalizes SDK events, and forwards controls", () => {
     let options: PiStartOptions | undefined;
     let listener: ((event: PiSessionEvent) => void) | undefined;
@@ -208,7 +387,10 @@ describe("Pi parent runtime", () => {
         prompt = value;
         listener?.({
           type: "message_end",
-          message: { role: "assistant", content: [{ type: "text", text: "done" }] },
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "done" }],
+          },
         });
         listener?.({
           type: "tool_execution_start",
@@ -237,7 +419,12 @@ describe("Pi parent runtime", () => {
     const sdk = Layer.succeed(PiSdk)({
       start: (found) => {
         options = found;
-        return Promise.resolve({ _tag: "Started", model: parentModel, session });
+        return Promise.resolve({
+          _tag: "Started",
+          model: parentModel,
+          pool: "apiKeys",
+          session,
+        });
       },
     });
 
@@ -259,6 +446,7 @@ describe("Pi parent runtime", () => {
         assert.strictEqual(steer, "Check the failing test.");
         assert.strictEqual(interrupted, true);
         assert.strictEqual(options?.extensions.length, 1);
+        assert.strictEqual(options?.toolMode, "orchestration");
         assert.deepStrictEqual(
           events.map((event) => event._tag),
           ["SessionStarted", "TextOutput", "ToolStarted", "ToolFinished", "SessionFinished"],
@@ -281,10 +469,56 @@ describe("Pi parent runtime", () => {
     );
   });
 
-  it.effect("rejects a parent model outside the API-key pool", () => {
+  it.effect("runs a parent model from the ChatGPT subscription pool", () => {
     const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    let listener: ((event: PiSessionEvent) => void) | undefined;
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => undefined,
+      messages: [],
+      prompt: () => {
+        listener?.({
+          type: "message_end",
+          message: { role: "assistant", content: "subscription parent done" },
+        });
+        return Promise.resolve();
+      },
+      steer: () => Promise.resolve(),
+      subscribe: (found) => {
+        listener = found;
+        return () => undefined;
+      },
+    };
     const sdk = Layer.succeed(PiSdk)({
-      start: () => Promise.resolve({ _tag: "ApiKeyRequired", model }),
+      start: () =>
+        Promise.resolve({
+          _tag: "Started",
+          model,
+          pool: "chatgptPlan",
+          session,
+        }),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const running = yield* runtime.launch(request);
+        const result = yield* running.result;
+        assert.strictEqual(running.session.brain.model, model);
+        assert.strictEqual(result.message, "subscription parent done");
+      }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
+    );
+  });
+
+  it.effect("rejects an OAuth parent without a known billing pool", () => {
+    const model = Agent.ModelId.make("github-copilot/gpt-5.6-sol");
+    const sdk = Layer.succeed(PiSdk)({
+      start: () =>
+        Promise.resolve({
+          _tag: "UnsupportedAuthentication",
+          authentication: { _tag: "OAuth", subscription: true },
+          model,
+          requiredPool: "apiKeys",
+        }),
     });
     return Effect.scoped(
       Effect.gen(function* () {
@@ -293,6 +527,52 @@ describe("Pi parent runtime", () => {
         assert(error instanceof PoolUnavailableError);
         assert.strictEqual(error.pool, "apiKeys");
         assert.strictEqual(error.model, model);
+      }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
+    );
+  });
+
+  it.effect("reports a missing parent credential as a terminal pool failure", () => {
+    const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    const sdk = Layer.succeed(PiSdk)({
+      start: () =>
+        Promise.resolve({
+          _tag: "AuthenticationUnavailable",
+          model,
+          requiredPool: "chatgptPlan",
+        }),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const error = yield* Effect.flip(runtime.launch(request));
+        assert(error instanceof PoolUnavailableError);
+        assert.strictEqual(error.pool, "chatgptPlan");
+        assert.strictEqual(error.model, model);
+      }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
+    );
+  });
+
+  it.effect("disposes a parent session that resolves after launch interruption", () => {
+    const delayed = delayedPiStart();
+    const sdk = Layer.succeed(PiSdk)({
+      start: delayed.start,
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const launchFiber = yield* Effect.forkChild(runtime.launch(request));
+        yield* Effect.promise(() => delayed.startCalled);
+        const interruptFiber = yield* Effect.forkChild(Fiber.interrupt(launchFiber));
+        yield* Effect.yieldNow;
+        delayed.resolve({
+          _tag: "Started",
+          model: parentModel,
+          pool: "apiKeys",
+        });
+        yield* Effect.promise(() => delayed.disposed);
+        yield* Fiber.join(interruptFiber);
+        assert.strictEqual(delayed.disposeCount(), 1);
       }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
     );
   });
@@ -314,7 +594,12 @@ describe("Pi parent runtime", () => {
     const sdk = Layer.succeed(PiSdk)({
       start: (found) => {
         options = found;
-        return Promise.resolve({ _tag: "Started", model: parentModel, session });
+        return Promise.resolve({
+          _tag: "Started",
+          model: parentModel,
+          pool: "apiKeys",
+          session,
+        });
       },
     });
     let sawLaunchContext = false;
@@ -341,7 +626,9 @@ describe("Pi parent runtime", () => {
         let registered: ToolDefinition | undefined;
         yield* Effect.promise(async () => {
           // SAFETY: this extension only calls registerTool; other members are unused.
-          await extension.factory({ registerTool: (tool) => (registered = tool) } as ExtensionAPI);
+          await extension.factory({
+            registerTool: (tool) => (registered = tool),
+          } as ExtensionAPI);
         });
         assert(registered !== undefined);
         const result = yield* Effect.promise(() =>
