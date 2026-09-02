@@ -216,7 +216,7 @@ describe("operator HTTP API", () => {
     }
   });
 
-  it("serves the packaged application shell and assets", async () => {
+  it("serves client routes without masking missing API routes or static files", async () => {
     const webRoot = await mkdtemp(join(tmpdir(), "usine-web-"));
     const assets = join(webRoot, "assets");
     await mkdir(assets);
@@ -225,24 +225,49 @@ describe("operator HTTP API", () => {
       writeFile(join(assets, "app.css"), ":root { color-scheme: dark; }"),
     ]);
     const web = HttpRouter.toWebHandler(
-      staticRoutes(webRoot).pipe(HttpRouter.provideRequest(NodeHttpPlatform.layer)),
+      Layer.mergeAll(apiRoutes, staticRoutes(webRoot)).pipe(
+        HttpRouter.provideRequest(Layer.mergeAll(backend, NodeHttpPlatform.layer)),
+      ),
       { disableLogger: true },
     );
     try {
+      const api = await web.handler(new Request("http://localhost/api/overview"));
+      assert.strictEqual(api.status, 200);
+
       const shell = await web.handler(new Request("http://localhost/"));
       assert.strictEqual(shell.status, 200);
       assert.strictEqual(await shell.text(), "<main>usine operator</main>");
+
+      const configuration = await web.handler(new Request("http://localhost/configuration/loops"));
+      assert.strictEqual(configuration.status, 200);
+      assert.deepStrictEqual(
+        Object.fromEntries(configuration.headers),
+        Object.fromEntries(shell.headers),
+      );
+      assert.strictEqual(await configuration.text(), "<main>usine operator</main>");
+
+      const project = await web.handler(
+        new Request("http://localhost/projects/basaltbytes/usine?run=run-1"),
+      );
+      assert.strictEqual(project.status, 200);
+      assert.strictEqual(await project.text(), "<main>usine operator</main>");
+
+      const missingApi = await web.handler(new Request("http://localhost/api/does-not-exist"));
+      assert.strictEqual(missingApi.status, 404);
 
       const asset = await web.handler(new Request("http://localhost/assets/app.css"));
       assert.strictEqual(asset.status, 200);
       assert.strictEqual(await asset.text(), ":root { color-scheme: dark; }");
 
-      const missing = await web.handler(new Request("http://localhost/assets/missing.css"));
+      const missing = await web.handler(new Request("http://localhost/assets/missing.js"));
       assert.strictEqual(missing.status, 404);
 
       // Encoded traversal must never escape the assets root.
       const traversal = await web.handler(new Request("http://localhost/assets/%2e%2e/index.html"));
       assert.strictEqual(traversal.status, 404);
+
+      const missingFile = await web.handler(new Request("http://localhost/favicon.ico"));
+      assert.strictEqual(missingFile.status, 404);
     } finally {
       await web.dispose();
       await rm(webRoot, { recursive: true });

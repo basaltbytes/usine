@@ -1,5 +1,5 @@
 import { createServer } from "node:http";
-import { resolve, sep } from "node:path";
+import { extname, resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
 import { Attempt, Item, Loop, Repository, Run } from "@usine/core";
 import {
@@ -281,8 +281,9 @@ export const apiRoutes = HttpRouter.addAll([
 
 export const staticRoutes = (webRoot: string) => {
   const assetsRoot = resolve(webRoot, "assets");
+  const applicationShell = HttpServerResponse.file(resolve(webRoot, "index.html"));
   return HttpRouter.addAll([
-    HttpRouter.route("GET", "/", HttpServerResponse.file(resolve(webRoot, "index.html"))),
+    HttpRouter.route("GET", "/", applicationShell),
     HttpRouter.route("GET", "/assets/*", (request) =>
       Effect.gen(function* () {
         const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
@@ -298,6 +299,26 @@ export const staticRoutes = (webRoot: string) => {
             }).pipe(Effect.as(HttpServerResponse.text("Not found", { status: 404 }))),
           ),
         );
+      }),
+    ),
+    HttpRouter.route("GET", "*", (request) =>
+      Effect.gen(function* () {
+        const pathname = decodeURIComponent(new URL(request.url, "http://localhost").pathname);
+        const reservedNamespace =
+          pathname === "/api" ||
+          pathname.startsWith("/api/") ||
+          pathname === "/assets" ||
+          pathname.startsWith("/assets/");
+        const hasFileExtension = extname(pathname) !== "";
+        if (reservedNamespace || hasFileExtension) {
+          yield* Effect.logDebug("Request was not eligible for the application shell fallback", {
+            pathname,
+            reason: reservedNamespace ? "reserved-namespace" : "file-extension",
+          });
+          return HttpServerResponse.text("Not found", { status: 404 });
+        }
+        yield* Effect.logDebug("Serving the application shell for a client route", { pathname });
+        return yield* applicationShell;
       }),
     ),
   ]);
