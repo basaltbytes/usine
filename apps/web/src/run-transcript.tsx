@@ -1,5 +1,7 @@
 import { CaretRightIcon } from "@phosphor-icons/react";
+import type { Agent } from "@usine/core";
 import type { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator";
+import { Option } from "effect";
 import { useMemo } from "react";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
 import { Button } from "@/components/ui/button";
@@ -36,6 +38,35 @@ export const mergeTranscript = (
     if (!merged.has(event.sequence)) merged.set(event.sequence, event);
   }
   return [...merged.values()].sort((left, right) => left.sequence - right.sequence);
+};
+
+const isRateLimitUpdate = (event: TranscriptEventView): boolean =>
+  event.payload._tag === "SessionEvent" && event.payload.event._tag === "PoolRateLimitsUpdated";
+
+export interface PoolMeter {
+  readonly pool: Agent.Pool;
+  readonly primaryUsedPercent: number | null;
+  readonly secondaryUsedPercent: number | null;
+}
+
+/** Rate-limit updates are a meter, not activity: keep the latest reading per billing pool. */
+export const poolMeters = (
+  events: ReadonlyArray<TranscriptEventView>,
+): ReadonlyArray<PoolMeter> => {
+  const latest = new Map<Agent.Pool, PoolMeter>();
+  for (const event of events) {
+    if (event.payload._tag !== "SessionEvent") continue;
+    const session = event.payload.event;
+    if (session._tag !== "PoolRateLimitsUpdated") continue;
+    const percent = (window: Option.Option<Agent.RateLimitWindow>) =>
+      Option.match(window, { onNone: () => null, onSome: ({ usedPercent }) => usedPercent });
+    latest.set(session.pool, {
+      pool: session.pool,
+      primaryUsedPercent: percent(session.rateLimits.primary),
+      secondaryUsedPercent: percent(session.rateLimits.secondary),
+    });
+  }
+  return [...latest.values()];
 };
 
 export const replaceEarlierCursor = (
@@ -88,7 +119,9 @@ export const Transcript = ({ events }: { readonly events: ReadonlyArray<Transcri
     // event, so concurrent children stay distinct and the parent/child
     // interleaving stays chronological (ADR 0008: one level deep).
     const groups = new Map<string, TranscriptGroup>();
-    const presented = events.map(presentTranscriptEvent);
+    const presented = events
+      .filter((event) => !isRateLimitUpdate(event))
+      .map(presentTranscriptEvent);
     for (const event of presented) {
       if (event.scope !== "child" || event.sessionId === null) continue;
       const current = groups.get(event.sessionId);
