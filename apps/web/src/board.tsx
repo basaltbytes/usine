@@ -1,3 +1,23 @@
+import {
+  closestCorners,
+  DndContext,
+  DragOverlay,
+  KeyboardSensor,
+  PointerSensor,
+  useDroppable,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+  type DragStartEvent,
+  type UniqueIdentifier,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { ArrowUpRightIcon } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Item, Repository, Run } from "@usine/core";
@@ -40,17 +60,52 @@ export const itemFailure = (item: BoardItemView): string | null => {
   return null;
 };
 
-const BoardCard = ({
+/** The fallback lane holds every unrouted Item, so it leads the board: a drag into an
+ * authored lane must not cross every column first. Authored and proposed lanes keep
+ * their configured order. */
+export const orderLanes = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<BoardLaneView> => [
+  ...lanes.filter(({ origin }) => origin === "fallback"),
+  ...lanes.filter(({ origin }) => origin !== "fallback"),
+];
+
+/** A drop lands on a lane or on one of its cards; either way the lane is the target. */
+export const laneUnder = (
+  over: UniqueIdentifier,
+  lanes: ReadonlyArray<BoardLaneView>,
+): BoardLaneView | undefined =>
+  lanes.find((lane) => lane.id === over) ??
+  lanes.find((lane) => lane.items.some(({ itemKey }) => itemKey === over));
+
+const laneOf = (
+  itemKey: Item.ItemKey,
+  lanes: ReadonlyArray<BoardLaneView>,
+): BoardLaneView | undefined =>
+  lanes.find((lane) => lane.items.some((item) => item.itemKey === itemKey));
+
+export interface PendingMove {
+  readonly itemKey: Item.ItemKey;
+  readonly toLane: BoardLaneView["id"];
+}
+
+/** Shows a move in its target lane while the label write and the next poll are in flight. */
+export const applyMove = (
+  lanes: ReadonlyArray<BoardLaneView>,
+  move: PendingMove | null,
+): ReadonlyArray<BoardLaneView> => {
+  if (move === null) return lanes;
+  const moved = lanes.flatMap(({ items }) => items).find(({ itemKey }) => itemKey === move.itemKey);
+  if (moved === undefined) return lanes;
+  return lanes.map((lane) => {
+    const items = lane.items.filter(({ itemKey }) => itemKey !== move.itemKey);
+    return lane.id === move.toLane ? { ...lane, items: [moved, ...items] } : { ...lane, items };
+  });
+};
+
+const CardBody = ({
   item,
-  draggable,
-  beginDrag,
-  endDrag,
   openRun,
 }: {
   readonly item: BoardItemView;
-  readonly draggable: boolean;
-  readonly beginDrag: (item: Item.Number) => void;
-  readonly endDrag: () => void;
   readonly openRun: (runId: Run.RunId) => void;
 }) => {
   const failure = itemFailure(item);
@@ -60,21 +115,7 @@ const BoardCard = ({
   const titleClass =
     "h-auto justify-start p-0 text-left text-xs/relaxed font-medium whitespace-normal text-card-foreground hover:text-primary";
   return (
-    <Card
-      size="sm"
-      className={cn(
-        "gap-2.5",
-        draggable && "cursor-grab active:cursor-grabbing",
-        item.needsYou && "ring-needs-you/50",
-      )}
-      draggable={draggable}
-      onDragStart={(event) => {
-        event.dataTransfer.effectAllowed = "move";
-        event.dataTransfer.setData("text/plain", String(item.number));
-        beginDrag(item.number);
-      }}
-      onDragEnd={endDrag}
-    >
+    <>
       <CardHeader className="gap-0.5">
         <CardDescription className="font-mono">
           {item.kind === "pr" ? "PR" : "Issue"} #{item.number}
@@ -85,7 +126,7 @@ const BoardCard = ({
               variant="link"
               className={titleClass}
               nativeButton={false}
-              render={<a href={item.url} target="_blank" rel="noreferrer" />}
+              render={<a href={item.url} target="_blank" rel="noreferrer" draggable={false} />}
             >
               {item.title}
             </Button>
@@ -126,43 +167,66 @@ const BoardCard = ({
           )}
         </CardContent>
       )}
+    </>
+  );
+};
+
+const cardClass = (needsYou: boolean) => cn("gap-2.5", needsYou && "ring-needs-you/50");
+
+const BoardCard = ({
+  item,
+  disabled,
+  openRun,
+}: {
+  readonly item: BoardItemView;
+  readonly disabled: boolean;
+  readonly openRun: (runId: Run.RunId) => void;
+}) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: item.itemKey,
+    disabled,
+  });
+  return (
+    <Card
+      ref={setNodeRef}
+      size="sm"
+      style={{ transform: CSS.Translate.toString(transform), transition }}
+      className={cn(
+        cardClass(item.needsYou),
+        !disabled && "cursor-grab touch-none",
+        isDragging && "opacity-40",
+      )}
+      {...attributes}
+      {...listeners}
+    >
+      <CardBody item={item} openRun={openRun} />
     </Card>
   );
 };
 
 const BoardLane = ({
   lane,
-  dragged,
+  dragging,
   pending,
-  drop,
-  beginDrag,
-  endDrag,
   openRun,
 }: {
   readonly lane: BoardLaneView;
-  readonly dragged: Item.Number | null;
+  readonly dragging: boolean;
   readonly pending: boolean;
-  readonly drop: (item: Item.Number, lane: BoardLaneView) => void;
-  readonly beginDrag: (item: Item.Number) => void;
-  readonly endDrag: () => void;
   readonly openRun: (runId: Run.RunId) => void;
 }) => {
   const writable = lane._tag === "WritableBoardLane";
+  const { setNodeRef, isOver } = useDroppable({ id: lane.id, disabled: !writable || pending });
   return (
     <Card
+      ref={setNodeRef}
       size="sm"
       aria-label={`${lane.name} lane`}
       className={cn(
         "w-72 shrink-0 bg-muted/30 transition-shadow",
-        writable && dragged !== null && "ring-run-active",
+        dragging && writable && "ring-run-active/50",
+        isOver && writable && "ring-run-active",
       )}
-      onDragOver={(event) => {
-        if (writable && !pending) event.preventDefault();
-      }}
-      onDrop={(event) => {
-        event.preventDefault();
-        if (writable && dragged !== null && !pending) drop(dragged, lane);
-      }}
     >
       <CardHeader>
         <CardTitle className="wrap-anywhere">{lane.name}</CardTitle>
@@ -176,29 +240,19 @@ const BoardLane = ({
         </CardAction>
       </CardHeader>
       <CardContent className="flex min-h-40 flex-col gap-2">
-        {lane.items.length === 0 && <p className="text-muted-foreground">No items.</p>}
-        {lane.items.map((item) => (
-          <BoardCard
-            key={item.itemKey}
-            item={item}
-            draggable={!pending}
-            beginDrag={beginDrag}
-            endDrag={endDrag}
-            openRun={openRun}
-          />
-        ))}
+        <SortableContext
+          items={lane.items.map(({ itemKey }) => itemKey)}
+          strategy={verticalListSortingStrategy}
+        >
+          {lane.items.length === 0 && <p className="text-muted-foreground">No items.</p>}
+          {lane.items.map((item) => (
+            <BoardCard key={item.itemKey} item={item} disabled={pending} openRun={openRun} />
+          ))}
+        </SortableContext>
       </CardContent>
     </Card>
   );
 };
-
-/** The fallback lane holds every unrouted Item, so it leads the board: a drag into an
- * authored lane must not cross every column first. Authored and proposed lanes keep
- * their configured order. */
-export const orderLanes = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<BoardLaneView> => [
-  ...lanes.filter(({ origin }) => origin === "fallback"),
-  ...lanes.filter(({ origin }) => origin !== "fallback"),
-];
 
 /** Runs whose Item has no card yet (schedule Runs, quarantined Items) stay reachable here. */
 export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> => {
@@ -273,7 +327,12 @@ export const ProjectBoard = ({
   readonly openRun: (runId: Run.RunId) => void;
 }) => {
   const queryClient = useQueryClient();
-  const [dragged, setDragged] = useState<Item.Number | null>(null);
+  const [active, setActive] = useState<BoardItemView | null>(null);
+  const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
   const uncarded = runsWithoutCard(project);
   const move = useMutation({
     mutationFn: ({ item, lane }: { readonly item: Item.Number; readonly lane: BoardLaneView }) => {
@@ -289,8 +348,25 @@ export const ProjectBoard = ({
       );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["overview"] }),
-    onSettled: () => setDragged(null),
+    onSettled: () => setPendingMove(null),
   });
+  const lanes = applyMove(orderLanes(project.board.lanes), pendingMove);
+  const pending = disabled || move.isPending;
+  const onDragStart = ({ active: dragged }: DragStartEvent) => {
+    const item = lanes.flatMap(({ items }) => items).find(({ itemKey }) => itemKey === dragged.id);
+    setActive(item ?? null);
+  };
+  const onDragEnd = ({ over }: DragEndEvent) => {
+    setActive(null);
+    if (over === null || active === null) return;
+    const source = laneOf(active.itemKey, lanes);
+    const target = laneUnder(over.id, lanes);
+    if (target === undefined || target._tag !== "WritableBoardLane" || target.id === source?.id) {
+      return;
+    }
+    setPendingMove({ itemKey: active.itemKey, toLane: target.id });
+    move.mutate({ item: active.number, lane: target });
+  };
   return (
     <main className="flex flex-col gap-4 px-4 py-6 sm:px-6">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -304,23 +380,35 @@ export const ProjectBoard = ({
           message={project.board.failures.map((failure) => failure.message).join("\n")}
         />
       )}
-      <div
-        className="flex gap-3 overflow-x-auto pb-3 overscroll-x-contain scrollbar-thin"
-        aria-label={`${project.repository} project board`}
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCorners}
+        onDragStart={onDragStart}
+        onDragEnd={onDragEnd}
+        onDragCancel={() => setActive(null)}
       >
-        {orderLanes(project.board.lanes).map((lane) => (
-          <BoardLane
-            key={lane.id}
-            lane={lane}
-            dragged={dragged}
-            pending={disabled || move.isPending}
-            drop={(item, target) => move.mutate({ item, lane: target })}
-            beginDrag={setDragged}
-            endDrag={() => setDragged(null)}
-            openRun={openRun}
-          />
-        ))}
-      </div>
+        <div
+          className="flex gap-3 overflow-x-auto pb-3 overscroll-x-contain scrollbar-thin"
+          aria-label={`${project.repository} project board`}
+        >
+          {lanes.map((lane) => (
+            <BoardLane
+              key={lane.id}
+              lane={lane}
+              dragging={active !== null}
+              pending={pending}
+              openRun={openRun}
+            />
+          ))}
+        </div>
+        <DragOverlay>
+          {active !== null && (
+            <Card size="sm" className={cn(cardClass(active.needsYou), "cursor-grabbing shadow-lg")}>
+              <CardBody item={active} openRun={openRun} />
+            </Card>
+          )}
+        </DragOverlay>
+      </DndContext>
       {move.isError && <ErrorAlert className="max-w-3xl" message={move.error.message} />}
       {uncarded.length > 0 && <UncardedRuns runs={uncarded} openRun={openRun} />}
     </main>
