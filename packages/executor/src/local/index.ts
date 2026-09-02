@@ -151,12 +151,16 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           if (yield* fileSystem.exists(reposRoot)) {
             const caches = yield* fileSystem.readDirectory(reposRoot);
             for (const cache of caches) {
-              yield* run("cleanup", "git", [
-                "--git-dir",
-                path.join(reposRoot, cache),
-                "worktree",
-                "prune",
-              ]).pipe(
+              const cachePath = path.join(reposRoot, cache);
+              if (!(yield* fileSystem.exists(path.join(cachePath, "HEAD")))) {
+                yield* Effect.logDebug("Skipping non-bare entry during the local cache sweep", {
+                  worker,
+                  host: "local",
+                  cache,
+                });
+                continue;
+              }
+              yield* run("cleanup", "git", ["--git-dir", cachePath, "worktree", "prune"]).pipe(
                 Effect.tapError((error) =>
                   Effect.logWarning("Could not prune a bare cache during the sweep", {
                     worker,
@@ -314,17 +318,22 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           cause: new Error("prepared Attempt state missing"),
         });
       }
+      const turboCache = path.join(workersRoot, prepared.worker, "turbo");
       yield* Effect.logInfo("Launching the run host", {
         attemptId,
         worker: prepared.worker,
         host: "local",
         command: runHost.command,
         worktree: prepared.worktree,
+        turboCache,
       });
       const handle = yield* spawner.spawn(
         ChildProcess.make(runHost.command, runHost.args, {
           cwd: prepared.worktree,
-          env: credentialEnvironment(baseEnvironment, stored.credential),
+          env: {
+            ...credentialEnvironment(baseEnvironment, stored.credential),
+            TURBO_CACHE_DIR: turboCache,
+          },
           extendEnv: false,
           stdin: { stream: Stream.fromQueue(input), endOnDone: true },
         }),

@@ -32,13 +32,25 @@ import {
   TranscriptTailQuery,
 } from "@usine/engine";
 import { stepExecutorLayer } from "../src/index.ts";
-import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
+import {
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Logger,
+  Option,
+  Path,
+  Redacted,
+  References,
+  Schema,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
 import { layer as localLayer } from "../src/local.ts";
 
 const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
 const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
+const TURBO_CACHE_HOST = fileURLToPath(new URL("./fixtures/turbo-cache.mjs", import.meta.url));
 const TOKEN = "one-attempt-test-token";
 // Each live transition crosses real git worktree and child-process boundaries;
 // the 10-second poll horizon absorbs slow shared CI hosts while the 10 ms cadence
@@ -180,6 +192,107 @@ const withLocalEngine = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer));
 
 describe("local worker", () => {
+  it.live(
+    "prunes bare caches while ignoring a stray .turbo directory",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-sweep-" });
+        const instance = InstanceDirectory.make(root);
+        const remote = yield* makeRemote(root);
+        const workerRoot = path.join(instance, ".usine", "workers", "local");
+        const reposRoot = path.join(workerRoot, "repos");
+        const cache = path.join(reposRoot, "acme_demo.git");
+        const abandoned = path.join(workerRoot, "attempts", "abandoned");
+        const turbo = path.join(reposRoot, ".turbo");
+        const turboMarker = path.join(turbo, "marker");
+        yield* fileSystem.makeDirectory(reposRoot, { recursive: true });
+        yield* run("git", ["clone", "--bare", remote, cache]);
+        const commit = (yield* output("git", [
+          "--git-dir",
+          cache,
+          "rev-parse",
+          "refs/heads/main",
+        ])).trim();
+        yield* run("git", ["--git-dir", cache, "worktree", "add", "--detach", abandoned, commit]);
+        yield* fileSystem.remove(abandoned, { recursive: true, force: true });
+        yield* fileSystem.makeDirectory(turbo, { recursive: true });
+        yield* fileSystem.writeFileString(turboMarker, "keep");
+        const registrationsBefore = yield* output("git", [
+          "--git-dir",
+          cache,
+          "worktree",
+          "list",
+          "--porcelain",
+        ]);
+        assert(registrationsBefore.includes(abandoned));
+
+        const logs: Array<{ readonly level: string; readonly message: string }> = [];
+        const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+          logs.push({
+            level: logLevel,
+            message: Array.isArray(message) ? message.map(String).join(" ") : String(message),
+          });
+        });
+        const runtime = localLayer(instance, config, { repositoryUrl: () => remote }).pipe(
+          Layer.provide(credentialLayer),
+        );
+        yield* Effect.gen(function* () {
+          yield* RunEngine;
+        }).pipe(
+          Effect.provide(runtime),
+          Effect.provide(Logger.layer([logger])),
+          Effect.provideService(References.MinimumLogLevel, "Debug"),
+        );
+
+        const registrationsAfter = yield* output("git", [
+          "--git-dir",
+          cache,
+          "worktree",
+          "list",
+          "--porcelain",
+        ]);
+        assert(!registrationsAfter.includes(abandoned));
+        assert(yield* fileSystem.exists(turboMarker));
+        const skipped = logs.filter(({ message }) =>
+          message.includes("Skipping non-bare entry during the local cache sweep"),
+        );
+        assert.deepStrictEqual(
+          skipped.map(({ level }) => level),
+          ["Debug"],
+        );
+        assert(
+          !logs.some(({ message }) =>
+            message.includes("Could not prune a bare cache during the sweep"),
+          ),
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "keeps Turbo's linked-worktree cache outside bare repository storage",
+    () =>
+      withLocalEngine(
+        ["--stub"],
+        ({ engine, instance }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(7));
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            yield* waitFor(engine, accepted.runId, "Succeeded");
+            const path = yield* Path.Path;
+            const fileSystem = yield* FileSystem.FileSystem;
+            const workerRoot = path.join(instance, ".usine", "workers", "local");
+            assert(yield* fileSystem.exists(path.join(workerRoot, "turbo", "test-marker")));
+            assert(!(yield* fileSystem.exists(path.join(workerRoot, "repos", ".turbo"))));
+          }),
+        TURBO_CACHE_HOST,
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
+
   it.live(
     "runs Event → Attempt, persists the transcript, and removes the worktree",
     () =>
