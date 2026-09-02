@@ -34,6 +34,7 @@ import {
   type ChangedItem,
   type GitHubAppError,
   type PayloadSnapshot,
+  type RepositoryLabelDetection,
 } from "@usine/github";
 import {
   Clock,
@@ -123,6 +124,15 @@ interface ItemCycle {
   readonly revokedRuns: number;
   /** Loop-authoring failures isolated to their loop so the cursor still advances. */
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
+}
+
+/** What one repository's label-catalog request contributed to its cycle. */
+interface LabelCatalogCycle {
+  readonly labelEntityTag: Option.Option<EntityTag>;
+  /** A fresh catalog was stored; its ETag must persist even when no item changed. */
+  readonly stored: boolean;
+  readonly failures: ReadonlyArray<RepositoryPollFailure>;
+  readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
 const cursorKey = (repository: ManagedRepo): CursorKey =>
@@ -355,42 +365,88 @@ export class PollingTriggers extends Context.Service<
         return { submissions, revokedRuns, failures } satisfies ItemCycle;
       });
 
+      /**
+       * The label catalog feeds the Board projection only. A failed catalog
+       * request keeps the stored catalog and ETag and never blocks trigger
+       * evaluation: label-triggered Loops fire from the change poll alone.
+       */
+      const applyLabelCatalog = Effect.fn("PollingTriggers.applyLabelCatalog")(function* (
+        watched: WatchedRepository,
+        stored: StoredPollCursor,
+        result: Result.Result<RepositoryLabelDetection, GitHubAppError>,
+      ) {
+        const unchanged = {
+          labelEntityTag: stored.labelEntityTag,
+          stored: false,
+          failures: [],
+          nextPollAt: Option.none(),
+        } satisfies LabelCatalogCycle;
+        if (Result.isFailure(result)) {
+          const error = result.failure;
+          if (error._tag === "GitHubRateLimitError") {
+            yield* Effect.logWarning("Label catalog rate-limited; keeping the stored catalog", {
+              repository: watched.repository.name,
+              operation: error.operation,
+              retryAt: DateTime.formatIso(error.retryAt),
+            });
+            return { ...unchanged, nextPollAt: Option.some(error.retryAt) };
+          }
+          yield* Effect.logError(
+            "Label catalog request failed; kept the stored catalog and evaluated items anyway",
+            {
+              repository: watched.repository.name,
+              ...repositoryFailureLogFields(error),
+            },
+          );
+          return {
+            ...unchanged,
+            failures: [
+              new RepositoryPollFailure({
+                repository: watched.repository.name,
+                errorTag: error._tag,
+                message: error.message,
+              }),
+            ],
+          };
+        }
+        const detection = result.success;
+        if (!(detection instanceof RepositoryLabelCatalog)) {
+          yield* Effect.logDebug("Repository label catalog unchanged (304)", {
+            repository: watched.repository.name,
+          });
+          return unchanged;
+        }
+        yield* repositoryLabels.replace(
+          new RepositoryLabelProjection({
+            repository: watched.repository.name,
+            labels: detection.labels.map(String),
+          }),
+        );
+        return { ...unchanged, labelEntityTag: detection.entityTag, stored: true };
+      });
+
       const pollRepository = Effect.fn("PollingTriggers.pollRepository")(function* (
         watched: WatchedRepository,
       ) {
         yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
         const stored = yield* readCursor(watched);
-        const [detected, labelDetection] = yield* Effect.all(
+        const [detected, labelResult] = yield* Effect.all(
           [
             github.changes(watched.repository.name, stored.cursor),
-            github.labels(watched.repository.name, stored.labelEntityTag),
+            Effect.result(github.labels(watched.repository.name, stored.labelEntityTag)),
           ] as const,
           { concurrency: "unbounded" },
         );
-        const labelEntityTag =
-          labelDetection instanceof RepositoryLabelCatalog
-            ? labelDetection.entityTag
-            : stored.labelEntityTag;
-        if (labelDetection instanceof RepositoryLabelCatalog) {
-          yield* repositoryLabels.replace(
-            new RepositoryLabelProjection({
-              repository: watched.repository.name,
-              labels: labelDetection.labels.map(String),
-            }),
-          );
-        } else {
-          yield* Effect.logDebug("Repository label catalog unchanged (304)", {
-            repository: watched.repository.name,
-          });
-        }
+        const catalog = yield* applyLabelCatalog(watched, stored, labelResult);
         const nextCursor = new StoredPollCursor({
           boardVersion: 2,
           cursor: detected.cursor,
-          labelEntityTag,
+          labelEntityTag: catalog.labelEntityTag,
           watches: watched.watches,
         });
+        const nextPollAt = latestPollAt([detected.nextPollAt, catalog.nextPollAt]);
         if (detected._tag === "RepositoryNotModified") {
-          if (labelDetection instanceof RepositoryLabelCatalog) {
+          if (catalog.stored) {
             yield* writeCursor(watched, nextCursor);
           }
           yield* Effect.logDebug("Repository unchanged (304)", {
@@ -400,8 +456,8 @@ export class PollingTriggers extends Context.Service<
             changedItems: 0,
             submissions: [],
             revokedRuns: 0,
-            failures: [],
-            nextPollAt: detected.nextPollAt,
+            failures: catalog.failures,
+            nextPollAt,
           } satisfies RepositoryCycle;
         }
 
@@ -423,8 +479,8 @@ export class PollingTriggers extends Context.Service<
           changedItems: detected.items.length,
           submissions: itemCycles.flatMap(({ submissions }) => submissions),
           revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
-          failures: itemCycles.flatMap(({ failures }) => failures),
-          nextPollAt: detected.nextPollAt,
+          failures: [...catalog.failures, ...itemCycles.flatMap(({ failures }) => failures)],
+          nextPollAt,
         } satisfies RepositoryCycle;
       });
 

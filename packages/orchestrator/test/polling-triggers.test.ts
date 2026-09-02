@@ -37,6 +37,7 @@ import {
   EntityTag,
   GitHubApiError,
   GitHubPolling,
+  GitHubRateLimitError,
   IssueSnapshot,
   PollCursor,
   RepositoryLabelCatalog,
@@ -285,6 +286,144 @@ describe("PollingTriggers", () => {
       assert.strictEqual(latest.value, cycle);
     }).pipe(Effect.provide(schedulerLayer(github, [state])));
   });
+
+  it.effect("turns a rate-limited label catalog into a backoff, not a failed cycle", () => {
+    const github: GitHubPolling["Service"] = {
+      changes: (_repository, cursor) =>
+        Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
+      labels: () =>
+        Effect.gen(function* () {
+          const now = yield* Clock.currentTimeMillis;
+          return yield* new GitHubRateLimitError({
+            operation: "list-repository-labels",
+            retryAt: DateTime.makeUnsafe(now + 90_000),
+            message: "secondary rate limit",
+          });
+        }),
+      snapshot: () => Effect.die("an unchanged repository has no snapshots"),
+    };
+
+    return Effect.gen(function* () {
+      const polling = yield* PollingTriggers;
+      const cycle = yield* polling.poll(instanceWith([issueLoop("start-dev")]));
+      assert.strictEqual(cycle.repositories, 2);
+      assert.strictEqual(cycle.failures.length, 0);
+      const now = yield* Clock.currentTimeMillis;
+      assert(Option.isSome(cycle.nextPollAt));
+      assert.strictEqual(DateTime.toEpochMillis(cycle.nextPollAt.value), now + 90_000);
+    }).pipe(Effect.provide(schedulerLayer(github)));
+  });
+
+  it.live("keeps firing Loops and advancing the cursor when the label catalog request fails", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = Instance.Directory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-polling-" }),
+      );
+      const catalogFails = yield* Ref.make(false);
+      const hash = yield* Ref.make(ContentHash.make("a".repeat(64)));
+      const cursorsSeen = yield* Ref.make<ReadonlyArray<Option.Option<EntityTag>>>([]);
+      const cursorsReturned = yield* Ref.make<ReadonlyArray<EntityTag>>([]);
+      const labelEntityTagsSeen = yield* Ref.make<ReadonlyArray<Option.Option<EntityTag>>>([]);
+      const catalogEntityTag = EntityTag.make('W/"labels"');
+      const changed = new ChangedIssue({
+        number: 28,
+        updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+      });
+      const recordFor =
+        <A>(repository: Repository.Name, ref: Ref.Ref<ReadonlyArray<A>>) =>
+        (value: A) =>
+          repository === watchedRepository
+            ? Ref.update(ref, (values) => [...values, value])
+            : Effect.void;
+      const github: GitHubPolling["Service"] = {
+        changes: (repository, cursor) =>
+          Effect.gen(function* () {
+            yield* recordFor(repository, cursorsSeen)(cursor.entityTag);
+            const entityTag = EntityTag.make(
+              `W/"${repository}-${String((yield* Ref.get(cursorsReturned)).length)}"`,
+            );
+            yield* recordFor(repository, cursorsReturned)(entityTag);
+            return new RepositoryChanges({
+              cursor: new PollCursor({
+                entityTag: Option.some(entityTag),
+                watermark: Option.some(changed.updatedAt),
+              }),
+              items: [changed],
+              backlog: false,
+              nextPollAt: Option.none(),
+            });
+          }),
+        labels: (repository, entityTag) =>
+          Effect.gen(function* () {
+            yield* recordFor(repository, labelEntityTagsSeen)(entityTag);
+            if (yield* Ref.get(catalogFails)) {
+              return yield* new GitHubApiError({
+                operation: "list-repository-labels",
+                status: Option.some(502),
+                message: "label catalog unavailable",
+              });
+            }
+            return new RepositoryLabelCatalog({
+              entityTag: Option.some(catalogEntityTag),
+              labels: [RepositoryLabelName.make("ready")],
+            });
+          }),
+        snapshot: () =>
+          Effect.gen(function* () {
+            return new IssueSnapshot({
+              payload: issuePayload(["ready"]),
+              contentHash: yield* Ref.get(hash),
+            });
+          }),
+      };
+      const context = yield* Layer.build(runtimeLayer(directory, github));
+      const polling = Context.get(context, PollingTriggers);
+      const engine = Context.get(context, RunEngine);
+      const labels = Context.get(context, RepositoryLabelProjectionReader);
+      const instance = instanceWith([issueLoop("start-dev")]);
+
+      const healthy = yield* polling.poll(instance);
+      assert.strictEqual(healthy.failures.length, 0);
+      const firstRun = claimedRun(healthy);
+      yield* waitForState(engine, firstRun, "Waiting");
+
+      // The item changes while the catalog endpoint is down: the Loop must still fire.
+      yield* Ref.set(catalogFails, true);
+      yield* Ref.set(hash, ContentHash.make("b".repeat(64)));
+      const degraded = yield* polling.poll(instance);
+      assert.strictEqual(degraded.changedItems, 2);
+      const secondRun = claimedRun(degraded);
+      assert.notStrictEqual(secondRun, firstRun);
+      yield* waitForState(engine, secondRun, "Waiting");
+      assert.deepStrictEqual(
+        degraded.failures
+          .map(({ repository, errorTag }) => ({ repository, errorTag }))
+          .sort((left, right) => left.repository.localeCompare(right.repository)),
+        [
+          { repository: Repository.Name.make("basaltbytes/unwatched"), errorTag: "GitHubApiError" },
+          { repository: watchedRepository, errorTag: "GitHubApiError" },
+        ],
+      );
+
+      // The stored catalog and its ETag survive the failed request.
+      const retained = yield* labels.get(watchedRepository);
+      assert(Option.isSome(retained));
+      assert.deepStrictEqual(retained.value.labels, ["ready"]);
+
+      // The next cycle proves both commit points: the item cursor advanced
+      // past the degraded poll, and the catalog ETag is still sent.
+      const recovered = yield* polling.poll(instance);
+      assert.strictEqual(claimedRun(recovered), secondRun);
+      const seen = yield* Ref.get(cursorsSeen);
+      const returned = yield* Ref.get(cursorsReturned);
+      assert.deepStrictEqual(seen[2], Option.some(returned[1]));
+      assert.deepStrictEqual(
+        (yield* Ref.get(labelEntityTagsSeen))[2],
+        Option.some(catalogEntityTag),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 
   it.live(
     "deduplicates snapshots across restart and emits new Events only for new matching content",
