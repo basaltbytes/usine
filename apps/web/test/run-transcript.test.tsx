@@ -66,7 +66,7 @@ describe("run transcript", () => {
       />,
     );
 
-    assert.strictEqual((markup.match(/<details/g) ?? []).length, 1);
+    assert.strictEqual((markup.match(/data-slot="collapsible"/g) ?? []).length, 1);
     assert.match(markup, /agent-child-session activity.*2 events/);
     assert.ok(markup.indexOf("Parent update") < markup.indexOf("activity"));
     assert.ok(markup.indexOf("activity") < markup.indexOf("Attempt started"));
@@ -83,7 +83,7 @@ describe("run transcript", () => {
       />,
     );
 
-    assert.strictEqual((markup.match(/<details/g) ?? []).length, 2);
+    assert.strictEqual((markup.match(/data-slot="collapsible"/g) ?? []).length, 2);
     assert.ok(markup.indexOf("agent-child-a activity") < markup.indexOf("Parent update"));
     assert.ok(markup.indexOf("Parent update") < markup.indexOf("agent-child-b activity"));
   });

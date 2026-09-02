@@ -18,6 +18,9 @@
     },
     "apps/server": {
       "ignoreDependencies": ["@usine/web"]
+    },
+    "apps/web": {
+      "entry": ["src/index.ts", "src/components/ui/*.tsx", "src/hooks/*.ts"]
     }
   }
 }

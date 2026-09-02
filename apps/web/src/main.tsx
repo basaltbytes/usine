@@ -1,6 +1,11 @@
-import "@fontsource-variable/archivo";
-import "@fontsource/ibm-plex-mono/400.css";
-import "@fontsource/ibm-plex-mono/500.css";
+import {
+  ArrowRightIcon,
+  CircleIcon,
+  PauseIcon,
+  PlayIcon,
+  WarningCircleIcon,
+  WarningIcon,
+} from "@phosphor-icons/react";
 import {
   QueryClient,
   QueryClientProvider,
@@ -17,21 +22,42 @@ import {
   useNavigate,
 } from "@tanstack/react-router";
 import { Repository, Run } from "@usine/core";
-import { FactoryOverview, RunDetailView } from "@usine/orchestrator";
-import type { LoopView, NeedView, ProjectView, TranscriptPageCursor } from "@usine/orchestrator";
+import { FactoryOverview } from "@usine/orchestrator";
+import type { LoopView, NeedView, ProjectView } from "@usine/orchestrator";
 import { Schema } from "effect";
-import { StrictMode, useState, type ReactNode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
-import { ApiOk, api } from "./api.ts";
-import { ProjectBoard } from "./board.tsx";
-import { brainLine, failureMessage, needCopy } from "./operator-copy.ts";
+import { ErrorAlert } from "@/components/error-alert";
+import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
-  mergeTranscript,
-  replaceEarlierCursor,
-  RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
-  Transcript,
-} from "./run-transcript.tsx";
-import "./styles.css";
+  Empty,
+  EmptyContent,
+  EmptyDescription,
+  EmptyHeader,
+  EmptyMedia,
+  EmptyTitle,
+} from "@/components/ui/empty";
+import {
+  Item,
+  ItemActions,
+  ItemContent,
+  ItemDescription,
+  ItemFooter,
+  ItemGroup,
+  ItemTitle,
+} from "@/components/ui/item";
+import { Spinner } from "@/components/ui/spinner";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
+import { api } from "./api.ts";
+import { ProjectBoard } from "./board.tsx";
+import { ApiOk } from "./api.ts";
+import { needCopy } from "./operator-copy.ts";
+import { RunDrawer } from "./run-drawer.tsx";
+import "./index.css";
 
 const FactorySearch = Schema.toStandardSchemaV1(
   Schema.Struct({
@@ -63,39 +89,30 @@ const overviewQuery = () => ({
   },
 });
 
-const timeAgo = (value: string): string => {
-  const elapsed = Math.max(0, Date.now() - Date.parse(value));
-  if (elapsed < 60_000) return "now";
-  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m`;
-  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
-  return `${Math.floor(elapsed / 86_400_000)}d`;
-};
-
-const jsonGist = (value: Schema.Json): string => JSON.stringify(value, null, 2);
-
-const StatusMark = ({ state }: { readonly state: string }) => (
-  <span className={`status-mark state-${state.toLowerCase()}`} aria-label={state}>
-    {state}
-  </span>
-);
-
-const ActionButton = ({
+const BootScreen = ({
+  title,
+  description,
+  tone = "loading",
   children,
-  className = "",
-  disabled,
-  onClick,
 }: {
-  readonly children: ReactNode;
-  readonly className?: string;
-  readonly disabled?: boolean;
-  readonly onClick: () => void;
+  readonly title: string;
+  readonly description: string;
+  readonly tone?: "loading" | "error";
+  readonly children?: ReactNode;
 }) => (
-  <button className={`action ${className}`} disabled={disabled} onClick={onClick} type="button">
-    {children}
-  </button>
+  <main className="grid min-h-svh place-items-center p-6">
+    <Empty className="max-w-md">
+      <EmptyHeader>
+        <EmptyMedia variant="icon" className={cn(tone === "error" && "text-destructive")}>
+          {tone === "loading" ? <Spinner /> : <WarningCircleIcon weight="fill" />}
+        </EmptyMedia>
+        <EmptyTitle>{title}</EmptyTitle>
+        <EmptyDescription className="wrap-anywhere">{description}</EmptyDescription>
+      </EmptyHeader>
+      {children !== undefined && <EmptyContent>{children}</EmptyContent>}
+    </Empty>
+  </main>
 );
-
-const PausedMark = () => <span className="paused-mark">paused</span>;
 
 const NeedStrip = ({
   needs,
@@ -103,272 +120,56 @@ const NeedStrip = ({
 }: {
   readonly needs: ReadonlyArray<NeedView>;
   readonly openRun: (runId: Run.RunId) => void;
-}) => {
-  if (needs.length === 0) {
-    return (
-      <div className="needs-strip all-clear">
-        <span className="strip-label">Needs you</span>
-        <span>Nothing is blocked. The floor is moving.</span>
-      </div>
-    );
-  }
-  return (
-    <section className="needs-strip" aria-label="Items needing intervention">
-      <span className="strip-label">Needs you · {needs.length}</span>
-      <div className="need-items">
+}) => (
+  <section aria-label="Items needing intervention" className="border-b px-4 py-3 sm:px-6">
+    <div className="flex items-center gap-2">
+      <h2 className="font-heading text-sm font-medium">Needs you</h2>
+      {needs.length > 0 ? (
+        <Badge className="bg-needs-you font-mono text-background">{needs.length}</Badge>
+      ) : (
+        <p className="text-muted-foreground">Nothing is blocked. The floor is moving.</p>
+      )}
+    </div>
+    {needs.length > 0 && (
+      <div className="mt-2 flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
         {needs.map((need) => {
           const copy = needCopy(need);
+          const runId = copy.runId;
           const body = (
             <>
-              <strong>{copy.title}</strong>
-              <span>{copy.detail}</span>
-              {copy.repository !== null && <small>{copy.repository}</small>}
+              <ItemContent>
+                <ItemTitle className="line-clamp-1">{copy.title}</ItemTitle>
+                <ItemDescription className="line-clamp-3 wrap-anywhere">
+                  {copy.detail}
+                </ItemDescription>
+              </ItemContent>
+              {copy.repository !== null && (
+                <ItemFooter className="font-mono text-[0.625rem] text-muted-foreground">
+                  {copy.repository}
+                </ItemFooter>
+              )}
             </>
           );
-          const runId = copy.runId;
           return runId !== null ? (
-            <button
-              className="need-item"
+            <Item
               key={need.id}
-              onClick={() => openRun(runId)}
-              type="button"
+              variant="outline"
+              size="sm"
+              className="w-80 shrink-0 cursor-pointer text-left hover:bg-muted"
+              render={<button type="button" onClick={() => openRun(runId)} />}
             >
               {body}
-            </button>
+            </Item>
           ) : (
-            <article className="need-item need-notice" key={need.id}>
+            <Item key={need.id} variant="muted" size="sm" className="w-80 shrink-0">
               {body}
-            </article>
+            </Item>
           );
         })}
       </div>
-    </section>
-  );
-};
-
-const LoopCard = ({
-  loop,
-  act,
-  pending,
-}: {
-  readonly loop: LoopView;
-  readonly act: (loop: LoopView) => void;
-  readonly pending: boolean;
-}) => (
-  <article className="loop-control">
-    <div>
-      <h3>{loop.name}</h3>
-      <p className="annotation">
-        {loop.trigger} · {loop.agent}
-      </p>
-    </div>
-    <ActionButton
-      className={loop.paused ? "resume" : "pause"}
-      disabled={pending}
-      onClick={() => act(loop)}
-    >
-      {loop.paused ? "Unpause" : "Pause"}
-    </ActionButton>
-  </article>
+    )}
+  </section>
 );
-
-const RunDrawer = ({ runId, close }: { readonly runId: Run.RunId; readonly close: () => void }) => {
-  const queryClient = useQueryClient();
-  const [confirmCancel, setConfirmCancel] = useState(false);
-  const detail = useQuery<RunDetailView>({
-    queryKey: ["run", runId],
-    queryFn: async () => {
-      const key = ["run", runId] as const;
-      const previous = queryClient.getQueryData<RunDetailView>(key);
-      const cursor = previous?.transcript.at(-1)?.sequence;
-      const search = cursor === undefined ? "" : `?after=${cursor}`;
-      const next = await api(`/api/runs/${encodeURIComponent(runId)}${search}`, RunDetailView);
-      const current = queryClient.getQueryData<RunDetailView>(key);
-      if (cursor === undefined || current === undefined) return next;
-      return new RunDetailView({
-        ...next,
-        transcript: mergeTranscript(current.transcript, next.transcript),
-        earlierTranscript: current.earlierTranscript,
-      });
-    },
-    structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
-    refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
-  });
-  const mutation = useMutation({
-    mutationFn: (act: "approve" | "retry" | "cancel") =>
-      api(`/api/runs/${encodeURIComponent(runId)}/${act}`, ApiOk, {
-        method: "POST",
-      }),
-    onSuccess: async () => {
-      setConfirmCancel(false);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["overview"] }),
-        queryClient.invalidateQueries({ queryKey: ["run", runId] }),
-      ]);
-    },
-  });
-  const earlierMutation = useMutation({
-    mutationFn: (cursor: TranscriptPageCursor) =>
-      api(
-        `/api/runs/${encodeURIComponent(runId)}?attempt=${encodeURIComponent(cursor.attemptId)}&before=${cursor.before}`,
-        RunDetailView,
-      ),
-    onSuccess: (page, cursor) => {
-      const key = ["run", runId] as const;
-      queryClient.setQueryData<RunDetailView>(key, (previous) =>
-        previous === undefined
-          ? previous
-          : new RunDetailView({
-              ...page,
-              transcript: mergeTranscript(previous.transcript, page.transcript),
-              earlierTranscript: replaceEarlierCursor(
-                previous.earlierTranscript,
-                cursor.attemptId,
-                page.earlierTranscript,
-              ),
-            }),
-      );
-    },
-  });
-  const run = detail.data?.run;
-  const earlier = detail.data?.earlierTranscript.at(-1);
-  return (
-    <div className="drawer-shell" role="dialog" aria-modal="true" aria-label="Run detail">
-      <button
-        className="drawer-scrim"
-        onClick={close}
-        type="button"
-        aria-label="Close run detail"
-      />
-      <aside className="run-drawer">
-        <header className="drawer-heading">
-          <div>
-            <p className="eyebrow">Run detail</p>
-            <h2>{run?.loop ?? "Loading…"}</h2>
-            {run !== undefined && (
-              <p className="annotation">
-                {run.repository} · {run.id}
-                {run.loopPaused && <PausedMark />}
-              </p>
-            )}
-          </div>
-          <button className="close-button" onClick={close} type="button" aria-label="Close">
-            ×
-          </button>
-        </header>
-        {detail.isError && <p className="error-panel">{detail.error.message}</p>}
-        {run !== undefined && (
-          <>
-            <div className="run-summary">
-              <StatusMark state={run.state} />
-              <span className="annotation">{run.agent}</span>
-              <span className="annotation">
-                {run.attempts.length} attempt
-                {run.attempts.length === 1 ? "" : "s"}
-              </span>
-            </div>
-            <div className="drawer-actions">
-              {run.canApprove && (
-                <ActionButton
-                  disabled={mutation.isPending}
-                  onClick={() => mutation.mutate("approve")}
-                >
-                  Approve
-                </ActionButton>
-              )}
-              {run.canRetry && (
-                <ActionButton
-                  disabled={mutation.isPending}
-                  onClick={() => mutation.mutate("retry")}
-                >
-                  Retry
-                </ActionButton>
-              )}
-              {run.canCancel && !confirmCancel && (
-                <ActionButton
-                  className="danger-quiet"
-                  disabled={mutation.isPending}
-                  onClick={() => setConfirmCancel(true)}
-                >
-                  Cancel
-                </ActionButton>
-              )}
-              {run.canCancel && confirmCancel && (
-                <ActionButton
-                  className="danger"
-                  disabled={mutation.isPending}
-                  onClick={() => mutation.mutate("cancel")}
-                >
-                  Confirm cancel
-                </ActionButton>
-              )}
-            </div>
-            {mutation.isError && <p className="error-panel">{mutation.error.message}</p>}
-            <section className="drawer-section">
-              <h3>Task</h3>
-              <p>{run.task}</p>
-            </section>
-            <section className="drawer-section">
-              <h3>Event</h3>
-              <p className="annotation event-key">{detail.data?.eventDedupKey}</p>
-              <pre className="payload-gist">{jsonGist(detail.data?.eventPayload ?? null)}</pre>
-            </section>
-            <section className="drawer-section">
-              <h3>Attempts</h3>
-              <div className="attempt-list">
-                {run.attempts.length === 0 && <p className="empty-copy">No attempt has started.</p>}
-                {run.attempts.map((attempt) => (
-                  <article className="attempt-entry" key={attempt.id}>
-                    <header>
-                      <strong>Attempt {attempt.number}</strong>
-                      <StatusMark state={attempt.outcome?._tag ?? "Running"} />
-                    </header>
-                    <p className="annotation attempt-meta">
-                      {attempt.worker} · {brainLine(attempt.brain)} · {timeAgo(attempt.startedAt)}
-                    </p>
-                    {attempt.outcome?._tag === "Failed" && (
-                      <p className="attempt-error">
-                        <strong>{attempt.outcome.failure._tag}</strong>
-                        {` — ${failureMessage(attempt.outcome.failure)}`}
-                      </p>
-                    )}
-                  </article>
-                ))}
-              </div>
-            </section>
-            {run.resultMessage !== null && (
-              <section className="drawer-section">
-                <h3>Result</h3>
-                <p>{run.resultMessage}</p>
-                {run.pullRequestUrl !== null && (
-                  <a href={run.pullRequestUrl} target="_blank" rel="noreferrer">
-                    Open pull request ↗
-                  </a>
-                )}
-              </section>
-            )}
-            <section className="drawer-section transcript-section">
-              <h3>Live transcript</h3>
-              {earlier !== undefined && (
-                <ActionButton
-                  className="load-earlier"
-                  disabled={earlierMutation.isPending}
-                  onClick={() => earlierMutation.mutate(earlier)}
-                >
-                  {earlierMutation.isPending ? "Loading…" : "Load earlier"}
-                </ActionButton>
-              )}
-              {earlierMutation.isError && (
-                <p className="error-panel">{earlierMutation.error.message}</p>
-              )}
-              <Transcript events={detail.data?.transcript ?? []} />
-            </section>
-          </>
-        )}
-      </aside>
-    </div>
-  );
-};
 
 const ProjectIndex = ({
   projects,
@@ -377,15 +178,12 @@ const ProjectIndex = ({
   readonly projects: ReadonlyArray<ProjectView>;
   readonly open: (repository: Repository.Name) => void;
 }) => (
-  <main className="projects-panel project-index">
-    <header className="section-heading">
-      <div>
-        <p className="eyebrow">Observe</p>
-        <h1>Projects</h1>
-      </div>
-      <span className="annotation">{projects.length} registered</span>
+  <main className="mx-auto w-full max-w-4xl px-4 py-6 sm:px-6">
+    <header className="mb-4 flex items-baseline justify-between gap-3">
+      <h1 className="font-heading text-xl font-medium">Projects</h1>
+      <p className="text-muted-foreground">{projects.length} registered</p>
     </header>
-    <div className="project-grid">
+    <ItemGroup className="gap-0 divide-y border-y">
       {projects.map((project) => {
         const itemCount = project.board.lanes.reduce((total, lane) => total + lane.items.length, 0);
         const needsYou = project.board.lanes.reduce(
@@ -393,29 +191,32 @@ const ProjectIndex = ({
           0,
         );
         return (
-          <button
-            className="project-tile"
+          <Item
             key={project.repository}
-            onClick={() => open(project.repository)}
-            type="button"
+            className="cursor-pointer rounded-none py-3 text-left hover:bg-muted"
+            render={<button type="button" onClick={() => open(project.repository)} />}
           >
-            <span className="project-tile-heading">
-              <strong>{project.repository}</strong>
-              <span className={`project-status project-${project.status}`}>{project.status}</span>
-            </span>
-            <span className="annotation">
-              {itemCount} item{itemCount === 1 ? "" : "s"} · {project.board.lanes.length} lanes
-            </span>
-            {project.status === "needs-you" && (
-              <span className="needs-you-badge">
-                {needsYou > 0 ? `${needsYou} need you` : "Needs you"}
-              </span>
-            )}
-            <span className="project-open">Open board →</span>
-          </button>
+            <ItemContent>
+              <ItemTitle className="font-heading text-sm wrap-anywhere">
+                {project.repository}
+              </ItemTitle>
+              <ItemDescription>
+                {itemCount} item{itemCount === 1 ? "" : "s"} across {project.board.lanes.length}{" "}
+                lane{project.board.lanes.length === 1 ? "" : "s"}
+              </ItemDescription>
+            </ItemContent>
+            <ItemActions>
+              {project.status === "needs-you" ? (
+                <NeedsYouBadge count={needsYou} />
+              ) : (
+                <StatusBadge state={project.status} />
+              )}
+              <ArrowRightIcon className="text-muted-foreground" aria-hidden="true" />
+            </ItemActions>
+          </Item>
         );
       })}
-    </div>
+    </ItemGroup>
   </main>
 );
 
@@ -430,20 +231,42 @@ const Configuration = ({
   readonly act: (loop: LoopView) => void;
   readonly error: string | null;
 }) => (
-  <main className="configuration-panel">
-    <header className="section-heading">
-      <div>
-        <p className="eyebrow">Configuration</p>
-        <h1>Loops</h1>
-      </div>
+  <main className="mx-auto w-full max-w-3xl px-4 py-6 sm:px-6">
+    <header className="mb-4">
+      <h1 className="font-heading text-xl font-medium">Loops</h1>
+      <p className="max-w-prose text-muted-foreground">
+        Runtime controls. Authored loop files remain untouched.
+      </p>
     </header>
-    <p className="aside-copy">Runtime controls. Authored loop files remain untouched.</p>
-    <div className="loop-list">
+    <ItemGroup className="gap-0 divide-y border-y">
       {loops.map((loop) => (
-        <LoopCard key={loop.name} loop={loop} pending={pending} act={act} />
+        <Item key={loop.name} className="rounded-none py-3">
+          <ItemContent>
+            <ItemTitle className="font-heading text-sm">{loop.name}</ItemTitle>
+            <ItemDescription className="font-mono">
+              {loop.trigger} → {loop.agent}
+            </ItemDescription>
+          </ItemContent>
+          <ItemActions>
+            {loop.paused && <Badge variant="outline">paused</Badge>}
+            <Button
+              variant={loop.paused ? "default" : "outline"}
+              size="sm"
+              disabled={pending}
+              onClick={() => act(loop)}
+            >
+              {loop.paused ? (
+                <PlayIcon data-icon="inline-start" aria-hidden="true" />
+              ) : (
+                <PauseIcon data-icon="inline-start" aria-hidden="true" />
+              )}
+              {loop.paused ? "Unpause" : "Pause"}
+            </Button>
+          </ItemActions>
+        </Item>
       ))}
-    </div>
-    {error !== null && <p className="error-panel">{error}</p>}
+    </ItemGroup>
+    {error !== null && <ErrorAlert className="mt-4" message={error} />}
   </main>
 );
 
@@ -468,62 +291,62 @@ const FactoryScreen = () => {
   const closeRun = () => navigate({ search: contextSearch });
 
   if (overview.isPending)
-    return (
-      <main className="boot-screen">
-        <span>USINE</span>
-        <p>Opening the factory floor…</p>
-      </main>
-    );
+    return <BootScreen title="Usine" description="Opening the factory floor…" />;
   if (overview.isError)
-    return (
-      <main className="boot-screen error-panel">
-        <span>OFFLINE</span>
-        <p>{overview.error.message}</p>
-      </main>
-    );
+    return <BootScreen title="Offline" description={overview.error.message} tone="error" />;
   const data = overview.data;
+  const live = data._tag !== "NeedsSetup";
   return (
-    <div className="factory-shell">
-      <header className="masthead">
-        <div className="wordmark">
-          <span className="mark">U</span>
-          <div>
-            <p>Usine</p>
-            <small>Factory floor · local</small>
+    <div className="flex min-h-svh flex-col">
+      <header className="flex flex-wrap items-center gap-x-6 gap-y-3 border-b px-4 py-3 sm:px-6">
+        <div className="flex items-center gap-2.5">
+          <span
+            className="grid size-7 place-items-center rounded-md bg-primary font-heading text-sm font-semibold text-primary-foreground"
+            aria-hidden="true"
+          >
+            U
+          </span>
+          <div className="leading-tight">
+            <p className="font-heading text-sm font-medium">Usine</p>
+            <p className="text-[0.625rem] text-muted-foreground">Factory floor · local</p>
           </div>
         </div>
-        <nav className="main-nav" aria-label="Operator views">
-          <button
-            className={search.view === undefined ? "active" : ""}
-            onClick={() => navigate({ search: {} })}
-            type="button"
-          >
-            Projects
-          </button>
-          <button
-            className={search.view === "configuration" ? "active" : ""}
-            onClick={() => navigate({ search: { view: "configuration" } })}
-            type="button"
-          >
-            Configuration
-          </button>
-        </nav>
+        <Tabs
+          value={search.view ?? "projects"}
+          onValueChange={(value: string) =>
+            navigate({ search: value === "configuration" ? { view: "configuration" } : {} })
+          }
+        >
+          <TabsList variant="line" aria-label="Operator views">
+            <TabsTrigger value="projects">Projects</TabsTrigger>
+            <TabsTrigger value="configuration">Configuration</TabsTrigger>
+          </TabsList>
+        </Tabs>
         {/* The indicator reports the trigger streams, not the server: idle
             pollers must never read as a running factory. */}
-        <div className={`live-indicator ${data._tag === "NeedsSetup" ? "idle" : ""}`}>
-          <i /> {data._tag === "NeedsSetup" ? "idle" : "live"}
-        </div>
+        <Badge
+          variant="outline"
+          className={cn("ml-auto font-mono", live ? "text-run-succeeded" : "text-muted-foreground")}
+        >
+          <CircleIcon weight="fill" aria-hidden="true" />
+          {live ? "live" : "idle"}
+        </Badge>
       </header>
       {data._tag === "NeedsSetup" && (
-        <section className="setup-banner">
-          <p className="eyebrow">Setup required · {data.errorTag}</p>
-          <h1>The floor is ready. GitHub is not connected yet.</h1>
-          <p>
-            Add <code>USINE_GITHUB_APP_ID</code> and <code>USINE_GITHUB_PRIVATE_KEY</code>, or
-            create <code>.usine/github-app.json</code> with mode 0600. Then stop and rerun{" "}
-            <code>usine up</code>: the running process reads credentials only when it starts.
-          </p>
-        </section>
+        <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 sm:px-6">
+          <WarningIcon weight="fill" className="text-needs-you" />
+          <AlertTitle className="text-sm">
+            The floor is ready. GitHub is not connected yet.
+          </AlertTitle>
+          <AlertDescription className="max-w-prose">
+            <p>
+              Setup required: {data.errorTag}. Add <code>USINE_GITHUB_APP_ID</code> and{" "}
+              <code>USINE_GITHUB_PRIVATE_KEY</code>, or create <code>.usine/github-app.json</code>{" "}
+              with mode 0600. Then stop and rerun <code>usine up</code>: the running process reads
+              credentials only when it starts.
+            </p>
+          </AlertDescription>
+        </Alert>
       )}
       <NeedStrip needs={data.needsYou} openRun={openRun} />
       {search.view === "configuration" ? (
@@ -542,11 +365,15 @@ const FactoryScreen = () => {
         (() => {
           const project = data.projects.find(({ repository }) => repository === search.project);
           return project === undefined ? (
-            <main className="boot-screen error-panel">
-              <span>NOT FOUND</span>
-              <p>{search.project} is not a registered project.</p>
-              <ActionButton onClick={() => navigate({ search: {} })}>Back to projects</ActionButton>
-            </main>
+            <BootScreen
+              title="Not found"
+              description={`${search.project} is not a registered project.`}
+              tone="error"
+            >
+              <Button variant="outline" onClick={() => navigate({ search: {} })}>
+                Back to projects
+              </Button>
+            </BootScreen>
           ) : (
             <ProjectBoard
               project={project}

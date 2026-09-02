@@ -6,4 +6,14 @@ The first screen lists registered projects and marks those with Items that need 
 
 Clicking a card with a Run opens the live protocol transcript drawer. Parent messages stay inline; each child session's activity is grouped into its own collapsible level, and truncated Attempts expose a load-earlier control until their full history is reachable. The separate Configuration view contains database-backed Loop pause controls. Needs-setup mode states that newly supplied GitHub App credentials require restarting `usine up` because the running process reads them only at startup.
 
-The app uses React, TypeScript, TanStack Query, and TanStack Router, with hand-written CSS. Its visual system follows ADR 0015: Catppuccin Mocha tokens, Archivo signage, IBM Plex Mono annotations, a modular type scale, and restrained rules.
+The app uses React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, and shadcn components on Base UI with Phosphor icons. Its visual system follows ADR 0015: dark-only, Catppuccin Mocha foreground and accents over the shadcn preset's neutrals, Geist for text and Geist Mono for headings and identifiers, flat ruled sections, and semantic run-state colors.
+
+## How to add UI
+
+The registry is the component library; the theme is the only place colors and type live.
+
+- **Use a registry component first.** Everything under `src/components/ui/` came from `pnpm dlx shadcn@latest add <name>` (run inside `apps/web`; `components.json` holds the preset). Compose those primitives (`Item`, `Card`, `Badge`, `Sheet`, `Message`, `Collapsible`, `Empty`, …) in screen files. Before writing a new element, check whether a registry component already covers it; the full set is installed.
+- **Extend with tokens, not hex.** Colors, fonts, and radii are CSS variables in `src/index.css`, exposed to Tailwind through the `@theme inline` block. A new semantic color is a new token pair there (`:root` and `.dark`) plus one `--color-*` line; screens then use utilities such as `text-run-active`. Never write a literal color in a component.
+- **Never hand-roll a parallel component.** No `styles.css`, no ad-hoc button or badge classes. A composition shared by several screens (for example `src/components/status-badge.tsx`) wraps a registry primitive and lives in `src/components/`, next to `ui/`, so the distinction between vendored and composed stays visible.
+- **Registry files are ours to edit.** Fix a type or a11y issue in place. They are exempt from the `usine/*` lint rules (see the `.oxlintrc.json` override) because upstream does not follow them, and `knip` treats them as entry files so unused components are not reported.
+- **Keep the scale.** Body text is `text-xs/relaxed`, titles `text-sm`, screen headings `text-xl` in `font-heading`; identifiers and ids use `font-mono`. Sentence case everywhere; no uppercase labels.
