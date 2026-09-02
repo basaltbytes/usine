@@ -30,6 +30,7 @@ import { ApiOk, api } from "./api.ts";
 import { brainLine, failureMessage } from "./operator-copy.ts";
 import {
   mergeTranscript,
+  poolMeters,
   replaceEarlierCursor,
   RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
   Transcript,
@@ -125,6 +126,7 @@ export const RunDrawer = ({
   });
   const run = detail.data?.run;
   const earlier = detail.data?.earlierTranscript.at(-1);
+  const meters = poolMeters(detail.data?.transcript ?? []);
   return (
     <Sheet
       open
@@ -158,6 +160,18 @@ export const RunDrawer = ({
                   {run.attempts.length} attempt
                   {run.attempts.length === 1 ? "" : "s"}
                 </span>
+                {meters.map((meter) => (
+                  <Badge
+                    key={meter.pool}
+                    variant="outline"
+                    className="font-mono"
+                    title="Share of the billing pool's rate-limit windows this session has used: 5-hour window, then weekly"
+                  >
+                    {meter.pool}
+                    {meter.primaryUsedPercent !== null && ` ${meter.primaryUsedPercent}%`}
+                    {meter.secondaryUsedPercent !== null && ` · ${meter.secondaryUsedPercent}%`}
+                  </Badge>
+                ))}
               </div>
               {(run.canApprove || run.canRetry || run.canCancel) && (
                 <div className="flex flex-wrap items-center gap-2 border-b px-6 py-3">
