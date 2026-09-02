@@ -1,6 +1,6 @@
 {
   "name": "@usine/server",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "The usine orchestrator as a headless server: a thin CLI over @usine/orchestrator that serves the web UI.",
   "license": "MIT",
   "repository": {

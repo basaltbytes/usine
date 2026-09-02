@@ -1,5 +1,11 @@
 # @usine/expression
 
+## 0.1.0
+
+### Minor Changes
+
+- 95b26af: Load, validate, and edit instance-folder configuration with per-loop quarantine and checked CEL prompt rendering. Add a typed CEL service over plain JSON with an implementation-neutral environment contract.
+
 ## 0.0.1
 
 ### Patch Changes
