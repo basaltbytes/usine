@@ -9,6 +9,8 @@ Reads and edits the authored files in a [usine](https://github.com/basaltbytes/u
 
 Authored keys are snake_case (`poll_interval`, `max_concurrent_attempts`); the decoded domain types expose camelCase fields (`pollInterval`, `maxConcurrentAttempts`). The rename is part of the schema, so edits encode back to the authored casing.
 
+Set `settings.max_children` to the number of child sessions one Attempt may spawn. The default is 4, and the count includes sequential and concurrent child sessions.
+
 Each managed repository can define an exclusive Board lane map. A lane accepts one or more GitHub label or Item-state sources:
 
 ```yaml
