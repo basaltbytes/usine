@@ -19,7 +19,7 @@ export const stubLayer = (delayMillis = 0) =>
               brain: new Agent.BrainSpec({
                 harness: "pi",
                 model,
-                effort: request.spec.agent.brain.effort,
+                effort: request.spec.parentEffort,
               }),
             });
             const events = yield* Queue.make<Agent.SessionEvent, Cause.Done>();

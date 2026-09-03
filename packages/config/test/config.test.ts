@@ -75,6 +75,53 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("parses parent_effort in settings and agent frontmatter as the Effort scale", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const config = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\nrepos: []\nsettings:\n  parent_model: openai-codex/gpt-5.6-terra\n  parent_effort: medium\n",
+      );
+      expect(Option.getOrNull(config.settings.parentEffort)).toBe("medium");
+
+      const unset = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        "version: 1\nrepos: []\n",
+      );
+      expect(Option.isNone(unset.settings.parentEffort)).toBe(true);
+
+      const invalid = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          "version: 1\nrepos: []\nsettings:\n  parent_effort: extreme\n",
+        )
+        .pipe(Effect.flip);
+      expect(invalid.stage).toBe("schema");
+      expect(invalid.message).toContain("parent_effort");
+
+      const agent = yield* parser.parseAgentFile(
+        InstancePath.make("agents/developer.md"),
+        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\nparent_effort: low\n---\nPersona body.",
+      );
+      expect(Option.getOrNull(agent.parentEffort)).toBe("low");
+
+      const inheriting = yield* parser.parseAgentFile(
+        InstancePath.make("agents/developer.md"),
+        "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\n---\nPersona body.",
+      );
+      expect(Option.isNone(inheriting.parentEffort)).toBe(true);
+
+      const badAgent = yield* parser
+        .parseAgentFile(
+          InstancePath.make("agents/developer.md"),
+          "---\nharness: codex\nmodel: gpt-5.6-sol\neffort: xhigh\nparent_effort: extreme\n---\nPersona body.",
+        )
+        .pipe(Effect.flip);
+      expect(badAgent.stage).toBe("schema");
+      expect(badAgent.message).toContain("parent_effort");
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("parses one exclusive per-repository lane map", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

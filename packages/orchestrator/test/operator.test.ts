@@ -94,6 +94,7 @@ const agentFile = new AgentFile({
   model: brain.model,
   effort: brain.effort,
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Persona.make("Review the issue."),
 });
 const loop = new LoopFile({
@@ -153,6 +154,7 @@ const snapshot = new RunSnapshot({
     name: agentFile.name,
     brain,
     parentModel: Option.none(),
+    parentEffort: Option.none(),
     persona: agentFile.persona,
   }),
   parentModel: Option.none(),

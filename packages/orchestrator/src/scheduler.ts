@@ -1,7 +1,7 @@
 /** Configured FIFO worker scheduler: the platform-free Executor-to-engine adapter. */
 
 import type { Worker as ConfigWorker, UsineConfig } from "@usine/config";
-import { AttemptFailure, Worker } from "@usine/core";
+import { Agent, AttemptFailure, Worker } from "@usine/core";
 import {
   CheckoutRequest,
   Executor,
@@ -176,6 +176,10 @@ export const stepExecutorLayer = (
                 task: execution.task,
                 agent: execution.agent,
                 parentModel: execution.parentModel,
+                parentEffort: Agent.resolveParentEffort(
+                  execution.agent,
+                  config.settings.parentEffort,
+                ),
               }),
             )
             .pipe(Effect.mapError(asInfrastructureFailure));
