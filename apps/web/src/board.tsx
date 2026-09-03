@@ -31,6 +31,7 @@ import type {
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { LabelBadge } from "@/components/label-badge";
+import { RunLinks } from "@/components/run-links";
 import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -165,16 +166,18 @@ const CardBody = ({
             </div>
           )}
           {runsToShow.map((cardRun) => (
-            <Button
-              variant="ghost"
-              size="sm"
-              className="-ml-2 gap-2"
-              key={cardRun.id}
-              onClick={() => openRun(cardRun.id)}
-            >
-              <StatusBadge state={cardRun.state} />
-              <span className="text-muted-foreground">{cardRun.agent}</span>
-            </Button>
+            <div className="flex flex-wrap items-center gap-2" key={cardRun.id}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="-ml-2 gap-2"
+                onClick={() => openRun(cardRun.id)}
+              >
+                <StatusBadge state={cardRun.state} />
+                <span className="text-muted-foreground">{cardRun.agent}</span>
+              </Button>
+              <RunLinks run={cardRun} />
+            </div>
           ))}
           {item.needsYou && <NeedsYouBadge />}
           {failure !== null && <p className="text-destructive wrap-anywhere">{failure}</p>}

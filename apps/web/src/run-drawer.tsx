@@ -1,4 +1,3 @@
-import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import type { Run } from "@usine/core";
@@ -8,6 +7,7 @@ import type { Schema } from "effect";
 import { useState, type ReactNode } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { Markdown } from "@/components/markdown";
+import { RunLinks } from "@/components/run-links";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -145,6 +145,7 @@ export const RunDrawer = ({
             <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono wrap-anywhere">
               <span>{run.repository}</span>
               <span>{run.id}</span>
+              <RunLinks run={run} />
               {run.loopPaused && <Badge variant="outline">paused</Badge>}
             </SheetDescription>
           )}
@@ -256,17 +257,6 @@ export const RunDrawer = ({
               {run.resultMessage !== null && (
                 <Section title="Result">
                   <Markdown className="max-w-prose">{run.resultMessage}</Markdown>
-                  {run.pullRequestUrl !== null && (
-                    <Button
-                      variant="link"
-                      className="mt-2 px-0"
-                      nativeButton={false}
-                      render={<a href={run.pullRequestUrl} target="_blank" rel="noreferrer" />}
-                    >
-                      Open pull request
-                      <ArrowSquareOutIcon data-icon="inline-end" aria-hidden="true" />
-                    </Button>
-                  )}
                 </Section>
               )}
               <Section title="Transcript">

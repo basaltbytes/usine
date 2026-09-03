@@ -12,8 +12,10 @@ import {
   RunView,
   SucceededAttemptView,
 } from "@usine/orchestrator";
+import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { applyMove, itemFailure, laneUnder, orderLanes, runsWithoutCard } from "../src/board.tsx";
+import { RunLinks } from "../src/components/run-links.tsx";
 
 const brain = new Agent.BrainSpec({
   harness: "codex",
@@ -35,7 +37,7 @@ const attempt = (number: number, message: string | null) =>
   });
 
 const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
-  const itemKey = Item.ItemKey.make("github:basaltbytes/usine:33");
+  const itemKey = Item.ItemKey.make('["github","basaltbytes/usine",33]');
   const run = new RunView({
     id: Run.RunId.make("run-33"),
     itemKey,
@@ -66,6 +68,37 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
     needsYou: state === "Failed",
   });
 };
+
+describe("Run links", () => {
+  const run = itemWithRun("Succeeded", [attempt(1, null)]).run;
+  assert(run !== null);
+
+  it("links the Item and produced PR to GitHub in new tabs", () => {
+    const markup = renderToStaticMarkup(
+      <RunLinks
+        run={
+          new RunView({
+            ...run,
+            pullRequestUrl: "https://github.com/basaltbytes/usine/pull/101",
+          })
+        }
+      />,
+    );
+
+    assert.ok(markup.includes("Item #33"));
+    assert.ok(markup.includes('href="https://github.com/basaltbytes/usine/issues/33"'));
+    assert.ok(markup.includes('href="https://github.com/basaltbytes/usine/pull/101"'));
+    assert.strictEqual((markup.match(/target="_blank"/gu) ?? []).length, 2);
+  });
+
+  it("omits the produced PR link when the Run has none", () => {
+    const markup = renderToStaticMarkup(<RunLinks run={run} />);
+
+    assert.ok(markup.includes('href="https://github.com/basaltbytes/usine/issues/33"'));
+    assert.ok(!markup.includes("pull request"));
+    assert.strictEqual((markup.match(/target="_blank"/gu) ?? []).length, 1);
+  });
+});
 
 describe("Board Run failure copy", () => {
   it("hides a failed Attempt after its Run recovers", () => {
