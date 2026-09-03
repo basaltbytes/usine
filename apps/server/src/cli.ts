@@ -1,3 +1,5 @@
+import { tmpdir } from "node:os";
+import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Console, Duration, Effect, FileSystem, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -14,17 +16,19 @@ export type Port = typeof Port.Type;
 const PortFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Port));
 
 export const CLI_USAGE = `Usage:
-  usine up [--port <port>]
+  usine up [--port <port>] [--allow-volatile-instance]
   usine --help
   usine --version
 
 Options:
-  -p, --port <port>  Listen on this port (default: 7331)
-  -h, --help         Print this usage
-  -v, --version      Print the pinned @usine/server version
+  -p, --port <port>            Listen on this port (default: 7331)
+  --allow-volatile-instance    Start even when the instance folder sits under a temp path
+  -h, --help                   Print this usage
+  -v, --version                Print the pinned @usine/server version
 
 Environment:
-  USINE_PORT         Listen on this port when --port is absent`;
+  USINE_PORT                     Listen on this port when --port is absent
+  USINE_ALLOW_VOLATILE_INSTANCE  Same as --allow-volatile-instance when set to 1`;
 
 export class CliUsageError extends Schema.TaggedError<CliUsageError>("@usine/server/CliUsageError")(
   "CliUsageError",
@@ -42,6 +46,14 @@ export class PortInUseError extends Schema.TaggedError<PortInUseError>(
 export class ServerStartError extends Schema.TaggedError<ServerStartError>(
   "@usine/server/ServerStartError",
 )("ServerStartError", { port: Port, cause: Schema.Defect() }) {}
+
+/** The instance folder sits under a path the OS clears; its runtime store is the only copy of run history. */
+export class VolatileInstanceDirectoryError extends Schema.TaggedError<VolatileInstanceDirectoryError>(
+  "@usine/server/VolatileInstanceDirectoryError",
+)("VolatileInstanceDirectoryError", {
+  directory: Schema.String,
+  root: Schema.String,
+}) {}
 
 export class BrowserOpenError extends Schema.TaggedError<BrowserOpenError>(
   "@usine/server/BrowserOpenError",
@@ -61,8 +73,13 @@ export class VersionCommand extends Schema.TaggedClass<VersionCommand>(
 
 export class UpCommand extends Schema.TaggedClass<UpCommand>("@usine/server/UpCommand")(
   "UpCommand",
-  { port: Port },
+  { port: Port, allowVolatileInstance: Schema.Boolean },
 ) {}
+
+export interface CliEnvironment {
+  readonly port: Option.Option<string>;
+  readonly allowVolatileInstance: Option.Option<string>;
+}
 
 export const CliCommand = Schema.Union([HelpCommand, VersionCommand, UpCommand]);
 export type CliCommand = typeof CliCommand.Type;
@@ -79,30 +96,45 @@ const decodePort = (
     ),
   );
 
-const upPort = (
+const ALLOW_VOLATILE_FLAG = "--allow-volatile-instance";
+
+const upCommand = (
   args: ReadonlyArray<string>,
-  environmentPort: Option.Option<string>,
-): Effect.Effect<Port, CliUsageError> => {
-  if (args.length === 0) {
-    return Option.match(environmentPort, {
-      onNone: () => Effect.succeed(Port.make(DEFAULT_PORT)),
-      onSome: (value) => decodePort("USINE_PORT", value),
+  environment: CliEnvironment,
+): Effect.Effect<UpCommand, CliUsageError> =>
+  Effect.gen(function* () {
+    let port: Option.Option<string> = Option.none();
+    let allowVolatileInstance = Option.exists(environment.allowVolatileInstance, (v) => v === "1");
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index];
+      if (arg === "--port" || arg === "-p") {
+        const value = args[index + 1];
+        if (value === undefined) return yield* usageError();
+        port = Option.some(value);
+        index += 1;
+      } else if (arg?.startsWith("--port=")) {
+        port = Option.some(arg.slice("--port=".length));
+      } else if (arg === ALLOW_VOLATILE_FLAG) {
+        allowVolatileInstance = true;
+      } else {
+        return yield* usageError();
+      }
+    }
+    const resolvedPort = yield* Option.match(port, {
+      onNone: () =>
+        Option.match(environment.port, {
+          onNone: () => Effect.succeed(Port.make(DEFAULT_PORT)),
+          onSome: (value) => decodePort("USINE_PORT", value),
+        }),
+      onSome: (value) => decodePort("--port", value),
     });
-  }
-  if (args.length === 2 && (args[0] === "--port" || args[0] === "-p")) {
-    const value = args[1];
-    return value === undefined ? Effect.fail(usageError()) : decodePort("--port", value);
-  }
-  if (args.length === 1 && args[0]?.startsWith("--port=")) {
-    return decodePort("--port", args[0].slice("--port=".length));
-  }
-  return Effect.fail(usageError());
-};
+    return new UpCommand({ port: resolvedPort, allowVolatileInstance });
+  });
 
 /** Parse process arguments and environment into one validated CLI command. */
 export const parseCli = Effect.fn("Cli.parse")((
   args: ReadonlyArray<string>,
-  environmentPort: Option.Option<string>,
+  environment: CliEnvironment,
 ): Effect.Effect<CliCommand, CliUsageError> => {
   if (
     (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) ||
@@ -114,8 +146,34 @@ export const parseCli = Effect.fn("Cli.parse")((
     return Effect.succeed(new VersionCommand());
   }
   if (args[0] !== "up") return Effect.fail(usageError());
-  return upPort(args.slice(1), environmentPort).pipe(Effect.map((port) => new UpCommand({ port })));
+  return upCommand(args.slice(1), environment);
 });
+
+/** Roots the OS may clear: `os.tmpdir()`, `$TMPDIR`, and the usual temp locations. */
+export const volatileRoots = (environmentTmpdir: Option.Option<string>): ReadonlyArray<string> =>
+  [
+    ...new Set([
+      tmpdir(),
+      ...Option.toArray(environmentTmpdir),
+      "/tmp",
+      "/private/tmp",
+      "/var/folders",
+    ]),
+  ]
+    .filter((root) => root.length > 0)
+    .map((root) => resolve(root));
+
+const isUnder = (directory: string, root: string): boolean =>
+  directory === root || directory.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
+
+/** The volatile root an instance folder sits under, if any. Paths are compared as given, symlinks unresolved. */
+export const volatileRoot = (
+  directory: string,
+  roots: ReadonlyArray<string>,
+): Option.Option<string> => {
+  const resolved = resolve(directory);
+  return Option.fromNullishOr(roots.find((root) => isUnder(resolved, root)));
+};
 
 const PackageMetadataFromJson = Schema.fromJsonString(
   Schema.Struct({ version: Schema.NonEmptyString }),
