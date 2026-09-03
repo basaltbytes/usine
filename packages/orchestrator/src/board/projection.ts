@@ -119,8 +119,6 @@ const laneId = (definition: LaneDefinition): BoardLaneId =>
 
 const SETTLED_STATES: ReadonlyArray<LaneItemState> = ["pr-merged", "pr-closed", "issue-closed"];
 
-// Labels place an open Item in the workflow; on a settled Item they are residue,
-// so only its state can select a Lane.
 const isSettled = (item: ProjectedItem): boolean => SETTLED_STATES.includes(item.state);
 
 const labelLaneFor = (
