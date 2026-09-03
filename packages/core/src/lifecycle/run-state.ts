@@ -85,7 +85,17 @@ export type Open = typeof Open.Type;
 export const RunState = Schema.Union([...Open.members, Succeeded, Failed, Canceled]);
 export type RunState = typeof RunState.Type;
 
+/** No attempt started yet: the precondition of `supersede` and `revoke`. */
+export const Unstarted = Schema.Union([Pending, Waiting, Queued]);
+export type Unstarted = typeof Unstarted.Type;
+
+/** Gate passed or absent: the states an attempt can start from. */
+export const Startable = Schema.Union([Pending, Queued]);
+export type Startable = typeof Startable.Type;
+
 export const isOpen = Schema.is(Open);
+export const isUnstarted = Schema.is(Unstarted);
+export const isStartable = Schema.is(Startable);
 
 /**
  * Compile-checked tag tuple over a state partition: the argument list must
@@ -119,11 +129,7 @@ export const STATE_TAGS = tagsOf<RunState>()(
  * The states with no started attempt, as `_tag` literals — the precondition
  * of `supersede` and `revoke`, for queries that filter stored rows by state.
  */
-export const UNSTARTED_STATE_TAGS = tagsOf<Pending | Waiting | Queued>()(
-  "Pending",
-  "Waiting",
-  "Queued",
-);
+export const UNSTARTED_STATE_TAGS = tagsOf<Unstarted>()("Pending", "Waiting", "Queued");
 
 /** pending → waiting: park the run on its loop's approval gate. */
 export const awaitApproval = (_state: Pending): Waiting => new Waiting();
@@ -132,7 +138,7 @@ export const awaitApproval = (_state: Pending): Waiting => new Waiting();
 export const approve = (_state: Waiting): Queued => new Queued();
 
 /** pending | queued → running: the first attempt starts. A waiting run must be approved first. */
-export const start = (_state: Pending | Queued): Running => new Running();
+export const start = (_state: Startable): Running => new Running();
 
 /** running → succeeded: the attempt finished and the step result is stored. */
 export const succeed = (_state: Running): Succeeded => new Succeeded();
@@ -164,12 +170,11 @@ export const cancelByOperator = (_state: Open): Canceled =>
  * running attempt always finishes, and the newer state is judged again when it
  * ends (ADR 0007).
  */
-export const supersede = (_state: Pending | Waiting | Queued, by: EventId): Canceled =>
+export const supersede = (_state: Unstarted, by: EventId): Canceled =>
   new Canceled({ reason: new Superseded({ by }) });
 
 /**
  * pending | waiting | queued → canceled: the run's Item stopped matching its
  * loop's trigger. Never touches a running attempt.
  */
-export const revoke = (_state: Pending | Waiting | Queued): Canceled =>
-  new Canceled({ reason: new Revoked() });
+export const revoke = (_state: Unstarted): Canceled => new Canceled({ reason: new Revoked() });

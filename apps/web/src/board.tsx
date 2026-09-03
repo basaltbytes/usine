@@ -145,6 +145,7 @@ const CardBody = ({
   const run = item.run;
   const visibleRuns = item.runs.filter(({ state }) => state === "Waiting" || state === "Failed");
   const runsToShow = visibleRuns.length > 0 ? visibleRuns : run === null ? [] : [run];
+  const moveTargets = move?.targets ?? [];
   const titleClass =
     "h-auto justify-start p-0 text-left text-xs/relaxed font-medium whitespace-normal text-card-foreground hover:text-primary";
   return (
@@ -174,7 +175,7 @@ const CardBody = ({
         runsToShow.length > 0 ||
         item.needsYou ||
         failure !== null ||
-        (move !== undefined && move.targets.length > 0)) && (
+        moveTargets.length > 0) && (
         <CardContent className="flex flex-col items-start gap-2">
           {item.labels.length > 0 && (
             <div className="flex flex-wrap gap-1">
@@ -203,7 +204,7 @@ const CardBody = ({
           {runsToShow.some(({ state }) => state === "Queued") && (
             <p className="text-muted-foreground">Approved. Waiting for a free worker slot.</p>
           )}
-          {move !== undefined && move.targets.length > 0 && (
+          {move !== undefined && moveTargets.length > 0 && (
             <DropdownMenu>
               <DropdownMenuTrigger
                 disabled={move.disabled}
@@ -214,7 +215,7 @@ const CardBody = ({
                 <CaretDownIcon aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
-                {move.targets.map((lane) => (
+                {moveTargets.map((lane) => (
                   <DropdownMenuItem key={lane.id} onClick={() => move.onMove(item, lane)}>
                     {lane.name}
                   </DropdownMenuItem>

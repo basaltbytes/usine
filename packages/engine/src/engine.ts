@@ -173,7 +173,6 @@ const makeRunEngine = Effect.gen(function* () {
   });
 
   const reconcile = Effect.fn("RunEngine.reconcile")(function* () {
-    yield* store.repairApprovedWaiting;
     yield* Effect.forEach(
       yield* store.pendingWorkflowCommands,
       ({ command, runId }) => commandHandlers[command](runId),

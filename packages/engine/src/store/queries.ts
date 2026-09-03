@@ -597,15 +597,6 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .sort((left, right) => left.sequence - right.sequence);
   });
 
-  const approvedWaiting = Effect.fn("RunStoreQueries.approvedWaiting")(function* () {
-    return yield* database
-      .select({ runId: runs.runId })
-      .from(runs)
-      .innerJoin(approvals, eq(approvals.runId, runs.runId))
-      .where(eq(storedStateTag, "Waiting"))
-      .execute();
-  });
-
   const recoverable = Effect.fn("RunStoreQueries.recoverable")(function* () {
     const rows = yield* database
       .select({
@@ -702,7 +693,6 @@ export const queriesFor = (database: RunDatabaseClient) => {
     hasWorkflowCommand,
     ignoredEvent,
     nextQueued,
-    approvedWaiting,
     pendingWorkflowCommands,
     recordTriggerEvent,
     recoverable,

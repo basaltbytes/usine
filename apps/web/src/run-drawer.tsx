@@ -82,7 +82,7 @@ export const RunDrawer = ({
     },
     structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
     enabled: open,
-    refetchInterval: (query) => (open && query.state.data?.run.canCancel === true ? 1_000 : false),
+    refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
   });
   const mutation = useMutation({
     mutationFn: (act: "approve" | "retry" | "cancel") =>
