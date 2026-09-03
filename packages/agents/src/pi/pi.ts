@@ -335,6 +335,13 @@ const makePiParent = Effect.gen(function* () {
               persona: request.spec.agent.persona,
               task: request.spec.task,
             });
+            const abort = Effect.tryPromise({
+              try: () => started.session.abort(),
+              catch: (cause) => parentError("interrupt", request, "Could not interrupt Pi", cause),
+            });
+            // Fail the channel before aborting the SDK: abort settles the
+            // in-flight prompt, and its fiber must find the result already
+            // terminal rather than race it to `channel.finish`.
             const budgetFailure = Deferred.await(childBudgetExceeded).pipe(
               Effect.tap((error) =>
                 Effect.logWarning(
@@ -346,7 +353,17 @@ const makePiParent = Effect.gen(function* () {
                   },
                 ),
               ),
-              Effect.flatMap(Effect.fail),
+              Effect.flatMap((error) => channel.fail(error)),
+              Effect.andThen(
+                abort.pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning("Pi parent kept running after its budget failure", {
+                      message: error.message,
+                      sessionId: parentId,
+                    }),
+                  ),
+                ),
+              ),
             );
             const run = Effect.raceFirst(
               Effect.tryPromise({
@@ -380,15 +397,7 @@ const makePiParent = Effect.gen(function* () {
             );
             const interrupt = Effect.logInfo("Interrupting Pi parent session", {
               sessionId: parentId,
-            }).pipe(
-              Effect.andThen(
-                Effect.tryPromise({
-                  try: () => started.session.abort(),
-                  catch: (cause) =>
-                    parentError("interrupt", request, "Could not interrupt Pi", cause),
-                }),
-              ),
-            );
+            }).pipe(Effect.andThen(abort));
             return {
               session: parent,
               events: Stream.fromQueue(channel.events),

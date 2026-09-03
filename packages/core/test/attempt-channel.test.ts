@@ -61,6 +61,27 @@ describe("attempt channel v4", () => {
     assert.deepStrictEqual(decoded, envelope);
   });
 
+  it("round-trips a child-session budget failure through its framed JSON schema", () => {
+    const envelope = new AttemptChannel.OutboundEnvelope({
+      version: AttemptChannel.PROTOCOL_VERSION,
+      attemptId: spec.attemptId,
+      sequence: AttemptChannel.Sequence.make(2),
+      sentAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
+      payload: new AttemptChannel.Failed({
+        failure: new AttemptFailure.ChildSessionBudgetFailure({
+          maxChildren: spec.maxChildren,
+          attemptedChildren: Agent.ChildSessionCount.make(5),
+        }),
+      }),
+    });
+
+    const encoded = Schema.encodeSync(AttemptChannel.EnvelopeFromJson)(envelope);
+    const decoded = Schema.decodeUnknownSync(AttemptChannel.EnvelopeFromJson)(encoded, {
+      onExcessProperty: "error",
+    });
+    assert.deepStrictEqual(decoded, envelope);
+  });
+
   it("rejects protocol-v3 frames on the live channel", () => {
     const start = Schema.encodeSync(AttemptChannel.InputFrame)(
       new AttemptChannel.Start({ version: AttemptChannel.PROTOCOL_VERSION, spec }),

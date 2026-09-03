@@ -460,8 +460,15 @@ describe("Pi parent runtime", () => {
   it.effect("fails the parent after it exhausts the Attempt child-session budget", () => {
     let options: PiStartOptions | undefined;
     let childLaunches = 0;
+    let resolveAborted: () => void = () => undefined;
+    const aborted = new Promise<void>((resolve) => {
+      resolveAborted = resolve;
+    });
     const session: PiSession = {
-      abort: () => Promise.resolve(),
+      abort: () => {
+        resolveAborted();
+        return Promise.resolve();
+      },
       dispose: () => undefined,
       messages: [],
       prompt: async () => {
@@ -539,6 +546,8 @@ describe("Pi parent runtime", () => {
         assert.strictEqual(error.maxChildren, 1);
         assert.strictEqual(error.attemptedChildren, 2);
         assert.strictEqual(childLaunches, 1);
+        // The budget must stop the SDK session itself, not wait for scope teardown.
+        yield* Effect.promise(() => aborted);
       }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(child)),
     );
   });
