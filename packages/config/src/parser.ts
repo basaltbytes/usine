@@ -44,6 +44,7 @@ class AgentFrontmatter extends Schema.Class<AgentFrontmatter>("@usine/config/Age
   model: ModelId,
   effort: Effort,
   parent_model: Schema.OptionFromOptionalKey(ModelId),
+  parent_effort: Schema.OptionFromOptionalKey(Effort),
 }) {}
 
 interface Interpolation {
@@ -203,6 +204,7 @@ const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
         model: frontmatter.model,
         effort: frontmatter.effort,
         parentModel: frontmatter.parent_model,
+        parentEffort: frontmatter.parent_effort,
         persona,
       });
     }),

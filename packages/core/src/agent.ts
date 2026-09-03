@@ -43,6 +43,7 @@ export class Agent extends Schema.Class<Agent>("Agent")({
   name: Name,
   brain: BrainSpec,
   parentModel: Schema.OptionFromNullOr(ModelId),
+  parentEffort: Schema.OptionFromOptionalKey(Effort),
   persona: Persona,
 }) {}
 
@@ -154,3 +155,10 @@ export const resolveParentModel = (
   agent: Agent,
   instanceDefault: Option.Option<ModelId>,
 ): Option.Option<ModelId> => Option.firstSomeOf([agent.parentModel, instanceDefault]);
+
+/** Pure deriver: the roster override, then the instance default, then the child brain's effort. */
+export const resolveParentEffort = (agent: Agent, instanceDefault: Option.Option<Effort>): Effort =>
+  Option.getOrElse(
+    Option.firstSomeOf([agent.parentEffort, instanceDefault]),
+    () => agent.brain.effort,
+  );

@@ -52,6 +52,7 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
       effort: loaded.effort,
     }),
     parentModel: loaded.parentModel,
+    parentEffort: loaded.parentEffort,
     persona: loaded.persona,
   });
   return {

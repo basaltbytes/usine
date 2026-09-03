@@ -12,6 +12,7 @@ import {
   type RunningSession,
   SessionOperationError,
   UnknownModelError,
+  UnsupportedEffortError,
 } from "../runtime.ts";
 import { lastPiMessageText, sessionChannel, subscribePiSession } from "./session.ts";
 import { PiSdk, usePiStart } from "./sdk.ts";
@@ -89,6 +90,19 @@ const makePiChild = Effect.gen(function* () {
                 harness: "pi",
                 model: request.session.brain.model,
                 message: `Pi does not expose model ${request.session.brain.model}`,
+              });
+            }
+            if (started._tag === "UnsupportedEffort") {
+              yield* Effect.logError("Pi child rejected an unsupported effort", {
+                effort: started.effort,
+                model: started.model,
+                supported: started.supported,
+              });
+              return yield* new UnsupportedEffortError({
+                harness: "pi",
+                model: started.model,
+                effort: started.effort,
+                message: `Pi model ${started.model} does not support effort ${started.effort}; supported: ${started.supported.join(", ")}`,
               });
             }
             if (started._tag === "AuthenticationUnavailable") {
@@ -216,6 +230,7 @@ const makePiParent = Effect.gen(function* () {
         agent: request.spec.agent.name,
         attemptId: request.spec.attemptId,
         effort: request.spec.agent.brain.effort,
+        parentEffort: request.spec.parentEffort,
         parentModel: Option.getOrUndefined(request.spec.parentModel),
         repository: request.spec.repository,
         sessionId: parentId,
@@ -255,7 +270,7 @@ const makePiParent = Effect.gen(function* () {
             ],
             model: request.spec.parentModel,
             signal,
-            thinkingLevel: request.spec.agent.brain.effort,
+            thinkingLevel: request.spec.parentEffort,
             toolMode: "orchestration",
           }),
         (cause) => parentError("launch", request, "Pi parent session failed to start", cause),
@@ -273,6 +288,19 @@ const makePiParent = Effect.gen(function* () {
                 harness: "pi",
                 model,
                 message: `Pi does not expose model ${model}`,
+              });
+            }
+            if (started._tag === "UnsupportedEffort") {
+              yield* Effect.logError("Pi parent rejected an unsupported effort", {
+                effort: started.effort,
+                model: started.model,
+                supported: started.supported,
+              });
+              return yield* new UnsupportedEffortError({
+                harness: "pi",
+                model: started.model,
+                effort: started.effort,
+                message: `Pi model ${started.model} does not support effort ${started.effort}; supported: ${started.supported.join(", ")}`,
               });
             }
             if (started._tag === "AuthenticationUnavailable") {
@@ -311,7 +339,7 @@ const makePiParent = Effect.gen(function* () {
               brain: new Agent.BrainSpec({
                 harness: "pi",
                 model: started.model,
-                effort: request.spec.agent.brain.effort,
+                effort: request.spec.parentEffort,
               }),
             });
             yield* channel.emit(new Agent.SessionStarted({ session: parent }));

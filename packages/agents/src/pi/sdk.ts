@@ -16,6 +16,7 @@ import {
   requiredPiPool,
   resolvePiPool,
 } from "./authentication.ts";
+import { supportedThinkingLevels } from "./thinking.ts";
 
 export type PiSessionEvent = AgentSessionEvent;
 export type PiMessage = Awaited<
@@ -54,6 +55,12 @@ export type PiStartResult =
       readonly requiredPool: PiPool;
     }
   | { readonly _tag: "UnknownModel" }
+  | {
+      readonly _tag: "UnsupportedEffort";
+      readonly effort: Agent.Effort;
+      readonly model: Agent.ModelId;
+      readonly supported: ReadonlyArray<Agent.Effort>;
+    }
   | {
       readonly _tag: "Started";
       readonly model: Agent.ModelId;
@@ -126,6 +133,10 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       const active = session.model;
       if (active === undefined) throw new Error("Pi started without an active model");
       const model = Agent.ModelId.make(`${active.provider}/${active.id}`);
+      const supported = supportedThinkingLevels(active);
+      if (!supported.includes(options.thinkingLevel)) {
+        return { _tag: "UnsupportedEffort", effort: options.thinkingLevel, model, supported };
+      }
       const resolvedAuthentication = await modelRuntime.checkAuth(active.provider, {
         signal: options.signal,
       });
