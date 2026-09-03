@@ -4,7 +4,12 @@ export * from "./operator/service.ts";
 export { labelMutationForBoardMove, projectBoard } from "./board/projection.ts";
 export * from "./orchestrator.ts";
 export { idleTriggersLayer } from "./idle-triggers.ts";
-export { PollCycle, PollingTriggers, RepositoryPollFailure } from "./polling-triggers.ts";
+export {
+  GitHubItemKey,
+  PollCycle,
+  PollingTriggers,
+  RepositoryPollFailure,
+} from "./polling-triggers.ts";
 export {
   ScheduleAgentFailure,
   ScheduleCronFailure,

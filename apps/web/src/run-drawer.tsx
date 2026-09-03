@@ -142,12 +142,14 @@ export const RunDrawer = ({
         <SheetHeader className="border-b pr-14">
           <SheetTitle className="text-lg">{run?.loop ?? "Loading…"}</SheetTitle>
           {run !== undefined && (
-            <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono wrap-anywhere">
-              <span>{run.repository}</span>
-              <span>{run.id}</span>
+            <>
+              <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono wrap-anywhere">
+                <span>{run.repository}</span>
+                <span>{run.id}</span>
+                {run.loopPaused && <Badge variant="outline">paused</Badge>}
+              </SheetDescription>
               <RunLinks run={run} />
-              {run.loopPaused && <Badge variant="outline">paused</Badge>}
-            </SheetDescription>
+            </>
           )}
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">

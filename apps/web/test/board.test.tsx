@@ -7,11 +7,13 @@ import {
   BoardLaneId,
   BoardView,
   FailedAttemptView,
+  GitHubItemKey,
   ProjectView,
   ReadOnlyBoardLaneView,
   RunView,
   SucceededAttemptView,
 } from "@usine/orchestrator";
+import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { applyMove, itemFailure, laneUnder, orderLanes, runsWithoutCard } from "../src/board.tsx";
@@ -36,13 +38,15 @@ const attempt = (number: number, message: string | null) =>
         : new FailedAttemptView({ failure: new AgentFailureView({ message }) }),
   });
 
-const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
-  const itemKey = Item.ItemKey.make('["github","basaltbytes/usine",33]');
-  const run = new RunView({
+const repository = Repository.Name.make("basaltbytes/usine");
+const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, Item.Number.make(33)]);
+
+const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) =>
+  new RunView({
     id: Run.RunId.make("run-33"),
     itemKey,
     loop: Loop.LoopName.make("review"),
-    repository: Repository.Name.make("basaltbytes/usine"),
+    repository,
     agent: Agent.Name.make("developer"),
     state,
     loopPaused: false,
@@ -55,6 +59,9 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
     canRetry: state === "Failed",
     canCancel: false,
   });
+
+const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
+  const run = runOnItem(state, attempts);
   return new BoardItemView({
     itemKey,
     kind: "issue",
@@ -70,8 +77,7 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
 };
 
 describe("Run links", () => {
-  const run = itemWithRun("Succeeded", [attempt(1, null)]).run;
-  assert(run !== null);
+  const run = runOnItem("Succeeded", [attempt(1, null)]);
 
   it("links the Item and produced PR to GitHub in new tabs", () => {
     const markup = renderToStaticMarkup(
@@ -95,8 +101,16 @@ describe("Run links", () => {
     const markup = renderToStaticMarkup(<RunLinks run={run} />);
 
     assert.ok(markup.includes('href="https://github.com/basaltbytes/usine/issues/33"'));
-    assert.ok(!markup.includes("pull request"));
+    assert.ok(!markup.includes("/pull/"));
     assert.strictEqual((markup.match(/target="_blank"/gu) ?? []).length, 1);
+  });
+
+  it("renders nothing for a schedule Run, whose Item is the repository itself", () => {
+    const scheduled = new RunView({
+      ...run,
+      itemKey: Item.ItemKey.make('["github","basaltbytes/usine"]'),
+    });
+    assert.strictEqual(renderToStaticMarkup(<RunLinks run={scheduled} />), "");
   });
 });
 

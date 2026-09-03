@@ -1,48 +1,30 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react";
-import { Item, Repository } from "@usine/core";
-import type { RunView } from "@usine/orchestrator";
+import { GitHubItemKey, type RunView } from "@usine/orchestrator";
 import { Option, Schema } from "effect";
 import { Button } from "@/components/ui/button";
 
-const GitHubItemKey = Schema.fromJsonString(
-  Schema.Tuple([Schema.Literal("github"), Repository.Name, Item.Number]),
-);
-const decodeGitHubItemKey = Schema.decodeUnknownOption(GitHubItemKey);
+const decodeGitHubItemKey = Schema.decodeOption(GitHubItemKey);
 
-type LinkedRun = Pick<RunView, "itemKey" | "repository" | "pullRequestUrl">;
+type LinkedRun = Pick<RunView, "itemKey" | "pullRequestUrl">;
 
-const githubItem = ({ itemKey, repository }: Pick<LinkedRun, "itemKey" | "repository">) =>
+/** Schedule Runs key the repository itself rather than an issue or pull request, so they have no Item link.
+ * GitHub resolves `/issues/N` to `/pull/N` and canonical (lowercased) owner/name to the display casing. */
+const githubItem = (itemKey: LinkedRun["itemKey"]) =>
   Option.match(decodeGitHubItemKey(itemKey), {
     onNone: () => null,
-    onSome: ([, itemRepository, number]) =>
-      Repository.canonical(itemRepository) === Repository.canonical(repository)
-        ? { href: `https://github.com/${repository}/issues/${number}`, number }
-        : null,
+    onSome: ([, repository, number]) => ({
+      href: `https://github.com/${repository}/issues/${number}`,
+      number,
+    }),
   });
 
-const ExternalLink = ({
-  href,
-  label,
-  accessibleLabel,
-}: {
-  readonly href: string;
-  readonly label: string;
-  readonly accessibleLabel: string;
-}) => (
+const ExternalLink = ({ href, label }: { readonly href: string; readonly label: string }) => (
   <Button
     variant="link"
     size="sm"
     className="h-auto p-0 font-mono"
     nativeButton={false}
-    render={
-      <a
-        href={href}
-        target="_blank"
-        rel="noreferrer"
-        aria-label={accessibleLabel}
-        draggable={false}
-      />
-    }
+    render={<a href={href} target="_blank" rel="noreferrer" draggable={false} />}
   >
     {label}
     <ArrowSquareOutIcon data-icon="inline-end" aria-hidden="true" />
@@ -50,24 +32,12 @@ const ExternalLink = ({
 );
 
 export const RunLinks = ({ run }: { readonly run: LinkedRun }) => {
-  const item = githubItem(run);
+  const item = githubItem(run.itemKey);
   if (item === null && run.pullRequestUrl === null) return null;
   return (
     <span className="flex items-center gap-2">
-      {item !== null && (
-        <ExternalLink
-          href={item.href}
-          label={`Item #${item.number}`}
-          accessibleLabel={`Open Item #${item.number} on GitHub`}
-        />
-      )}
-      {run.pullRequestUrl !== null && (
-        <ExternalLink
-          href={run.pullRequestUrl}
-          label="PR"
-          accessibleLabel="Open produced pull request on GitHub"
-        />
-      )}
+      {item !== null && <ExternalLink href={item.href} label={`Item #${item.number}`} />}
+      {run.pullRequestUrl !== null && <ExternalLink href={run.pullRequestUrl} label="PR" />}
     </span>
   );
 };
