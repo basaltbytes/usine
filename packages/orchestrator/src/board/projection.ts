@@ -117,13 +117,29 @@ const effectiveLanes = (
 const laneId = (definition: LaneDefinition): BoardLaneId =>
   BoardLaneId.make(`${definition.origin}:${definition.lane.name}`);
 
+const SETTLED_STATES: ReadonlyArray<LaneItemState> = ["pr-merged", "pr-closed", "issue-closed"];
+
+const isSettled = (item: ProjectedItem): boolean => SETTLED_STATES.includes(item.state);
+
+const labelLaneFor = (
+  item: ProjectedItem,
+  lanes: ReadonlyArray<LaneDefinition>,
+): LaneDefinition | undefined =>
+  lanes.find(({ lane }) => labelSources(lane.sources).some((label) => item.labels.includes(label)));
+
+const stateLaneFor = (
+  item: ProjectedItem,
+  lanes: ReadonlyArray<LaneDefinition>,
+): LaneDefinition | undefined =>
+  lanes.find(({ lane }) => stateSources(lane.sources).includes(item.state));
+
 const laneFor = (
   item: ProjectedItem,
   lanes: ReadonlyArray<LaneDefinition>,
 ): LaneDefinition | undefined =>
-  lanes.find(({ lane }) =>
-    labelSources(lane.sources).some((label) => item.labels.includes(label)),
-  ) ?? lanes.find(({ lane }) => stateSources(lane.sources).includes(item.state));
+  isSettled(item)
+    ? stateLaneFor(item, lanes)
+    : (labelLaneFor(item, lanes) ?? stateLaneFor(item, lanes));
 
 const isOpenRun = (run: RunView): boolean =>
   RunState.OPEN_STATE_TAGS.some((state) => state === run.state);

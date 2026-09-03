@@ -50,6 +50,52 @@ const itemWithLabels = (labels: ReadonlyArray<GitHubLabelName>) =>
   });
 
 const item = itemWithLabels([ready, bug]);
+const closedItem = new ItemProjection({
+  ...itemWithLabels([ready]),
+  contentHash: ItemContentHash.make("issue-33:closed"),
+  payload: {
+    ...itemWithLabels([ready]).payload,
+    state: "CLOSED",
+    stateReason: "COMPLETED",
+    closedAt: "2026-09-03T08:00:00Z",
+  },
+});
+
+const passed = GitHubLabelName.make("review-passed");
+const mergedPullRequest = new ItemProjection({
+  itemKey: Item.ItemKey.make("github:basaltbytes/usine:98"),
+  repository,
+  source: ItemProjectionSource.make("pr"),
+  number: ItemNumber.make(98),
+  contentHash: ItemContentHash.make("pr-98:merged"),
+  payload: {
+    number: 98,
+    title: "Isolate Turbo from bare caches",
+    body: "Closes #84.",
+    url: "https://github.com/basaltbytes/usine/pull/98",
+    state: "MERGED",
+    isDraft: false,
+    merged: true,
+    createdAt: "2026-09-02T18:00:00Z",
+    updatedAt: "2026-09-03T08:00:00Z",
+    mergedAt: "2026-09-03T08:00:00Z",
+    author: { login: "usine-bot" },
+    baseRefName: "main",
+    headRefName: "fix/issue-84-bare-cache-sweep",
+    headRefOid: "410607d",
+    additions: 40,
+    deletions: 12,
+    changedFiles: 3,
+    reviewDecision: "APPROVED",
+    statusCheckRollup: { state: "SUCCESS" },
+    labels: { totalCount: 1, nodes: [{ name: passed }] },
+    reviewRequests: { totalCount: 0, nodes: [] },
+    reviews: { totalCount: 0, nodes: [] },
+    reviewThreads: { totalCount: 0, nodes: [] },
+    comments: { totalCount: 0, nodes: [] },
+    closingIssuesReferences: { totalCount: 1, nodes: [{ number: 84, state: "CLOSED" }] },
+  },
+});
 
 const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succeeded") =>
   new RunView({
@@ -91,6 +137,45 @@ describe("Board projection", () => {
       assert.strictEqual(board.lanes[0]?.items.length, 0);
       assert.strictEqual(board.lanes[1]?.items[0]?.itemKey, itemKey);
       assert.deepStrictEqual(board.failures, []);
+    }),
+  );
+
+  it.effect("groups a merged pull request by state even when it still carries a lane label", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [
+          {
+            name: repository,
+            lanes: [
+              { name: "Passed", sources: [{ label: passed }] },
+              { name: "Done", sources: [{ state: "pr-merged" }] },
+            ],
+          },
+        ],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const board = yield* projectBoard(managed, [], [mergedPullRequest], []);
+      assert.deepStrictEqual(board.lanes[0]?.items, []);
+      assert.strictEqual(board.lanes[1]?.items[0]?.itemKey, mergedPullRequest.itemKey);
+      assert.deepStrictEqual(board.failures, []);
+    }),
+  );
+
+  it.effect("leaves a closed issue unmapped instead of placing it by a leftover label", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const board = yield* projectBoard(managed, [], [closedItem], []);
+      assert.deepStrictEqual(board.lanes[0]?.items, []);
+      const unmapped = board.lanes.find(({ origin }) => origin === "fallback");
+      assert.strictEqual(unmapped?.items[0]?.itemKey, itemKey);
+      assert.strictEqual(unmapped?.items[0]?.state, "issue-closed");
     }),
   );
 
