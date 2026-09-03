@@ -30,7 +30,14 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { needCopy } from "../operator-copy.ts";
 import { overviewQuery } from "../overview.ts";
-import { RunDrawer, useOpenRun } from "../run-drawer.tsx";
+import { Suspense, lazy, useState } from "react";
+import { useOpenRun } from "../open-run.ts";
+
+// The drawer carries the transcript, Markdown, and message components; it
+// loads on first open so the first paint of a project stays small (#81).
+const RunDrawer = lazy(() =>
+  import("../run-drawer.tsx").then(({ RunDrawer: drawer }) => ({ default: drawer })),
+);
 
 /** The run drawer overlays any screen, so its id lives in the root search. */
 const RootSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(Run.RunId) }));
@@ -148,6 +155,9 @@ const Shell = () => {
   const project = params.repository;
   const view = matchRoute({ to: "/configuration/loops" }) === false ? "projects" : "configuration";
   const closeRun = () => void navigate({ to: ".", search: ({ run: _run, ...rest }) => rest });
+  // Remember the last opened Run so the Sheet stays mounted for its exit transition.
+  const [shownRun, setShownRun] = useState(run);
+  if (run !== undefined && run !== shownRun) setShownRun(run);
   const live = data._tag !== "NeedsSetup";
   return (
     <SidebarProvider>
@@ -187,7 +197,11 @@ const Shell = () => {
         )}
         <NeedStrip needs={data.needsYou} />
         <Outlet />
-        {run !== undefined && <RunDrawer runId={run} close={closeRun} />}
+        {shownRun !== undefined && (
+          <Suspense fallback={null}>
+            <RunDrawer runId={shownRun} open={run !== undefined} close={closeRun} />
+          </Suspense>
+        )}
       </SidebarInset>
     </SidebarProvider>
   );
