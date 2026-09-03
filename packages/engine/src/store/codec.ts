@@ -77,7 +77,7 @@ export const TranscriptRow = Schema.Struct({
   sequence: TranscriptSequence,
   attemptId: Attempt.AttemptId,
   direction: AttemptChannel.Direction,
-  envelope: AttemptChannel.Envelope,
+  envelope: TranscriptEntry.fields.envelope,
   receivedAt: Schema.DateTimeUtcFromString,
 });
 export type TranscriptRow = typeof TranscriptRow.Type;

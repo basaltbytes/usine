@@ -61,6 +61,34 @@ describe("attempt channel v4", () => {
     assert.deepStrictEqual(decoded, envelope);
   });
 
+  it("rejects protocol-v3 frames on the live channel", () => {
+    const start = Schema.encodeSync(AttemptChannel.InputFrame)(
+      new AttemptChannel.Start({ version: AttemptChannel.PROTOCOL_VERSION, spec }),
+    );
+    const outbound = Schema.encodeSync(AttemptChannel.Envelope)(
+      new AttemptChannel.OutboundEnvelope({
+        version: AttemptChannel.PROTOCOL_VERSION,
+        attemptId: spec.attemptId,
+        sequence: AttemptChannel.Sequence.make(1),
+        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
+        payload: new AttemptChannel.Interrupted(),
+      }),
+    );
+
+    assert.throws(() =>
+      Schema.decodeUnknownSync(AttemptChannel.InputFrame)(
+        { ...start, version: 3 },
+        { onExcessProperty: "error" },
+      ),
+    );
+    assert.throws(() =>
+      Schema.decodeUnknownSync(AttemptChannel.Envelope)(
+        { ...outbound, version: 3 },
+        { onExcessProperty: "error" },
+      ),
+    );
+  });
+
   it("round-trips rate-limit reset dates through its framed JSON schema", () => {
     const session = new Agent.ParentSession({
       id: Agent.SessionId.make("parent-1"),
