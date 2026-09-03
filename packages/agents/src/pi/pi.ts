@@ -15,7 +15,7 @@ import {
   UnsupportedEffortError,
 } from "../runtime.ts";
 import { lastPiMessageText, sessionChannel, subscribePiSession } from "./session.ts";
-import { PiSdk, usePiStart } from "./sdk.ts";
+import { PiSdk, type PiStartResult, usePiStart } from "./sdk.ts";
 import { subagentsExtension } from "./subagents.ts";
 
 export {
@@ -53,6 +53,23 @@ const childError = (
     message,
     cause,
   });
+
+const unsupportedEffort = Effect.fn("Pi.unsupportedEffort")(function* (
+  role: "child" | "parent",
+  started: Extract<PiStartResult, { readonly _tag: "UnsupportedEffort" }>,
+) {
+  yield* Effect.logError(`Pi ${role} rejected an unsupported effort`, {
+    effort: started.effort,
+    model: started.model,
+    supported: started.supported,
+  });
+  return yield* new UnsupportedEffortError({
+    harness: "pi",
+    model: started.model,
+    effort: started.effort,
+    message: `Pi model ${started.model} does not support effort ${started.effort}; supported: ${started.supported.join(", ")}`,
+  });
+});
 
 const makePiChild = Effect.gen(function* () {
   const sdk = yield* PiSdk;
@@ -93,17 +110,7 @@ const makePiChild = Effect.gen(function* () {
               });
             }
             if (started._tag === "UnsupportedEffort") {
-              yield* Effect.logError("Pi child rejected an unsupported effort", {
-                effort: started.effort,
-                model: started.model,
-                supported: started.supported,
-              });
-              return yield* new UnsupportedEffortError({
-                harness: "pi",
-                model: started.model,
-                effort: started.effort,
-                message: `Pi model ${started.model} does not support effort ${started.effort}; supported: ${started.supported.join(", ")}`,
-              });
+              return yield* unsupportedEffort("child", started);
             }
             if (started._tag === "AuthenticationUnavailable") {
               yield* Effect.logError("Pi child has no credential for its model", {
@@ -291,17 +298,7 @@ const makePiParent = Effect.gen(function* () {
               });
             }
             if (started._tag === "UnsupportedEffort") {
-              yield* Effect.logError("Pi parent rejected an unsupported effort", {
-                effort: started.effort,
-                model: started.model,
-                supported: started.supported,
-              });
-              return yield* new UnsupportedEffortError({
-                harness: "pi",
-                model: started.model,
-                effort: started.effort,
-                message: `Pi model ${started.model} does not support effort ${started.effort}; supported: ${started.supported.join(", ")}`,
-              });
+              return yield* unsupportedEffort("parent", started);
             }
             if (started._tag === "AuthenticationUnavailable") {
               yield* Effect.logError("Pi parent has no credential for its model", {

@@ -43,6 +43,7 @@ export class Agent extends Schema.Class<Agent>("Agent")({
   name: Name,
   brain: BrainSpec,
   parentModel: Schema.OptionFromNullOr(ModelId),
+  // Optional key, not null: agent_json rows stored before #102 have no such key.
   parentEffort: Schema.OptionFromOptionalKey(Effort),
   persona: Persona,
 }) {}
