@@ -93,6 +93,8 @@ The REST cursor overlaps its watermark by five seconds. Repeated items are expec
 
 `GitHubItemWriter.updateLabels(repository, item, mutation)` adds destination lane labels and removes only explicitly lane-owned labels from an issue or pull request. It never replaces the complete applied-label set or deletes repository label definitions, so unrelated and concurrently added labels survive stale or truncated Item projections. The service requires `GitHubApp` and an Effect HTTP client.
 
+`GitHubLabelWriter.create(repository, label)` creates one repository label through `POST /repos/{owner}/{repo}/labels` using the installation-wide App token. Provide a name; color and description are optional. Reconciliation policy belongs to the orchestrator, so this service exposes creation only and never edits or deletes label definitions.
+
 ## Real-App integration check
 
 Run the opt-in integration test against a disposable issue in a repository covered by the App:

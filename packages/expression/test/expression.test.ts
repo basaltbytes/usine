@@ -58,6 +58,24 @@ describe("ExpressionEngine", () => {
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 
+  it.effect("finds label-related string literals without treating state literals as labels", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const labels = yield* engine.relatedStringLiterals(
+        source('item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "ready")'),
+        ["item", "labels"],
+      );
+
+      expect(labels).toEqual(["ready"]);
+
+      const noLabelLiteral = yield* engine.relatedStringLiterals(
+        source('item.labels.totalCount > 0 && item.state == "OPEN"'),
+        ["item", "labels"],
+      );
+      expect(noLabelLiteral).toEqual([]);
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
   it.effect("rejects unknown variables and paths inside macro bodies during checking", () =>
     Effect.gen(function* () {
       const engine = yield* ExpressionEngine;

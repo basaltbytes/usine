@@ -1,6 +1,7 @@
 /** @usine/github — GitHub App identity and scoped installation tokens. */
 export { GitHubApp } from "./github-app.ts";
 export { GitHubItemWriter, ItemLabelMutation } from "./item-writer.ts";
+export { GitHubLabelWriter, NewRepositoryLabel } from "./label-writer.ts";
 export {
   AppAuthenticationError,
   AppCredentials,

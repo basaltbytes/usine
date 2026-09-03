@@ -1,6 +1,7 @@
 import { Loop as CoreLoop, Step } from "@usine/core";
 import {
   type Environment,
+  type ExpressionCheckError,
   ExpressionEngine,
   type ExpressionError,
   Source,
@@ -10,8 +11,10 @@ import { splitMarkdown } from "./frontmatter.ts";
 import {
   AgentFile,
   AgentName,
+  type ConfigWarning,
   ConfigFileError,
   Effort,
+  GitHubLabelName,
   Harness,
   InstancePath,
   LoopFile,
@@ -21,6 +24,8 @@ import {
   Persona,
   PromptTemplate,
   Trigger,
+  UndeclaredLaneLabelWarning,
+  UndeclaredTriggerLabelWarning,
   UsineConfig,
   ValidSelector,
 } from "./model.ts";
@@ -246,6 +251,42 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
       }),
   );
 
+const canonicalLabelName = (name: string): string => name.toLowerCase();
+
+const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
+  Effect.fn("ConfigParser.configWarnings")(function* (
+    config: UsineConfig,
+    loops: ReadonlyArray<LoopFile>,
+  ) {
+    const declared = new Set(config.labels.map(({ name }) => canonicalLabelName(name)));
+    const warnings: Array<ConfigWarning> = [];
+    for (const repository of config.repos) {
+      for (const lane of repository.lanes) {
+        for (const source of lane.sources) {
+          if ("label" in source && !declared.has(canonicalLabelName(source.label))) {
+            warnings.push(
+              new UndeclaredLaneLabelWarning({
+                repository: repository.name,
+                lane: lane.name,
+                label: source.label,
+              }),
+            );
+          }
+        }
+      }
+    }
+    for (const loop of loops) {
+      const literals = yield* engine.relatedStringLiterals(loop.trigger.if, ["item", "labels"]);
+      for (const literal of literals) {
+        const label = Schema.decodeUnknownOption(GitHubLabelName)(literal);
+        if (Option.isSome(label) && !declared.has(canonicalLabelName(label.value))) {
+          warnings.push(new UndeclaredTriggerLabelWarning({ loop: loop.name, label: label.value }));
+        }
+      }
+    }
+    return warnings;
+  });
+
 /**
  * Strict config parser and prompt renderer. All methods capture their CEL
  * dependency. The interface below is the package's declared API — widen it
@@ -267,6 +308,10 @@ export class ConfigParser extends Context.Service<
       file: InstancePath,
       source: string,
     ) => Effect.Effect<LoopFile, ConfigFileError>;
+    readonly configWarnings: (
+      config: UsineConfig,
+      loops: ReadonlyArray<LoopFile>,
+    ) => Effect.Effect<ReadonlyArray<ConfigWarning>, ExpressionCheckError>;
     readonly renderPrompt: (
       loop: LoopFile,
       context: Schema.JsonObject,
@@ -278,6 +323,7 @@ export class ConfigParser extends Context.Service<
     Effect.gen(function* () {
       const engine = yield* ExpressionEngine;
       return {
+        configWarnings: makeConfigWarnings(engine),
         parseUsineYaml,
         parseAgentFile,
         parseLoopFile: makeParseLoopFile(engine),

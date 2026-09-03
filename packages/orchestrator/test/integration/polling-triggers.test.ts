@@ -18,7 +18,7 @@ import { Instance, Repository, Run, Step } from "@usine/core";
 import { RunEngine, StepExecutor } from "@usine/engine";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer, Source } from "@usine/expression";
-import { GitHubApp, GitHubPolling, IssuePayload } from "@usine/github";
+import { GitHubApp, GitHubLabelWriter, GitHubPolling, IssuePayload } from "@usine/github";
 import { localSecretsLayer } from "@usine/github/local-secrets";
 import {
   Config,
@@ -33,7 +33,7 @@ import {
   Scope,
 } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { PollingTriggers } from "../../src/index.ts";
+import { LabelReconciler, PollingTriggers } from "../../src/index.ts";
 
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
   Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
@@ -106,6 +106,7 @@ const makeInstance = (repository: Repository.Name, label: string): LoadedInstanc
     invalidAgents: [],
     loops: [loop],
     quarantinedLoops: [],
+    warnings: [],
   });
 };
 
@@ -121,8 +122,19 @@ const runtimeLayer = (directory: Instance.Directory, app: GitHubApp["Service"]) 
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
   );
+  const labelWriter = GitHubLabelWriter.layer.pipe(
+    Layer.provide(Layer.succeed(GitHubApp, app)),
+    Layer.provide(FetchHttpClient.layer),
+  );
+  const labelReconciler = LabelReconciler.layer.pipe(Layer.provide(labelWriter));
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-  const dependencies = Layer.mergeAll(engine, MarcbachmannCelLayer, parser, polling);
+  const dependencies = Layer.mergeAll(
+    engine,
+    labelReconciler,
+    MarcbachmannCelLayer,
+    parser,
+    polling,
+  );
   return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
 };
 

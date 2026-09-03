@@ -14,6 +14,7 @@ export const idleTriggersLayer = Layer.mergeAll(
           submissions: [],
           revokedRuns: 0,
           failures: [],
+          preflightFindings: [],
           nextPollAt: Option.none(),
         }),
       ),

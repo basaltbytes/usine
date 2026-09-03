@@ -2,6 +2,7 @@
 export * from "./operator/model.ts";
 export * from "./operator/service.ts";
 export { labelMutationForBoardMove, projectBoard } from "./board/projection.ts";
+export { LabelPreflightFinding, LabelReconciler } from "./label-reconciler.ts";
 export * from "./orchestrator.ts";
 export { idleTriggersLayer } from "./idle-triggers.ts";
 export { PollCycle, PollingTriggers, RepositoryPollFailure } from "./polling-triggers.ts";

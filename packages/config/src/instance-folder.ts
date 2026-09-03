@@ -149,12 +149,41 @@ export class InstanceFolder extends Context.Service<
                 } else loops.push(entry.result.success);
               }
 
+              const warnings = yield* parser.configWarnings(config, loops).pipe(
+                Effect.catch((error) =>
+                  Effect.logError(
+                    "Config warning analysis failed; loaded the valid instance without warnings",
+                    {
+                      errorTag: error._tag,
+                      expression: error.source,
+                      message: error.message,
+                    },
+                  ).pipe(Effect.as([])),
+                ),
+              );
+              yield* Effect.forEach(
+                warnings,
+                (warning) =>
+                  warning._tag === "UndeclaredLaneLabelWarning"
+                    ? Effect.logWarning("Board Lane references an undeclared GitHub label", {
+                        repository: warning.repository,
+                        lane: warning.lane,
+                        label: warning.label,
+                      })
+                    : Effect.logWarning("Loop trigger references an undeclared GitHub label", {
+                        loop: warning.loop,
+                        label: warning.label,
+                      }),
+                { discard: true },
+              );
+
               return new LoadedInstance({
                 config,
                 agents,
                 invalidAgents,
                 loops,
                 quarantinedLoops,
+                warnings,
               });
             }),
         ),

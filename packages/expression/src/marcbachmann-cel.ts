@@ -1,7 +1,9 @@
 import {
+  type ASTNode,
   Environment as CelEnvironment,
   ParseError as CelParseError,
   TypeError as CelTypeError,
+  parse,
 } from "@marcbachmann/cel-js";
 import { Effect, Layer, Option, Schema } from "effect";
 import { ExpressionEngine } from "./expression-engine.ts";
@@ -64,6 +66,108 @@ const checkFailure = (source: Source, error: VendorCheckError | undefined): Expr
         message: error.message,
         position: Option.fromNullishOr(error.range?.start),
       });
+
+const childNodes = (node: ASTNode): ReadonlyArray<ASTNode> => {
+  switch (node.op) {
+    case "value":
+    case "id":
+      return [];
+    case ".":
+    case ".?":
+      return [node.args[0]];
+    case "!_":
+    case "-_":
+      return [node.args];
+    case "call":
+      return node.args[1];
+    case "rcall":
+      return [node.args[1], ...node.args[2]];
+    case "list":
+      return node.args;
+    case "map":
+      return node.args.flatMap(([key, value]) => [key, value]);
+    default:
+      return node.args;
+  }
+};
+
+const pathOf = (node: ASTNode): ReadonlyArray<string> | undefined => {
+  if (node.op === "id") return [node.args];
+  if (node.op !== "." && node.op !== ".?") return undefined;
+  const parent = pathOf(node.args[0]);
+  return parent === undefined ? undefined : [...parent, node.args[1]];
+};
+
+const samePath = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
+  left.length === right.length && left.every((part, index) => part === right[index]);
+
+const decodeStringLiteral = Schema.decodeUnknownOption(Schema.String);
+
+interface RelatedLiteralScan {
+  readonly containsPath: boolean;
+  readonly literals: ReadonlyArray<string>;
+  readonly related: ReadonlyArray<string>;
+}
+
+/**
+ * Select literals from the nearest subtree containing the requested path.
+ * Boolean siblings outside that subtree are intentionally excluded: in
+ * `item.labels... == "ready" && item.state == "OPEN"`, only `ready` is related.
+ */
+const scanRelatedLiterals = (
+  node: ASTNode,
+  memberPath: ReadonlyArray<string>,
+): RelatedLiteralScan => {
+  const children = childNodes(node).map((child) => scanRelatedLiterals(child, memberPath));
+  const descendantRelated = children.flatMap(({ related }) => related);
+  const nodePath = pathOf(node);
+  const containsPath =
+    (nodePath !== undefined && samePath(nodePath, memberPath)) ||
+    children.some((child) => child.containsPath);
+  const literals = [
+    ...(node.op === "value"
+      ? Option.match(decodeStringLiteral(node.args), {
+          onNone: () => [],
+          onSome: (literal) => [literal],
+        })
+      : []),
+    ...children.flatMap((child) => child.literals),
+  ];
+  return {
+    containsPath,
+    literals,
+    related:
+      descendantRelated.length > 0
+        ? descendantRelated
+        : containsPath &&
+            literals.length > 0 &&
+            node.op !== "&&" &&
+            node.op !== "||" &&
+            node.op !== "?:"
+          ? literals
+          : [],
+  };
+};
+
+const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals")(function* (
+  source: Source,
+  memberPath: ReadonlyArray<string>,
+) {
+  if (memberPath.length === 0) return [];
+  const ast = yield* Effect.try({
+    try: () => parse(source).ast,
+    catch: (cause) =>
+      cause instanceof CelParseError
+        ? checkFailure(source, cause)
+        : new ExpressionCheckError({
+            source,
+            code: "check_failed",
+            message: messageFromCause(cause, "CEL analysis failed"),
+            position: Option.none(),
+          }),
+  });
+  return [...new Set(scanRelatedLiterals(ast, memberPath).related)];
+});
 
 const makeEnvironment = (descriptor: Environment): CelEnvironment => {
   const environment = new CelEnvironment({ unlistedVariablesAreDyn: false });
@@ -220,6 +324,7 @@ const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
 
 /** Live CEL adapter backed by the exact-pinned @marcbachmann/cel-js implementation. */
 export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {
+  relatedStringLiterals,
   checkBoolean,
   checkScalar,
   evaluateBoolean,

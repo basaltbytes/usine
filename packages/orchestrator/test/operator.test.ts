@@ -50,6 +50,7 @@ import {
   BoardMove,
   EarlierTranscriptRequest,
   FailureView,
+  LabelPreflightFinding,
   Operator,
   PollCycle,
   PollingTriggers,
@@ -111,6 +112,7 @@ const instance = new LoadedInstance({
   invalidAgents: [],
   loops: [loop],
   quarantinedLoops: [],
+  warnings: [],
 });
 
 const snapshot = new RunSnapshot({
@@ -345,6 +347,14 @@ const testLayer = (
               message: "GitHub was unavailable",
             }),
           ],
+          preflightFindings: [
+            new LabelPreflightFinding({
+              repository,
+              label: "ready-for-review",
+              errorTag: "GitHubApiError",
+              message: "GitHub rejected the request with status 500",
+            }),
+          ],
           nextPollAt: Option.none(),
         }),
       ),
@@ -415,13 +425,14 @@ describe("Operator", () => {
         assert.strictEqual(overview.projects[0]?.board.lanes[0]?.items[0]?.run?.id, runId);
         assert.strictEqual(overview.projects[0]?.board.lanes[0]?.items[0]?.needsYou, true);
         assert.strictEqual(overview.projects[0]?.board.failures.length, 1);
+        assert.strictEqual(overview.projects[0]?.preflightFindings[0]?.label, "ready-for-review");
         assert.strictEqual(
           overview.projects[0]?.board.failures[0]?.itemKey,
           "github:basaltbytes/usine:32",
         );
         assert.deepStrictEqual(
           overview.needsYou.map(({ _tag }) => _tag),
-          ["ApprovalNeed", "BoardProjectionNeed", "PollFailureNeed"],
+          ["ApprovalNeed", "BoardProjectionNeed", "PollFailureNeed", "PreflightFindingNeed"],
         );
 
         const detail = yield* operator.detail(runId, new ColdTranscriptRequest());

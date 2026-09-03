@@ -16,6 +16,7 @@ import {
 import { GitHubItemWriter, type GitHubAppError } from "@usine/github";
 import { Context, DateTime, Effect, Layer, Option, SynchronizedRef } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
+import type { LabelPreflightFinding } from "../label-reconciler.ts";
 import { PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import {
@@ -33,6 +34,7 @@ import {
   ColdTranscriptRequest,
   LoopView,
   PollFailureNeed,
+  PreflightFindingNeed,
   ProjectView,
   ReadyOverview,
   RunDetailView,
@@ -79,6 +81,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
     pollFailures: ReadonlyArray<RepositoryPollFailure>,
+    preflightFindings: ReadonlyArray<LabelPreflightFinding>,
     scheduleFailures: ReadonlyArray<ScheduleFailure>,
     revision: Option.Option<ProjectionRevision>,
   ) {
@@ -100,6 +103,9 @@ const makeOperatorObservation = Effect.gen(function* () {
         Effect.gen(function* () {
           const { name } = repository;
           const projectRuns = runsByRepository.get(name) ?? [];
+          const projectFindings = preflightFindings.filter(
+            ({ repository: findingRepository }) => findingRepository === name,
+          );
           const [boardItems, labelProjection] = yield* Effect.all(
             [
               itemReader.list(name, { limit: OVERVIEW_BOARD_ITEMS }),
@@ -119,6 +125,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           );
           const status: ProjectStatus =
             board.failures.length > 0 ||
+            projectFindings.length > 0 ||
             projectRuns.some((run) => run.state === "Waiting" || run.state === "Failed")
               ? "needs-you"
               : projectRuns.some((run) => run.canCancel)
@@ -137,6 +144,7 @@ const makeOperatorObservation = Effect.gen(function* () {
                   description: Option.getOrNull(description),
                 }),
             ),
+            preflightFindings: projectFindings,
           });
         }),
       { concurrency: 4 },
@@ -195,6 +203,14 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
       );
     });
+    preflightFindings.forEach((finding) => {
+      needsYou.push(
+        new PreflightFindingNeed({
+          id: `preflight:${finding.repository}:${finding.label}`,
+          finding,
+        }),
+      );
+    });
     scheduleFailures.forEach((failure, index) => {
       needsYou.push(
         new ScheduleFailureNeed({
@@ -223,6 +239,10 @@ const makeOperatorObservation = Effect.gen(function* () {
           onNone: () => [],
           onSome: ({ failures }) => failures,
         });
+        const preflightFindings = Option.match(latestPoll, {
+          onNone: () => [],
+          onSome: ({ preflightFindings }) => preflightFindings,
+        });
         const scheduleFailures = Option.match(latestSchedule, {
           onNone: () => [],
           onSome: ({ failures }) => failures,
@@ -235,6 +255,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             instance.config.repos.map(({ name, lanes }) => [name, lanes]),
             instance.loops.map(({ name, agent, trigger }) => [name, agent, trigger.on]),
             pollFailures,
+            preflightFindings,
             scheduleFailures,
           ]),
         );
@@ -245,6 +266,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           const projected = yield* projectOverview(
             instance,
             pollFailures,
+            preflightFindings,
             scheduleFailures,
             revision,
           );
@@ -259,6 +281,7 @@ const makeOperatorObservation = Effect.gen(function* () {
         const projected = yield* projectOverview(
           instance,
           pollFailures,
+          preflightFindings,
           scheduleFailures,
           revision,
         );

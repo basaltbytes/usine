@@ -21,6 +21,7 @@ import {
   LoopControl,
   RepositoryLabel,
   RepositoryLabelProjection,
+  RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
   RunEngine,
   SubmissionResult,
@@ -56,6 +57,7 @@ import {
   submissionLogFields,
   triggerSubmission,
 } from "./trigger-submission.ts";
+import { LabelPreflightFinding, LabelReconciler } from "./label-reconciler.ts";
 
 /** GitHub REST + GraphQL tolerate a handful of parallel calls per token. */
 const REPOSITORY_CONCURRENCY = 4;
@@ -68,7 +70,7 @@ type WatchKey = typeof WatchKey.Type;
 class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   "@usine/orchestrator/StoredPollCursor",
 )({
-  boardVersion: Schema.Literal(3),
+  boardVersion: Schema.Literal(4),
   cursor: PollCursor,
   labelEntityTag: Schema.OptionFromNullOr(EntityTag),
   watches: Schema.Array(WatchKey).check(Schema.isUnique()),
@@ -90,6 +92,7 @@ export class PollCycle extends Schema.Class<PollCycle>("@usine/orchestrator/Poll
   /** Run ids actually revoked because their item stopped matching. */
   revokedRuns: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   failures: Schema.Array(RepositoryPollFailure),
+  preflightFindings: Schema.Array(LabelPreflightFinding),
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
 }) {}
 
@@ -108,6 +111,7 @@ const repositoryFailureLogFields = (error: RepositoryPollError) => {
 
 interface WatchedRepository {
   readonly repository: ManagedRepo;
+  readonly declaredLabels: LoadedInstance["config"]["labels"];
   readonly loops: ReadonlyArray<ResolvedLoop>;
   readonly watches: ReadonlyArray<WatchKey>;
 }
@@ -117,6 +121,7 @@ interface RepositoryCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
+  readonly preflightFindings: ReadonlyArray<LabelPreflightFinding>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
@@ -150,7 +155,12 @@ const watchedRepositories = (
     const loops = resolved.filter(
       ({ loop }) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
     );
-    return { repository, loops, watches: loops.map(watchKey).sort() };
+    return {
+      repository,
+      declaredLabels: instance.config.labels,
+      loops,
+      watches: loops.map(watchKey).sort(),
+    };
   });
 
 const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKey>): boolean =>
@@ -211,14 +221,16 @@ export class PollingTriggers extends Context.Service<
       const expressions = yield* ExpressionEngine;
       const github = yield* GitHubPolling;
       const items = yield* ItemProjectionWriter;
-      const repositoryLabels = yield* RepositoryLabelProjectionWriter;
+      const repositoryLabelReader = yield* RepositoryLabelProjectionReader;
+      const repositoryLabelWriter = yield* RepositoryLabelProjectionWriter;
+      const labelReconciler = yield* LabelReconciler;
       const runs = yield* RunEngine;
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
 
       const emptyCursor = (watches: ReadonlyArray<WatchKey>) =>
         new StoredPollCursor({
-          boardVersion: 3,
+          boardVersion: 4,
           cursor: PollCursor.empty,
           labelEntityTag: Option.none(),
           watches,
@@ -417,7 +429,7 @@ export class PollingTriggers extends Context.Service<
           });
           return unchanged;
         }
-        yield* repositoryLabels.replace(
+        yield* repositoryLabelWriter.replace(
           new RepositoryLabelProjection({
             repository: watched.repository.name,
             labels: detection.labels.map(
@@ -434,23 +446,43 @@ export class PollingTriggers extends Context.Service<
       ) {
         yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
         const stored = yield* readCursor(watched);
-        const [detected, labelResult] = yield* Effect.all(
-          [
-            github.changes(watched.repository.name, stored.cursor),
-            Effect.result(github.labels(watched.repository.name, stored.labelEntityTag)),
-          ] as const,
-          { concurrency: "unbounded" },
+        const labelResult = yield* Effect.result(
+          github.labels(watched.repository.name, stored.labelEntityTag),
         );
         const catalog = yield* applyLabelCatalog(watched, stored, labelResult);
+        const storedProjection = yield* repositoryLabelReader.get(watched.repository.name);
+        const reconciliation = yield* labelReconciler.reconcile(
+          watched.repository.name,
+          watched.declaredLabels,
+          Option.match(storedProjection, {
+            onNone: () => [],
+            onSome: ({ labels }) => labels,
+          }),
+        );
+        if (reconciliation.catalogChanged) {
+          yield* repositoryLabelWriter.replace(
+            new RepositoryLabelProjection({
+              repository: watched.repository.name,
+              labels: reconciliation.labels,
+            }),
+          );
+        }
+        // Label creation is preflight work: it completes before change detection
+        // and Item evaluation begin, including on the first `usine up` cycle.
+        const detected = yield* github.changes(watched.repository.name, stored.cursor);
         const nextCursor = new StoredPollCursor({
-          boardVersion: 3,
+          boardVersion: 4,
           cursor: detected.cursor,
-          labelEntityTag: catalog.labelEntityTag,
+          labelEntityTag: reconciliation.catalogChanged ? Option.none() : catalog.labelEntityTag,
           watches: watched.watches,
         });
-        const nextPollAt = latestPollAt([detected.nextPollAt, catalog.nextPollAt]);
+        const nextPollAt = latestPollAt([
+          detected.nextPollAt,
+          catalog.nextPollAt,
+          reconciliation.nextPollAt,
+        ]);
         if (detected._tag === "RepositoryNotModified") {
-          if (catalog.stored) {
+          if (catalog.stored || reconciliation.catalogChanged) {
             yield* writeCursor(watched, nextCursor);
           }
           yield* Effect.logDebug("Repository unchanged (304)", {
@@ -461,6 +493,7 @@ export class PollingTriggers extends Context.Service<
             submissions: [],
             revokedRuns: 0,
             failures: catalog.failures,
+            preflightFindings: reconciliation.findings,
             nextPollAt,
           } satisfies RepositoryCycle;
         }
@@ -484,6 +517,7 @@ export class PollingTriggers extends Context.Service<
           submissions: itemCycles.flatMap(({ submissions }) => submissions),
           revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
           failures: [...catalog.failures, ...itemCycles.flatMap(({ failures }) => failures)],
+          preflightFindings: reconciliation.findings,
           nextPollAt,
         } satisfies RepositoryCycle;
       });
@@ -549,6 +583,7 @@ export class PollingTriggers extends Context.Service<
           submissions: cycles.flatMap(({ submissions }) => submissions),
           revokedRuns: cycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
           failures: [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
+          preflightFindings: cycles.flatMap(({ preflightFindings }) => preflightFindings),
           nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
         });
         yield* Ref.set(latest, Option.some(cycle));
@@ -586,6 +621,7 @@ export class PollingTriggers extends Context.Service<
             submissions: cycle.submissions.length,
             revokedRuns: cycle.revokedRuns,
             failures: cycle.failures.length,
+            preflightFindings: cycle.preflightFindings.length,
             sleepMs,
           });
           yield* Effect.sleep(Duration.millis(sleepMs));

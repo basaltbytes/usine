@@ -103,6 +103,7 @@ describe("Runs without a Board card", () => {
       status: "active",
       runs: [cardedRun, scheduled],
       labels: [],
+      preflightFindings: [],
       board: new BoardView({
         failures: [],
         lanes: [

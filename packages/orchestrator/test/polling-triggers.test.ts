@@ -21,16 +21,13 @@ import {
   Claimed,
   CursorKey,
   CursorStore,
-  ItemProjectionWriter,
-  LoopControl,
   LoopRuntimeState,
   RepositoryLabelProjectionReader,
-  RepositoryLabelProjectionWriter,
   RunEngine,
   StepExecutor,
 } from "@usine/engine";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
-import { ExpressionEngine, MarcbachmannCelLayer, Source } from "@usine/expression";
+import { MarcbachmannCelLayer, Source } from "@usine/expression";
 import {
   ChangedIssue,
   ContentHash,
@@ -65,6 +62,15 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { PollingTriggers } from "../src/index.ts";
+import {
+  inertGitHubLabelWriterLayer,
+  inertLabelReconcilerLayer,
+  itemProjectionWriterLayer,
+  loopControlLayer,
+  pollingTestLayer,
+  repositoryLabelProjectionReaderLayer,
+  repositoryLabelProjectionWriterLayer,
+} from "./support/polling.ts";
 
 const watchedRepository = Repository.Name.make("basaltbytes/usine");
 const emptyLabelCatalog = new RepositoryLabelCatalog({
@@ -118,6 +124,7 @@ const instanceWith = (loops: ReadonlyArray<LoopFile>) =>
     invalidAgents: [],
     loops,
     quarantinedLoops: [],
+    warnings: [],
   });
 
 const issuePayload = (labels: ReadonlyArray<string>, number = 28): IssuePayload => ({
@@ -175,63 +182,11 @@ const runtimeLayer = (directory: Instance.Directory, github: GitHubPolling["Serv
     engine,
     MarcbachmannCelLayer,
     parser,
+    inertGitHubLabelWriterLayer,
+    inertLabelReconcilerLayer,
     Layer.succeed(GitHubPolling, github),
   );
   return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
-};
-
-const loopControlLayer = (states: ReadonlyArray<LoopRuntimeState> = []) =>
-  Layer.succeed(LoopControl)({
-    isPaused: (loop) => Effect.succeed(states.some((state) => state.loop === loop && state.paused)),
-    pause: () => Effect.die("unused"),
-    states: Effect.succeed(states),
-    unpause: () => Effect.die("unused"),
-  });
-
-const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
-  upsert: () => Effect.succeed(true),
-});
-
-const repositoryLabelProjectionWriterLayer = Layer.succeed(RepositoryLabelProjectionWriter)({
-  replace: () => Effect.succeed(true),
-});
-
-const schedulerLayer = (
-  github: GitHubPolling["Service"],
-  states: ReadonlyArray<LoopRuntimeState> = [],
-) => {
-  const cursors = Layer.succeed(CursorStore)({
-    read: () => Effect.succeed(Option.none()),
-    write: () => Effect.void,
-  });
-  const expressions = Layer.succeed(ExpressionEngine)({
-    checkBoolean: () => Effect.die("unused"),
-    checkScalar: () => Effect.die("unused"),
-    evaluateBoolean: () => Effect.die("unused"),
-    evaluateScalar: () => Effect.die("unused"),
-  });
-  const runs = Layer.succeed(RunEngine)({
-    approve: () => Effect.die("unused"),
-    cancel: () => Effect.die("unused"),
-    inspect: () => Effect.die("unused"),
-    reconcile: () => Effect.die("unused"),
-    retry: () => Effect.die("unused"),
-    revoke: () => Effect.die("unused"),
-    submit: () => Effect.die("unused"),
-    transcript: () => Effect.die("unused"),
-  });
-  const parser = ConfigParser.layer.pipe(Layer.provide(expressions));
-  const dependencies = Layer.mergeAll(
-    cursors,
-    expressions,
-    itemProjectionWriterLayer,
-    repositoryLabelProjectionWriterLayer,
-    parser,
-    runs,
-    loopControlLayer(states),
-    Layer.succeed(GitHubPolling, github),
-  );
-  return PollingTriggers.layer.pipe(Layer.provide(dependencies));
 };
 
 describe("PollingTriggers", () => {
@@ -261,7 +216,7 @@ describe("PollingTriggers", () => {
       yield* TestClock.adjust("1 second");
       assert.strictEqual(changeRequests, 4);
       yield* Fiber.interrupt(fiber);
-    }).pipe(Effect.provide(schedulerLayer(github)));
+    }).pipe(Effect.provide(pollingTestLayer(github)));
   });
 
   it.effect("keeps Board projection polling while paused Loops open no Runs", () => {
@@ -286,7 +241,7 @@ describe("PollingTriggers", () => {
       const latest = yield* polling.latest;
       assert(Option.isSome(latest));
       assert.strictEqual(latest.value, cycle);
-    }).pipe(Effect.provide(schedulerLayer(github, [state])));
+    }).pipe(Effect.provide(pollingTestLayer(github, [state])));
   });
 
   it.effect("turns a rate-limited label catalog into a backoff, not a failed cycle", () => {
@@ -313,7 +268,7 @@ describe("PollingTriggers", () => {
       const now = yield* Clock.currentTimeMillis;
       assert(Option.isSome(cycle.nextPollAt));
       assert.strictEqual(DateTime.toEpochMillis(cycle.nextPollAt.value), now + 90_000);
-    }).pipe(Effect.provide(schedulerLayer(github)));
+    }).pipe(Effect.provide(pollingTestLayer(github)));
   });
 
   it.live("keeps firing Loops and advancing the cursor when the label catalog request fails", () =>
@@ -645,6 +600,7 @@ describe("PollingTriggers", () => {
       invalidAgents: [],
       loops: [loop],
       quarantinedLoops: [],
+      warnings: [],
     });
     const changed = new ChangedIssue({
       number: 7,
@@ -703,7 +659,10 @@ describe("PollingTriggers", () => {
         Layer.mergeAll(
           cursors,
           itemProjectionWriterLayer,
+          repositoryLabelProjectionReaderLayer,
           repositoryLabelProjectionWriterLayer,
+          inertGitHubLabelWriterLayer,
+          inertLabelReconcilerLayer,
           runs,
           MarcbachmannCelLayer,
           parser,
@@ -756,6 +715,7 @@ describe("PollingTriggers", () => {
       transcript: () => Effect.die("unused"),
     });
     const parser = Layer.succeed(ConfigParser)({
+      configWarnings: () => Effect.die("unused"),
       parseAgentFile: () => Effect.die("unused"),
       parseLoopFile: () => Effect.die("unused"),
       parseUsineYaml: () => Effect.die("unused"),
@@ -800,7 +760,10 @@ describe("PollingTriggers", () => {
         Layer.mergeAll(
           cursors,
           itemProjectionWriterLayer,
+          repositoryLabelProjectionReaderLayer,
           repositoryLabelProjectionWriterLayer,
+          inertGitHubLabelWriterLayer,
+          inertLabelReconcilerLayer,
           runs,
           MarcbachmannCelLayer,
           parser,
@@ -848,6 +811,7 @@ describe("PollingTriggers", () => {
         invalidAgents: [],
         loops: [loop],
         quarantinedLoops: [],
+        warnings: [],
       });
       const changedItems = [11, 12].map(
         (number) =>
