@@ -13,17 +13,59 @@ import {
   openBrowser,
   parseCli,
   serverStartError,
+  volatileRoot,
+  volatileRoots,
 } from "../src/cli.ts";
 
+const noEnvironment = { port: Option.none<string>(), allowVolatileInstance: Option.none<string>() };
+
 describe("usine CLI", () => {
-  it("parses help, version, flag ports, and the environment fallback", async () => {
-    const help = await Effect.runPromise(parseCli(["--help"], Option.none()));
-    const upHelp = await Effect.runPromise(parseCli(["up", "-h"], Option.none()));
-    const version = await Effect.runPromise(parseCli(["--version"], Option.none()));
-    const flagged = await Effect.runPromise(
-      parseCli(["up", "--port", "8123"], Option.some("9000")),
+  it("accepts the volatile-instance override from the flag or the environment", async () => {
+    const flag = await Effect.runPromise(
+      parseCli(["up", "--allow-volatile-instance", "--port=8125"], noEnvironment),
     );
-    const environment = await Effect.runPromise(parseCli(["up"], Option.some("8124")));
+    const environment = await Effect.runPromise(
+      parseCli(["up"], { ...noEnvironment, allowVolatileInstance: Option.some("1") }),
+    );
+    const plain = await Effect.runPromise(parseCli(["up"], noEnvironment));
+    const unknown = await Effect.runPromise(
+      parseCli(["up", "--allow-anything"], noEnvironment).pipe(Effect.flip),
+    );
+    assert(
+      flag._tag === "UpCommand" && environment._tag === "UpCommand" && plain._tag === "UpCommand",
+    );
+    assert.strictEqual(flag.allowVolatileInstance, true);
+    assert.strictEqual(flag.port, 8_125);
+    assert.strictEqual(environment.allowVolatileInstance, true);
+    assert.strictEqual(plain.allowVolatileInstance, false);
+    assert(unknown instanceof CliUsageError);
+  });
+
+  it("recognises instance folders under temp roots and leaves others alone", () => {
+    const roots = volatileRoots(Option.some("/var/folders/ab/T"));
+    assert(roots.includes("/tmp"));
+    assert(roots.includes("/private/tmp"));
+    assert(roots.includes("/var/folders/ab/T"));
+    assert.deepStrictEqual(
+      volatileRoot("/private/tmp/usine-factory", roots),
+      Option.some("/private/tmp"),
+    );
+    assert(Option.isSome(volatileRoot("/var/folders/ab/T/x/y", roots)));
+    assert.deepStrictEqual(volatileRoot("/tmp", roots), Option.some("/tmp"));
+    assert.deepStrictEqual(volatileRoot("/tmpfiles/usine", roots), Option.none());
+    assert.deepStrictEqual(volatileRoot("/Users/me/Code/usine-factory", roots), Option.none());
+  });
+
+  it("parses help, version, flag ports, and the environment fallback", async () => {
+    const help = await Effect.runPromise(parseCli(["--help"], noEnvironment));
+    const upHelp = await Effect.runPromise(parseCli(["up", "-h"], noEnvironment));
+    const version = await Effect.runPromise(parseCli(["--version"], noEnvironment));
+    const flagged = await Effect.runPromise(
+      parseCli(["up", "--port", "8123"], { ...noEnvironment, port: Option.some("9000") }),
+    );
+    const environment = await Effect.runPromise(
+      parseCli(["up"], { ...noEnvironment, port: Option.some("8124") }),
+    );
 
     assert.strictEqual(help._tag, "HelpCommand");
     assert.strictEqual(upHelp._tag, "HelpCommand");
@@ -37,10 +79,10 @@ describe("usine CLI", () => {
 
   it("rejects invalid ports at the CLI boundary", async () => {
     const flagError = await Effect.runPromise(
-      parseCli(["up", "--port", "70000"], Option.none()).pipe(Effect.flip),
+      parseCli(["up", "--port", "70000"], noEnvironment).pipe(Effect.flip),
     );
     const environmentError = await Effect.runPromise(
-      parseCli(["up"], Option.some("not-a-port")).pipe(Effect.flip),
+      parseCli(["up"], { ...noEnvironment, port: Option.some("not-a-port") }).pipe(Effect.flip),
     );
     assert(flagError instanceof CliUsageError);
     assert.match(flagError.message, /between 1 and 65535/);

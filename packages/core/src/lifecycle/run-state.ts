@@ -1,14 +1,14 @@
 /**
  * The run state machine (ADR 0002):
  *
- *   pending ──────────────► running ──► succeeded
- *      │                    ▲  │
- *      ▼                    │  ▼
- *   waiting ────────────────┘ failed ──► (retry: attempt N+1) ──► running
+ *   pending ─────────────────────────► running ──► succeeded
+ *      │                               ▲  │
+ *      ▼                               │  ▼
+ *   waiting ──(approval)──► queued ────┘ failed ──► (retry: attempt N+1) ──► running
  *
- *   pending | waiting | running ──► canceled   (operator cancel)
- *   pending | waiting           ──► canceled   (supersede, revoke — a started
- *                                               attempt always finishes, ADR 0007)
+ *   pending | waiting | queued | running ──► canceled   (operator cancel)
+ *   pending | waiting | queued           ──► canceled   (supersede, revoke — a started
+ *                                                        attempt always finishes, ADR 0007)
  *
  * States are value objects (a discriminated union, each state carrying exactly
  * its own data). Transitions are typestate derivers: each function accepts
@@ -52,6 +52,9 @@ export class Pending extends Schema.TaggedClass<Pending>("RunState/Pending")("Pe
  */
 export class Waiting extends Schema.TaggedClass<Waiting>("RunState/Waiting")("Waiting", {}) {}
 
+/** Open: the approval gate opened; no attempt started. Waits for a worker slot like Pending. */
+export class Queued extends Schema.TaggedClass<Queued>("RunState/Queued")("Queued", {}) {}
+
 /** Open: an attempt is executing on a worker. */
 export class Running extends Schema.TaggedClass<Running>("RunState/Running")("Running", {}) {}
 
@@ -76,13 +79,23 @@ export class Canceled extends Schema.TaggedClass<Canceled>("RunState/Canceled")(
  * The open half of the machine — the single statement of the open/closed
  * partition; the alias, the guard, and the full union all derive from it.
  */
-export const Open = Schema.Union([Pending, Waiting, Running]);
+export const Open = Schema.Union([Pending, Waiting, Queued, Running]);
 export type Open = typeof Open.Type;
 
 export const RunState = Schema.Union([...Open.members, Succeeded, Failed, Canceled]);
 export type RunState = typeof RunState.Type;
 
+/** No attempt started yet: the precondition of `supersede` and `revoke`. */
+export const Unstarted = Schema.Union([Pending, Waiting, Queued]);
+export type Unstarted = typeof Unstarted.Type;
+
+/** Gate passed or absent: the states an attempt can start from. */
+export const Startable = Schema.Union([Pending, Queued]);
+export type Startable = typeof Startable.Type;
+
 export const isOpen = Schema.is(Open);
+export const isUnstarted = Schema.is(Unstarted);
+export const isStartable = Schema.is(Startable);
 
 /**
  * Compile-checked tag tuple over a state partition: the argument list must
@@ -99,12 +112,13 @@ const tagsOf =
     tags;
 
 /** The open partition as `_tag` literals, for queries that filter stored rows by state. */
-export const OPEN_STATE_TAGS = tagsOf<Open>()("Pending", "Waiting", "Running");
+export const OPEN_STATE_TAGS = tagsOf<Open>()("Pending", "Waiting", "Queued", "Running");
 
 /** Every state as `_tag` literals, for read models that project stored rows by state. */
 export const STATE_TAGS = tagsOf<RunState>()(
   "Pending",
   "Waiting",
+  "Queued",
   "Running",
   "Succeeded",
   "Failed",
@@ -115,16 +129,16 @@ export const STATE_TAGS = tagsOf<RunState>()(
  * The states with no started attempt, as `_tag` literals — the precondition
  * of `supersede` and `revoke`, for queries that filter stored rows by state.
  */
-export const UNSTARTED_STATE_TAGS = tagsOf<Pending | Waiting>()("Pending", "Waiting");
+export const UNSTARTED_STATE_TAGS = tagsOf<Unstarted>()("Pending", "Waiting", "Queued");
 
 /** pending → waiting: park the run on its loop's approval gate. */
 export const awaitApproval = (_state: Pending): Waiting => new Waiting();
 
-/**
- * pending | waiting → running: the first attempt starts. From waiting, the
- * engine consumes the approval Event that opens the gate.
- */
-export const start = (_state: Pending | Waiting): Running => new Running();
+/** waiting → queued: the approval Event opened the gate; the run now waits for a worker slot. */
+export const approve = (_state: Waiting): Queued => new Queued();
+
+/** pending | queued → running: the first attempt starts. A waiting run must be approved first. */
+export const start = (_state: Startable): Running => new Running();
 
 /** running → succeeded: the attempt finished and the step result is stored. */
 export const succeed = (_state: Running): Succeeded => new Succeeded();
@@ -151,17 +165,16 @@ export const cancelByOperator = (_state: Open): Canceled =>
   new Canceled({ reason: new OperatorCanceled() });
 
 /**
- * pending | waiting → canceled: a newer Event for the same Item takes this
- * run's place. Only runs with no started attempt can be superseded — a running
- * attempt always finishes, and the newer state is judged again when it ends
- * (ADR 0007).
+ * pending | waiting | queued → canceled: a newer Event for the same Item takes
+ * this run's place. Only runs with no started attempt can be superseded — a
+ * running attempt always finishes, and the newer state is judged again when it
+ * ends (ADR 0007).
  */
-export const supersede = (_state: Pending | Waiting, by: EventId): Canceled =>
+export const supersede = (_state: Unstarted, by: EventId): Canceled =>
   new Canceled({ reason: new Superseded({ by }) });
 
 /**
- * pending | waiting → canceled: the run's Item stopped matching its loop's
- * trigger. Never touches a running attempt.
+ * pending | waiting | queued → canceled: the run's Item stopped matching its
+ * loop's trigger. Never touches a running attempt.
  */
-export const revoke = (_state: Pending | Waiting): Canceled =>
-  new Canceled({ reason: new Revoked() });
+export const revoke = (_state: Unstarted): Canceled => new Canceled({ reason: new Revoked() });

@@ -134,6 +134,11 @@ export const stepExecutorLayer = (
             state,
           };
           yield* TxPriorityQueue.offer(pending, reservation);
+          yield* Effect.logInfo("Run waits for a worker slot", {
+            loop: submission.loop,
+            itemKey: submission.itemKey,
+            queued: yield* TxPriorityQueue.size(pending),
+          });
           return yield* Deferred.await(deferred).pipe(
             Effect.onInterrupt(() =>
               Ref.modify(state, (current) =>
