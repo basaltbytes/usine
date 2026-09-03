@@ -18,7 +18,7 @@ import {
 } from "@dnd-kit/sortable";
 import { pointerWithin, rectIntersection, type CollisionDetection } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowUpRightIcon } from "@phosphor-icons/react";
+import { ArrowUpRightIcon, CaretDownIcon } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Item, Repository, Run } from "@usine/core";
 import type {
@@ -34,6 +34,12 @@ import { LabelBadge } from "@/components/label-badge";
 import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Card,
   CardAction,
@@ -117,14 +123,23 @@ export const applyMove = (
 
 type LabelCatalog = ReadonlyMap<string, LabelView>;
 
+/** The keyboard and assistive-technology path for a lane move; drag stays the fast path (#75). */
+export interface MoveMenu {
+  readonly targets: ReadonlyArray<BoardLaneView>;
+  readonly disabled: boolean;
+  readonly onMove: (item: BoardItemView, lane: BoardLaneView) => void;
+}
+
 const CardBody = ({
   item,
   catalog,
   openRun,
+  move,
 }: {
   readonly item: BoardItemView;
   readonly catalog: LabelCatalog;
   readonly openRun: (runId: Run.RunId) => void;
+  readonly move?: MoveMenu;
 }) => {
   const failure = itemFailure(item);
   const run = item.run;
@@ -155,7 +170,11 @@ const CardBody = ({
           )}
         </CardTitle>
       </CardHeader>
-      {(item.labels.length > 0 || runsToShow.length > 0 || item.needsYou || failure !== null) && (
+      {(item.labels.length > 0 ||
+        runsToShow.length > 0 ||
+        item.needsYou ||
+        failure !== null ||
+        (move !== undefined && move.targets.length > 0)) && (
         <CardContent className="flex flex-col items-start gap-2">
           {item.labels.length > 0 && (
             <div className="flex flex-wrap gap-1">
@@ -184,6 +203,25 @@ const CardBody = ({
           {runsToShow.some(({ state }) => state === "Queued") && (
             <p className="text-muted-foreground">Approved. Waiting for a free worker slot.</p>
           )}
+          {move !== undefined && move.targets.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                disabled={move.disabled}
+                render={<Button variant="ghost" size="sm" className="-ml-2" />}
+                aria-label={`Move ${item.kind === "pr" ? "PR" : "issue"} #${item.number} to a lane`}
+              >
+                Move to
+                <CaretDownIcon aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start">
+                {move.targets.map((lane) => (
+                  <DropdownMenuItem key={lane.id} onClick={() => move.onMove(item, lane)}>
+                    {lane.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </CardContent>
       )}
     </>
@@ -197,11 +235,13 @@ const BoardCard = ({
   catalog,
   disabled,
   openRun,
+  move,
 }: {
   readonly item: BoardItemView;
   readonly catalog: LabelCatalog;
   readonly disabled: boolean;
   readonly openRun: (runId: Run.RunId) => void;
+  readonly move: MoveMenu;
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: item.itemKey,
@@ -220,24 +260,33 @@ const BoardCard = ({
       {...attributes}
       {...listeners}
     >
-      <CardBody item={item} catalog={catalog} openRun={openRun} />
+      <CardBody item={item} catalog={catalog} openRun={openRun} move={move} />
     </Card>
   );
 };
 
 const BoardLane = ({
   lane,
+  lanes,
   catalog,
   dragging,
   pending,
   openRun,
+  onMove,
 }: {
   readonly lane: BoardLaneView;
+  readonly lanes: ReadonlyArray<BoardLaneView>;
   readonly catalog: LabelCatalog;
   readonly dragging: boolean;
   readonly pending: boolean;
   readonly openRun: (runId: Run.RunId) => void;
+  readonly onMove: (item: BoardItemView, lane: BoardLaneView) => void;
 }) => {
+  const move: MoveMenu = {
+    targets: lanes.filter((other) => other._tag === "WritableBoardLane" && other.id !== lane.id),
+    disabled: pending,
+    onMove,
+  };
   const writable = lane._tag === "WritableBoardLane";
   const { setNodeRef, isOver } = useDroppable({ id: lane.id, disabled: !writable || pending });
   return (
@@ -287,6 +336,7 @@ const BoardLane = ({
               catalog={catalog}
               disabled={pending}
               openRun={openRun}
+              move={move}
             />
           ))}
         </SortableContext>
@@ -398,16 +448,18 @@ export const ProjectBoard = ({
     const item = lanes.flatMap(({ items }) => items).find(({ itemKey }) => itemKey === dragged.id);
     setActive(item ?? null);
   };
+  const moveItem = (item: BoardItemView, target: BoardLaneView) => {
+    if (target._tag !== "WritableBoardLane" || target.id === laneOf(item.itemKey, lanes)?.id) {
+      return;
+    }
+    setPendingMove({ itemKey: item.itemKey, toLane: target.id });
+    move.mutate({ item: item.number, lane: target });
+  };
   const onDragEnd = ({ over }: DragEndEvent) => {
     setActive(null);
     if (over === null || active === null) return;
-    const source = laneOf(active.itemKey, lanes);
     const target = laneUnder(over.id, lanes);
-    if (target === undefined || target._tag !== "WritableBoardLane" || target.id === source?.id) {
-      return;
-    }
-    setPendingMove({ itemKey: active.itemKey, toLane: target.id });
-    move.mutate({ item: active.number, lane: target });
+    if (target !== undefined) moveItem(active, target);
   };
   return (
     <main className="flex flex-col gap-4 px-4 py-6 sm:px-6">
@@ -437,10 +489,12 @@ export const ProjectBoard = ({
             <BoardLane
               key={lane.id}
               lane={lane}
+              lanes={lanes}
               catalog={catalog}
               dragging={active !== null}
               pending={pending}
               openRun={openRun}
+              onMove={moveItem}
             />
           ))}
         </div>
