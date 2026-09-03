@@ -1,6 +1,5 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 import type { Run } from "@usine/core";
 import { RunDetailView } from "@usine/orchestrator";
 import type { TranscriptPageCursor } from "@usine/orchestrator";
@@ -36,13 +35,6 @@ import {
   Transcript,
 } from "./run-transcript.tsx";
 
-/** Opens the drawer over the current screen by writing the run id into the root search. */
-export const useOpenRun = () => {
-  const navigate = useNavigate();
-  return (runId: Run.RunId) =>
-    void navigate({ to: ".", search: (previous) => ({ ...previous, run: runId }) });
-};
-
 const timeAgo = (value: string): string => {
   const elapsed = Math.max(0, Date.now() - Date.parse(value));
   if (elapsed < 60_000) return "now";
@@ -62,9 +54,12 @@ const Section = ({ title, children }: { readonly title: string; readonly childre
 
 export const RunDrawer = ({
   runId,
+  open,
   close,
 }: {
   readonly runId: Run.RunId;
+  /** False keeps the last Run mounted while the Sheet plays its exit transition. */
+  readonly open: boolean;
   readonly close: () => void;
 }) => {
   const queryClient = useQueryClient();
@@ -86,7 +81,8 @@ export const RunDrawer = ({
       });
     },
     structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
-    refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
+    enabled: open,
+    refetchInterval: (query) => (open && query.state.data?.run.canCancel === true ? 1_000 : false),
   });
   const mutation = useMutation({
     mutationFn: (act: "approve" | "retry" | "cancel") =>
@@ -129,9 +125,9 @@ export const RunDrawer = ({
   const meters = poolMeters(detail.data?.transcript ?? []);
   return (
     <Sheet
-      open
-      onOpenChange={(open) => {
-        if (!open) close();
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) close();
       }}
     >
       <SheetContent
