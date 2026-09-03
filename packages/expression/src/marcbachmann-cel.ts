@@ -98,55 +98,101 @@ const pathOf = (node: ASTNode): ReadonlyArray<string> | undefined => {
   return parent === undefined ? undefined : [...parent, node.args[1]];
 };
 
-const samePath = (left: ReadonlyArray<string>, right: ReadonlyArray<string>): boolean =>
-  left.length === right.length && left.every((part, index) => part === right[index]);
-
 const decodeStringLiteral = Schema.decodeUnknownOption(Schema.String);
 
-interface RelatedLiteralScan {
-  readonly containsPath: boolean;
-  readonly literals: ReadonlyArray<string>;
-  readonly related: ReadonlyArray<string>;
-}
+const MACROS_WITH_BINDINGS: ReadonlySet<string> = new Set([
+  "all",
+  "exists",
+  "exists_one",
+  "filter",
+  "map",
+]);
 
-/**
- * Select literals from the nearest subtree containing the requested path.
- * Boolean siblings outside that subtree are intentionally excluded: in
- * `item.labels... == "ready" && item.state == "OPEN"`, only `ready` is related.
- */
+type MacroBindings = ReadonlyMap<string, ReadonlyArray<string>>;
+
+const resolvedPathOf = (
+  node: ASTNode,
+  bindings: MacroBindings,
+): ReadonlyArray<string> | undefined => {
+  const path = pathOf(node);
+  const root = path?.[0];
+  if (path === undefined || root === undefined) return path;
+  const boundPath = bindings.get(root);
+  return boundPath === undefined ? path : [...boundPath, ...path.slice(1)];
+};
+
+const startsWithPath = (path: ReadonlyArray<string>, prefix: ReadonlyArray<string>): boolean =>
+  prefix.every((part, index) => path[index] === part);
+
+const stringLiteralsIn = (node: ASTNode): ReadonlyArray<string> => [
+  ...(node.op === "value"
+    ? Option.match(decodeStringLiteral(node.args), {
+        onNone: () => [],
+        onSome: (literal) => [literal],
+      })
+    : []),
+  ...childNodes(node).flatMap(stringLiteralsIn),
+];
+
+const isRelatedName = (
+  node: ASTNode,
+  memberPath: ReadonlyArray<string>,
+  bindings: MacroBindings,
+): boolean => {
+  const path = resolvedPathOf(node, bindings);
+  return path !== undefined && startsWithPath(path, memberPath) && path[path.length - 1] === "name";
+};
+
+const comparisonLiterals = (
+  node: ASTNode,
+  memberPath: ReadonlyArray<string>,
+  bindings: MacroBindings,
+): ReadonlyArray<string> => {
+  switch (node.op) {
+    case "!=":
+    case "==":
+    case "in": {
+      const [left, right] = node.args;
+      return [
+        ...(isRelatedName(left, memberPath, bindings) ? stringLiteralsIn(right) : []),
+        ...(isRelatedName(right, memberPath, bindings) ? stringLiteralsIn(left) : []),
+      ];
+    }
+    default:
+      return [];
+  }
+};
+
+/** Track macro-bound collection members to their label-name comparisons. */
 const scanRelatedLiterals = (
   node: ASTNode,
   memberPath: ReadonlyArray<string>,
-): RelatedLiteralScan => {
-  const children = childNodes(node).map((child) => scanRelatedLiterals(child, memberPath));
-  const descendantRelated = children.flatMap(({ related }) => related);
-  const nodePath = pathOf(node);
-  const containsPath =
-    (nodePath !== undefined && samePath(nodePath, memberPath)) ||
-    children.some((child) => child.containsPath);
-  const literals = [
-    ...(node.op === "value"
-      ? Option.match(decodeStringLiteral(node.args), {
-          onNone: () => [],
-          onSome: (literal) => [literal],
-        })
-      : []),
-    ...children.flatMap((child) => child.literals),
+  bindings: MacroBindings,
+): ReadonlyArray<string> => {
+  const related = comparisonLiterals(node, memberPath, bindings);
+  if (node.op !== "rcall" || !MACROS_WITH_BINDINGS.has(node.args[0])) {
+    return [
+      ...related,
+      ...childNodes(node).flatMap((child) => scanRelatedLiterals(child, memberPath, bindings)),
+    ];
+  }
+
+  const [, receiver, args] = node.args;
+  const [binding, ...body] = args;
+  const receiverPath = resolvedPathOf(receiver, bindings);
+  if (binding?.op !== "id" || receiverPath === undefined) {
+    return [
+      ...related,
+      ...childNodes(node).flatMap((child) => scanRelatedLiterals(child, memberPath, bindings)),
+    ];
+  }
+
+  const bodyBindings = new Map(bindings).set(binding.args, receiverPath);
+  return [
+    ...related,
+    ...scanRelatedLiterals(receiver, memberPath, bindings),
+    ...body.flatMap((child) => scanRelatedLiterals(child, memberPath, bodyBindings)),
   ];
-  return {
-    containsPath,
-    literals,
-    related:
-      descendantRelated.length > 0
-        ? descendantRelated
-        : containsPath &&
-            literals.length > 0 &&
-            node.op !== "&&" &&
-            node.op !== "||" &&
-            node.op !== "?:"
-          ? literals
-          : [],
-  };
 };
 
 const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals")(function* (
@@ -166,7 +212,7 @@ const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals"
             position: Option.none(),
           }),
   });
-  return [...new Set(scanRelatedLiterals(ast, memberPath).related)];
+  return [...new Set(scanRelatedLiterals(ast, memberPath, new Map()))];
 });
 
 const makeEnvironment = (descriptor: Environment): CelEnvironment => {

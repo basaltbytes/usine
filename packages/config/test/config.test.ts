@@ -106,6 +106,7 @@ describe("ConfigParser", () => {
         "version: 1\nlabels: [{ name: '   ' }]\nrepos: []\n",
         "version: 1\nlabels: [{ name: ready, color: '#a2eeef' }]\nrepos: []\n",
         "version: 1\nlabels: [{ name: ready, colour: a2eeef }]\nrepos: []\n",
+        `version: 1\nlabels: [{ name: ready, description: ${"x".repeat(101)} }]\nrepos: []\n`,
       ]) {
         const failure = yield* parser
           .parseUsineYaml(InstancePath.make("usine.yaml"), source)
@@ -151,7 +152,7 @@ describe("ConfigParser", () => {
           "---",
           "trigger:",
           "  on: issue",
-          "  if: item.state == 'OPEN' && item.labels.nodes.exists(label, label.name == 'missing-trigger')",
+          "  if: item.labels.nodes.exists(label, label.name == 'missing-trigger' && item.state == 'OPEN')",
           "agent: developer",
           "---",
           "Handle it.",

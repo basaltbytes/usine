@@ -125,6 +125,14 @@ interface RepositoryCycle {
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
+/** A completed preflight followed by a failed repository-poll phase. */
+interface InterruptedRepositoryCycle {
+  readonly _tag: "InterruptedRepositoryCycle";
+  readonly error: RepositoryPollError;
+  readonly preflightFindings: ReadonlyArray<LabelPreflightFinding>;
+  readonly nextPollAt: Option.Option<DateTime.Utc>;
+}
+
 interface ItemCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
@@ -459,67 +467,73 @@ export class PollingTriggers extends Context.Service<
             onSome: ({ labels }) => labels,
           }),
         );
-        if (reconciliation.catalogChanged) {
-          yield* repositoryLabelWriter.replace(
-            new RepositoryLabelProjection({
-              repository: watched.repository.name,
-              labels: reconciliation.labels,
-            }),
-          );
-        }
-        // Label creation is preflight work: it completes before change detection
-        // and Item evaluation begin, including on the first `usine up` cycle.
-        const detected = yield* github.changes(watched.repository.name, stored.cursor);
-        const nextCursor = new StoredPollCursor({
-          boardVersion: 4,
-          cursor: detected.cursor,
-          labelEntityTag: reconciliation.catalogChanged ? Option.none() : catalog.labelEntityTag,
-          watches: watched.watches,
-        });
-        const nextPollAt = latestPollAt([
-          detected.nextPollAt,
-          catalog.nextPollAt,
-          reconciliation.nextPollAt,
-        ]);
-        if (detected._tag === "RepositoryNotModified") {
-          if (catalog.stored || reconciliation.catalogChanged) {
-            yield* writeCursor(watched, nextCursor);
+        const preflightNextPollAt = latestPollAt([catalog.nextPollAt, reconciliation.nextPollAt]);
+        return yield* Effect.gen(function* () {
+          if (reconciliation.catalogChanged) {
+            yield* repositoryLabelWriter.replace(
+              new RepositoryLabelProjection({
+                repository: watched.repository.name,
+                labels: reconciliation.labels,
+              }),
+            );
           }
-          yield* Effect.logDebug("Repository unchanged (304)", {
-            repository: watched.repository.name,
+          // Label creation is preflight work: it completes before change detection
+          // and Item evaluation begin, including on the first `usine up` cycle.
+          const detected = yield* github.changes(watched.repository.name, stored.cursor);
+          const nextCursor = new StoredPollCursor({
+            boardVersion: 4,
+            cursor: detected.cursor,
+            labelEntityTag: reconciliation.catalogChanged ? Option.none() : catalog.labelEntityTag,
+            watches: watched.watches,
           });
+          const nextPollAt = latestPollAt([detected.nextPollAt, preflightNextPollAt]);
+          if (detected._tag === "RepositoryNotModified") {
+            if (catalog.stored || reconciliation.catalogChanged) {
+              yield* writeCursor(watched, nextCursor);
+            }
+            yield* Effect.logDebug("Repository unchanged (304)", {
+              repository: watched.repository.name,
+            });
+            return {
+              changedItems: 0,
+              submissions: [],
+              revokedRuns: 0,
+              failures: catalog.failures,
+              preflightFindings: reconciliation.findings,
+              nextPollAt,
+            } satisfies RepositoryCycle;
+          }
+
+          yield* Effect.logInfo("Repository changed", {
+            repository: watched.repository.name,
+            changedItems: detected.items.length,
+            backlog: detected.backlog,
+          });
+          const itemCycles = yield* Effect.forEach(
+            detected.items,
+            (item) => evaluateItem(watched, item),
+            { concurrency: ITEM_CONCURRENCY },
+          );
+          // Advancing is the commit point: every changed item was fetched,
+          // evaluated, and submitted/revoked successfully. A prior failure
+          // leaves the old cursor so the next cycle safely re-polls.
+          yield* writeCursor(watched, nextCursor);
           return {
-            changedItems: 0,
-            submissions: [],
-            revokedRuns: 0,
-            failures: catalog.failures,
+            changedItems: detected.items.length,
+            submissions: itemCycles.flatMap(({ submissions }) => submissions),
+            revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
+            failures: [...catalog.failures, ...itemCycles.flatMap(({ failures }) => failures)],
             preflightFindings: reconciliation.findings,
             nextPollAt,
           } satisfies RepositoryCycle;
-        }
-
-        yield* Effect.logInfo("Repository changed", {
-          repository: watched.repository.name,
-          changedItems: detected.items.length,
-          backlog: detected.backlog,
-        });
-        const itemCycles = yield* Effect.forEach(
-          detected.items,
-          (item) => evaluateItem(watched, item),
-          { concurrency: ITEM_CONCURRENCY },
+        }).pipe(
+          Effect.mapError((error): InterruptedRepositoryCycle => ({
+            _tag: "InterruptedRepositoryCycle",
+            error,
+            preflightFindings: reconciliation.findings,
+            nextPollAt: preflightNextPollAt,
+          })),
         );
-        // Advancing is the commit point: every changed item was fetched,
-        // evaluated, and submitted/revoked successfully. A prior failure
-        // leaves the old cursor so the next cycle safely re-polls.
-        yield* writeCursor(watched, nextCursor);
-        return {
-          changedItems: detected.items.length,
-          submissions: itemCycles.flatMap(({ submissions }) => submissions),
-          revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
-          failures: [...catalog.failures, ...itemCycles.flatMap(({ failures }) => failures)],
-          preflightFindings: reconciliation.findings,
-          nextPollAt,
-        } satisfies RepositoryCycle;
       });
 
       const poll = Effect.fn("PollingTriggers.poll")(function* (instance: LoadedInstance) {
@@ -549,12 +563,19 @@ export class PollingTriggers extends Context.Service<
         const cycles: Array<RepositoryCycle> = [];
         const failures: Array<RepositoryPollFailure> = [];
         const backoffs: Array<Option.Option<DateTime.Utc>> = [];
+        const preflightFindings: Array<LabelPreflightFinding> = [];
         for (const { repository, result } of settled) {
           if (Result.isSuccess(result)) {
             cycles.push(result.success);
+            preflightFindings.push(...result.success.preflightFindings);
             continue;
           }
-          const error: RepositoryPollError = result.failure;
+          const interrupted = result.failure._tag === "InterruptedRepositoryCycle";
+          const error: RepositoryPollError = interrupted ? result.failure.error : result.failure;
+          if (interrupted) {
+            preflightFindings.push(...result.failure.preflightFindings);
+            backoffs.push(result.failure.nextPollAt);
+          }
           if (error._tag === "GitHubRateLimitError") {
             // A rate-limit pause is scheduling input, not a repository failure.
             yield* Effect.logWarning("GitHub rate limit reached; delaying the next cycle", {
@@ -583,7 +604,7 @@ export class PollingTriggers extends Context.Service<
           submissions: cycles.flatMap(({ submissions }) => submissions),
           revokedRuns: cycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
           failures: [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
-          preflightFindings: cycles.flatMap(({ preflightFindings }) => preflightFindings),
+          preflightFindings,
           nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
         });
         yield* Ref.set(latest, Option.some(cycle));

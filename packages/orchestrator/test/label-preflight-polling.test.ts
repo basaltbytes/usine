@@ -18,12 +18,13 @@ import {
   GitHubApiError,
   GitHubLabelWriter,
   GitHubPolling,
+  GitHubRateLimitError,
   RepositoryLabel,
   RepositoryLabelCatalog,
   RepositoryLabelColor,
   RepositoryNotModified,
 } from "@usine/github";
-import { Effect, Option, Schema } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import { PollingTriggers } from "../src/index.ts";
 import { pollingTestLayer } from "./support/polling.ts";
 
@@ -134,6 +135,48 @@ describe("PollingTriggers label preflight", () => {
       assert.deepStrictEqual(
         cycle.preflightFindings.map(({ label }) => label),
         ["ready"],
+      );
+    }).pipe(Effect.provide(pollingTestLayer(github, [], writer)));
+  });
+
+  it.effect("preserves creation findings when change detection is later rate-limited", () => {
+    const creationRetryAt = DateTime.makeUnsafe("2026-09-03T12:01:00Z");
+    const changesRetryAt = DateTime.makeUnsafe("2026-09-03T12:02:00Z");
+    const github: GitHubPolling["Service"] = {
+      labels: () => Effect.succeed(emptyCatalog),
+      changes: () =>
+        Effect.fail(
+          new GitHubRateLimitError({
+            operation: "poll-repository-changes",
+            retryAt: changesRetryAt,
+            message: "change polling rate-limited",
+          }),
+        ),
+      snapshot: () => Effect.die("change detection did not return any items"),
+    };
+    const writer: GitHubLabelWriter["Service"] = {
+      create: () =>
+        Effect.fail(
+          new GitHubRateLimitError({
+            operation: "create-repository-label",
+            retryAt: creationRetryAt,
+            message: "label creation rate-limited",
+          }),
+        ),
+    };
+
+    return Effect.gen(function* () {
+      const polling = yield* PollingTriggers;
+      const cycle = yield* polling.poll(instance);
+
+      assert.deepStrictEqual(
+        cycle.preflightFindings.map(({ label }) => label),
+        ["ready"],
+      );
+      assert(Option.isSome(cycle.nextPollAt));
+      assert.strictEqual(
+        DateTime.toEpochMillis(cycle.nextPollAt.value),
+        DateTime.toEpochMillis(changesRetryAt),
       );
     }).pipe(Effect.provide(pollingTestLayer(github, [], writer)));
   });

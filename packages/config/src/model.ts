@@ -87,11 +87,17 @@ export const GitHubLabelColor = Schema.String.check(
 ).pipe(Schema.brand("GitHubLabelColor"));
 export type GitHubLabelColor = typeof GitHubLabelColor.Type;
 
+const GitHubLabelDescription = Schema.String.check(
+  Schema.isMaxLength(100, {
+    message: "Expected a GitHub label description of at most 100 characters",
+  }),
+);
+
 /** One factory-wide label declaration, provisioned into every managed repository. */
 export class DeclaredLabel extends Schema.Class<DeclaredLabel>("@usine/config/DeclaredLabel")({
   name: GitHubLabelName,
   color: Schema.OptionFromOptionalKey(GitHubLabelColor),
-  description: Schema.OptionFromOptionalKey(Schema.String),
+  description: Schema.OptionFromOptionalKey(GitHubLabelDescription),
 }) {}
 
 export const LaneItemState = Schema.Literals([

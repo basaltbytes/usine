@@ -62,7 +62,7 @@ describe("ExpressionEngine", () => {
     Effect.gen(function* () {
       const engine = yield* ExpressionEngine;
       const labels = yield* engine.relatedStringLiterals(
-        source('item.state == "OPEN" && item.labels.nodes.exists(label, label.name == "ready")'),
+        source('item.labels.nodes.exists(label, label.name == "ready" && item.state == "OPEN")'),
         ["item", "labels"],
       );
 
