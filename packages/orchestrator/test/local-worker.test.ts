@@ -475,6 +475,7 @@ describe("local worker", () => {
       task: AttemptChannel.Task.make("Prove cleanup stays out of the outcome"),
       agent: testAgent,
       parentModel: Option.none(),
+      maxChildren: Agent.ChildSessionBudget.make(4),
     });
     const prepared = new PreparedAttempt({
       worker: Worker.Name.make("local"),

@@ -5,7 +5,7 @@ import type {
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import { Agent } from "@usine/core";
-import { Effect, Option, Stream } from "effect";
+import { Effect, Logger, Option, Stream } from "effect";
 import { ChildBackend, SessionResult, WorkingDirectory } from "../../src/index.ts";
 import { createSubagentsExtension } from "../../src/pi/subagents.ts";
 
@@ -48,14 +48,20 @@ describe("owned Pi subagents extension", () => {
       },
     });
     const events: Array<Agent.SessionEvent> = [];
+    const logs: Array<unknown> = [];
+    const logger = Logger.make<unknown, void>(({ message }) => {
+      logs.push(message);
+    });
     let registered: ToolDefinition | undefined;
     const extension = createSubagentsExtension({
       agent,
       backend: child,
       cwd: WorkingDirectory.make("/workspace/repo"),
       emit: (event) => Effect.sync(() => events.push(event)),
+      maxChildren: Agent.ChildSessionBudget.make(4),
+      onBudgetExceeded: () => Effect.void,
       parentId: parent.id,
-      run: (program) => Effect.runPromise(program),
+      run: (program) => Effect.runPromise(program.pipe(Effect.withLogger(logger))),
     });
     // SAFETY: this extension only calls registerTool; all other ExtensionAPI members are unused.
     await extension({ registerTool: (tool) => (registered = tool) } as ExtensionAPI);
@@ -75,6 +81,17 @@ describe("owned Pi subagents extension", () => {
     assert.strictEqual(childRequest?.session.parentId, parent.id);
     assert.match(childRequest?.prompt ?? "", /Implement focused TypeScript changes/u);
     assert.match(childRequest?.prompt ?? "", /— usine agent: developer/u);
+    assert.deepStrictEqual(
+      logs.find((message) => Array.isArray(message) && message[0] === "Spawning child session"),
+      [
+        "Spawning child session",
+        {
+          childrenSpawned: 1,
+          maxChildren: 4,
+          taskExcerpt: "Add interrupt propagation.",
+        },
+      ],
+    );
     assert.deepStrictEqual(
       events.map((event) => event._tag),
       ["SessionStarted", "TextOutput", "SessionFinished"],

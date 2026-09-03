@@ -3,23 +3,31 @@ import { DateTime, Schema } from "effect";
 import { AttemptNumber, shouldAutoRetry } from "../src/lifecycle/attempt.ts";
 import {
   AgentFailure,
+  ChildSessionBudgetFailure,
   InfraFailure,
   isAutoRetryable,
   RunawayFailure,
 } from "../src/lifecycle/attempt-failure.ts";
+import { ChildSessionBudget, ChildSessionCount } from "../src/agent.ts";
 import { DedupKey, Event, EventId } from "../src/lifecycle/event.ts";
 
 const infra = new InfraFailure({ message: "worker unreachable", cause: new Error("ECONNREFUSED") });
 const agent = new AgentFailure({ message: "agent reported failure" });
 const runaway = new RunawayFailure({ ceiling: "tokens" });
+const childBudget = new ChildSessionBudgetFailure({
+  maxChildren: ChildSessionBudget.make(4),
+  attemptedChildren: ChildSessionCount.make(5),
+});
 const n = AttemptNumber.make;
 const decodeAttemptNumber = Schema.decodeUnknownSync(AttemptNumber);
+const decodeChildSessionBudget = Schema.decodeUnknownSync(ChildSessionBudget);
 
 describe("auto-retry law (ADR 0002, ADR 0013)", () => {
   it("only infra failures are auto-retryable at the class level", () => {
     expect(isAutoRetryable(infra)).toBe(true);
     expect(isAutoRetryable(agent)).toBe(false);
     expect(isAutoRetryable(runaway)).toBe(false);
+    expect(isAutoRetryable(childBudget)).toBe(false);
   });
 
   it("infra auto-retry stops at the cap", () => {
@@ -27,9 +35,12 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
     expect(shouldAutoRetry({ failure: infra, number: n(3), maxAutoAttempts: n(3) })).toBe(false);
   });
 
-  it("agent failures and runaways never auto-retry, even on the first attempt", () => {
+  it("agent failures and guard failures never auto-retry, even on the first attempt", () => {
     expect(shouldAutoRetry({ failure: agent, number: n(1), maxAutoAttempts: n(3) })).toBe(false);
     expect(shouldAutoRetry({ failure: runaway, number: n(1), maxAutoAttempts: n(3) })).toBe(false);
+    expect(shouldAutoRetry({ failure: childBudget, number: n(1), maxAutoAttempts: n(3) })).toBe(
+      false,
+    );
   });
 });
 
@@ -39,6 +50,13 @@ describe("construction is the only door", () => {
     expect(() => decodeAttemptNumber(-1)).toThrow();
     expect(() => decodeAttemptNumber(1.5)).toThrow();
     expect(decodeAttemptNumber(1)).toBe(1);
+  });
+
+  it("child-session budgets below 1 or fractional are unconstructible", () => {
+    expect(() => decodeChildSessionBudget(0)).toThrow();
+    expect(() => decodeChildSessionBudget(-1)).toThrow();
+    expect(() => decodeChildSessionBudget(1.5)).toThrow();
+    expect(decodeChildSessionBudget(1)).toBe(1);
   });
 
   it("empty ids are unconstructible", () => {

@@ -60,6 +60,15 @@ export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   message: Schema.NonEmptyString,
 }) {}
 
+/** The Pi parent tried to spawn a child after consuming this Attempt's child-session budget. */
+export class ChildSessionBudgetExceededError extends Schema.TaggedError<ChildSessionBudgetExceededError>(
+  "@usine/agents/ChildSessionBudgetExceededError",
+)("ChildSessionBudgetExceededError", {
+  maxChildren: Agent.ChildSessionBudget,
+  attemptedChildren: Agent.ChildSessionCount,
+  message: Schema.NonEmptyString,
+}) {}
+
 export const SESSION_OPERATIONS = ["launch", "stream", "steer", "interrupt"] as const;
 export const SessionOperation = Schema.Literals(SESSION_OPERATIONS);
 export type SessionOperation = typeof SessionOperation.Type;
@@ -79,6 +88,7 @@ export const AgentSessionError = Schema.Union([
   PoolUnavailableError,
   UnsupportedEffortError,
   AgentResultError,
+  ChildSessionBudgetExceededError,
   SessionOperationError,
 ]);
 export type AgentSessionError = typeof AgentSessionError.Type;
@@ -96,6 +106,8 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure.Attem
     PoolUnavailableError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
     UnsupportedEffortError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
     AgentResultError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
+    ChildSessionBudgetExceededError: ({ attemptedChildren, maxChildren }) =>
+      new AttemptFailure.ChildSessionBudgetFailure({ attemptedChildren, maxChildren }),
   });
 
 /** Live SDK session. Its event stream and controls are backend-independent. */

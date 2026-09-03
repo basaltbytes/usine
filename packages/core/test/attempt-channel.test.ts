@@ -30,9 +30,10 @@ const spec = new AttemptChannel.RunSpec({
   task: AttemptChannel.Task.make("Implement the issue"),
   agent,
   parentModel: Option.some(parentModel),
+  maxChildren: Agent.ChildSessionBudget.make(4),
 });
 
-describe("attempt channel v3", () => {
+describe("attempt channel v4", () => {
   it("round-trips a final envelope through its framed JSON schema", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,

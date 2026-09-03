@@ -19,6 +19,7 @@ import {
   AgentRuntime,
   ChildBackend,
   ChildRequest,
+  ChildSessionBudgetExceededError,
   LaunchRequest,
   PiChildBackend,
   PoolUnavailableError,
@@ -310,6 +311,7 @@ const request = new LaunchRequest({
     task: AttemptChannel.Task.make("Implement issue 30."),
     agent,
     parentModel: Option.some(parentModel),
+    maxChildren: Agent.ChildSessionBudget.make(4),
   }),
   cwd: WorkingDirectory.make("/workspace/usine"),
 });
@@ -452,6 +454,92 @@ describe("Pi parent runtime", () => {
           ["SessionStarted", "TextOutput", "ToolStarted", "ToolFinished", "SessionFinished"],
         );
       }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
+    );
+  });
+
+  it.effect("fails the parent after it exhausts the Attempt child-session budget", () => {
+    let options: PiStartOptions | undefined;
+    let childLaunches = 0;
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => undefined,
+      messages: [],
+      prompt: async () => {
+        const extension = options?.extensions[0];
+        assert(extension !== undefined);
+        let registered: ToolDefinition | undefined;
+        // SAFETY: this extension only calls registerTool; other members are unused.
+        await extension.factory({
+          registerTool: (tool) => (registered = tool),
+        } as ExtensionAPI);
+        assert(registered !== undefined);
+        // SAFETY: the owned subagent tool does not read ExtensionContext.
+        const context = {} as ExtensionContext;
+        await registered.execute(
+          "tool-1",
+          { task: "Inspect the current failure." },
+          undefined,
+          undefined,
+          context,
+        );
+        // A real Pi session turns a rejected tool call into model-visible tool
+        // output. Keep the mocked parent alive to prove the Attempt still
+        // terminates from the independent budget signal.
+        await registered
+          .execute(
+            "tool-2",
+            { task: "Inspect the current failure again." },
+            undefined,
+            undefined,
+            context,
+          )
+          .catch(() => undefined);
+        return new Promise<void>(() => undefined);
+      },
+      steer: () => Promise.resolve(),
+      subscribe: () => () => undefined,
+    };
+    const sdk = Layer.succeed(PiSdk)({
+      start: (found) => {
+        options = found;
+        return Promise.resolve({
+          _tag: "Started",
+          model: parentModel,
+          pool: "apiKeys",
+          session,
+        });
+      },
+    });
+    const child = Layer.succeed(ChildBackend)({
+      launch: (childRequest) => {
+        childLaunches += 1;
+        return Effect.succeed({
+          session: childRequest.session,
+          events: Stream.empty,
+          result: Effect.succeed(new SessionResult({ message: "child done" })),
+          steer: () => Effect.void,
+          interrupt: Effect.void,
+        });
+      },
+    });
+    const limitedRequest = new LaunchRequest({
+      ...request,
+      spec: new AttemptChannel.RunSpec({
+        ...request.spec,
+        maxChildren: Agent.ChildSessionBudget.make(1),
+      }),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const running = yield* runtime.launch(limitedRequest);
+        const error = yield* running.result.pipe(Effect.flip);
+        assert(error instanceof ChildSessionBudgetExceededError);
+        assert.strictEqual(error.maxChildren, 1);
+        assert.strictEqual(error.attemptedChildren, 2);
+        assert.strictEqual(childLaunches, 1);
+      }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(child)),
     );
   });
 

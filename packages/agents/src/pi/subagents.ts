@@ -11,6 +11,7 @@ import {
   type AgentSessionError,
   type ChildBackend,
   ChildRequest,
+  ChildSessionBudgetExceededError,
   type WorkingDirectory,
 } from "../runtime.ts";
 
@@ -19,6 +20,8 @@ export interface SubagentsExtensionOptions {
   readonly backend: ChildBackend["Service"];
   readonly cwd: WorkingDirectory;
   readonly emit: (event: Agent.SessionEvent) => Effect.Effect<void>;
+  readonly maxChildren: Agent.ChildSessionBudget;
+  readonly onBudgetExceeded: (error: ChildSessionBudgetExceededError) => Effect.Effect<void>;
   readonly parentId: Agent.SessionId;
   /**
    * Executes one child program on the parent launch's own services and scope.
@@ -28,6 +31,11 @@ export interface SubagentsExtensionOptions {
    */
   readonly run: <A>(program: Effect.Effect<A, AgentSessionError>) => Promise<A>;
 }
+
+const TASK_EXCERPT_CHARACTERS = 160;
+
+const taskExcerpt = (task: string): string =>
+  task.replace(/\s+/gu, " ").trim().slice(0, TASK_EXCERPT_CHARACTERS);
 
 const interrupted = (
   signal: AbortSignal | undefined,
@@ -65,29 +73,51 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
         executionMode: "parallel",
         execute: (_toolCallId, params, signal, onUpdate) => {
           childNumber += 1;
-          const session = new Agent.ChildSession({
-            id: Agent.SessionId.make(`${options.parentId}:child:${childNumber}`),
-            parentId: options.parentId,
-            agent: options.agent.name,
-            brain: options.agent.brain,
-          });
-          const request = new ChildRequest({
-            session,
-            cwd: options.cwd,
-            prompt: assembleChildPrompt({
-              agent: options.agent.name,
-              persona: options.agent.persona,
-              task: params.task,
-            }),
-          });
+          const attemptedChildren = Agent.ChildSessionCount.make(childNumber);
+          const excerpt = taskExcerpt(params.task);
+          const reportsBudget = attemptedChildren === options.maxChildren + 1;
           const program = Effect.scoped(
             Effect.gen(function* () {
+              if (attemptedChildren > options.maxChildren) {
+                const error = new ChildSessionBudgetExceededError({
+                  attemptedChildren,
+                  maxChildren: options.maxChildren,
+                  message: `Attempt tried to spawn child ${attemptedChildren} after reaching its ${options.maxChildren}-child budget`,
+                });
+                yield* Effect.logWarning("Child session budget exceeded", {
+                  attemptedChildren,
+                  maxChildren: options.maxChildren,
+                  parentSessionId: options.parentId,
+                  taskExcerpt: excerpt,
+                });
+                if (reportsBudget) yield* options.onBudgetExceeded(error);
+                return yield* error;
+              }
+              const session = new Agent.ChildSession({
+                id: Agent.SessionId.make(`${options.parentId}:child:${attemptedChildren}`),
+                parentId: options.parentId,
+                agent: options.agent.name,
+                brain: options.agent.brain,
+              });
+              const request = new ChildRequest({
+                session,
+                cwd: options.cwd,
+                prompt: assembleChildPrompt({
+                  agent: options.agent.name,
+                  persona: options.agent.persona,
+                  task: params.task,
+                }),
+              });
               yield* Effect.annotateCurrentSpan({
                 agent: request.session.agent,
                 parentSessionId: request.session.parentId,
                 sessionId: request.session.id,
               });
-              yield* Effect.logInfo("Delegating task to child session");
+              yield* Effect.logInfo("Spawning child session", {
+                childrenSpawned: attemptedChildren,
+                maxChildren: options.maxChildren,
+                taskExcerpt: excerpt,
+              });
               const child = yield* options.backend.launch(request);
               const forward = yield* child.events.pipe(
                 Stream.runForEach(options.emit),
@@ -106,14 +136,14 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
               });
               onUpdate?.({
                 content: [{ type: "text", text: result.message }],
-                details: { childSessionId: session.id },
+                details: { childSessionId: request.session.id },
               });
               return {
                 content: [{ type: "text" as const, text: result.message }],
-                details: { childSessionId: session.id },
+                details: { childSessionId: request.session.id },
               };
             }),
-          );
+          ).pipe(Effect.withSpan("Subagents.spawn"));
           return options.run(program);
         },
       }),

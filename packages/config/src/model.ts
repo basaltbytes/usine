@@ -165,7 +165,8 @@ export class Worker extends Schema.Class<Worker>("@usine/config/Worker")({
 
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
   pollInterval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
-  maxChildren: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
+  /** Total child sessions one Attempt may spawn; this is not a concurrency limit. */
+  maxChildren: CoreAgent.ChildSessionBudget.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
   maxAttemptMinutes: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
   maxAttemptTokens: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(10_000_000))),
   parentModel: Schema.OptionFromOptionalKey(ModelId),

@@ -4,6 +4,7 @@ import { Option, Schema } from "effect";
 import {
   AgentResultError,
   ChildRequest,
+  ChildSessionBudgetExceededError,
   PoolUnavailableError,
   SessionOperationError,
   toAttemptFailure,
@@ -75,6 +76,19 @@ describe("agent runtime contract", () => {
     ];
     for (const error of terminal) {
       assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
+    }
+
+    const budget = toAttemptFailure(
+      new ChildSessionBudgetExceededError({
+        maxChildren: Agent.ChildSessionBudget.make(4),
+        attemptedChildren: Agent.ChildSessionCount.make(5),
+        message: "Attempt tried to spawn child 5 after reaching its 4-child budget",
+      }),
+    );
+    assert.strictEqual(budget._tag, "ChildSessionBudgetFailure");
+    if (budget._tag === "ChildSessionBudgetFailure") {
+      assert.strictEqual(budget.maxChildren, 4);
+      assert.strictEqual(budget.attemptedChildren, 5);
     }
   });
 });

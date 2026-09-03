@@ -171,6 +171,7 @@ export const stepExecutorLayer = (
                 task: execution.task,
                 agent: execution.agent,
                 parentModel: execution.parentModel,
+                maxChildren: config.settings.maxChildren,
               }),
             )
             .pipe(Effect.mapError(asInfrastructureFailure));

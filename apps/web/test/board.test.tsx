@@ -6,14 +6,17 @@ import {
   BoardItemView,
   BoardLaneId,
   BoardView,
+  ChildSessionBudgetFailureView,
   FailedAttemptView,
   ProjectView,
   ReadOnlyBoardLaneView,
+  RunFailureNeed,
   RunView,
   SucceededAttemptView,
 } from "@usine/orchestrator";
 import { assert, describe, it } from "vitest";
 import { applyMove, itemFailure, laneUnder, orderLanes, runsWithoutCard } from "../src/board.tsx";
+import { failureMessage, needCopy } from "../src/operator-copy.ts";
 
 const brain = new Agent.BrainSpec({
   harness: "codex",
@@ -81,6 +84,34 @@ describe("Board Run failure copy", () => {
         itemWithRun("Failed", [attempt(1, "old failure"), attempt(2, "current failure")]),
       ),
       "current failure",
+    );
+  });
+
+  it("explains an exhausted child-session budget in the drawer and Needs you", () => {
+    const failure = new ChildSessionBudgetFailureView({
+      maxChildren: Agent.ChildSessionBudget.make(4),
+      attemptedChildren: Agent.ChildSessionCount.make(5),
+    });
+    const message = "This Attempt used its 4-child session budget; child 5 did not start";
+    const repository = Repository.Name.make("basaltbytes/usine");
+    const runId = Run.RunId.make("run-33");
+    assert.strictEqual(failureMessage(failure), message);
+    assert.deepStrictEqual(
+      needCopy(
+        new RunFailureNeed({
+          id: "run-failure:run-33",
+          repository,
+          runId,
+          loop: Loop.LoopName.make("review"),
+          failure,
+        }),
+      ),
+      {
+        title: "ChildSessionBudgetFailure",
+        detail: message,
+        repository,
+        runId,
+      },
     );
   });
 });
