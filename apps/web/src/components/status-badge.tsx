@@ -10,6 +10,7 @@ const tone = (state: string): string => {
       return "text-run-succeeded";
     case "Running":
     case "Pending":
+    case "Queued":
     case "active":
       return "text-run-active";
     case "Waiting":

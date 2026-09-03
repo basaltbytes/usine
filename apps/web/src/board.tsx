@@ -181,6 +181,9 @@ const CardBody = ({
           {visibleRuns.some(({ state }) => state === "Waiting") && (
             <p className="text-needs-you">A run on this item is waiting for approval.</p>
           )}
+          {runsToShow.some(({ state }) => state === "Queued") && (
+            <p className="text-muted-foreground">Approved. Waiting for a free worker slot.</p>
+          )}
         </CardContent>
       )}
     </>

@@ -173,6 +173,11 @@ export const RunDrawer = ({
                   </Badge>
                 ))}
               </div>
+              {run.state === "Queued" && (
+                <p className="border-b px-6 py-3 text-muted-foreground">
+                  Approved. Waiting for a free worker slot.
+                </p>
+              )}
               {(run.canApprove || run.canRetry || run.canCancel) && (
                 <div className="flex flex-wrap items-center gap-2 border-b px-6 py-3">
                   {run.canApprove && (

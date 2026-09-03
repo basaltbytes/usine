@@ -146,7 +146,8 @@ const makeRunStore = Effect.gen(function* () {
         }
         if (
           blockedSnapshot.run.state._tag === "Pending" ||
-          blockedSnapshot.run.state._tag === "Waiting"
+          blockedSnapshot.run.state._tag === "Waiting" ||
+          blockedSnapshot.run.state._tag === "Queued"
         ) {
           yield* tx.updateState(
             blockedSnapshot.run.id,
@@ -205,7 +206,7 @@ const makeRunStore = Effect.gen(function* () {
           }
         }
 
-        if (runState._tag === "Pending" || runState._tag === "Waiting") {
+        if (runState._tag === "Pending" || runState._tag === "Queued") {
           runState = RunState.start(runState);
           yield* tx.updateState(runId, runState);
         }
@@ -311,6 +312,7 @@ const makeRunStore = Effect.gen(function* () {
           });
         }
         yield* tx.recordApproval(runId, approval);
+        yield* tx.updateState(runId, RunState.approve(current.run.state));
         yield* tx.requestWorkflowCommand(runId, "Approve");
       }),
     );
@@ -377,7 +379,11 @@ const makeRunStore = Effect.gen(function* () {
         const storedRuns = yield* tx.revokeUnstarted(loop, itemKey);
         for (const row of storedRuns) {
           const current = yield* tx.snapshot(row.runId);
-          if (current.run.state._tag === "Pending" || current.run.state._tag === "Waiting") {
+          if (
+            current.run.state._tag === "Pending" ||
+            current.run.state._tag === "Waiting" ||
+            current.run.state._tag === "Queued"
+          ) {
             yield* tx.updateState(row.runId, RunState.revoke(current.run.state));
             yield* tx.requestInterrupt(row.runId);
           }
@@ -409,6 +415,18 @@ const makeRunStore = Effect.gen(function* () {
       }),
     );
   }, persistence("claim queued Event"));
+
+  const repairApprovedWaiting = Effect.fn("RunStore.repairApprovedWaiting")(function* () {
+    const repaired: Array<Run.RunId> = [];
+    for (const { runId } of yield* queries.approvedWaiting()) {
+      const current = yield* queries.snapshot(runId);
+      if (current.run.state._tag !== "Waiting") continue;
+      yield* queries.updateState(runId, RunState.approve(current.run.state));
+      yield* Effect.logInfo("Approved Run stored as Waiting moved to Queued", { runId });
+      repaired.push(runId);
+    }
+    return repaired;
+  }, persistence("repair approved runs"));
 
   const recoverable = Effect.fn("RunStore.recoverable")(function* () {
     return (yield* queries.recoverable()).map(
@@ -489,6 +507,7 @@ const makeRunStore = Effect.gen(function* () {
     recordAndClaim,
     reconcileCompletion,
     recoverable: recoverable(),
+    repairApprovedWaiting: repairApprovedWaiting(),
     retry,
     revoke,
     snapshot: (runId: Run.RunId) => queries.snapshot(runId).pipe(persistence("read run")),
@@ -548,6 +567,8 @@ export class RunStore extends Context.Service<
       result: Workflow.Result<StepResult.StepResult, AttemptFailure.AttemptFailure>,
     ) => Effect.Effect<void, RunStoreError>;
     readonly recoverable: Effect.Effect<ReadonlyArray<RecoverableRun>, RunStoreError>;
+    /** Runs approved before Queued existed are stored as Waiting; move them on. */
+    readonly repairApprovedWaiting: Effect.Effect<ReadonlyArray<Run.RunId>, RunStoreError>;
     readonly retry: (runId: Run.RunId) => Effect.Effect<void, RunStoreError>;
     readonly revoke: (
       loop: Loop.LoopName,
