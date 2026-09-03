@@ -4,7 +4,7 @@ import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 
 if (process.argv.includes("--protocol-version")) {
-  process.stdout.write("3\n");
+  process.stdout.write("4\n");
 } else {
   const cacheDirectory = process.env.TURBO_CACHE_DIR;
   if (cacheDirectory === undefined) {
