@@ -2,14 +2,18 @@ name: Release
 
 # Publishes to npm via OIDC trusted publishing — no NPM_TOKEN secret anywhere
 # (same model as basaltbytes/balade). npmjs.com must list this exact workflow
-# (basaltbytes/usine, release.yml) as each package's trusted publisher;
-# scripts/npm-publish-setup.sh registers that. The registry then accepts the
-# runner's OIDC identity. Provenance attestations are generated automatically
-# once the repository is public; npm skips them while it is private.
+# (basaltbytes/usine, release.yml) as each package's trusted publisher, set by
+# hand in each package's settings on npmjs.com (Trusted publisher: GitHub
+# Actions, organization basaltbytes, repository usine, workflow release.yml).
+# The registry then accepts the runner's OIDC identity. Provenance
+# attestations are generated automatically once the repository is public; npm
+# skips them while it is private.
+#
+# Manual until @usine/server has a trusted publisher (#85): every push to main
+# failed at the publish step, so the workflow runs only when dispatched.
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 concurrency: release-${{ github.ref }}
 
