@@ -26,7 +26,7 @@ export type LocalSecretsError = typeof LocalSecretsError.Type;
 
 const AppIdFromString = Schema.FiniteFromString.pipe(Schema.decodeTo(AppId));
 
-/** Each variable is optional on its own; a present but invalid one is an error, never a fallback. */
+/** Each variable may be absent on its own. A present but invalid one is an error, not a fallback to the file. */
 const environment = Config.all({
   appId: Config.option(Config.schema(AppIdFromString, "USINE_GITHUB_APP_ID")),
   privateKey: Config.option(Config.schema(RedactedPrivateKey, "USINE_GITHUB_PRIVATE_KEY")),
@@ -63,8 +63,8 @@ const readSecretsFile = Effect.fn("GitHubCredentials.readSecretsFile")(function*
 });
 
 /**
- * Load the orchestrator's App credentials. Each environment variable wins
- * over its file field; when both are present the file is not touched.
+ * Loads the orchestrator's App credentials. An environment variable wins over
+ * its file field, and the file is not read when both variables are set.
  */
 export const loadLocalCredentials = Effect.fn("GitHubCredentials.loadLocal")(function* (
   root: InstanceDirectory,

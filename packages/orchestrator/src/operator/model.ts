@@ -26,7 +26,7 @@ export type RunStateTag = typeof RunStateTag.Type;
 
 const NullableString = Schema.NullOr(Schema.String);
 
-/** Operator-safe failure variants. Infrastructure defect causes never cross this boundary. */
+/** An infra failure as the operator sees it; the defect cause stays behind this boundary. */
 export class InfraFailureView extends Schema.TaggedClass<InfraFailureView>(
   "@usine/orchestrator/InfraFailureView",
 )("InfraFailure", { message: Schema.String }) {}
@@ -115,7 +115,7 @@ export class BoardItemView extends Schema.Class<BoardItemView>("@usine/orchestra
     url: Schema.NonEmptyString,
     state: LaneItemState,
     labels: Schema.Array(GitHubLabelName),
-    /** All runs retained for a card, including every action the operator can take. */
+    /** Every retained Run for this card, each with the actions the operator can take on it. */
     runs: Schema.Array(RunView),
     run: Schema.NullOr(RunView),
     needsYou: Schema.Boolean,
@@ -157,7 +157,7 @@ export class BoardView extends Schema.Class<BoardView>("@usine/orchestrator/Boar
   failures: Schema.Array(BoardProjectionError),
 }) {}
 
-/** A repository label as GitHub shows it; color is null for catalogs stored before colors were kept. */
+/** A repository label as GitHub shows it. Color is null for catalogs stored before colors were kept. */
 export class LabelView extends Schema.Class<LabelView>("@usine/orchestrator/LabelView")({
   name: GitHubLabelName,
   color: Schema.NullOr(Schema.String),
@@ -169,9 +169,9 @@ export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/
   status: ProjectStatus,
   runs: Schema.Array(RunView),
   board: BoardView,
-  /** The repository's label catalog, for coloring badges on cards and lanes. */
+  /** The repository's label catalog, used to color badges on cards and lanes. */
   labels: Schema.Array(LabelView),
-  /** Non-blocking failures while provisioning this Project's declared labels. */
+  /** Failures from provisioning this Project's declared labels; they do not block the Board. */
   preflightFindings: Schema.Array(LabelPreflightFinding),
 }) {}
 
@@ -297,7 +297,7 @@ export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
   payload: TranscriptPayload,
 }) {}
 
-/** Cursor for loading one earlier page without mixing Attempts across Runs. */
+/** Where the next earlier transcript page starts, scoped to one Attempt. */
 export class TranscriptPageCursor extends Schema.Class<TranscriptPageCursor>(
   "@usine/orchestrator/TranscriptPageCursor",
 )({

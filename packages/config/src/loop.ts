@@ -36,5 +36,5 @@ export class QuarantinedLoop extends Schema.Class<QuarantinedLoop>("@usine/confi
   },
 ) {}
 
-/** The instance-relative path a loop's filename identity maps back to. */
+/** The file a loop name refers to. */
 export const loopPath = (name: LoopName): InstancePath => InstancePath.make(`loops/${name}.md`);

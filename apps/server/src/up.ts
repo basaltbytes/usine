@@ -121,9 +121,8 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       const context = yield* Layer.build(runtime);
       const operator = Context.get(context, Operator);
       const orchestrator = Context.get(context, Orchestrator);
-      // Racing instead of forking: a defect in either the trigger streams or the
-      // HTTP server takes the whole process down loudly, never leaving a green
-      // "live" UI over a dead factory.
+      // Race rather than fork: a defect in the trigger streams or the HTTP server
+      // must take the whole process down instead of leaving a live UI over a dead factory.
       return yield* Effect.raceFirst(
         serve({
           backend: liveBackendLayer(instance, operator),

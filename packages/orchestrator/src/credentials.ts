@@ -5,10 +5,10 @@ import { GitHubApp, CoveredProject } from "@usine/github/github-app";
 import { Effect, Layer, Option, SynchronizedRef } from "effect";
 
 /**
- * Mints one fresh, single-repository GitHub App token per Attempt. Project
- * access is discovered lazily on the first mint and cached — a GitHub outage
- * cannot block orchestrator startup, and a repository added to the
- * installation later is picked up by the next refresh after a miss.
+ * Mints one fresh single-repository GitHub App token per Attempt. Project
+ * access is discovered on the first mint and cached, so a GitHub outage cannot
+ * block startup, and a repository added to the installation later is found by
+ * the refresh that follows a miss.
  */
 export const gitHubCredentialLayer = (
   config: UsineConfig,
@@ -41,7 +41,7 @@ export const gitHubCredentialLayer = (
           ),
         );
 
-      /** Cached map; on a miss, refresh once before concluding "not covered". */
+      /** Refreshes the cached project map once on a miss before answering "not covered". */
       const projectFor = Effect.fn("GitHubCredentialProvider.projectFor")(function* (
         repository: RepositoryName,
       ) {

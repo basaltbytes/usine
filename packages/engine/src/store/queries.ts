@@ -102,18 +102,17 @@ const attemptSelection = {
   outcome: attempts.outcomeJson,
 } as const;
 
-// The state partitions stay owned by @usine/core (`RunState.Open` and the
-// supersede/revoke precondition); these predicates only borrow their tags.
+// The state partitions are owned by @usine/core; these predicates only borrow their tags.
 const storedStateTag = sql`json_extract(${runs.stateJson}, '$._tag')`;
 const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
-// The Json round-trip is the portable named type for `queriesFor`'s inferred
-// signature — without it tsc cannot emit the declaration (TS2883).
+// The Json round-trip gives `queriesFor` a portable named type; without it tsc
+// cannot emit the declaration (TS2883).
 const storedAgent = (agent: Agent): Schema.Json =>
   Schema.decodeUnknownSync(Schema.Json)(encodeAgent(agent));
 
 export const queriesFor = (database: RunDatabaseClient) => {
-  // Keep `.execute()` explicit: RC.4's yieldable wrapper can cross an Effect
+  // Keep `.execute()` explicit: the yieldable wrapper can cross an Effect
   // Workflow suspension before its final mutation is observable (ADR 0020).
   const eventRouteByDedup = Effect.fn("RunStoreQueries.eventRouteByDedup")(function* (
     dedupKey: DedupKey,
@@ -184,9 +183,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
     });
   });
 
-  // Every open Run plus the newest `closedLimit` settled ones: an old Waiting
-  // run can never fall out of the operator's view, while total history stays
-  // bounded no matter how long the factory has been running.
+  // Every open Run plus the newest `closedLimit` settled ones, so an old
+  // Waiting run never falls out of the operator's view while history stays bounded.
   const runSummaries = Effect.fn("RunStoreQueries.runSummaries")(function* (closedLimit: number) {
     const [openRuns, closedRuns] = yield* Effect.all([
       database
@@ -581,7 +579,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       TranscriptPageQuery: ({ limit }) =>
         selection.orderBy(desc(attemptTranscripts.sequence)).limit(limit).execute(),
     });
-    // Transcript rows are usine-owned: an unknown key is corruption, not tolerance.
+    // Transcript rows are usine-owned, so an unknown key is corruption.
     return (yield* decodeTranscriptRows(rows, { onExcessProperty: "error" }))
       .map(transcriptEntryFromRow)
       .sort((left, right) => left.sequence - right.sequence);
@@ -609,8 +607,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
         .from(workflowCommands)
         .execute();
       const decoded = yield* decodeWorkflowCommands(rows);
-      // Delivery order per run is a replay invariant, not a sort convenience —
-      // WORKFLOW_COMMAND_PRIORITY names it.
+      // Delivery order per run is a replay invariant; WORKFLOW_COMMAND_PRIORITY names it.
       const priority = (command: WorkflowCommand) => WORKFLOW_COMMAND_PRIORITY.indexOf(command);
       return [...decoded].sort((left, right) =>
         left.runId === right.runId

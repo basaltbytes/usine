@@ -17,29 +17,28 @@ import {
 } from "@usine/core/attempt/failure";
 import { Context, Effect, Match, Schema, Scope, Stream } from "effect";
 
-/** Value object: process-local working directory for one isolated Attempt. */
+/** The checkout directory one Attempt runs in. */
 export const WorkingDirectory = Schema.NonEmptyString.pipe(Schema.brand("AgentWorkingDirectory"));
 export type WorkingDirectory = typeof WorkingDirectory.Type;
 
-/** Complete input required to start the Pi parent inside one Attempt checkout. */
 export class LaunchRequest extends Schema.Class<LaunchRequest>("@usine/agents/LaunchRequest")({
   spec: AttemptChannel.RunSpec,
   cwd: WorkingDirectory,
 }) {}
 
-/** Complete input for exactly one first-level child session. */
+/** Starts one first-level child session; a child cannot request children of its own. */
 export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/ChildRequest")({
   session: ChildSession,
   cwd: WorkingDirectory,
   prompt: Schema.NonEmptyString,
 }) {}
 
-/** Terminal semantic output from a parent or child SDK session. */
+/** The final message a parent or child session returns. */
 export class SessionResult extends Schema.Class<SessionResult>("@usine/agents/SessionResult")({
   message: Schema.NonEmptyString,
 }) {}
 
-/** The configured vendor model id is well-formed but absent from the selected SDK registry. */
+/** The rostered model id is well-formed but the SDK's registry does not list it. */
 export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
   "@usine/agents/UnknownModelError",
 )("UnknownModelError", {
@@ -48,7 +47,7 @@ export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** The selected credential cannot draw from the billing pool required by this session. */
+/** The credential cannot spend from the billing pool this session needs. */
 export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableError>(
   "@usine/agents/PoolUnavailableError",
 )("PoolUnavailableError", {
@@ -58,7 +57,7 @@ export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableErro
   message: Schema.NonEmptyString,
 }) {}
 
-/** The selected model exists but does not support the rostered reasoning effort. */
+/** The model exists but does not support the rostered reasoning effort. */
 export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffortError>(
   "@usine/agents/UnsupportedEffortError",
 )("UnsupportedEffortError", {
@@ -68,7 +67,7 @@ export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffort
   message: Schema.NonEmptyString,
 }) {}
 
-/** The session ran to a terminal state and reported that the work itself failed. */
+/** The session finished and reported that the work itself failed. */
 export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   "@usine/agents/AgentResultError",
 )("AgentResultError", {
@@ -76,7 +75,7 @@ export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** The Pi parent tried to spawn a child after consuming this Attempt's child-session budget. */
+/** The Pi parent asked for one more child than this Attempt's budget allows. */
 export class ChildSessionBudgetExceededError extends Schema.TaggedError<ChildSessionBudgetExceededError>(
   "@usine/agents/ChildSessionBudgetExceededError",
 )("ChildSessionBudgetExceededError", {
@@ -89,7 +88,7 @@ export const SESSION_OPERATIONS = ["launch", "stream", "steer", "interrupt"] as 
 export const SessionOperation = Schema.Literals(SESSION_OPERATIONS);
 export type SessionOperation = typeof SessionOperation.Type;
 
-/** SDK/process failure after model and harness validation. */
+/** The SDK or its process failed after the model and harness were validated. */
 export class SessionOperationError extends Schema.TaggedError<SessionOperationError>(
   "@usine/agents/SessionOperationError",
 )("SessionOperationError", {
@@ -110,9 +109,9 @@ export const AgentSessionError = Schema.Union([
 export type AgentSessionError = typeof AgentSessionError.Type;
 
 /**
- * The one place the session error union meets the ADR 0002 retry taxonomy:
- * SDK/process trouble is retryable infrastructure; a bad roster spec or the
- * agent failing its own work always waits for the operator.
+ * Maps session errors onto the retry taxonomy: an SDK or process failure is
+ * retryable infrastructure, while a bad roster spec or the agent failing its
+ * own work waits for the operator (ADR 0002).
  */
 export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
   Match.valueTags(error, {
@@ -126,7 +125,7 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
       new ChildSessionBudgetFailure({ attemptedChildren, maxChildren }),
   });
 
-/** Live SDK session. Its event stream and controls are backend-independent. */
+/** A running session: the same event stream and controls whichever backend runs it. */
 export interface RunningSession {
   readonly session: AgentSession;
   readonly events: Stream.Stream<AgentSessionEvent, AgentSessionError>;
@@ -141,27 +140,27 @@ export interface ChildBackendService {
   ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;
 }
 
-/** Stable first-level child seam selected by the authored BrainSpec harness. */
+/** Starts first-level child sessions; the dispatcher picks the implementation from the BrainSpec harness. */
 export class ChildBackend extends Context.Service<ChildBackend, ChildBackendService>()(
   "@usine/agents/ChildBackend",
 ) {}
 
-/** Concrete Claude child implementation consumed by the harness dispatcher. */
+/** Claude child sessions; reached through the dispatcher, not directly. */
 export class ClaudeChildBackend extends Context.Service<ClaudeChildBackend, ChildBackendService>()(
   "@usine/agents/ClaudeChildBackend",
 ) {}
 
-/** Concrete Codex child implementation consumed by the harness dispatcher. */
+/** Codex child sessions; reached through the dispatcher, not directly. */
 export class CodexChildBackend extends Context.Service<CodexChildBackend, ChildBackendService>()(
   "@usine/agents/CodexChildBackend",
 ) {}
 
-/** Concrete Pi child implementation consumed by the harness dispatcher. */
+/** Pi child sessions; reached through the dispatcher, not directly. */
 export class PiChildBackend extends Context.Service<PiChildBackend, ChildBackendService>()(
   "@usine/agents/PiChildBackend",
 ) {}
 
-/** Stable parent seam consumed by the run host. */
+/** Launches the parent session for one Attempt; the run host calls it. */
 export class AgentRuntime extends Context.Service<
   AgentRuntime,
   {

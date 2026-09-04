@@ -177,7 +177,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
     });
   }, logPreflightFailure);
 
-  // Both resolveVm failures sit inside the ExecutorError union prepare
+  // Both resolveVm failures are members of the ExecutorError union prepare
   // reports, so a stopped VM keeps its typed capability shape.
   const vmFor = Effect.fn("ExeDevExecutor.vmFor")(function* (worker: WorkerName) {
     const cached = (yield* Ref.get(workers)).get(worker);

@@ -20,7 +20,6 @@ export const PrivateKey = Schema.NonEmptyString.check(
 ).pipe(Schema.brand("GitHubAppPrivateKey"));
 export type PrivateKey = typeof PrivateKey.Type;
 
-/** A PEM string parsed straight into a `Redacted` that can never be encoded back out. */
 export const RedactedPrivateKey = Schema.RedactedFromValue(PrivateKey, { disallowEncode: true });
 
 export const GitHubOperation = Schema.Literals([
@@ -38,13 +37,13 @@ export const GitHubOperation = Schema.Literals([
 ]);
 export type GitHubOperation = typeof GitHubOperation.Type;
 
-/** Credentials held by the orchestrator and never passed to a worker. */
+/** The App credentials the orchestrator keeps and never passes to a worker. */
 export class AppCredentials extends Schema.Class<AppCredentials>("@usine/github/AppCredentials")({
   appId: AppId,
   privateKey: RedactedPrivateKey,
 }) {}
 
-/** Service boundary that keeps credential sourcing separate from App use. */
+/** Supplies `AppCredentials`, so where credentials come from stays separate from how the App uses them. */
 export class GitHubCredentials extends Context.Service<GitHubCredentials, AppCredentials>()(
   "@usine/github/GitHubCredentials",
 ) {}
@@ -62,7 +61,7 @@ export type RequiredRepositoryPermission = keyof typeof REQUIRED_REPOSITORY_PERM
 const grants = (actual: string | undefined, required: "read" | "write"): boolean =>
   actual === required || (required === "read" && actual === "write");
 
-/** Pure deriver: the required permissions an installation's grant does not satisfy. */
+/** The required repository permissions an installation grant does not satisfy, as `name:level` strings. */
 export const missingPermissions = (
   granted: Readonly<Record<string, string>>,
 ): ReadonlyArray<string> =>
@@ -105,7 +104,7 @@ export class CoveredProject extends Schema.TaggedClass<CoveredProject>(
   repositoryId: RepositoryId,
 }) {}
 
-/** Typed, project-local registry drift. It never fails covered siblings. */
+/** A registry repository the installation does not cover. Raised per project, so covered siblings still load. */
 export class ProjectNotInstalledError extends Schema.TaggedError<ProjectNotInstalledError>(
   "@usine/github/ProjectNotInstalledError",
 )("ProjectNotInstalledError", {
@@ -121,7 +120,7 @@ export interface InstalledRepository {
   readonly name: RepositoryName;
 }
 
-/** Pure registry⊆installation derivation: one result, and one error, per project. */
+/** Checks each registry repository against the installation's repositories and returns one `ProjectAccess` per project. */
 export const deriveProjectAccess = (
   installation: Installation,
   registry: ReadonlyArray<RepositoryName>,
@@ -143,7 +142,7 @@ export const deriveProjectAccess = (
   });
 };
 
-/** The private key cannot sign: raised once, when the App layer is built. */
+/** The App private key cannot sign. Raised once, when the App layer is built. */
 export class AppAuthenticationError extends Schema.TaggedError<AppAuthenticationError>(
   "@usine/github/AppAuthenticationError",
 )("AppAuthenticationError", {
@@ -188,11 +187,10 @@ export class InvalidGitHubResponseError extends Schema.TaggedError<InvalidGitHub
 )("InvalidGitHubResponseError", {
   operation: GitHubOperation,
   message: Schema.NonEmptyString,
-  /** What made the response invalid — decode path, missing field, GraphQL errors. */
+  /** What made the response invalid: the decode path, the missing field, or the GraphQL errors. */
   detail: Schema.NonEmptyString,
 }) {}
 
-/** Everything one GitHub App call can fail with. */
 export const GitHubAppError = Schema.Union([
   InstallationDiscoveryError,
   AppPermissionError,

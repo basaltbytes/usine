@@ -13,7 +13,7 @@ const makeOrchestrator = Effect.gen(function* () {
   return { run } as const;
 });
 
-/** The embeddable full runtime: polling, schedules, engine-facing operator acts. */
+/** The embeddable runtime: polling, schedules, and the operator acts that reach the engine. */
 export class Orchestrator extends Context.Service<
   Orchestrator,
   {

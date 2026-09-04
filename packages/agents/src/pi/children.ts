@@ -24,5 +24,5 @@ const makeChildDispatcher = Effect.gen(function* () {
   });
 });
 
-/** Selects one concrete child backend from the authored BrainSpec harness. */
+/** Routes each child request to the backend named by its BrainSpec harness. */
 export const childDispatcherLayer = Layer.effect(ChildBackend, makeChildDispatcher);

@@ -13,8 +13,8 @@ import { Submission, type SubmissionResult } from "@usine/engine/engine";
 import { type DateTime, Effect, Match, Option, Result, Schema } from "effect";
 
 /**
- * The worker fetch target until per-loop revisions exist: `git fetch origin
- * HEAD` resolves the remote's current default branch at prepare time.
+ * What a worker fetches until loops can name a revision: `HEAD` resolves the
+ * remote's default branch at prepare time.
  */
 const DEFAULT_BRANCH_REVISION = RepositoryRevision.make("HEAD");
 
@@ -24,7 +24,7 @@ export interface ResolvedLoop {
   readonly parentModel: Option.Option<ModelId>;
 }
 
-/** A loaded loop lost the roster member its authored agent name refers to. */
+/** The agent a loaded loop names is no longer in the roster. */
 export class LoopAgentResolutionError extends Schema.TaggedError<LoopAgentResolutionError>(
   "@usine/orchestrator/LoopAgentResolutionError",
 )("LoopAgentResolutionError", {
@@ -33,7 +33,7 @@ export class LoopAgentResolutionError extends Schema.TaggedError<LoopAgentResolu
   message: Schema.NonEmptyString,
 }) {}
 
-/** Snapshot one authored loop's roster member and effective parent model. */
+/** Resolves one loop's roster agent and effective parent model. */
 export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(function* (
   instance: LoadedInstance,
   loop: LoopFile,
@@ -67,10 +67,10 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
 });
 
 /**
- * Snapshot the validated instance roster. `InstanceFolder.load` quarantines
- * loops naming unknown Agents, so a miss here is config drift on a
- * hand-assembled instance: the loop is skipped with a log every cycle while
- * its siblings keep polling — the same isolation the schedule path applies.
+ * Resolves every loaded loop's agent. `InstanceFolder.load` already quarantines
+ * loops that name unknown agents, so a miss here means a hand-assembled
+ * instance drifted: the loop is skipped with a log each cycle and its siblings
+ * keep running.
  */
 export const resolveTriggerLoops = Effect.fn("TriggerRouting.resolveLoops")(function* (
   instance: LoadedInstance,
@@ -104,7 +104,7 @@ interface TriggerSubmissionOptions {
   readonly parentModel: Option.Option<ModelId>;
 }
 
-/** The one routing contract shared by every trigger stream. */
+/** Builds the Submission every trigger stream hands to the engine. */
 export const triggerSubmission = (options: TriggerSubmissionOptions): Submission =>
   new Submission({
     event: new Event({
@@ -124,11 +124,7 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     parentModel: options.parentModel,
   });
 
-/**
- * What each submission outcome contributes to its log line: the run for a
- * claim, the ignore reason for a superseded or revoked Event — never a
- * sentinel value.
- */
+/** The log fields for a submission outcome: the run id for a claim, the reason for an ignore. */
 export const submissionLogFields = (submission: SubmissionResult): Record<string, string> =>
   Match.valueTags(submission, {
     Claimed: ({ runId }) => ({ runId }),
@@ -136,7 +132,7 @@ export const submissionLogFields = (submission: SubmissionResult): Record<string
     Ignored: ({ reason }) => ({ reason }),
   });
 
-/** Safe structured context for a config-owned trigger failure. */
+/** Log fields for a config failure met while triggering. */
 export const configFileErrorLogFields = (error: ConfigFileError) =>
   Option.match(error.expression, {
     onNone: () => ({ configFile: error.file, configStage: error.stage }),

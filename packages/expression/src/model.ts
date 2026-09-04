@@ -1,12 +1,12 @@
 import { Schema } from "effect";
 
-/** CEL source accepted at the config boundary. */
+/** Non-blank CEL source text. */
 export const Source = Schema.String.check(
   Schema.isPattern(/\S/u, { message: "Expected a non-blank CEL expression" }),
 ).pipe(Schema.brand("ExpressionSource"));
 export type Source = typeof Source.Type;
 
-/** A CEL-spec type reference such as `string`, `Issue`, or `list<Label>`. */
+/** A type name in CEL syntax such as `string`, `Issue`, or `list<Label>`. */
 export const TypeReference = Schema.String.check(
   Schema.isPattern(
     /^(?:[A-Za-z_][A-Za-z0-9_.]*|list<[A-Za-z_][A-Za-z0-9_.]*>|map<[A-Za-z_][A-Za-z0-9_.]*,[A-Za-z_][A-Za-z0-9_.]*>)$/u,
@@ -31,25 +31,23 @@ const uniqueNames = (message: string) =>
     { message },
   );
 
-/** One field in a backend-neutral CEL object-type declaration. */
 export class ObjectField extends Schema.Class<ObjectField>("@usine/expression/ObjectField")({
   name: Identifier,
   type: TypeReference,
 }) {}
 
-/** A CEL object type. Types are registered in declaration order. */
+/** A CEL object type. Declare a type before the types that reference it. */
 export class ObjectType extends Schema.Class<ObjectType>("@usine/expression/ObjectType")({
   name: ObjectTypeName,
   fields: Schema.Array(ObjectField).check(uniqueNames("Expected unique CEL object-field names")),
 }) {}
 
-/** One root variable available to a CEL expression. */
 export class Variable extends Schema.Class<Variable>("@usine/expression/Variable")({
   name: Identifier,
   type: TypeReference,
 }) {}
 
-/** The checked namespace for one expression family, expressed in CEL's type vocabulary. */
+/** The types and root variables an expression is checked and evaluated against. */
 export class Environment extends Schema.Class<Environment>("@usine/expression/Environment")({
   types: Schema.Array(ObjectType).check(uniqueNames("Expected unique CEL object-type names")),
   variables: Schema.Array(Variable).check(uniqueNames("Expected unique CEL variable names")),
@@ -65,7 +63,7 @@ export const CheckErrorCode = Schema.Literals([
 ]);
 export type CheckErrorCode = typeof CheckErrorCode.Type;
 
-/** Typed failure from CEL parsing, type checking, or expected-result checking. */
+/** The expression failed to parse, to type-check, or to produce the expected result type. */
 export class ExpressionCheckError extends Schema.TaggedError<ExpressionCheckError>(
   "@usine/expression/ExpressionCheckError",
 )("ExpressionCheckError", {
@@ -75,7 +73,7 @@ export class ExpressionCheckError extends Schema.TaggedError<ExpressionCheckErro
   position: Schema.Option(Position),
 }) {}
 
-/** Typed failure from evaluating an expression that previously checked. */
+/** Evaluation failed on an expression that had already checked. */
 export class ExpressionEvaluationError extends Schema.TaggedError<ExpressionEvaluationError>(
   "@usine/expression/ExpressionEvaluationError",
 )("ExpressionEvaluationError", {
@@ -83,11 +81,10 @@ export class ExpressionEvaluationError extends Schema.TaggedError<ExpressionEval
   message: Schema.NonEmptyString,
 }) {}
 
-/** Every failure mode this package's service can produce. */
 export const ExpressionError = Schema.Union([ExpressionCheckError, ExpressionEvaluationError]);
 export type ExpressionError = typeof ExpressionError.Type;
 
-/** Values admitted by prompt interpolation. CEL ints deliberately remain bigint here. */
+/** Values prompt interpolation can render. CEL ints stay bigint. */
 export const Scalar = Schema.Union([
   Schema.String,
   Schema.Number,

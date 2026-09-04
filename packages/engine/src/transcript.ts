@@ -3,9 +3,9 @@ import { AttemptId } from "@usine/core/attempt";
 import { Schema } from "effect";
 
 /**
- * Value object: global append order of the persisted transcript — the tail
- * cursor. Distinct from `AttemptChannel.Sequence`, which orders messages
- * within one Attempt's channel direction.
+ * Global append order of the persisted transcript. Distinct from
+ * `AttemptChannel.Sequence`, which orders messages within one Attempt's channel
+ * direction.
  */
 export const TranscriptSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("TranscriptSequence"),
@@ -26,10 +26,10 @@ const LegacyTranscriptEnvelope = Schema.Union([
   }),
 ]);
 
-/** Durable v3 envelopes remain readable; the live Attempt channel stays v4-only. */
+/** Stored v3 envelopes stay readable; the live channel is v4 only. */
 const TranscriptEnvelope = Schema.Union([AttemptChannel.Envelope, LegacyTranscriptEnvelope]);
 
-/** One append-only row in an Attempt transcript. */
+/** One append-only row of an Attempt transcript. */
 export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engine/TranscriptEntry")(
   {
     sequence: TranscriptSequence,
@@ -40,12 +40,12 @@ export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engin
   },
 ) {}
 
-/** Read every row for one Attempt. Intended for execution and diagnostic consumers. */
+/** Every row for one Attempt, for execution and diagnostics. */
 export class TranscriptAllQuery extends Schema.TaggedClass<TranscriptAllQuery>(
   "@usine/engine/TranscriptAllQuery",
 )("TranscriptAllQuery", { attemptId: AttemptId }) {}
 
-/** Read rows appended after a cursor while tailing a live Attempt. */
+/** Rows appended after a cursor, for tailing a live Attempt. */
 export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>(
   "@usine/engine/TranscriptTailQuery",
 )("TranscriptTailQuery", {
@@ -54,7 +54,7 @@ export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>
   limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
-/** Read the newest bounded page before a cursor, or from the current tail. */
+/** The newest bounded page before a cursor, or from the current tail. */
 export class TranscriptPageQuery extends Schema.TaggedClass<TranscriptPageQuery>(
   "@usine/engine/TranscriptPageQuery",
 )("TranscriptPageQuery", {
@@ -63,7 +63,6 @@ export class TranscriptPageQuery extends Schema.TaggedClass<TranscriptPageQuery>
   limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
-/** Illegal combinations of full, tail, and backward-page reads are unrepresentable. */
 export const TranscriptQuery = Schema.Union([
   TranscriptAllQuery,
   TranscriptTailQuery,

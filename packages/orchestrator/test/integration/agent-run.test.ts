@@ -379,8 +379,8 @@ describe("live agent loop", () => {
           () => removeTestComments,
         );
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
-    // The run legitimately spans a poll claim plus a full agent session; the
-    // in-test terminal wait already caps it at ten minutes.
+    // The run spans a poll claim plus a full agent session; the terminal wait
+    // inside the test caps it at ten minutes.
     720_000,
   );
 });

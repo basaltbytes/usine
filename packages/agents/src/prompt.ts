@@ -18,10 +18,9 @@ export interface ChildPromptParts {
   readonly task: string;
 }
 
-/** Human-visible attribution required on GitHub content authored by an Agent. */
+/** The attribution line every GitHub comment or review written by an Agent ends with. */
 export const githubSignature = (agent: AgentName): string => `— usine agent: ${agent}`;
 
-/** Builds the complete parent prompt from immutable run context. */
 export const assemblePrompt = (parts: PromptParts): string =>
   [
     "# Run context",
@@ -47,7 +46,6 @@ export const assemblePrompt = (parts: PromptParts): string =>
     githubSignature(parts.agent),
   ].join("\n");
 
-/** Builds the isolated prompt given to a first-level child session. */
 export const assembleChildPrompt = (parts: ChildPromptParts): string =>
   [
     "# Agent persona",

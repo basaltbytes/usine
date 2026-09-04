@@ -36,7 +36,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     const integrationNames = new Set(options.githubIntegrations.map(({ name }) => name));
     const runHost = options.runHost ?? { command: "usine-run-host", args: [] };
     // The grace covers an SSH round trip plus the agent flushing its final
-    // events, not just a local pipe: budget accordingly.
+    // events, not just a local pipe.
     const interruptGrace = options.interruptGrace ?? "10 seconds";
 
     if (integrations.size !== options.githubIntegrations.length) {
@@ -113,8 +113,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       const prepared = yield* fetches
         .withLock(request.repository)(
           Effect.gen(function* () {
-            // The grant attaches inside the compensated region: an interrupt
-            // parked on the repository lock must not leak an attachment.
+            // The grant attaches inside the compensated region, so an interrupt
+            // parked on the repository lock cannot leak an attachment.
             yield* credentialGrants.acquire(request.worker, request.repository, integration);
             const provisioned = yield* provisionWorktree({
               request,
@@ -190,7 +190,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         worker: prepared.worker,
         host: state.vm.sshDest,
       });
-      // Killing the local SSH client says nothing about the VM: confirm the
+      // Killing the local SSH client says nothing about the VM. Confirm the
       // recorded run host is dead before destroying the workspace under it.
       const confirmed = yield* commands.remoteRaw("cleanup", state.vm.sshDest, "sh", [
         "-c",
@@ -249,9 +249,9 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         return;
       }
       yield* Effect.annotateCurrentSpan({ host: state.vm.sshDest });
-      // The state entry drops exactly once whatever the outcome: a failed
-      // cleanup must never leave a retry path that releases the grant twice
-      // and detaches a running sibling's credentials.
+      // The state entry drops exactly once whatever the outcome. A failed cleanup
+      // must not leave a retry path that releases the grant twice and detaches a
+      // running sibling's credentials.
       const [worktreeResult, grantResult] = yield* Effect.all([
         cleanWorktree(prepared, state).pipe(Effect.result),
         credentialGrants.release(prepared.worker, state.integration).pipe(Effect.result),
@@ -298,7 +298,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     });
   });
 
-/** Node-only exe.dev adapter; the package root remains platform-free. */
+/** The exe.dev Executor layer. Node-only; the rest of the package stays platform-free. */
 export const layer = (
   options: ExeDevExecutorOptions,
 ): Layer.Layer<Executor, never, ChildProcessSpawner.ChildProcessSpawner> =>

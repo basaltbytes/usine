@@ -39,10 +39,10 @@ import {
 } from "./model.ts";
 
 const TOKEN_MAX_LIFETIME_MS = 60 * 60 * 1_000;
-/** Renew the shared lease once its token has less than this left to live. */
+/** Renew the shared lease when its token has less than this long left. */
 const LEASE_RENEWAL_MARGIN_MS = 5 * 60 * 1_000;
 
-/** What the orchestrator acts under: one discovered installation and one installation-wide token. */
+/** The discovered installation and the installation-wide token the orchestrator calls GitHub with. */
 interface Lease {
   readonly installation: Installation;
   readonly token: InstallationToken;
@@ -73,7 +73,7 @@ const TokenResponse = Schema.Struct({
   repositories: Schema.OptionFromOptionalKey(Schema.Array(RepositoryResponse)),
 }).pipe(Schema.encodeKeys({ expiresAt: "expires_at" }));
 
-/** One token mint, described by its scope: what to ask for and what to call it. */
+/** The operation name and request body for minting a token of this scope. */
 const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema.Json } =>
   scope._tag === "InstallationWide"
     ? {
@@ -89,12 +89,9 @@ const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema
       };
 
 /**
- * Whole GitHub identity for one usine instance. The transport is supplied as
- * an Effect HttpClient, so the root entry remains platform-free.
- *
- * The orchestrator-side operations share one lease — a single discovery and
- * installation-wide mint reused until the token nears expiry — so polling does
- * not spend two App requests per call. Worker tokens are minted per call.
+ * GitHub App identity for one usine instance over a caller-supplied Effect HttpClient.
+ * Orchestrator-side calls share one installation-wide token until it nears expiry,
+ * and worker tokens are minted per call.
  */
 export class GitHubApp extends Context.Service<
   GitHubApp,
@@ -120,7 +117,7 @@ export class GitHubApp extends Context.Service<
       const sign = yield* appJwtSigner(credentials);
       const http = yield* HttpClient.HttpClient;
 
-      /** Send one request and parse its JSON body; every other outcome is a typed error. */
+      /** Sends one request and decodes its JSON body. Any other outcome is a typed GitHub error. */
       const fetchJson = <S extends Schema.Codec<unknown, unknown, never, unknown>>(
         operation: GitHubOperation,
         request: HttpClientRequest.HttpClientRequest,
@@ -242,7 +239,7 @@ export class GitHubApp extends Context.Service<
 
       const leaseRef = yield* SynchronizedRef.make(Option.none<Lease>());
 
-      /** The current lease, renewed under the margin; renewals are serialized by the ref. */
+      /** Returns the current lease, renewing it inside the ref when its token is under the margin. */
       const lease = Effect.fn("GitHubApp.lease")(() =>
         SynchronizedRef.modifyEffect(leaseRef, (current) =>
           Effect.gen(function* () {

@@ -4,7 +4,7 @@ import { RunDatabase } from "../database/database.ts";
 import { cursors } from "../database/schema.ts";
 import { EnginePersistenceError } from "../engine/error.ts";
 
-/** Stable identity of one efficiency-only runtime cursor. */
+/** Identity of one cursor. Cursors only save work, so losing one is safe. */
 export const CursorKey = Schema.NonEmptyString.pipe(Schema.brand("CursorKey"));
 
 export type CursorKey = typeof CursorKey.Type;
@@ -18,9 +18,9 @@ const persistence =
     Effect.mapError(effect, (cause) => new EnginePersistenceError({ operation, cause }));
 
 /**
- * Durable storage for efficiency-only cursors. The module that owns a key also
- * owns its schema and passes it per call; a stored value that no longer decodes
- * is treated as absent — losing a cursor is always safe — and logged.
+ * Durable storage for cursors that only save work. The module that owns a key
+ * passes its schema per call; a stored value that no longer decodes reads as
+ * absent and is logged.
  */
 export class CursorStore extends Context.Service<
   CursorStore,

@@ -11,7 +11,7 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { cn } from "@/lib/utils";
 
-/** Full-viewport state for loading, unreachable, and not-found, before a screen can render. */
+/** Full-viewport placeholder for the loading, unreachable, and not-found states shown before a screen can render. */
 export const BootScreen = ({
   title,
   description,

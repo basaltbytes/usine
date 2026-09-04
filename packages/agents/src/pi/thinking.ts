@@ -5,7 +5,7 @@ export interface ThinkingCapableModel {
   readonly thinkingLevelMap?: Partial<Record<Effort, string | null>> | undefined;
 }
 
-/** Pi's own support rule, which the SDK applies by clamping instead of exposing. */
+/** The thinking levels a model supports; the SDK clamps to this set without exposing it. */
 export const supportedThinkingLevels = (model: ThinkingCapableModel): ReadonlyArray<Effort> => {
   if (!model.reasoning) return ["off"];
   return EFFORTS.filter((level) => {

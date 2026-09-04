@@ -12,15 +12,15 @@ export const safeSegment = (value: string): string => value.replaceAll(/[^A-Za-z
 
 const CACHE_DIRECTORY_SUFFIX = ".git";
 
-/** The bare cache directory name every adapter mints for a repository under `repos/`. */
+/** The bare cache directory name for a repository under `repos/`, shared by every adapter. */
 export const cacheDirectoryName = (repository: RepositoryName): string =>
   `${safeSegment(repository)}${CACHE_DIRECTORY_SUFFIX}`;
 
 /**
  * Whether a `repos/` entry is one of our bare caches, decided by the name we
- * mint rather than by probing its contents: a `HEAD` lookup fails with
- * ENOTDIR on a stray file, and a `.cloning` staging leftover or a tool's
- * scratch directory must never be handed to `git worktree prune`.
+ * mint rather than by probing contents: a `HEAD` lookup fails with ENOTDIR on
+ * a stray file, and a `.cloning` leftover or a tool's scratch directory must
+ * never reach `git worktree prune`.
  */
 export const isCacheDirectoryName = (entry: string): boolean =>
   entry.length > CACHE_DIRECTORY_SUFFIX.length && entry.endsWith(CACHE_DIRECTORY_SUFFIX);
@@ -52,11 +52,10 @@ export interface ProvisionOptions<E> {
 }
 
 /**
- * One canonical cached-clone-to-worktree choreography shared by every
- * Executor: clone into a staging sibling and promote on success (an
- * interrupted clone must never leave a half-initialized cache that every
- * later fetch for the repository would poison), fetch the requested
- * revision, and check out a detached worktree at the resolved commit.
+ * The clone-to-worktree sequence every Executor shares: clone into a staging
+ * sibling and promote it on success, so an interrupted clone never leaves a
+ * half-initialized cache that later fetches would poison; then fetch the
+ * requested revision and check out a detached worktree at the resolved commit.
  */
 export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(function* <E>(
   options: ProvisionOptions<E>,

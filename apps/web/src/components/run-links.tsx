@@ -8,8 +8,8 @@ const decodeGitHubItemKey = Schema.decodeOption(GitHubItemKey);
 
 type LinkedRun = Pick<RunView, "itemKey" | "pullRequestUrl">;
 
-/** Schedule Runs key the repository itself rather than an issue or pull request, so they have no Item link.
- * GitHub resolves `/issues/N` to `/pull/N` and canonical (lowercased) owner/name to the display casing. */
+/** Schedule Runs key the repository itself, not an issue or pull request, so they have no Item link.
+ * GitHub resolves `/issues/N` to `/pull/N` and a lowercased owner/name to its display casing. */
 const githubItem = (itemKey: LinkedRun["itemKey"]) =>
   Option.match(decodeGitHubItemKey(itemKey), {
     onNone: () => null,

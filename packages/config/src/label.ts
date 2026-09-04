@@ -1,8 +1,8 @@
 import { Schema } from "effect";
 
 /**
- * GitHub trims label names and caps them at 50 characters; a name outside that
- * contract would never match the catalog and would be re-created every cycle.
+ * GitHub trims label names and caps them at 50 characters. A name outside that
+ * contract never matches the catalog and would be re-created every cycle.
  */
 export const GitHubLabelName = Schema.String.check(
   Schema.isPattern(/^\S(?:.*\S)?$/u, {
@@ -13,10 +13,10 @@ export const GitHubLabelName = Schema.String.check(
 
 export type GitHubLabelName = typeof GitHubLabelName.Type;
 
-/** GitHub matches label names case-insensitively; compare declarations on this key. */
+/** Compare label names on this key: GitHub matches them case-insensitively. */
 export const canonicalLabelName = (name: string): string => name.toLowerCase();
 
-/** GitHub label colors are authored as six hex digits without a leading hash. */
+/** Six hex digits without a leading hash, as GitHub stores label colors. */
 export const GitHubLabelColor = Schema.String.check(
   Schema.isPattern(/^[0-9a-fA-F]{6}$/u, {
     message: "Expected a six-digit hex GitHub label color without #",
@@ -31,7 +31,7 @@ const GitHubLabelDescription = Schema.String.check(
   }),
 );
 
-/** One factory-wide label declaration, provisioned into every managed repository. */
+/** A label the factory creates in every managed repository. */
 export class DeclaredLabel extends Schema.Class<DeclaredLabel>("@usine/config/DeclaredLabel")({
   name: GitHubLabelName,
   color: Schema.OptionFromOptionalKey(GitHubLabelColor),

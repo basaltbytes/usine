@@ -74,10 +74,9 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
   }
 
   while (true) {
-    // The wait for a worker slot stays interruptible: a cancel must be able
-    // to reach a run parked in `reserve` (its scheduler releases or reoffers
-    // the slot in its own onInterrupt). Only after the lease exists does the
-    // release obligation begin.
+    // The wait for a worker slot stays interruptible so a cancel can reach a run
+    // parked in `reserve`; the scheduler releases or reoffers the slot in its own
+    // onInterrupt. The release obligation begins only once the lease exists.
     const lease = yield* executor.reserve(submission);
     const attempted = yield* Effect.gen(function* () {
       const started = yield* store.beginAttempt(runId, lease.worker).pipe(asAttemptFailure);
@@ -85,9 +84,9 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
         return started;
       }
 
-      // Port ACL: the executor's contract is the typed AttemptFailure channel.
-      // A defect escaping the adapter is infrastructure breakage around the
-      // agent, so it is translated before reaching the durable workflow.
+      // The executor's contract is the typed AttemptFailure channel. A defect
+      // escaping the adapter is infrastructure breakage around the agent, so it
+      // is translated before reaching the durable workflow.
       const result = yield* executor
         .execute(started.execution, {
           append: (direction, envelope) =>
@@ -107,7 +106,7 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
     }).pipe(Effect.ensuring(lease.release));
     if (attempted._tag === "RunClosed") {
       // Canceled, superseded, or revoked while queued: release was the only
-      // obligation; the closing operation already delivered the interrupt.
+      // obligation, and the closing operation already delivered the interrupt.
       yield* Effect.logInfo("Run closed while it waited for a worker", {
         runId,
         state: attempted.state,

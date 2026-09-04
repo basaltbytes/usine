@@ -26,7 +26,7 @@ const makeRunReader = Effect.gen(function* () {
   return { inspect, list, revision, transcript } as const;
 });
 
-/** Read-only durable Run projection; safe to build while execution is idle. */
+/** Read-only access to the durable Run projection; safe to build while execution is idle. */
 export class RunReader extends Context.Service<
   RunReader,
   {
@@ -35,7 +35,7 @@ export class RunReader extends Context.Service<
     readonly list: (options: {
       readonly closedLimit: number;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
-    /** `None` means the invalidation singleton is absent: treat every cached projection as stale. */
+    /** `None` means the invalidation row is absent: treat every cached projection as stale. */
     readonly revision: () => Effect.Effect<Option.Option<ProjectionRevision>, RunStoreError>;
     readonly transcript: (
       query: TranscriptQuery,

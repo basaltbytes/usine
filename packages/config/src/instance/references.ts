@@ -6,7 +6,7 @@ import { RegistryTag, UsineConfig } from "../factory.ts";
 import { LoopFile } from "../loop.ts";
 import type { AgentFile } from "../agent.ts";
 
-/** The names a loop may reference, drawn from one loaded roster and registry. */
+/** The agent and selector names a loop may reference in one loaded instance. */
 export interface ReferenceIndex {
   readonly agentNames: ReadonlySet<AgentName>;
   readonly registryTags: ReadonlySet<RegistryTag>;
@@ -23,10 +23,9 @@ export const referenceIndex = (
 });
 
 /**
- * Pure deriver: the reference failure quarantining one loop against the
- * loaded roster and registry, if any. The single owner of the reference rule
- * — the folder loader reports it per file, LoadedInstance enforces it at
- * construction.
+ * Returns the reference error that quarantines this loop, if it names an agent
+ * or selector entry the instance does not have. The folder loader reports it
+ * per file and LoadedInstance refuses to construct with it.
  */
 export const loopReferenceFailure = (
   file: InstancePath,

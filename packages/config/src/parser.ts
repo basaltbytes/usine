@@ -282,10 +282,8 @@ const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
   });
 
 /**
- * Strict config parser and prompt renderer. All methods capture their CEL
- * dependency. The interface below is the package's declared API — widen it
- * deliberately, never by letting an implementation change leak through
- * inference.
+ * Parses authored config files and renders prompts. The interface is declared
+ * explicitly so an implementation change cannot widen it through inference.
  */
 export class ConfigParser extends Context.Service<
   ConfigParser,

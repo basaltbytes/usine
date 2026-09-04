@@ -6,7 +6,7 @@ export class AttemptSucceeded extends Schema.TaggedClass<AttemptSucceeded>(
   "AttemptOutcome/Succeeded",
 )("Succeeded", {}) {}
 
-/** The attempt failed, with the typed failure that closed it. */
+/** The attempt failed with the typed failure that closed it. */
 export class AttemptFailed extends Schema.TaggedClass<AttemptFailed>("AttemptOutcome/Failed")(
   "Failed",
   {

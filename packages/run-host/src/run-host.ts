@@ -1,5 +1,3 @@
-/** @usine/run-host — one-shot worker-side Attempt host. */
-
 import {
   AgentRuntime,
   LaunchRequest,
@@ -33,7 +31,7 @@ export class RunHostError extends Schema.TaggedError<RunHostError>("@usine/run-h
   },
 ) {}
 
-/** Strict by contract: an unknown key on a protocol frame is a rejected frame. */
+/** Rejects a frame with any unknown key; the protocol is strict by contract. */
 const decodeInput = (line: string) =>
   Schema.decodeUnknownEffect(AttemptChannel.InputFrameFromJson)(line, {
     onExcessProperty: "error",
@@ -232,9 +230,9 @@ export const runHost = () =>
           yield* Ref.set(expectedInputSequence, expected + 1);
           if (command.payload._tag === "Interrupt") {
             yield* Effect.logInfo("Run host received an Interrupt frame");
-            // Start delivery before waking the terminal race. The SDK's native
-            // promise keeps carrying the interrupt even when terminal cleanup
-            // interrupts this command fiber immediately afterward.
+            // Start delivery before waking the terminal race: the SDK's native
+            // promise keeps delivering the interrupt even when terminal cleanup
+            // interrupts this command fiber right after.
             yield* Effect.forkChild(session.interrupt);
             yield* Deferred.succeed(interrupted, undefined);
           } else {

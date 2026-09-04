@@ -7,7 +7,7 @@ import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { Layer } from "effect";
 import { stepExecutorLayer } from "./scheduler.ts";
 
-/** Complete local-orchestrator / exe.dev-Worker engine composition. */
+/** The full engine composition for a local orchestrator driving an exe.dev Worker. */
 export const layer = (
   instanceDirectory: InstanceDirectory,
   config: UsineConfig,

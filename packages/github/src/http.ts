@@ -73,11 +73,11 @@ const latestEpoch = (candidates: ReadonlyArray<Option.Option<number>>): Option.O
   return epochs.length === 0 ? Option.none() : Option.some(Math.max(...epochs));
 };
 
-/** When GitHub asked us to come back, from `retry-after` and an exhausted primary budget. */
+/** The epoch when GitHub allows the next request, from `retry-after` and an exhausted primary rate-limit budget. */
 export const rateLimitRetryEpoch = (headers: Headers, now: number): Option.Option<number> =>
   latestEpoch([retryAfterMillis(headers["retry-after"], now), rateLimitResetMillis(headers, 0)]);
 
-/** One classification for every non-2xx GitHub status: rate-limit pauses become typed waits. */
+/** Turns a non-2xx GitHub response into a typed error. A rate-limit status with a known retry time becomes a wait, not a failure. */
 export const statusError = (
   operation: GitHubOperation,
   response: HttpClientResponse.HttpClientResponse,

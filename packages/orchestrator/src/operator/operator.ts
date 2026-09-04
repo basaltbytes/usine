@@ -60,10 +60,10 @@ export type BoardMoveError =
 export type OperatorError = RunEngineError | TranscriptAttemptNotFoundError | BoardMoveError;
 export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFoundError;
 
-/** Settled Runs kept in the overview beside every open one; history stays bounded. */
+/** How many settled Runs the overview keeps beside the open ones. */
 const OVERVIEW_CLOSED_RUNS = 100;
 
-/** Newest Items projected onto a Board; older ones fall off instead of growing the overview. */
+/** How many newest Items a Board shows; older ones drop off. */
 const OVERVIEW_BOARD_ITEMS = 500;
 
 interface CachedOverview {
@@ -249,8 +249,8 @@ const makeOperatorObservation = Effect.gen(function* () {
           onNone: () => [],
           onSome: ({ failures }) => failures,
         });
-        // A missing invalidation singleton means staleness is undetectable, so the
-        // cache is bypassed entirely rather than trusted.
+        // Without the invalidation singleton staleness cannot be detected, so the
+        // cache is bypassed.
         const token = Option.map(revision, (value) =>
           JSON.stringify([
             value,
@@ -315,7 +315,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   return { detail, overview } as const;
 });
 
-/** Read-only operator surface; safe to build without trigger execution. */
+/** The read-only operator surface. It needs no trigger execution to build. */
 export class OperatorObservation extends Context.Service<
   OperatorObservation,
   {
@@ -451,7 +451,7 @@ const makeOperator = Effect.gen(function* () {
   return { ...observation, approve, cancel, moveBoardItem, pause, retry, unpause } as const;
 });
 
-/** Observe-and-intervene application service; transports only translate this API. */
+/** The observe-and-intervene service. Transports translate this API and add no logic of their own. */
 export class Operator extends Context.Service<
   Operator,
   OperatorObservation["Service"] & {

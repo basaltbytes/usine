@@ -62,7 +62,7 @@ export const ExecutorError = Schema.Union([
 ]);
 export type ExecutorError = typeof ExecutorError.Type;
 
-/** Every preflight refusal is logged: a missing capability must be explainable from logs alone. */
+/** Logs every preflight refusal so a missing capability is explainable from logs alone. */
 export const logPreflightFailure = <A, R>(
   effect: Effect.Effect<A, ExecutorError, R>,
 ): Effect.Effect<A, ExecutorError, R> =>
@@ -86,7 +86,7 @@ export interface RunHostCommand {
   readonly args: ReadonlyArray<string>;
 }
 
-/** Secret-free request used to create one fresh Attempt workspace. */
+/** Everything prepare needs for one fresh Attempt workspace; credentials are never part of it. */
 export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   "@usine/executor/CheckoutRequest",
 )({
@@ -102,11 +102,11 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   parentEffort: Effort,
 }) {}
 
-/** Value object (branded path): one Attempt's disposable checkout directory. */
+/** One Attempt's disposable checkout directory. */
 export const WorktreePath = Schema.NonEmptyString.pipe(Schema.brand("WorktreePath"));
 export type WorktreePath = typeof WorktreePath.Type;
 
-/** Prepared workspace descriptor. Credentials remain private to the adapter. */
+/** What prepare returns and launch consumes; credentials stay private to the adapter. */
 export class PreparedAttempt extends Schema.Class<PreparedAttempt>(
   "@usine/executor/PreparedAttempt",
 )({
@@ -126,7 +126,7 @@ export class CredentialProvider extends Context.Service<
   }
 >()("@usine/executor/CredentialProvider") {}
 
-/** The five-operation worker contract from ADR 0006. Preflight verifies only — it never installs. */
+/** The five-operation worker contract (ADR 0006). Preflight verifies only; it never installs. */
 export class Executor extends Context.Service<
   Executor,
   {

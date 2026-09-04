@@ -39,7 +39,7 @@ export const RunStoreError = Schema.Union([
 
 export type RunStoreError = typeof RunStoreError.Type;
 
-/** The store's failures plus the engine-only cancellation handshake failure. */
+/** The store's failures plus the cancellation handshake failure only the engine raises. */
 export const RunEngineError = Schema.Union([
   RunNotFoundError,
   RunOperationRejectedError,

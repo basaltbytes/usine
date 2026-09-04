@@ -57,9 +57,9 @@ interface PreparedState {
 const isExecutorError = Schema.is(ExecutorError);
 
 /**
- * The run host gets a minimal environment, never the orchestrator's: the App
- * private key and every other orchestrator secret must not reach the agent
- * (ADR 0011's single-repo worker token is the only credential it holds).
+ * The run host inherits only these variables. The App private key and every
+ * other orchestrator secret stay out; the single-repo worker token is the only
+ * credential it receives (ADR 0011).
  */
 const HOST_ENVIRONMENT_ALLOWLIST = [
   "HOME",
@@ -77,7 +77,7 @@ const executorError = (
   cause: unknown,
 ): ExecutorOperationError => new ExecutorOperationError({ operation, message, cause });
 
-/** The credential must never survive into a persisted error message. */
+/** Removes the credential from text before it can reach a persisted error message. */
 const scrubbed = (text: string, credential: Redacted.Redacted<string>): string =>
   text.replaceAll(Redacted.value(credential), "[REDACTED]");
 
@@ -136,9 +136,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* executeCommand(operation, command, args, commandOptions);
     });
 
-    // ADR 0006: worktrees never outlive their Attempt. A crashed orchestrator
-    // leaves both directories and bare-cache registrations behind; the sweep
-    // reclaims them at the next layer build, before new Attempts start.
+    // Worktrees never outlive their Attempt (ADR 0006). A crashed orchestrator
+    // leaves directories and bare-cache registrations behind; the sweep reclaims
+    // them at the next layer build, before new Attempts start.
     const sweepAbandonedWorktrees = Effect.fn("LocalExecutor.sweepAbandonedWorktrees")(
       function* () {
         if (!(yield* fileSystem.exists(workersRoot))) return;
@@ -349,10 +349,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         });
       }
       // A linked worktree's git common dir is the bare cache itself, and Turbo
-      // places its cache next to the common dir, so an unscoped run from the
-      // worktree writes `repos/.turbo` beside the bare caches. Pin the cache to
-      // the Worker instead: it is shared across that Worker's Attempts, and it
-      // stays out of the directory the startup sweep treats as cache storage.
+      // puts its cache next to the common dir, so an unscoped run from the
+      // worktree would write `repos/.turbo` beside the bare caches. The Worker
+      // cache is shared across that Worker's Attempts and stays out of the
+      // directory the startup sweep treats as cache storage.
       const turboCache = path.join(workersRoot, prepared.worker, "turbo");
       yield* Effect.logInfo("Launching the run host", {
         attemptId,
@@ -470,7 +470,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     });
   });
 
-/** Node-only local executor; the package root remains platform-free. */
+/** The local Executor layer. Node-only; the rest of the package stays platform-free. */
 export const layer = (
   options: LocalExecutorOptions,
 ): Layer.Layer<

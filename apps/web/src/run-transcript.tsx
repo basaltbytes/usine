@@ -115,9 +115,9 @@ const TranscriptEvent = ({ event }: { readonly event: PresentedTranscriptEvent }
 
 export const Transcript = ({ events }: { readonly events: ReadonlyArray<TranscriptEventView> }) => {
   const feed = useMemo(() => {
-    // One collapsible group per child session, anchored at its own first
-    // event, so concurrent children stay distinct and the parent/child
-    // interleaving stays chronological (ADR 0008: one level deep).
+    // One collapsible group per child session, anchored at its first event, so
+    // concurrent children stay distinct and the interleaving stays chronological.
+    // Nesting is one level deep (ADR 0008).
     const groups = new Map<string, TranscriptGroup>();
     const presented = events
       .filter((event) => !isRateLimitUpdate(event))

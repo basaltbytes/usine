@@ -7,13 +7,12 @@ import type {
   Source,
 } from "./model.ts";
 
-/** Backend-neutral CEL operations used by config parsing and prompt rendering. */
+/** CEL checking, evaluation, and literal scanning, independent of the CEL backend. */
 export interface ExpressionEngineService {
   /**
-   * String literals compared against the `name` leaf of values whose lineage
-   * starts at `memberPath` (through macro bindings and collection
-   * transformations). This keeps config diagnostics independent of the CEL
-   * backend's AST.
+   * The string literals the expression compares against the `name` field of
+   * values reached from `memberPath`, following macro bindings and collection
+   * transformations. Config validation uses it to spot undeclared labels.
    */
   readonly relatedStringLiterals: (
     source: Source,

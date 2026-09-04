@@ -12,9 +12,8 @@ export const IntegrationName = Schema.String.check(
 export type IntegrationName = typeof IntegrationName.Type;
 
 /**
- * The SSH argv boundary: this string is handed to the local `ssh` client as a
- * destination, so anything that could read as an option (`-oProxyCommand=...`)
- * must be unrepresentable, not merely unexpected.
+ * An SSH destination handed to the local `ssh` client as argv, so anything
+ * that could read as an option (`-oProxyCommand=...`) is unrepresentable.
  */
 export const SshDestination = Schema.String.check(
   Schema.isPattern(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/u, {

@@ -9,7 +9,7 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { Schema } from "effect";
 
-/** The complete routing context needed to turn one Event into a Run. */
+/** Everything the engine needs to turn one Event into a Run. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
   event: Event,
   itemKey: ItemKey,
@@ -23,7 +23,7 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   parentModel: Schema.Option(ModelId),
 }) {}
 
-/** The Event owns a Run and repeated submissions return the same identity. */
+/** The Event now owns a Run; submitting it again returns the same run id. */
 export class Claimed extends Schema.TaggedClass<Claimed>("@usine/engine/Claimed")("Claimed", {
   eventId: EventId,
   runId: RunId,
@@ -40,7 +40,7 @@ export const IgnoreReason = Schema.Literals(IGNORED_REASONS);
 
 export type IgnoreReason = typeof IgnoreReason.Type;
 
-/** The Event remains in the permanent ledger but can no longer open a Run. */
+/** The Event stays in the ledger but can no longer open a Run. */
 export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored")("Ignored", {
   eventId: EventId,
   reason: IgnoreReason,

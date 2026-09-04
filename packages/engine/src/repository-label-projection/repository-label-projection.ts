@@ -6,7 +6,7 @@ import { repositoryLabelProjections } from "../database/schema.ts";
 import { EnginePersistenceError } from "../engine/error.ts";
 import { RepositoryLabel, RepositoryLabelProjection } from "./model.ts";
 
-/** Rows written before colors were kept hold bare names; they read as colorless labels. */
+/** Rows written before colors were kept are bare names and read as colorless labels. */
 const LegacyLabelNames = Schema.Array(Schema.String);
 const isLegacyLabelNames = Schema.is(LegacyLabelNames);
 const RepositoryLabelProjectionRow = Schema.Struct({

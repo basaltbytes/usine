@@ -101,9 +101,8 @@ const TurnCompleted = Schema.Struct({
     ),
   }),
 });
-// Upstream documents this notification as a sparse rolling update: any
-// account metadata may be absent, so every field except the load figure
-// itself is optional here.
+// Upstream sends this notification as a sparse rolling update: any account
+// field may be absent, so only the load figure is required.
 const RateLimitWindow = Schema.Struct({
   usedPercent: Schema.Number,
   windowDurationMins: Schema.optionalKey(Schema.NullOr(Schema.Number)),
@@ -131,7 +130,7 @@ const decodeResponse = <S extends Schema.Top>(
     ),
   );
 
-/** Decodes one notification payload, logging and skipping instead of failing the session. */
+/** Decodes one notification payload; an undecodable payload is logged and skipped, never fatal. */
 const decodeNotification = <S extends Schema.Top>(
   schema: S,
   label: string,
@@ -173,7 +172,7 @@ const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLimitWind
     resetsAt: Option.fromNullishOr(window.resetsAt).pipe(Option.map(DateTime.fromEpochSeconds)),
   });
 
-/** Server pushes that must reach the operator's logs even though no session event carries them. */
+/** Server pushes with no session event shape; they still reach the operator's logs. */
 const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([
   "error",
   "warning",
@@ -383,9 +382,9 @@ const makeCodexChild = Effect.gen(function* () {
               return yield* channel.emit(
                 new PoolRateLimitsUpdated({
                   session,
-                  // Workers provision Codex children on ChatGPT-plan login
-                  // state (ADR 0005); an API-key login would misattribute
-                  // these windows, and preflighting it is issue #60's scope.
+                  // Workers log Codex children in with a ChatGPT plan (ADR 0005).
+                  // An API-key login would attribute these windows to the
+                  // wrong pool, and nothing checks for that yet.
                   pool: "chatgptPlan",
                   rateLimits: new RateLimitsSnapshot({
                     limitId: Option.fromNullishOr(snapshot.limitId),
@@ -439,7 +438,7 @@ const makeCodexChild = Effect.gen(function* () {
                 sessionId: session.id,
               });
             }
-            // Streaming deltas re-deliver content the completed items carry.
+            // Streaming deltas repeat content that the completed items deliver.
             if (method.toLowerCase().includes("delta")) return;
             yield* Effect.logDebug("Ignoring an unhandled Codex notification", {
               method,

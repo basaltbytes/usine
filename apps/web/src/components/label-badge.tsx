@@ -17,8 +17,8 @@ export const luminance = (hex: string): number => {
   );
 };
 
-/** GitHub colors are picked for a white page; on the dark theme, dark labels get lifted toward white
- * so the text stays readable, while the tint keeps the original hue. */
+/** GitHub picks label colors for a white page, so on the dark theme dark labels are lifted toward
+ * white to keep the text readable while the tint keeps the hue. */
 export const labelTextColor = (hex: string): string => {
   const lift = Math.max(0, 0.55 - luminance(hex)) / 0.55;
   if (lift === 0) return `#${hex}`;

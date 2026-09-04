@@ -23,7 +23,7 @@ export type PiMessage = Awaited<
   ReturnType<typeof createAgentSession>
 >["session"]["messages"][number];
 
-/** Narrow in-process Pi session surface consumed by the adapter. */
+/** The subset of an in-process Pi session that the adapter uses. */
 export interface PiSession {
   readonly messages: ReadonlyArray<PiMessage>;
   readonly subscribe: (listener: (event: PiSessionEvent) => void) => () => void;
@@ -68,10 +68,10 @@ export type PiStartResult =
       readonly session: PiSession;
     };
 
-/** The parent orchestrates through usine extensions; harnesses own repository tools. */
+/** The parent works only through usine extensions; repository tools belong to the harness children. */
 export const piParentSessionToolPolicy = { noTools: "builtin" } as const;
 
-/** Narrow SDK seam keeps vendor setup testable without module replacement. */
+/** Starts a Pi SDK session; a service so tests substitute it without module mocking. */
 export class PiSdk extends Context.Service<
   PiSdk,
   { readonly start: (options: PiStartOptions) => Promise<PiStartResult> }
@@ -95,9 +95,9 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       if (selected === undefined) return { _tag: "UnknownModel" };
     }
     const agentDir = getAgentDir();
-    // The Attempt worktree is repository-controlled input: never trust its
-    // `.pi/` settings, SYSTEM.md, extensions, or skills. The subagents tool
-    // arrives as an inline factory, which the loader registers regardless.
+    // The worktree is repository-controlled input, so its `.pi/` settings,
+    // SYSTEM.md, extensions, and skills never load. The subagents tool is an
+    // inline factory, which the loader registers regardless.
     const settingsManager = SettingsManager.create(options.cwd, agentDir, {
       projectTrusted: false,
     });
@@ -181,14 +181,14 @@ export const piSdkLive = Layer.succeed(PiSdk)({
 
 export interface AcquiredPiStart {
   readonly result: PiStartResult;
-  /** Idempotent because both failed setup and the ambient scope may request cleanup. */
+  /** Safe to call twice: failed setup and the ambient scope may both request cleanup. */
   readonly dispose: () => void;
 }
 
 /**
- * Keeps SDK startup interruptible while retaining ownership until setup succeeds.
- * A result that loses the race with interruption is disposed in its Promise
- * continuation; a result already handed to `use` is disposed by `onExit`.
+ * Runs SDK startup so an interruption cannot leak a session. A result that
+ * loses the race with interruption is disposed in its Promise continuation;
+ * one already handed to `use` is disposed by `onExit`.
  */
 export const usePiStart = <A, E, R, E2>(
   start: (signal: AbortSignal) => Promise<PiStartResult>,

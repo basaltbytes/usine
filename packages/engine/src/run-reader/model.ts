@@ -8,7 +8,7 @@ import { Run } from "@usine/core/run";
 import { Step } from "@usine/core/step";
 import { Schema } from "effect";
 
-/** Observable durable projection for one Run. */
+/** The full durable view of one Run. */
 export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSnapshot")({
   event: Event,
   itemKey: ItemKey,
@@ -22,7 +22,7 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   parentModel: Schema.Option(ModelId),
 }) {}
 
-/** Lightweight durable projection used when listing Runs for operators. */
+/** The lighter view used when listing Runs for operators. */
 export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSummary")({
   itemKey: ItemKey,
   run: Run,
@@ -33,7 +33,7 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
   agent: Agent,
 }) {}
 
-/** Monotonic version of the durable operator projection. */
+/** Monotonic version of the operator projection. */
 export const ProjectionRevision = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
   Schema.brand("ProjectionRevision"),
 );

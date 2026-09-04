@@ -423,9 +423,9 @@ describe("ScheduleTriggers", () => {
   it.effect("keeps evaluating when a cron minute falls in a DST spring-forward gap", () =>
     Effect.gen(function* () {
       const config = configWith([{ name: "basaltbytes/usine" }]);
-      // Warsaw skips 02:00-03:00 local on 2026-03-29 (01:00Z): effect's
-      // Cron.prev throws for this instant. The stream must fail only this
-      // schedule and keep returning cycles instead of dying with a defect.
+      // Warsaw skips 02:00-03:00 local on 2026-03-29 (01:00Z), so Cron.prev
+      // throws for this instant. The stream must fail only this schedule and
+      // keep returning cycles.
       const loop = scheduleLoop(config, { cron: "30 2 * * *", tz: "Europe/Warsaw" });
       const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
       yield* TestClock.setTime(Date.parse("2026-03-29T01:30:00.000Z"));

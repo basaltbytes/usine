@@ -17,7 +17,7 @@ export const ValidSelector = Selector.check(
   }),
 );
 
-/** Match both selector axes when both are present; an omitted selector matches every repo. */
+/** Whether a repo passes the selector. Both axes must match when present; no selector matches every repo. */
 export const matchesSelector = (selector: Option.Option<Selector>, repo: ManagedRepo): boolean =>
   Option.match(selector, {
     onNone: () => true,

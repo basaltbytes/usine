@@ -532,8 +532,8 @@ describe("Operator", () => {
         const recorded = approvals[0];
         assert(recorded !== undefined);
         assert.strictEqual(recorded.runId, runId);
-        // The approval Event the waiting run consumes must be recorded whole:
-        // deterministic identity for idempotent re-approval, typed payload.
+        // The approval Event the waiting run consumes is recorded whole: a
+        // deterministic identity for idempotent re-approval and a typed payload.
         assert.strictEqual<string>(recorded.event.id, recorded.event.dedupKey);
         assert.strictEqual<string>(
           recorded.event.dedupKey,

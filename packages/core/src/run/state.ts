@@ -10,87 +10,69 @@ import { EventId } from "../event.ts";
  *   waiting ──(approval)──► queued ────┘ failed ──► (retry: attempt N+1) ──► running
  *
  *   pending | waiting | queued | running ──► canceled   (operator cancel)
- *   pending | waiting | queued           ──► canceled   (supersede, revoke — a started
+ *   pending | waiting | queued           ──► canceled   (supersede, revoke: a started
  *                                                        attempt always finishes, ADR 0007)
  *
- * States are value objects (a discriminated union, each state carrying exactly
- * its own data). Transitions are typestate derivers: each function accepts
- * only the states it is legal on, so an illegal transition is a compile
- * error. Construct states through these transitions (or by parsing a stored
- * row via the `RunState` union) — they are the state machine.
+ * Each transition accepts only the states it is legal on, so an illegal
+ * transition fails to compile. Construct states through the transitions or by
+ * decoding a stored row with `RunState`.
  */
 
-/** Cancel reason — value object: the operator closed the run by hand. */
+/** The operator closed the run by hand. */
 export class OperatorCanceled extends Schema.TaggedClass<OperatorCanceled>(
   "CancelReason/OperatorCanceled",
 )("OperatorCanceled", {}) {}
 
-/**
- * Cancel reason — value object: a newer Event for the same Item took the
- * run's place before any attempt started.
- */
+/** A newer Event for the same Item took the run's place before any attempt started. */
 export class Superseded extends Schema.TaggedClass<Superseded>("CancelReason/Superseded")(
   "Superseded",
   { by: EventId },
 ) {}
 
-/**
- * Cancel reason — value object: the run's Item stopped matching its loop's
- * trigger before any attempt started. Distinct from operator cancel and from
- * supersede.
- */
+/** The run's Item stopped matching its loop's trigger before any attempt started. */
 export class Revoked extends Schema.TaggedClass<Revoked>("CancelReason/Revoked")("Revoked", {}) {}
 
 export const CancelReason = Schema.Union([OperatorCanceled, Superseded, Revoked]);
 export type CancelReason = typeof CancelReason.Type;
 
-/** Open: just created; no attempt started, no approval gate passed. */
+/** Just created: no attempt started and no approval gate passed. */
 export class Pending extends Schema.TaggedClass<Pending>("RunState/Pending")("Pending", {}) {}
 
-/**
- * Open: parked on its loop's approval gate — v1's only waiting reason. The
- * approval it consumes is an Event like every other fact.
- */
+/** Parked on the loop's approval gate. The approval it waits for is an Event like any other fact. */
 export class Waiting extends Schema.TaggedClass<Waiting>("RunState/Waiting")("Waiting", {}) {}
 
-/** Open: the approval gate opened; no attempt started. Waits for a worker slot like Pending. */
+/** Approved and waiting for a worker slot. */
 export class Queued extends Schema.TaggedClass<Queued>("RunState/Queued")("Queued", {}) {}
 
-/** Open: an attempt is executing on a worker. */
+/** An attempt is executing on a worker. */
 export class Running extends Schema.TaggedClass<Running>("RunState/Running")("Running", {}) {}
 
-/** Closed: the step finished and its result is stored. */
+/** The step finished and its result is stored. */
 export class Succeeded extends Schema.TaggedClass<Succeeded>("RunState/Succeeded")(
   "Succeeded",
   {},
 ) {}
 
-/**
- * Closed, but reopenable: the last attempt failed and no auto-retry applies.
- * The failure itself lives on the Attempt.
- */
+/** The last attempt failed and no auto-retry applies. The failure is on the Attempt, and `retry` reopens the run. */
 export class Failed extends Schema.TaggedClass<Failed>("RunState/Failed")("Failed", {}) {}
 
-/** Closed: canceled, with the reason recorded. */
+/** Canceled, with the reason recorded. */
 export class Canceled extends Schema.TaggedClass<Canceled>("RunState/Canceled")("Canceled", {
   reason: CancelReason,
 }) {}
 
-/**
- * The open half of the machine — the single statement of the open/closed
- * partition; the alias, the guard, and the full union all derive from it.
- */
+/** The open states. `RunState`, `isOpen`, and the tag lists derive from this union. */
 export const Open = Schema.Union([Pending, Waiting, Queued, Running]);
 export type Open = typeof Open.Type;
 
 export const RunState = Schema.Union([...Open.members, Succeeded, Failed, Canceled]);
 export type RunState = typeof RunState.Type;
 
-/** No attempt started yet: the precondition of `supersede` and `revoke`. */
+/** The states with no attempt started: what `supersede` and `revoke` accept. */
 export const Unstarted = Schema.Union([Pending, Waiting, Queued]);
 export type Unstarted = typeof Unstarted.Type;
 
-/** Gate passed or absent: the states an attempt can start from. */
+/** The states an attempt can start from: the gate is passed or absent. */
 export const Startable = Schema.Union([Pending, Queued]);
 export type Startable = typeof Startable.Type;
 
@@ -99,11 +81,9 @@ export const isUnstarted = Schema.is(Unstarted);
 export const isStartable = Schema.is(Startable);
 
 /**
- * Compile-checked tag tuple over a state partition: the argument list must
- * name every `_tag` of `State` and nothing else. A foreign tag fails the
- * `Tags` constraint; a missing tag collapses the parameters to `[never]`, so
- * the call stops compiling. This keeps the unions above the single owner of
- * each partition while read-side SQL gets a value-level tag list.
+ * Builds a tag tuple that must name every `_tag` of `State` and nothing else,
+ * so the SQL-side lists below cannot drift from the unions above. A foreign tag
+ * fails the `Tags` constraint; a missing tag collapses the parameters to `[never]`.
  */
 const tagsOf =
   <State extends RunState>() =>
@@ -112,10 +92,10 @@ const tagsOf =
   ) =>
     tags;
 
-/** The open partition as `_tag` literals, for queries that filter stored rows by state. */
+/** The open states as `_tag` literals, for queries that filter stored rows. */
 export const OPEN_STATE_TAGS = tagsOf<Open>()("Pending", "Waiting", "Queued", "Running");
 
-/** Every state as `_tag` literals, for read models that project stored rows by state. */
+/** Every state as a `_tag` literal, for read models that project stored rows. */
 export const STATE_TAGS = tagsOf<RunState>()(
   "Pending",
   "Waiting",
@@ -126,56 +106,37 @@ export const STATE_TAGS = tagsOf<RunState>()(
   "Canceled",
 );
 
-/**
- * The states with no started attempt, as `_tag` literals — the precondition
- * of `supersede` and `revoke`, for queries that filter stored rows by state.
- */
+/** The unstarted states as `_tag` literals, for queries that filter stored rows. */
 export const UNSTARTED_STATE_TAGS = tagsOf<Unstarted>()("Pending", "Waiting", "Queued");
 
-/** pending → waiting: park the run on its loop's approval gate. */
+/** Parks a pending run on its loop's approval gate. */
 export const awaitApproval = (_state: Pending): Waiting => new Waiting();
 
-/** waiting → queued: the approval Event opened the gate; the run now waits for a worker slot. */
+/** Opens the gate: the run now waits for a worker slot. */
 export const approve = (_state: Waiting): Queued => new Queued();
 
-/** pending | queued → running: the first attempt starts. A waiting run must be approved first. */
+/** Starts the first attempt. A waiting run must be approved first. */
 export const start = (_state: Startable): Running => new Running();
 
-/** running → succeeded: the attempt finished and the step result is stored. */
+/** Closes the run after a successful attempt. */
 export const succeed = (_state: Running): Succeeded => new Succeeded();
 
-/**
- * running → failed: the attempt failed and no auto-retry applies — the engine
- * discharges that precondition with `Attempt.shouldAutoRetry`, the one owner
- * of the auto-retry law.
- */
+/** Closes the run after a failed attempt when no auto-retry applies; `shouldAutoRetry` decides that. */
 export const fail = (_state: Running): Failed => new Failed();
 
-/**
- * failed → running: operator retry. The next try is a new Attempt (N+1) under
- * the same Step, never a new run.
- */
+/** Reopens a failed run for attempt N+1 under the same Step. */
 export const retry = (_state: Failed): Running => new Running();
 
-/**
- * open → canceled: the operator's act, reachable from every open state —
- * named by cause like its siblings; supersede and revoke are the other two
- * roads into Canceled.
- */
+/** Cancels from any open state. */
 export const cancelByOperator = (_state: Open): Canceled =>
   new Canceled({ reason: new OperatorCanceled() });
 
 /**
- * pending | waiting | queued → canceled: a newer Event for the same Item takes
- * this run's place. Only runs with no started attempt can be superseded — a
- * running attempt always finishes, and the newer state is judged again when it
- * ends (ADR 0007).
+ * Cancels an unstarted run because a newer Event for the same Item replaced it.
+ * A running attempt always finishes and the newer state is judged when it ends (ADR 0007).
  */
 export const supersede = (_state: Unstarted, by: EventId): Canceled =>
   new Canceled({ reason: new Superseded({ by }) });
 
-/**
- * pending | waiting | queued → canceled: the run's Item stopped matching its
- * loop's trigger. Never touches a running attempt.
- */
+/** Cancels an unstarted run because its Item stopped matching the loop's trigger. */
 export const revoke = (_state: Unstarted): Canceled => new Canceled({ reason: new Revoked() });

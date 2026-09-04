@@ -22,8 +22,6 @@ import {
   TxPriorityQueue,
 } from "effect";
 
-/** Configured FIFO worker scheduler: the platform-free Executor-to-engine adapter. */
-
 export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorkerError>(
   "@usine/orchestrator/UnsupportedWorkerError",
 )("UnsupportedWorkerError", {
@@ -81,7 +79,7 @@ const validateWorkers = (
     : new UnsupportedWorkerError({ worker: unsupported.name, kind: unsupported.kind });
 };
 
-/** Configured FIFO worker scheduler and Executor-to-engine adapter. */
+/** Schedules Attempts FIFO over the configured Workers and adapts the Executor to the engine's StepExecutor port. */
 export const stepExecutorLayer = (
   config: UsineConfig,
 ): Layer.Layer<StepExecutor, ExecutorError | UnsupportedWorkerError, Executor> =>
@@ -164,9 +162,8 @@ export const stepExecutorLayer = (
             runId: execution.run.id,
             worker: execution.attempt.worker,
           });
-          // `prepare` stays interruptible — a cancel must be able to stop a
-          // hung clone or fetch; the adapter cleans its partial state on any
-          // non-success exit.
+          // `prepare` stays interruptible so a cancel can stop a hung clone or
+          // fetch; the adapter cleans its partial state on any non-success exit.
           const prepared = yield* executor
             .prepare(
               new CheckoutRequest({
@@ -195,10 +192,10 @@ export const stepExecutorLayer = (
                 Effect.ignore,
               ),
             ),
-            // The attempt dies before its credential grant does: a hung run
-            // host or dead link past the configured budget interrupts the
-            // launch (running the cancel handshake above) and reports a typed
-            // infra failure, never a silent forever-park (ADR 0006).
+            // The attempt ends before its credential grant does: past the
+            // configured budget a hung run host or dead link interrupts the
+            // launch through the cancel handshake above and reports an infra
+            // failure instead of parking forever (ADR 0006).
             Effect.timeoutOrElse({
               duration: `${config.settings.maxAttemptMinutes} minutes`,
               orElse: () =>
@@ -209,10 +206,10 @@ export const stepExecutorLayer = (
                   }),
                 ),
             }),
-            // ADR 0006: the worktree dies at attempt end regardless of outcome.
-            // Cleanup never decides that outcome — a failed removal is logged,
-            // not allowed to convert a finished agent session into a retryable
-            // infra failure that would re-run non-idempotent work.
+            // The worktree is removed at attempt end whatever the outcome, and
+            // cleanup never changes that outcome: a failed removal is logged
+            // rather than turned into a retryable infra failure that would
+            // re-run non-idempotent work (ADR 0006).
             Effect.ensuring(
               executor.cleanup(prepared).pipe(
                 Effect.tapError((error) =>

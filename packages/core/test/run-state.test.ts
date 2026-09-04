@@ -66,11 +66,10 @@ describe("run state machine (ADR 0002)", () => {
     expect(RunState.isOpen(RunState.cancelByOperator(new RunState.Pending()))).toBe(false);
   });
 
-  // The transitions are typestate: illegality is a compile error, enforced by
-  // the `check` script (tsc over this file). If a signature ever widens so one
-  // of these calls compiles, its @ts-expect-error turns into an "unused
-  // directive" error and CI fails. The calls are pure, so running them is
-  // harmless.
+  // Illegal transitions are compile errors, checked by tsc over this file. If a
+  // signature widens so one of these calls compiles, its @ts-expect-error turns
+  // into an unused-directive error and CI fails. The calls are pure, so running
+  // them is harmless.
   it("illegal transitions do not compile", () => {
     const pending = new RunState.Pending();
     const waiting = new RunState.Waiting();
@@ -85,7 +84,7 @@ describe("run state machine (ADR 0002)", () => {
     // @ts-expect-error a waiting run has no attempt to fail
     RunState.fail(waiting);
 
-    // Closed runs never move again — except failed → running via retry.
+    // Closed runs never move again, except failed → running via retry.
     // @ts-expect-error a succeeded run cannot be retried
     RunState.retry(succeeded);
     // @ts-expect-error a canceled run cannot be retried
@@ -94,7 +93,7 @@ describe("run state machine (ADR 0002)", () => {
     RunState.retry(running);
     // @ts-expect-error a succeeded run cannot be canceled
     RunState.cancelByOperator(succeeded);
-    // @ts-expect-error a failed run cannot be canceled — retry it or leave it closed
+    // @ts-expect-error a failed run cannot be canceled; retry it or leave it closed
     RunState.cancelByOperator(failed);
     // @ts-expect-error a closed run cannot start again
     RunState.start(canceled);

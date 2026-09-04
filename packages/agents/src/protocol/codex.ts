@@ -1,10 +1,9 @@
 /**
- * NodeNext-compatible view of the exact-pinned generated app-server protocol
- * (`@pwrdrvr/codex-app-server-protocol@0.144.0`, mirroring codex-cli 0.144.0).
- * The upstream package omits extensions in its generated source, so it only
- * resolves under bundler-style resolution; these are the request shapes usine
- * sends on that pinned wire version. `protocol-conformance/check.ts` compiles
- * against the real package and fails `pnpm check` when this view drifts.
+ * The request shapes usine sends to the Codex app server, restated from
+ * `@pwrdrvr/codex-app-server-protocol@0.144.0` (codex-cli 0.144.0) because
+ * that package resolves only under bundler-style resolution.
+ * `protocol-conformance/check.ts` compiles against the real package and fails
+ * `pnpm check` when these shapes drift.
  */
 export interface InitializeParams {
   readonly clientInfo: {

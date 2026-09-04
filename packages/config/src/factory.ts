@@ -64,7 +64,7 @@ export class Worker extends Schema.Class<Worker>("@usine/config/Worker")({
 
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
   pollInterval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
-  /** Total child sessions one Attempt may spawn; this is not a concurrency limit. */
+  /** Total child sessions one Attempt may spawn over its lifetime, not a concurrency limit. */
   maxChildren: ChildSessionBudget.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
   maxAttemptMinutes: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
   maxAttemptTokens: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(10_000_000))),
@@ -82,8 +82,8 @@ export const Webhooks = Schema.Union([
 
 export type Webhooks = typeof Webhooks.Type;
 
-// The authored YAML surface is snake_case; domain fields are camelCase. The
-// renames live here, at the parse boundary, and encode back for edits.
+// Authored YAML keys are snake_case and domain fields camelCase. The rename
+// happens once here and encodes back for edits.
 const SettingsFromYaml = Settings.pipe(
   Schema.encodeKeys({
     pollInterval: "poll_interval",
@@ -103,7 +103,7 @@ const ManagedRepos = Schema.Array(ManagedRepo).check(uniqueNames);
 
 const Workers = Schema.Array(WorkerFromYaml).check(Schema.isNonEmpty(), uniqueNames);
 
-/** Strict, factory-wide authored config from usine.yaml. */
+/** The parsed `usine.yaml`. */
 export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")({
   version: Schema.Literal(1),
   labels: DeclaredLabels.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),

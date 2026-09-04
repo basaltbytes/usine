@@ -44,9 +44,9 @@ export const triggerEvents = snakeCase.table(
     loopName: text().$type<LoopName>().notNull(),
     stepName: text().$type<StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
-    // The submitted execution context, part of the immutable Event fact. A
-    // queued Event (blocked behind a running Run) is claimed later from these
-    // columns; the Run's own copy below is what execution reads.
+    // The execution context as submitted, part of the immutable Event fact. A
+    // queued Event is claimed later from these columns, while execution reads
+    // the Run's own copy below.
     repository: text().$type<RepositoryName>().notNull(),
     revision: text().$type<RepositoryRevision>().notNull(),
     task: text().$type<AttemptTask>().notNull(),
@@ -72,8 +72,8 @@ export const runs = snakeCase.table(
     loopName: text().$type<LoopName>().notNull(),
     stateJson: text({ mode: "json" }).$type<unknown>().notNull(),
     openedAt: text().notNull(),
-    // The Run's *effective* context, seeded from the claiming submission.
-    // ADR 0018's edit-and-retry amends these; the Event columns never change.
+    // The Run's effective context, seeded from the claiming submission.
+    // Edit-and-retry amends these columns; the Event columns never change (ADR 0018).
     repository: text().$type<RepositoryName>().notNull(),
     revision: text().$type<RepositoryRevision>().notNull(),
     task: text().$type<AttemptTask>().notNull(),
@@ -209,7 +209,7 @@ export const workflowCommands = snakeCase.table(
   ],
 );
 
-/** Opaque, owner-validated cursors for efficiency-only trigger state. */
+/** Cursors that only save work; each owner validates its own value. */
 export const cursors = snakeCase.table(
   "usine_cursors",
   {
@@ -219,7 +219,7 @@ export const cursors = snakeCase.table(
   (table) => [check("usine_cursors_value_json_valid", sql`json_valid(${table.valueJson})`)],
 );
 
-/** Latest trigger-owned payload for each Item, projected for operator reads. */
+/** The latest payload seen for each Item, for operator reads. */
 export const itemProjections = snakeCase.table(
   "usine_item_projections",
   {
@@ -238,7 +238,7 @@ export const itemProjections = snakeCase.table(
   ],
 );
 
-/** Latest complete GitHub label catalog for each managed repository. */
+/** The latest complete label catalog for each managed repository. */
 export const repositoryLabelProjections = snakeCase.table(
   "usine_repository_label_projections",
   {
@@ -253,13 +253,13 @@ export const repositoryLabelProjections = snakeCase.table(
   ],
 );
 
-/** Operator-owned runtime toggles; deliberately separate from authored Loop files (ADR 0009). */
+/** Operator-owned runtime toggles, kept apart from authored loop files (ADR 0009). */
 export const loopRuntime = snakeCase.table("usine_loop_runtime", {
   loopName: text().$type<LoopName>().primaryKey(),
   paused: integer({ mode: "boolean" }).notNull(),
 });
 
-/** Singleton invalidation token for cached operator projections. */
+/** Single row whose version invalidates cached operator projections. */
 export const projectionRevision = snakeCase.table(
   "usine_projection_revision",
   {

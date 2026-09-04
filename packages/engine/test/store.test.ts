@@ -368,8 +368,8 @@ describe("run store", () => {
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
         yield* store.recordAndClaim(submission, runId);
-        // With worker capacity, a run routinely closes between claim and
-        // begin. That is a routine outcome, never a defect.
+        // With worker capacity, a run routinely closes between claim and begin;
+        // that is not a defect.
         const outcome = yield* store.cancel(runId);
         assert.strictEqual(outcome._tag, "Canceled");
         const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
@@ -499,8 +499,8 @@ describe("cursor store", () => {
         const restored = yield* store.read(key, TestCursor);
         assert(Option.isSome(restored));
         assert.deepStrictEqual(restored.value, { etag: "second" });
-        // A stored value that no longer decodes (owner schema evolved) must
-        // read as absent, never fail: losing a cursor is always safe.
+        // A stored value that no longer decodes must read as absent, never
+        // fail: losing a cursor is always safe.
         assert(Option.isNone(yield* store.read(key, StricterCursor)));
       }).pipe(Effect.provide(CursorStore.layer), Effect.provide(database));
     }).pipe(Effect.provide(NodeServices.layer)),

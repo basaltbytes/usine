@@ -1,6 +1,6 @@
 import { Schema } from "effect";
 
-/** An opaque vendor model identifier. */
+/** A vendor model identifier, passed through as is. */
 export const ModelId = Schema.String.check(
   Schema.isPattern(/\S/u, { message: "Expected a non-blank model id" }),
 ).pipe(Schema.brand("ModelId"));
@@ -14,7 +14,7 @@ export const EFFORTS = ["off", "minimal", "low", "medium", "high", "xhigh", "max
 export const Effort = Schema.Literals(EFFORTS);
 export type Effort = typeof Effort.Type;
 
-/** The harness child that a run is declared to spawn. */
+/** The harness child a run is declared to spawn. */
 export class BrainSpec extends Schema.Class<BrainSpec>("Agent/BrainSpec")({
   harness: Harness,
   model: ModelId,

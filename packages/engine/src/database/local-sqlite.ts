@@ -55,7 +55,7 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
   return database.pipe(Layer.provideMerge(sqlClient));
 };
 
-/** Local-first runtime backed by `.usine/runtime.sqlite`. */
+/** The local runtime on `.usine/runtime.sqlite`. */
 export const layer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<
@@ -71,7 +71,7 @@ export const layer = (
   StepExecutor
 > => layerWithDatabase(localSqliteLayer(instanceDirectory)).pipe(Layer.provide(NodeServices.layer));
 
-/** Read-only local projection; it never reconciles workflows or starts Attempts. */
+/** Read-only access to the local runtime. It never reconciles workflows or starts Attempts. */
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<

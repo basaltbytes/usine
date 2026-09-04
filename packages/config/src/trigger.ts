@@ -1,10 +1,9 @@
 import { Source } from "@usine/expression/model";
 import { Cron as EffectCron, DateTime, Effect, Option, Result, Schema } from "effect";
 
-// Validated by the same effect Cron parser the engine's scheduler evaluates
-// with, so a cron that parses here parses at tick time too. Evaluation is a
-// weaker guarantee: Cron.prev/next can still fail inside a DST gap, which the
-// scheduler isolates per schedule.
+// Uses the same Cron parser the scheduler evaluates with, so a cron that parses
+// here parses at tick time too. Cron.prev and Cron.next can still fail inside a
+// DST gap; the scheduler isolates that per schedule.
 const isFiveFieldCron = (value: string): boolean =>
   value.trim().split(/\s+/u).length === 5 && Result.isSuccess(EffectCron.parse(value));
 
@@ -47,5 +46,5 @@ export const Trigger = Schema.Union([IssueTrigger, PullRequestTrigger, ScheduleT
 
 export type Trigger = typeof Trigger.Type;
 
-/** The watched streams, derived from the Trigger union so the set has one owner. */
+/** The watched streams. Add a stream by adding a Trigger variant. */
 export type Stream = Trigger["on"];

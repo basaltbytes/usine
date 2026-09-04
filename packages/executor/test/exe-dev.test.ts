@@ -37,8 +37,8 @@ import { TestClock } from "effect/testing";
 const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
 const WORKER = WorkerName.make("remote-one");
 const REPOSITORY = RepositoryName.make("acme/demo");
-// The brand already rejects whitespace and a leading dash; what remains
-// representable ($, ;, quotes) must still die at the shell-quoting boundary.
+// The brand already rejects whitespace and a leading dash; the characters it
+// still allows ($, ;, quotes) must die at the shell-quoting boundary.
 const REVISION = RepositoryRevision.make("main;$(touch$IFS/tmp/usine-injected)");
 const COMMIT = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
 const TASK = AttemptTask.make("Complete the remote task");
@@ -362,7 +362,7 @@ const runtime = (sshLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>)
   exeDevLayer({
     githubIntegrations: [integration],
     harnessLoginChecks: [harness],
-    // Pinned: the cancellation tests advance the TestClock by exactly this.
+    // The cancellation tests advance the TestClock by exactly this much.
     interruptGrace: "2 seconds",
   }).pipe(Layer.provide(sshLayer));
 
@@ -398,8 +398,8 @@ describe("exe.dev executor", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
-      // The sweep failure is isolated: prepare proceeds, but the path outside
-      // the Worker root is never acted on.
+      // The sweep failure is isolated: prepare proceeds, and the path outside
+      // the Worker root is never touched.
       const prepared = yield* executor.prepare(request);
       assert.strictEqual(prepared.spec.attemptId, ATTEMPT_ID);
       assert.deepStrictEqual(prepared.spec.payload, request.payload);
@@ -423,11 +423,11 @@ describe("exe.dev executor", () => {
       const detaches = () =>
         ssh.state.commands.filter(({ args }) => args.join(" ").includes("integrations detach"))
           .length;
-      // The grant released once despite the worktree failure...
+      // The grant is released once despite the worktree failure.
       assert.strictEqual(detaches(), 1);
       const issued = ssh.state.commands.length;
-      // ...and the second cleanup is a recorded no-op, not a second release
-      // that would detach a running sibling's credentials.
+      // The second cleanup is a recorded no-op, not a second release that would
+      // detach a running sibling's credentials.
       yield* executor.cleanup(prepared);
       assert.strictEqual(detaches(), 1);
       assert.strictEqual(ssh.state.commands.length, issued);

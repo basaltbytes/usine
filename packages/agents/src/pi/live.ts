@@ -1,5 +1,3 @@
-/** Node-only Pi parent plus all harness child adapters. */
-
 import { Layer } from "effect";
 import { claudeChildBackendLayer, claudeSdkLive } from "./claude.ts";
 import { childDispatcherLayer } from "./children.ts";
@@ -16,5 +14,5 @@ const childImplementations = Layer.merge(
 );
 const childLive = childDispatcherLayer.pipe(Layer.provide(childImplementations));
 
-/** Production in-process agent runtime: Pi parent with the three harness child backends. */
+/** The Node agent runtime: the Pi parent with the Claude, Codex, and Pi child backends. */
 export const layer = piParentLayer.pipe(Layer.provide(Layer.merge(piSdkLive, childLive)));

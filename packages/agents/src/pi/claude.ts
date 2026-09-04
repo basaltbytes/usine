@@ -48,7 +48,7 @@ export interface ClaudeModelInfo {
   readonly resolvedModel?: string;
 }
 
-/** Narrow vendor seam: tests never need to imitate the SDK's large Query surface. */
+/** The subset of the Claude SDK query the adapter uses, so tests fake only this. */
 export interface ClaudeQuery extends AsyncIterable<Schema.Json> {
   readonly close: () => void;
   readonly interrupt: () => Promise<void>;
@@ -72,7 +72,7 @@ const vendorMessageJson = (message: SDKMessage): Schema.Json =>
 
 export const claudeSdkLive = Layer.succeed(ClaudeSdk)({
   open: (input, options) => {
-    // SAFETY: ClaudeUserMessage is the exact streaming-input subset of SDKUserMessage.
+    // SAFETY: ClaudeUserMessage is the streaming-input subset of SDKUserMessage.
     const query = openClaudeQuery({ prompt: input as AsyncIterable<SDKUserMessage>, options });
     return {
       close: () => query.close(),
@@ -144,9 +144,9 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
     model: request.session.brain.model,
     permissionMode: "bypassPermissions",
     persistSession: false,
-    // The Attempt worktree is repository-controlled input: its project and
-    // local settings (hooks, env) must never load into a child that carries
-    // the App credential. Only the worker user's own settings apply.
+    // The worktree is repository-controlled input. Its project and local
+    // settings (hooks, env) must not load into a child that runs with the App
+    // credential, so only the worker user's settings apply.
     settingSources: ["user"],
   };
   return effort === "off"
@@ -197,8 +197,8 @@ const sessionEventsFrom = (
   if (!Schema.is(ClaudeContentMessage)(message)) return [];
   const events: Array<AgentSessionEvent> = [];
   for (const block of message.message.content) {
-    // Complete messages only: one TextOutput per finished assistant message
-    // keeps transcript volume at message granularity, matching the parent.
+    // Only complete assistant messages become TextOutput events, one per
+    // message, matching the parent's granularity.
     if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
       events.push(new TextOutput({ session, text: block.text }));
     } else if (Schema.is(ClaudeToolUseBlock)(block)) {
