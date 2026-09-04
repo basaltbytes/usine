@@ -520,6 +520,9 @@ describe("PollingTriggers", () => {
         assert.strictEqual(coldStart.changedItems, 2);
         const originalRun = claimedRun(coldStart);
         const originalSnapshot = yield* waitForState(firstEngine, originalRun, "Waiting");
+        // The persisted ItemKey wire format: ledger rows written before the codec
+        // existed must keep matching the keys new polls produce.
+        assert.strictEqual(originalSnapshot.itemKey, '["github","basaltbytes/usine",28]');
         assert.strictEqual(originalSnapshot.task, "Implement issue 28.");
         assert.strictEqual(originalSnapshot.agent.name, "developer");
         assert.strictEqual(originalSnapshot.agent.brain.harness, "codex");
