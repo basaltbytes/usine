@@ -31,6 +31,8 @@ export const failureMessage = (failure: FailureView): string =>
     InfraFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,
     RunawayFailure: ({ ceiling }) => `Runaway guard tripped its ${ceiling} ceiling`,
+    ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
+      `This Attempt used its ${maxChildren}-child session budget; child ${attemptedChildren} did not start`,
   });
 
 export const needCopy = (need: NeedView): NeedCopy =>

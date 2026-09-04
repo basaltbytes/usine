@@ -176,6 +176,7 @@ export const stepExecutorLayer = (
                 task: execution.task,
                 agent: execution.agent,
                 parentModel: execution.parentModel,
+                maxChildren: config.settings.maxChildren,
                 parentEffort: Agent.resolveParentEffort(
                   execution.agent,
                   config.settings.parentEffort,

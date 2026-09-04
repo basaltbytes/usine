@@ -52,6 +52,16 @@ export class Agent extends Schema.Class<Agent>("Agent")({
 export const SessionId = Schema.NonEmptyString.pipe(Schema.brand("AgentSessionId"));
 export type SessionId = typeof SessionId.Type;
 
+const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
+
+/** Value object: maximum child sessions one Attempt may spawn. */
+export const ChildSessionBudget = PositiveInt.pipe(Schema.brand("ChildSessionBudget"));
+export type ChildSessionBudget = typeof ChildSessionBudget.Type;
+
+/** Value object: cumulative child-session spawn ordinal within one Attempt. */
+export const ChildSessionCount = PositiveInt.pipe(Schema.brand("ChildSessionCount"));
+export type ChildSessionCount = typeof ChildSessionCount.Type;
+
 /** Parent session descriptor. It cannot name a parent, so recursive nesting is unrepresentable. */
 export class ParentSession extends Schema.TaggedClass<ParentSession>("Agent/ParentSession")(
   "ParentSession",

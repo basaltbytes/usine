@@ -141,13 +141,28 @@ export const TranscriptSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo
 );
 export type TranscriptSequence = typeof TranscriptSequence.Type;
 
+const LEGACY_TRANSCRIPT_PROTOCOL_VERSION = 3 as const;
+const LegacyTranscriptEnvelope = Schema.Union([
+  Schema.Struct({
+    ...AttemptChannel.OutboundEnvelope.fields,
+    version: Schema.Literal(LEGACY_TRANSCRIPT_PROTOCOL_VERSION),
+  }),
+  Schema.Struct({
+    ...AttemptChannel.InboundEnvelope.fields,
+    version: Schema.Literal(LEGACY_TRANSCRIPT_PROTOCOL_VERSION),
+  }),
+]);
+
+/** Durable v3 envelopes remain readable; the live Attempt channel stays v4-only. */
+const TranscriptEnvelope = Schema.Union([AttemptChannel.Envelope, LegacyTranscriptEnvelope]);
+
 /** One append-only row in an Attempt transcript. */
 export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engine/TranscriptEntry")(
   {
     sequence: TranscriptSequence,
     attemptId: Attempt.AttemptId,
     direction: AttemptChannel.Direction,
-    envelope: AttemptChannel.Envelope,
+    envelope: TranscriptEnvelope,
     receivedAt: Schema.DateTimeUtc,
   },
 ) {}

@@ -1,11 +1,17 @@
 import { Result, Schema, type Effect } from "effect";
-import { SessionEvent as AgentSessionEvent, Agent, Effort, ModelId } from "./agent.ts";
+import {
+  SessionEvent as AgentSessionEvent,
+  Agent,
+  ChildSessionBudget,
+  Effort,
+  ModelId,
+} from "./agent.ts";
 import { AttemptId } from "./lifecycle/attempt.ts";
 import { AttemptFailure } from "./lifecycle/attempt-failure.ts";
 import { CommitSha, Name as RepositoryName, Revision } from "./repository.ts";
 import { StepResult } from "./step-result.ts";
 
-export const PROTOCOL_VERSION = 3 as const;
+export const PROTOCOL_VERSION = 4 as const;
 
 /**
  * Value object: monotonically increasing per-Attempt, per-direction message
@@ -41,6 +47,7 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
   task: Task,
   agent: Agent,
   parentModel: Schema.OptionFromNullOr(ModelId),
+  maxChildren: ChildSessionBudget,
   parentEffort: Effort,
 }) {}
 

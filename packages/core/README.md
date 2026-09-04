@@ -14,16 +14,16 @@ Everything lives in the `lifecycle` cluster: a deduplicated Event opens a Run, t
 | `Instance.Directory`, `Repository.Name`, `Repository.Revision`, `Repository.CommitSha` | Shared value objects — paths and validated Git identities |
 | `Worker.Name`, `Worker.Kind` | Value objects — a Worker identity and its local or exe.dev adapter kind |
 | `Agent.Agent`, `Agent.BrainSpec` | Agent values — a named persona, its child brain, and optional Pi parent-model override |
-| `Agent.SessionEvent` | Session events — typed parent or first-level child lifecycle, text, and tool events |
-| `AttemptChannel.*` | Protocol values: the secret-free run spec, framed input, and protocol-v3 Attempt envelopes (`Started` carries the effective parent model) |
+| `Agent.SessionEvent`, `Agent.ChildSessionBudget`, `Agent.ChildSessionCount` | Session values — typed parent or first-level child events plus per-Attempt child limits and counts |
+| `AttemptChannel.*` | Protocol values: the secret-free run spec, framed input, and protocol-v4 Attempt envelopes (`Started` contains the effective parent model) |
 | `StepResult.*` | Result values — the final agent message plus commit, pull-request, and comment facts |
 | `RunState.*`, `CancelReason`, `Attempt.Outcome` | State value objects — discriminated unions, including a distinct canceled Attempt outcome |
 | `RunState.awaitApproval/start/succeed/fail/retry/cancelByOperator/supersede/revoke` | Typestate transitions — each accepts only the states it is legal on, so an illegal transition is a compile error |
-| `InfraFailure`, `AgentFailure`, `RunawayFailure` | Typed errors — the attempt-failure taxonomy |
+| `InfraFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure` | Typed errors — the attempt-failure taxonomy |
 | `AttemptFailure.isAutoRetryable`, `Attempt.shouldAutoRetry` | Derivers — pure decision functions stating the auto-retry law (class rule; class rule capped by attempt count) |
 
-The run state machine is `pending → waiting → running → succeeded / failed / canceled`, with `failed → running` on operator retry. The failure taxonomy separates infra failures (the only auto-retryable class, capped), agent failures (always wait for the operator), and the runaway guard tripping (never auto-retried).
+The run state machine is `pending → waiting → running → succeeded / failed / canceled`, with `failed → running` on operator retry. The failure taxonomy separates infra failures (the only auto-retryable class, capped), agent failures (always wait for the operator), runaway guard failures, and exhausted child-session budgets. Guard failures never auto-retry.
 
-Each Attempt records the child `BrainSpec` and effective Pi parent model used for that try. The attempt channel carries immutable repository, payload, task, and agent context in its `Start` frame; outbound `SessionEvent` envelopes retain parent and first-level child session identity.
+Each Attempt records the child `BrainSpec` and effective Pi parent model used for that try. The attempt channel includes immutable repository, payload, task, agent context, and child-session budget in its `Start` frame; outbound `SessionEvent` envelopes retain parent and first-level child session identity.
 
 Everything is 0.x: APIs change without notice while the engine grows. `effect` is a peer dependency — supply it yourself at the pinned version.

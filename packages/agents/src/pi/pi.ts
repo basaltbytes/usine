@@ -5,6 +5,7 @@ import {
   type AgentSessionError,
   AgentRuntime,
   ChildBackend,
+  ChildSessionBudgetExceededError,
   type ChildRequest,
   type LaunchRequest,
   PiChildBackend,
@@ -247,6 +248,7 @@ const makePiParent = Effect.gen(function* () {
         label: "Pi parent session",
         sessionId: parentId,
       });
+      const childBudgetExceeded = yield* Deferred.make<ChildSessionBudgetExceededError>();
       // The Pi tool callback runs outside any usine fiber. Child programs must
       // still carry this fiber's services (stderr logging, tracing) and die
       // with this launch scope, so the extension receives a runner instead of
@@ -271,6 +273,9 @@ const makePiParent = Effect.gen(function* () {
                 backend: children,
                 cwd: request.cwd,
                 emit: channel.emit,
+                maxChildren: request.spec.maxChildren,
+                onBudgetExceeded: (error) =>
+                  Deferred.succeed(childBudgetExceeded, error).pipe(Effect.asVoid),
                 parentId,
                 run: runChild,
               }),
@@ -355,20 +360,52 @@ const makePiParent = Effect.gen(function* () {
               persona: request.spec.agent.persona,
               task: request.spec.task,
             });
-            const run = Effect.tryPromise({
-              try: () => started.session.prompt(prompt),
-              catch: (cause) => parentError("stream", request, "Pi parent session failed", cause),
-            }).pipe(
-              Effect.flatMap(() =>
-                channel.finish(
-                  parent,
-                  subscription.lastText() ??
-                    lastPiMessageText(started.session.messages) ??
-                    "Pi parent session completed",
+            const abort = Effect.tryPromise({
+              try: () => started.session.abort(),
+              catch: (cause) => parentError("interrupt", request, "Could not interrupt Pi", cause),
+            });
+            // Fail the channel before aborting the SDK: abort settles the
+            // in-flight prompt, and its fiber must find the result already
+            // terminal rather than race it to `channel.finish`.
+            const budgetFailure = Deferred.await(childBudgetExceeded).pipe(
+              Effect.tap((error) =>
+                Effect.logWarning(
+                  "Stopping Pi parent after its child session budget was exceeded",
+                  {
+                    attemptedChildren: error.attemptedChildren,
+                    maxChildren: error.maxChildren,
+                    sessionId: parentId,
+                  },
                 ),
               ),
-              Effect.catch((error) => channel.fail(error)),
+              Effect.flatMap((error) => channel.fail(error)),
+              Effect.andThen(
+                abort.pipe(
+                  Effect.catch((error) =>
+                    Effect.logWarning("Pi parent kept running after its budget failure", {
+                      message: error.message,
+                      sessionId: parentId,
+                    }),
+                  ),
+                ),
+              ),
             );
+            const run = Effect.raceFirst(
+              Effect.tryPromise({
+                try: () => started.session.prompt(prompt),
+                catch: (cause) => parentError("stream", request, "Pi parent session failed", cause),
+              }).pipe(
+                Effect.flatMap(() =>
+                  channel.finish(
+                    parent,
+                    subscription.lastText() ??
+                      lastPiMessageText(started.session.messages) ??
+                      "Pi parent session completed",
+                  ),
+                ),
+              ),
+              budgetFailure,
+            ).pipe(Effect.catch((error) => channel.fail(error)));
             yield* Effect.forkScoped(run);
 
             const steer = Effect.fn("PiParentRuntime.steer")((message: string) =>
@@ -385,15 +422,7 @@ const makePiParent = Effect.gen(function* () {
             );
             const interrupt = Effect.logInfo("Interrupting Pi parent session", {
               sessionId: parentId,
-            }).pipe(
-              Effect.andThen(
-                Effect.tryPromise({
-                  try: () => started.session.abort(),
-                  catch: (cause) =>
-                    parentError("interrupt", request, "Could not interrupt Pi", cause),
-                }),
-              ),
-            );
+            }).pipe(Effect.andThen(abort));
             return {
               session: parent,
               events: Stream.fromQueue(channel.events),

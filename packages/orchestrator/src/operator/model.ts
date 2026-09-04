@@ -41,7 +41,19 @@ export class RunawayFailureView extends Schema.TaggedClass<RunawayFailureView>(
   "@usine/orchestrator/RunawayFailureView",
 )("RunawayFailure", { ceiling: AttemptFailure.RunawayCeiling }) {}
 
-export const FailureView = Schema.Union([InfraFailureView, AgentFailureView, RunawayFailureView]);
+export class ChildSessionBudgetFailureView extends Schema.TaggedClass<ChildSessionBudgetFailureView>(
+  "@usine/orchestrator/ChildSessionBudgetFailureView",
+)("ChildSessionBudgetFailure", {
+  maxChildren: Agent.ChildSessionBudget,
+  attemptedChildren: Agent.ChildSessionCount,
+}) {}
+
+export const FailureView = Schema.Union([
+  InfraFailureView,
+  AgentFailureView,
+  RunawayFailureView,
+  ChildSessionBudgetFailureView,
+]);
 export type FailureView = typeof FailureView.Type;
 
 export class SucceededAttemptView extends Schema.TaggedClass<SucceededAttemptView>(

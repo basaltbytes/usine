@@ -13,6 +13,7 @@ import {
   AgentFailureView,
   AttemptView,
   CanceledAttemptView,
+  ChildSessionBudgetFailureView,
   FailedAttemptView,
   FailedTranscriptView,
   type FailureView,
@@ -36,6 +37,8 @@ export const failureView = (failure: AttemptFailure.AttemptFailure): FailureView
     InfraFailure: ({ message }) => new InfraFailureView({ message }),
     AgentFailure: ({ message }) => new AgentFailureView({ message }),
     RunawayFailure: ({ ceiling }) => new RunawayFailureView({ ceiling }),
+    ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
+      new ChildSessionBudgetFailureView({ attemptedChildren, maxChildren }),
   });
 
 const attemptOutcomeView = (outcome: Attempt.Outcome) =>

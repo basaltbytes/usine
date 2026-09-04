@@ -31,10 +31,11 @@ const spec = new AttemptChannel.RunSpec({
   task: AttemptChannel.Task.make("Implement the issue"),
   agent,
   parentModel: Option.some(parentModel),
+  maxChildren: Agent.ChildSessionBudget.make(4),
   parentEffort: "high",
 });
 
-describe("attempt channel v3", () => {
+describe("attempt channel v4", () => {
   it("round-trips a final envelope through its framed JSON schema", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,
@@ -60,6 +61,55 @@ describe("attempt channel v3", () => {
     });
 
     assert.deepStrictEqual(decoded, envelope);
+  });
+
+  it("round-trips a child-session budget failure through its framed JSON schema", () => {
+    const envelope = new AttemptChannel.OutboundEnvelope({
+      version: AttemptChannel.PROTOCOL_VERSION,
+      attemptId: spec.attemptId,
+      sequence: AttemptChannel.Sequence.make(2),
+      sentAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
+      payload: new AttemptChannel.Failed({
+        failure: new AttemptFailure.ChildSessionBudgetFailure({
+          maxChildren: spec.maxChildren,
+          attemptedChildren: Agent.ChildSessionCount.make(5),
+        }),
+      }),
+    });
+
+    const encoded = Schema.encodeSync(AttemptChannel.EnvelopeFromJson)(envelope);
+    const decoded = Schema.decodeUnknownSync(AttemptChannel.EnvelopeFromJson)(encoded, {
+      onExcessProperty: "error",
+    });
+    assert.deepStrictEqual(decoded, envelope);
+  });
+
+  it("rejects protocol-v3 frames on the live channel", () => {
+    const start = Schema.encodeSync(AttemptChannel.InputFrame)(
+      new AttemptChannel.Start({ version: AttemptChannel.PROTOCOL_VERSION, spec }),
+    );
+    const outbound = Schema.encodeSync(AttemptChannel.Envelope)(
+      new AttemptChannel.OutboundEnvelope({
+        version: AttemptChannel.PROTOCOL_VERSION,
+        attemptId: spec.attemptId,
+        sequence: AttemptChannel.Sequence.make(1),
+        sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
+        payload: new AttemptChannel.Interrupted(),
+      }),
+    );
+
+    assert.throws(() =>
+      Schema.decodeUnknownSync(AttemptChannel.InputFrame)(
+        { ...start, version: 3 },
+        { onExcessProperty: "error" },
+      ),
+    );
+    assert.throws(() =>
+      Schema.decodeUnknownSync(AttemptChannel.Envelope)(
+        { ...outbound, version: 3 },
+        { onExcessProperty: "error" },
+      ),
+    );
   });
 
   it("round-trips rate-limit reset dates through its framed JSON schema", () => {
