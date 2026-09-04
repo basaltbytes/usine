@@ -106,6 +106,8 @@ describe("ConfigParser", () => {
 
       for (const source of [
         "version: 1\nlabels: [{ name: '   ' }]\nrepos: []\n",
+        "version: 1\nlabels: [{ name: ' ready ' }]\nrepos: []\n",
+        `version: 1\nlabels: [{ name: ${"x".repeat(51)} }]\nrepos: []\n`,
         "version: 1\nlabels: [{ name: ready, color: '#a2eeef' }]\nrepos: []\n",
         "version: 1\nlabels: [{ name: ready, colour: a2eeef }]\nrepos: []\n",
         `version: 1\nlabels: [{ name: ready, description: ${"x".repeat(101)} }]\nrepos: []\n`,
@@ -173,7 +175,24 @@ describe("ConfigParser", () => {
         ].join("\n"),
       );
 
-      const warnings = yield* parser.configWarnings(config, [loop, chainedMacroLoop]);
+      const conditionalLoop = yield* parser.parseLoopFile(
+        InstancePath.make("loops/watch-conditional-label.md"),
+        [
+          "---",
+          "trigger:",
+          "  on: issue",
+          "  if: \"item.labels.nodes.exists(label, label.name == (item.state == 'OPEN' ? 'declared' : 'missing-conditional-trigger'))\"",
+          "agent: developer",
+          "---",
+          "Handle it.",
+        ].join("\n"),
+      );
+
+      const warnings = yield* parser.configWarnings(config, [
+        loop,
+        chainedMacroLoop,
+        conditionalLoop,
+      ]);
       expect(warnings).toEqual([
         expect.objectContaining({
           _tag: "UndeclaredLaneLabelWarning",
@@ -190,6 +209,11 @@ describe("ConfigParser", () => {
           _tag: "UndeclaredTriggerLabelWarning",
           loop: "watch-chained-label",
           label: "missing-chained-trigger",
+        }),
+        expect.objectContaining({
+          _tag: "UndeclaredTriggerLabelWarning",
+          loop: "watch-conditional-label",
+          label: "missing-conditional-trigger",
         }),
       ]);
       expect(warnings.some((warning) => warning.label === "OPEN")).toBe(false);

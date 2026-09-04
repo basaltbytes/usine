@@ -10,7 +10,7 @@ import {
 } from "@usine/engine";
 import { ExpressionEngine } from "@usine/expression";
 import { GitHubLabelWriter, GitHubPolling } from "@usine/github";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 import { LabelReconciler, PollingTriggers } from "../../src/index.ts";
 
 export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
@@ -21,13 +21,40 @@ export const repositoryLabelProjectionWriterLayer = Layer.succeed(RepositoryLabe
   replace: () => Effect.succeed(true),
 });
 
-export const repositoryLabelProjectionReaderLayer = Layer.succeed(RepositoryLabelProjectionReader)({
+const noRepositoryLabelProjections: RepositoryLabelProjectionReader["Service"] = {
   get: () => Effect.succeed(Option.none()),
-});
+};
 
-export const inertGitHubLabelWriterLayer = Layer.succeed(GitHubLabelWriter)({
+export const repositoryLabelProjectionReaderLayer = Layer.succeed(RepositoryLabelProjectionReader)(
+  noRepositoryLabelProjections,
+);
+
+const forgetfulCursorStore: CursorStore["Service"] = {
+  read: () => Effect.succeed(Option.none()),
+  write: () => Effect.void,
+};
+
+/** A cursor store that round-trips encoded cursors, exposing what each poll persisted. */
+export const memoryCursorStore = () => {
+  const stored = new Map<string, Schema.Json>();
+  const store: CursorStore["Service"] = {
+    read: (key, schema) =>
+      Effect.sync(() =>
+        Option.map(Option.fromNullishOr(stored.get(key)), Schema.decodeUnknownSync(schema)),
+      ),
+    write: (key, schema, value) =>
+      Effect.sync(() => {
+        stored.set(key, Schema.encodeSync(schema)(value));
+      }),
+  };
+  return { store, stored };
+};
+
+const inertGitHubLabelWriter: GitHubLabelWriter["Service"] = {
   create: () => Effect.die("no labels are declared by the polling fixture"),
-});
+};
+
+export const inertGitHubLabelWriterLayer = Layer.succeed(GitHubLabelWriter)(inertGitHubLabelWriter);
 
 export const inertLabelReconcilerLayer = LabelReconciler.layer.pipe(
   Layer.provide(inertGitHubLabelWriterLayer),
@@ -44,14 +71,11 @@ export const loopControlLayer = (states: ReadonlyArray<LoopRuntimeState> = []) =
 export const pollingTestLayer = (
   github: GitHubPolling["Service"],
   states: ReadonlyArray<LoopRuntimeState> = [],
-  labelWriter: GitHubLabelWriter["Service"] = {
-    create: () => Effect.die("no labels are declared by the polling fixture"),
-  },
+  labelWriter: GitHubLabelWriter["Service"] = inertGitHubLabelWriter,
+  labelProjections: RepositoryLabelProjectionReader["Service"] = noRepositoryLabelProjections,
+  cursorStore: CursorStore["Service"] = forgetfulCursorStore,
 ) => {
-  const cursors = Layer.succeed(CursorStore)({
-    read: () => Effect.succeed(Option.none()),
-    write: () => Effect.void,
-  });
+  const cursors = Layer.succeed(CursorStore)(cursorStore);
   const expressions = Layer.succeed(ExpressionEngine)({
     relatedStringLiterals: () => Effect.die("unused"),
     checkBoolean: () => Effect.die("unused"),
@@ -77,7 +101,7 @@ export const pollingTestLayer = (
     expressions,
     itemProjectionWriterLayer,
     repositoryLabelProjectionWriterLayer,
-    repositoryLabelProjectionReaderLayer,
+    Layer.succeed(RepositoryLabelProjectionReader)(labelProjections),
     reconciler,
     parser,
     runs,

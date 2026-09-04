@@ -10,8 +10,10 @@ import type {
 /** Backend-neutral CEL operations used by config parsing and prompt rendering. */
 export interface ExpressionEngineService {
   /**
-   * String literals in the smallest expression subtrees related to a member
-   * path. This keeps config diagnostics independent of the CEL backend's AST.
+   * String literals compared against the `name` leaf of values whose lineage
+   * starts at `memberPath` (through macro bindings and collection
+   * transformations). This keeps config diagnostics independent of the CEL
+   * backend's AST.
    */
   readonly relatedStringLiterals: (
     source: Source,

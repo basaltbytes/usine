@@ -85,6 +85,20 @@ describe("ExpressionEngine", () => {
         ["item", "labels"],
       );
       expect(unrelatedProjection).toEqual([]);
+
+      const conditionalResult = yield* engine.relatedStringLiterals(
+        source(
+          'item.labels.nodes.exists(label, label.name == (item.state == "OPEN" ? "ready" : "review"))',
+        ),
+        ["item", "labels"],
+      );
+      expect(conditionalResult).toEqual(["ready", "review"]);
+
+      const membership = yield* engine.relatedStringLiterals(
+        source('item.labels.nodes.exists(label, label.name in ["ready", "review"])'),
+        ["item", "labels"],
+      );
+      expect(membership).toEqual(["ready", "review"]);
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 

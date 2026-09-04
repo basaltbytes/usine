@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import {
   AgentFile,
   AgentName,
+  GitHubLabelName,
   IssueTrigger,
   LoadedInstance,
   LoopFile,
@@ -353,7 +354,7 @@ const testLayer = (
           preflightFindings: [
             new LabelPreflightFinding({
               repository,
-              label: "ready-for-review",
+              label: GitHubLabelName.make("ready-for-review"),
               errorTag: "GitHubApiError",
               message: "GitHub rejected the request with status 500",
             }),

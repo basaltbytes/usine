@@ -19,7 +19,7 @@ labels:
   - name: ready-for-review
 ```
 
-Label names are unique without regard to case. A lane source or trigger-expression string literal that refers to an undeclared label becomes a non-blocking entry in `LoadedInstance.warnings`; prose in prompt bodies is not inspected.
+Label names follow GitHub's contract: at most 50 characters, no surrounding whitespace, and unique without regard to case; descriptions are at most 100 characters. A lane source or trigger-expression string literal that refers to an undeclared label becomes a non-blocking entry in `LoadedInstance.warnings`; prose in prompt bodies is not inspected.
 
 Set `settings.max_children` to the number of child sessions one Attempt may spawn. The default is 4, and the count includes sequential and concurrent child sessions.
 

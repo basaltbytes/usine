@@ -91,7 +91,10 @@ const childNodes = (node: ASTNode): ReadonlyArray<ASTNode> => {
   }
 };
 
-const pathOf = (node: ASTNode): ReadonlyArray<string> | undefined => {
+/** A member path always starts at its root identifier. */
+type MemberPath = readonly [string, ...Array<string>];
+
+const pathOf = (node: ASTNode): MemberPath | undefined => {
   if (node.op === "id") return [node.args];
   if (node.op !== "." && node.op !== ".?") return undefined;
   const parent = pathOf(node.args[0]);
@@ -116,10 +119,8 @@ const lineagePathOf = (
   bindings: MacroBindings,
 ): ReadonlyArray<string> | undefined => {
   const path = pathOf(node);
-  const root = path?.[0];
   if (path !== undefined) {
-    if (root === undefined) return path;
-    const boundPath = bindings.get(root);
+    const boundPath = bindings.get(path[0]);
     return boundPath === undefined ? path : [...boundPath, ...path.slice(1)];
   }
   if (node.op !== "rcall") return undefined;
@@ -139,15 +140,29 @@ const lineagePathOf = (
 const startsWithPath = (path: ReadonlyArray<string>, prefix: ReadonlyArray<string>): boolean =>
   prefix.every((part, index) => path[index] === part);
 
-const stringLiteralsIn = (node: ASTNode): ReadonlyArray<string> => [
-  ...(node.op === "value"
-    ? Option.match(decodeStringLiteral(node.args), {
+/**
+ * String literals an operand can evaluate to. Only result positions count:
+ * a conditional contributes its branches, never its test, and a list its
+ * elements — so `item.state == "OPEN" ? "ready" : "review"` yields the two
+ * label names and not the state.
+ */
+const resultStringLiterals = (node: ASTNode): ReadonlyArray<string> => {
+  switch (node.op) {
+    case "value":
+      return Option.match(decodeStringLiteral(node.args), {
         onNone: () => [],
         onSome: (literal) => [literal],
-      })
-    : []),
-  ...childNodes(node).flatMap(stringLiteralsIn),
-];
+      });
+    case "?:": {
+      const [, whenTrue, whenFalse] = node.args;
+      return [...resultStringLiterals(whenTrue), ...resultStringLiterals(whenFalse)];
+    }
+    case "list":
+      return node.args.flatMap(resultStringLiterals);
+    default:
+      return [];
+  }
+};
 
 const isRelatedName = (
   node: ASTNode,
@@ -169,8 +184,8 @@ const comparisonLiterals = (
     case "in": {
       const [left, right] = node.args;
       return [
-        ...(isRelatedName(left, memberPath, bindings) ? stringLiteralsIn(right) : []),
-        ...(isRelatedName(right, memberPath, bindings) ? stringLiteralsIn(left) : []),
+        ...(isRelatedName(left, memberPath, bindings) ? resultStringLiterals(right) : []),
+        ...(isRelatedName(right, memberPath, bindings) ? resultStringLiterals(left) : []),
       ];
     }
     default:

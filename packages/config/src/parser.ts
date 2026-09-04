@@ -11,6 +11,7 @@ import { splitMarkdown } from "./frontmatter.ts";
 import {
   AgentFile,
   AgentName,
+  canonicalLabelName,
   type ConfigWarning,
   ConfigFileError,
   Effort,
@@ -253,7 +254,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
       }),
   );
 
-const canonicalLabelName = (name: string): string => name.toLowerCase();
+const decodeLabelName = Schema.decodeUnknownOption(GitHubLabelName);
 
 const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
   Effect.fn("ConfigParser.configWarnings")(function* (
@@ -280,7 +281,7 @@ const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
     for (const loop of loops) {
       const literals = yield* engine.relatedStringLiterals(loop.trigger.if, ["item", "labels"]);
       for (const literal of literals) {
-        const label = Schema.decodeUnknownOption(GitHubLabelName)(literal);
+        const label = decodeLabelName(literal);
         if (Option.isSome(label) && !declared.has(canonicalLabelName(label.value))) {
           warnings.push(new UndeclaredTriggerLabelWarning({ loop: loop.name, label: label.value }));
         }

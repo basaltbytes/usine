@@ -1,4 +1,4 @@
-import type { DeclaredLabel } from "@usine/config";
+import { canonicalLabelName, type DeclaredLabel, GitHubLabelName } from "@usine/config";
 import { Repository } from "@usine/core";
 import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine";
 import {
@@ -13,7 +13,7 @@ export class LabelPreflightFinding extends Schema.Class<LabelPreflightFinding>(
   "@usine/orchestrator/LabelPreflightFinding",
 )({
   repository: Repository.Name,
-  label: Schema.NonEmptyString,
+  label: GitHubLabelName,
   errorTag: Schema.NonEmptyString,
   message: Schema.NonEmptyString,
 }) {}
@@ -26,8 +26,6 @@ export interface LabelReconciliation {
   /** Creation rate limits delay the next cycle without blocking this cycle's triggers. */
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
-
-const canonicalName = (name: string): string => name.toLowerCase();
 
 const driftFields = (
   declared: DeclaredLabel,
@@ -90,13 +88,13 @@ export class LabelReconciler extends Context.Service<
         ) {
           yield* Effect.annotateCurrentSpan({ repository });
           const labels = [...existing];
-          const byName = new Map(existing.map((label) => [canonicalName(label.name), label]));
+          const byName = new Map(existing.map((label) => [canonicalLabelName(label.name), label]));
           const findings: Array<LabelPreflightFinding> = [];
           let catalogChanged = false;
           let nextPollAt = Option.none<DateTime.Utc>();
 
           for (const declaration of declared) {
-            const current = byName.get(canonicalName(declaration.name));
+            const current = byName.get(canonicalLabelName(declaration.name));
             if (current !== undefined) {
               const drift = driftFields(declaration, current);
               if (drift.length > 0) {
@@ -162,7 +160,7 @@ export class LabelReconciler extends Context.Service<
               description: created.success.description,
             });
             labels.push(label);
-            byName.set(canonicalName(label.name), label);
+            byName.set(canonicalLabelName(label.name), label);
             catalogChanged = true;
             yield* Effect.logInfo("Created declared GitHub label", {
               repository,
