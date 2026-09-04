@@ -23,6 +23,7 @@ const agent = new Agent.Agent({
     effort: "high",
   }),
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Agent.Persona.make("Implement focused TypeScript changes."),
 });
 const parent = new Agent.ParentSession({

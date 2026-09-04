@@ -26,6 +26,7 @@ import {
   SessionOperationError,
   SessionResult,
   UnknownModelError,
+  UnsupportedEffortError,
   WorkingDirectory,
 } from "../../src/index.ts";
 import {
@@ -112,6 +113,7 @@ const agent = new Agent.Agent({
     effort: "high",
   }),
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Agent.Persona.make("Implement the issue carefully."),
 });
 
@@ -312,6 +314,7 @@ const request = new LaunchRequest({
     agent,
     parentModel: Option.some(parentModel),
     maxChildren: Agent.ChildSessionBudget.make(4),
+    parentEffort: "medium",
   }),
   cwd: WorkingDirectory.make("/workspace/usine"),
 });
@@ -449,6 +452,10 @@ describe("Pi parent runtime", () => {
         assert.strictEqual(interrupted, true);
         assert.strictEqual(options?.extensions.length, 1);
         assert.strictEqual(options?.toolMode, "orchestration");
+        assert.strictEqual(options?.thinkingLevel, "medium");
+        const started = [...events][0];
+        assert(started?._tag === "SessionStarted");
+        assert.strictEqual(started.session.brain.effort, "medium");
         assert.deepStrictEqual(
           events.map((event) => event._tag),
           ["SessionStarted", "TextOutput", "ToolStarted", "ToolFinished", "SessionFinished"],
@@ -565,6 +572,31 @@ describe("Pi parent runtime", () => {
       }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
     );
   });
+
+  it.effect(
+    "surfaces a parent model that cannot run the resolved effort as a typed failure",
+    () => {
+      const sdk = Layer.succeed(PiSdk)({
+        start: () =>
+          Promise.resolve({
+            _tag: "UnsupportedEffort",
+            model: parentModel,
+            effort: "medium",
+            supported: ["off", "high"],
+          }),
+      });
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const runtime = yield* AgentRuntime;
+          const error = yield* Effect.flip(runtime.launch(request));
+          assert(error instanceof UnsupportedEffortError);
+          assert.strictEqual(error.harness, "pi");
+          assert.strictEqual(error.model, parentModel);
+          assert.strictEqual(error.effort, "medium");
+        }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
+      );
+    },
+  );
 
   it.effect("runs a parent model from the ChatGPT subscription pool", () => {
     const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");

@@ -132,6 +132,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
       agent: request.agent,
       parentModel: request.parentModel,
       maxChildren: request.maxChildren,
+      parentEffort: request.parentEffort,
     }),
     worktree: WorktreePath.make(layout.worktree),
   });

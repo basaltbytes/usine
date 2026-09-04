@@ -5,7 +5,7 @@ import { BootScreen } from "@/components/boot-screen";
 import { Button } from "@/components/ui/button";
 import { ProjectBoard } from "../../../board.tsx";
 import { overviewQuery } from "../../../overview.ts";
-import { useOpenRun } from "../../../run-drawer.tsx";
+import { useOpenRun } from "../../../open-run.ts";
 
 const ProjectNotFound = () => (
   <BootScreen

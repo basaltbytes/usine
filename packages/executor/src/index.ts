@@ -99,6 +99,7 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   agent: Agent.Agent,
   parentModel: Schema.Option(Agent.ModelId),
   maxChildren: Agent.ChildSessionBudget,
+  parentEffort: Agent.Effort,
 }) {}
 
 /** Value object (branded path): one Attempt's disposable checkout directory. */

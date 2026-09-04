@@ -144,10 +144,7 @@ const makeRunStore = Effect.gen(function* () {
             supersededRun: Option.none(),
           });
         }
-        if (
-          blockedSnapshot.run.state._tag === "Pending" ||
-          blockedSnapshot.run.state._tag === "Waiting"
-        ) {
+        if (RunState.isUnstarted(blockedSnapshot.run.state)) {
           yield* tx.updateState(
             blockedSnapshot.run.id,
             RunState.supersede(blockedSnapshot.run.state, recorded.event.id),
@@ -205,7 +202,7 @@ const makeRunStore = Effect.gen(function* () {
           }
         }
 
-        if (runState._tag === "Pending" || runState._tag === "Waiting") {
+        if (RunState.isStartable(runState)) {
           runState = RunState.start(runState);
           yield* tx.updateState(runId, runState);
         }
@@ -311,6 +308,7 @@ const makeRunStore = Effect.gen(function* () {
           });
         }
         yield* tx.recordApproval(runId, approval);
+        yield* tx.updateState(runId, RunState.approve(current.run.state));
         yield* tx.requestWorkflowCommand(runId, "Approve");
       }),
     );
@@ -377,7 +375,7 @@ const makeRunStore = Effect.gen(function* () {
         const storedRuns = yield* tx.revokeUnstarted(loop, itemKey);
         for (const row of storedRuns) {
           const current = yield* tx.snapshot(row.runId);
-          if (current.run.state._tag === "Pending" || current.run.state._tag === "Waiting") {
+          if (RunState.isUnstarted(current.run.state)) {
             yield* tx.updateState(row.runId, RunState.revoke(current.run.state));
             yield* tx.requestInterrupt(row.runId);
           }

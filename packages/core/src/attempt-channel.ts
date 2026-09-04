@@ -1,5 +1,11 @@
 import { Result, Schema, type Effect } from "effect";
-import { SessionEvent as AgentSessionEvent, Agent, ChildSessionBudget, ModelId } from "./agent.ts";
+import {
+  SessionEvent as AgentSessionEvent,
+  Agent,
+  ChildSessionBudget,
+  Effort,
+  ModelId,
+} from "./agent.ts";
 import { AttemptId } from "./lifecycle/attempt.ts";
 import { AttemptFailure } from "./lifecycle/attempt-failure.ts";
 import { CommitSha, Name as RepositoryName, Revision } from "./repository.ts";
@@ -42,6 +48,7 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
   agent: Agent,
   parentModel: Schema.OptionFromNullOr(ModelId),
   maxChildren: ChildSessionBudget,
+  parentEffort: Effort,
 }) {}
 
 /**

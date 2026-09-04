@@ -13,9 +13,10 @@ import {
   type RunningSession,
   SessionOperationError,
   UnknownModelError,
+  UnsupportedEffortError,
 } from "../runtime.ts";
 import { lastPiMessageText, sessionChannel, subscribePiSession } from "./session.ts";
-import { PiSdk, usePiStart } from "./sdk.ts";
+import { PiSdk, type PiStartResult, usePiStart } from "./sdk.ts";
 import { subagentsExtension } from "./subagents.ts";
 
 export {
@@ -54,6 +55,23 @@ const childError = (
     cause,
   });
 
+const unsupportedEffort = Effect.fn("Pi.unsupportedEffort")(function* (
+  role: "child" | "parent",
+  started: Extract<PiStartResult, { readonly _tag: "UnsupportedEffort" }>,
+) {
+  yield* Effect.logError(`Pi ${role} rejected an unsupported effort`, {
+    effort: started.effort,
+    model: started.model,
+    supported: started.supported,
+  });
+  return yield* new UnsupportedEffortError({
+    harness: "pi",
+    model: started.model,
+    effort: started.effort,
+    message: `Pi model ${started.model} does not support effort ${started.effort}; supported: ${started.supported.join(", ")}`,
+  });
+});
+
 const makePiChild = Effect.gen(function* () {
   const sdk = yield* PiSdk;
 
@@ -91,6 +109,9 @@ const makePiChild = Effect.gen(function* () {
                 model: request.session.brain.model,
                 message: `Pi does not expose model ${request.session.brain.model}`,
               });
+            }
+            if (started._tag === "UnsupportedEffort") {
+              return yield* unsupportedEffort("child", started);
             }
             if (started._tag === "AuthenticationUnavailable") {
               yield* Effect.logError("Pi child has no credential for its model", {
@@ -217,6 +238,7 @@ const makePiParent = Effect.gen(function* () {
         agent: request.spec.agent.name,
         attemptId: request.spec.attemptId,
         effort: request.spec.agent.brain.effort,
+        parentEffort: request.spec.parentEffort,
         parentModel: Option.getOrUndefined(request.spec.parentModel),
         repository: request.spec.repository,
         sessionId: parentId,
@@ -260,7 +282,7 @@ const makePiParent = Effect.gen(function* () {
             ],
             model: request.spec.parentModel,
             signal,
-            thinkingLevel: request.spec.agent.brain.effort,
+            thinkingLevel: request.spec.parentEffort,
             toolMode: "orchestration",
           }),
         (cause) => parentError("launch", request, "Pi parent session failed to start", cause),
@@ -279,6 +301,9 @@ const makePiParent = Effect.gen(function* () {
                 model,
                 message: `Pi does not expose model ${model}`,
               });
+            }
+            if (started._tag === "UnsupportedEffort") {
+              return yield* unsupportedEffort("parent", started);
             }
             if (started._tag === "AuthenticationUnavailable") {
               yield* Effect.logError("Pi parent has no credential for its model", {
@@ -316,7 +341,7 @@ const makePiParent = Effect.gen(function* () {
               brain: new Agent.BrainSpec({
                 harness: "pi",
                 model: started.model,
-                effort: request.spec.agent.brain.effort,
+                effort: request.spec.parentEffort,
               }),
             });
             yield* channel.emit(new Agent.SessionStarted({ session: parent }));

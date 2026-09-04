@@ -67,6 +67,7 @@ const testAgent = new Agent.Agent({
     effort: "high",
   }),
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Agent.Persona.make("Implement the task."),
 });
 
@@ -476,6 +477,7 @@ describe("local worker", () => {
       agent: testAgent,
       parentModel: Option.none(),
       maxChildren: Agent.ChildSessionBudget.make(4),
+      parentEffort: "high",
     });
     const prepared = new PreparedAttempt({
       worker: Worker.Name.make("local"),

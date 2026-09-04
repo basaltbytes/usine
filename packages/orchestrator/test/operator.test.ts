@@ -94,6 +94,7 @@ const agentFile = new AgentFile({
   model: brain.model,
   effort: brain.effort,
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Persona.make("Review the issue."),
 });
 const loop = new LoopFile({
@@ -153,6 +154,7 @@ const snapshot = new RunSnapshot({
     name: agentFile.name,
     brain,
     parentModel: Option.none(),
+    parentEffort: Option.none(),
     persona: agentFile.persona,
   }),
   parentModel: Option.none(),
@@ -238,6 +240,7 @@ const testLayer = (
   movedLabels: Ref.Ref<ItemLabelMutation | null>,
   overviewReads: Ref.Ref<number>,
   projectionRevision: Ref.Ref<Option.Option<ProjectionRevision>>,
+  runSnapshot: RunSnapshot = snapshot,
 ) => {
   const readTranscript = (query: TranscriptQuery) =>
     Effect.succeed(
@@ -257,7 +260,7 @@ const testLayer = (
   const runs = Layer.succeed(RunEngine)({
     approve: (id, event) => Ref.update(approved, (entries) => [...entries, { runId: id, event }]),
     cancel: () => Effect.void,
-    inspect: () => Effect.succeed(snapshot),
+    inspect: () => Effect.succeed(runSnapshot),
     reconcile: () => Effect.void,
     retry: () => Effect.void,
     revoke: () => Effect.succeed([]),
@@ -265,11 +268,11 @@ const testLayer = (
     transcript: readTranscript,
   });
   const reader = Layer.succeed(RunReader)({
-    inspect: () => Effect.succeed(snapshot),
+    inspect: () => Effect.succeed(runSnapshot),
     list: () =>
       Ref.updateAndGet(overviewReads, (reads) => reads + 1).pipe(
         Effect.andThen(Effect.yieldNow),
-        Effect.as([snapshot]),
+        Effect.as([runSnapshot]),
       ),
     revision: () => Ref.get(projectionRevision),
     transcript: readTranscript,
@@ -381,6 +384,45 @@ const testLayer = (
 };
 
 describe("Operator", () => {
+  it.effect(
+    "rejects approving a Run that already left its gate and keeps it out of needs-you",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
+        const overviewReads = yield* Ref.make(0);
+        const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const queued = new RunSnapshot({
+          ...snapshot,
+          run: new Run.Run({ ...snapshot.run, state: new RunState.Queued() }),
+        });
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const rejected = yield* operator.approve(runId).pipe(Effect.flip);
+          assert(rejected._tag === "RunOperationRejectedError");
+          assert.strictEqual(rejected.state, "Queued");
+          assert.deepStrictEqual(yield* Ref.get(approved), []);
+
+          const overview = yield* operator.overview(instance);
+          assert(overview._tag === "Ready");
+          const run = overview.projects[0]?.runs[0];
+          assert(run !== undefined);
+          assert.strictEqual(run.state, "Queued");
+          assert.strictEqual(run.canApprove, false);
+          assert.strictEqual(run.canCancel, true);
+          // The fixture's malformed Item and poll failure still need the operator; the Run does not.
+          assert.deepStrictEqual(
+            overview.needsYou.map((need) => need._tag),
+            ["BoardProjectionNeed", "PollFailureNeed"],
+          );
+        }).pipe(
+          Effect.provide(
+            testLayer(approved, movedLabels, overviewReads, projectionRevision, queued),
+          ),
+        );
+      }),
+  );
+
   it.effect("projects needs-you state and protocol child activity without recursive nesting", () =>
     Effect.gen(function* () {
       const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);

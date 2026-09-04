@@ -15,3 +15,7 @@ Usine's agent layer is a single adapter: the in-process Pi SDK. Every run is a P
 - Children run headless with permissions bypassed (`bypassPermissions` / `approvalPolicy: never`); isolation remains the worker seam's job. Workers must provision harness binaries, login state, and a duplex channel for the normalized event stream + steer/interrupt.
 - The engine validates only its own shapes (harness enum, effort scale `off|minimal|low|medium|high|xhigh|max`); model ids pass through and an unknown model fails the attempt with a typed error. Runs record what was actually spawned — declare by roster, observe by record.
 - The acceptance loops are harness-free: migrating a loop to a different brain is editing its agent's file, never the loop.
+
+## Amendment (2026-09-03, #102)
+
+The Pi parent's reasoning effort is authored, not inherited. `settings.parent_effort` in `usine.yaml` sets the instance default and `parent_effort` in an agent file overrides it, the same two levels as the parent model. Unset keeps the original behavior: the parent runs at its child's effort. A parent model that cannot run the resolved effort fails the Attempt with a typed error before the session starts, instead of letting the SDK clamp the level.

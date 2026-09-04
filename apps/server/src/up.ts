@@ -8,9 +8,16 @@ import { GitHubCredentials } from "@usine/github";
 import { loadLocalCredentials } from "@usine/github/local-secrets";
 import { Operator, OperatorObservation, Orchestrator } from "@usine/orchestrator";
 import { operatorObservationLayer, runtimeLayer } from "@usine/orchestrator/local";
-import { Console, Context, Effect, Layer, Result } from "effect";
+import { Console, Context, Effect, FileSystem, Layer, Option, Result } from "effect";
 import { liveBackendLayer, needsSetupBackendLayer } from "./backend.ts";
-import { type Port, openBrowser, serverStartError } from "./cli.ts";
+import {
+  type Port,
+  VolatileInstanceDirectoryError,
+  openBrowser,
+  serverStartError,
+  volatileRoot,
+  volatileRoots,
+} from "./cli.ts";
 import { serverLayer } from "./http.ts";
 
 const loadInstance = (directory: Instance.Directory) => {
@@ -54,10 +61,34 @@ const serve = Effect.fn("Server.serve")(function* (options: {
   return yield* Effect.never;
 });
 
-export const up = (port: Port) =>
+const refuseVolatileInstance = Effect.fn("Server.refuseVolatileInstance")(function* (
+  directory: Instance.Directory,
+  allowVolatileInstance: boolean,
+) {
+  const realDirectory = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
+    fileSystem.realPath(directory),
+  ).pipe(Effect.orElseSucceed(() => directory));
+  const roots = volatileRoots(Option.fromNullishOr(process.env.TMPDIR));
+  const root = Option.orElse(volatileRoot(directory, roots), () =>
+    volatileRoot(realDirectory, roots),
+  );
+  if (Option.isNone(root)) return;
+  if (!allowVolatileInstance) {
+    return yield* new VolatileInstanceDirectoryError({ directory, root: root.value });
+  }
+  yield* Effect.logWarning(
+    "Instance folder sits under a volatile path; its runtime store is the only copy of run history",
+    { instanceDirectory: directory, root: root.value },
+  );
+});
+
+export const up = (port: Port, allowVolatileInstance: boolean) =>
   Effect.scoped(
     Effect.gen(function* () {
       const directory = Instance.Directory.make(process.cwd());
+      yield* refuseVolatileInstance(directory, allowVolatileInstance).pipe(
+        Effect.provide(NodeServices.layer),
+      );
       const instance = yield* loadInstance(directory);
       const credentials = yield* loadLocalCredentials(directory).pipe(
         Effect.provide(NodeServices.layer),

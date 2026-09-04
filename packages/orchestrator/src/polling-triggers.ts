@@ -65,6 +65,23 @@ const ITEM_CONCURRENCY = 4;
 const WatchKey = Schema.NonEmptyString.pipe(Schema.brand("GitHubPollWatchKey"));
 type WatchKey = typeof WatchKey.Type;
 
+/**
+ * The ItemKey of one GitHub issue or pull request: the repository's canonical
+ * name and the item number, JSON-encoded. The poll encodes with this schema and
+ * the web decodes with it to link a Run back to its Item, so the two cannot
+ * drift apart. Schedule Runs key the repository alone (see schedule-triggers)
+ * and therefore do not decode as an item.
+ *
+ * `toType` keeps the ItemKey brand on the encoded side, so `encodeSync`
+ * returns an `Item.ItemKey` rather than a bare string.
+ */
+export const GitHubItemKey = Schema.toType(Item.ItemKey).pipe(
+  Schema.decodeTo(
+    Schema.fromJsonString(Schema.Tuple([Schema.Literal("github"), Repository.Name, Item.Number])),
+  ),
+);
+const encodeGitHubItemKey = Schema.encodeSync(GitHubItemKey);
+
 class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   "@usine/orchestrator/StoredPollCursor",
 )({
@@ -160,7 +177,11 @@ const itemStream = (item: ChangedItem): "issue" | "pr" =>
   item._tag === "ChangedIssue" ? "issue" : "pr";
 
 const itemKey = (repository: ManagedRepo, item: ChangedItem): Item.ItemKey =>
-  Item.ItemKey.make(JSON.stringify(["github", Repository.canonical(repository.name), item.number]));
+  encodeGitHubItemKey([
+    "github",
+    Repository.Name.make(Repository.canonical(repository.name)),
+    ItemNumber.make(item.number),
+  ]);
 
 const eventKey = (
   loop: LoopFile,

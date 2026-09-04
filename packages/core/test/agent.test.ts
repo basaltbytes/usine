@@ -1,6 +1,14 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Option, Schema } from "effect";
-import { Agent, BrainSpec, ModelId, Name, Persona, resolveParentModel } from "../src/agent.ts";
+import {
+  Agent,
+  BrainSpec,
+  ModelId,
+  Name,
+  Persona,
+  resolveParentEffort,
+  resolveParentModel,
+} from "../src/agent.ts";
 
 const decodeBrain = Schema.decodeUnknownSync(BrainSpec);
 
@@ -30,10 +38,48 @@ describe("Agent brain specs", () => {
       persona: Persona.make("Implement the issue."),
     } as const;
 
-    const defaulted = new Agent({ ...base, parentModel: Option.none() });
-    const overridden = new Agent({ ...base, parentModel: Option.some(override) });
+    const defaulted = new Agent({
+      ...base,
+      parentModel: Option.none(),
+      parentEffort: Option.none(),
+    });
+    const overridden = new Agent({
+      ...base,
+      parentModel: Option.some(override),
+      parentEffort: Option.none(),
+    });
 
     expect(resolveParentModel(defaulted, Option.some(inherited))).toEqual(Option.some(inherited));
     expect(resolveParentModel(overridden, Option.some(inherited))).toEqual(Option.some(override));
+  });
+
+  it("resolves the parent effort from the roster, then the instance, then the child brain", () => {
+    const base = {
+      name: Name.make("developer"),
+      brain: new BrainSpec({
+        harness: "codex",
+        model: ModelId.make("gpt-5.6-sol"),
+        effort: "xhigh",
+      }),
+      parentModel: Option.none(),
+      persona: Persona.make("Implement the issue."),
+    } as const;
+    const inherited = new Agent({ ...base, parentEffort: Option.none() });
+    const overridden = new Agent({ ...base, parentEffort: Option.some("low") });
+
+    expect(resolveParentEffort(inherited, Option.none())).toBe("xhigh");
+    expect(resolveParentEffort(inherited, Option.some("medium"))).toBe("medium");
+    expect(resolveParentEffort(overridden, Option.some("medium"))).toBe("low");
+  });
+
+  it("decodes a stored Agent without a parent effort as inheriting", () => {
+    const stored = Schema.decodeUnknownSync(Agent)({
+      name: "developer",
+      brain: { harness: "codex", model: "gpt-5.6-sol", effort: "xhigh" },
+      parentModel: null,
+      persona: "Implement the issue.",
+    });
+    expect(Option.isNone(stored.parentEffort)).toBe(true);
+    expect("parentEffort" in Schema.encodeSync(Agent)(stored)).toBe(false);
   });
 });

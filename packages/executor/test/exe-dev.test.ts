@@ -43,6 +43,7 @@ const TEST_AGENT = new Agent.Agent({
     effort: "high",
   }),
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Agent.Persona.make("Implement the task."),
 });
 const TEST_SESSION = new Agent.ParentSession({
@@ -346,6 +347,7 @@ const request = new CheckoutRequest({
   agent: TEST_AGENT,
   parentModel: Option.none(),
   maxChildren: Agent.ChildSessionBudget.make(4),
+  parentEffort: "high",
 });
 
 const runtime = (sshLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>) =>

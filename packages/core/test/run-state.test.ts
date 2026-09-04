@@ -6,10 +6,12 @@ import * as RunState from "../src/lifecycle/run-state.ts";
 const decodeRunState = Schema.decodeUnknownSync(RunState.RunState);
 
 describe("run state machine (ADR 0002)", () => {
-  it("a gated run reaches running only through waiting", () => {
+  it("a gated run reaches running only through waiting and queued", () => {
     const waiting = RunState.awaitApproval(new RunState.Pending());
     expect(waiting._tag).toBe("Waiting");
-    expect(RunState.start(waiting)._tag).toBe("Running");
+    const queued = RunState.approve(waiting);
+    expect(queued._tag).toBe("Queued");
+    expect(RunState.start(queued)._tag).toBe("Running");
   });
 
   it("an ungated run starts straight from pending", () => {
@@ -31,6 +33,7 @@ describe("run state machine (ADR 0002)", () => {
     const open: ReadonlyArray<RunState.Open> = [
       new RunState.Pending(),
       new RunState.Waiting(),
+      new RunState.Queued(),
       new RunState.Running(),
     ];
     for (const state of open) {
@@ -50,11 +53,13 @@ describe("run state machine (ADR 0002)", () => {
   it("revoke records its own reason, distinct from operator cancel and supersede", () => {
     const canceled = RunState.revoke(new RunState.Waiting());
     expect(canceled.reason._tag).toBe("Revoked");
+    expect(RunState.revoke(new RunState.Queued()).reason._tag).toBe("Revoked");
   });
 
-  it("only pending, waiting and running are open", () => {
+  it("only pending, waiting, queued and running are open", () => {
     expect(RunState.isOpen(new RunState.Pending())).toBe(true);
     expect(RunState.isOpen(new RunState.Waiting())).toBe(true);
+    expect(RunState.isOpen(new RunState.Queued())).toBe(true);
     expect(RunState.isOpen(new RunState.Running())).toBe(true);
     expect(RunState.isOpen(new RunState.Succeeded())).toBe(false);
     expect(RunState.isOpen(new RunState.Failed())).toBe(false);
@@ -103,9 +108,14 @@ describe("run state machine (ADR 0002)", () => {
     // @ts-expect-error a closed run cannot be superseded
     RunState.supersede(succeeded, EventId.make("evt-4"));
 
-    // The approval gate is entered exactly once, from pending.
+    // The approval gate is entered exactly once, from pending, and left only
+    // through approve.
     // @ts-expect-error only a pending run can be parked on the approval gate
     RunState.awaitApproval(running);
+    // @ts-expect-error a waiting run has not passed its approval gate
+    RunState.start(waiting);
+    // @ts-expect-error only a waiting run can be approved
+    RunState.approve(pending);
   });
 
   it("a stored state row parses back into the same state", () => {

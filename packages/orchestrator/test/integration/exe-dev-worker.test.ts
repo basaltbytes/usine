@@ -81,6 +81,7 @@ describe("live exe.dev Worker", () => {
           effort: "high",
         }),
         parentModel: Option.none(),
+        parentEffort: Option.none(),
         persona: Agent.Persona.make("Verify the remote Worker transport."),
       });
       const config = Schema.decodeUnknownSync(UsineConfig)({

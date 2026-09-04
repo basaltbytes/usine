@@ -17,6 +17,7 @@ const agent = new Agent.Agent({
     effort: "high",
   }),
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Agent.Persona.make("Implement the task and sign every GitHub comment."),
 });
 const parentModel = Agent.ModelId.make("anthropic/claude-opus-4-6");
@@ -31,6 +32,7 @@ const spec = new AttemptChannel.RunSpec({
   agent,
   parentModel: Option.some(parentModel),
   maxChildren: Agent.ChildSessionBudget.make(4),
+  parentEffort: "high",
 });
 
 describe("attempt channel v4", () => {

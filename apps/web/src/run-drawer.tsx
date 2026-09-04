@@ -1,6 +1,4 @@
-import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useNavigate } from "@tanstack/react-router";
 import type { Run } from "@usine/core";
 import { RunDetailView } from "@usine/orchestrator";
 import type { TranscriptPageCursor } from "@usine/orchestrator";
@@ -8,6 +6,7 @@ import type { Schema } from "effect";
 import { useState, type ReactNode } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { Markdown } from "@/components/markdown";
+import { RunLinks } from "@/components/run-links";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -36,13 +35,6 @@ import {
   Transcript,
 } from "./run-transcript.tsx";
 
-/** Opens the drawer over the current screen by writing the run id into the root search. */
-export const useOpenRun = () => {
-  const navigate = useNavigate();
-  return (runId: Run.RunId) =>
-    void navigate({ to: ".", search: (previous) => ({ ...previous, run: runId }) });
-};
-
 const timeAgo = (value: string): string => {
   const elapsed = Math.max(0, Date.now() - Date.parse(value));
   if (elapsed < 60_000) return "now";
@@ -62,9 +54,12 @@ const Section = ({ title, children }: { readonly title: string; readonly childre
 
 export const RunDrawer = ({
   runId,
+  open,
   close,
 }: {
   readonly runId: Run.RunId;
+  /** False keeps the last Run mounted while the Sheet plays its exit transition. */
+  readonly open: boolean;
   readonly close: () => void;
 }) => {
   const queryClient = useQueryClient();
@@ -86,6 +81,7 @@ export const RunDrawer = ({
       });
     },
     structuralSharing: RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
+    enabled: open,
     refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
   });
   const mutation = useMutation({
@@ -129,9 +125,9 @@ export const RunDrawer = ({
   const meters = poolMeters(detail.data?.transcript ?? []);
   return (
     <Sheet
-      open
-      onOpenChange={(open) => {
-        if (!open) close();
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) close();
       }}
     >
       <SheetContent
@@ -142,11 +138,14 @@ export const RunDrawer = ({
         <SheetHeader className="border-b pr-14">
           <SheetTitle className="text-lg">{run?.loop ?? "Loading…"}</SheetTitle>
           {run !== undefined && (
-            <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono wrap-anywhere">
-              <span>{run.repository}</span>
-              <span>{run.id}</span>
-              {run.loopPaused && <Badge variant="outline">paused</Badge>}
-            </SheetDescription>
+            <>
+              <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono wrap-anywhere">
+                <span>{run.repository}</span>
+                <span>{run.id}</span>
+                {run.loopPaused && <Badge variant="outline">paused</Badge>}
+              </SheetDescription>
+              <RunLinks run={run} />
+            </>
           )}
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
@@ -173,6 +172,11 @@ export const RunDrawer = ({
                   </Badge>
                 ))}
               </div>
+              {run.state === "Queued" && (
+                <p className="border-b px-6 py-3 text-muted-foreground">
+                  Approved. Waiting for a free worker slot.
+                </p>
+              )}
               {(run.canApprove || run.canRetry || run.canCancel) && (
                 <div className="flex flex-wrap items-center gap-2 border-b px-6 py-3">
                   {run.canApprove && (
@@ -256,17 +260,6 @@ export const RunDrawer = ({
               {run.resultMessage !== null && (
                 <Section title="Result">
                   <Markdown className="max-w-prose">{run.resultMessage}</Markdown>
-                  {run.pullRequestUrl !== null && (
-                    <Button
-                      variant="link"
-                      className="mt-2 px-0"
-                      nativeButton={false}
-                      render={<a href={run.pullRequestUrl} target="_blank" rel="noreferrer" />}
-                    >
-                      Open pull request
-                      <ArrowSquareOutIcon data-icon="inline-end" aria-hidden="true" />
-                    </Button>
-                  )}
                 </Section>
               )}
               <Section title="Transcript">
