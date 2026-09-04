@@ -59,6 +59,7 @@ const SAFE_PATH_SEGMENTS = new Set([
   "windowDurationMinutes",
   "resetsAt",
   "parentModel",
+  "parentEffort",
   "result",
   "failure",
 ]);

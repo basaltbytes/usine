@@ -48,6 +48,7 @@ const testAgent = new Agent.Agent({
     effort: "high",
   }),
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Agent.Persona.make("Implement the task."),
 });
 

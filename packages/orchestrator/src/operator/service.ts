@@ -11,6 +11,7 @@ import {
   type LoopRuntimeState,
   type ProjectionRevision,
   type RunEngineError,
+  RunOperationRejectedError,
   type RunStoreError,
 } from "@usine/engine";
 import { GitHubItemWriter, type GitHubAppError } from "@usine/github";
@@ -339,6 +340,18 @@ const makeOperator = Effect.gen(function* () {
 
   const approve = Effect.fn("Operator.approve")(function* (runId: Run.RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
+    const current = yield* runs.inspect(runId);
+    if (current.run.state._tag !== "Waiting") {
+      yield* Effect.logInfo("Operator approval rejected; the Run is past its gate", {
+        runId,
+        state: current.run.state._tag,
+      });
+      return yield* new RunOperationRejectedError({
+        runId,
+        operation: "approve",
+        state: current.run.state._tag,
+      });
+    }
     const receivedAt = yield* DateTime.now;
     const dedupKey = Event.DedupKey.make(JSON.stringify(["operator-approval", runId]));
     yield* runs.approve(

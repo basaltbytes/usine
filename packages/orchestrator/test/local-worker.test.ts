@@ -67,6 +67,7 @@ const testAgent = new Agent.Agent({
     effort: "high",
   }),
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Agent.Persona.make("Implement the task."),
 });
 
@@ -475,6 +476,7 @@ describe("local worker", () => {
       task: AttemptChannel.Task.make("Prove cleanup stays out of the outcome"),
       agent: testAgent,
       parentModel: Option.none(),
+      parentEffort: "high",
     });
     const prepared = new PreparedAttempt({
       worker: Worker.Name.make("local"),

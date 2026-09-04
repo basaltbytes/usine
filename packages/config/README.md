@@ -4,7 +4,7 @@ Reads and edits the authored files in a [usine](https://github.com/basaltbytes/u
 
 - `usine.yaml` defines the schema version, factory-wide GitHub labels, managed-repo registry, settings, workers, webhook mode, and operator login.
 - `loops/*.md` combines strict YAML frontmatter with a Markdown prompt. The parser type-checks the trigger and every `{{ CEL expression }}` against that trigger's payload.
-- `agents/*.md` records a named agent's harness, model, effort, optional parent model, and persona.
+- `agents/*.md` records a named agent's harness, model, effort, optional parent model, optional parent effort, and persona.
 - `updateYaml` and `updateFrontmatter` change one path through the YAML document tree while retaining comments, key order, and the Markdown body.
 
 Authored keys are snake_case (`poll_interval`, `max_concurrent_attempts`); the decoded domain types expose camelCase fields (`pollInterval`, `maxConcurrentAttempts`). The rename is part of the schema, so edits encode back to the authored casing.

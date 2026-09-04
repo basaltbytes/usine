@@ -124,6 +124,7 @@ const makeInstance = (options: {
     model: options.childModel,
     effort: "low",
     parentModel: Option.none(),
+    parentEffort: Option.none(),
     persona: Persona.make(
       "Act conservatively. Perform only the requested GitHub operation and report its result.",
     ),

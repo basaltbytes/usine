@@ -81,6 +81,7 @@ const makeInstance = (repository: Repository.Name, label: string): LoadedInstanc
     model: ModelId.make("gpt-5.6-sol"),
     effort: "high",
     parentModel: Option.none(),
+    parentEffort: Option.none(),
     persona: Persona.make("Exercise the polling integration path."),
   });
   const loop = new LoopFile({

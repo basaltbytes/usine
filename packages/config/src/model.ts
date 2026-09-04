@@ -195,6 +195,7 @@ export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
   maxAttemptMinutes: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
   maxAttemptTokens: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(10_000_000))),
   parentModel: Schema.OptionFromOptionalKey(ModelId),
+  parentEffort: Schema.OptionFromOptionalKey(CoreAgent.Effort),
 }) {}
 
 export const Webhooks = Schema.Union([
@@ -215,6 +216,7 @@ const SettingsFromYaml = Settings.pipe(
     maxAttemptMinutes: "max_attempt_minutes",
     maxAttemptTokens: "max_attempt_tokens",
     parentModel: "parent_model",
+    parentEffort: "parent_effort",
   }),
 );
 const WorkerFromYaml = Worker.pipe(
@@ -320,6 +322,7 @@ export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile"
   model: ModelId,
   effort: Effort,
   parentModel: Schema.Option(ModelId),
+  parentEffort: Schema.Option(Effort),
   persona: Persona,
 }) {}
 

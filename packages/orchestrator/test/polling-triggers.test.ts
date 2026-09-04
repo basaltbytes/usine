@@ -93,6 +93,7 @@ const agent = new AgentFile({
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Persona.make("Implement the issue."),
 });
 

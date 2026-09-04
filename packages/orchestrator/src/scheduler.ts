@@ -1,7 +1,7 @@
 /** Configured FIFO worker scheduler: the platform-free Executor-to-engine adapter. */
 
 import type { Worker as ConfigWorker, UsineConfig } from "@usine/config";
-import { AttemptFailure, Worker } from "@usine/core";
+import { Agent, AttemptFailure, Worker } from "@usine/core";
 import {
   CheckoutRequest,
   Executor,
@@ -134,6 +134,11 @@ export const stepExecutorLayer = (
             state,
           };
           yield* TxPriorityQueue.offer(pending, reservation);
+          yield* Effect.logInfo("Run waits for a worker slot", {
+            loop: submission.loop,
+            itemKey: submission.itemKey,
+            queued: yield* TxPriorityQueue.size(pending),
+          });
           return yield* Deferred.await(deferred).pipe(
             Effect.onInterrupt(() =>
               Ref.modify(state, (current) =>
@@ -171,6 +176,10 @@ export const stepExecutorLayer = (
                 task: execution.task,
                 agent: execution.agent,
                 parentModel: execution.parentModel,
+                parentEffort: Agent.resolveParentEffort(
+                  execution.agent,
+                  config.settings.parentEffort,
+                ),
               }),
             )
             .pipe(Effect.mapError(asInfrastructureFailure));

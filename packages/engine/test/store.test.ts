@@ -51,6 +51,7 @@ const testAgent = new Agent.Agent({
     effort: "high",
   }),
   parentModel: Option.none(),
+  parentEffort: Option.none(),
   persona: Agent.Persona.make("Implement the task."),
 });
 
@@ -104,6 +105,57 @@ describe("run store", () => {
         assert.strictEqual(snapshot.run.state._tag, "Failed");
         assert.strictEqual(snapshot.attempts.length, 3);
         assert(snapshot.attempts.every((attempt) => Option.isSome(attempt.outcome)));
+      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("an approved Run is Queued until its attempt starts", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-queued-" }),
+      );
+      const submission = new Submission({
+        event: new Event.Event({
+          id: Event.EventId.make("queued-event"),
+          dedupKey: Event.DedupKey.make("queued/event/revision"),
+          payload: {},
+          receivedAt: DateTime.makeUnsafe("2026-09-03T00:00:00Z"),
+        }),
+        itemKey: Item.ItemKey.make("queued-item"),
+        loop: Loop.LoopName.make("queued-loop"),
+        step: Step.StepName.make("queued-step"),
+        approval: "required",
+        repository: Repository.Name.make("basaltbytes/usine"),
+        revision: Repository.Revision.make("queued-revision"),
+        task: AttemptChannel.Task.make("Wait for a worker"),
+        agent: testAgent,
+        parentModel: Option.none(),
+      });
+      const approval = new Event.Event({
+        id: Event.EventId.make("queued-approval"),
+        dedupKey: Event.DedupKey.make("queued/approval"),
+        payload: { approved: true },
+        receivedAt: DateTime.makeUnsafe("2026-09-03T00:01:00Z"),
+      });
+      const runId = Run.RunId.make("queued-run");
+
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore;
+        const state = () => store.snapshot(runId).pipe(Effect.map(({ run }) => run.state._tag));
+        yield* store.recordAndClaim(submission, runId);
+        yield* store.parkForApproval(runId);
+        assert.strictEqual(yield* state(), "Waiting");
+
+        yield* store.approve(runId, approval);
+        assert.strictEqual(yield* state(), "Queued");
+        // Re-delivery of the same approval is a no-op, not a rejection.
+        yield* store.approve(runId, approval);
+        assert.strictEqual(yield* state(), "Queued");
+
+        const started = yield* store.beginAttempt(runId, Worker.Name.make("local"));
+        assert.strictEqual(started._tag, "AttemptStarted");
+        assert.strictEqual(yield* state(), "Running");
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
