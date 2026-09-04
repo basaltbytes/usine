@@ -73,6 +73,18 @@ describe("ExpressionEngine", () => {
         ["item", "labels"],
       );
       expect(noLabelLiteral).toEqual([]);
+
+      const chainedMacroLabels = yield* engine.relatedStringLiterals(
+        source('item.labels.nodes.map(label, label.name).exists(name, name == "missing-chained")'),
+        ["item", "labels"],
+      );
+      expect(chainedMacroLabels).toEqual(["missing-chained"]);
+
+      const unrelatedProjection = yield* engine.relatedStringLiterals(
+        source('item.labels.nodes.map(label, item.state).exists(state, state == "OPEN")'),
+        ["item", "labels"],
+      );
+      expect(unrelatedProjection).toEqual([]);
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 

@@ -110,15 +110,30 @@ const MACROS_WITH_BINDINGS: ReadonlySet<string> = new Set([
 
 type MacroBindings = ReadonlyMap<string, ReadonlyArray<string>>;
 
-const resolvedPathOf = (
+/** Resolve a value's source path through macro bindings and collection transformations. */
+const lineagePathOf = (
   node: ASTNode,
   bindings: MacroBindings,
 ): ReadonlyArray<string> | undefined => {
   const path = pathOf(node);
   const root = path?.[0];
-  if (path === undefined || root === undefined) return path;
-  const boundPath = bindings.get(root);
-  return boundPath === undefined ? path : [...boundPath, ...path.slice(1)];
+  if (path !== undefined) {
+    if (root === undefined) return path;
+    const boundPath = bindings.get(root);
+    return boundPath === undefined ? path : [...boundPath, ...path.slice(1)];
+  }
+  if (node.op !== "rcall") return undefined;
+
+  const [macro, receiver, args] = node.args;
+  const receiverPath = lineagePathOf(receiver, bindings);
+  if (receiverPath === undefined) return undefined;
+  if (macro === "filter") return receiverPath;
+  if (macro !== "map") return undefined;
+
+  const [binding, ...body] = args;
+  const projection = body[body.length - 1];
+  if (binding?.op !== "id" || projection === undefined) return undefined;
+  return lineagePathOf(projection, new Map(bindings).set(binding.args, receiverPath));
 };
 
 const startsWithPath = (path: ReadonlyArray<string>, prefix: ReadonlyArray<string>): boolean =>
@@ -139,7 +154,7 @@ const isRelatedName = (
   memberPath: ReadonlyArray<string>,
   bindings: MacroBindings,
 ): boolean => {
-  const path = resolvedPathOf(node, bindings);
+  const path = lineagePathOf(node, bindings);
   return path !== undefined && startsWithPath(path, memberPath) && path[path.length - 1] === "name";
 };
 
@@ -179,7 +194,7 @@ const scanRelatedLiterals = (
 
   const [, receiver, args] = node.args;
   const [binding, ...body] = args;
-  const receiverPath = resolvedPathOf(receiver, bindings);
+  const receiverPath = lineagePathOf(receiver, bindings);
   if (binding?.op !== "id" || receiverPath === undefined) {
     return [
       ...related,

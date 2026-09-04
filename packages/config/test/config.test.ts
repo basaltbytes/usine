@@ -158,8 +158,20 @@ describe("ConfigParser", () => {
           "Handle it.",
         ].join("\n"),
       );
+      const chainedMacroLoop = yield* parser.parseLoopFile(
+        InstancePath.make("loops/watch-chained-label.md"),
+        [
+          "---",
+          "trigger:",
+          "  on: issue",
+          "  if: item.labels.nodes.map(label, label.name).exists(name, name == 'missing-chained-trigger')",
+          "agent: developer",
+          "---",
+          "Handle it.",
+        ].join("\n"),
+      );
 
-      const warnings = yield* parser.configWarnings(config, [loop]);
+      const warnings = yield* parser.configWarnings(config, [loop, chainedMacroLoop]);
       expect(warnings).toEqual([
         expect.objectContaining({
           _tag: "UndeclaredLaneLabelWarning",
@@ -171,6 +183,11 @@ describe("ConfigParser", () => {
           _tag: "UndeclaredTriggerLabelWarning",
           loop: "watch-label",
           label: "missing-trigger",
+        }),
+        expect.objectContaining({
+          _tag: "UndeclaredTriggerLabelWarning",
+          loop: "watch-chained-label",
+          label: "missing-chained-trigger",
         }),
       ]);
       expect(warnings.some((warning) => warning.label === "OPEN")).toBe(false);
