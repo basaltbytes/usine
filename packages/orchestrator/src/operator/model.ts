@@ -13,6 +13,7 @@ import {
 import { GitHubLabelName, LaneItemState, LaneName, LaneSource } from "@usine/config";
 import { TranscriptSequence } from "@usine/engine";
 import { Schema } from "effect";
+import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleFailure } from "../schedule-triggers.ts";
 
@@ -173,6 +174,8 @@ export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/
   board: BoardView,
   /** The repository's label catalog, for coloring badges on cards and lanes. */
   labels: Schema.Array(LabelView),
+  /** Non-blocking failures while provisioning this Project's declared labels. */
+  preflightFindings: Schema.Array(LabelPreflightFinding),
 }) {}
 
 export class BoardMove extends Schema.Class<BoardMove>("@usine/orchestrator/BoardMove")({
@@ -241,6 +244,13 @@ export class PollFailureNeed extends Schema.TaggedClass<PollFailureNeed>(
   failure: RepositoryPollFailure,
 }) {}
 
+export class PreflightFindingNeed extends Schema.TaggedClass<PreflightFindingNeed>(
+  "@usine/orchestrator/PreflightFindingNeed",
+)("PreflightFindingNeed", {
+  id: Schema.String,
+  finding: LabelPreflightFinding,
+}) {}
+
 export class BoardProjectionNeed extends Schema.TaggedClass<BoardProjectionNeed>(
   "@usine/orchestrator/BoardProjectionNeed",
 )("BoardProjectionNeed", {
@@ -260,6 +270,7 @@ export const NeedView = Schema.Union([
   BoardProjectionNeed,
   RunFailureNeed,
   PollFailureNeed,
+  PreflightFindingNeed,
   ScheduleFailureNeed,
 ]);
 export type NeedView = typeof NeedView.Type;

@@ -116,6 +116,7 @@ const instanceWith = (config: UsineConfig, loops: ReadonlyArray<LoopFile>) =>
     invalidAgents: [],
     loops,
     quarantinedLoops: [],
+    warnings: [],
   });
 
 const fakeLayer = (
@@ -391,6 +392,7 @@ describe("ScheduleTriggers", () => {
         parseAgentFile: () => Effect.die("unused"),
         parseLoopFile: () => Effect.die("unused"),
         parseUsineYaml: () => Effect.die("unused"),
+        configWarnings: () => Effect.succeed([]),
         renderPrompt: (loop) =>
           loop.name === broken.name
             ? Effect.fail(

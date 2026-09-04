@@ -1,0 +1,112 @@
+import { ConfigParser } from "@usine/config";
+import {
+  CursorStore,
+  ItemProjectionWriter,
+  LoopControl,
+  type LoopRuntimeState,
+  RepositoryLabelProjectionReader,
+  RepositoryLabelProjectionWriter,
+  RunEngine,
+} from "@usine/engine";
+import { ExpressionEngine } from "@usine/expression";
+import { GitHubLabelWriter, GitHubPolling } from "@usine/github";
+import { Effect, Layer, Option, Schema } from "effect";
+import { LabelReconciler, PollingTriggers } from "../../src/index.ts";
+
+export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
+  upsert: () => Effect.succeed(true),
+});
+
+export const repositoryLabelProjectionWriterLayer = Layer.succeed(RepositoryLabelProjectionWriter)({
+  replace: () => Effect.succeed(true),
+});
+
+const noRepositoryLabelProjections: RepositoryLabelProjectionReader["Service"] = {
+  get: () => Effect.succeed(Option.none()),
+};
+
+export const repositoryLabelProjectionReaderLayer = Layer.succeed(RepositoryLabelProjectionReader)(
+  noRepositoryLabelProjections,
+);
+
+const forgetfulCursorStore: CursorStore["Service"] = {
+  read: () => Effect.succeed(Option.none()),
+  write: () => Effect.void,
+};
+
+/** A cursor store that round-trips encoded cursors, exposing what each poll persisted. */
+export const memoryCursorStore = () => {
+  const stored = new Map<string, Schema.Json>();
+  const store: CursorStore["Service"] = {
+    read: (key, schema) =>
+      Effect.sync(() =>
+        Option.map(Option.fromNullishOr(stored.get(key)), Schema.decodeUnknownSync(schema)),
+      ),
+    write: (key, schema, value) =>
+      Effect.sync(() => {
+        stored.set(key, Schema.encodeSync(schema)(value));
+      }),
+  };
+  return { store, stored };
+};
+
+const inertGitHubLabelWriter: GitHubLabelWriter["Service"] = {
+  create: () => Effect.die("no labels are declared by the polling fixture"),
+};
+
+export const inertGitHubLabelWriterLayer = Layer.succeed(GitHubLabelWriter)(inertGitHubLabelWriter);
+
+export const inertLabelReconcilerLayer = LabelReconciler.layer.pipe(
+  Layer.provide(inertGitHubLabelWriterLayer),
+);
+
+export const loopControlLayer = (states: ReadonlyArray<LoopRuntimeState> = []) =>
+  Layer.succeed(LoopControl)({
+    isPaused: (loop) => Effect.succeed(states.some((state) => state.loop === loop && state.paused)),
+    pause: () => Effect.die("unused"),
+    states: Effect.succeed(states),
+    unpause: () => Effect.die("unused"),
+  });
+
+export const pollingTestLayer = (
+  github: GitHubPolling["Service"],
+  states: ReadonlyArray<LoopRuntimeState> = [],
+  labelWriter: GitHubLabelWriter["Service"] = inertGitHubLabelWriter,
+  labelProjections: RepositoryLabelProjectionReader["Service"] = noRepositoryLabelProjections,
+  cursorStore: CursorStore["Service"] = forgetfulCursorStore,
+) => {
+  const cursors = Layer.succeed(CursorStore)(cursorStore);
+  const expressions = Layer.succeed(ExpressionEngine)({
+    relatedStringLiterals: () => Effect.die("unused"),
+    checkBoolean: () => Effect.die("unused"),
+    checkScalar: () => Effect.die("unused"),
+    evaluateBoolean: () => Effect.die("unused"),
+    evaluateScalar: () => Effect.die("unused"),
+  });
+  const runs = Layer.succeed(RunEngine)({
+    approve: () => Effect.die("unused"),
+    cancel: () => Effect.die("unused"),
+    inspect: () => Effect.die("unused"),
+    reconcile: () => Effect.die("unused"),
+    retry: () => Effect.die("unused"),
+    revoke: () => Effect.die("unused"),
+    submit: () => Effect.die("unused"),
+    transcript: () => Effect.die("unused"),
+  });
+  const parser = ConfigParser.layer.pipe(Layer.provide(expressions));
+  const writer = Layer.succeed(GitHubLabelWriter)(labelWriter);
+  const reconciler = LabelReconciler.layer.pipe(Layer.provide(writer));
+  const dependencies = Layer.mergeAll(
+    cursors,
+    expressions,
+    itemProjectionWriterLayer,
+    repositoryLabelProjectionWriterLayer,
+    Layer.succeed(RepositoryLabelProjectionReader)(labelProjections),
+    reconciler,
+    parser,
+    runs,
+    loopControlLayer(states),
+    Layer.succeed(GitHubPolling, github),
+  );
+  return PollingTriggers.layer.pipe(Layer.provide(dependencies));
+};

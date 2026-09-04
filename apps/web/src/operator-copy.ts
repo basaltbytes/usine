@@ -61,6 +61,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: failure.repository,
       runId: null,
     }),
+    PreflightFindingNeed: ({ finding }) => ({
+      title: "Label preflight failed",
+      detail: `${finding.label}: ${finding.message}`,
+      repository: finding.repository,
+      runId: null,
+    }),
     ScheduleFailureNeed: ({ failure }) => ({
       title: failure._tag === "ScheduleTickFailure" ? failure.errorTag : failure._tag,
       detail: failure.message,

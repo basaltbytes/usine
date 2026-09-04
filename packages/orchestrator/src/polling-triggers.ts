@@ -2,6 +2,7 @@ import {
   ConfigParser,
   environmentFor,
   type ConfigFileError,
+  type DeclaredLabel,
   type LoadedInstance,
   type LoopFile,
   type ManagedRepo,
@@ -21,6 +22,7 @@ import {
   LoopControl,
   RepositoryLabel,
   RepositoryLabelProjection,
+  RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
   RunEngine,
   SubmissionResult,
@@ -49,6 +51,11 @@ import {
   Result,
   Schema,
 } from "effect";
+import {
+  LabelPreflightFinding,
+  type LabelReconciliation,
+  LabelReconciler,
+} from "./label-reconciler.ts";
 import {
   configFileErrorLogFields,
   type ResolvedLoop,
@@ -85,7 +92,7 @@ const encodeGitHubItemKey = Schema.encodeSync(GitHubItemKey);
 class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   "@usine/orchestrator/StoredPollCursor",
 )({
-  boardVersion: Schema.Literal(3),
+  boardVersion: Schema.Literal(4),
   cursor: PollCursor,
   labelEntityTag: Schema.OptionFromNullOr(EntityTag),
   watches: Schema.Array(WatchKey).check(Schema.isUnique()),
@@ -107,6 +114,7 @@ export class PollCycle extends Schema.Class<PollCycle>("@usine/orchestrator/Poll
   /** Run ids actually revoked because their item stopped matching. */
   revokedRuns: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   failures: Schema.Array(RepositoryPollFailure),
+  preflightFindings: Schema.Array(LabelPreflightFinding),
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
 }) {}
 
@@ -125,6 +133,7 @@ const repositoryFailureLogFields = (error: RepositoryPollError) => {
 
 interface WatchedRepository {
   readonly repository: ManagedRepo;
+  readonly declaredLabels: ReadonlyArray<DeclaredLabel>;
   readonly loops: ReadonlyArray<ResolvedLoop>;
   readonly watches: ReadonlyArray<WatchKey>;
 }
@@ -134,6 +143,17 @@ interface RepositoryCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
+  readonly preflightFindings: ReadonlyArray<LabelPreflightFinding>;
+  readonly nextPollAt: Option.Option<DateTime.Utc>;
+}
+
+/** A completed preflight followed by a failed repository-poll phase. */
+interface InterruptedRepositoryCycle {
+  readonly _tag: "InterruptedRepositoryCycle";
+  readonly error: RepositoryPollError;
+  /** Isolated preflight failures (a failed catalog request) survive the interruption. */
+  readonly failures: ReadonlyArray<RepositoryPollFailure>;
+  readonly preflightFindings: ReadonlyArray<LabelPreflightFinding>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
@@ -147,11 +167,26 @@ interface ItemCycle {
 /** What one repository's label-catalog request contributed to its cycle. */
 interface LabelCatalogCycle {
   readonly labelEntityTag: Option.Option<EntityTag>;
-  /** A fresh catalog was stored; its ETag must persist even when no item changed. */
-  readonly stored: boolean;
+  /** The ETag moved; the cursor must persist it even when no item changed. */
+  readonly entityTagChanged: boolean;
+  /**
+   * The catalog GitHub confirmed this cycle: the fresh body, or the stored
+   * projection an unchanged (304) answer vouches for. Absent when the request
+   * failed — provisioning then waits for the next confirmed catalog, so a
+   * transient failure never re-creates labels the repository already has.
+   */
+  readonly confirmedLabels: Option.Option<ReadonlyArray<RepositoryLabel>>;
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
+
+/** Nothing to provision: the cycle had no confirmed catalog to compare against. */
+const DEFERRED_RECONCILIATION: LabelReconciliation = {
+  labels: [],
+  findings: [],
+  catalogChanged: false,
+  nextPollAt: Option.none(),
+};
 
 const cursorKey = (repository: ManagedRepo): CursorKey =>
   CursorKey.make(`github-poll:${Repository.canonical(repository.name)}`);
@@ -167,7 +202,12 @@ const watchedRepositories = (
     const loops = resolved.filter(
       ({ loop }) => loop.trigger.on !== "schedule" && matchesSelector(loop.selector, repository),
     );
-    return { repository, loops, watches: loops.map(watchKey).sort() };
+    return {
+      repository,
+      declaredLabels: instance.config.labels,
+      loops,
+      watches: loops.map(watchKey).sort(),
+    };
   });
 
 const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKey>): boolean =>
@@ -232,14 +272,16 @@ export class PollingTriggers extends Context.Service<
       const expressions = yield* ExpressionEngine;
       const github = yield* GitHubPolling;
       const items = yield* ItemProjectionWriter;
-      const repositoryLabels = yield* RepositoryLabelProjectionWriter;
+      const repositoryLabelReader = yield* RepositoryLabelProjectionReader;
+      const repositoryLabelWriter = yield* RepositoryLabelProjectionWriter;
+      const labelReconciler = yield* LabelReconciler;
       const runs = yield* RunEngine;
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
 
       const emptyCursor = (watches: ReadonlyArray<WatchKey>) =>
         new StoredPollCursor({
-          boardVersion: 3,
+          boardVersion: 4,
           cursor: PollCursor.empty,
           labelEntityTag: Option.none(),
           watches,
@@ -388,9 +430,10 @@ export class PollingTriggers extends Context.Service<
       });
 
       /**
-       * The label catalog feeds the Board projection only. A failed catalog
-       * request keeps the stored catalog and ETag and never blocks trigger
-       * evaluation: label-triggered Loops fire from the change poll alone.
+       * The label catalog feeds the Board projection and the label preflight.
+       * A failed catalog request keeps the stored catalog and ETag, defers
+       * provisioning, and never blocks trigger evaluation: label-triggered
+       * Loops fire from the change poll alone.
        */
       const applyLabelCatalog = Effect.fn("PollingTriggers.applyLabelCatalog")(function* (
         watched: WatchedRepository,
@@ -399,22 +442,26 @@ export class PollingTriggers extends Context.Service<
       ) {
         const unchanged = {
           labelEntityTag: stored.labelEntityTag,
-          stored: false,
+          entityTagChanged: false,
+          confirmedLabels: Option.none(),
           failures: [],
           nextPollAt: Option.none(),
         } satisfies LabelCatalogCycle;
         if (Result.isFailure(result)) {
           const error = result.failure;
           if (error._tag === "GitHubRateLimitError") {
-            yield* Effect.logWarning("Label catalog rate-limited; keeping the stored catalog", {
-              repository: watched.repository.name,
-              operation: error.operation,
-              retryAt: DateTime.formatIso(error.retryAt),
-            });
+            yield* Effect.logWarning(
+              "Label catalog rate-limited; kept the stored catalog and deferred label provisioning",
+              {
+                repository: watched.repository.name,
+                operation: error.operation,
+                retryAt: DateTime.formatIso(error.retryAt),
+              },
+            );
             return { ...unchanged, nextPollAt: Option.some(error.retryAt) };
           }
           yield* Effect.logError(
-            "Label catalog request failed; kept the stored catalog and evaluated items anyway",
+            "Label catalog request failed; kept the stored catalog, deferred label provisioning, and evaluated items anyway",
             {
               repository: watched.repository.name,
               ...repositoryFailureLogFields(error),
@@ -433,21 +480,34 @@ export class PollingTriggers extends Context.Service<
         }
         const detection = result.success;
         if (!(detection instanceof RepositoryLabelCatalog)) {
+          const projection = yield* repositoryLabelReader.get(watched.repository.name);
+          if (Option.isNone(projection)) {
+            // The ETag vouches for a projection that is no longer stored:
+            // drop it so the next cycle fetches the catalog in full.
+            yield* Effect.logWarning(
+              "Repository label catalog unchanged (304) but its projection is missing; refetching next cycle and deferring label provisioning",
+              { repository: watched.repository.name },
+            );
+            return { ...unchanged, labelEntityTag: Option.none(), entityTagChanged: true };
+          }
           yield* Effect.logDebug("Repository label catalog unchanged (304)", {
             repository: watched.repository.name,
           });
-          return unchanged;
+          return { ...unchanged, confirmedLabels: Option.some(projection.value.labels) };
         }
-        yield* repositoryLabels.replace(
-          new RepositoryLabelProjection({
-            repository: watched.repository.name,
-            labels: detection.labels.map(
-              ({ name, color, description }) =>
-                new RepositoryLabel({ name, color: Option.some(color), description }),
-            ),
-          }),
+        const labels = detection.labels.map(
+          ({ name, color, description }) =>
+            new RepositoryLabel({ name, color: Option.some(color), description }),
         );
-        return { ...unchanged, labelEntityTag: detection.entityTag, stored: true };
+        yield* repositoryLabelWriter.replace(
+          new RepositoryLabelProjection({ repository: watched.repository.name, labels }),
+        );
+        return {
+          ...unchanged,
+          labelEntityTag: detection.entityTag,
+          entityTagChanged: true,
+          confirmedLabels: Option.some(labels),
+        };
       });
 
       const pollRepository = Effect.fn("PollingTriggers.pollRepository")(function* (
@@ -455,58 +515,83 @@ export class PollingTriggers extends Context.Service<
       ) {
         yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
         const stored = yield* readCursor(watched);
-        const [detected, labelResult] = yield* Effect.all(
-          [
-            github.changes(watched.repository.name, stored.cursor),
-            Effect.result(github.labels(watched.repository.name, stored.labelEntityTag)),
-          ] as const,
-          { concurrency: "unbounded" },
+        const labelResult = yield* Effect.result(
+          github.labels(watched.repository.name, stored.labelEntityTag),
         );
         const catalog = yield* applyLabelCatalog(watched, stored, labelResult);
-        const nextCursor = new StoredPollCursor({
-          boardVersion: 3,
-          cursor: detected.cursor,
-          labelEntityTag: catalog.labelEntityTag,
-          watches: watched.watches,
+        const reconciliation = yield* Option.match(catalog.confirmedLabels, {
+          onNone: () => Effect.succeed(DEFERRED_RECONCILIATION),
+          onSome: (labels) =>
+            labelReconciler.reconcile(watched.repository.name, watched.declaredLabels, labels),
         });
-        const nextPollAt = latestPollAt([detected.nextPollAt, catalog.nextPollAt]);
-        if (detected._tag === "RepositoryNotModified") {
-          if (catalog.stored) {
-            yield* writeCursor(watched, nextCursor);
+        const preflightNextPollAt = latestPollAt([catalog.nextPollAt, reconciliation.nextPollAt]);
+        return yield* Effect.gen(function* () {
+          if (reconciliation.catalogChanged) {
+            yield* repositoryLabelWriter.replace(
+              new RepositoryLabelProjection({
+                repository: watched.repository.name,
+                labels: reconciliation.labels,
+              }),
+            );
           }
-          yield* Effect.logDebug("Repository unchanged (304)", {
-            repository: watched.repository.name,
+          // Label creation is preflight work: it completes before change detection
+          // and Item evaluation begin, including on the first `usine up` cycle.
+          const detected = yield* github.changes(watched.repository.name, stored.cursor);
+          const nextCursor = new StoredPollCursor({
+            boardVersion: 4,
+            cursor: detected.cursor,
+            labelEntityTag: reconciliation.catalogChanged ? Option.none() : catalog.labelEntityTag,
+            watches: watched.watches,
           });
+          const nextPollAt = latestPollAt([detected.nextPollAt, preflightNextPollAt]);
+          if (detected._tag === "RepositoryNotModified") {
+            if (catalog.entityTagChanged || reconciliation.catalogChanged) {
+              yield* writeCursor(watched, nextCursor);
+            }
+            yield* Effect.logDebug("Repository unchanged (304)", {
+              repository: watched.repository.name,
+            });
+            return {
+              changedItems: 0,
+              submissions: [],
+              revokedRuns: 0,
+              failures: catalog.failures,
+              preflightFindings: reconciliation.findings,
+              nextPollAt,
+            } satisfies RepositoryCycle;
+          }
+
+          yield* Effect.logInfo("Repository changed", {
+            repository: watched.repository.name,
+            changedItems: detected.items.length,
+            backlog: detected.backlog,
+          });
+          const itemCycles = yield* Effect.forEach(
+            detected.items,
+            (item) => evaluateItem(watched, item),
+            { concurrency: ITEM_CONCURRENCY },
+          );
+          // Advancing is the commit point: every changed item was fetched,
+          // evaluated, and submitted/revoked successfully. A prior failure
+          // leaves the old cursor so the next cycle safely re-polls.
+          yield* writeCursor(watched, nextCursor);
           return {
-            changedItems: 0,
-            submissions: [],
-            revokedRuns: 0,
-            failures: catalog.failures,
+            changedItems: detected.items.length,
+            submissions: itemCycles.flatMap(({ submissions }) => submissions),
+            revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
+            failures: [...catalog.failures, ...itemCycles.flatMap(({ failures }) => failures)],
+            preflightFindings: reconciliation.findings,
             nextPollAt,
           } satisfies RepositoryCycle;
-        }
-
-        yield* Effect.logInfo("Repository changed", {
-          repository: watched.repository.name,
-          changedItems: detected.items.length,
-          backlog: detected.backlog,
-        });
-        const itemCycles = yield* Effect.forEach(
-          detected.items,
-          (item) => evaluateItem(watched, item),
-          { concurrency: ITEM_CONCURRENCY },
+        }).pipe(
+          Effect.mapError((error): InterruptedRepositoryCycle => ({
+            _tag: "InterruptedRepositoryCycle",
+            error,
+            failures: catalog.failures,
+            preflightFindings: reconciliation.findings,
+            nextPollAt: preflightNextPollAt,
+          })),
         );
-        // Advancing is the commit point: every changed item was fetched,
-        // evaluated, and submitted/revoked successfully. A prior failure
-        // leaves the old cursor so the next cycle safely re-polls.
-        yield* writeCursor(watched, nextCursor);
-        return {
-          changedItems: detected.items.length,
-          submissions: itemCycles.flatMap(({ submissions }) => submissions),
-          revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
-          failures: [...catalog.failures, ...itemCycles.flatMap(({ failures }) => failures)],
-          nextPollAt,
-        } satisfies RepositoryCycle;
       });
 
       const poll = Effect.fn("PollingTriggers.poll")(function* (instance: LoadedInstance) {
@@ -536,12 +621,20 @@ export class PollingTriggers extends Context.Service<
         const cycles: Array<RepositoryCycle> = [];
         const failures: Array<RepositoryPollFailure> = [];
         const backoffs: Array<Option.Option<DateTime.Utc>> = [];
+        const preflightFindings: Array<LabelPreflightFinding> = [];
         for (const { repository, result } of settled) {
           if (Result.isSuccess(result)) {
             cycles.push(result.success);
+            preflightFindings.push(...result.success.preflightFindings);
             continue;
           }
-          const error: RepositoryPollError = result.failure;
+          const interrupted = result.failure._tag === "InterruptedRepositoryCycle";
+          const error: RepositoryPollError = interrupted ? result.failure.error : result.failure;
+          if (interrupted) {
+            failures.push(...result.failure.failures);
+            preflightFindings.push(...result.failure.preflightFindings);
+            backoffs.push(result.failure.nextPollAt);
+          }
           if (error._tag === "GitHubRateLimitError") {
             // A rate-limit pause is scheduling input, not a repository failure.
             yield* Effect.logWarning("GitHub rate limit reached; delaying the next cycle", {
@@ -570,6 +663,7 @@ export class PollingTriggers extends Context.Service<
           submissions: cycles.flatMap(({ submissions }) => submissions),
           revokedRuns: cycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
           failures: [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
+          preflightFindings,
           nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
         });
         yield* Ref.set(latest, Option.some(cycle));
@@ -607,6 +701,7 @@ export class PollingTriggers extends Context.Service<
             submissions: cycle.submissions.length,
             revokedRuns: cycle.revokedRuns,
             failures: cycle.failures.length,
+            preflightFindings: cycle.preflightFindings.length,
             sleepMs,
           });
           yield* Effect.sleep(Duration.millis(sleepMs));

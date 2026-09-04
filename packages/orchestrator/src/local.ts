@@ -7,12 +7,13 @@ import {
   observationLayer as localObservationLayer,
 } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression";
-import { GitHubApp, GitHubItemWriter, GitHubPolling } from "@usine/github";
+import { GitHubApp, GitHubItemWriter, GitHubLabelWriter, GitHubPolling } from "@usine/github";
 import { executableCommand } from "@usine/run-host/executable";
 import { Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { gitHubCredentialLayer } from "./credentials.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
+import { LabelReconciler } from "./label-reconciler.ts";
 import { Operator, OperatorObservation } from "./operator/service.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { PollingTriggers } from "./polling-triggers.ts";
@@ -69,8 +70,20 @@ export const runtimeLayer = (
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),
   );
+  const labelWriter = GitHubLabelWriter.layer.pipe(
+    Layer.provide(app),
+    Layer.provide(FetchHttpClient.layer),
+  );
+  const labelReconciler = LabelReconciler.layer.pipe(Layer.provide(labelWriter));
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-  const dependencies = Layer.mergeAll(engine, itemWriter, MarcbachmannCelLayer, parser, polling);
+  const dependencies = Layer.mergeAll(
+    engine,
+    itemWriter,
+    labelReconciler,
+    MarcbachmannCelLayer,
+    parser,
+    polling,
+  );
   const triggers = Layer.mergeAll(PollingTriggers.layer, ScheduleTriggers.layer).pipe(
     Layer.provide(dependencies),
   );

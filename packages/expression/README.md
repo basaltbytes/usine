@@ -4,6 +4,8 @@ Typed CEL checking and evaluation for [usine](https://github.com/basaltbytes/usi
 
 Unknown variables and object paths fail during checking, including paths inside CEL macros such as `exists`. Failures are typed values: `ExpressionCheckError` from parsing, type checking, or result-type checking, `ExpressionEvaluationError` from evaluation, and the `ExpressionError` union covering both. JSON integers declared as CEL `int` or `uint` are converted to `bigint` before evaluation so GraphQL payloads keep CEL integer semantics.
 
+`relatedStringLiterals(source, memberPath)` reports string literals from the smallest expression subtrees that use a member path. Config validation uses it to diagnose undeclared GitHub labels without coupling `@usine/config` to the CEL adapter's AST.
+
 `MarcbachmannCelLayer` uses `@marcbachmann/cel-js@8.0.0`. The exported `ExpressionEngine` contract contains CEL type names and usine-owned descriptors rather than library objects; an `@bufbuild/cel` adapter can provide the same service tag without changing callers.
 
 All APIs remain 0.x and can change between minor releases.

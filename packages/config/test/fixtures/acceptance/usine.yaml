@@ -1,5 +1,8 @@
 # One schema version governs usine.yaml, loops, and agents.
 version: 1
+labels:
+  - name: ready
+  - name: ready-for-agent
 repos:
   - name: basaltbytes/usine
     tags: [active]

@@ -24,6 +24,7 @@ export type PrivateKey = typeof PrivateKey.Type;
 export const RedactedPrivateKey = Schema.RedactedFromValue(PrivateKey, { disallowEncode: true });
 
 export const GitHubOperation = Schema.Literals([
+  "create-repository-label",
   "discover-installation",
   "fetch-item-labels",
   "fetch-issue-snapshot",

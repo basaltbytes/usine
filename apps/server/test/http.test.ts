@@ -39,6 +39,7 @@ const instance = new LoadedInstance({
   invalidAgents: [],
   loops: [],
   quarantinedLoops: [],
+  warnings: [],
 });
 const run = new RunView({
   id: runId,
@@ -72,6 +73,7 @@ const overview = new ReadyOverview({
       runs: [run],
       board: new BoardView({ failures: [], lanes: [] }),
       labels: [],
+      preflightFindings: [],
     }),
   ],
   loops: [new LoopView({ name: loopName, trigger: "issue", agent: agentName, paused: true })],

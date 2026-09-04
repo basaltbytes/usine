@@ -58,6 +58,50 @@ describe("ExpressionEngine", () => {
     }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 
+  it.effect("finds label-related string literals without treating state literals as labels", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const labels = yield* engine.relatedStringLiterals(
+        source('item.labels.nodes.exists(label, label.name == "ready" && item.state == "OPEN")'),
+        ["item", "labels"],
+      );
+
+      expect(labels).toEqual(["ready"]);
+
+      const noLabelLiteral = yield* engine.relatedStringLiterals(
+        source('item.labels.totalCount > 0 && item.state == "OPEN"'),
+        ["item", "labels"],
+      );
+      expect(noLabelLiteral).toEqual([]);
+
+      const chainedMacroLabels = yield* engine.relatedStringLiterals(
+        source('item.labels.nodes.map(label, label.name).exists(name, name == "missing-chained")'),
+        ["item", "labels"],
+      );
+      expect(chainedMacroLabels).toEqual(["missing-chained"]);
+
+      const unrelatedProjection = yield* engine.relatedStringLiterals(
+        source('item.labels.nodes.map(label, item.state).exists(state, state == "OPEN")'),
+        ["item", "labels"],
+      );
+      expect(unrelatedProjection).toEqual([]);
+
+      const conditionalResult = yield* engine.relatedStringLiterals(
+        source(
+          'item.labels.nodes.exists(label, label.name == (item.state == "OPEN" ? "ready" : "review"))',
+        ),
+        ["item", "labels"],
+      );
+      expect(conditionalResult).toEqual(["ready", "review"]);
+
+      const membership = yield* engine.relatedStringLiterals(
+        source('item.labels.nodes.exists(label, label.name in ["ready", "review"])'),
+        ["item", "labels"],
+      );
+      expect(membership).toEqual(["ready", "review"]);
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
   it.effect("rejects unknown variables and paths inside macro bodies during checking", () =>
     Effect.gen(function* () {
       const engine = yield* ExpressionEngine;

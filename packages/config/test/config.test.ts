@@ -40,6 +40,7 @@ describe("ConfigParser", () => {
       expect(config.workers).toHaveLength(1);
       expect(config.workers[0]?.name).toBe("local");
       expect(config.repos).toEqual([]);
+      expect(config.labels).toEqual([]);
       expect(config.webhooks.mode).toBe("off");
       expect(Option.isNone(config.operator)).toBe(true);
 
@@ -74,6 +75,148 @@ describe("ConfigParser", () => {
         .pipe(Effect.flip);
       expect(failure.stage).toBe("schema");
       expect(failure.message).toContain('["enabled"]');
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("parses declared labels and rejects invalid label declarations", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const configured = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        [
+          "version: 1",
+          "labels:",
+          "  - name: ready-for-agent",
+          "    color: A2EEEF",
+          "    description: Ready for an agent to claim",
+          "  - name: ready-for-review",
+          "repos: []",
+        ].join("\n"),
+      );
+
+      expect(configured.labels.map(({ name }) => name)).toEqual([
+        "ready-for-agent",
+        "ready-for-review",
+      ]);
+      expect(Option.getOrNull(configured.labels[0]?.color ?? Option.none())).toBe("A2EEEF");
+      expect(Option.getOrNull(configured.labels[0]?.description ?? Option.none())).toBe(
+        "Ready for an agent to claim",
+      );
+      expect(Option.isNone(configured.labels[1]?.color ?? Option.none())).toBe(true);
+
+      for (const source of [
+        "version: 1\nlabels: [{ name: '   ' }]\nrepos: []\n",
+        "version: 1\nlabels: [{ name: ' ready ' }]\nrepos: []\n",
+        `version: 1\nlabels: [{ name: ${"x".repeat(51)} }]\nrepos: []\n`,
+        "version: 1\nlabels: [{ name: ready, color: '#a2eeef' }]\nrepos: []\n",
+        "version: 1\nlabels: [{ name: ready, colour: a2eeef }]\nrepos: []\n",
+        `version: 1\nlabels: [{ name: ready, description: ${"x".repeat(101)} }]\nrepos: []\n`,
+      ]) {
+        const failure = yield* parser
+          .parseUsineYaml(InstancePath.make("usine.yaml"), source)
+          .pipe(Effect.flip);
+        expect(failure.stage).toBe("schema");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("rejects case-only duplicate label declarations", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const failure = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          "version: 1\nlabels: [{ name: Ready }, { name: ready }]\nrepos: []\n",
+        )
+        .pipe(Effect.flip);
+
+      expect(failure.stage).toBe("schema");
+      expect(failure.message).toContain("unique GitHub label names");
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("warns when a Lane or label-related trigger literal is undeclared", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const config = yield* parser.parseUsineYaml(
+        InstancePath.make("usine.yaml"),
+        [
+          "version: 1",
+          "labels: [{ name: declared }]",
+          "repos:",
+          "  - name: basaltbytes/usine",
+          "    lanes:",
+          "      - name: Ready",
+          "        sources: [{ label: missing-lane }]",
+        ].join("\n"),
+      );
+      const loop = yield* parser.parseLoopFile(
+        InstancePath.make("loops/watch-label.md"),
+        [
+          "---",
+          "trigger:",
+          "  on: issue",
+          "  if: item.labels.nodes.exists(label, label.name == 'missing-trigger' && item.state == 'OPEN')",
+          "agent: developer",
+          "---",
+          "Handle it.",
+        ].join("\n"),
+      );
+      const chainedMacroLoop = yield* parser.parseLoopFile(
+        InstancePath.make("loops/watch-chained-label.md"),
+        [
+          "---",
+          "trigger:",
+          "  on: issue",
+          "  if: item.labels.nodes.map(label, label.name).exists(name, name == 'missing-chained-trigger')",
+          "agent: developer",
+          "---",
+          "Handle it.",
+        ].join("\n"),
+      );
+
+      const conditionalLoop = yield* parser.parseLoopFile(
+        InstancePath.make("loops/watch-conditional-label.md"),
+        [
+          "---",
+          "trigger:",
+          "  on: issue",
+          "  if: \"item.labels.nodes.exists(label, label.name == (item.state == 'OPEN' ? 'declared' : 'missing-conditional-trigger'))\"",
+          "agent: developer",
+          "---",
+          "Handle it.",
+        ].join("\n"),
+      );
+
+      const warnings = yield* parser.configWarnings(config, [
+        loop,
+        chainedMacroLoop,
+        conditionalLoop,
+      ]);
+      expect(warnings).toEqual([
+        expect.objectContaining({
+          _tag: "UndeclaredLaneLabelWarning",
+          repository: "basaltbytes/usine",
+          lane: "Ready",
+          label: "missing-lane",
+        }),
+        expect.objectContaining({
+          _tag: "UndeclaredTriggerLabelWarning",
+          loop: "watch-label",
+          label: "missing-trigger",
+        }),
+        expect.objectContaining({
+          _tag: "UndeclaredTriggerLabelWarning",
+          loop: "watch-chained-label",
+          label: "missing-chained-trigger",
+        }),
+        expect.objectContaining({
+          _tag: "UndeclaredTriggerLabelWarning",
+          loop: "watch-conditional-label",
+          label: "missing-conditional-trigger",
+        }),
+      ]);
+      expect(warnings.some((warning) => warning.label === "OPEN")).toBe(false);
     }).pipe(Effect.provide(parserLayer)),
   );
 
@@ -328,6 +471,7 @@ describe("InstanceFolder", () => {
             invalidAgents: loaded.invalidAgents,
             loops: loaded.loops,
             quarantinedLoops: loaded.quarantinedLoops,
+            warnings: loaded.warnings,
           }),
       ).toThrow();
     }).pipe(Effect.provide(instanceFolderLayer)),

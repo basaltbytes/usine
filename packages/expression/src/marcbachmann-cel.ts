@@ -1,7 +1,9 @@
 import {
+  type ASTNode,
   Environment as CelEnvironment,
   ParseError as CelParseError,
   TypeError as CelTypeError,
+  parse,
 } from "@marcbachmann/cel-js";
 import { Effect, Layer, Option, Schema } from "effect";
 import { ExpressionEngine } from "./expression-engine.ts";
@@ -64,6 +66,184 @@ const checkFailure = (source: Source, error: VendorCheckError | undefined): Expr
         message: error.message,
         position: Option.fromNullishOr(error.range?.start),
       });
+
+const childNodes = (node: ASTNode): ReadonlyArray<ASTNode> => {
+  switch (node.op) {
+    case "value":
+    case "id":
+      return [];
+    case ".":
+    case ".?":
+      return [node.args[0]];
+    case "!_":
+    case "-_":
+      return [node.args];
+    case "call":
+      return node.args[1];
+    case "rcall":
+      return [node.args[1], ...node.args[2]];
+    case "list":
+      return node.args;
+    case "map":
+      return node.args.flatMap(([key, value]) => [key, value]);
+    default:
+      return node.args;
+  }
+};
+
+/** A member path always starts at its root identifier. */
+type MemberPath = readonly [string, ...Array<string>];
+
+const pathOf = (node: ASTNode): MemberPath | undefined => {
+  if (node.op === "id") return [node.args];
+  if (node.op !== "." && node.op !== ".?") return undefined;
+  const parent = pathOf(node.args[0]);
+  return parent === undefined ? undefined : [...parent, node.args[1]];
+};
+
+const decodeStringLiteral = Schema.decodeUnknownOption(Schema.String);
+
+const MACROS_WITH_BINDINGS: ReadonlySet<string> = new Set([
+  "all",
+  "exists",
+  "exists_one",
+  "filter",
+  "map",
+]);
+
+type MacroBindings = ReadonlyMap<string, ReadonlyArray<string>>;
+
+/** Resolve a value's source path through macro bindings and collection transformations. */
+const lineagePathOf = (
+  node: ASTNode,
+  bindings: MacroBindings,
+): ReadonlyArray<string> | undefined => {
+  const path = pathOf(node);
+  if (path !== undefined) {
+    const boundPath = bindings.get(path[0]);
+    return boundPath === undefined ? path : [...boundPath, ...path.slice(1)];
+  }
+  if (node.op !== "rcall") return undefined;
+
+  const [macro, receiver, args] = node.args;
+  const receiverPath = lineagePathOf(receiver, bindings);
+  if (receiverPath === undefined) return undefined;
+  if (macro === "filter") return receiverPath;
+  if (macro !== "map") return undefined;
+
+  const [binding, ...body] = args;
+  const projection = body[body.length - 1];
+  if (binding?.op !== "id" || projection === undefined) return undefined;
+  return lineagePathOf(projection, new Map(bindings).set(binding.args, receiverPath));
+};
+
+const startsWithPath = (path: ReadonlyArray<string>, prefix: ReadonlyArray<string>): boolean =>
+  prefix.every((part, index) => path[index] === part);
+
+/**
+ * String literals an operand can evaluate to. Only result positions count:
+ * a conditional contributes its branches, never its test, and a list its
+ * elements — so `item.state == "OPEN" ? "ready" : "review"` yields the two
+ * label names and not the state.
+ */
+const resultStringLiterals = (node: ASTNode): ReadonlyArray<string> => {
+  switch (node.op) {
+    case "value":
+      return Option.match(decodeStringLiteral(node.args), {
+        onNone: () => [],
+        onSome: (literal) => [literal],
+      });
+    case "?:": {
+      const [, whenTrue, whenFalse] = node.args;
+      return [...resultStringLiterals(whenTrue), ...resultStringLiterals(whenFalse)];
+    }
+    case "list":
+      return node.args.flatMap(resultStringLiterals);
+    default:
+      return [];
+  }
+};
+
+const isRelatedName = (
+  node: ASTNode,
+  memberPath: ReadonlyArray<string>,
+  bindings: MacroBindings,
+): boolean => {
+  const path = lineagePathOf(node, bindings);
+  return path !== undefined && startsWithPath(path, memberPath) && path[path.length - 1] === "name";
+};
+
+const comparisonLiterals = (
+  node: ASTNode,
+  memberPath: ReadonlyArray<string>,
+  bindings: MacroBindings,
+): ReadonlyArray<string> => {
+  switch (node.op) {
+    case "!=":
+    case "==":
+    case "in": {
+      const [left, right] = node.args;
+      return [
+        ...(isRelatedName(left, memberPath, bindings) ? resultStringLiterals(right) : []),
+        ...(isRelatedName(right, memberPath, bindings) ? resultStringLiterals(left) : []),
+      ];
+    }
+    default:
+      return [];
+  }
+};
+
+/** Track macro-bound collection members to their label-name comparisons. */
+const scanRelatedLiterals = (
+  node: ASTNode,
+  memberPath: ReadonlyArray<string>,
+  bindings: MacroBindings,
+): ReadonlyArray<string> => {
+  const related = comparisonLiterals(node, memberPath, bindings);
+  if (node.op !== "rcall" || !MACROS_WITH_BINDINGS.has(node.args[0])) {
+    return [
+      ...related,
+      ...childNodes(node).flatMap((child) => scanRelatedLiterals(child, memberPath, bindings)),
+    ];
+  }
+
+  const [, receiver, args] = node.args;
+  const [binding, ...body] = args;
+  const receiverPath = lineagePathOf(receiver, bindings);
+  if (binding?.op !== "id" || receiverPath === undefined) {
+    return [
+      ...related,
+      ...childNodes(node).flatMap((child) => scanRelatedLiterals(child, memberPath, bindings)),
+    ];
+  }
+
+  const bodyBindings = new Map(bindings).set(binding.args, receiverPath);
+  return [
+    ...related,
+    ...scanRelatedLiterals(receiver, memberPath, bindings),
+    ...body.flatMap((child) => scanRelatedLiterals(child, memberPath, bodyBindings)),
+  ];
+};
+
+const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals")(function* (
+  source: Source,
+  memberPath: ReadonlyArray<string>,
+) {
+  if (memberPath.length === 0) return [];
+  const ast = yield* Effect.try({
+    try: () => parse(source).ast,
+    catch: (cause) =>
+      cause instanceof CelParseError
+        ? checkFailure(source, cause)
+        : new ExpressionCheckError({
+            source,
+            code: "check_failed",
+            message: messageFromCause(cause, "CEL analysis failed"),
+            position: Option.none(),
+          }),
+  });
+  return [...new Set(scanRelatedLiterals(ast, memberPath, new Map()))];
+});
 
 const makeEnvironment = (descriptor: Environment): CelEnvironment => {
   const environment = new CelEnvironment({ unlistedVariablesAreDyn: false });
@@ -220,6 +400,7 @@ const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
 
 /** Live CEL adapter backed by the exact-pinned @marcbachmann/cel-js implementation. */
 export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {
+  relatedStringLiterals,
   checkBoolean,
   checkScalar,
   evaluateBoolean,

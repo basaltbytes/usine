@@ -16,7 +16,7 @@ import {
 import { Agent, Instance, Repository, Run, Step } from "@usine/core";
 import { RunEngine, TranscriptAllQuery } from "@usine/engine";
 import { MarcbachmannCelLayer, Source } from "@usine/expression";
-import { GitHubApp, GitHubPolling, IssuePayload } from "@usine/github";
+import { GitHubApp, GitHubLabelWriter, GitHubPolling, IssuePayload } from "@usine/github";
 import { localSecretsLayer } from "@usine/github/local-secrets";
 import {
   Config,
@@ -31,7 +31,7 @@ import {
   Scope,
 } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { PollingTriggers, gitHubCredentialLayer } from "../../src/index.ts";
+import { LabelReconciler, PollingTriggers, gitHubCredentialLayer } from "../../src/index.ts";
 import { layer as localWorkerLayer } from "../../src/local.ts";
 
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
@@ -160,6 +160,7 @@ const makeInstance = (options: {
     invalidAgents: [],
     loops: [loop],
     quarantinedLoops: [],
+    warnings: [],
   });
 };
 
@@ -182,8 +183,20 @@ const runtimeLayer = (
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
   );
+  const labelWriter = GitHubLabelWriter.layer.pipe(
+    Layer.provide(app),
+    Layer.provide(FetchHttpClient.layer),
+  );
+  const labelReconciler = LabelReconciler.layer.pipe(Layer.provide(labelWriter));
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
-  const dependencies = Layer.mergeAll(app, engine, MarcbachmannCelLayer, parser, polling);
+  const dependencies = Layer.mergeAll(
+    app,
+    engine,
+    labelReconciler,
+    MarcbachmannCelLayer,
+    parser,
+    polling,
+  );
   return Layer.merge(dependencies, PollingTriggers.layer.pipe(Layer.provide(dependencies)));
 };
 

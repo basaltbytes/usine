@@ -74,10 +74,41 @@ export const LaneName = nonBlankString("Expected a non-blank lane name").pipe(
 );
 export type LaneName = typeof LaneName.Type;
 
-export const GitHubLabelName = nonBlankString("Expected a non-blank GitHub label name").pipe(
-  Schema.brand("GitHubLabelName"),
-);
+/**
+ * GitHub trims label names and caps them at 50 characters; a name outside that
+ * contract would never match the catalog and would be re-created every cycle.
+ */
+export const GitHubLabelName = Schema.String.check(
+  Schema.isPattern(/^\S(?:.*\S)?$/u, {
+    message: "Expected a GitHub label name without surrounding whitespace",
+  }),
+  Schema.isMaxLength(50, { message: "Expected a GitHub label name of at most 50 characters" }),
+).pipe(Schema.brand("GitHubLabelName"));
 export type GitHubLabelName = typeof GitHubLabelName.Type;
+
+/** GitHub matches label names case-insensitively; compare declarations on this key. */
+export const canonicalLabelName = (name: string): string => name.toLowerCase();
+
+/** GitHub label colors are authored as six hex digits without a leading hash. */
+export const GitHubLabelColor = Schema.String.check(
+  Schema.isPattern(/^[0-9a-fA-F]{6}$/u, {
+    message: "Expected a six-digit hex GitHub label color without #",
+  }),
+).pipe(Schema.brand("GitHubLabelColor"));
+export type GitHubLabelColor = typeof GitHubLabelColor.Type;
+
+const GitHubLabelDescription = Schema.String.check(
+  Schema.isMaxLength(100, {
+    message: "Expected a GitHub label description of at most 100 characters",
+  }),
+);
+
+/** One factory-wide label declaration, provisioned into every managed repository. */
+export class DeclaredLabel extends Schema.Class<DeclaredLabel>("@usine/config/DeclaredLabel")({
+  name: GitHubLabelName,
+  color: Schema.OptionFromOptionalKey(GitHubLabelColor),
+  description: Schema.OptionFromOptionalKey(GitHubLabelDescription),
+}) {}
 
 export const LaneItemState = Schema.Literals([
   "issue-open",
@@ -145,6 +176,11 @@ const uniqueLaneSources = Schema.makeFilter<ReadonlyArray<Lane>>(
 );
 
 const Lanes = Schema.Array(Lane).check(uniqueNames, uniqueLaneSources);
+const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<DeclaredLabel>>(
+  (values) => new Set(values.map(({ name }) => canonicalLabelName(name))).size === values.length,
+  { message: "Expected unique GitHub label names" },
+);
+const DeclaredLabels = Schema.Array(DeclaredLabel).check(uniqueLabelNames);
 
 export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/ManagedRepo")({
   name: RepoName,
@@ -204,6 +240,7 @@ const Workers = Schema.Array(WorkerFromYaml).check(Schema.isNonEmpty(), uniqueNa
 /** Strict, factory-wide authored config from usine.yaml. */
 export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")({
   version: Schema.Literal(1),
+  labels: DeclaredLabels.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
   repos: ManagedRepos,
   settings: SettingsFromYaml.pipe(Schema.withDecodingDefaultKey(Effect.succeed({}))),
   workers: Workers.pipe(
@@ -312,6 +349,28 @@ export class QuarantinedLoop extends Schema.Class<QuarantinedLoop>("@usine/confi
   },
 ) {}
 
+export class UndeclaredLaneLabelWarning extends Schema.TaggedClass<UndeclaredLaneLabelWarning>(
+  "@usine/config/UndeclaredLaneLabelWarning",
+)("UndeclaredLaneLabelWarning", {
+  repository: RepoName,
+  lane: LaneName,
+  label: GitHubLabelName,
+}) {}
+
+export class UndeclaredTriggerLabelWarning extends Schema.TaggedClass<UndeclaredTriggerLabelWarning>(
+  "@usine/config/UndeclaredTriggerLabelWarning",
+)("UndeclaredTriggerLabelWarning", {
+  loop: LoopName,
+  label: GitHubLabelName,
+}) {}
+
+/** Non-blocking authored-reference diagnostics from one loaded instance. */
+export const ConfigWarning = Schema.Union([
+  UndeclaredLaneLabelWarning,
+  UndeclaredTriggerLabelWarning,
+]);
+export type ConfigWarning = typeof ConfigWarning.Type;
+
 /** The instance-relative path a loop's filename identity maps back to. */
 export const loopPath = (name: LoopName): InstancePath => InstancePath.make(`loops/${name}.md`);
 
@@ -379,6 +438,7 @@ export class LoadedInstance extends Schema.Class<LoadedInstance>("@usine/config/
     invalidAgents: Schema.Array(InvalidAgent),
     loops: Schema.Array(LoopFile),
     quarantinedLoops: Schema.Array(QuarantinedLoop),
+    warnings: Schema.Array(ConfigWarning),
   }).check(
     Schema.makeFilter(
       ({ agents, config, loops }) => {
