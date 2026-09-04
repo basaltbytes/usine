@@ -1,5 +1,17 @@
-import { Agent, Attempt, Item, Loop, Repository, Run, Worker } from "@usine/core";
-import { LaneName } from "@usine/config";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
+import { AttemptNumber } from "@usine/core/attempt";
+import {
+  AgentName,
+  AttemptId,
+  ItemKey,
+  LoopName,
+  RepositoryName,
+  RunId,
+  WorkerName,
+} from "@usine/core/ids";
+import { ItemNumber } from "@usine/core/item";
+import { LaneName } from "@usine/config/model";
 import {
   AgentFailureView,
   AttemptView,
@@ -8,13 +20,13 @@ import {
   BoardView,
   ChildSessionBudgetFailureView,
   FailedAttemptView,
-  GitHubItemKey,
   ProjectView,
   ReadOnlyBoardLaneView,
   RunFailureNeed,
   RunView,
   SucceededAttemptView,
-} from "@usine/orchestrator";
+} from "@usine/orchestrator/operator/model";
+import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
@@ -22,17 +34,17 @@ import { applyMove, itemFailure, laneUnder, orderLanes, runsWithoutCard } from "
 import { RunLinks } from "../src/components/run-links.tsx";
 import { failureMessage, needCopy } from "../src/operator-copy.ts";
 
-const brain = new Agent.BrainSpec({
+const brain = new BrainSpec({
   harness: "codex",
-  model: Agent.ModelId.make("gpt-5.6-sol"),
+  model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
 });
 
 const attempt = (number: number, message: string | null) =>
   new AttemptView({
-    id: Attempt.AttemptId.make(`attempt-${number}`),
-    number: Attempt.AttemptNumber.make(number),
-    worker: Worker.Name.make("local"),
+    id: AttemptId.make(`attempt-${number}`),
+    number: AttemptNumber.make(number),
+    worker: WorkerName.make("local"),
     brain,
     startedAt: `2026-09-01T12:00:0${number}.000Z`,
     outcome:
@@ -41,16 +53,16 @@ const attempt = (number: number, message: string | null) =>
         : new FailedAttemptView({ failure: new AgentFailureView({ message }) }),
   });
 
-const repository = Repository.Name.make("basaltbytes/usine");
-const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, Item.Number.make(33)]);
+const repository = RepositoryName.make("basaltbytes/usine");
+const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(33)]);
 
 const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) =>
   new RunView({
-    id: Run.RunId.make("run-33"),
+    id: RunId.make("run-33"),
     itemKey,
-    loop: Loop.LoopName.make("review"),
+    loop: LoopName.make("review"),
     repository,
-    agent: Agent.Name.make("developer"),
+    agent: AgentName.make("developer"),
     state,
     loopPaused: false,
     openedAt: "2026-09-01T12:00:00.000Z",
@@ -68,7 +80,7 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
   return new BoardItemView({
     itemKey,
     kind: "issue",
-    number: Item.Number.make(33),
+    number: ItemNumber.make(33),
     title: "Board lanes",
     url: "https://github.com/basaltbytes/usine/issues/33",
     state: "issue-open",
@@ -111,7 +123,7 @@ describe("Run links", () => {
   it("renders nothing for a schedule Run, whose Item is the repository itself", () => {
     const scheduled = new RunView({
       ...run,
-      itemKey: Item.ItemKey.make('["github","basaltbytes/usine"]'),
+      itemKey: ItemKey.make('["github","basaltbytes/usine"]'),
     });
     assert.strictEqual(renderToStaticMarkup(<RunLinks run={scheduled} />), "");
   });
@@ -136,12 +148,12 @@ describe("Board Run failure copy", () => {
 
   it("explains an exhausted child-session budget in the drawer and Needs you", () => {
     const failure = new ChildSessionBudgetFailureView({
-      maxChildren: Agent.ChildSessionBudget.make(4),
-      attemptedChildren: Agent.ChildSessionCount.make(5),
+      maxChildren: ChildSessionBudget.make(4),
+      attemptedChildren: ChildSessionCount.make(5),
     });
     const message = "This Attempt used its 4-child session budget; child 5 did not start";
-    const repository = Repository.Name.make("basaltbytes/usine");
-    const runId = Run.RunId.make("run-33");
+    const repository = RepositoryName.make("basaltbytes/usine");
+    const runId = RunId.make("run-33");
     assert.strictEqual(failureMessage(failure), message);
     assert.deepStrictEqual(
       needCopy(
@@ -149,7 +161,7 @@ describe("Board Run failure copy", () => {
           id: "run-failure:run-33",
           repository,
           runId,
-          loop: Loop.LoopName.make("review"),
+          loop: LoopName.make("review"),
           failure,
         }),
       ),
@@ -170,14 +182,14 @@ describe("Runs without a Board card", () => {
     assert(cardedRun !== undefined);
     const scheduled = new RunView({
       ...cardedRun,
-      id: Run.RunId.make("run-schedule"),
-      itemKey: Item.ItemKey.make('["github","basaltbytes/usine"]'),
-      loop: Loop.LoopName.make("nightly"),
+      id: RunId.make("run-schedule"),
+      itemKey: ItemKey.make('["github","basaltbytes/usine"]'),
+      loop: LoopName.make("nightly"),
       state: "Running",
       canCancel: true,
     });
     const project = new ProjectView({
-      repository: Repository.Name.make("basaltbytes/usine"),
+      repository: RepositoryName.make("basaltbytes/usine"),
       status: "active",
       runs: [cardedRun, scheduled],
       labels: [],

@@ -1,4 +1,5 @@
-import { Event, Item, Loop, Run } from "@usine/core";
+import { Event } from "@usine/core/event";
+import { ItemKey, LoopName, RunId } from "@usine/core/ids";
 import { Context, Crypto, Effect, Layer, Option, Result } from "effect";
 import { ClusterWorkflowEngine, SingleRunner } from "effect/unstable/cluster";
 import { SqlClient } from "effect/unstable/sql";
@@ -46,12 +47,12 @@ const makeRunEngine = Effect.gen(function* () {
     yield* DurableRun.execute({ submission }, { discard: true }).pipe(provideWorkflowEngine);
   });
 
-  const deliverInterrupt = Effect.fn("RunEngine.deliverInterrupt")(function* (runId: Run.RunId) {
+  const deliverInterrupt = Effect.fn("RunEngine.deliverInterrupt")(function* (runId: RunId) {
     yield* DurableRun.interrupt(runId).pipe(provideWorkflowEngine);
     yield* store.completeWorkflowCommand(runId, "Interrupt");
   });
 
-  const deliverApproval = Effect.fn("RunEngine.deliverApproval")(function* (runId: Run.RunId) {
+  const deliverApproval = Effect.fn("RunEngine.deliverApproval")(function* (runId: RunId) {
     const token = DurableDeferred.tokenFromExecutionId(ApprovalGate, {
       workflow: DurableRun,
       executionId: runId,
@@ -62,14 +63,12 @@ const makeRunEngine = Effect.gen(function* () {
     yield* store.completeWorkflowCommand(runId, "Approve");
   });
 
-  const deliverContinuation = Effect.fn("RunEngine.deliverContinuation")(function* (
-    runId: Run.RunId,
-  ) {
+  const deliverContinuation = Effect.fn("RunEngine.deliverContinuation")(function* (runId: RunId) {
     yield* continueWithNewest(store, runId).pipe(provideWorkflowEngine);
   });
 
   const awaitWorkflowSettlement = Effect.fn("RunEngine.awaitWorkflowSettlement")(function* (
-    runId: Run.RunId,
+    runId: RunId,
   ) {
     // A Failed projection is committed before the workflow finishes suspending.
     // Poll across that short handover so an immediate operator retry is not
@@ -83,7 +82,7 @@ const makeRunEngine = Effect.gen(function* () {
     return yield* Effect.die(new Error(`Run ${runId} has no durable workflow execution to settle`));
   });
 
-  const deliverResume = Effect.fn("RunEngine.deliverResume")(function* (runId: Run.RunId) {
+  const deliverResume = Effect.fn("RunEngine.deliverResume")(function* (runId: RunId) {
     const status = yield* awaitWorkflowSettlement(runId);
     if (status._tag === "Complete") {
       yield* store.reconcileCompletion(runId, status);
@@ -114,20 +113,17 @@ const makeRunEngine = Effect.gen(function* () {
     return claim.result;
   });
 
-  const approve = Effect.fn("RunEngine.approve")(function* (
-    runId: Run.RunId,
-    approval: Event.Event,
-  ) {
+  const approve = Effect.fn("RunEngine.approve")(function* (runId: RunId, approval: Event) {
     yield* store.approve(runId, approval);
     yield* deliverApproval(runId);
   });
 
-  const retry = Effect.fn("RunEngine.retry")(function* (runId: Run.RunId) {
+  const retry = Effect.fn("RunEngine.retry")(function* (runId: RunId) {
     yield* store.retry(runId);
     yield* deliverResume(runId);
   });
 
-  const cancel = Effect.fn("RunEngine.cancel")(function* (runId: Run.RunId) {
+  const cancel = Effect.fn("RunEngine.cancel")(function* (runId: RunId) {
     // The closing transaction decides both facts at once: whether the run was
     // still open, and which attempt (if any) was in flight when it closed.
     const outcome = yield* store.cancel(runId);
@@ -152,10 +148,7 @@ const makeRunEngine = Effect.gen(function* () {
     }
   });
 
-  const revoke = Effect.fn("RunEngine.revoke")(function* (
-    loop: Loop.LoopName,
-    itemKey: Item.ItemKey,
-  ) {
+  const revoke = Effect.fn("RunEngine.revoke")(function* (loop: LoopName, itemKey: ItemKey) {
     const revoked = yield* store.revoke(loop, itemKey);
     yield* Effect.forEach(revoked, deliverInterrupt, {
       concurrency: "unbounded",
@@ -164,7 +157,7 @@ const makeRunEngine = Effect.gen(function* () {
     return revoked;
   });
 
-  const inspect = Effect.fn("RunEngine.inspect")(function* (runId: Run.RunId) {
+  const inspect = Effect.fn("RunEngine.inspect")(function* (runId: RunId) {
     return yield* store.snapshot(runId);
   });
 
@@ -214,18 +207,15 @@ const makeRunEngine = Effect.gen(function* () {
 export class RunEngine extends Context.Service<
   RunEngine,
   {
-    readonly approve: (
-      runId: Run.RunId,
-      approval: Event.Event,
-    ) => Effect.Effect<void, RunEngineError>;
-    readonly cancel: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
-    readonly inspect: (runId: Run.RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
+    readonly approve: (runId: RunId, approval: Event) => Effect.Effect<void, RunEngineError>;
+    readonly cancel: (runId: RunId) => Effect.Effect<void, RunEngineError>;
+    readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
-    readonly retry: (runId: Run.RunId) => Effect.Effect<void, RunEngineError>;
+    readonly retry: (runId: RunId) => Effect.Effect<void, RunEngineError>;
     readonly revoke: (
-      loop: Loop.LoopName,
-      itemKey: Item.ItemKey,
-    ) => Effect.Effect<ReadonlyArray<Run.RunId>, RunEngineError>;
+      loop: LoopName,
+      itemKey: ItemKey,
+    ) => Effect.Effect<ReadonlyArray<RunId>, RunEngineError>;
     readonly submit: (submission: Submission) => Effect.Effect<SubmissionResult, RunEngineError>;
     readonly transcript: (
       query: TranscriptQuery,

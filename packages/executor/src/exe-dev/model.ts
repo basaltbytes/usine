@@ -1,6 +1,6 @@
-import { Attempt, Repository } from "@usine/core";
+import { AttemptId, RepositoryName } from "@usine/core/ids";
 import { Schema, type Effect, type Ref } from "effect";
-import type { RunHostCommand } from "../index.ts";
+import type { RunHostCommand } from "../executor.ts";
 
 /** The name of one exe.dev edge-injected integration. */
 export const IntegrationName = Schema.String.check(
@@ -34,7 +34,7 @@ export type HomePath = typeof HomePath.Type;
 export class GitHubIntegration extends Schema.Class<GitHubIntegration>(
   "@usine/executor/ExeDevGitHubIntegration",
 )({
-  repository: Repository.Name,
+  repository: RepositoryName,
   name: IntegrationName,
 }) {}
 
@@ -77,4 +77,4 @@ export interface PreparedState {
   readonly vm: VmState;
 }
 
-export type PreparedStates = Ref.Ref<Map<Attempt.AttemptId, PreparedState>>;
+export type PreparedStates = Ref.Ref<Map<AttemptId, PreparedState>>;

@@ -1,7 +1,7 @@
 import { CircleIcon, KanbanIcon, SlidersHorizontalIcon, WarningIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
-import type { Repository } from "@usine/core";
-import type { ProjectView } from "@usine/orchestrator";
+import type { RepositoryName } from "@usine/core/ids";
+import type { ProjectView } from "@usine/orchestrator/operator/model";
 import {
   Sidebar,
   SidebarContent,
@@ -32,7 +32,7 @@ export const AppSidebar = ({
 }: {
   readonly projects: ReadonlyArray<ProjectView>;
   readonly view: OperatorView;
-  readonly project: Repository.Name | undefined;
+  readonly project: RepositoryName | undefined;
   readonly needsYou: number;
   readonly live: boolean;
 }) => (

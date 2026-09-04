@@ -1,27 +1,29 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Agent } from "@usine/core";
+import { BrainSpec, Harness, HARNESSES, ModelId } from "@usine/core/agent/brain";
+import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
+import { AgentName } from "@usine/core/ids";
 import { Effect, Layer, Stream } from "effect";
 import {
   ChildBackend,
+  type ChildBackendService,
   ChildRequest,
   ClaudeChildBackend,
   CodexChildBackend,
   PiChildBackend,
   SessionResult,
   WorkingDirectory,
-  type ChildBackendService,
-} from "../../src/index.ts";
+} from "../../src/runtime.ts";
 import { childDispatcherLayer } from "../../src/pi/children.ts";
 
-const request = (harness: Agent.Harness) =>
+const request = (harness: Harness) =>
   new ChildRequest({
-    session: new Agent.ChildSession({
-      id: Agent.SessionId.make(`child-${harness}`),
-      parentId: Agent.SessionId.make("parent-1"),
-      agent: Agent.Name.make("developer"),
-      brain: new Agent.BrainSpec({
+    session: new ChildSession({
+      id: AgentSessionId.make(`child-${harness}`),
+      parentId: AgentSessionId.make("parent-1"),
+      agent: AgentName.make("developer"),
+      brain: new BrainSpec({
         harness,
-        model: Agent.ModelId.make(`${harness}-model`),
+        model: ModelId.make(`${harness}-model`),
         effort: "high",
       }),
     }),
@@ -29,7 +31,7 @@ const request = (harness: Agent.Harness) =>
     prompt: "Implement the focused task.",
   });
 
-const backend = (selected: Agent.Harness): ChildBackendService => ({
+const backend = (selected: Harness): ChildBackendService => ({
   launch: (found) =>
     Effect.succeed({
       session: found.session,
@@ -45,7 +47,7 @@ describe("child backend dispatcher", () => {
     Effect.scoped(
       Effect.gen(function* () {
         const dispatcher = yield* ChildBackend;
-        for (const harness of Agent.HARNESSES) {
+        for (const harness of HARNESSES) {
           const running = yield* dispatcher.launch(request(harness));
           const result = yield* running.result;
           assert.strictEqual(result.message, harness);

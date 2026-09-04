@@ -1,15 +1,17 @@
-import type { LoadedInstance } from "@usine/config";
-import { Loop, Run } from "@usine/core";
+import type { LoadedInstance } from "@usine/config/model";
+import { LoopName, RunId } from "@usine/core/ids";
+import {
+  type BoardMove,
+  type FactoryOverview,
+  NeedsSetupOverview,
+  type RunDetailView,
+  type TranscriptRequest,
+} from "@usine/orchestrator/operator/model";
 import type {
-  FactoryOverview,
-  BoardMove,
   Operator,
-  OperatorObservation,
   OperatorError,
-  RunDetailView,
-  TranscriptRequest,
-} from "@usine/orchestrator";
-import { NeedsSetupOverview } from "@usine/orchestrator";
+  OperatorObservation,
+} from "@usine/orchestrator/operator/service";
 import { Context, Effect, Layer, Schema } from "effect";
 
 export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailableError>(
@@ -25,15 +27,15 @@ export class FactoryBackend extends Context.Service<
   {
     readonly overview: Effect.Effect<FactoryOverview, BackendError>;
     readonly detail: (
-      runId: Run.RunId,
+      runId: RunId,
       request: TranscriptRequest,
     ) => Effect.Effect<RunDetailView, BackendError>;
-    readonly approve: (runId: Run.RunId) => Effect.Effect<void, BackendError>;
-    readonly retry: (runId: Run.RunId) => Effect.Effect<void, BackendError>;
-    readonly cancel: (runId: Run.RunId) => Effect.Effect<void, BackendError>;
+    readonly approve: (runId: RunId) => Effect.Effect<void, BackendError>;
+    readonly retry: (runId: RunId) => Effect.Effect<void, BackendError>;
+    readonly cancel: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly moveBoardItem: (move: BoardMove) => Effect.Effect<void, BackendError>;
-    readonly pause: (loop: Loop.LoopName) => Effect.Effect<void, BackendError>;
-    readonly unpause: (loop: Loop.LoopName) => Effect.Effect<void, BackendError>;
+    readonly pause: (loop: LoopName) => Effect.Effect<void, BackendError>;
+    readonly unpause: (loop: LoopName) => Effect.Effect<void, BackendError>;
   }
 >()("@usine/server/FactoryBackend") {}
 

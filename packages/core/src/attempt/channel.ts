@@ -1,15 +1,12 @@
 import { Result, Schema, type Effect } from "effect";
-import {
-  SessionEvent as AgentSessionEvent,
-  Agent,
-  ChildSessionBudget,
-  Effort,
-  ModelId,
-} from "./agent.ts";
-import { AttemptId } from "./lifecycle/attempt.ts";
-import { AttemptFailure } from "./lifecycle/attempt-failure.ts";
-import { CommitSha, Name as RepositoryName, Revision } from "./repository.ts";
-import { StepResult } from "./step-result.ts";
+import { Agent } from "../agent/agent.ts";
+import { Effort, ModelId } from "../agent/brain.ts";
+import { AgentSessionEvent, ChildSessionBudget } from "../agent/session.ts";
+import { AttemptId, RepositoryName } from "../ids.ts";
+import { CommitSha, RepositoryRevision } from "../repository.ts";
+import { StepResult } from "../step/result.ts";
+import { AttemptTask } from "./attempt.ts";
+import { AttemptFailure } from "./failure.ts";
 
 export const PROTOCOL_VERSION = 4 as const;
 
@@ -31,20 +28,14 @@ export const DIRECTIONS = ["inbound", "outbound"] as const;
 export const Direction = Schema.Literals(DIRECTIONS);
 export type Direction = typeof Direction.Type;
 
-/** Value object: the rendered task text the run host gives the agent. */
-export const Task = Schema.String.check(
-  Schema.isPattern(/\S/u, { message: "Expected non-blank task text" }),
-).pipe(Schema.brand("AttemptTask"));
-export type Task = typeof Task.Type;
-
 /** Secret-free launch input. Worker credentials are deliberately absent. */
 export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
   attemptId: AttemptId,
   repository: RepositoryName,
-  revision: Revision,
+  revision: RepositoryRevision,
   baseCommit: CommitSha,
   payload: Schema.Json,
-  task: Task,
+  task: AttemptTask,
   agent: Agent,
   parentModel: Schema.OptionFromNullOr(ModelId),
   maxChildren: ChildSessionBudget,

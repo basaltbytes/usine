@@ -1,5 +1,6 @@
 import { ArrowSquareOutIcon } from "@phosphor-icons/react";
-import { GitHubItemKey, type RunView } from "@usine/orchestrator";
+import type { RunView } from "@usine/orchestrator/operator/model";
+import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Option, Schema } from "effect";
 import { Button } from "@/components/ui/button";
 

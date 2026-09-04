@@ -1,4 +1,4 @@
-import { Instance } from "@usine/core";
+import { InstanceDirectory } from "@usine/core/instance";
 import { Config, Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
 import { AppCredentials, AppId, GitHubCredentials, RedactedPrivateKey } from "./model.ts";
 
@@ -40,7 +40,7 @@ const AppCredentialsFile = Schema.fromJsonString(
 const decodeCredentialsFile = Schema.decodeUnknownEffect(AppCredentialsFile);
 
 const readSecretsFile = Effect.fn("GitHubCredentials.readSecretsFile")(function* (
-  root: Instance.Directory,
+  root: InstanceDirectory,
 ) {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
@@ -67,7 +67,7 @@ const readSecretsFile = Effect.fn("GitHubCredentials.readSecretsFile")(function*
  * over its file field; when both are present the file is not touched.
  */
 export const loadLocalCredentials = Effect.fn("GitHubCredentials.loadLocal")(function* (
-  root: Instance.Directory,
+  root: InstanceDirectory,
 ) {
   const env = yield* environment.pipe(
     Effect.mapError(
@@ -89,6 +89,6 @@ export const loadLocalCredentials = Effect.fn("GitHubCredentials.loadLocal")(fun
 });
 
 export const localSecretsLayer = (
-  root: Instance.Directory,
+  root: InstanceDirectory,
 ): Layer.Layer<GitHubCredentials, LocalSecretsError, FileSystem.FileSystem | Path.Path> =>
   Layer.effect(GitHubCredentials, loadLocalCredentials(root));

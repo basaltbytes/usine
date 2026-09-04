@@ -1,4 +1,7 @@
-import { Attempt, AttemptChannel, AttemptFailure, Instance, Repository } from "@usine/core";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { InfraFailure } from "@usine/core/attempt/failure";
+import { AttemptId, RepositoryName } from "@usine/core/ids";
+import { InstanceDirectory } from "@usine/core/instance";
 import {
   Effect,
   FileSystem,
@@ -24,7 +27,7 @@ import {
   type RunHostCommand,
   WorkerCapabilityError,
   type ExecutorOperation,
-} from "../index.ts";
+} from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
   cacheDirectoryName,
@@ -35,13 +38,13 @@ import {
 } from "../provision.ts";
 import { runHostSessionFor, type RunHostInput } from "../run-host-session.ts";
 
-export type { RunHostCommand } from "../index.ts";
+export type { RunHostCommand } from "../executor.ts";
 
 export interface LocalExecutorOptions {
-  readonly instanceDirectory: Instance.Directory;
+  readonly instanceDirectory: InstanceDirectory;
   /** How to launch the one-shot run host; the composition root resolves it. */
   readonly runHost: RunHostCommand;
-  readonly repositoryUrl?: (repository: Repository.Name) => string;
+  readonly repositoryUrl?: (repository: RepositoryName) => string;
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
 }
 
@@ -98,12 +101,12 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const fetches = yield* keyedLockFor<Repository.Name>();
-    const preparedStates = yield* Ref.make(new Map<Attempt.AttemptId, PreparedState>());
+    const fetches = yield* keyedLockFor<RepositoryName>();
+    const preparedStates = yield* Ref.make(new Map<AttemptId, PreparedState>());
     const baseEnvironment = yield* allowlistedEnvironment(HOST_ENVIRONMENT_ALLOWLIST);
     const repositoryUrl =
       options.repositoryUrl ??
-      ((repository: Repository.Name): string => `https://github.com/${repository}.git`);
+      ((repository: RepositoryName): string => `https://github.com/${repository}.git`);
     const runHost = options.runHost;
     const interruptGrace = options.interruptGrace ?? "2 seconds";
     const workersRoot = path.join(options.instanceDirectory, ".usine", "workers");
@@ -339,7 +342,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       });
       const stored = (yield* Ref.get(preparedStates)).get(attemptId);
       if (stored === undefined) {
-        return yield* new AttemptFailure.InfraFailure({
+        return yield* new InfraFailure({
           message: `Attempt ${attemptId} has no prepared credential`,
           cause: new Error("prepared Attempt state missing"),
         });

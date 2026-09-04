@@ -1,31 +1,31 @@
-import {
-  type ConfigFileError,
-  type LoadedInstance,
-  type LoopFile,
-  type ManagedRepo,
-} from "@usine/config";
-import { Agent, AttemptChannel, Event, Item, Loop, Repository } from "@usine/core";
-import { Submission, type SubmissionResult } from "@usine/engine";
+import type { ConfigFileError, LoadedInstance, LoopFile, ManagedRepo } from "@usine/config/model";
+import { Agent, resolveParentModel } from "@usine/core/agent";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { AttemptTask } from "@usine/core/attempt";
+import { Event } from "@usine/core/event";
+import { AgentName, DedupKey, EventId, ItemKey, LoopName } from "@usine/core/ids";
+import { RepositoryRevision } from "@usine/core/repository";
+import { Submission, type SubmissionResult } from "@usine/engine/model";
 import { type DateTime, Effect, Match, Option, Result, Schema } from "effect";
 
 /**
  * The worker fetch target until per-loop revisions exist: `git fetch origin
  * HEAD` resolves the remote's current default branch at prepare time.
  */
-const DEFAULT_BRANCH_REVISION = Repository.Revision.make("HEAD");
+const DEFAULT_BRANCH_REVISION = RepositoryRevision.make("HEAD");
 
 export interface ResolvedLoop {
-  readonly agent: Agent.Agent;
+  readonly agent: Agent;
   readonly loop: LoopFile;
-  readonly parentModel: Option.Option<Agent.ModelId>;
+  readonly parentModel: Option.Option<ModelId>;
 }
 
 /** A loaded loop lost the roster member its authored agent name refers to. */
 export class LoopAgentResolutionError extends Schema.TaggedError<LoopAgentResolutionError>(
   "@usine/orchestrator/LoopAgentResolutionError",
 )("LoopAgentResolutionError", {
-  loop: Loop.LoopName,
-  agent: Agent.Name,
+  loop: LoopName,
+  agent: AgentName,
   message: Schema.NonEmptyString,
 }) {}
 
@@ -44,9 +44,9 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
       message: `Loop ${loop.name} references missing Agent ${loop.agent}`,
     });
   }
-  const agent = new Agent.Agent({
+  const agent = new Agent({
     name: loaded.name,
-    brain: new Agent.BrainSpec({
+    brain: new BrainSpec({
       harness: loaded.harness,
       model: loaded.model,
       effort: loaded.effort,
@@ -58,7 +58,7 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
   return {
     agent,
     loop,
-    parentModel: Agent.resolveParentModel(agent, instance.config.settings.parentModel),
+    parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
   } satisfies ResolvedLoop;
 });
 
@@ -89,22 +89,22 @@ export const resolveTriggerLoops = Effect.fn("TriggerRouting.resolveLoops")(func
 });
 
 interface TriggerSubmissionOptions {
-  readonly agent: Agent.Agent;
-  readonly dedupKey: Event.DedupKey;
-  readonly itemKey: Item.ItemKey;
+  readonly agent: Agent;
+  readonly dedupKey: DedupKey;
+  readonly itemKey: ItemKey;
   readonly loop: LoopFile;
   readonly payload: Schema.Json;
   readonly receivedAt: DateTime.Utc;
   readonly repository: ManagedRepo;
-  readonly task: AttemptChannel.Task;
-  readonly parentModel: Option.Option<Agent.ModelId>;
+  readonly task: AttemptTask;
+  readonly parentModel: Option.Option<ModelId>;
 }
 
 /** The one routing contract shared by every trigger stream. */
 export const triggerSubmission = (options: TriggerSubmissionOptions): Submission =>
   new Submission({
-    event: new Event.Event({
-      id: Event.EventId.make(options.dedupKey),
+    event: new Event({
+      id: EventId.make(options.dedupKey),
       dedupKey: options.dedupKey,
       payload: options.payload,
       receivedAt: options.receivedAt,

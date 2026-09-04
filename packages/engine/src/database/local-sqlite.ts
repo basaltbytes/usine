@@ -13,7 +13,8 @@ import {
 } from "../repository-label-projection/service.ts";
 import { LoopControl } from "../loop-control.ts";
 import { layerWithDatabase, type RunEngine } from "../engine.ts";
-import { EnginePersistenceError, type InstanceDirectory, type RunEngineError } from "../model.ts";
+import type { InstanceDirectory } from "@usine/core/instance";
+import { EnginePersistenceError, type RunEngineError } from "../model.ts";
 import { RunReader } from "../run-reader.ts";
 import type { StepExecutor } from "../step-executor.ts";
 import { RunDatabase } from "./database.ts";

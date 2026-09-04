@@ -1,18 +1,20 @@
-import { AttemptChannel, Repository } from "@usine/core";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { RepositoryName } from "@usine/core/ids";
+import { CommitSha } from "@usine/core/repository";
 import { Effect, Schema } from "effect";
 import {
   ExecutorOperationError,
   PreparedAttempt,
   WorktreePath,
   type CheckoutRequest,
-} from "./index.ts";
+} from "./executor.ts";
 
 export const safeSegment = (value: string): string => value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
 
 const CACHE_DIRECTORY_SUFFIX = ".git";
 
 /** The bare cache directory name every adapter mints for a repository under `repos/`. */
-export const cacheDirectoryName = (repository: Repository.Name): string =>
+export const cacheDirectoryName = (repository: RepositoryName): string =>
   `${safeSegment(repository)}${CACHE_DIRECTORY_SUFFIX}`;
 
 /**
@@ -24,7 +26,7 @@ export const cacheDirectoryName = (repository: Repository.Name): string =>
 export const isCacheDirectoryName = (entry: string): boolean =>
   entry.length > CACHE_DIRECTORY_SUFFIX.length && entry.endsWith(CACHE_DIRECTORY_SUFFIX);
 
-const decodeCommit = Schema.decodeUnknownEffect(Repository.CommitSha);
+const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
 
 export interface WorkspaceLayout {
   readonly cache: string;

@@ -1,4 +1,4 @@
-import type { LoadedInstance } from "@usine/config";
+import type { LoadedInstance } from "@usine/config/model";
 import { Context, Effect, Layer } from "effect";
 import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";

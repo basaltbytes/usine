@@ -3,9 +3,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Agent } from "@usine/core";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
+import { AgentName } from "@usine/core/ids";
 import { Effect, Stream } from "effect";
-import { ChildRequest, CodexChildBackend, WorkingDirectory } from "../../src/index.ts";
+import { ChildRequest, CodexChildBackend, WorkingDirectory } from "../../src/runtime.ts";
 import { codexAppServerLive } from "../../src/pi/codex/app-server.ts";
 import { codexChildBackendLayer } from "../../src/pi/codex/codex.ts";
 
@@ -26,13 +28,13 @@ describe("Codex child live contract", () => {
           const backend = yield* CodexChildBackend;
           const running = yield* backend.launch(
             new ChildRequest({
-              session: new Agent.ChildSession({
-                id: Agent.SessionId.make("codex-live-child"),
-                parentId: Agent.SessionId.make("codex-live-parent"),
-                agent: Agent.Name.make("contract-tester"),
-                brain: new Agent.BrainSpec({
+              session: new ChildSession({
+                id: AgentSessionId.make("codex-live-child"),
+                parentId: AgentSessionId.make("codex-live-parent"),
+                agent: AgentName.make("contract-tester"),
+                brain: new BrainSpec({
                   harness: "codex",
-                  model: Agent.ModelId.make(model),
+                  model: ModelId.make(model),
                   effort: "low",
                 }),
               }),

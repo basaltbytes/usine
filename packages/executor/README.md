@@ -31,18 +31,14 @@ The first prepare on each VM after orchestrator startup sweeps abandoned Attempt
 Concurrent Attempts against different repositories leave their integrations attached to the VM simultaneously; each grant stays time-boxed, and the refcounted release detaches an integration only after its last Attempt finishes. A failed detach is logged and left to lapse with its time-box.
 
 ```ts
-import { Repository } from "@usine/core"
-import {
-  GitHubIntegration,
-  HarnessLoginCheck,
-  IntegrationName,
-  layer,
-} from "@usine/executor/exe-dev"
+import { RepositoryName } from "@usine/core/ids"
+import { layer } from "@usine/executor/exe-dev"
+import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev/model"
 
 const executorLayer = layer({
   githubIntegrations: [
     new GitHubIntegration({
-      repository: Repository.Name.make("acme/widget"),
+      repository: RepositoryName.make("acme/widget"),
       name: IntegrationName.make("usine-acme-widget"),
     }),
   ],

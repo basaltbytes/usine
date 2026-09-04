@@ -1,57 +1,54 @@
+import { Agent } from "@usine/core/agent";
+import { ModelId } from "@usine/core/agent/brain";
+import { Attempt, AttemptTask } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { Event } from "@usine/core/event";
 import {
-  Agent,
-  Attempt,
-  AttemptChannel,
-  Event,
-  Instance,
-  Item,
-  Loop,
-  Repository,
-  Run,
-  Step,
-} from "@usine/core";
+  AttemptId,
+  EventId,
+  ItemKey,
+  LoopName,
+  RepositoryName,
+  RunId,
+  StepName,
+} from "@usine/core/ids";
+import { ApprovalRequirement } from "@usine/core/loop";
+import { RepositoryRevision } from "@usine/core/repository";
+import { Run } from "@usine/core/run";
+import { Step } from "@usine/core/step";
 import { Schema } from "effect";
-
-/** Whether a loop parks new runs until an approval Event arrives. */
-export const APPROVAL_REQUIREMENTS = Loop.APPROVAL_REQUIREMENTS;
-export const ApprovalRequirement = Loop.ApprovalRequirement;
-export type ApprovalRequirement = Loop.ApprovalRequirement;
-
-/** Absolute or caller-resolved path to the instance folder. */
-export const InstanceDirectory = Instance.Directory;
-export type InstanceDirectory = Instance.Directory;
 
 /** Durable runtime state for one Loop. Authored loop files never carry this toggle. */
 export class LoopRuntimeState extends Schema.Class<LoopRuntimeState>(
   "@usine/engine/LoopRuntimeState",
 )({
-  loop: Loop.LoopName,
+  loop: LoopName,
   paused: Schema.Boolean,
 }) {}
 
 /** The complete routing context needed to turn one Event into a Run. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
-  event: Event.Event,
-  itemKey: Item.ItemKey,
-  loop: Loop.LoopName,
-  step: Step.StepName,
+  event: Event,
+  itemKey: ItemKey,
+  loop: LoopName,
+  step: StepName,
   approval: ApprovalRequirement,
-  repository: Repository.Name,
-  revision: Repository.Revision,
-  task: AttemptChannel.Task,
-  agent: Agent.Agent,
-  parentModel: Schema.Option(Agent.ModelId),
+  repository: RepositoryName,
+  revision: RepositoryRevision,
+  task: AttemptTask,
+  agent: Agent,
+  parentModel: Schema.Option(ModelId),
 }) {}
 
 /** The Event owns a Run and repeated submissions return the same identity. */
 export class Claimed extends Schema.TaggedClass<Claimed>("@usine/engine/Claimed")("Claimed", {
-  eventId: Event.EventId,
-  runId: Run.RunId,
+  eventId: EventId,
+  runId: RunId,
 }) {}
 
 /** A running Attempt on the same Item must finish before this Event is reconsidered. */
 export class Queued extends Schema.TaggedClass<Queued>("@usine/engine/Queued")("Queued", {
-  eventId: Event.EventId,
+  eventId: EventId,
 }) {}
 
 export const IGNORED_REASONS = ["superseded", "revoked"] as const;
@@ -80,7 +77,7 @@ export const WORKFLOW_COMMAND_PRIORITY = [
 
 /** The Event remains in the permanent ledger but can no longer open a Run. */
 export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored")("Ignored", {
-  eventId: Event.EventId,
+  eventId: EventId,
   reason: IgnoreReason,
 }) {}
 
@@ -89,27 +86,27 @@ export type SubmissionResult = typeof SubmissionResult.Type;
 
 /** Observable durable projection for one Run. */
 export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSnapshot")({
-  event: Event.Event,
-  itemKey: Item.ItemKey,
-  run: Run.Run,
-  step: Step.Step,
-  attempts: Schema.Array(Attempt.Attempt),
-  repository: Repository.Name,
-  revision: Repository.Revision,
-  task: AttemptChannel.Task,
-  agent: Agent.Agent,
-  parentModel: Schema.Option(Agent.ModelId),
+  event: Event,
+  itemKey: ItemKey,
+  run: Run,
+  step: Step,
+  attempts: Schema.Array(Attempt),
+  repository: RepositoryName,
+  revision: RepositoryRevision,
+  task: AttemptTask,
+  agent: Agent,
+  parentModel: Schema.Option(ModelId),
 }) {}
 
 /** Lightweight durable projection used when listing Runs for operators. */
 export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSummary")({
-  itemKey: Item.ItemKey,
-  run: Run.Run,
-  step: Step.Step,
-  attempts: Schema.Array(Attempt.Attempt),
-  repository: Repository.Name,
-  task: AttemptChannel.Task,
-  agent: Agent.Agent,
+  itemKey: ItemKey,
+  run: Run,
+  step: Step,
+  attempts: Schema.Array(Attempt),
+  repository: RepositoryName,
+  task: AttemptTask,
+  agent: Agent,
 }) {}
 
 /** Monotonic version of the durable operator projection. */
@@ -120,15 +117,15 @@ export type ProjectionRevision = typeof ProjectionRevision.Type;
 
 /** Input passed to the attempt-execution port. */
 export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/StepExecution")({
-  attempt: Attempt.Attempt,
-  event: Event.Event,
-  run: Run.Run,
-  step: Step.Step,
-  repository: Repository.Name,
-  revision: Repository.Revision,
-  task: AttemptChannel.Task,
-  agent: Agent.Agent,
-  parentModel: Schema.Option(Agent.ModelId),
+  attempt: Attempt,
+  event: Event,
+  run: Run,
+  step: Step,
+  repository: RepositoryName,
+  revision: RepositoryRevision,
+  task: AttemptTask,
+  agent: Agent,
+  parentModel: Schema.Option(ModelId),
 }) {}
 
 /**
@@ -160,7 +157,7 @@ const TranscriptEnvelope = Schema.Union([AttemptChannel.Envelope, LegacyTranscri
 export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engine/TranscriptEntry")(
   {
     sequence: TranscriptSequence,
-    attemptId: Attempt.AttemptId,
+    attemptId: AttemptId,
     direction: AttemptChannel.Direction,
     envelope: TranscriptEnvelope,
     receivedAt: Schema.DateTimeUtc,
@@ -170,13 +167,13 @@ export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engin
 /** Read every row for one Attempt. Intended for execution and diagnostic consumers. */
 export class TranscriptAllQuery extends Schema.TaggedClass<TranscriptAllQuery>(
   "@usine/engine/TranscriptAllQuery",
-)("TranscriptAllQuery", { attemptId: Attempt.AttemptId }) {}
+)("TranscriptAllQuery", { attemptId: AttemptId }) {}
 
 /** Read rows appended after a cursor while tailing a live Attempt. */
 export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>(
   "@usine/engine/TranscriptTailQuery",
 )("TranscriptTailQuery", {
-  attemptId: Attempt.AttemptId,
+  attemptId: AttemptId,
   after: TranscriptSequence,
   limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
@@ -185,7 +182,7 @@ export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>
 export class TranscriptPageQuery extends Schema.TaggedClass<TranscriptPageQuery>(
   "@usine/engine/TranscriptPageQuery",
 )("TranscriptPageQuery", {
-  attemptId: Attempt.AttemptId,
+  attemptId: AttemptId,
   before: Schema.Option(TranscriptSequence),
   limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
@@ -201,13 +198,13 @@ export type TranscriptQuery = typeof TranscriptQuery.Type;
 export class RunNotFoundError extends Schema.TaggedError<RunNotFoundError>(
   "@usine/engine/RunNotFoundError",
 )("RunNotFoundError", {
-  runId: Run.RunId,
+  runId: RunId,
 }) {}
 
 export class RunOperationRejectedError extends Schema.TaggedError<RunOperationRejectedError>(
   "@usine/engine/RunOperationRejectedError",
 )("RunOperationRejectedError", {
-  runId: Run.RunId,
+  runId: RunId,
   operation: Schema.Literals(["approve", "retry"]),
   state: Schema.String,
 }) {}
@@ -222,7 +219,7 @@ export class EnginePersistenceError extends Schema.TaggedError<EnginePersistence
 export class AttemptCancellationError extends Schema.TaggedError<AttemptCancellationError>(
   "@usine/engine/AttemptCancellationError",
 )("AttemptCancellationError", {
-  attemptId: Attempt.AttemptId,
+  attemptId: AttemptId,
   cause: Schema.Defect(),
 }) {}
 

@@ -1,4 +1,20 @@
-import { Agent, AttemptChannel, AttemptFailure } from "@usine/core";
+import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
+import {
+  AgentSession,
+  AgentSessionEvent,
+  AgentSessionId,
+  BillingPool,
+  ChildSession,
+  ChildSessionBudget,
+  ChildSessionCount,
+} from "@usine/core/agent/session";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import {
+  AgentFailure,
+  AttemptFailure,
+  ChildSessionBudgetFailure,
+  InfraFailure,
+} from "@usine/core/attempt/failure";
 import { Context, Effect, Match, Schema, Scope, Stream } from "effect";
 
 /** Value object: process-local working directory for one isolated Attempt. */
@@ -13,7 +29,7 @@ export class LaunchRequest extends Schema.Class<LaunchRequest>("@usine/agents/La
 
 /** Complete input for exactly one first-level child session. */
 export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/ChildRequest")({
-  session: Agent.ChildSession,
+  session: ChildSession,
   cwd: WorkingDirectory,
   prompt: Schema.NonEmptyString,
 }) {}
@@ -27,8 +43,8 @@ export class SessionResult extends Schema.Class<SessionResult>("@usine/agents/Se
 export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
   "@usine/agents/UnknownModelError",
 )("UnknownModelError", {
-  harness: Agent.Harness,
-  model: Agent.ModelId,
+  harness: Harness,
+  model: ModelId,
   message: Schema.NonEmptyString,
 }) {}
 
@@ -36,9 +52,9 @@ export class UnknownModelError extends Schema.TaggedError<UnknownModelError>(
 export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableError>(
   "@usine/agents/PoolUnavailableError",
 )("PoolUnavailableError", {
-  harness: Agent.Harness,
-  model: Agent.ModelId,
-  pool: Agent.Pool,
+  harness: Harness,
+  model: ModelId,
+  pool: BillingPool,
   message: Schema.NonEmptyString,
 }) {}
 
@@ -46,9 +62,9 @@ export class PoolUnavailableError extends Schema.TaggedError<PoolUnavailableErro
 export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffortError>(
   "@usine/agents/UnsupportedEffortError",
 )("UnsupportedEffortError", {
-  harness: Agent.Harness,
-  model: Agent.ModelId,
-  effort: Agent.Effort,
+  harness: Harness,
+  model: ModelId,
+  effort: Effort,
   message: Schema.NonEmptyString,
 }) {}
 
@@ -56,7 +72,7 @@ export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffort
 export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   "@usine/agents/AgentResultError",
 )("AgentResultError", {
-  sessionId: Schema.OptionFromNullOr(Agent.SessionId),
+  sessionId: Schema.OptionFromNullOr(AgentSessionId),
   message: Schema.NonEmptyString,
 }) {}
 
@@ -64,8 +80,8 @@ export class AgentResultError extends Schema.TaggedError<AgentResultError>(
 export class ChildSessionBudgetExceededError extends Schema.TaggedError<ChildSessionBudgetExceededError>(
   "@usine/agents/ChildSessionBudgetExceededError",
 )("ChildSessionBudgetExceededError", {
-  maxChildren: Agent.ChildSessionBudget,
-  attemptedChildren: Agent.ChildSessionCount,
+  maxChildren: ChildSessionBudget,
+  attemptedChildren: ChildSessionCount,
   message: Schema.NonEmptyString,
 }) {}
 
@@ -78,7 +94,7 @@ export class SessionOperationError extends Schema.TaggedError<SessionOperationEr
   "@usine/agents/SessionOperationError",
 )("SessionOperationError", {
   operation: SessionOperation,
-  sessionId: Schema.OptionFromNullOr(Agent.SessionId),
+  sessionId: Schema.OptionFromNullOr(AgentSessionId),
   message: Schema.NonEmptyString,
   cause: Schema.Defect(),
 }) {}
@@ -98,22 +114,22 @@ export type AgentSessionError = typeof AgentSessionError.Type;
  * SDK/process trouble is retryable infrastructure; a bad roster spec or the
  * agent failing its own work always waits for the operator.
  */
-export const toAttemptFailure = (error: AgentSessionError): AttemptFailure.AttemptFailure =>
+export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
   Match.valueTags(error, {
     SessionOperationError: (operation) =>
-      new AttemptFailure.InfraFailure({ message: operation.message, cause: operation.cause }),
-    UnknownModelError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
-    PoolUnavailableError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
-    UnsupportedEffortError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
-    AgentResultError: ({ message }) => new AttemptFailure.AgentFailure({ message }),
+      new InfraFailure({ message: operation.message, cause: operation.cause }),
+    UnknownModelError: ({ message }) => new AgentFailure({ message }),
+    PoolUnavailableError: ({ message }) => new AgentFailure({ message }),
+    UnsupportedEffortError: ({ message }) => new AgentFailure({ message }),
+    AgentResultError: ({ message }) => new AgentFailure({ message }),
     ChildSessionBudgetExceededError: ({ attemptedChildren, maxChildren }) =>
-      new AttemptFailure.ChildSessionBudgetFailure({ attemptedChildren, maxChildren }),
+      new ChildSessionBudgetFailure({ attemptedChildren, maxChildren }),
   });
 
 /** Live SDK session. Its event stream and controls are backend-independent. */
 export interface RunningSession {
-  readonly session: Agent.Session;
-  readonly events: Stream.Stream<Agent.SessionEvent, AgentSessionError>;
+  readonly session: AgentSession;
+  readonly events: Stream.Stream<AgentSessionEvent, AgentSessionError>;
   readonly result: Effect.Effect<SessionResult, AgentSessionError>;
   readonly steer: (message: string) => Effect.Effect<void, AgentSessionError>;
   readonly interrupt: Effect.Effect<void, AgentSessionError>;

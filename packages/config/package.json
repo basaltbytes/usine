@@ -14,9 +14,29 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./instance-folder": {
+      "types": "./dist/instance-folder.d.ts",
+      "default": "./dist/instance-folder.js"
+    },
+    "./model": {
+      "types": "./dist/model.d.ts",
+      "default": "./dist/model.js"
+    },
+    "./parser": {
+      "types": "./dist/parser.d.ts",
+      "default": "./dist/parser.js"
+    },
+    "./payload-slices": {
+      "types": "./dist/payload-slices.d.ts",
+      "default": "./dist/payload-slices.js"
+    },
+    "./selector": {
+      "types": "./dist/selector.d.ts",
+      "default": "./dist/selector.js"
+    },
+    "./yaml/writer": {
+      "types": "./dist/yaml/writer.d.ts",
+      "default": "./dist/yaml/writer.js"
     }
   },
   "publishConfig": {

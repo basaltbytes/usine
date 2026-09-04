@@ -1,12 +1,20 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Agent, Attempt, AttemptChannel, Repository, StepResult, Worker } from "@usine/core";
-import { CheckoutRequest, Executor, type PreparedAttempt } from "../src/index.ts";
+import { Agent, AgentPersona } from "@usine/core/agent";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
-  GitHubIntegration,
-  HarnessLoginCheck,
-  IntegrationName,
-  layer as exeDevLayer,
-} from "../src/exe-dev/index.ts";
+  AgentSessionId,
+  ChildSessionBudget,
+  ParentSession,
+  TextOutput,
+} from "@usine/core/agent/session";
+import { AttemptTask } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { AgentName, AttemptId, RepositoryName, WorkerName } from "@usine/core/ids";
+import { CommitSha, RepositoryRevision } from "@usine/core/repository";
+import { StepResult } from "@usine/core/step/result";
+import { CheckoutRequest, Executor, type PreparedAttempt } from "../src/executor.ts";
+import { layer as exeDevLayer } from "../src/exe-dev/exe-dev.ts";
+import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "../src/exe-dev/model.ts";
 import {
   Cause,
   DateTime,
@@ -26,28 +34,28 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import type { StandardCommand } from "effect/unstable/process/ChildProcess";
 import { TestClock } from "effect/testing";
 
-const ATTEMPT_ID = Attempt.AttemptId.make("remote-run/execute/1");
-const WORKER = Worker.Name.make("remote-one");
-const REPOSITORY = Repository.Name.make("acme/demo");
+const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
+const WORKER = WorkerName.make("remote-one");
+const REPOSITORY = RepositoryName.make("acme/demo");
 // The brand already rejects whitespace and a leading dash; what remains
 // representable ($, ;, quotes) must still die at the shell-quoting boundary.
-const REVISION = Repository.Revision.make("main;$(touch$IFS/tmp/usine-injected)");
-const COMMIT = Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567");
-const TASK = AttemptChannel.Task.make("Complete the remote task");
+const REVISION = RepositoryRevision.make("main;$(touch$IFS/tmp/usine-injected)");
+const COMMIT = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
+const TASK = AttemptTask.make("Complete the remote task");
 const PROTOCOL = String(AttemptChannel.PROTOCOL_VERSION);
-const TEST_AGENT = new Agent.Agent({
-  name: Agent.Name.make("developer"),
-  brain: new Agent.BrainSpec({
+const TEST_AGENT = new Agent({
+  name: AgentName.make("developer"),
+  brain: new BrainSpec({
     harness: "claude",
-    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Agent.Persona.make("Implement the task."),
+  persona: AgentPersona.make("Implement the task."),
 });
-const TEST_SESSION = new Agent.ParentSession({
-  id: Agent.SessionId.make("parent-session"),
+const TEST_SESSION = new ParentSession({
+  id: AgentSessionId.make("parent-session"),
   agent: TEST_AGENT.name,
   brain: TEST_AGENT.brain,
 });
@@ -184,7 +192,7 @@ const interactiveHandle = (command: StandardCommand, state: FakeSshState, mode: 
                   sequence: AttemptChannel.Sequence.make(2),
                   sentAt: DateTime.makeUnsafe("2026-08-31T12:00:01Z"),
                   payload: new AttemptChannel.SessionEvent({
-                    event: new Agent.TextOutput({
+                    event: new TextOutput({
                       session: TEST_SESSION,
                       text: "Remote work completed",
                     }),
@@ -198,7 +206,7 @@ const interactiveHandle = (command: StandardCommand, state: FakeSshState, mode: 
                   sequence: AttemptChannel.Sequence.make(3),
                   sentAt: DateTime.makeUnsafe("2026-08-31T12:00:02Z"),
                   payload: new AttemptChannel.Final({
-                    result: new StepResult.StepResult({ message: "done", facts: [] }),
+                    result: new StepResult({ message: "done", facts: [] }),
                   }),
                 }),
               );
@@ -346,7 +354,7 @@ const request = new CheckoutRequest({
   task: TASK,
   agent: TEST_AGENT,
   parentModel: Option.none(),
-  maxChildren: Agent.ChildSessionBudget.make(4),
+  maxChildren: ChildSessionBudget.make(4),
   parentEffort: "high",
 });
 
@@ -530,7 +538,7 @@ describe("exe.dev executor", () => {
     const ssh = fakeSsh(PROTOCOL);
     const secondRequest = new CheckoutRequest({
       ...request,
-      attemptId: Attempt.AttemptId.make("remote-run/execute/2"),
+      attemptId: AttemptId.make("remote-run/execute/2"),
     });
     return Effect.gen(function* () {
       const executor = yield* Executor;

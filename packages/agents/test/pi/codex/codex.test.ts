@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Agent } from "@usine/core";
+import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
+import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
+import { AgentName } from "@usine/core/ids";
 import { Effect, Layer, Schema, Stream } from "effect";
 import {
   AgentResultError,
@@ -9,7 +11,7 @@ import {
   UnknownModelError,
   UnsupportedEffortError,
   WorkingDirectory,
-} from "../../../src/index.ts";
+} from "../../../src/runtime.ts";
 import {
   CodexAppServer,
   type CodexConnection,
@@ -17,15 +19,15 @@ import {
 } from "../../../src/pi/codex/app-server.ts";
 import { codexChildBackendLayer } from "../../../src/pi/codex/codex.ts";
 
-const request = (model = "gpt-5.6-terra", effort: Agent.Effort = "off") =>
+const request = (model = "gpt-5.6-terra", effort: Effort = "off") =>
   new ChildRequest({
-    session: new Agent.ChildSession({
-      id: Agent.SessionId.make("codex-child-1"),
-      parentId: Agent.SessionId.make("parent-1"),
-      agent: Agent.Name.make("developer"),
-      brain: new Agent.BrainSpec({
+    session: new ChildSession({
+      id: AgentSessionId.make("codex-child-1"),
+      parentId: AgentSessionId.make("parent-1"),
+      agent: AgentName.make("developer"),
+      brain: new BrainSpec({
         harness: "codex",
-        model: Agent.ModelId.make(model),
+        model: ModelId.make(model),
         effort,
       }),
     }),

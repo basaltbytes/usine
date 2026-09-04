@@ -1,6 +1,6 @@
-import { Repository, Worker } from "@usine/core";
+import { RepositoryName, WorkerName } from "@usine/core/ids";
 import { Effect, Ref } from "effect";
-import { CredentialUnavailableError } from "../index.ts";
+import { CredentialUnavailableError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import type { ExeDevCommands } from "./commands.ts";
 import {
@@ -9,7 +9,7 @@ import {
   type IntegrationName,
 } from "./model.ts";
 
-const grantKey = (worker: Worker.Name, integration: IntegrationName): string =>
+const grantKey = (worker: WorkerName, integration: IntegrationName): string =>
   `${worker} ${integration}`;
 
 export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor")(function* (
@@ -21,8 +21,8 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
   const grantMinutes = options.credentialGrantMinutes ?? CredentialGrantMinutes.make(65);
 
   const acquire = Effect.fn("ExeDevExecutor.acquireGrant")(function* (
-    worker: Worker.Name,
-    repository: Repository.Name,
+    worker: WorkerName,
+    repository: RepositoryName,
     integration: IntegrationName,
   ) {
     const key = grantKey(worker, integration);
@@ -65,7 +65,7 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
   });
 
   const release = Effect.fn("ExeDevExecutor.releaseGrant")(function* (
-    worker: Worker.Name,
+    worker: WorkerName,
     integration: IntegrationName,
   ) {
     const key = grantKey(worker, integration);

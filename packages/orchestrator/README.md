@@ -24,7 +24,7 @@ Polling cursors live in the engine's `CursorStore`. When a loop starts watching 
 
 ```ts
 import { Layer } from "effect"
-import { PollingTriggers } from "@usine/orchestrator"
+import { PollingTriggers } from "@usine/orchestrator/polling-triggers"
 
 const dependencies = Layer.mergeAll(
   engineLayer,
@@ -69,14 +69,14 @@ For the whole local application, `runtimeLayer(instanceDirectory, instance, opti
 For an exe.dev Worker, use the `@usine/orchestrator/exe-dev` composition. It keeps the engine and SQLite runtime local while the unchanged Worker contract runs on the named VM:
 
 ```ts
-import { Repository } from "@usine/core"
-import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev"
+import { RepositoryName } from "@usine/core/ids"
+import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev/model"
 import { layer as exeDevLayer } from "@usine/orchestrator/exe-dev"
 
 const EngineLive = exeDevLayer(instanceDirectory, config, {
   githubIntegrations: [
     new GitHubIntegration({
-      repository: Repository.Name.make("acme/widget"),
+      repository: RepositoryName.make("acme/widget"),
       name: IntegrationName.make("usine-acme-widget"),
     }),
   ],

@@ -1,4 +1,5 @@
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/ids";
+import { splitRepositoryName } from "@usine/core/repository";
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "./github-app.ts";
@@ -27,8 +28,8 @@ interface CreateLabelBody {
   description?: string;
 }
 
-const labelsUrl = (repository: Repository.Name): string => {
-  const { name, owner } = Repository.parts(repository);
+const labelsUrl = (repository: RepositoryName): string => {
+  const { name, owner } = splitRepositoryName(repository);
   return `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/labels`;
 };
 
@@ -37,7 +38,7 @@ export class GitHubLabelWriter extends Context.Service<
   GitHubLabelWriter,
   {
     readonly create: (
-      repository: Repository.Name,
+      repository: RepositoryName,
       label: NewRepositoryLabel,
     ) => Effect.Effect<RepositoryLabel, GitHubAppError>;
   }
@@ -51,7 +52,7 @@ export class GitHubLabelWriter extends Context.Service<
 
         return {
           create: Effect.fn("GitHubLabelWriter.create")(function* (
-            repository: Repository.Name,
+            repository: RepositoryName,
             label: NewRepositoryLabel,
           ) {
             yield* Effect.annotateCurrentSpan({ repository, label: label.name });

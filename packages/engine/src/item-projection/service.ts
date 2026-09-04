@@ -1,14 +1,15 @@
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/ids";
 import { desc, eq, ne } from "drizzle-orm";
 import { Context, Effect, Layer, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import { itemProjections } from "../database/schema.ts";
 import { EnginePersistenceError } from "../model.ts";
-import { ItemContentHash, ItemNumber, ItemProjection, ItemProjectionSource } from "./model.ts";
+import { ItemNumber } from "@usine/core/item";
+import { ItemContentHash, ItemProjection, ItemProjectionSource } from "./model.ts";
 
 const ItemProjectionRow = Schema.Struct({
   itemKey: ItemProjection.fields.itemKey,
-  repository: Repository.Name,
+  repository: RepositoryName,
   source: ItemProjectionSource,
   number: ItemNumber,
   contentHash: ItemContentHash,
@@ -32,7 +33,7 @@ const makeReader = Effect.gen(function* () {
   const database = yield* RunDatabase;
   return {
     list: Effect.fn("ItemProjectionReader.list")(function* (
-      repository: Repository.Name,
+      repository: RepositoryName,
       options: ItemProjectionListOptions,
     ) {
       yield* Effect.annotateCurrentSpan({ repository, limit: options.limit });
@@ -113,7 +114,7 @@ export class ItemProjectionReader extends Context.Service<
   {
     /** The newest `limit` Item projections of one repository, highest number first. */
     readonly list: (
-      repository: Repository.Name,
+      repository: RepositoryName,
       options: ItemProjectionListOptions,
     ) => Effect.Effect<ReadonlyArray<ItemProjection>, EnginePersistenceError>;
   }

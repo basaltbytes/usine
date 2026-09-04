@@ -1,44 +1,52 @@
+import type {
+  ConfigFileError,
+  DeclaredLabel,
+  LoadedInstance,
+  LoopFile,
+  ManagedRepo,
+} from "@usine/config/model";
+import { ConfigParser } from "@usine/config/parser";
+import { environmentFor, repositoryContext } from "@usine/config/payload-slices";
+import { matchesSelector } from "@usine/config/selector";
+import { AttemptTask } from "@usine/core/attempt";
+import { DedupKey, ItemKey, RepositoryName } from "@usine/core/ids";
+import { ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
+import { canonicalRepositoryName } from "@usine/core/repository";
+import { CursorKey } from "@usine/engine/cursor/model";
+import { CursorStore } from "@usine/engine/cursor/store";
+import { RunEngine } from "@usine/engine/engine";
 import {
-  ConfigParser,
-  environmentFor,
-  type ConfigFileError,
-  type DeclaredLabel,
-  type LoadedInstance,
-  type LoopFile,
-  type ManagedRepo,
-  matchesSelector,
-  repositoryContext,
-} from "@usine/config";
-import { AttemptChannel, Event, Item, Repository } from "@usine/core";
-import {
-  CursorKey,
-  CursorStore,
-  type EnginePersistenceError,
   ItemContentHash,
-  ItemNumber,
   ItemProjection,
   ItemProjectionSource,
-  ItemProjectionWriter,
-  LoopControl,
+} from "@usine/engine/item-projection/model";
+import { ItemProjectionWriter } from "@usine/engine/item-projection/service";
+import { LoopControl } from "@usine/engine/loop-control";
+import {
+  type EnginePersistenceError,
+  type RunEngineError,
+  SubmissionResult,
+} from "@usine/engine/model";
+import {
   RepositoryLabel,
   RepositoryLabelProjection,
+} from "@usine/engine/repository-label-projection/model";
+import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
-  RunEngine,
-  SubmissionResult,
-  type RunEngineError,
-} from "@usine/engine";
-import { ExpressionEngine, type ExpressionError } from "@usine/expression";
+} from "@usine/engine/repository-label-projection/service";
+import { ExpressionEngine } from "@usine/expression/expression-engine";
+import type { ExpressionError } from "@usine/expression/model";
+import type { GitHubAppError } from "@usine/github/model";
 import {
-  GitHubPolling,
+  type ChangedItem,
   EntityTag,
+  type PayloadSnapshot,
   PollCursor,
   RepositoryLabelCatalog,
-  type ChangedItem,
-  type GitHubAppError,
-  type PayloadSnapshot,
   type RepositoryLabelDetection,
-} from "@usine/github";
+} from "@usine/github/polling/model";
+import { GitHubPolling } from "@usine/github/polling/polling";
 import {
   Clock,
   Context,
@@ -82,9 +90,9 @@ type WatchKey = typeof WatchKey.Type;
  * `toType` keeps the ItemKey brand on the encoded side, so `encodeSync`
  * returns an `Item.ItemKey` rather than a bare string.
  */
-export const GitHubItemKey = Schema.toType(Item.ItemKey).pipe(
+export const GitHubItemKey = Schema.toType(ItemKey).pipe(
   Schema.decodeTo(
-    Schema.fromJsonString(Schema.Tuple([Schema.Literal("github"), Repository.Name, Item.Number])),
+    Schema.fromJsonString(Schema.Tuple([Schema.Literal("github"), RepositoryName, CoreItemNumber])),
   ),
 );
 const encodeGitHubItemKey = Schema.encodeSync(GitHubItemKey);
@@ -102,7 +110,7 @@ class StoredPollCursor extends Schema.Class<StoredPollCursor>(
 export class RepositoryPollFailure extends Schema.Class<RepositoryPollFailure>(
   "@usine/orchestrator/RepositoryPollFailure",
 )({
-  repository: Repository.Name,
+  repository: RepositoryName,
   errorTag: Schema.NonEmptyString,
   message: Schema.String,
 }) {}
@@ -189,7 +197,7 @@ const DEFERRED_RECONCILIATION: LabelReconciliation = {
 };
 
 const cursorKey = (repository: ManagedRepo): CursorKey =>
-  CursorKey.make(`github-poll:${Repository.canonical(repository.name)}`);
+  CursorKey.make(`github-poll:${canonicalRepositoryName(repository.name)}`);
 
 const watchKey = ({ loop }: ResolvedLoop): WatchKey =>
   WatchKey.make(JSON.stringify([loop.name, loop.trigger.on, loop.trigger.if]));
@@ -216,10 +224,10 @@ const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKe
 const itemStream = (item: ChangedItem): "issue" | "pr" =>
   item._tag === "ChangedIssue" ? "issue" : "pr";
 
-const itemKey = (repository: ManagedRepo, item: ChangedItem): Item.ItemKey =>
+const itemKey = (repository: ManagedRepo, item: ChangedItem): ItemKey =>
   encodeGitHubItemKey([
     "github",
-    Repository.Name.make(Repository.canonical(repository.name)),
+    RepositoryName.make(canonicalRepositoryName(repository.name)),
     ItemNumber.make(item.number),
   ]);
 
@@ -228,11 +236,11 @@ const eventKey = (
   repository: ManagedRepo,
   item: ChangedItem,
   snapshot: PayloadSnapshot,
-): Event.DedupKey =>
-  Event.DedupKey.make(
+): DedupKey =>
+  DedupKey.make(
     JSON.stringify([
       loop.name,
-      Repository.canonical(repository.name),
+      canonicalRepositoryName(repository.name),
       item.number,
       snapshot.contentHash,
     ]),
@@ -410,7 +418,7 @@ export class PollingTriggers extends Context.Service<
               payload,
               receivedAt,
               repository: watched.repository,
-              task: AttemptChannel.Task.make(rendered.success),
+              task: AttemptTask.make(rendered.success),
               agent,
               parentModel,
             }),

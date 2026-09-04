@@ -1,19 +1,29 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { UsineConfig } from "@usine/config";
+import { UsineConfig } from "@usine/config/model";
+import { Agent, AgentPersona } from "@usine/core/agent";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { AttemptTask } from "@usine/core/attempt";
+import { Event } from "@usine/core/event";
 import {
-  Agent,
-  AttemptChannel,
-  Event,
-  Instance,
-  Item,
-  Loop,
-  Repository,
-  Step,
-  Worker,
-} from "@usine/core";
-import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev";
-import { RunEngine, Submission, TranscriptAllQuery } from "@usine/engine";
+  AgentName,
+  DedupKey,
+  EventId,
+  ItemKey,
+  LoopName,
+  RepositoryName,
+  StepName,
+  WorkerName,
+} from "@usine/core/ids";
+import { InstanceDirectory } from "@usine/core/instance";
+import { RepositoryRevision } from "@usine/core/repository";
+import {
+  GitHubIntegration,
+  HarnessLoginCheck,
+  IntegrationName,
+} from "@usine/executor/exe-dev/model";
+import { RunEngine } from "@usine/engine/engine";
+import { Submission, TranscriptAllQuery } from "@usine/engine/model";
 import { Config, DateTime, Effect, FileSystem, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as exeDevLayer } from "../../src/exe-dev.ts";
@@ -70,19 +80,19 @@ describe("live exe.dev Worker", () => {
         revision: Config.string("USINE_EXE_DEV_INTEGRATION_REVISION"),
         integration: Config.string("USINE_EXE_DEV_INTEGRATION_GITHUB_INTEGRATION"),
       });
-      const worker = Worker.Name.make(settings.worker);
-      const repository = Repository.Name.make(settings.repository);
-      const revision = Repository.Revision.make(settings.revision);
-      const agent = new Agent.Agent({
-        name: Agent.Name.make("developer"),
-        brain: new Agent.BrainSpec({
+      const worker = WorkerName.make(settings.worker);
+      const repository = RepositoryName.make(settings.repository);
+      const revision = RepositoryRevision.make(settings.revision);
+      const agent = new Agent({
+        name: AgentName.make("developer"),
+        brain: new BrainSpec({
           harness: "codex",
-          model: Agent.ModelId.make("gpt-5.6-sol"),
+          model: ModelId.make("gpt-5.6-sol"),
           effort: "high",
         }),
         parentModel: Option.none(),
         parentEffort: Option.none(),
-        persona: Agent.Persona.make("Verify the remote Worker transport."),
+        persona: AgentPersona.make("Verify the remote Worker transport."),
       });
       const config = Schema.decodeUnknownSync(UsineConfig)({
         version: 1,
@@ -90,7 +100,7 @@ describe("live exe.dev Worker", () => {
         workers: [{ name: worker, kind: "exe.dev", max_concurrent_attempts: 1 }],
       });
       const fileSystem = yield* FileSystem.FileSystem;
-      const instanceDirectory = Instance.Directory.make(
+      const instanceDirectory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-exe-dev-integration-" }),
       );
       const runtime = exeDevLayer(instanceDirectory, config, {
@@ -113,21 +123,19 @@ describe("live exe.dev Worker", () => {
         const engine = yield* RunEngine;
         const accepted = yield* engine.submit(
           new Submission({
-            event: new Event.Event({
-              id: Event.EventId.make(`exe-dev-${globalThis.crypto.randomUUID()}`),
-              dedupKey: Event.DedupKey.make(
-                `exe-dev/${repository}/${globalThis.crypto.randomUUID()}`,
-              ),
+            event: new Event({
+              id: EventId.make(`exe-dev-${globalThis.crypto.randomUUID()}`),
+              dedupKey: DedupKey.make(`exe-dev/${repository}/${globalThis.crypto.randomUUID()}`),
               payload: { integration: "exe.dev" },
               receivedAt: yield* DateTime.now,
             }),
-            itemKey: Item.ItemKey.make("exe-dev-integration"),
-            loop: Loop.LoopName.make("exe-dev-integration"),
-            step: Step.StepName.make("execute"),
+            itemKey: ItemKey.make("exe-dev-integration"),
+            loop: LoopName.make("exe-dev-integration"),
+            step: StepName.make("execute"),
             approval: "none",
             repository,
             revision,
-            task: AttemptChannel.Task.make("Verify the exe.dev Worker transport"),
+            task: AttemptTask.make("Verify the exe.dev Worker transport"),
             agent,
             parentModel: Option.none(),
           }),

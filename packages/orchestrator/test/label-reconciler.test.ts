@@ -1,19 +1,18 @@
 import { assert, describe, it } from "@effect/vitest";
-import { DeclaredLabel, GitHubLabelColor, GitHubLabelName } from "@usine/config";
-import { Repository } from "@usine/core";
-import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine";
+import { DeclaredLabel, GitHubLabelColor, GitHubLabelName } from "@usine/config/model";
+import { RepositoryName } from "@usine/core/ids";
+import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine/repository-label-projection/model";
+import { GitHubLabelWriter } from "@usine/github/label-writer";
+import { GitHubApiError, GitHubRateLimitError } from "@usine/github/model";
 import {
-  GitHubApiError,
-  GitHubLabelWriter,
-  GitHubRateLimitError,
   RepositoryLabel,
   RepositoryLabelColor,
   RepositoryLabelName,
-} from "@usine/github";
+} from "@usine/github/polling/model";
 import { DateTime, Effect, Layer, Logger, Option } from "effect";
 import { LabelReconciler } from "../src/label-reconciler.ts";
 
-const repository = Repository.Name.make("basaltbytes/usine");
+const repository = RepositoryName.make("basaltbytes/usine");
 const declaration = (name: string, color?: string, description?: string) =>
   new DeclaredLabel({
     name: GitHubLabelName.make(name),

@@ -1,18 +1,14 @@
-import { canonicalLabelName, type DeclaredLabel, GitHubLabelName } from "@usine/config";
-import { Repository } from "@usine/core";
-import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine";
-import {
-  GitHubLabelWriter,
-  NewRepositoryLabel,
-  RepositoryLabelColor,
-  RepositoryLabelName,
-} from "@usine/github";
+import { canonicalLabelName, type DeclaredLabel, GitHubLabelName } from "@usine/config/model";
+import { RepositoryName } from "@usine/core/ids";
+import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine/repository-label-projection/model";
+import { GitHubLabelWriter, NewRepositoryLabel } from "@usine/github/label-writer";
+import { RepositoryLabelColor, RepositoryLabelName } from "@usine/github/polling/model";
 import { Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
 
 export class LabelPreflightFinding extends Schema.Class<LabelPreflightFinding>(
   "@usine/orchestrator/LabelPreflightFinding",
 )({
-  repository: Repository.Name,
+  repository: RepositoryName,
   label: GitHubLabelName,
   errorTag: Schema.NonEmptyString,
   message: Schema.NonEmptyString,
@@ -69,7 +65,7 @@ export class LabelReconciler extends Context.Service<
   LabelReconciler,
   {
     readonly reconcile: (
-      repository: Repository.Name,
+      repository: RepositoryName,
       declared: ReadonlyArray<DeclaredLabel>,
       existing: ReadonlyArray<StoredRepositoryLabel>,
     ) => Effect.Effect<LabelReconciliation>;
@@ -82,7 +78,7 @@ export class LabelReconciler extends Context.Service<
 
       return {
         reconcile: Effect.fn("LabelReconciler.reconcile")(function* (
-          repository: Repository.Name,
+          repository: RepositoryName,
           declared: ReadonlyArray<DeclaredLabel>,
           existing: ReadonlyArray<StoredRepositoryLabel>,
         ) {

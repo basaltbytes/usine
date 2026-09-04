@@ -1,24 +1,29 @@
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
+import { ModelId } from "@usine/core/agent/brain";
+import { AgentName, RepositoryName, RunId, StepName } from "@usine/core/ids";
 import {
   AgentFile,
-  AgentName,
-  ConfigParser,
   IssueTrigger,
   LoadedInstance,
   LoopFile,
   LoopName,
-  ModelId,
   Persona,
   PromptTemplate,
   Selector,
   UsineConfig,
-} from "@usine/config";
-import { Instance, Repository, Run, Step } from "@usine/core";
-import { RunEngine, StepExecutor } from "@usine/engine";
+} from "@usine/config/model";
+import { ConfigParser } from "@usine/config/parser";
+import { InstanceDirectory } from "@usine/core/instance";
+import { RunEngine } from "@usine/engine/engine";
+import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
-import { MarcbachmannCelLayer, Source } from "@usine/expression";
-import { GitHubApp, GitHubLabelWriter, GitHubPolling, IssuePayload } from "@usine/github";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
+import { Source } from "@usine/expression/model";
+import { GitHubApp } from "@usine/github/github-app";
+import { GitHubLabelWriter } from "@usine/github/label-writer";
+import { IssuePayload } from "@usine/github/polling/model";
+import { GitHubPolling } from "@usine/github/polling/polling";
 import { localSecretsLayer } from "@usine/github/local-secrets";
 import {
   Config,
@@ -33,7 +38,8 @@ import {
   Scope,
 } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { LabelReconciler, PollingTriggers } from "../../src/index.ts";
+import { LabelReconciler } from "../../src/label-reconciler.ts";
+import { PollingTriggers } from "../../src/polling-triggers.ts";
 
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
   Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
@@ -63,13 +69,13 @@ const request = Effect.fn("integration.request")(function* (
   }
 });
 
-const repositoryApi = (repository: Repository.Name): string =>
+const repositoryApi = (repository: RepositoryName): string =>
   `https://api.github.com/repos/${repository
     .split("/")
     .map((part) => encodeURIComponent(part))
     .join("/")}`;
 
-const makeInstance = (repository: Repository.Name, label: string): LoadedInstance => {
+const makeInstance = (repository: RepositoryName, label: string): LoadedInstance => {
   const config = Schema.decodeUnknownSync(UsineConfig)({
     version: 1,
     repos: [{ name: repository, tags: ["integration"] }],
@@ -97,7 +103,7 @@ const makeInstance = (repository: Repository.Name, label: string): LoadedInstanc
       }),
     ),
     approval: "required",
-    step: Step.StepName.make("run"),
+    step: StepName.make("run"),
     agent: agent.name,
     body: PromptTemplate.make("Integration test."),
   });
@@ -111,7 +117,7 @@ const makeInstance = (repository: Repository.Name, label: string): LoadedInstanc
   });
 };
 
-const runtimeLayer = (directory: Instance.Directory, app: GitHubApp["Service"]) => {
+const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) => {
   const executor = Layer.succeed(StepExecutor)({
     interrupt: () => Effect.void,
     reserve: () => Effect.die("the approval-gated integration run must not reserve a worker"),
@@ -140,7 +146,7 @@ const runtimeLayer = (directory: Instance.Directory, app: GitHubApp["Service"]) 
 };
 
 const openRuntime = Effect.fn("integration.openRuntime")(function* (
-  directory: Instance.Directory,
+  directory: InstanceDirectory,
   app: GitHubApp["Service"],
 ) {
   const scope = yield* Scope.make();
@@ -157,7 +163,7 @@ const closeRuntime = ({ scope }: Effect.Success<ReturnType<typeof openRuntime>>)
 
 const runIdFrom = (
   submissions: Effect.Success<ReturnType<PollingTriggers["Service"]["poll"]>>["submissions"],
-): Option.Option<Run.RunId> => {
+): Option.Option<RunId> => {
   const first = submissions[0];
   return first === undefined || first._tag !== "Claimed" ? Option.none() : Option.some(first.runId);
 };
@@ -170,14 +176,14 @@ describe("live GitHub polling", () => {
         repository: Config.string("USINE_GITHUB_INTEGRATION_REPO"),
         issueNumber: Config.schema(PositiveIntFromString, "USINE_GITHUB_INTEGRATION_ISSUE_NUMBER"),
       });
-      const repository = Repository.Name.make(settings.repository);
+      const repository = RepositoryName.make(settings.repository);
       const label = `usine-poll-${globalThis.crypto.randomUUID()}`;
       const instance = makeInstance(repository, label);
       const fileSystem = yield* FileSystem.FileSystem;
-      const runtimeDirectory = Instance.Directory.make(
+      const runtimeDirectory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-live-polling-" }),
       );
-      const credentialsDirectory = Instance.Directory.make(settings.credentialsDirectory);
+      const credentialsDirectory = InstanceDirectory.make(settings.credentialsDirectory);
       const platformLayer = Layer.merge(NodeFileSystem.layer, NodePath.layer);
       const credentialsLayer = localSecretsLayer(credentialsDirectory).pipe(
         Layer.provide(platformLayer),
@@ -215,7 +221,7 @@ describe("live GitHub polling", () => {
                     );
 
                     const deadline = Date.now() + instance.config.settings.pollInterval * 1_000;
-                    let originalRun = Option.none<Run.RunId>();
+                    let originalRun = Option.none<RunId>();
                     while (Option.isNone(originalRun) && Date.now() <= deadline) {
                       const cycle = yield* polling.poll(instance);
                       if (cycle.failures.length > 0) {

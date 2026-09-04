@@ -1,7 +1,14 @@
 /** @usine/run-host — one-shot worker-side Attempt host. */
 
-import { AgentRuntime, LaunchRequest, toAttemptFailure, WorkingDirectory } from "@usine/agents";
-import { AttemptChannel, Repository, StepResult } from "@usine/core";
+import {
+  AgentRuntime,
+  LaunchRequest,
+  toAttemptFailure,
+  WorkingDirectory,
+} from "@usine/agents/runtime";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { CommitSha } from "@usine/core/repository";
+import { Commit, StepResult } from "@usine/core/step/result";
 import {
   Deferred,
   DateTime,
@@ -152,7 +159,7 @@ export const runHost = () =>
         return yield* Effect.forEach(lines, (line) =>
           Effect.gen(function* () {
             const separator = line.indexOf("\u0000");
-            const sha = yield* Schema.decodeUnknownEffect(Repository.CommitSha)(
+            const sha = yield* Schema.decodeUnknownEffect(CommitSha)(
               separator < 0 ? line : line.slice(0, separator),
             ).pipe(
               Effect.mapError((cause) =>
@@ -167,7 +174,7 @@ export const runHost = () =>
                 new Error("empty commit summary"),
               );
             }
-            return new StepResult.Commit({ sha, summary });
+            return new Commit({ sha, summary });
           }),
         );
       });
@@ -242,7 +249,7 @@ export const runHost = () =>
         const sessionResult = yield* session.result;
         yield* Fiber.join(eventFiber);
         const commits = yield* harvestCommits();
-        return new StepResult.StepResult({ message: sessionResult.message, facts: commits });
+        return new StepResult({ message: sessionResult.message, facts: commits });
       });
       yield* Effect.gen(function* () {
         const outcome = yield* Effect.raceFirst(

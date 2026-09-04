@@ -1,7 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { Run } from "@usine/core";
-import { RunDetailView } from "@usine/orchestrator";
-import type { TranscriptPageCursor } from "@usine/orchestrator";
+import type { RunId } from "@usine/core/ids";
+import { RunDetailView, type TranscriptPageCursor } from "@usine/orchestrator/operator/model";
 import type { Schema } from "effect";
 import { useState, type ReactNode } from "react";
 import { ErrorAlert } from "@/components/error-alert";
@@ -57,7 +56,7 @@ export const RunDrawer = ({
   open,
   close,
 }: {
-  readonly runId: Run.RunId;
+  readonly runId: RunId;
   /** False keeps the last Run mounted while the Sheet plays its exit transition. */
   readonly open: boolean;
   readonly close: () => void;

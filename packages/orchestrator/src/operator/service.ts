@@ -1,20 +1,21 @@
-import { GitHubLabelName } from "@usine/config";
-import type { LoadedInstance } from "@usine/config";
-import { Event, Loop, Run } from "@usine/core";
+import { GitHubLabelName, type LoadedInstance } from "@usine/config/model";
+import { Event } from "@usine/core/event";
+import { DedupKey, EventId, LoopName, RunId } from "@usine/core/ids";
+import { RunEngine } from "@usine/engine/engine";
+import { ItemProjectionReader } from "@usine/engine/item-projection/service";
+import { LoopControl } from "@usine/engine/loop-control";
 import {
-  ItemProjectionReader,
-  LoopControl,
-  RepositoryLabelProjectionReader,
-  RunEngine,
-  RunReader,
   type EnginePersistenceError,
   type LoopRuntimeState,
   type ProjectionRevision,
   type RunEngineError,
   RunOperationRejectedError,
   type RunStoreError,
-} from "@usine/engine";
-import { GitHubItemWriter, type GitHubAppError } from "@usine/github";
+} from "@usine/engine/model";
+import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection/service";
+import { RunReader } from "@usine/engine/run-reader";
+import { GitHubItemWriter } from "@usine/github/item-writer";
+import type { GitHubAppError } from "@usine/github/model";
 import { Context, DateTime, Effect, Layer, Option, SynchronizedRef } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
@@ -292,7 +293,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   );
 
   const detail = Effect.fn("Operator.detail")(function* (
-    runId: Run.RunId,
+    runId: RunId,
     request: TranscriptRequest = new ColdTranscriptRequest(),
   ) {
     yield* Effect.annotateCurrentSpan({ runId });
@@ -322,7 +323,7 @@ export class OperatorObservation extends Context.Service<
       instance: LoadedInstance,
     ) => Effect.Effect<ReadyOverview, OperatorObservationError>;
     readonly detail: (
-      runId: Run.RunId,
+      runId: RunId,
       request?: TranscriptRequest,
     ) => Effect.Effect<RunDetailView, OperatorObservationError>;
   }
@@ -338,7 +339,7 @@ const makeOperator = Effect.gen(function* () {
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const github = yield* GitHubItemWriter;
 
-  const approve = Effect.fn("Operator.approve")(function* (runId: Run.RunId) {
+  const approve = Effect.fn("Operator.approve")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     const current = yield* runs.inspect(runId);
     if (current.run.state._tag !== "Waiting") {
@@ -353,11 +354,11 @@ const makeOperator = Effect.gen(function* () {
       });
     }
     const receivedAt = yield* DateTime.now;
-    const dedupKey = Event.DedupKey.make(JSON.stringify(["operator-approval", runId]));
+    const dedupKey = DedupKey.make(JSON.stringify(["operator-approval", runId]));
     yield* runs.approve(
       runId,
-      new Event.Event({
-        id: Event.EventId.make(dedupKey),
+      new Event({
+        id: EventId.make(dedupKey),
         dedupKey,
         payload: { runId, decision: "approved" },
         receivedAt,
@@ -366,23 +367,23 @@ const makeOperator = Effect.gen(function* () {
     yield* Effect.logInfo("Operator approved Run", { runId });
   });
 
-  const retry = Effect.fn("Operator.retry")(function* (runId: Run.RunId) {
+  const retry = Effect.fn("Operator.retry")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.retry(runId);
     yield* Effect.logInfo("Operator retried Run", { runId });
   });
 
-  const cancel = Effect.fn("Operator.cancel")(function* (runId: Run.RunId) {
+  const cancel = Effect.fn("Operator.cancel")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.cancel(runId);
     yield* Effect.logInfo("Operator canceled Run", { runId });
   });
 
-  const pause = Effect.fn("Operator.pause")(function* (loop: Loop.LoopName) {
+  const pause = Effect.fn("Operator.pause")(function* (loop: LoopName) {
     yield* Effect.annotateCurrentSpan({ loop });
     return yield* controls.pause(loop);
   });
-  const unpause = Effect.fn("Operator.unpause")(function* (loop: Loop.LoopName) {
+  const unpause = Effect.fn("Operator.unpause")(function* (loop: LoopName) {
     yield* Effect.annotateCurrentSpan({ loop });
     return yield* controls.unpause(loop);
   });
@@ -454,19 +455,15 @@ const makeOperator = Effect.gen(function* () {
 export class Operator extends Context.Service<
   Operator,
   OperatorObservation["Service"] & {
-    readonly approve: (runId: Run.RunId) => Effect.Effect<void, OperatorError>;
-    readonly retry: (runId: Run.RunId) => Effect.Effect<void, OperatorError>;
-    readonly cancel: (runId: Run.RunId) => Effect.Effect<void, OperatorError>;
+    readonly approve: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    readonly retry: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
     readonly moveBoardItem: (
       instance: LoadedInstance,
       move: BoardMove,
     ) => Effect.Effect<void, BoardMoveError>;
-    readonly pause: (
-      loop: Loop.LoopName,
-    ) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
-    readonly unpause: (
-      loop: Loop.LoopName,
-    ) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+    readonly pause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+    readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
   }
 >()("@usine/orchestrator/Operator") {
   static readonly layer = Layer.effect(Operator, makeOperator).pipe(

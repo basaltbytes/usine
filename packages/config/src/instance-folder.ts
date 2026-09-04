@@ -1,4 +1,4 @@
-import { Instance } from "@usine/core";
+import { InstanceDirectory } from "@usine/core/instance";
 import { Context, Effect, FileSystem, Layer, Option, Path, Result } from "effect";
 import {
   type AgentFile,
@@ -8,8 +8,8 @@ import {
   InvalidAgent,
   LoadedInstance,
   type LoopFile,
-  QuarantinedLoop,
   loopReferenceFailure,
+  QuarantinedLoop,
   referenceIndex,
 } from "./model.ts";
 import { ConfigParser } from "./parser.ts";
@@ -32,7 +32,7 @@ const factoryError = (error: ConfigFileError): FactoryConfigError =>
 export class InstanceFolder extends Context.Service<
   InstanceFolder,
   {
-    readonly load: (root: Instance.Directory) => Effect.Effect<LoadedInstance, FactoryConfigError>;
+    readonly load: (root: InstanceDirectory) => Effect.Effect<LoadedInstance, FactoryConfigError>;
   }
 >()("@usine/config/InstanceFolder") {
   static readonly layer = Layer.effect(
@@ -59,7 +59,7 @@ export class InstanceFolder extends Context.Service<
 
       const markdownFiles = Effect.fn("InstanceFolder.markdownFiles")(
         (
-          root: Instance.Directory,
+          root: InstanceDirectory,
           directory: "agents" | "loops",
         ): Effect.Effect<ReadonlyArray<string>, FactoryConfigError> =>
           fileSystem.readDirectory(path.join(root, directory)).pipe(
@@ -76,7 +76,7 @@ export class InstanceFolder extends Context.Service<
       );
 
       const loadMarkdownFiles = <A>(
-        root: Instance.Directory,
+        root: InstanceDirectory,
         directory: "agents" | "loops",
         parseFile: (file: InstancePath, source: string) => Effect.Effect<A, ConfigFileError>,
       ): Effect.Effect<ReadonlyArray<ParsedFile<A>>, FactoryConfigError> =>
@@ -98,7 +98,7 @@ export class InstanceFolder extends Context.Service<
 
       return {
         load: Effect.fn("InstanceFolder.load")(
-          (root: Instance.Directory): Effect.Effect<LoadedInstance, FactoryConfigError> =>
+          (root: InstanceDirectory): Effect.Effect<LoadedInstance, FactoryConfigError> =>
             Effect.gen(function* () {
               const configFile = InstancePath.make("usine.yaml");
               const configSource = yield* readFile(path.join(root, configFile), configFile).pipe(

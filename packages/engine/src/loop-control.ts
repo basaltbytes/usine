@@ -1,4 +1,4 @@
-import { Loop } from "@usine/core";
+import { LoopName } from "@usine/core/ids";
 import { asc, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
 import { RunDatabase } from "./database/database.ts";
@@ -13,7 +13,7 @@ const persistence =
 const makeLoopControl = Effect.gen(function* () {
   const database = yield* RunDatabase;
 
-  const stateFor = Effect.fn("LoopControl.stateFor")(function* (loop: Loop.LoopName) {
+  const stateFor = Effect.fn("LoopControl.stateFor")(function* (loop: LoopName) {
     yield* Effect.annotateCurrentSpan({ loop });
     const rows = yield* database
       .select({ loop: loopRuntime.loopName, paused: loopRuntime.paused })
@@ -63,14 +63,14 @@ const makeLoopControl = Effect.gen(function* () {
   });
 
   return {
-    isPaused: Effect.fn("LoopControl.isPaused")(function* (loop: Loop.LoopName) {
+    isPaused: Effect.fn("LoopControl.isPaused")(function* (loop: LoopName) {
       return (yield* stateFor(loop)).paused;
     }),
-    pause: Effect.fn("LoopControl.pause")((loop: Loop.LoopName) =>
+    pause: Effect.fn("LoopControl.pause")((loop: LoopName) =>
       write(new LoopRuntimeState({ loop, paused: true })),
     ),
     states: states(),
-    unpause: Effect.fn("LoopControl.unpause")((loop: Loop.LoopName) =>
+    unpause: Effect.fn("LoopControl.unpause")((loop: LoopName) =>
       write(new LoopRuntimeState({ loop, paused: false })),
     ),
   } as const;
@@ -80,14 +80,10 @@ const makeLoopControl = Effect.gen(function* () {
 export class LoopControl extends Context.Service<
   LoopControl,
   {
-    readonly isPaused: (loop: Loop.LoopName) => Effect.Effect<boolean, EnginePersistenceError>;
-    readonly pause: (
-      loop: Loop.LoopName,
-    ) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+    readonly isPaused: (loop: LoopName) => Effect.Effect<boolean, EnginePersistenceError>;
+    readonly pause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
     readonly states: Effect.Effect<ReadonlyArray<LoopRuntimeState>, EnginePersistenceError>;
-    readonly unpause: (
-      loop: Loop.LoopName,
-    ) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+    readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
   }
 >()("@usine/engine/LoopControl") {
   static readonly layer = Layer.effect(LoopControl, makeLoopControl);

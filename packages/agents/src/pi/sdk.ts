@@ -8,7 +8,7 @@ import {
   type AgentSessionEvent,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
-import { Agent } from "@usine/core";
+import { Effort, ModelId } from "@usine/core/agent/brain";
 import { Context, Effect, Exit, Layer, Option } from "effect";
 import {
   type PiAuthentication,
@@ -36,34 +36,34 @@ export interface PiSession {
 export interface PiStartOptions {
   readonly cwd: string;
   readonly extensions: ReadonlyArray<InlineExtension>;
-  readonly model: Option.Option<Agent.ModelId>;
+  readonly model: Option.Option<ModelId>;
   readonly signal: AbortSignal;
-  readonly thinkingLevel: Agent.Effort;
+  readonly thinkingLevel: Effort;
   readonly toolMode: "orchestration" | "repository";
 }
 
 export type PiStartResult =
   | {
       readonly _tag: "AuthenticationUnavailable";
-      readonly model: Agent.ModelId;
+      readonly model: ModelId;
       readonly requiredPool: PiPool;
     }
   | {
       readonly _tag: "UnsupportedAuthentication";
       readonly authentication: Extract<PiAuthentication, { readonly _tag: "OAuth" }>;
-      readonly model: Agent.ModelId;
+      readonly model: ModelId;
       readonly requiredPool: PiPool;
     }
   | { readonly _tag: "UnknownModel" }
   | {
       readonly _tag: "UnsupportedEffort";
-      readonly effort: Agent.Effort;
-      readonly model: Agent.ModelId;
-      readonly supported: ReadonlyArray<Agent.Effort>;
+      readonly effort: Effort;
+      readonly model: ModelId;
+      readonly supported: ReadonlyArray<Effort>;
     }
   | {
       readonly _tag: "Started";
-      readonly model: Agent.ModelId;
+      readonly model: ModelId;
       readonly pool: PiPool;
       readonly session: PiSession;
     };
@@ -77,7 +77,7 @@ export class PiSdk extends Context.Service<
   { readonly start: (options: PiStartOptions) => Promise<PiStartResult> }
 >()("@usine/agents/pi/PiSdk") {}
 
-const splitModel = (model: Agent.ModelId): readonly [string, string] | undefined => {
+const splitModel = (model: ModelId): readonly [string, string] | undefined => {
   const separator = model.indexOf("/");
   return separator <= 0 || separator === model.length - 1
     ? undefined
@@ -132,7 +132,7 @@ export const piSdkLive = Layer.succeed(PiSdk)({
     try {
       const active = session.model;
       if (active === undefined) throw new Error("Pi started without an active model");
-      const model = Agent.ModelId.make(`${active.provider}/${active.id}`);
+      const model = ModelId.make(`${active.provider}/${active.id}`);
       const supported = supportedThinkingLevels(active);
       if (!supported.includes(options.thinkingLevel)) {
         return { _tag: "UnsupportedEffort", effort: options.thinkingLevel, model, supported };

@@ -1,27 +1,24 @@
-import { Loop as CoreLoop, Step } from "@usine/core";
+import { StepName } from "@usine/core/ids";
+import { ApprovalRequirement } from "@usine/core/loop";
+import { ExpressionEngine } from "@usine/expression/expression-engine";
 import {
   type Environment,
   type ExpressionCheckError,
-  ExpressionEngine,
   type ExpressionError,
   Source,
-} from "@usine/expression";
+} from "@usine/expression/model";
 import { Context, Effect, Layer, Option, Schema, SchemaIssue } from "effect";
 import { splitMarkdown } from "./frontmatter.ts";
 import {
   AgentFile,
-  AgentName,
   canonicalLabelName,
-  type ConfigWarning,
   ConfigFileError,
-  Effort,
+  type ConfigWarning,
   GitHubLabelName,
-  Harness,
   InstancePath,
   LoopFile,
   LoopName,
   loopPath,
-  ModelId,
   Persona,
   PromptTemplate,
   Trigger,
@@ -30,6 +27,8 @@ import {
   UsineConfig,
   ValidSelector,
 } from "./model.ts";
+import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
+import { AgentName } from "@usine/core/ids";
 import { environmentFor } from "./payload-slices.ts";
 import { parseYamlDocument } from "./yaml/document.ts";
 
@@ -38,10 +37,8 @@ const formatIssue = SchemaIssue.makeFormatterDefault();
 class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopFrontmatter")({
   trigger: Trigger,
   selector: Schema.OptionFromOptionalKey(ValidSelector),
-  approval: CoreLoop.ApprovalRequirement.pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed("none")),
-  ),
-  step: Step.StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
+  approval: ApprovalRequirement.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
+  step: StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
   agent: AgentName,
 }) {}
 

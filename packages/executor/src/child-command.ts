@@ -1,6 +1,6 @@
 import { Array as Arr, Config, Effect, Fiber, Option, Stream } from "effect";
 import { ChildProcess, type ChildProcessSpawner } from "effect/unstable/process";
-import { ExecutorOperationError, type ExecutorOperation } from "./index.ts";
+import { ExecutorOperationError, type ExecutorOperation } from "./executor.ts";
 
 export interface CommandResult {
   readonly exitCode: number;

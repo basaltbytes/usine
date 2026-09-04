@@ -1,18 +1,15 @@
 import { NodeServices } from "@effect/platform-node";
-import type { UsineConfig } from "@usine/config";
-import type { Instance } from "@usine/core";
-import {
-  CredentialGrantMinutes,
-  layer as exeDevExecutorLayer,
-  type ExeDevExecutorOptions,
-} from "@usine/executor/exe-dev";
+import type { UsineConfig } from "@usine/config/model";
+import type { InstanceDirectory } from "@usine/core/instance";
+import { layer as exeDevExecutorLayer } from "@usine/executor/exe-dev";
+import { CredentialGrantMinutes, type ExeDevExecutorOptions } from "@usine/executor/exe-dev/model";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { Layer } from "effect";
 import { stepExecutorLayer } from "./scheduler.ts";
 
 /** Complete local-orchestrator / exe.dev-Worker engine composition. */
 export const layer = (
-  instanceDirectory: Instance.Directory,
+  instanceDirectory: InstanceDirectory,
   config: UsineConfig,
   options: ExeDevExecutorOptions,
 ) => {

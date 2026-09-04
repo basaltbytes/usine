@@ -2,9 +2,9 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeHttpPlatform } from "@effect/platform-node";
-import { LoadedInstance, UsineConfig } from "@usine/config";
-import { Agent, Attempt, Item, Loop, Repository, Run } from "@usine/core";
-import { RunNotFoundError, RunOperationRejectedError } from "@usine/engine";
+import { LoadedInstance, UsineConfig } from "@usine/config/model";
+import { AgentName, AttemptId, ItemKey, LoopName, RepositoryName, RunId } from "@usine/core/ids";
+import { RunNotFoundError, RunOperationRejectedError } from "@usine/engine/model";
 import {
   ApprovalNeed,
   BoardLaneId,
@@ -12,23 +12,23 @@ import {
   BoardView,
   FactoryOverview,
   LoopView,
-  OperatorObservation,
   ProjectView,
   ReadyOverview,
   RunDetailView,
   RunView,
   TranscriptAttemptNotFoundError,
-} from "@usine/orchestrator";
+} from "@usine/orchestrator/operator/model";
+import { OperatorObservation } from "@usine/orchestrator/operator/service";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { afterAll, assert, describe, it } from "vitest";
 import { FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
 import { apiRoutes, staticRoutes } from "../src/http.ts";
 
-const runId = Run.RunId.make("run-1");
-const loopName = Loop.LoopName.make("review-issue");
-const agentName = Agent.Name.make("developer");
-const repositoryName = Repository.Name.make("basaltbytes/usine");
+const runId = RunId.make("run-1");
+const loopName = LoopName.make("review-issue");
+const agentName = AgentName.make("developer");
+const repositoryName = RepositoryName.make("basaltbytes/usine");
 const config = Schema.decodeUnknownSync(UsineConfig)({
   version: 1,
   repos: [{ name: "basaltbytes/usine" }],
@@ -43,7 +43,7 @@ const instance = new LoadedInstance({
 });
 const run = new RunView({
   id: runId,
-  itemKey: Item.ItemKey.make("issue:31"),
+  itemKey: ItemKey.make("issue:31"),
   loop: loopName,
   repository: repositoryName,
   agent: agentName,
@@ -162,7 +162,7 @@ describe("operator HTTP API", () => {
               new TranscriptAttemptNotFoundError({ runId: id, attemptId: request.attemptId }),
             )
           : Effect.fail(new RunNotFoundError({ runId: id })),
-      approve: (id: Run.RunId) =>
+      approve: (id: RunId) =>
         Effect.fail(
           new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
         ),
@@ -193,7 +193,7 @@ describe("operator HTTP API", () => {
         message: `Cannot approve Run ${runId} while it is Running.`,
       });
 
-      const wrongAttempt = Attempt.AttemptId.make("attempt-from-another-run");
+      const wrongAttempt = AttemptId.make("attempt-from-another-run");
       const earlier = await rejectingApp.handler(
         new Request(`http://localhost/api/runs/${runId}?attempt=${wrongAttempt}&before=2`),
       );

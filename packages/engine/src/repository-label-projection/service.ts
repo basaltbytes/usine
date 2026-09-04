@@ -1,4 +1,4 @@
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/ids";
 import { eq, ne } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
@@ -10,7 +10,7 @@ import { RepositoryLabel, RepositoryLabelProjection } from "./model.ts";
 const LegacyLabelNames = Schema.Array(Schema.String);
 const isLegacyLabelNames = Schema.is(LegacyLabelNames);
 const RepositoryLabelProjectionRow = Schema.Struct({
-  repository: Repository.Name,
+  repository: RepositoryName,
   labels: Schema.Union([RepositoryLabelProjection.fields.labels, LegacyLabelNames]),
 });
 const storedLabels = (
@@ -33,7 +33,7 @@ const persistence =
 const makeReader = Effect.gen(function* () {
   const database = yield* RunDatabase;
   return {
-    get: Effect.fn("RepositoryLabelProjectionReader.get")(function* (repository: Repository.Name) {
+    get: Effect.fn("RepositoryLabelProjectionReader.get")(function* (repository: RepositoryName) {
       const rows = yield* database
         .select({
           repository: repositoryLabelProjections.repository,
@@ -95,7 +95,7 @@ export class RepositoryLabelProjectionReader extends Context.Service<
   RepositoryLabelProjectionReader,
   {
     readonly get: (
-      repository: Repository.Name,
+      repository: RepositoryName,
     ) => Effect.Effect<Option.Option<RepositoryLabelProjection>, EnginePersistenceError>;
   }
 >()("@usine/engine/RepositoryLabelProjectionReader") {

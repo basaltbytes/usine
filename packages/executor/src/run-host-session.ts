@@ -1,4 +1,7 @@
-import { Attempt, AttemptChannel, AttemptFailure, StepResult } from "@usine/core";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { AgentFailure, AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { AttemptId } from "@usine/core/ids";
+import { StepResult } from "@usine/core/step/result";
 import {
   Cause,
   DateTime,
@@ -14,7 +17,7 @@ import {
   type PlatformError,
 } from "effect";
 import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner";
-import { ExecutorError, ExecutorOperationError, type PreparedAttempt } from "./index.ts";
+import { ExecutorError, ExecutorOperationError, type PreparedAttempt } from "./executor.ts";
 import { invalidFrameDiagnostic, invalidFrameMessage } from "./invalid-frame.ts";
 
 export interface SpawnedRunHost {
@@ -31,19 +34,15 @@ export interface RunHostSessionOptions {
   readonly spawn: (
     prepared: PreparedAttempt,
     input: RunHostInput,
-  ) => Effect.Effect<
-    SpawnedRunHost,
-    AttemptFailure.AttemptFailure | PlatformError.PlatformError,
-    Scope.Scope
-  >;
+  ) => Effect.Effect<SpawnedRunHost, AttemptFailure | PlatformError.PlatformError, Scope.Scope>;
 }
 
 export interface RunHostSession {
-  readonly cancel: (attemptId: Attempt.AttemptId) => Effect.Effect<void, ExecutorError>;
+  readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
   readonly launch: (
     prepared: PreparedAttempt,
     io: AttemptChannel.Sink,
-  ) => Effect.Effect<StepResult.StepResult, AttemptFailure.AttemptFailure>;
+  ) => Effect.Effect<StepResult, AttemptFailure>;
 }
 
 interface ActiveAttempt {
@@ -72,12 +71,12 @@ const frame = (input: AttemptChannel.InputFrame): Uint8Array =>
   encoder.encode(`${inputFrameToJson(input)}\n`);
 
 const infrastructureFailure = (message: string, cause: unknown) =>
-  new AttemptFailure.InfraFailure({ message, cause });
+  new InfraFailure({ message, cause });
 
 const violationFailure = (violation: AttemptChannel.Violation) =>
   infrastructureFailure(violation.message, new Error(violation.detail));
 
-const cancelError = (attemptId: Attempt.AttemptId, cause: unknown) =>
+const cancelError = (attemptId: AttemptId, cause: unknown) =>
   new ExecutorOperationError({
     operation: "cancel",
     message: `Could not cancel Attempt ${attemptId}`,
@@ -87,10 +86,10 @@ const cancelError = (attemptId: Attempt.AttemptId, cause: unknown) =>
 /** One canonical byte-channel state machine shared by every process-backed Executor. */
 export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effect<RunHostSession> =
   Effect.fn("RunHostSession.for")(function* (options: RunHostSessionOptions) {
-    const activeAttempts = yield* Ref.make(new Map<Attempt.AttemptId, ActiveAttempt>());
+    const activeAttempts = yield* Ref.make(new Map<AttemptId, ActiveAttempt>());
 
     const hardKill = Effect.fn("RunHostSession.hardKill")(function* (
-      attemptId: Attempt.AttemptId,
+      attemptId: AttemptId,
       active: ActiveAttempt,
       reason: "delivery-failed" | "grace-expired",
     ) {
@@ -124,7 +123,7 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
     });
 
     const cancelActive = Effect.fn("RunHostSession.cancelActive")(function* (
-      attemptId: Attempt.AttemptId,
+      attemptId: AttemptId,
       active: ActiveAttempt,
     ) {
       return yield* Effect.uninterruptible(
@@ -208,7 +207,7 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
       );
     });
 
-    const cancel = Effect.fn("RunHostSession.cancel")(function* (attemptId: Attempt.AttemptId) {
+    const cancel = Effect.fn("RunHostSession.cancel")(function* (attemptId: AttemptId) {
       const active = (yield* Ref.get(activeAttempts)).get(attemptId);
       if (active === undefined) {
         yield* Effect.logDebug("Attempt cancellation was a no-op", { attemptId });
@@ -318,7 +317,7 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
               }),
             ),
             Effect.mapError((error) =>
-              Schema.is(AttemptFailure.AttemptFailure)(error)
+              Schema.is(AttemptFailure)(error)
                 ? error
                 : infrastructureFailure("The run-host channel failed", error),
             ),
@@ -351,7 +350,7 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
           }
           if (ended.value._tag === "Failed") return yield* ended.value.failure;
           if (ended.value._tag === "Interrupted") {
-            return yield* new AttemptFailure.AgentFailure({
+            return yield* new AgentFailure({
               message: "The run host confirmed the interrupt and stopped",
             });
           }
@@ -386,7 +385,7 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
           }),
         ),
         Effect.mapError((error) =>
-          Schema.is(AttemptFailure.AttemptFailure)(error)
+          Schema.is(AttemptFailure)(error)
             ? error
             : infrastructureFailure("The executor failed while running the run host", error),
         ),

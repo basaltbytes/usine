@@ -25,20 +25,22 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 
 ## Composition
 
-The root entry (`@usine/engine`) is platform-free; the Node local adapter lives behind `@usine/engine/local-sqlite`. Its `layer` supplies local SQLite, Effect `SingleRunner`, workflow registration, and startup reconciliation. Provide a `StepExecutor` implementation at the composition root:
+Every subpath is platform-free except the Node local adapter at `@usine/engine/local-sqlite`. Its `layer` supplies local SQLite, Effect `SingleRunner`, workflow registration, and startup reconciliation. Provide a `StepExecutor` implementation at the composition root:
 
 ```ts
 import { Effect, Layer } from "effect"
-import { StepResult, Worker } from "@usine/core"
-import { CursorStore, InstanceDirectory, LoopControl, RunEngine, StepExecutor } from "@usine/engine"
+import { WorkerName } from "@usine/core/ids"
+import { InstanceDirectory } from "@usine/core/instance"
+import { StepResult } from "@usine/core/step/result"
+import { StepExecutor } from "@usine/engine/step-executor"
 import { layer } from "@usine/engine/local-sqlite"
 
 const StepExecutorLive = Layer.succeed(StepExecutor)({
   reserve: () => Effect.succeed({
-    worker: Worker.Name.make("local"),
+    worker: WorkerName.make("local"),
     release: Effect.void,
   }),
-  execute: ({ event }) => Effect.succeed(new StepResult.StepResult({
+  execute: ({ event }) => Effect.succeed(new StepResult({
     message: `Handled ${event.id}`,
     facts: [],
   })),

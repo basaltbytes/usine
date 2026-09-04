@@ -1,37 +1,47 @@
 import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Option, Result, Schema } from "effect";
+import { Agent, AgentPersona } from "../src/agent/agent.ts";
+import { BrainSpec, ModelId } from "../src/agent/brain.ts";
 import {
-  Agent,
-  AttemptChannel,
-  Attempt,
-  AttemptFailure,
-  Repository,
-  StepResult,
-} from "../src/index.ts";
+  AgentSessionId,
+  ChildSessionBudget,
+  ChildSessionCount,
+  ParentSession,
+  PoolRateLimitsUpdated,
+  RateLimitsSnapshot,
+  RateLimitWindow,
+  SessionStarted,
+} from "../src/agent/session.ts";
+import { AttemptTask } from "../src/attempt/attempt.ts";
+import * as AttemptChannel from "../src/attempt/channel.ts";
+import { AgentFailure, ChildSessionBudgetFailure } from "../src/attempt/failure.ts";
+import { AgentName, AttemptId, RepositoryName } from "../src/ids.ts";
+import { CommitSha, RepositoryRevision } from "../src/repository.ts";
+import { Commit, StepResult } from "../src/step/result.ts";
 
-const agent = new Agent.Agent({
-  name: Agent.Name.make("developer"),
-  brain: new Agent.BrainSpec({
+const agent = new Agent({
+  name: AgentName.make("developer"),
+  brain: new BrainSpec({
     harness: "claude",
-    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Agent.Persona.make("Implement the task and sign every GitHub comment."),
+  persona: AgentPersona.make("Implement the task and sign every GitHub comment."),
 });
-const parentModel = Agent.ModelId.make("anthropic/claude-opus-4-6");
+const parentModel = ModelId.make("anthropic/claude-opus-4-6");
 
 const spec = new AttemptChannel.RunSpec({
-  attemptId: Attempt.AttemptId.make("attempt-1"),
-  repository: Repository.Name.make("basaltbytes/usine"),
-  revision: Repository.Revision.make("main"),
-  baseCommit: Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+  attemptId: AttemptId.make("attempt-1"),
+  repository: RepositoryName.make("basaltbytes/usine"),
+  revision: RepositoryRevision.make("main"),
+  baseCommit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
   payload: { number: 30, title: "Agent layer" },
-  task: AttemptChannel.Task.make("Implement the issue"),
+  task: AttemptTask.make("Implement the issue"),
   agent,
   parentModel: Option.some(parentModel),
-  maxChildren: Agent.ChildSessionBudget.make(4),
+  maxChildren: ChildSessionBudget.make(4),
   parentEffort: "high",
 });
 
@@ -43,11 +53,11 @@ describe("attempt channel v4", () => {
       sequence: AttemptChannel.Sequence.make(1),
       sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
       payload: new AttemptChannel.Final({
-        result: new StepResult.StepResult({
+        result: new StepResult({
           message: "Done",
           facts: [
-            new StepResult.Commit({
-              sha: Repository.CommitSha.make("fedcba9876543210fedcba9876543210fedcba98"),
+            new Commit({
+              sha: CommitSha.make("fedcba9876543210fedcba9876543210fedcba98"),
               summary: "Implement executor",
             }),
           ],
@@ -70,9 +80,9 @@ describe("attempt channel v4", () => {
       sequence: AttemptChannel.Sequence.make(2),
       sentAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
       payload: new AttemptChannel.Failed({
-        failure: new AttemptFailure.ChildSessionBudgetFailure({
+        failure: new ChildSessionBudgetFailure({
           maxChildren: spec.maxChildren,
-          attemptedChildren: Agent.ChildSessionCount.make(5),
+          attemptedChildren: ChildSessionCount.make(5),
         }),
       }),
     });
@@ -113,10 +123,10 @@ describe("attempt channel v4", () => {
   });
 
   it("round-trips rate-limit reset dates through its framed JSON schema", () => {
-    const session = new Agent.ParentSession({
-      id: Agent.SessionId.make("parent-1"),
+    const session = new ParentSession({
+      id: AgentSessionId.make("parent-1"),
       agent: agent.name,
-      brain: new Agent.BrainSpec({ harness: "pi", model: parentModel, effort: "high" }),
+      brain: new BrainSpec({ harness: "pi", model: parentModel, effort: "high" }),
     });
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,
@@ -124,21 +134,21 @@ describe("attempt channel v4", () => {
       sequence: AttemptChannel.Sequence.make(1),
       sentAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
       payload: new AttemptChannel.SessionEvent({
-        event: new Agent.PoolRateLimitsUpdated({
+        event: new PoolRateLimitsUpdated({
           session,
           pool: "chatgptPlan",
-          rateLimits: new Agent.RateLimitsSnapshot({
+          rateLimits: new RateLimitsSnapshot({
             limitId: Option.some("codex"),
             limitName: Option.some("ChatGPT"),
             primary: Option.some(
-              new Agent.RateLimitWindow({
+              new RateLimitWindow({
                 usedPercent: 24,
                 windowDurationMinutes: Option.some(300),
                 resetsAt: Option.some(DateTime.makeUnsafe("2026-09-07T02:25:59Z")),
               }),
             ),
             secondary: Option.some(
-              new Agent.RateLimitWindow({
+              new RateLimitWindow({
                 usedPercent: 0,
                 windowDurationMinutes: Option.none(),
                 resetsAt: Option.none(),
@@ -186,11 +196,11 @@ describe("attempt channel v4", () => {
       });
     const started = new AttemptChannel.Started({ parentModel });
     const sessionEvent = new AttemptChannel.SessionEvent({
-      event: new Agent.SessionStarted({
-        session: new Agent.ParentSession({
-          id: Agent.SessionId.make("parent-1"),
+      event: new SessionStarted({
+        session: new ParentSession({
+          id: AgentSessionId.make("parent-1"),
           agent: agent.name,
-          brain: new Agent.BrainSpec({ harness: "pi", model: parentModel, effort: "high" }),
+          brain: new BrainSpec({ harness: "pi", model: parentModel, effort: "high" }),
         }),
       }),
     });
@@ -217,7 +227,7 @@ describe("attempt channel v4", () => {
     });
 
     it("rejects a frame for another Attempt", () => {
-      const outcome = admitAll([outbound(1, started, Attempt.AttemptId.make("attempt-2"))]);
+      const outcome = admitAll([outbound(1, started, AttemptId.make("attempt-2"))]);
       assert(Result.isFailure(outcome));
       assert.match(outcome.failure.message, /another Attempt/u);
     });
@@ -239,7 +249,7 @@ describe("attempt channel v4", () => {
         outbound(
           1,
           new AttemptChannel.Failed({
-            failure: new AttemptFailure.AgentFailure({ message: "Unknown model" }),
+            failure: new AgentFailure({ message: "Unknown model" }),
           }),
         ),
       ]);

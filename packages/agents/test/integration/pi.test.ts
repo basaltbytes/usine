@@ -2,9 +2,11 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
-import { Agent } from "@usine/core";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
+import { AgentName } from "@usine/core/ids";
 import { Effect, Stream } from "effect";
-import { ChildRequest, PiChildBackend, WorkingDirectory } from "../../src/index.ts";
+import { ChildRequest, PiChildBackend, WorkingDirectory } from "../../src/runtime.ts";
 import { piChildBackendLayer, piSdkLive } from "../../src/pi/pi.ts";
 
 const model = process.env.USINE_PI_INTEGRATION_MODEL;
@@ -24,13 +26,13 @@ describe("Pi child live contract", () => {
           const backend = yield* PiChildBackend;
           const running = yield* backend.launch(
             new ChildRequest({
-              session: new Agent.ChildSession({
-                id: Agent.SessionId.make("pi-live-child"),
-                parentId: Agent.SessionId.make("pi-live-parent"),
-                agent: Agent.Name.make("contract-tester"),
-                brain: new Agent.BrainSpec({
+              session: new ChildSession({
+                id: AgentSessionId.make("pi-live-child"),
+                parentId: AgentSessionId.make("pi-live-parent"),
+                agent: AgentName.make("contract-tester"),
+                brain: new BrainSpec({
                   harness: "pi",
-                  model: Agent.ModelId.make(model),
+                  model: ModelId.make(model),
                   effort: "low",
                 }),
               }),

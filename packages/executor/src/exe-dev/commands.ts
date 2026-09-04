@@ -6,7 +6,7 @@ import {
   requireSuccess,
   type CommandResult,
 } from "../child-command.ts";
-import type { ExecutorOperation, ExecutorOperationError, RunHostCommand } from "../index.ts";
+import type { ExecutorOperation, ExecutorOperationError, RunHostCommand } from "../executor.ts";
 import type { SshDestination } from "./model.ts";
 import { shellCommand } from "./shell.ts";
 

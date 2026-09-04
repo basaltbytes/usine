@@ -1,51 +1,48 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
+import { ModelId } from "@usine/core/agent/brain";
+import { AgentName, RepositoryName, RunId, StepName } from "@usine/core/ids";
 import {
   AgentFile,
-  AgentName,
   ConfigFileError,
-  ConfigParser,
   InstancePath,
   IssueTrigger,
   LoadedInstance,
   LoopFile,
   LoopName,
-  ModelId,
   Persona,
   PromptTemplate,
   Selector,
   UsineConfig,
-} from "@usine/config";
-import { Instance, Repository, Run, Step } from "@usine/core";
-import {
-  Claimed,
-  CursorKey,
-  CursorStore,
-  LoopRuntimeState,
-  RepositoryLabelProjectionReader,
-  RunEngine,
-  StepExecutor,
-} from "@usine/engine";
+} from "@usine/config/model";
+import { ConfigParser } from "@usine/config/parser";
+import { InstanceDirectory } from "@usine/core/instance";
+import { CursorKey } from "@usine/engine/cursor/model";
+import { CursorStore } from "@usine/engine/cursor/store";
+import { RunEngine } from "@usine/engine/engine";
+import { Claimed, LoopRuntimeState } from "@usine/engine/model";
+import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection/service";
+import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
-import { MarcbachmannCelLayer, Source } from "@usine/expression";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
+import { Source } from "@usine/expression/model";
+import { GitHubApiError, GitHubRateLimitError } from "@usine/github/model";
 import {
   ChangedIssue,
   ContentHash,
   EntityTag,
-  GitHubApiError,
-  GitHubPolling,
-  GitHubRateLimitError,
+  type IssuePayload,
   IssueSnapshot,
   PollCursor,
-  RepositoryLabelCatalog,
-  RepositoryLabelsNotModified,
-  RepositoryNotModified,
   RepositoryChanges,
   RepositoryLabel,
+  RepositoryLabelCatalog,
   RepositoryLabelColor,
   RepositoryLabelName,
-  type IssuePayload,
-} from "@usine/github";
+  RepositoryLabelsNotModified,
+  RepositoryNotModified,
+} from "@usine/github/polling/model";
+import { GitHubPolling } from "@usine/github/polling/polling";
 import {
   Context,
   Clock,
@@ -61,7 +58,7 @@ import {
   Scope,
 } from "effect";
 import { TestClock } from "effect/testing";
-import { PollingTriggers } from "../src/index.ts";
+import { PollingTriggers } from "../src/polling-triggers.ts";
 import {
   inertGitHubLabelWriterLayer,
   inertLabelReconcilerLayer,
@@ -72,7 +69,7 @@ import {
   repositoryLabelProjectionWriterLayer,
 } from "./support/polling.ts";
 
-const watchedRepository = Repository.Name.make("basaltbytes/usine");
+const watchedRepository = RepositoryName.make("basaltbytes/usine");
 const emptyLabelCatalog = new RepositoryLabelCatalog({
   entityTag: Option.none(),
   labels: [],
@@ -113,7 +110,7 @@ const issueLoop = (name: string) =>
       }),
     ),
     approval: "required",
-    step: Step.StepName.make("run"),
+    step: StepName.make("run"),
     agent: agent.name,
     body: PromptTemplate.make("Implement issue {{ item.number }}."),
   });
@@ -154,7 +151,7 @@ interface RemoteState {
 
 const waitForState = Effect.fn("test.waitForState")(function* (
   engine: RunEngine["Service"],
-  runId: Run.RunId,
+  runId: RunId,
   tag: "Canceled" | "Waiting",
 ) {
   for (let poll = 0; poll < 500; poll += 1) {
@@ -171,7 +168,7 @@ const claimedRun = (cycle: Effect.Success<ReturnType<PollingTriggers["Service"][
   return submission.runId;
 };
 
-const runtimeLayer = (directory: Instance.Directory, github: GitHubPolling["Service"]) => {
+const runtimeLayer = (directory: InstanceDirectory, github: GitHubPolling["Service"]) => {
   const executor = Layer.succeed(StepExecutor)({
     interrupt: () => Effect.void,
     reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
@@ -275,7 +272,7 @@ describe("PollingTriggers", () => {
   it.live("keeps firing Loops and advancing the cursor when the label catalog request fails", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = Instance.Directory.make(
+      const directory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-polling-" }),
       );
       const catalogFails = yield* Ref.make(false);
@@ -289,7 +286,7 @@ describe("PollingTriggers", () => {
         updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
       });
       const recordFor =
-        <A>(repository: Repository.Name, ref: Ref.Ref<ReadonlyArray<A>>) =>
+        <A>(repository: RepositoryName, ref: Ref.Ref<ReadonlyArray<A>>) =>
         (value: A) =>
           repository === watchedRepository
             ? Ref.update(ref, (values) => [...values, value])
@@ -365,7 +362,7 @@ describe("PollingTriggers", () => {
           .map(({ repository, errorTag }) => ({ repository, errorTag }))
           .sort((left, right) => left.repository.localeCompare(right.repository)),
         [
-          { repository: Repository.Name.make("basaltbytes/unwatched"), errorTag: "GitHubApiError" },
+          { repository: RepositoryName.make("basaltbytes/unwatched"), errorTag: "GitHubApiError" },
           { repository: watchedRepository, errorTag: "GitHubApiError" },
         ],
       );
@@ -397,7 +394,7 @@ describe("PollingTriggers", () => {
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
-        const directory = Instance.Directory.make(
+        const directory = InstanceDirectory.make(
           yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-polling-" }),
         );
         const state = yield* Ref.make<RemoteState>({
@@ -594,7 +591,7 @@ describe("PollingTriggers", () => {
       trigger: new IssueTrigger({ on: "issue", if: Source.make('item.state == "OPEN"') }),
       selector: Option.none(),
       approval: "required",
-      step: Step.StepName.make("run"),
+      step: StepName.make("run"),
       agent: agent.name,
       body: PromptTemplate.make("Implement issue {{ item.number }}."),
     });
@@ -652,7 +649,7 @@ describe("PollingTriggers", () => {
         Effect.succeed(
           new Claimed({
             eventId: submission.event.id,
-            runId: Run.RunId.make(`run-${submission.event.id}`),
+            runId: RunId.make(`run-${submission.event.id}`),
           }),
         ),
       transcript: () => Effect.die("unused"),
@@ -713,7 +710,7 @@ describe("PollingTriggers", () => {
         Effect.succeed(
           new Claimed({
             eventId: submission.event.id,
-            runId: Run.RunId.make(`run-${submission.loop}`),
+            runId: RunId.make(`run-${submission.loop}`),
           }),
         ),
       transcript: () => Effect.die("unused"),
@@ -792,7 +789,7 @@ describe("PollingTriggers", () => {
   it.live("submits items from concurrent repositories through one engine", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = Instance.Directory.make(
+      const directory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-polling-multi-" }),
       );
       const multiConfig = Schema.decodeUnknownSync(UsineConfig)({
@@ -805,7 +802,7 @@ describe("PollingTriggers", () => {
         trigger: new IssueTrigger({ on: "issue", if: Source.make('item.state == "OPEN"') }),
         selector: Option.none(),
         approval: "required",
-        step: Step.StepName.make("run"),
+        step: StepName.make("run"),
         agent: agent.name,
         body: PromptTemplate.make("Implement issue {{ item.number }}."),
       });

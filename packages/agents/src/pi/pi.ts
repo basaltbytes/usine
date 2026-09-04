@@ -1,4 +1,10 @@
-import { Agent } from "@usine/core";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import {
+  AgentSessionId,
+  ChildSession,
+  ParentSession,
+  SessionStarted,
+} from "@usine/core/agent/session";
 import { Deferred, Effect, Fiber, Layer, Option, Stream } from "effect";
 import { assemblePrompt } from "../prompt.ts";
 import {
@@ -37,7 +43,7 @@ const parentError = (
 ) =>
   new SessionOperationError({
     operation,
-    sessionId: Option.some(Agent.SessionId.make(`parent:${request.spec.attemptId}`)),
+    sessionId: Option.some(AgentSessionId.make(`parent:${request.spec.attemptId}`)),
     message,
     cause,
   });
@@ -151,11 +157,11 @@ const makePiChild = Effect.gen(function* () {
                 message: `Pi child model ${started.model} must use an API key`,
               });
             }
-            const session = new Agent.ChildSession({
+            const session = new ChildSession({
               id: request.session.id,
               parentId: request.session.parentId,
               agent: request.session.agent,
-              brain: new Agent.BrainSpec({
+              brain: new BrainSpec({
                 harness: "pi",
                 model: started.model,
                 effort: request.session.brain.effort,
@@ -165,7 +171,7 @@ const makePiChild = Effect.gen(function* () {
               label: "Pi child session",
               sessionId: session.id,
             });
-            yield* channel.emit(new Agent.SessionStarted({ session }));
+            yield* channel.emit(new SessionStarted({ session }));
             const subscription = yield* subscribePiSession(started.session, session, channel);
             // Once setup succeeds, the ambient scope owns both subscription and SDK session.
             yield* Effect.addFinalizer(() =>
@@ -233,7 +239,7 @@ const makePiParent = Effect.gen(function* () {
 
   const launch: AgentRuntime["Service"]["launch"] = Effect.fn("PiParentRuntime.launch")(
     function* (request) {
-      const parentId = Agent.SessionId.make(`parent:${request.spec.attemptId}`);
+      const parentId = AgentSessionId.make(`parent:${request.spec.attemptId}`);
       yield* Effect.annotateCurrentSpan({
         agent: request.spec.agent.name,
         attemptId: request.spec.attemptId,
@@ -291,7 +297,7 @@ const makePiParent = Effect.gen(function* () {
             const started = acquired.result;
             if (started._tag === "UnknownModel") {
               const model = Option.getOrElse(request.spec.parentModel, () =>
-                Agent.ModelId.make("unknown"),
+                ModelId.make("unknown"),
               );
               yield* Effect.logError("Pi parent rejected an unknown model", {
                 model,
@@ -335,16 +341,16 @@ const makePiParent = Effect.gen(function* () {
               model: started.model,
               pool: started.pool,
             });
-            const parent = new Agent.ParentSession({
+            const parent = new ParentSession({
               id: parentId,
               agent: request.spec.agent.name,
-              brain: new Agent.BrainSpec({
+              brain: new BrainSpec({
                 harness: "pi",
                 model: started.model,
                 effort: request.spec.parentEffort,
               }),
             });
-            yield* channel.emit(new Agent.SessionStarted({ session: parent }));
+            yield* channel.emit(new SessionStarted({ session: parent }));
             const subscription = yield* subscribePiSession(started.session, parent, channel);
             // Once setup succeeds, the ambient scope owns both subscription and SDK session.
             yield* Effect.addFinalizer(() =>

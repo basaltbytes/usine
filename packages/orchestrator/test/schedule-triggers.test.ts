@@ -1,35 +1,36 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
+import { ModelId } from "@usine/core/agent/brain";
+import { AgentName, RunId, StepName } from "@usine/core/ids";
 import {
   AgentFile,
-  AgentName,
   ConfigFileError,
-  ConfigParser,
-  InstancePath,
   Cron as CronExpression,
+  InstancePath,
   LoadedInstance,
   LoopFile,
   LoopName,
-  ModelId,
   Persona,
   PromptTemplate,
   ScheduleTrigger,
   Selector,
   TimeZone,
   UsineConfig,
-} from "@usine/config";
-import { Instance, Run, Step } from "@usine/core";
+} from "@usine/config/model";
+import { ConfigParser } from "@usine/config/parser";
+import { InstanceDirectory } from "@usine/core/instance";
+import { RunEngine } from "@usine/engine/engine";
+import { LoopControl } from "@usine/engine/loop-control";
 import {
   Claimed,
   EnginePersistenceError,
-  LoopControl,
   LoopRuntimeState,
-  RunEngine,
-  StepExecutor,
   type Submission,
-} from "@usine/engine";
+} from "@usine/engine/model";
+import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
-import { MarcbachmannCelLayer, Source } from "@usine/expression";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
+import { Source } from "@usine/expression/model";
 import {
   Context,
   DateTime,
@@ -44,7 +45,11 @@ import {
   Scope,
 } from "effect";
 import { TestClock } from "effect/testing";
-import { ScheduleCronFailure, ScheduleTickFailure, ScheduleTriggers } from "../src/index.ts";
+import {
+  ScheduleCronFailure,
+  ScheduleTickFailure,
+  ScheduleTriggers,
+} from "../src/schedule-triggers.ts";
 
 const agent = new AgentFile({
   name: AgentName.make("developer"),
@@ -104,7 +109,7 @@ const scheduleLoop = (
             }),
           ),
     approval: "required",
-    step: Step.StepName.make("run"),
+    step: StepName.make("run"),
     agent: agent.name,
     body: PromptTemplate.make(options.body ?? "Run maintenance for {{ repo.name }}."),
   });
@@ -144,7 +149,7 @@ const fakeLayer = (
             Effect.as(
               new Claimed({
                 eventId: submission.event.id,
-                runId: Run.RunId.make(`run-${submission.event.id}`),
+                runId: RunId.make(`run-${submission.event.id}`),
               }),
             ),
           ),
@@ -162,7 +167,7 @@ const fakeLayer = (
 
 const waitForWaiting = Effect.fn("test.waitForWaiting")(function* (
   engine: RunEngine["Service"],
-  runId: Run.RunId,
+  runId: RunId,
 ) {
   for (let poll = 0; poll < 500; poll += 1) {
     const snapshot = yield* engine.inspect(runId);
@@ -172,7 +177,7 @@ const waitForWaiting = Effect.fn("test.waitForWaiting")(function* (
   return yield* Effect.die(`Run ${runId} did not reach Waiting`);
 });
 
-const runtimeLayer = (directory: Instance.Directory) => {
+const runtimeLayer = (directory: InstanceDirectory) => {
   const executor = Layer.succeed(StepExecutor)({
     interrupt: () => Effect.void,
     reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
@@ -485,7 +490,7 @@ describe("ScheduleTriggers", () => {
   it.live("deduplicates one scheduled Event across engine restarts", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      const directory = Instance.Directory.make(
+      const directory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-schedules-" }),
       );
       const config = configWith([{ name: "basaltbytes/usine" }]);

@@ -1,6 +1,21 @@
-import { Agent, Attempt, AttemptChannel } from "@usine/core";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import {
+  AgentSessionId,
+  ChildSession,
+  ParentSession,
+  PoolRateLimitsUpdated,
+  RateLimitsSnapshot,
+  RateLimitWindow,
+  TextOutput,
+} from "@usine/core/agent/session";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { AgentName, AttemptId } from "@usine/core/ids";
 import { Option } from "effect";
-import { TranscriptEventView, TranscriptPageCursor, TranscriptCursor } from "@usine/orchestrator";
+import {
+  TranscriptCursor,
+  TranscriptEventView,
+  TranscriptPageCursor,
+} from "@usine/orchestrator/operator/model";
 import { QueryClient } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
@@ -12,10 +27,10 @@ import {
   Transcript,
 } from "../src/run-transcript.tsx";
 
-const attemptId = Attempt.AttemptId.make("attempt-31");
-const brain = new Agent.BrainSpec({
+const attemptId = AttemptId.make("attempt-31");
+const brain = new BrainSpec({
   harness: "codex",
-  model: Agent.ModelId.make("gpt-5"),
+  model: ModelId.make("gpt-5"),
   effort: "high",
 });
 
@@ -25,17 +40,17 @@ const event = (
   scope: "parent" | "child" | "channel" = "parent",
   session = `${scope}-session`,
 ) => {
-  const agent = Agent.Name.make(scope === "child" ? `agent-${session}` : "developer");
+  const agent = AgentName.make(scope === "child" ? `agent-${session}` : "developer");
   const sessionView =
     scope === "child"
-      ? new Agent.ChildSession({
-          id: Agent.SessionId.make(session),
-          parentId: Agent.SessionId.make("parent-session"),
+      ? new ChildSession({
+          id: AgentSessionId.make(session),
+          parentId: AgentSessionId.make("parent-session"),
           agent,
           brain,
         })
-      : new Agent.ParentSession({
-          id: Agent.SessionId.make(session),
+      : new ParentSession({
+          id: AgentSessionId.make(session),
           agent,
           brain,
         });
@@ -47,10 +62,10 @@ const event = (
     payload:
       scope === "channel"
         ? new AttemptChannel.Started({
-            parentModel: Agent.ModelId.make("gpt-5"),
+            parentModel: ModelId.make("gpt-5"),
           })
         : new AttemptChannel.SessionEvent({
-            event: new Agent.TextOutput({ session: sessionView, text }),
+            event: new TextOutput({ session: sessionView, text }),
           }),
   });
 };
@@ -62,18 +77,18 @@ const rateLimits = (sequence: number, usedPercent: number) =>
     receivedAt: "2026-09-01T12:00:00.000Z",
     direction: "outbound",
     payload: new AttemptChannel.SessionEvent({
-      event: new Agent.PoolRateLimitsUpdated({
-        session: new Agent.ParentSession({
-          id: Agent.SessionId.make("parent-session"),
-          agent: Agent.Name.make("developer"),
+      event: new PoolRateLimitsUpdated({
+        session: new ParentSession({
+          id: AgentSessionId.make("parent-session"),
+          agent: AgentName.make("developer"),
           brain,
         }),
         pool: "chatgptPlan",
-        rateLimits: new Agent.RateLimitsSnapshot({
+        rateLimits: new RateLimitsSnapshot({
           limitId: Option.none(),
           limitName: Option.none(),
           primary: Option.some(
-            new Agent.RateLimitWindow({
+            new RateLimitWindow({
               usedPercent,
               windowDurationMinutes: Option.none(),
               resetsAt: Option.none(),
@@ -150,8 +165,8 @@ describe("run transcript", () => {
   });
 
   it("replaces only the cursor for the Attempt whose earlier page was loaded", () => {
-    const firstAttempt = Attempt.AttemptId.make("attempt-1");
-    const secondAttempt = Attempt.AttemptId.make("attempt-2");
+    const firstAttempt = AttemptId.make("attempt-1");
+    const secondAttempt = AttemptId.make("attempt-2");
     const cursors = [
       new TranscriptPageCursor({
         attemptId: firstAttempt,

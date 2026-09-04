@@ -1,11 +1,16 @@
+import { AgentPersona } from "@usine/core/agent";
+import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
+import { ChildSessionBudget } from "@usine/core/agent/session";
 import {
-  Agent as CoreAgent,
-  Loop as CoreLoop,
-  Repository,
-  Step,
-  Worker as CoreWorker,
-} from "@usine/core";
-import { Source } from "@usine/expression";
+  AgentName,
+  LoopName as CoreLoopName,
+  RepositoryName,
+  StepName,
+  WorkerName,
+} from "@usine/core/ids";
+import { ApprovalRequirement } from "@usine/core/loop";
+import { WorkerKind } from "@usine/core/worker";
+import { Source } from "@usine/expression/model";
 import { Cron as EffectCron, DateTime, Effect, Option, Result, Schema } from "effect";
 
 /** Instance-relative path of one authored file (`usine.yaml`, `loops/x.md`). */
@@ -52,17 +57,11 @@ const KebabCase = Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
 const nonBlankString = (message: string) =>
   Schema.String.check(Schema.isPattern(/\S/u, { message }));
 
-export const AgentName = CoreAgent.Name;
-export type AgentName = CoreAgent.Name;
-
-export const LoopName = CoreLoop.LoopName.check(KebabCase);
+export const LoopName = CoreLoopName.check(KebabCase);
 export type LoopName = typeof LoopName.Type;
 
-export const WorkerName = CoreWorker.Name;
-export type WorkerName = CoreWorker.Name;
-
-export const RepoName = Repository.Name;
-export type RepoName = Repository.Name;
+export const RepoName = RepositoryName;
+export type RepoName = RepositoryName;
 
 export const RegistryTag = nonBlankString("Expected a non-blank registry tag").pipe(
   Schema.brand("RegistryTag"),
@@ -139,9 +138,6 @@ export class Lane extends Schema.Class<Lane>("@usine/config/Lane")({
   sources: Schema.Array(LaneSource).check(Schema.isNonEmpty()),
 }) {}
 
-export const ModelId = CoreAgent.ModelId;
-export type ModelId = CoreAgent.ModelId;
-
 export const OperatorLogin = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/u, {
     message: "Expected a GitHub login",
@@ -154,8 +150,8 @@ export const PromptTemplate = nonBlankString("Expected a non-blank Markdown prom
 );
 export type PromptTemplate = typeof PromptTemplate.Type;
 
-export const Persona = CoreAgent.Persona;
-export type Persona = CoreAgent.Persona;
+export const Persona = AgentPersona;
+export type Persona = AgentPersona;
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
@@ -190,9 +186,6 @@ export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/Manage
   lanes: Lanes.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}
 
-export const WorkerKind = CoreWorker.Kind;
-export type WorkerKind = CoreWorker.Kind;
-
 export class Worker extends Schema.Class<Worker>("@usine/config/Worker")({
   name: WorkerName,
   kind: WorkerKind,
@@ -202,11 +195,11 @@ export class Worker extends Schema.Class<Worker>("@usine/config/Worker")({
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
   pollInterval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
   /** Total child sessions one Attempt may spawn; this is not a concurrency limit. */
-  maxChildren: CoreAgent.ChildSessionBudget.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
+  maxChildren: ChildSessionBudget.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
   maxAttemptMinutes: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
   maxAttemptTokens: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(10_000_000))),
   parentModel: Schema.OptionFromOptionalKey(ModelId),
-  parentEffort: Schema.OptionFromOptionalKey(CoreAgent.Effort),
+  parentEffort: Schema.OptionFromOptionalKey(Effort),
 }) {}
 
 export const Webhooks = Schema.Union([
@@ -315,17 +308,11 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
   name: LoopName,
   trigger: Trigger,
   selector: Schema.Option(ValidSelector),
-  approval: CoreLoop.ApprovalRequirement,
-  step: Step.StepName,
+  approval: ApprovalRequirement,
+  step: StepName,
   agent: AgentName,
   body: PromptTemplate,
 }) {}
-
-export const Harness = CoreAgent.Harness;
-export type Harness = CoreAgent.Harness;
-
-export const Effort = CoreAgent.Effort;
-export type Effort = CoreAgent.Effort;
 
 export class AgentFile extends Schema.Class<AgentFile>("@usine/config/AgentFile")({
   name: AgentName,

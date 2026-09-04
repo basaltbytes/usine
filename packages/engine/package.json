@@ -15,13 +15,57 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./cursor/model": {
+      "types": "./dist/cursor/model.d.ts",
+      "default": "./dist/cursor/model.js"
+    },
+    "./cursor/store": {
+      "types": "./dist/cursor/store.d.ts",
+      "default": "./dist/cursor/store.js"
+    },
+    "./database/database": {
+      "types": "./dist/database/database.d.ts",
+      "default": "./dist/database/database.js"
+    },
+    "./engine": {
+      "types": "./dist/engine.d.ts",
+      "default": "./dist/engine.js"
+    },
+    "./item-projection/model": {
+      "types": "./dist/item-projection/model.d.ts",
+      "default": "./dist/item-projection/model.js"
+    },
+    "./item-projection/service": {
+      "types": "./dist/item-projection/service.d.ts",
+      "default": "./dist/item-projection/service.js"
     },
     "./local-sqlite": {
       "types": "./dist/database/local-sqlite.d.ts",
       "default": "./dist/database/local-sqlite.js"
+    },
+    "./loop-control": {
+      "types": "./dist/loop-control.d.ts",
+      "default": "./dist/loop-control.js"
+    },
+    "./model": {
+      "types": "./dist/model.d.ts",
+      "default": "./dist/model.js"
+    },
+    "./repository-label-projection/model": {
+      "types": "./dist/repository-label-projection/model.d.ts",
+      "default": "./dist/repository-label-projection/model.js"
+    },
+    "./repository-label-projection/service": {
+      "types": "./dist/repository-label-projection/service.d.ts",
+      "default": "./dist/repository-label-projection/service.js"
+    },
+    "./run-reader": {
+      "types": "./dist/run-reader.d.ts",
+      "default": "./dist/run-reader.js"
+    },
+    "./step-executor": {
+      "types": "./dist/step-executor.d.ts",
+      "default": "./dist/step-executor.js"
     }
   },
   "publishConfig": {

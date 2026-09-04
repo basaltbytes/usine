@@ -1,7 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
-import { GitHubLabelName, LabelLaneSource, LaneName, UsineConfig } from "@usine/config";
-import { Agent, Item, Loop, Repository, Run } from "@usine/core";
-import { ItemContentHash, ItemNumber, ItemProjection, ItemProjectionSource } from "@usine/engine";
+import { GitHubLabelName, LabelLaneSource, LaneName, UsineConfig } from "@usine/config/model";
+import { AgentName, ItemKey, LoopName, RepositoryName, RunId } from "@usine/core/ids";
+import { ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
+import {
+  ItemContentHash,
+  ItemProjection,
+  ItemProjectionSource,
+} from "@usine/engine/item-projection/model";
 import { Effect, Schema } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../src/board/projection.ts";
 import {
@@ -13,8 +18,8 @@ import {
   WritableBoardLaneView,
 } from "../src/operator/model.ts";
 
-const repository = Repository.Name.make("basaltbytes/usine");
-const itemKey = Item.ItemKey.make("github:basaltbytes/usine:33");
+const repository = RepositoryName.make("basaltbytes/usine");
+const itemKey = ItemKey.make("github:basaltbytes/usine:33");
 const ready = GitHubLabelName.make("ready-for-agent");
 const review = GitHubLabelName.make("ready-for-review");
 const bug = GitHubLabelName.make("bug");
@@ -63,7 +68,7 @@ const closedItem = new ItemProjection({
 
 const passed = GitHubLabelName.make("review-passed");
 const mergedPullRequest = new ItemProjection({
-  itemKey: Item.ItemKey.make("github:basaltbytes/usine:98"),
+  itemKey: ItemKey.make("github:basaltbytes/usine:98"),
   repository,
   source: ItemProjectionSource.make("pr"),
   number: ItemNumber.make(98),
@@ -99,11 +104,11 @@ const mergedPullRequest = new ItemProjection({
 
 const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succeeded") =>
   new RunView({
-    id: Run.RunId.make(id),
+    id: RunId.make(id),
     itemKey,
-    loop: Loop.LoopName.make(`loop-${id}`),
+    loop: LoopName.make(`loop-${id}`),
     repository,
-    agent: Agent.Name.make("developer"),
+    agent: AgentName.make("developer"),
     state,
     loopPaused: false,
     openedAt: "2026-09-01T12:00:00.000Z",
@@ -204,7 +209,7 @@ describe("Board projection", () => {
       const managed = config.repos[0];
       assert(managed !== undefined);
       const malformed = new ItemProjection({
-        itemKey: Item.ItemKey.make("github:basaltbytes/usine:34"),
+        itemKey: ItemKey.make("github:basaltbytes/usine:34"),
         repository,
         source: ItemProjectionSource.make("issue"),
         number: ItemNumber.make(34),
@@ -265,7 +270,7 @@ describe("Board projection", () => {
     const card = new BoardItemView({
       itemKey,
       kind: "issue",
-      number: Item.Number.make(33),
+      number: CoreItemNumber.make(33),
       title: "Board lanes",
       url: "https://github.com/basaltbytes/usine/issues/33",
       state: "issue-open",

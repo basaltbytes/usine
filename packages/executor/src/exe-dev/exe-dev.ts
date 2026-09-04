@@ -1,4 +1,4 @@
-import { Attempt, Repository } from "@usine/core";
+import { AttemptId, RepositoryName } from "@usine/core/ids";
 import { Effect, Layer, Ref, Result, Schema } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
@@ -8,31 +8,16 @@ import {
   ExecutorError,
   ExecutorOperationError,
   PreparedAttempt,
-} from "../index.ts";
+} from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import { provisionWorktree, safeSegment, type WorkspaceOps } from "../provision.ts";
 import { attemptChannelFor } from "./channel.ts";
 import { commandsFor } from "./commands.ts";
 import { credentialGrantsFor } from "./grants.ts";
-import {
-  CredentialGrantMinutes,
-  type ExeDevExecutorOptions,
-  GitHubIntegration,
-  HarnessLoginCheck,
-  IntegrationName,
-  type PreparedState,
-} from "./model.ts";
+import type { ExeDevExecutorOptions, PreparedState } from "./model.ts";
 import { preflightFor } from "./preflight.ts";
 import { RUN_HOST_KILL_SCRIPT, runHostPidFile } from "./shell.ts";
 import { abandonedWorktreeSweepFor } from "./sweep.ts";
-
-export {
-  CredentialGrantMinutes,
-  type ExeDevExecutorOptions,
-  GitHubIntegration,
-  HarnessLoginCheck,
-  IntegrationName,
-};
 
 const isExecutorError = Schema.is(ExecutorError);
 
@@ -42,8 +27,8 @@ const executorError = (message: string, cause: unknown): ExecutorOperationError 
 const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
   Effect.gen(function* () {
     const commands = yield* commandsFor(options.ssh);
-    const fetches = yield* keyedLockFor<Repository.Name>();
-    const preparedStates = yield* Ref.make(new Map<Attempt.AttemptId, PreparedState>());
+    const fetches = yield* keyedLockFor<RepositoryName>();
+    const preparedStates = yield* Ref.make(new Map<AttemptId, PreparedState>());
     const integrations = new Map(
       options.githubIntegrations.map(({ name, repository }) => [repository, name]),
     );

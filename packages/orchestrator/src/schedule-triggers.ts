@@ -1,23 +1,25 @@
-import {
-  ConfigParser,
-  environmentFor,
-  type ConfigFileError,
-  type LoadedInstance,
-  type LoopFile,
-  type ManagedRepo,
-  matchesSelector,
-  repositoryContext,
-  type ScheduleTrigger,
-} from "@usine/config";
-import { Agent, AttemptChannel, Event, Item, Loop, Repository } from "@usine/core";
+import type {
+  ConfigFileError,
+  LoadedInstance,
+  LoopFile,
+  ManagedRepo,
+  ScheduleTrigger,
+} from "@usine/config/model";
+import { ConfigParser } from "@usine/config/parser";
+import { environmentFor, repositoryContext } from "@usine/config/payload-slices";
+import { matchesSelector } from "@usine/config/selector";
+import { AttemptTask } from "@usine/core/attempt";
+import { AgentName, DedupKey, ItemKey, LoopName, RepositoryName } from "@usine/core/ids";
+import { canonicalRepositoryName } from "@usine/core/repository";
+import { RunEngine } from "@usine/engine/engine";
+import { LoopControl } from "@usine/engine/loop-control";
 import {
   type EnginePersistenceError,
-  LoopControl,
-  RunEngine,
   type RunEngineError,
   SubmissionResult,
-} from "@usine/engine";
-import { ExpressionEngine, type ExpressionError } from "@usine/expression";
+} from "@usine/engine/model";
+import { ExpressionEngine } from "@usine/expression/expression-engine";
+import type { ExpressionError } from "@usine/expression/model";
 import {
   Clock,
   Context,
@@ -81,8 +83,8 @@ const scheduleFailureLogFields = (error: ScheduleTriggerError) => {
 export class ScheduleAgentFailure extends Schema.TaggedClass<ScheduleAgentFailure>(
   "@usine/orchestrator/ScheduleAgentFailure",
 )("ScheduleAgentFailure", {
-  loop: Loop.LoopName,
-  agent: Agent.Name,
+  loop: LoopName,
+  agent: AgentName,
   message: Schema.String,
 }) {}
 
@@ -90,8 +92,8 @@ export class ScheduleAgentFailure extends Schema.TaggedClass<ScheduleAgentFailur
 export class ScheduleTickFailure extends Schema.TaggedClass<ScheduleTickFailure>(
   "@usine/orchestrator/ScheduleTickFailure",
 )("ScheduleTickFailure", {
-  loop: Loop.LoopName,
-  repository: Repository.Name,
+  loop: LoopName,
+  repository: RepositoryName,
   scheduledAt: Schema.DateTimeUtc,
   errorTag: Schema.NonEmptyString,
   message: Schema.String,
@@ -105,7 +107,7 @@ export class ScheduleTickFailure extends Schema.TaggedClass<ScheduleTickFailure>
 export class ScheduleCronFailure extends Schema.TaggedClass<ScheduleCronFailure>(
   "@usine/orchestrator/ScheduleCronFailure",
 )("ScheduleCronFailure", {
-  loop: Loop.LoopName,
+  loop: LoopName,
   cron: Schema.String,
   tz: Schema.String,
   message: Schema.String,
@@ -174,18 +176,14 @@ const earliest = (values: ReadonlyArray<DateTime.Utc>): Option.Option<DateTime.U
   return DateTime.make(Math.min(...values.map(DateTime.toEpochMillis)));
 };
 
-const itemKey = (repository: ManagedRepo): Item.ItemKey =>
-  Item.ItemKey.make(JSON.stringify(["github", Repository.canonical(repository.name)]));
+const itemKey = (repository: ManagedRepo): ItemKey =>
+  ItemKey.make(JSON.stringify(["github", canonicalRepositoryName(repository.name)]));
 
-const eventKey = (
-  loop: LoopFile,
-  repository: ManagedRepo,
-  scheduledAt: DateTime.Utc,
-): Event.DedupKey =>
-  Event.DedupKey.make(
+const eventKey = (loop: LoopFile, repository: ManagedRepo, scheduledAt: DateTime.Utc): DedupKey =>
+  DedupKey.make(
     JSON.stringify([
       loop.name,
-      Repository.canonical(repository.name),
+      canonicalRepositoryName(repository.name),
       DateTime.formatIso(scheduledAt),
     ]),
   );
@@ -226,7 +224,7 @@ export class ScheduleTriggers extends Context.Service<
       // Efficiency-only fired-tick memory: an empty map after a restart is
       // exactly ADR 0007's "fire the latest missed tick"; the permanent dedup
       // ledger stays the correctness guarantee.
-      const lastFired = yield* Ref.make(new Map<Loop.LoopName, number>());
+      const lastFired = yield* Ref.make(new Map<LoopName, number>());
       // Cron sources are immutable once parsed at the config boundary; parsing
       // again per cycle is waste. parseUnsafe trusts that boundary validation.
       const parsedCrons = new WeakMap<ScheduleTrigger, Cron.Cron>();
@@ -276,7 +274,7 @@ export class ScheduleTriggers extends Context.Service<
             payload,
             receivedAt,
             repository: due.repository,
-            task: AttemptChannel.Task.make(task),
+            task: AttemptTask.make(task),
             parentModel: due.parentModel,
           }),
         );
@@ -310,7 +308,7 @@ export class ScheduleTriggers extends Context.Service<
         const due: Array<DueTick> = [];
         const agentFailures: Array<ScheduleAgentFailure> = [];
         const cronFailures: Array<ScheduleCronFailure> = [];
-        const boundariesByLoop = new Map<Loop.LoopName, number>();
+        const boundariesByLoop = new Map<LoopName, number>();
         const nexts: Array<DateTime.Utc> = [];
         let alreadyFired = 0;
         for (const schedule of schedules) {
@@ -418,8 +416,8 @@ export class ScheduleTriggers extends Context.Service<
 
         const submissions: Array<SubmissionResult> = [];
         const tickFailures: Array<ScheduleTickFailure> = [];
-        const submittedLoops = new Set<Loop.LoopName>();
-        const failedLoops = new Set<Loop.LoopName>();
+        const submittedLoops = new Set<LoopName>();
+        const failedLoops = new Set<LoopName>();
         let skipped = 0;
         for (const { candidate, result } of settled) {
           if (Result.isSuccess(result)) {

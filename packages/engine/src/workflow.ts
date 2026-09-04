@@ -1,4 +1,6 @@
-import { AttemptFailure, Run, StepResult } from "@usine/core";
+import { AgentFailure, AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { RunId } from "@usine/core/ids";
+import { StepResult } from "@usine/core/step/result";
 import { Effect, Option, Result, Schema } from "effect";
 import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { StepExecutor } from "./step-executor.ts";
@@ -18,8 +20,8 @@ type WorkflowPayload = typeof WorkflowPayload.Type;
 
 export const DurableRun = Workflow.make("@usine/engine/DurableRun", {
   payload: WorkflowPayload,
-  success: StepResult.StepResult,
-  error: AttemptFailure.AttemptFailure,
+  success: StepResult,
+  error: AttemptFailure,
   idempotencyKey: ({ submission }) => submission.event.dedupKey,
 }).annotate(Workflow.SuspendOnFailure, true);
 
@@ -27,10 +29,10 @@ export const ApprovalGate = DurableDeferred.make("@usine/engine/ApprovalGate");
 
 const asAttemptFailure = <A, R>(
   effect: Effect.Effect<A, RunStoreError, R>,
-): Effect.Effect<A, AttemptFailure.AttemptFailure, R> =>
+): Effect.Effect<A, AttemptFailure, R> =>
   Effect.catchTags(effect, {
     EnginePersistenceError: (error: EnginePersistenceError) =>
-      new AttemptFailure.InfraFailure({
+      new InfraFailure({
         message: `Engine persistence failed during ${error.operation}`,
         cause: error,
       }),
@@ -42,14 +44,14 @@ const executionId = (submission: Submission) => DurableRun.executionId({ submiss
 
 export const continueWithNewest: (
   store: RunStore["Service"],
-  completedRunId: Run.RunId,
+  completedRunId: RunId,
 ) => Effect.Effect<void, RunStoreError, WorkflowEngine.WorkflowEngine> = Effect.fn(
   "DurableRun.continueWithNewest",
-)(function* (store: RunStore["Service"], completedRunId: Run.RunId) {
+)(function* (store: RunStore["Service"], completedRunId: RunId) {
   const queued = yield* store.nextQueued(completedRunId);
   if (Option.isSome(queued)) {
     const nextExecutionId = yield* executionId(queued.value);
-    const runId = Run.RunId.make(nextExecutionId);
+    const runId = RunId.make(nextExecutionId);
     const claimed = yield* store.claimQueued(queued.value, runId);
     if (Option.isSome(claimed)) {
       yield* DurableRun.execute({ submission: claimed.value.submission }, { discard: true });
@@ -62,7 +64,7 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
   { submission }: WorkflowPayload,
   executionId: string,
 ) {
-  const runId = Run.RunId.make(executionId);
+  const runId = RunId.make(executionId);
   const store = yield* RunStore;
   const executor = yield* StepExecutor;
 
@@ -94,7 +96,7 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
         .pipe(
           Effect.catchDefect(
             (defect) =>
-              new AttemptFailure.InfraFailure({
+              new InfraFailure({
                 message: "The step executor crashed outside its typed failure channel",
                 cause: defect,
               }),
@@ -111,7 +113,7 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
         state: attempted.state,
       });
       yield* continueWithNewest(store, runId).pipe(asAttemptFailure);
-      return yield* new AttemptFailure.AgentFailure({
+      return yield* new AgentFailure({
         message: `The run closed (${attempted.state}) before an attempt started`,
       });
     }
@@ -140,5 +142,5 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
 export const durableRunLayer = DurableRun.toLayer(executeDurableRun);
 
 export const runIdFor = Effect.fn("DurableRun.runIdFor")(function* (submission: Submission) {
-  return Run.RunId.make(yield* executionId(submission));
+  return RunId.make(yield* executionId(submission));
 });

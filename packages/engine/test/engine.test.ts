@@ -1,19 +1,24 @@
 import { assert, describe, it } from "@effect/vitest";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
+import { Agent, AgentPersona } from "@usine/core/agent";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { AttemptTask } from "@usine/core/attempt";
+import { AgentFailure, AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { Event } from "@usine/core/event";
 import {
-  Agent,
-  AttemptChannel,
-  AttemptFailure,
-  Event,
-  Item,
-  Loop,
-  Repository,
-  Run,
-  Step,
-  StepResult,
-  Worker,
-} from "@usine/core";
+  AgentName,
+  DedupKey,
+  EventId,
+  ItemKey,
+  LoopName,
+  RepositoryName,
+  RunId,
+  StepName,
+  WorkerName,
+} from "@usine/core/ids";
+import { RepositoryRevision } from "@usine/core/repository";
+import { StepResult } from "@usine/core/step/result";
 import {
   Context,
   DateTime,
@@ -30,34 +35,32 @@ import {
 } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { layer } from "../src/database/local-sqlite.ts";
-import {
-  InstanceDirectory,
-  LoopControl,
-  RunEngine,
-  RunReader,
-  StepExecutor,
-  Submission,
-} from "../src/index.ts";
+import { InstanceDirectory } from "@usine/core/instance";
+import { RunEngine } from "../src/engine.ts";
+import { LoopControl } from "../src/loop-control.ts";
+import { Submission } from "../src/model.ts";
+import { RunReader } from "../src/run-reader.ts";
+import { StepExecutor } from "../src/step-executor.ts";
 
-const stepResult = (message: string) => new StepResult.StepResult({ message, facts: [] });
-const testAgent = new Agent.Agent({
-  name: Agent.Name.make("developer"),
-  brain: new Agent.BrainSpec({
+const stepResult = (message: string) => new StepResult({ message, facts: [] });
+const testAgent = new Agent({
+  name: AgentName.make("developer"),
+  brain: new BrainSpec({
     harness: "claude",
-    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Agent.Persona.make("Implement the task."),
+  persona: AgentPersona.make("Implement the task."),
 });
 
-type AttemptPlan = Effect.Effect<StepResult.StepResult, AttemptFailure.AttemptFailure>;
+type AttemptPlan = Effect.Effect<StepResult, AttemptFailure>;
 
 const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
   Layer.succeed(StepExecutor)({
     interrupt: () => Effect.void,
-    reserve: () => Effect.succeed({ worker: Worker.Name.make("local"), release: Effect.void }),
+    reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
     execute: () =>
       Ref.modify(plans, (remaining) => {
         const [next, ...rest] = remaining;
@@ -76,19 +79,19 @@ const submission = (options: {
 }) => {
   const second = String(options.number).padStart(2, "0");
   return new Submission({
-    event: new Event.Event({
-      id: Event.EventId.make(`event-${options.number}`),
-      dedupKey: Event.DedupKey.make(`loop/item/revision-${options.number}`),
+    event: new Event({
+      id: EventId.make(`event-${options.number}`),
+      dedupKey: DedupKey.make(`loop/item/revision-${options.number}`),
       payload: { revision: options.number },
       receivedAt: DateTime.makeUnsafe(`2026-08-24T12:00:${second}Z`),
     }),
-    itemKey: Item.ItemKey.make(options.item ?? "item-1"),
-    loop: Loop.LoopName.make("review"),
-    step: Step.StepName.make("run"),
+    itemKey: ItemKey.make(options.item ?? "item-1"),
+    loop: LoopName.make("review"),
+    step: StepName.make("run"),
     approval: options.approval ?? "none",
-    repository: Repository.Name.make("basaltbytes/usine"),
-    revision: Repository.Revision.make(`revision-${options.number}`),
-    task: AttemptChannel.Task.make(`Run test ${options.number}`),
+    repository: RepositoryName.make("basaltbytes/usine"),
+    revision: RepositoryRevision.make(`revision-${options.number}`),
+    task: AttemptTask.make(`Run test ${options.number}`),
     agent: testAgent,
     parentModel: Option.none(),
   });
@@ -96,9 +99,9 @@ const submission = (options: {
 
 const approvalEvent = (number: number) => {
   const second = String(number).padStart(2, "0");
-  return new Event.Event({
-    id: Event.EventId.make(`approval-${number}`),
-    dedupKey: Event.DedupKey.make(`approval/run-${number}`),
+  return new Event({
+    id: EventId.make(`approval-${number}`),
+    dedupKey: DedupKey.make(`approval/run-${number}`),
     payload: { approved: true },
     receivedAt: DateTime.makeUnsafe(`2026-08-24T13:00:${second}Z`),
   });
@@ -106,7 +109,7 @@ const approvalEvent = (number: number) => {
 
 const waitFor = Effect.fn("test.waitFor")(function* (
   engine: RunEngine["Service"],
-  runId: Run.RunId,
+  runId: RunId,
   predicate: (snapshot: Effect.Success<ReturnType<RunEngine["Service"]["inspect"]>>) => boolean,
 ) {
   let latest = yield* engine.inspect(runId);
@@ -206,7 +209,7 @@ describe("durable run engine", () => {
           );
           const runRevision = Option.getOrThrow(yield* reader.revision());
           assert(runRevision > initialRevision);
-          yield* controls.pause(Loop.LoopName.make("review"));
+          yield* controls.pause(LoopName.make("review"));
           assert(Option.getOrThrow(yield* reader.revision()) > runRevision);
         }).pipe(Effect.provide(runtime));
       }),
@@ -258,7 +261,7 @@ describe("durable run engine", () => {
   it.live("auto-retries only typed infrastructure failures", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
-        const infrastructureFailure = new AttemptFailure.InfraFailure({
+        const infrastructureFailure = new InfraFailure({
           message: "worker unreachable",
           cause: new Error("ECONNREFUSED"),
         });
@@ -332,7 +335,7 @@ describe("durable run engine", () => {
   it.live("stops automatic infrastructure retry at three Attempts", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
-        const failure = new AttemptFailure.InfraFailure({
+        const failure = new InfraFailure({
           message: "worker unavailable",
           cause: new Error("offline"),
         });
@@ -372,7 +375,7 @@ describe("durable run engine", () => {
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          new AttemptFailure.AgentFailure({ message: "agent could not finish" }),
+          new AgentFailure({ message: "agent could not finish" }),
           Effect.succeed(stepResult("operator-guided result")),
         ]);
         const runtime = layer(directory).pipe(Layer.provide(executorLayer(plans)));
@@ -434,7 +437,7 @@ describe("durable run engine", () => {
           }
 
           yield* waitFor(engine, second.runId, ({ run }) => run.state._tag === "Waiting");
-          yield* engine.revoke(Loop.LoopName.make("review"), Item.ItemKey.make("item-1"));
+          yield* engine.revoke(LoopName.make("review"), ItemKey.make("item-1"));
           const revoked = yield* engine.inspect(second.runId);
           assert.strictEqual(revoked.run.state._tag, "Canceled");
           if (revoked.run.state._tag === "Canceled") {

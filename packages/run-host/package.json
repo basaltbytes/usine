@@ -18,8 +18,8 @@
   "sideEffects": false,
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./dist/run-host.d.ts",
+      "default": "./dist/run-host.js"
     },
     "./executable": {
       "types": "./dist/executable.d.ts",

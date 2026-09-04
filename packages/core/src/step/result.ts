@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { CommitSha } from "./repository.ts";
+import { CommitSha } from "../repository.ts";
 
 /** A commit the run host found between the workspace base and final HEAD. */
 export class Commit extends Schema.TaggedClass<Commit>("StepResult/Commit")("Commit", {
@@ -21,8 +21,8 @@ export class Comment extends Schema.TaggedClass<Comment>("StepResult/Comment")("
   url: Schema.URL,
 }) {}
 
-export const Fact = Schema.Union([Commit, PullRequest, Comment]);
-export type Fact = typeof Fact.Type;
+export const StepResultFact = Schema.Union([Commit, PullRequest, Comment]);
+export type StepResultFact = typeof StepResultFact.Type;
 
 /**
  * The Step result carried by the run host's final envelope: the agent's final
@@ -30,5 +30,5 @@ export type Fact = typeof Fact.Type;
  */
 export class StepResult extends Schema.Class<StepResult>("StepResult")({
   message: Schema.NonEmptyString,
-  facts: Schema.Array(Fact),
+  facts: Schema.Array(StepResultFact),
 }) {}

@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, Option } from "effect";
-import { Run } from "@usine/core";
+import { RunId } from "@usine/core/ids";
 import { RunDatabase } from "./database/database.ts";
 import {
   ProjectionRevision,
@@ -15,7 +15,7 @@ import { queriesFor } from "./store/queries.ts";
 const makeRunReader = Effect.gen(function* () {
   const queries = queriesFor(yield* RunDatabase);
 
-  const inspect = Effect.fn("RunReader.inspect")((runId: Run.RunId) =>
+  const inspect = Effect.fn("RunReader.inspect")((runId: RunId) =>
     queries.snapshot(runId).pipe(persistence("read run")),
   );
   const list = Effect.fn("RunReader.list")((options: { readonly closedLimit: number }) =>
@@ -35,7 +35,7 @@ const makeRunReader = Effect.gen(function* () {
 export class RunReader extends Context.Service<
   RunReader,
   {
-    readonly inspect: (runId: Run.RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
+    readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
     /** Every open Run plus the newest `closedLimit` settled ones, newest first. */
     readonly list: (options: {
       readonly closedLimit: number;

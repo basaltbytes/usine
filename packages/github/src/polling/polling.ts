@@ -1,4 +1,5 @@
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/ids";
+import { splitRepositoryName } from "@usine/core/repository";
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../github-app.ts";
@@ -143,8 +144,8 @@ const sinceParameter = (watermark: DateTime.Utc): string => {
   return `${new Date(epoch - (epoch % 1_000)).toISOString().slice(0, 19)}Z`;
 };
 
-const changesUrl = (repository: Repository.Name, cursor: PollCursor): string => {
-  const { name, owner } = Repository.parts(repository);
+const changesUrl = (repository: RepositoryName, cursor: PollCursor): string => {
+  const { name, owner } = splitRepositoryName(repository);
   const url = new URL(
     `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues`,
   );
@@ -158,8 +159,8 @@ const changesUrl = (repository: Repository.Name, cursor: PollCursor): string => 
   return url.toString();
 };
 
-const labelsUrl = (repository: Repository.Name): string => {
-  const { name, owner } = Repository.parts(repository);
+const labelsUrl = (repository: RepositoryName): string => {
+  const { name, owner } = splitRepositoryName(repository);
   const url = new URL(
     `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/labels`,
   );
@@ -167,8 +168,8 @@ const labelsUrl = (repository: Repository.Name): string => {
   return url.toString();
 };
 
-const itemLabelsUrl = (repository: Repository.Name, item: number): string => {
-  const { name, owner } = Repository.parts(repository);
+const itemLabelsUrl = (repository: RepositoryName, item: number): string => {
+  const { name, owner } = splitRepositoryName(repository);
   const url = new URL(
     `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${item}/labels`,
   );
@@ -200,15 +201,15 @@ export class GitHubPolling extends Context.Service<
   GitHubPolling,
   {
     readonly changes: (
-      repository: Repository.Name,
+      repository: RepositoryName,
       cursor: PollCursor,
     ) => Effect.Effect<ChangeDetection, GitHubAppError>;
     readonly labels: (
-      repository: Repository.Name,
+      repository: RepositoryName,
       entityTag: Option.Option<EntityTag>,
     ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
     readonly snapshot: (
-      repository: Repository.Name,
+      repository: RepositoryName,
       item: ChangedItem,
     ) => Effect.Effect<PayloadSnapshot, GitHubAppError>;
   }
@@ -306,7 +307,7 @@ export class GitHubPolling extends Context.Service<
       });
 
       const labels = Effect.fn("GitHubPolling.labels")(function* (
-        repository: Repository.Name,
+        repository: RepositoryName,
         entityTag: Option.Option<EntityTag>,
       ) {
         yield* Effect.annotateCurrentSpan({ repository });
@@ -343,7 +344,7 @@ export class GitHubPolling extends Context.Service<
       });
 
       const changes = Effect.fn("GitHubPolling.changes")(function* (
-        repository: Repository.Name,
+        repository: RepositoryName,
         cursor: PollCursor,
       ) {
         const token = yield* app.installationToken();
@@ -406,13 +407,13 @@ export class GitHubPolling extends Context.Service<
         S extends Schema.Codec<unknown, unknown, never, unknown>,
       >(
         operation: GitHubOperation,
-        repository: Repository.Name,
+        repository: RepositoryName,
         number: number,
         query: string,
         dataSchema: S,
       ) {
         const token = yield* app.installationToken();
-        const { name, owner } = Repository.parts(repository);
+        const { name, owner } = splitRepositoryName(repository);
         const request = HttpClientRequest.post(`${API_ROOT}/graphql`).pipe(
           HttpClientRequest.bodyJsonUnsafe({ query, variables: { owner, name, number } }),
           authorized(token.value),
@@ -450,7 +451,7 @@ export class GitHubPolling extends Context.Service<
 
       const snapshot = Effect.fn("GitHubPolling.snapshot")(
         (
-          repository: Repository.Name,
+          repository: RepositoryName,
           item: ChangedItem,
         ): Effect.Effect<PayloadSnapshot, GitHubAppError> =>
           Effect.gen(function* () {

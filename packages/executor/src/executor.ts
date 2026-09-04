@@ -1,14 +1,15 @@
 /** @usine/executor — platform-free worker execution contract. */
 
-import {
-  Agent,
-  Attempt,
-  AttemptChannel,
-  AttemptFailure,
-  Repository,
-  StepResult,
-  Worker,
-} from "@usine/core";
+import { Agent } from "@usine/core/agent";
+import { Effort, ModelId } from "@usine/core/agent/brain";
+import { ChildSessionBudget } from "@usine/core/agent/session";
+import { AttemptTask } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { AttemptFailure } from "@usine/core/attempt/failure";
+import { AttemptId, RepositoryName, WorkerName } from "@usine/core/ids";
+import { RepositoryRevision } from "@usine/core/repository";
+import { StepResult } from "@usine/core/step/result";
+import { WorkerKind } from "@usine/core/worker";
 import { Context, Effect, Redacted, Schema } from "effect";
 
 export const ExecutorOperation = Schema.Literals([
@@ -40,7 +41,7 @@ export class ExecutorOperationError extends Schema.TaggedError<ExecutorOperation
 export class CredentialUnavailableError extends Schema.TaggedError<CredentialUnavailableError>(
   "@usine/executor/CredentialUnavailableError",
 )("CredentialUnavailableError", {
-  repository: Repository.Name,
+  repository: RepositoryName,
   message: Schema.NonEmptyString,
   cause: Schema.Defect(),
 }) {}
@@ -49,7 +50,7 @@ export class CredentialUnavailableError extends Schema.TaggedError<CredentialUna
 export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityError>(
   "@usine/executor/WorkerCapabilityError",
 )("WorkerCapabilityError", {
-  worker: Worker.Name,
+  worker: WorkerName,
   capability: WorkerCapability,
   message: Schema.NonEmptyString,
   cause: Schema.Defect(),
@@ -90,16 +91,16 @@ export interface RunHostCommand {
 export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   "@usine/executor/CheckoutRequest",
 )({
-  attemptId: Attempt.AttemptId,
-  worker: Worker.Name,
-  repository: Repository.Name,
-  revision: Repository.Revision,
+  attemptId: AttemptId,
+  worker: WorkerName,
+  repository: RepositoryName,
+  revision: RepositoryRevision,
   payload: Schema.Json,
-  task: AttemptChannel.Task,
-  agent: Agent.Agent,
-  parentModel: Schema.Option(Agent.ModelId),
-  maxChildren: Agent.ChildSessionBudget,
-  parentEffort: Agent.Effort,
+  task: AttemptTask,
+  agent: Agent,
+  parentModel: Schema.Option(ModelId),
+  maxChildren: ChildSessionBudget,
+  parentEffort: Effort,
 }) {}
 
 /** Value object (branded path): one Attempt's disposable checkout directory. */
@@ -110,7 +111,7 @@ export type WorktreePath = typeof WorktreePath.Type;
 export class PreparedAttempt extends Schema.Class<PreparedAttempt>(
   "@usine/executor/PreparedAttempt",
 )({
-  worker: Worker.Name,
+  worker: WorkerName,
   spec: AttemptChannel.RunSpec,
   worktree: WorktreePath,
 }) {}
@@ -120,8 +121,8 @@ export class CredentialProvider extends Context.Service<
   CredentialProvider,
   {
     readonly issue: (
-      repository: Repository.Name,
-      attemptId: Attempt.AttemptId,
+      repository: RepositoryName,
+      attemptId: AttemptId,
     ) => Effect.Effect<Redacted.Redacted<string>, CredentialUnavailableError>;
   }
 >()("@usine/executor/CredentialProvider") {}
@@ -130,14 +131,14 @@ export class CredentialProvider extends Context.Service<
 export class Executor extends Context.Service<
   Executor,
   {
-    readonly kind: Worker.Kind;
-    readonly preflight: (worker: Worker.Name) => Effect.Effect<void, ExecutorError>;
+    readonly kind: WorkerKind;
+    readonly preflight: (worker: WorkerName) => Effect.Effect<void, ExecutorError>;
     readonly prepare: (request: CheckoutRequest) => Effect.Effect<PreparedAttempt, ExecutorError>;
     readonly launch: (
       prepared: PreparedAttempt,
       io: AttemptChannel.Sink,
-    ) => Effect.Effect<StepResult.StepResult, AttemptFailure.AttemptFailure>;
-    readonly cancel: (attemptId: Attempt.AttemptId) => Effect.Effect<void, ExecutorError>;
+    ) => Effect.Effect<StepResult, AttemptFailure>;
+    readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
     readonly cleanup: (prepared: PreparedAttempt) => Effect.Effect<void, ExecutorError>;
   }
 >()("@usine/executor/Executor") {}

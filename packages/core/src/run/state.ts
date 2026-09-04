@@ -17,7 +17,7 @@
  * row via the `RunState` union) — they are the state machine.
  */
 import { Schema } from "effect";
-import { EventId } from "./event.ts";
+import { EventId } from "../ids.ts";
 
 /** Cancel reason — value object: the operator closed the run by hand. */
 export class OperatorCanceled extends Schema.TaggedClass<OperatorCanceled>(

@@ -1,4 +1,4 @@
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/ids";
 import { Context, Schema } from "effect";
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
@@ -82,7 +82,7 @@ export class InstallationWide extends Schema.TaggedClass<InstallationWide>(
 export class SingleRepository extends Schema.TaggedClass<SingleRepository>(
   "@usine/github/TokenScope/SingleRepository",
 )("SingleRepository", {
-  repository: Repository.Name,
+  repository: RepositoryName,
   repositoryId: RepositoryId,
 }) {}
 
@@ -101,7 +101,7 @@ export class CoveredProject extends Schema.TaggedClass<CoveredProject>(
   "@usine/github/ProjectAccess/CoveredProject",
 )("CoveredProject", {
   installationId: InstallationId,
-  repository: Repository.Name,
+  repository: RepositoryName,
   repositoryId: RepositoryId,
 }) {}
 
@@ -109,7 +109,7 @@ export class CoveredProject extends Schema.TaggedClass<CoveredProject>(
 export class ProjectNotInstalledError extends Schema.TaggedError<ProjectNotInstalledError>(
   "@usine/github/ProjectNotInstalledError",
 )("ProjectNotInstalledError", {
-  repository: Repository.Name,
+  repository: RepositoryName,
   message: Schema.NonEmptyString,
 }) {}
 
@@ -118,13 +118,13 @@ export type ProjectAccess = typeof ProjectAccess.Type;
 
 export interface InstalledRepository {
   readonly id: RepositoryId;
-  readonly name: Repository.Name;
+  readonly name: RepositoryName;
 }
 
 /** Pure registry⊆installation derivation: one result, and one error, per project. */
 export const deriveProjectAccess = (
   installation: Installation,
-  registry: ReadonlyArray<Repository.Name>,
+  registry: ReadonlyArray<RepositoryName>,
   installed: ReadonlyArray<InstalledRepository>,
 ): ReadonlyArray<ProjectAccess> => {
   const byName = new Map(installed.map((repo) => [repo.name.toLowerCase(), repo]));

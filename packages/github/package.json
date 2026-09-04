@@ -14,13 +14,33 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./github-app": {
+      "types": "./dist/github-app.d.ts",
+      "default": "./dist/github-app.js"
+    },
+    "./item-writer": {
+      "types": "./dist/item-writer.d.ts",
+      "default": "./dist/item-writer.js"
+    },
+    "./label-writer": {
+      "types": "./dist/label-writer.d.ts",
+      "default": "./dist/label-writer.js"
     },
     "./local-secrets": {
       "types": "./dist/local-secrets.d.ts",
       "default": "./dist/local-secrets.js"
+    },
+    "./model": {
+      "types": "./dist/model.d.ts",
+      "default": "./dist/model.js"
+    },
+    "./polling/model": {
+      "types": "./dist/polling/model.d.ts",
+      "default": "./dist/polling/model.js"
+    },
+    "./polling/polling": {
+      "types": "./dist/polling/polling.d.ts",
+      "default": "./dist/polling/polling.js"
     }
   },
   "publishConfig": {

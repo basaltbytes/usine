@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Schema } from "effect";
-import { EventId } from "../src/lifecycle/event.ts";
-import * as RunState from "../src/lifecycle/run-state.ts";
+import { EventId } from "../src/ids.ts";
+import * as RunState from "../src/run/state.ts";
 
 const decodeRunState = Schema.decodeUnknownSync(RunState.RunState);
 

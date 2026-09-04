@@ -14,17 +14,53 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./board/projection": {
+      "types": "./dist/board/projection.d.ts",
+      "default": "./dist/board/projection.js"
+    },
+    "./credentials": {
+      "types": "./dist/credentials.d.ts",
+      "default": "./dist/credentials.js"
+    },
+    "./exe-dev": {
+      "types": "./dist/exe-dev.d.ts",
+      "default": "./dist/exe-dev.js"
+    },
+    "./idle-triggers": {
+      "types": "./dist/idle-triggers.d.ts",
+      "default": "./dist/idle-triggers.js"
+    },
+    "./label-reconciler": {
+      "types": "./dist/label-reconciler.d.ts",
+      "default": "./dist/label-reconciler.js"
     },
     "./local": {
       "types": "./dist/local.d.ts",
       "default": "./dist/local.js"
     },
-    "./exe-dev": {
-      "types": "./dist/exe-dev.d.ts",
-      "default": "./dist/exe-dev.js"
+    "./operator/model": {
+      "types": "./dist/operator/model.d.ts",
+      "default": "./dist/operator/model.js"
+    },
+    "./operator/service": {
+      "types": "./dist/operator/service.d.ts",
+      "default": "./dist/operator/service.js"
+    },
+    "./orchestrator": {
+      "types": "./dist/orchestrator.d.ts",
+      "default": "./dist/orchestrator.js"
+    },
+    "./polling-triggers": {
+      "types": "./dist/polling-triggers.d.ts",
+      "default": "./dist/polling-triggers.js"
+    },
+    "./schedule-triggers": {
+      "types": "./dist/schedule-triggers.d.ts",
+      "default": "./dist/schedule-triggers.js"
+    },
+    "./scheduler": {
+      "types": "./dist/scheduler.d.ts",
+      "default": "./dist/scheduler.js"
     }
   },
   "publishConfig": {

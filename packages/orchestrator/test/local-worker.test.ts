@@ -1,20 +1,29 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { UsineConfig } from "@usine/config";
+import { UsineConfig } from "@usine/config/model";
+import { Agent, AgentPersona } from "@usine/core/agent";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { ChildSessionBudget } from "@usine/core/agent/session";
+import { Attempt, AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { Event } from "@usine/core/event";
 import {
-  Agent,
-  Attempt,
-  AttemptChannel,
-  Event,
-  Item,
-  Loop,
-  Repository,
-  Run,
-  RunState,
-  Step,
-  StepResult,
-  Worker,
-} from "@usine/core";
+  AgentName,
+  AttemptId,
+  DedupKey,
+  EventId,
+  ItemKey,
+  LoopName,
+  RepositoryName,
+  RunId,
+  StepName,
+  WorkerName,
+} from "@usine/core/ids";
+import { CommitSha, RepositoryRevision } from "@usine/core/repository";
+import { Run } from "@usine/core/run";
+import * as RunState from "@usine/core/run/state";
+import { Step } from "@usine/core/step";
+import { StepResult } from "@usine/core/step/result";
 import {
   CredentialProvider,
   Executor,
@@ -22,16 +31,16 @@ import {
   PreparedAttempt,
   WorktreePath,
 } from "@usine/executor";
+import { InstanceDirectory } from "@usine/core/instance";
+import { RunEngine } from "@usine/engine/engine";
 import {
-  InstanceDirectory,
-  RunEngine,
   StepExecution,
-  StepExecutor,
   Submission,
   TranscriptAllQuery,
   TranscriptTailQuery,
-} from "@usine/engine";
-import { stepExecutorLayer } from "../src/index.ts";
+} from "@usine/engine/model";
+import { StepExecutor } from "@usine/engine/step-executor";
+import { stepExecutorLayer } from "../src/scheduler.ts";
 import {
   DateTime,
   Effect,
@@ -59,16 +68,16 @@ const STATE_POLL_ATTEMPTS = 1_000;
 // The capacity test completes three sequential run-host lifecycles, so its
 // per-test ceiling must cover more than one state-poll horizon plus cleanup.
 const LIVE_TEST_TIMEOUT = 30_000;
-const testAgent = new Agent.Agent({
-  name: Agent.Name.make("developer"),
-  brain: new Agent.BrainSpec({
+const testAgent = new Agent({
+  name: AgentName.make("developer"),
+  brain: new BrainSpec({
     harness: "claude",
-    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Agent.Persona.make("Implement the task."),
+  persona: AgentPersona.make("Implement the task."),
 });
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
@@ -125,26 +134,26 @@ const makeRemote = Effect.fn("test.makeRemote")(function* (root: string) {
 
 const submission = (number: number, receivedAt = `2026-08-30T12:00:0${number}Z`) =>
   new Submission({
-    event: new Event.Event({
-      id: Event.EventId.make(`local-event-${number}`),
-      dedupKey: Event.DedupKey.make(`local/item-${number}/main`),
+    event: new Event({
+      id: EventId.make(`local-event-${number}`),
+      dedupKey: DedupKey.make(`local/item-${number}/main`),
       payload: { number },
       receivedAt: DateTime.makeUnsafe(receivedAt),
     }),
-    itemKey: Item.ItemKey.make(`item-${number}`),
-    loop: Loop.LoopName.make("local-worker"),
-    step: Step.StepName.make("execute"),
+    itemKey: ItemKey.make(`item-${number}`),
+    loop: LoopName.make("local-worker"),
+    step: StepName.make("execute"),
     approval: "none",
-    repository: Repository.Name.make("acme/demo"),
-    revision: Repository.Revision.make("main"),
-    task: AttemptChannel.Task.make(`Complete local task ${number}`),
+    repository: RepositoryName.make("acme/demo"),
+    revision: RepositoryRevision.make("main"),
+    task: AttemptTask.make(`Complete local task ${number}`),
     agent: testAgent,
     parentModel: Option.none(),
   });
 
 const waitFor = Effect.fn("test.waitFor")(function* (
   engine: RunEngine["Service"],
-  runId: Run.RunId,
+  runId: RunId,
   state: "Running" | "Succeeded" | "Failed" | "Canceled",
 ) {
   let snapshot = yield* engine.inspect(runId);
@@ -468,19 +477,19 @@ describe("local worker", () => {
 
   it.effect("keeps a successful attempt successful when cleanup fails", () => {
     const spec = new AttemptChannel.RunSpec({
-      attemptId: Attempt.AttemptId.make("cleanup-run/run/1"),
-      repository: Repository.Name.make("acme/demo"),
-      revision: Repository.Revision.make("main"),
-      baseCommit: Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+      attemptId: AttemptId.make("cleanup-run/run/1"),
+      repository: RepositoryName.make("acme/demo"),
+      revision: RepositoryRevision.make("main"),
+      baseCommit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
       payload: {},
-      task: AttemptChannel.Task.make("Prove cleanup stays out of the outcome"),
+      task: AttemptTask.make("Prove cleanup stays out of the outcome"),
       agent: testAgent,
       parentModel: Option.none(),
-      maxChildren: Agent.ChildSessionBudget.make(4),
+      maxChildren: ChildSessionBudget.make(4),
       parentEffort: "high",
     });
     const prepared = new PreparedAttempt({
-      worker: Worker.Name.make("local"),
+      worker: WorkerName.make("local"),
       spec,
       worktree: WorktreePath.make("/tmp/usine-cleanup-test"),
     });
@@ -488,7 +497,7 @@ describe("local worker", () => {
       kind: "local",
       preflight: () => Effect.void,
       prepare: () => Effect.succeed(prepared),
-      launch: () => Effect.succeed(new StepResult.StepResult({ message: "done", facts: [] })),
+      launch: () => Effect.succeed(new StepResult({ message: "done", facts: [] })),
       cancel: () => Effect.void,
       // ADR 0006 regression: a failed worktree removal must never convert a
       // finished agent session into a retryable infra failure.
@@ -501,36 +510,36 @@ describe("local worker", () => {
           }),
         ),
     });
-    const runId = Run.RunId.make("cleanup-run");
-    const event = new Event.Event({
-      id: Event.EventId.make("cleanup-event"),
-      dedupKey: Event.DedupKey.make("cleanup/event"),
+    const runId = RunId.make("cleanup-run");
+    const event = new Event({
+      id: EventId.make("cleanup-event"),
+      dedupKey: DedupKey.make("cleanup/event"),
       payload: {},
       receivedAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
     });
     const execution = new StepExecution({
-      attempt: new Attempt.Attempt({
+      attempt: new Attempt({
         id: spec.attemptId,
         runId,
-        stepName: Step.StepName.make("run"),
-        worker: Worker.Name.make("local"),
-        number: Attempt.AttemptNumber.make(1),
+        stepName: StepName.make("run"),
+        worker: WorkerName.make("local"),
+        number: AttemptNumber.make(1),
         brain: testAgent.brain,
         parentModel: Option.none(),
         startedAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
         outcome: Option.none(),
       }),
       event,
-      run: new Run.Run({
+      run: new Run({
         id: runId,
         eventId: event.id,
-        loop: Loop.LoopName.make("review"),
+        loop: LoopName.make("review"),
         state: RunState.start(new RunState.Pending()),
         openedAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
       }),
-      step: new Step.Step({
+      step: new Step({
         runId,
-        name: Step.StepName.make("run"),
+        name: StepName.make("run"),
         result: Option.none(),
       }),
       repository: spec.repository,

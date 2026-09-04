@@ -1,18 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Item, Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/ids";
+import { ItemNumber } from "@usine/core/item";
 import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
-import {
-  GitHubApp,
-  GitHubItemWriter,
-  ItemLabelMutation,
-  Installation,
-  InstallationId,
-  InstallationToken,
-  InstallationWide,
-} from "../src/index.ts";
+import { GitHubApp } from "../src/github-app.ts";
+import { GitHubItemWriter, ItemLabelMutation } from "../src/item-writer.ts";
+import { Installation, InstallationId, InstallationToken, InstallationWide } from "../src/model.ts";
 
-const repository = Repository.Name.make("basaltbytes/usine");
+const repository = RepositoryName.make("basaltbytes/usine");
 const token = new InstallationToken({
   value: Redacted.make("item-writer-token"),
   expiresAt: DateTime.makeUnsafe("2026-09-01T22:00:00Z"),
@@ -77,7 +72,7 @@ describe("GitHubItemWriter", () => {
       const writer = yield* GitHubItemWriter;
       const applied = yield* writer.updateLabels(
         repository,
-        Item.Number.make(33),
+        ItemNumber.make(33),
         new ItemLabelMutation({
           add: ["ready-for-review"],
           remove: ["ready", "stale-lane-label"],

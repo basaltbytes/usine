@@ -1,23 +1,20 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/ids";
 import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { GitHubApp } from "../src/github-app.ts";
+import { Installation, InstallationId, InstallationToken, InstallationWide } from "../src/model.ts";
 import {
   ChangedIssue,
   ChangedPullRequest,
-  GitHubApp,
-  GitHubPolling,
-  Installation,
-  InstallationId,
-  InstallationToken,
-  InstallationWide,
   PollCursor,
   RepositoryLabelCatalog,
   RepositoryLabelsNotModified,
-} from "../src/index.ts";
+} from "../src/polling/model.ts";
+import { GitHubPolling } from "../src/polling/polling.ts";
 
-const repository = Repository.Name.make("basaltbytes/usine");
+const repository = RepositoryName.make("basaltbytes/usine");
 const token = new InstallationToken({
   value: Redacted.make("polling-token"),
   expiresAt: DateTime.makeUnsafe("2026-08-30T22:00:00Z"),

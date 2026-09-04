@@ -1,13 +1,18 @@
-import { Attempt, AttemptChannel, AttemptFailure, Loop, RunState, StepResult } from "@usine/core";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { AttemptFailure } from "@usine/core/attempt/failure";
+import { AttemptOutcome } from "@usine/core/attempt/outcome";
+import { LoopName } from "@usine/core/ids";
+import * as RunState from "@usine/core/run/state";
+import { PullRequest } from "@usine/core/step/result";
 import {
-  RunReader,
-  TranscriptPageQuery,
-  TranscriptTailQuery,
   type RunSnapshot,
   type RunStoreError,
   type RunSummary,
   type TranscriptEntry,
-} from "@usine/engine";
+  TranscriptPageQuery,
+  TranscriptTailQuery,
+} from "@usine/engine/model";
+import { RunReader } from "@usine/engine/run-reader";
 import { DateTime, Effect, Match, Option } from "effect";
 import {
   AgentFailureView,
@@ -32,7 +37,7 @@ export const COLD_TRANSCRIPT_LIMIT = 500;
 /** Maximum rows returned by one live catch-up response across all Attempts. */
 export const TAIL_TRANSCRIPT_LIMIT = 500;
 
-export const failureView = (failure: AttemptFailure.AttemptFailure): FailureView =>
+export const failureView = (failure: AttemptFailure): FailureView =>
   Match.valueTags(failure, {
     InfraFailure: ({ message }) => new InfraFailureView({ message }),
     AgentFailure: ({ message }) => new AgentFailureView({ message }),
@@ -41,7 +46,7 @@ export const failureView = (failure: AttemptFailure.AttemptFailure): FailureView
       new ChildSessionBudgetFailureView({ attemptedChildren, maxChildren }),
   });
 
-const attemptOutcomeView = (outcome: Attempt.Outcome) =>
+const attemptOutcomeView = (outcome: AttemptOutcome) =>
   Match.valueTags(outcome, {
     Succeeded: () => new SucceededAttemptView(),
     Failed: ({ failure }) => new FailedAttemptView({ failure: failureView(failure) }),
@@ -62,10 +67,10 @@ const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
   });
 };
 
-export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<Loop.LoopName>): RunView => {
+export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<LoopName>): RunView => {
   const result = Option.getOrNull(snapshot.step.result);
   const pullRequest = result?.facts.find(
-    (fact): fact is StepResult.PullRequest => fact._tag === "PullRequest",
+    (fact): fact is PullRequest => fact._tag === "PullRequest",
   );
   return new RunView({
     id: snapshot.run.id,

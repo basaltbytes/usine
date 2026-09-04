@@ -1,10 +1,13 @@
-import type { Attempt, AttemptChannel, AttemptFailure, StepResult, Worker } from "@usine/core";
+import type * as AttemptChannel from "@usine/core/attempt/channel";
+import type { AttemptFailure } from "@usine/core/attempt/failure";
+import type { AttemptId, WorkerName } from "@usine/core/ids";
+import type { StepResult } from "@usine/core/step/result";
 import { Context, Effect } from "effect";
 import type { StepExecution, Submission } from "./model.ts";
 
 /** A worker-capacity reservation held while one Attempt runs. */
 export interface WorkerLease {
-  readonly worker: Worker.Name;
+  readonly worker: WorkerName;
   readonly release: Effect.Effect<void>;
 }
 
@@ -15,15 +18,11 @@ export interface WorkerLease {
 export class StepExecutor extends Context.Service<
   StepExecutor,
   {
-    readonly interrupt: (
-      attemptId: Attempt.AttemptId,
-    ) => Effect.Effect<void, AttemptFailure.AttemptFailure>;
-    readonly reserve: (
-      submission: Submission,
-    ) => Effect.Effect<WorkerLease, AttemptFailure.AttemptFailure>;
+    readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
+    readonly reserve: (submission: Submission) => Effect.Effect<WorkerLease, AttemptFailure>;
     readonly execute: (
       execution: StepExecution,
       io: AttemptChannel.Sink,
-    ) => Effect.Effect<StepResult.StepResult, AttemptFailure.AttemptFailure>;
+    ) => Effect.Effect<StepResult, AttemptFailure>;
   }
 >()("@usine/engine/StepExecutor") {}

@@ -1,4 +1,5 @@
-import { Item, Repository } from "@usine/core";
+import { ItemKey, RepositoryName } from "@usine/core/ids";
+import { ItemNumber } from "@usine/core/item";
 import { Schema } from "effect";
 
 export const ItemProjectionSource = Schema.NonEmptyString.pipe(
@@ -6,16 +7,13 @@ export const ItemProjectionSource = Schema.NonEmptyString.pipe(
 );
 export type ItemProjectionSource = typeof ItemProjectionSource.Type;
 
-export const ItemNumber = Item.Number;
-export type ItemNumber = Item.Number;
-
 export const ItemContentHash = Schema.NonEmptyString.pipe(Schema.brand("ItemContentHash"));
 export type ItemContentHash = typeof ItemContentHash.Type;
 
 /** Latest trigger-observed payload for one Item, independent of its source adapter. */
 export class ItemProjection extends Schema.Class<ItemProjection>("@usine/engine/ItemProjection")({
-  itemKey: Item.ItemKey,
-  repository: Repository.Name,
+  itemKey: ItemKey,
+  repository: RepositoryName,
   source: ItemProjectionSource,
   number: ItemNumber,
   contentHash: ItemContentHash,

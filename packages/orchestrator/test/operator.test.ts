@@ -1,75 +1,87 @@
 import { assert, describe, it } from "@effect/vitest";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import {
+  AgentName,
+  AttemptId,
+  DedupKey,
+  EventId,
+  ItemKey,
+  RepositoryName,
+  RunId,
+  StepName,
+  WorkerName,
+} from "@usine/core/ids";
 import {
   AgentFile,
-  AgentName,
   GitHubLabelName,
   IssueTrigger,
   LoadedInstance,
   LoopFile,
   LoopName,
-  ModelId,
   Persona,
   PromptTemplate,
   UsineConfig,
-} from "@usine/config";
+} from "@usine/config/model";
+import { Agent } from "@usine/core/agent";
 import {
-  Agent,
-  Attempt,
-  AttemptChannel,
-  AttemptFailure,
-  Event,
-  Item,
-  Repository,
-  Run,
-  RunState,
-  Step,
-  Worker,
-} from "@usine/core";
+  AgentSessionId,
+  ChildSession,
+  ParentSession,
+  TextOutput,
+  ToolStarted,
+} from "@usine/core/agent/session";
+import { Attempt, AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { InfraFailure } from "@usine/core/attempt/failure";
+import { Event } from "@usine/core/event";
+import { ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
+import { RepositoryRevision } from "@usine/core/repository";
+import { Run } from "@usine/core/run";
+import * as RunState from "@usine/core/run/state";
+import { Step } from "@usine/core/step";
+import { RunEngine } from "@usine/engine/engine";
 import {
-  LoopControl,
-  LoopRuntimeState,
   ItemContentHash,
-  ItemNumber,
   ItemProjection,
-  ItemProjectionReader,
   ItemProjectionSource,
+} from "@usine/engine/item-projection/model";
+import { ItemProjectionReader } from "@usine/engine/item-projection/service";
+import { LoopControl } from "@usine/engine/loop-control";
+import {
+  LoopRuntimeState,
   ProjectionRevision,
-  RepositoryLabelProjectionReader,
-  RunEngine,
-  RunReader,
   RunSnapshot,
   TranscriptEntry,
   type TranscriptQuery,
   TranscriptSequence,
-} from "@usine/engine";
-import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github";
-import { Source } from "@usine/expression";
+} from "@usine/engine/model";
+import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection/service";
+import { RunReader } from "@usine/engine/run-reader";
+import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
+import { Source } from "@usine/expression/model";
 import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
+import { LabelPreflightFinding } from "../src/label-reconciler.ts";
 import {
-  ColdTranscriptRequest,
   BoardLaneId,
   BoardMove,
+  ColdTranscriptRequest,
   EarlierTranscriptRequest,
   FailureView,
-  LabelPreflightFinding,
-  Operator,
-  PollCycle,
-  PollingTriggers,
-  RepositoryPollFailure,
-  ScheduleCycle,
-  ScheduleTriggers,
   TailTranscriptRequest,
   TranscriptCursor,
-} from "../src/index.ts";
+} from "../src/operator/model.ts";
+import { Operator } from "../src/operator/service.ts";
+import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
+import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { failureView } from "../src/operator/projection.ts";
 
 const now = DateTime.makeUnsafe("2026-08-31T12:00:00.000Z");
-const runId = Run.RunId.make("run-operator-test");
-const attemptId = Attempt.AttemptId.make("attempt-operator-test");
+const runId = RunId.make("run-operator-test");
+const attemptId = AttemptId.make("attempt-operator-test");
 const loopName = LoopName.make("review-issue");
-const repository = Repository.Name.make("basaltbytes/usine");
-const itemKey = Item.ItemKey.make("github:basaltbytes/usine:31");
-const brain = new Agent.BrainSpec({
+const repository = RepositoryName.make("basaltbytes/usine");
+const itemKey = ItemKey.make("github:basaltbytes/usine:31");
+const brain = new BrainSpec({
   harness: "codex",
   model: ModelId.make("gpt-5.6-sol"),
   effort: "high",
@@ -104,7 +116,7 @@ const loop = new LoopFile({
   trigger: new IssueTrigger({ on: "issue", if: Source.make("true") }),
   selector: Option.none(),
   approval: "required",
-  step: Step.StepName.make("run"),
+  step: StepName.make("run"),
   agent: agentFile.name,
   body: PromptTemplate.make("Review it."),
 });
@@ -118,32 +130,32 @@ const instance = new LoadedInstance({
 });
 
 const snapshot = new RunSnapshot({
-  event: new Event.Event({
-    id: Event.EventId.make("event-operator-test"),
-    dedupKey: Event.DedupKey.make("event-operator-test"),
+  event: new Event({
+    id: EventId.make("event-operator-test"),
+    dedupKey: DedupKey.make("event-operator-test"),
     payload: { number: 31 },
     receivedAt: now,
   }),
   itemKey,
-  run: new Run.Run({
+  run: new Run({
     id: runId,
-    eventId: Event.EventId.make("event-operator-test"),
+    eventId: EventId.make("event-operator-test"),
     loop: loopName,
     state: new RunState.Waiting(),
     openedAt: now,
   }),
-  step: new Step.Step({
+  step: new Step({
     runId,
-    name: Step.StepName.make("run"),
+    name: StepName.make("run"),
     result: Option.none(),
   }),
   attempts: [
-    new Attempt.Attempt({
+    new Attempt({
       id: attemptId,
       runId,
-      stepName: Step.StepName.make("run"),
-      worker: Worker.Name.make("local"),
-      number: Attempt.AttemptNumber.make(1),
+      stepName: StepName.make("run"),
+      worker: WorkerName.make("local"),
+      number: AttemptNumber.make(1),
       brain,
       parentModel: Option.none(),
       startedAt: now,
@@ -151,9 +163,9 @@ const snapshot = new RunSnapshot({
     }),
   ],
   repository,
-  revision: Repository.Revision.make("main"),
-  task: AttemptChannel.Task.make("Review issue 31."),
-  agent: new Agent.Agent({
+  revision: RepositoryRevision.make("main"),
+  task: AttemptTask.make("Review issue 31."),
+  agent: new Agent({
     name: agentFile.name,
     brain,
     parentModel: Option.none(),
@@ -163,13 +175,13 @@ const snapshot = new RunSnapshot({
   parentModel: Option.none(),
 });
 
-const parent = new Agent.ParentSession({
-  id: Agent.SessionId.make("parent-session"),
+const parent = new ParentSession({
+  id: AgentSessionId.make("parent-session"),
   agent: agentFile.name,
   brain,
 });
-const child = new Agent.ChildSession({
-  id: Agent.SessionId.make("child-session"),
+const child = new ChildSession({
+  id: AgentSessionId.make("child-session"),
   parentId: parent.id,
   agent: AgentName.make("researcher"),
   brain,
@@ -185,7 +197,7 @@ const transcript = [
       sequence: AttemptChannel.Sequence.make(1),
       sentAt: now,
       payload: new AttemptChannel.SessionEvent({
-        event: new Agent.TextOutput({ session: parent, text: "Parent update" }),
+        event: new TextOutput({ session: parent, text: "Parent update" }),
       }),
     }),
     receivedAt: now,
@@ -200,7 +212,7 @@ const transcript = [
       sequence: AttemptChannel.Sequence.make(2),
       sentAt: now,
       payload: new AttemptChannel.SessionEvent({
-        event: new Agent.ToolStarted({
+        event: new ToolStarted({
           session: child,
           callId: "call-1",
           tool: "search",
@@ -222,7 +234,7 @@ const transcript = [
         sequence: AttemptChannel.Sequence.make(sequence),
         sentAt: now,
         payload: new AttemptChannel.SessionEvent({
-          event: new Agent.TextOutput({
+          event: new TextOutput({
             session: parent,
             text: `Parent update ${sequence}`,
           }),
@@ -234,8 +246,8 @@ const transcript = [
 ];
 
 interface RecordedApproval {
-  readonly runId: Run.RunId;
-  readonly event: Event.Event;
+  readonly runId: RunId;
+  readonly event: Event;
 }
 
 const testLayer = (
@@ -318,7 +330,7 @@ const testLayer = (
           },
         }),
         new ItemProjection({
-          itemKey: Item.ItemKey.make("github:basaltbytes/usine:32"),
+          itemKey: ItemKey.make("github:basaltbytes/usine:32"),
           repository,
           source: ItemProjectionSource.make("issue"),
           number: ItemNumber.make(32),
@@ -405,7 +417,7 @@ describe("Operator", () => {
         const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const queued = new RunSnapshot({
           ...snapshot,
-          run: new Run.Run({ ...snapshot.run, state: new RunState.Queued() }),
+          run: new Run({ ...snapshot.run, state: new RunState.Queued() }),
         });
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
@@ -526,7 +538,7 @@ describe("Operator", () => {
           .detail(
             runId,
             new EarlierTranscriptRequest({
-              attemptId: Attempt.AttemptId.make("another-attempt"),
+              attemptId: AttemptId.make("another-attempt"),
               before: TranscriptCursor.make(3),
             }),
           )
@@ -553,7 +565,7 @@ describe("Operator", () => {
           instance,
           new BoardMove({
             repository,
-            item: Item.Number.make(31),
+            item: CoreItemNumber.make(31),
             toLane: BoardLaneId.make("authored:In review"),
           }),
         );
@@ -575,19 +587,19 @@ describe("Operator", () => {
         const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const rejected = (target: Repository.Name, item: number, toLane: string) =>
+          const rejected = (target: RepositoryName, item: number, toLane: string) =>
             operator
               .moveBoardItem(
                 instance,
                 new BoardMove({
                   repository: target,
-                  item: Item.Number.make(item),
+                  item: CoreItemNumber.make(item),
                   toLane: BoardLaneId.make(toLane),
                 }),
               )
               .pipe(Effect.flip);
           const unknownProject = yield* rejected(
-            Repository.Name.make("basaltbytes/elsewhere"),
+            RepositoryName.make("basaltbytes/elsewhere"),
             31,
             "authored:In review",
           );
@@ -608,7 +620,7 @@ describe("Operator", () => {
   it("removes nested infrastructure defect causes from operator failure schemas", () => {
     const secret = "token=super-secret";
     const view = failureView(
-      new AttemptFailure.InfraFailure({
+      new InfraFailure({
         message: "The worker connection failed",
         cause: new Error(secret),
       }),

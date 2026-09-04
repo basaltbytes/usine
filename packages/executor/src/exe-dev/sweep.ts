@@ -1,6 +1,6 @@
-import { Attempt, Worker } from "@usine/core";
+import { AttemptId, WorkerName } from "@usine/core/ids";
 import { Effect, Ref, Schema } from "effect";
-import { ExecutorOperationError } from "../index.ts";
+import { ExecutorOperationError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import type { ExeDevCommands } from "./commands.ts";
 import type { VmState } from "./model.ts";
@@ -52,12 +52,12 @@ const directChildren = (
  */
 export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWorktreeSweepFor")(
   function* (commands: ExeDevCommands) {
-    const locks = yield* keyedLockFor<Worker.Name>();
-    const swept = yield* Ref.make(new Set<Worker.Name>());
+    const locks = yield* keyedLockFor<WorkerName>();
+    const swept = yield* Ref.make(new Set<WorkerName>());
 
     const sweep = Effect.fn("ExeDevExecutor.sweepAbandonedWorktrees")(function* (
-      attemptId: Attempt.AttemptId,
-      worker: Worker.Name,
+      attemptId: AttemptId,
+      worker: WorkerName,
       vm: VmState,
       root: string,
     ) {
