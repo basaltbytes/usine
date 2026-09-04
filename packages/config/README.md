@@ -21,6 +21,8 @@ labels:
 
 Label names are unique without regard to case. A lane source or trigger-expression string literal that refers to an undeclared label becomes a non-blocking entry in `LoadedInstance.warnings`; prose in prompt bodies is not inspected.
 
+Set `settings.max_children` to the number of child sessions one Attempt may spawn. The default is 4, and the count includes sequential and concurrent child sessions.
+
 Each managed repository can define an exclusive Board lane map. A lane accepts one or more GitHub label or Item-state sources:
 
 ```yaml

@@ -152,6 +152,10 @@ _Avoid_: budget (an amount, not a source), account, quota
 The per-attempt ceiling — wall-clock and total tokens — that interrupts an attempt burning without progress. The wall-clock pauses while an ask or a hold is open: waiting on — or supervised by — the operator is never runaway; the token ceiling stays armed throughout. Tripping it fails the attempt with its own error class, which never auto-retries; only the operator restarts a runaway.
 _Avoid_: budget, timeout (the wall-clock half only), kill switch
 
+**Child-session budget**:
+The maximum number of child sessions a parent may spawn during one Attempt. It counts sequential and concurrent spawns; the next spawn fails the Attempt and requires operator action.
+_Avoid_: child concurrency, concurrent-children cap
+
 **Block**:
 A standalone piece of the engine, published on its own so a factory can be assembled from parts — usine's orchestrator is the first composition, not the only intended one.
 _Avoid_: module (any code unit; a block is published), component, plugin

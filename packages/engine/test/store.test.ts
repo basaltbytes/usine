@@ -12,8 +12,11 @@ import {
   Step,
   Worker,
 } from "@usine/core";
+import { eq } from "drizzle-orm";
 import { DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { RunDatabase } from "../src/database/database.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
+import { attemptTranscripts } from "../src/database/schema.ts";
 import { CursorKey } from "../src/cursor/model.ts";
 import { CursorStore } from "../src/cursor/store.ts";
 import { LoopControl } from "../src/loop-control.ts";
@@ -273,6 +276,64 @@ describe("run store", () => {
           )).map(({ sequence }) => sequence),
           [1, 2],
         );
+      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("reads transcript envelopes persisted under protocol v3", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-protocol-v3-" }),
+      );
+      const submission = new Submission({
+        event: new Event.Event({
+          id: Event.EventId.make("protocol-v3-event"),
+          dedupKey: Event.DedupKey.make("protocol-v3/event/revision"),
+          payload: {},
+          receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
+        }),
+        itemKey: Item.ItemKey.make("protocol-v3-item"),
+        loop: Loop.LoopName.make("protocol-v3-loop"),
+        step: Step.StepName.make("protocol-v3-step"),
+        approval: "none",
+        repository: Repository.Name.make("basaltbytes/usine"),
+        revision: Repository.Revision.make("protocol-v3-revision"),
+        task: AttemptChannel.Task.make("Read a durable protocol-v3 transcript"),
+        agent: testAgent,
+        parentModel: Option.none(),
+      });
+      const runId = Run.RunId.make("protocol-v3-run");
+
+      yield* Effect.gen(function* () {
+        const database = yield* RunDatabase;
+        const store = yield* RunStore;
+        yield* store.recordAndClaim(submission, runId);
+        const started = yield* store.beginAttempt(runId, Worker.Name.make("local"));
+        assert.strictEqual(started._tag, "AttemptStarted");
+        if (started._tag !== "AttemptStarted") return;
+        const attemptId = started.execution.attempt.id;
+        const currentEnvelope = new AttemptChannel.OutboundEnvelope({
+          version: AttemptChannel.PROTOCOL_VERSION,
+          attemptId,
+          sequence: AttemptChannel.Sequence.make(1),
+          sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
+          payload: new AttemptChannel.Interrupted(),
+        });
+        yield* store.appendTranscript("outbound", currentEnvelope);
+
+        const encoded = Schema.encodeSync(AttemptChannel.Envelope)(currentEnvelope);
+        yield* database
+          .update(attemptTranscripts)
+          .set({ envelope: { ...encoded, version: 3 } })
+          .where(eq(attemptTranscripts.attemptId, attemptId))
+          .execute();
+
+        const transcript = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
+        const entry = transcript[0];
+        assert(entry !== undefined);
+        assert.strictEqual(entry.envelope.version, 3);
+        assert.strictEqual(entry.envelope.payload._tag, "Interrupted");
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
     }).pipe(Effect.provide(NodeServices.layer)),
   );

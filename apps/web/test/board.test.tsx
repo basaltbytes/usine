@@ -6,14 +6,21 @@ import {
   BoardItemView,
   BoardLaneId,
   BoardView,
+  ChildSessionBudgetFailureView,
   FailedAttemptView,
+  GitHubItemKey,
   ProjectView,
   ReadOnlyBoardLaneView,
+  RunFailureNeed,
   RunView,
   SucceededAttemptView,
 } from "@usine/orchestrator";
+import { Schema } from "effect";
+import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { applyMove, itemFailure, laneUnder, orderLanes, runsWithoutCard } from "../src/board.tsx";
+import { RunLinks } from "../src/components/run-links.tsx";
+import { failureMessage, needCopy } from "../src/operator-copy.ts";
 
 const brain = new Agent.BrainSpec({
   harness: "codex",
@@ -34,13 +41,15 @@ const attempt = (number: number, message: string | null) =>
         : new FailedAttemptView({ failure: new AgentFailureView({ message }) }),
   });
 
-const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
-  const itemKey = Item.ItemKey.make("github:basaltbytes/usine:33");
-  const run = new RunView({
+const repository = Repository.Name.make("basaltbytes/usine");
+const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, Item.Number.make(33)]);
+
+const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) =>
+  new RunView({
     id: Run.RunId.make("run-33"),
     itemKey,
     loop: Loop.LoopName.make("review"),
-    repository: Repository.Name.make("basaltbytes/usine"),
+    repository,
     agent: Agent.Name.make("developer"),
     state,
     loopPaused: false,
@@ -53,6 +62,9 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
     canRetry: state === "Failed",
     canCancel: false,
   });
+
+const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
+  const run = runOnItem(state, attempts);
   return new BoardItemView({
     itemKey,
     kind: "issue",
@@ -66,6 +78,44 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
     needsYou: state === "Failed",
   });
 };
+
+describe("Run links", () => {
+  const run = runOnItem("Succeeded", [attempt(1, null)]);
+
+  it("links the Item and produced PR to GitHub in new tabs", () => {
+    const markup = renderToStaticMarkup(
+      <RunLinks
+        run={
+          new RunView({
+            ...run,
+            pullRequestUrl: "https://github.com/basaltbytes/usine/pull/101",
+          })
+        }
+      />,
+    );
+
+    assert.ok(markup.includes("Item #33"));
+    assert.ok(markup.includes('href="https://github.com/basaltbytes/usine/issues/33"'));
+    assert.ok(markup.includes('href="https://github.com/basaltbytes/usine/pull/101"'));
+    assert.strictEqual((markup.match(/target="_blank"/gu) ?? []).length, 2);
+  });
+
+  it("omits the produced PR link when the Run has none", () => {
+    const markup = renderToStaticMarkup(<RunLinks run={run} />);
+
+    assert.ok(markup.includes('href="https://github.com/basaltbytes/usine/issues/33"'));
+    assert.ok(!markup.includes("/pull/"));
+    assert.strictEqual((markup.match(/target="_blank"/gu) ?? []).length, 1);
+  });
+
+  it("renders nothing for a schedule Run, whose Item is the repository itself", () => {
+    const scheduled = new RunView({
+      ...run,
+      itemKey: Item.ItemKey.make('["github","basaltbytes/usine"]'),
+    });
+    assert.strictEqual(renderToStaticMarkup(<RunLinks run={scheduled} />), "");
+  });
+});
 
 describe("Board Run failure copy", () => {
   it("hides a failed Attempt after its Run recovers", () => {
@@ -81,6 +131,34 @@ describe("Board Run failure copy", () => {
         itemWithRun("Failed", [attempt(1, "old failure"), attempt(2, "current failure")]),
       ),
       "current failure",
+    );
+  });
+
+  it("explains an exhausted child-session budget in the drawer and Needs you", () => {
+    const failure = new ChildSessionBudgetFailureView({
+      maxChildren: Agent.ChildSessionBudget.make(4),
+      attemptedChildren: Agent.ChildSessionCount.make(5),
+    });
+    const message = "This Attempt used its 4-child session budget; child 5 did not start";
+    const repository = Repository.Name.make("basaltbytes/usine");
+    const runId = Run.RunId.make("run-33");
+    assert.strictEqual(failureMessage(failure), message);
+    assert.deepStrictEqual(
+      needCopy(
+        new RunFailureNeed({
+          id: "run-failure:run-33",
+          repository,
+          runId,
+          loop: Loop.LoopName.make("review"),
+          failure,
+        }),
+      ),
+      {
+        title: "ChildSessionBudgetFailure",
+        detail: message,
+        repository,
+        runId,
+      },
     );
   });
 });

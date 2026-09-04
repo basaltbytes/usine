@@ -346,6 +346,7 @@ const request = new CheckoutRequest({
   task: TASK,
   agent: TEST_AGENT,
   parentModel: Option.none(),
+  maxChildren: Agent.ChildSessionBudget.make(4),
   parentEffort: "high",
 });
 

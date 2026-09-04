@@ -51,6 +51,7 @@ describe("ConfigParser", () => {
           "repos: []",
           "settings:",
           "  poll_interval: 30",
+          "  max_children: 2",
           "workers:",
           "  - name: remote",
           "    kind: exe.dev",
@@ -60,6 +61,7 @@ describe("ConfigParser", () => {
         ].join("\n"),
       );
       expect(configuredWorker.settings.pollInterval).toBe(30);
+      expect(configuredWorker.settings.maxChildren).toBe(2);
       expect(configuredWorker.workers[0]?.maxConcurrentAttempts).toBe(1);
       expect(configuredWorker.workers[1]?.maxConcurrentAttempts).toBe(2);
 

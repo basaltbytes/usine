@@ -1,4 +1,3 @@
-import { ArrowSquareOutIcon } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { Run } from "@usine/core";
 import { RunDetailView } from "@usine/orchestrator";
@@ -7,6 +6,7 @@ import type { Schema } from "effect";
 import { useState, type ReactNode } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { Markdown } from "@/components/markdown";
+import { RunLinks } from "@/components/run-links";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -138,11 +138,14 @@ export const RunDrawer = ({
         <SheetHeader className="border-b pr-14">
           <SheetTitle className="text-lg">{run?.loop ?? "Loading…"}</SheetTitle>
           {run !== undefined && (
-            <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono wrap-anywhere">
-              <span>{run.repository}</span>
-              <span>{run.id}</span>
-              {run.loopPaused && <Badge variant="outline">paused</Badge>}
-            </SheetDescription>
+            <>
+              <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono wrap-anywhere">
+                <span>{run.repository}</span>
+                <span>{run.id}</span>
+                {run.loopPaused && <Badge variant="outline">paused</Badge>}
+              </SheetDescription>
+              <RunLinks run={run} />
+            </>
           )}
         </SheetHeader>
         <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
@@ -257,17 +260,6 @@ export const RunDrawer = ({
               {run.resultMessage !== null && (
                 <Section title="Result">
                   <Markdown className="max-w-prose">{run.resultMessage}</Markdown>
-                  {run.pullRequestUrl !== null && (
-                    <Button
-                      variant="link"
-                      className="mt-2 px-0"
-                      nativeButton={false}
-                      render={<a href={run.pullRequestUrl} target="_blank" rel="noreferrer" />}
-                    >
-                      Open pull request
-                      <ArrowSquareOutIcon data-icon="inline-end" aria-hidden="true" />
-                    </Button>
-                  )}
                 </Section>
               )}
               <Section title="Transcript">

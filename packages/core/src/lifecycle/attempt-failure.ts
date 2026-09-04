@@ -1,12 +1,14 @@
 /**
  * Why an attempt failed — the typed taxonomy the retry law dispatches on
- * (ADR 0002, ADR 0013). Typed errors; three classes, deliberately distinct:
+ * (ADR 0002, ADR 0013). Typed errors; four classes, deliberately distinct:
  *
  * - `InfraFailure` — the only class the engine may retry on its own, capped.
  * - `AgentFailure` — always waits for the operator.
  * - `RunawayFailure` — never auto-retried; only the operator restarts it.
+ * - `ChildSessionBudgetFailure` — a parent exhausted its per-Attempt spawn allowance.
  */
 import { Schema } from "effect";
+import { ChildSessionBudget, ChildSessionCount } from "../agent.ts";
 
 /**
  * Typed error: infrastructure failed around the agent — worker unreachable,
@@ -46,7 +48,24 @@ export class RunawayFailure extends Schema.TaggedError<RunawayFailure>(
   ceiling: RunawayCeiling,
 }) {}
 
-export const AttemptFailure = Schema.Union([InfraFailure, AgentFailure, RunawayFailure]);
+/**
+ * Typed error: the Pi parent tried to spawn more child sessions than this
+ * Attempt permits. Never auto-retried because the same parent would exhaust
+ * the same budget again.
+ */
+export class ChildSessionBudgetFailure extends Schema.TaggedError<ChildSessionBudgetFailure>(
+  "AttemptFailure/ChildSessionBudgetFailure",
+)("ChildSessionBudgetFailure", {
+  maxChildren: ChildSessionBudget,
+  attemptedChildren: ChildSessionCount,
+}) {}
+
+export const AttemptFailure = Schema.Union([
+  InfraFailure,
+  AgentFailure,
+  RunawayFailure,
+  ChildSessionBudgetFailure,
+]);
 export type AttemptFailure = typeof AttemptFailure.Type;
 
 /**

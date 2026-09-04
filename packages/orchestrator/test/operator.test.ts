@@ -179,7 +179,7 @@ const transcript = [
     attemptId,
     direction: "outbound",
     envelope: new AttemptChannel.OutboundEnvelope({
-      version: 3,
+      version: AttemptChannel.PROTOCOL_VERSION,
       attemptId,
       sequence: AttemptChannel.Sequence.make(1),
       sentAt: now,
@@ -194,7 +194,7 @@ const transcript = [
     attemptId,
     direction: "outbound",
     envelope: new AttemptChannel.OutboundEnvelope({
-      version: 3,
+      version: AttemptChannel.PROTOCOL_VERSION,
       attemptId,
       sequence: AttemptChannel.Sequence.make(2),
       sentAt: now,
@@ -216,7 +216,7 @@ const transcript = [
       attemptId,
       direction: "outbound",
       envelope: new AttemptChannel.OutboundEnvelope({
-        version: 3,
+        version: AttemptChannel.PROTOCOL_VERSION,
         attemptId,
         sequence: AttemptChannel.Sequence.make(sequence),
         sentAt: now,

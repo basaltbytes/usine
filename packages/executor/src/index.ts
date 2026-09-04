@@ -98,6 +98,7 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   task: AttemptChannel.Task,
   agent: Agent.Agent,
   parentModel: Schema.Option(Agent.ModelId),
+  maxChildren: Agent.ChildSessionBudget,
   parentEffort: Agent.Effort,
 }) {}
 
