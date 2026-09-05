@@ -1,123 +1,52 @@
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
-import { AttemptId } from "@usine/core/attempt";
-import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
-import { RunId } from "@usine/core/run";
-import { ItemNumber } from "@usine/core/item";
+import { BoardMove } from "@usine/orchestrator/operator";
 import {
-  BoardLaneId,
-  BoardMove,
-  ColdTranscriptRequest,
-  EarlierTranscriptRequest,
-  FactoryOverview,
-  RunDetailView,
-  TailTranscriptRequest,
-  type TranscriptRequest,
-} from "@usine/orchestrator/operator";
-import { TranscriptSequence } from "@usine/engine/transcript";
-import { Effect, Layer, Match, Schema } from "effect";
-import { HttpBody, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+  OperatorApi,
+  OperatorHttpError,
+  OperatorHttpPolicy,
+} from "@usine/orchestrator/operator/http";
+import { Effect, Layer, Schema, type Types } from "effect";
+import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi";
 import { FactoryBackend, type BackendError } from "./backend.ts";
 
-const PathRun = Schema.Struct({ runId: RunId });
-const PathLoop = Schema.Struct({ loop: LoopName });
-const RepositoryPart = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9_.-]+$/u, { message: "Expected a repository path segment" }),
-);
-const PathBoardItem = Schema.Struct({
-  owner: RepositoryPart,
-  repository: RepositoryPart,
-  item: Schema.FiniteFromString.pipe(Schema.decodeTo(ItemNumber)),
-});
-const BoardMoveBody = Schema.Struct({ toLane: BoardLaneId });
-const TranscriptSequenceFromString = Schema.FiniteFromString.pipe(
-  Schema.decodeTo(TranscriptSequence),
-);
-const RunDetailSearch = Schema.Union([
-  Schema.Struct({ _tag: Schema.Literal("ColdTranscriptRequest") }),
-  Schema.Struct({
-    _tag: Schema.Literal("TailTranscriptRequest"),
-    after: TranscriptSequenceFromString,
-  }),
-  Schema.Struct({
-    _tag: Schema.Literal("EarlierTranscriptRequest"),
-    attemptId: AttemptId,
-    before: TranscriptSequenceFromString,
-  }),
-]);
-const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
-const ApiError = Schema.Struct({ error: Schema.String, message: Schema.String });
-const ok = HttpServerResponse.schemaJson(ApiOk);
-
-class InvalidRequestError extends Schema.TaggedError<InvalidRequestError>(
-  "@usine/server/InvalidRequestError",
-)("InvalidRequestError", { message: Schema.String }) {}
-
-type RouteError = BackendError | HttpBody.HttpBodyError | InvalidRequestError | Schema.SchemaError;
-
-const errorResponse = (error: RouteError) => {
-  const response = (() => {
+const operatorFailure = (error: BackendError) => {
+  const message = (() => {
     switch (error._tag) {
       case "RunNotFoundError":
-        return { status: 404, message: `Run ${error.runId} was not found.` } as const;
+        return `Run ${error.runId} was not found.`;
       case "RunOperationRejectedError":
-        return {
-          status: 409,
-          message: `Cannot ${error.operation} Run ${error.runId} while it is ${error.state}.`,
-        } as const;
+        return `Cannot ${error.operation} Run ${error.runId} while it is ${error.state}.`;
       case "TranscriptAttemptNotFoundError":
-        return {
-          status: 404,
-          message: `Attempt ${error.attemptId} does not belong to Run ${error.runId}.`,
-        } as const;
+        return `Attempt ${error.attemptId} does not belong to Run ${error.runId}.`;
       case "BackendUnavailableError":
-        return { status: 503, message: error.message } as const;
+        return error.message;
       case "BoardProjectNotFoundError":
-        return { status: 404, message: `Project ${error.repository} was not found.` } as const;
+        return `Project ${error.repository} was not found.`;
       case "BoardItemNotFoundError":
-        return {
-          status: 404,
-          message: `Item ${error.repository}#${error.item} was not found on the Board.`,
-        } as const;
+        return `Item ${error.repository}#${error.item} was not found on the Board.`;
       case "BoardLaneNotFoundError":
-        return { status: 404, message: `Board Lane ${error.lane} was not found.` } as const;
+        return `Board Lane ${error.lane} was not found.`;
       case "BoardLaneReadOnlyError":
-        return {
-          status: 409,
-          message: `Board Lane ${error.lane} is derived from Item state and cannot accept label moves.`,
-        } as const;
+        return `Board Lane ${error.lane} is derived from Item state and cannot accept label moves.`;
       case "InstallationDiscoveryError":
       case "AppPermissionError":
-        return { status: 503, message: error.message } as const;
+        return error.message;
       case "GitHubApiError":
       case "InvalidGitHubResponseError":
-        return { status: 502, message: error.message } as const;
+        return error.message;
       case "GitHubRateLimitError":
-        return { status: 503, message: error.message } as const;
+        return error.message;
       case "EnginePersistenceError":
-        return {
-          status: 500,
-          message: `Runtime persistence failed while trying to ${error.operation}.`,
-        } as const;
+        return `Runtime persistence failed while trying to ${error.operation}.`;
       case "AttemptCancellationError":
-        return {
-          status: 500,
-          message: `Attempt ${error.attemptId} could not be canceled.`,
-        } as const;
-      case "SchemaError":
-        return { status: 400, message: `Invalid request: ${error.message}` } as const;
-      case "InvalidRequestError":
-        return { status: 400, message: error.message } as const;
-      case "HttpBodyError":
-        return { status: 500, message: "The server could not encode its response." } as const;
+        return `Attempt ${error.attemptId} could not be canceled.`;
     }
   })();
-  return HttpServerResponse.schemaJson(ApiError)(
-    { error: error._tag, message: response.message },
-    { status: response.status },
-  ).pipe(Effect.orDie);
+  return new OperatorHttpError({ error: error._tag, message });
 };
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
@@ -139,7 +68,7 @@ const crossSiteOrigin = (request: HttpServerRequest.HttpServerRequest): boolean 
   }
 };
 
-const handled = <A, E extends RouteError, R>(effect: Effect.Effect<A, E, R>) =>
+const policy = Layer.succeed(OperatorHttpPolicy)((handler, { endpoint }) =>
   Effect.gen(function* () {
     const request = yield* HttpServerRequest.HttpServerRequest;
     if (crossSiteOrigin(request)) {
@@ -147,143 +76,102 @@ const handled = <A, E extends RouteError, R>(effect: Effect.Effect<A, E, R>) =>
         origin: request.headers.origin,
         url: request.url,
       });
-      return yield* HttpServerResponse.schemaJson(ApiError)(
-        { error: "CrossSiteRequestError", message: "Cross-site requests are refused." },
-        { status: 403 },
-      ).pipe(Effect.orDie);
+      return yield* new OperatorHttpError({
+        error: "CrossSiteRequestError",
+        message: "Cross-site requests are refused.",
+      });
     }
-    return yield* effect.pipe(Effect.catch(errorResponse));
-  });
-
-const runAction = (
-  action: (
-    backend: FactoryBackend["Service"],
-    runId: RunId,
-  ) => ReturnType<FactoryBackend["Service"]["approve"]>,
-) =>
-  handled(
-    Effect.gen(function* () {
-      const backend = yield* FactoryBackend;
-      const { runId } = yield* HttpRouter.schemaPathParams(PathRun);
-      yield* action(backend, runId);
-      return yield* ok({ ok: true });
-    }),
-  );
-
-const loopAction = (
-  action: (
-    backend: FactoryBackend["Service"],
-    loop: LoopName,
-  ) => ReturnType<FactoryBackend["Service"]["pause"]>,
-) =>
-  handled(
-    Effect.gen(function* () {
-      const backend = yield* FactoryBackend;
-      const { loop } = yield* HttpRouter.schemaPathParams(PathLoop);
-      yield* action(backend, loop);
-      return yield* ok({ ok: true });
-    }),
-  );
-
-const transcriptRequest = (
-  request: HttpServerRequest.HttpServerRequest,
-): Effect.Effect<TranscriptRequest, Schema.SchemaError> => {
-  const params = new URL(request.url, "http://localhost").searchParams;
-  const after = params.get("after");
-  const before = params.get("before");
-  const attemptId = params.get("attempt");
-  const input: unknown =
-    after === null && before === null && attemptId === null
-      ? { _tag: "ColdTranscriptRequest" }
-      : after !== null && before === null && attemptId === null
-        ? { _tag: "TailTranscriptRequest", after }
-        : after === null && before !== null && attemptId !== null
-          ? { _tag: "EarlierTranscriptRequest", attemptId, before }
-          : { _tag: "InvalidTranscriptRequest" };
-  return Schema.decodeUnknownEffect(RunDetailSearch)(input, { onExcessProperty: "error" }).pipe(
-    Effect.map((search) =>
-      Match.valueTags(search, {
-        ColdTranscriptRequest: () => new ColdTranscriptRequest(),
-        TailTranscriptRequest: ({ after }) => new TailTranscriptRequest({ after }),
-        EarlierTranscriptRequest: ({ attemptId, before }) =>
-          new EarlierTranscriptRequest({ attemptId, before }),
-      }),
-    ),
-  );
-};
-
-const boardMove = Effect.fn("Http.boardMove")(function* () {
-  const { owner, repository: name, item } = yield* HttpRouter.schemaPathParams(PathBoardItem);
-  const repository = yield* Schema.decodeUnknownEffect(RepositoryName)(`${owner}/${name}`);
-  const { toLane } = yield* HttpServerRequest.schemaBodyJson(BoardMoveBody, {
-    onExcessProperty: "error",
-  }).pipe(
-    Effect.mapError(
-      (error) => new InvalidRequestError({ message: `Invalid request: ${error.message}` }),
-    ),
-  );
-  return new BoardMove({ repository, item, toLane });
-});
-
-export const apiRoutes = HttpRouter.addAll([
-  HttpRouter.route(
-    "GET",
-    "/api/overview",
-    handled(
-      Effect.gen(function* () {
-        const backend = yield* FactoryBackend;
-        return yield* HttpServerResponse.schemaJson(FactoryOverview)(yield* backend.overview);
-      }),
-    ),
-  ),
-  HttpRouter.route("GET", "/api/runs/:runId", (request) =>
-    handled(
-      Effect.gen(function* () {
-        const backend = yield* FactoryBackend;
-        const { runId } = yield* HttpRouter.schemaPathParams(PathRun);
-        return yield* HttpServerResponse.schemaJson(RunDetailView)(
-          yield* backend.detail(runId, yield* transcriptRequest(request)),
+    // The operator API has always accepted JSON regardless of Content-Type,
+    // including simple browser POSTs. Keep that convention behind the origin guard.
+    const decoded =
+      endpoint.payload.size === 0
+        ? handler
+        : handler.pipe(
+            Effect.provideService(
+              HttpServerRequest.HttpServerRequest,
+              request.modify({
+                headers: Headers.set(request.headers, "content-type", "application/json"),
+              }),
+            ),
+          );
+    return yield* decoded.pipe(
+      Effect.catch((error): Effect.Effect<never, OperatorHttpError | Types.unhandled> => {
+        if (!HttpApiError.HttpApiSchemaError.is(error)) return Effect.fail(error);
+        const responseEncoding = error.kind === "Body" || error.kind === "ResponseHeaders";
+        return Effect.fail(
+          new OperatorHttpError({
+            error: responseEncoding
+              ? "HttpBodyError"
+              : error.kind === "Payload"
+                ? "InvalidRequestError"
+                : "SchemaError",
+            message: responseEncoding
+              ? "The server could not encode its response."
+              : `Invalid request: ${error.cause.message}`,
+          }),
         );
       }),
-    ),
-  ),
-  HttpRouter.route(
-    "POST",
-    "/api/runs/:runId/approve",
-    runAction((backend, id) => backend.approve(id)),
-  ),
-  HttpRouter.route(
-    "POST",
-    "/api/projects/:owner/:repository/items/:item/lane",
-    handled(
-      Effect.gen(function* () {
-        const backend = yield* FactoryBackend;
-        yield* backend.moveBoardItem(yield* boardMove());
-        return yield* ok({ ok: true });
+    );
+  }),
+);
+
+const acknowledge = <E, R>(effect: Effect.Effect<void, E, R>) =>
+  Effect.as(effect, { ok: true } as const);
+
+const fromBackend = <A>(
+  use: (backend: FactoryBackend["Service"]) => Effect.Effect<A, BackendError>,
+) => Effect.flatMap(FactoryBackend, use).pipe(Effect.mapError(operatorFailure));
+
+const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
+  routes
+    .handle("overview", () => fromBackend((backend) => backend.overview))
+    .handle("detail", ({ params, query }) =>
+      fromBackend((backend) => backend.detail(params.runId, query)),
+    )
+    .handle("approve", ({ params }) =>
+      fromBackend((backend) => backend.approve(params.runId)).pipe(acknowledge),
+    )
+    .handle("retry", ({ params }) =>
+      fromBackend((backend) => backend.retry(params.runId)).pipe(acknowledge),
+    )
+    .handle("cancel", ({ params }) =>
+      fromBackend((backend) => backend.cancel(params.runId)).pipe(acknowledge),
+    )
+    .handle(
+      "moveBoardItem",
+      Effect.fn("Http.boardMove")(function* ({ params, payload }) {
+        const repository = yield* Schema.decodeUnknownEffect(RepositoryName)(
+          `${params.owner}/${params.repository}`,
+        ).pipe(
+          Effect.mapError(
+            (error) =>
+              new OperatorHttpError({
+                error: "SchemaError",
+                message: `Invalid request: ${error.message}`,
+              }),
+          ),
+        );
+        yield* Effect.annotateCurrentSpan({ repository, item: params.item, lane: payload.toLane });
+        return yield* fromBackend((backend) =>
+          backend.moveBoardItem(
+            new BoardMove({ repository, item: params.item, toLane: payload.toLane }),
+          ),
+        ).pipe(acknowledge);
       }),
+    )
+    .handle("pause", ({ params }) =>
+      fromBackend((backend) => backend.pause(params.loop)).pipe(acknowledge),
+    )
+    .handle("unpause", ({ params }) =>
+      fromBackend((backend) => backend.unpause(params.loop)).pipe(acknowledge),
     ),
-  ),
-  HttpRouter.route(
-    "POST",
-    "/api/runs/:runId/retry",
-    runAction((backend, id) => backend.retry(id)),
-  ),
-  HttpRouter.route(
-    "POST",
-    "/api/runs/:runId/cancel",
-    runAction((backend, id) => backend.cancel(id)),
-  ),
-  HttpRouter.route(
-    "POST",
-    "/api/loops/:loop/pause",
-    loopAction((backend, loop) => backend.pause(loop)),
-  ),
-  HttpRouter.route(
-    "POST",
-    "/api/loops/:loop/unpause",
-    loopAction((backend, loop) => backend.unpause(loop)),
-  ),
-]);
+);
+
+export const apiRoutes = HttpApiBuilder.layer(OperatorApi).pipe(
+  Layer.provide(handlers),
+  Layer.provide(policy),
+  Layer.provide(NodeHttpServer.layerHttpServices),
+);
 
 export const staticRoutes = (webRoot: string) => {
   const assetsRoot = resolve(webRoot, "assets");

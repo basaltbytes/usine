@@ -57,6 +57,10 @@
     "./operator": {
       "types": "./dist/operator/operator.d.ts",
       "default": "./dist/operator/operator.js"
+    },
+    "./operator/http": {
+      "types": "./dist/operator/http.d.ts",
+      "default": "./dist/operator/http.js"
     }
   },
   "publishConfig": {
