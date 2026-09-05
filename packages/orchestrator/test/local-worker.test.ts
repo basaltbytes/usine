@@ -38,10 +38,13 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { layer as localLayer } from "../src/local.ts";
+import { runView } from "../src/operator/projection.ts";
 
 const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
 const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
 const TURBO_CACHE_HOST = fileURLToPath(new URL("./fixtures/turbo-cache.mjs", import.meta.url));
+const STDOUT_NOISE_HOST = fileURLToPath(new URL("./fixtures/stdout-noise.mjs", import.meta.url));
+const PULL_REQUEST_HOST = fileURLToPath(new URL("./fixtures/pull-request.mjs", import.meta.url));
 const TOKEN = "one-attempt-test-token";
 // Each live transition crosses real git worktree and child-process boundaries.
 // The 10-second poll horizon absorbs slow CI hosts, and the 10 ms cadence still
@@ -141,6 +144,9 @@ const waitFor = Effect.fn("test.waitFor")(function* (
   let snapshot = yield* engine.inspect(runId);
   for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
     if (snapshot.run.state._tag === state) return snapshot;
+    if (state === "Succeeded" && snapshot.run.state._tag === "Failed") {
+      return yield* Effect.die(JSON.stringify(snapshot.attempts.map((attempt) => attempt.outcome)));
+    }
     yield* Effect.sleep("10 millis");
     snapshot = yield* engine.inspect(runId);
   }
@@ -184,6 +190,114 @@ const withLocalEngine = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer));
 
 describe("local worker", () => {
+  it.live(
+    "preserves successful agent work when PR discovery fails",
+    () =>
+      withLocalEngine(
+        ["--lookup-fails"],
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
+            assert.strictEqual(snapshot.attempts.length, 1);
+            assert(Option.isSome(snapshot.step.result));
+            assert.deepStrictEqual(
+              snapshot.step.result.value.facts.map((fact) => fact._tag),
+              ["Commit"],
+            );
+            assert.strictEqual(runView(snapshot, new Set()).pullRequestUrl, null);
+          }),
+        PULL_REQUEST_HOST,
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
+  it.live.each(["create", "update"])(
+    "persists a PR fact and operator link after an agent %s",
+    (operation) =>
+      withLocalEngine(
+        operation === "update" ? ["--update-pr"] : [],
+        ({ engine, remote }) =>
+          Effect.gen(function* () {
+            const initial = submission(1);
+            const request =
+              operation === "update"
+                ? new Submission({
+                    ...initial,
+                    revision: RepositoryRevision.make(
+                      (yield* output("git", ["--git-dir", remote, "rev-parse", "main"])).trim(),
+                    ),
+                  })
+                : initial;
+            const accepted = yield* engine.submit(request);
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
+            assert.strictEqual(snapshot.attempts.length, 1);
+            assert(Option.isSome(snapshot.step.result));
+            const facts = snapshot.step.result.value.facts;
+            assert.strictEqual(
+              facts.filter((fact) => fact._tag === "Commit").length,
+              operation === "create" ? 1 : 0,
+            );
+            assert.deepStrictEqual(
+              facts.filter((fact) => fact._tag === "PullRequest").map((fact) => fact.number),
+              [71],
+            );
+            assert.strictEqual(
+              runView(snapshot, new Set()).pullRequestUrl,
+              "https://github.com/acme/demo/pull/71",
+            );
+          }),
+        PULL_REQUEST_HOST,
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
+  it.live(
+    "completes one Attempt despite stray Effect and console logs",
+    () =>
+      withLocalEngine(
+        ["--stub"],
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
+            assert.strictEqual(snapshot.attempts.length, 1);
+            const attempt = snapshot.attempts[0] ?? assert.fail("missing Attempt");
+            const transcript = yield* engine.transcript(
+              new TranscriptAllQuery({ attemptId: attempt.id }),
+            );
+            assert.strictEqual(transcript.at(-1)?.envelope.payload._tag, "Final");
+            assert(!JSON.stringify(transcript).includes("library diagnostic"));
+          }),
+        STDOUT_NOISE_HOST,
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "still fails schema-invalid protocol frames",
+    () =>
+      withLocalEngine(
+        ["--stub", "--malformed-frame"],
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            const outcome = Option.getOrUndefined(snapshot.attempts[0]?.outcome ?? Option.none());
+            assert.strictEqual(outcome?._tag, "Failed");
+            if (outcome?._tag !== "Failed") return;
+            assert.match(outcome.failure.message, /schema-invalid frame/u);
+          }),
+        STDOUT_NOISE_HOST,
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
   it.effect(
     "keeps completed agent work successful when checkout cleanup passes the Attempt deadline",
     () =>
@@ -366,12 +480,16 @@ describe("local worker", () => {
   );
 
   it.live(
-    "releases an unlaunched checkout and wipes credentials after successful or failed preparation",
+    "prepares an exact PR-only commit and releases checkout credentials after success or failure",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
         const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-resource-" });
         const remote = yield* makeRemote(root);
+        const seed = `${root}/seed`;
+        yield* run("git", ["commit", "--allow-empty", "-m", "PR-only change"], seed);
+        const prHead = (yield* output("git", ["rev-parse", "HEAD"], seed)).trim();
+        yield* run("git", ["push", "origin", "HEAD:refs/pull/63/head"], seed);
         const issued: Array<Redacted.Redacted<string>> = [];
         const credentials = Layer.succeed(CredentialProvider)({
           issue: () =>
@@ -392,7 +510,7 @@ describe("local worker", () => {
             attemptId: AttemptId.make("unlaunched/run/1"),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
-            revision: RepositoryRevision.make("main"),
+            revision: RepositoryRevision.make(prHead),
             payload: {},
             task: AttemptTask.make("Prepare without launching"),
             agent: testAgent,
@@ -401,7 +519,17 @@ describe("local worker", () => {
             maxAttemptMinutes: 60,
             parentEffort: "high",
           });
-          const prepared = yield* executor.prepare(request).pipe(Effect.scoped);
+          const prepared = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const prepared = yield* executor.prepare(request);
+              assert.strictEqual(prepared.workspace.spec.baseCommit, prHead);
+              assert.strictEqual(
+                (yield* output("git", ["rev-parse", "HEAD"], prepared.workspace.worktree)).trim(),
+                prHead,
+              );
+              return prepared;
+            }),
+          );
           assert(!(yield* fileSystem.exists(prepared.workspace.worktree)));
           const registration = yield* output("git", [
             "--git-dir",

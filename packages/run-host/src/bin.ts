@@ -3,6 +3,12 @@
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Effect, Logger, Stdio, Stream } from "effect";
+import { Console } from "node:console";
+
+// Libraries and independent Effect runtimes may use the process console instead
+// of this program's Logger context. Protocol frames use Stdio directly; every
+// console method must write to stderr before the agent backends are imported.
+globalThis.console = new Console({ stdout: process.stderr, stderr: process.stderr });
 
 const program = Effect.gen(function* () {
   const stdio = yield* Stdio.Stdio;

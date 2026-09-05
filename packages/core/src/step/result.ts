@@ -12,13 +12,13 @@ export class PullRequest extends Schema.TaggedClass<PullRequest>("StepResult/Pul
   "PullRequest",
   {
     number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
-    url: Schema.URL,
+    url: Schema.URLFromString,
   },
 ) {}
 
 /** A GitHub comment the agent created or updated during the Attempt. */
 export class Comment extends Schema.TaggedClass<Comment>("StepResult/Comment")("Comment", {
-  url: Schema.URL,
+  url: Schema.URLFromString,
 }) {}
 
 /** A commit or GitHub artifact recorded as an outcome of the Agent's work. */

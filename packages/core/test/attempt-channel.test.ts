@@ -16,7 +16,7 @@ import { AttemptTask, AttemptId } from "../src/attempt/attempt.ts";
 import * as AttemptChannel from "../src/attempt/channel.ts";
 import { AgentFailure, ChildSessionBudgetFailure } from "../src/attempt/failure.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../src/repository.ts";
-import { Commit, StepResult } from "../src/step/result.ts";
+import { Comment, Commit, PullRequest, StepResult } from "../src/step/result.ts";
 
 const agent = new Agent({
   name: AgentName.make("developer"),
@@ -59,6 +59,8 @@ describe("attempt channel v4", () => {
               sha: CommitSha.make("fedcba9876543210fedcba9876543210fedcba98"),
               summary: "Implement executor",
             }),
+            new PullRequest({ number: 71, url: new URL("https://github.com/acme/demo/pull/71") }),
+            new Comment({ url: new URL("https://github.com/acme/demo/pull/71#issuecomment-1") }),
           ],
         }),
       }),

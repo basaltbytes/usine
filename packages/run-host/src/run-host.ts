@@ -5,14 +5,15 @@ import {
   WorkingDirectory,
 } from "@usine/agents/runtime";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { CommitSha } from "@usine/core/repository";
-import { Commit, StepResult } from "@usine/core/step/result";
+import { CommitSha, RepositoryRevision } from "@usine/core/repository";
+import { Commit, PullRequest, StepResult } from "@usine/core/step/result";
 import {
   Deferred,
   DateTime,
   Effect,
   Fiber,
   Queue,
+  Path,
   Ref,
   Result,
   Schema,
@@ -26,7 +27,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 export class RunHostError extends Schema.TaggedError<RunHostError>("@usine/run-host/RunHostError")(
   "RunHostError",
   {
-    stage: Schema.Literals(["input", "output", "git"]),
+    stage: Schema.Literals(["input", "output", "git", "github"]),
     message: Schema.NonEmptyString,
     cause: Schema.Defect(),
   },
@@ -38,6 +39,14 @@ const decodeInput = (line: string) =>
     onExcessProperty: "error",
   });
 const encodeOutput = Schema.encodeSync(Schema.fromJsonString(AttemptChannel.OutboundEnvelope));
+const PullRequestResponse = Schema.Struct({
+  number: PullRequest.fields.number,
+  url: Schema.URLFromString,
+  head: Schema.Struct({ sha: CommitSha }),
+}).pipe(Schema.encodeKeys({ url: "html_url" }));
+const decodePullRequestPages = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(Schema.Array(Schema.Array(PullRequestResponse))),
+);
 
 const hostError = (stage: RunHostError["stage"], message: string, cause: unknown): RunHostError =>
   new RunHostError({ stage, message, cause });
@@ -49,6 +58,7 @@ export const runHost = () =>
       const agents = yield* AgentRuntime;
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const stdio = yield* Stdio.Stdio;
+      const path = yield* Path.Path;
       const frames = yield* Queue.make<AttemptChannel.InputFrame, RunHostError>();
       const input = stdio.stdin.pipe(
         Stream.mapError((cause) => hostError("input", "Could not read protocol input", cause)),
@@ -114,10 +124,14 @@ export const runHost = () =>
         Effect.mapError((cause) => hostError("output", "Could not write protocol output", cause)),
       );
 
-      const gitLines = Effect.fn("RunHost.gitLines")(function* (args: ReadonlyArray<string>) {
+      const commandLines = Effect.fn("RunHost.commandLines")(function* (
+        command: "git" | "gh",
+        args: ReadonlyArray<string>,
+      ) {
+        const stage = command === "git" ? "git" : "github";
         return yield* Effect.scoped(
           Effect.gen(function* () {
-            const handle = yield* spawner.spawn(ChildProcess.make("git", args));
+            const handle = yield* spawner.spawn(ChildProcess.make(command, args));
             const stderrFiber = yield* handle.stderr.pipe(
               Stream.decodeText(),
               Stream.mkString,
@@ -132,8 +146,8 @@ export const runHost = () =>
             const stderr = yield* Fiber.join(stderrFiber);
             if (Number(exitCode) !== 0) {
               return yield* hostError(
-                "git",
-                `git exited with code ${String(exitCode)}`,
+                stage,
+                `${command} exited with code ${String(exitCode)}`,
                 new Error(stderr.trim()),
               );
             }
@@ -143,13 +157,13 @@ export const runHost = () =>
           Effect.mapError((cause) =>
             cause instanceof RunHostError
               ? cause
-              : hostError("git", "Could not inspect Attempt commits", cause),
+              : hostError(stage, `Could not inspect Attempt results with ${command}`, cause),
           ),
         );
       });
 
       const harvestCommits = Effect.fn("RunHost.harvestCommits")(function* () {
-        const lines = yield* gitLines([
+        const lines = yield* commandLines("git", [
           "log",
           "--reverse",
           "--format=%H%x00%s",
@@ -178,11 +192,57 @@ export const runHost = () =>
         );
       });
 
+      const harvestPullRequests = Effect.fn("RunHost.harvestPullRequests")(function* () {
+        yield* Effect.annotateCurrentSpan({
+          attemptId: spec.attemptId,
+          repository: spec.repository,
+        });
+        const head = yield* Schema.decodeUnknownEffect(CommitSha)(
+          (yield* commandLines("git", ["rev-parse", "HEAD"])).join(""),
+        ).pipe(
+          Effect.mapError((cause) => hostError("git", "git returned an invalid final HEAD", cause)),
+        );
+        const branch = (yield* commandLines("git", ["branch", "--show-current"])).join("");
+        // Executors start detached. An unchanged default-branch Attempt has no
+        // PR candidate; a fixed revision, changed HEAD, or agent-created branch does.
+        if (
+          head === spec.baseCommit &&
+          spec.revision !== RepositoryRevision.make(spec.baseCommit) &&
+          branch === ""
+        ) {
+          yield* Effect.logDebug("No pull request candidate in the Attempt checkout");
+          return [];
+        }
+        const output = yield* commandLines("gh", [
+          "api",
+          `repos/${spec.repository}/commits/${head}/pulls?per_page=100`,
+          "--paginate",
+          "--slurp",
+        ]);
+        const pages = yield* decodePullRequestPages(output.join("\n")).pipe(
+          Effect.mapError((cause) =>
+            hostError("github", "GitHub returned invalid pull request results", cause),
+          ),
+        );
+        // Associated PRs can contain this commit as an ancestor. Record only
+        // PRs whose head is the checkout's final commit, once across all pages.
+        const facts = new Map<number, PullRequest>();
+        for (const pr of pages.flat()) {
+          if (pr.head.sha === head)
+            facts.set(pr.number, new PullRequest({ number: pr.number, url: pr.url }));
+        }
+        yield* Effect.logInfo("Collected Attempt pull request results", {
+          head,
+          pullRequests: [...facts.keys()],
+        });
+        return [...facts.values()];
+      });
+
       const launched = yield* Effect.result(
         agents.launch(
           new LaunchRequest({
             spec,
-            cwd: WorkingDirectory.make(process.cwd()),
+            cwd: WorkingDirectory.make(path.resolve(".")),
           }),
         ),
       );
@@ -248,7 +308,35 @@ export const runHost = () =>
         const sessionResult = yield* session.result;
         yield* Fiber.join(eventFiber);
         const commits = yield* harvestCommits();
-        return new StepResult({ message: sessionResult.message, facts: commits });
+        const pullRequests = yield* harvestPullRequests().pipe(
+          Effect.timeout("10 seconds"),
+          // Result discovery is read-only enrichment after the agent completed.
+          // A GitHub outage must not automatically repeat already-pushed work.
+          Effect.catchTags({
+            RunHostError: (error) =>
+              Effect.logWarning(
+                "Pull request discovery failed; retaining the completed agent result",
+                {
+                  attemptId: spec.attemptId,
+                  repository: spec.repository,
+                  stage: error.stage,
+                  message: error.message,
+                },
+              ).pipe(Effect.as([])),
+            TimeoutError: () =>
+              Effect.logWarning(
+                "Pull request discovery timed out; retaining the completed agent result",
+                {
+                  attemptId: spec.attemptId,
+                  repository: spec.repository,
+                },
+              ).pipe(Effect.as([])),
+          }),
+        );
+        return new StepResult({
+          message: sessionResult.message,
+          facts: [...commits, ...pullRequests],
+        });
       });
       yield* Effect.gen(function* () {
         const outcome = yield* Effect.raceFirst(
@@ -279,7 +367,7 @@ export const runHost = () =>
           return;
         }
         yield* Effect.logInfo("Run host completed the Attempt", {
-          commits: outcome.success.value.facts.length,
+          facts: outcome.success.value.facts.length,
         });
         yield* emit(new AttemptChannel.Final({ result: outcome.success.value }));
       }).pipe(

@@ -281,19 +281,26 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
                 // Frames include raw tool inputs and outputs; scrub the credential
                 // from the line before it is decoded or persisted.
                 const line = scrub(rawLine);
-                const envelope = yield* decodeOutboundEnvelope(line).pipe(
-                  Effect.catch((cause) => {
-                    const diagnostic = invalidFrameDiagnostic(line, cause);
-                    return Effect.logError("Run host emitted an invalid frame", {
+                const decoded = yield* decodeOutboundEnvelope(line).pipe(Effect.result);
+                if (Result.isFailure(decoded)) {
+                  const diagnostic = invalidFrameDiagnostic(line, decoded.failure);
+                  if (diagnostic.source === "effect-log") {
+                    yield* Effect.logWarning("Dropped a run-host diagnostic from protocol output", {
                       attemptId,
                       ...diagnostic,
-                    }).pipe(
-                      Effect.andThen(
-                        Effect.fail(infrastructureFailure(invalidFrameMessage(diagnostic), cause)),
-                      ),
-                    );
-                  }),
-                );
+                    });
+                    return;
+                  }
+                  yield* Effect.logError("Run host emitted an invalid frame", {
+                    attemptId,
+                    ...diagnostic,
+                  });
+                  return yield* infrastructureFailure(
+                    invalidFrameMessage(diagnostic),
+                    decoded.failure,
+                  );
+                }
+                const envelope = decoded.success;
                 const admitted = AttemptChannel.admit(
                   yield* Ref.get(progress),
                   attemptId,

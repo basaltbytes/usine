@@ -4,13 +4,15 @@ import { ConfigParser } from "@usine/config/parser";
 import { environmentFor, repositoryContext } from "@usine/config/payload-slices";
 import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey } from "@usine/core/event";
-import { canonicalRepositoryName } from "@usine/core/repository";
+import { CommitSha, RepositoryRevision, canonicalRepositoryName } from "@usine/core/repository";
 import { RunEngine, type SubmissionResult } from "@usine/engine/engine";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
-import { DateTime, Effect, Result } from "effect";
+import { InvalidGitHubResponseError } from "@usine/github/github-app";
+import { DateTime, Effect, Result, Schema } from "effect";
 import {
   configFileErrorLogFields,
+  DEFAULT_BRANCH_REVISION,
   type ResolvedLoop,
   submissionLogFields,
   triggerSubmission,
@@ -64,6 +66,22 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
     return { submissions: [], revokedRuns: 0, failures: [] } satisfies ItemCycle;
   }
   const submissions: Array<SubmissionResult> = [];
+  // Projections store generic JSON; decode the GitHub PR revision at this boundary.
+  const revision =
+    item.source === "pr"
+      ? RepositoryRevision.make(
+          yield* Schema.decodeUnknownEffect(CommitSha)(payload.headRefOid).pipe(
+            Effect.mapError(
+              () =>
+                new InvalidGitHubResponseError({
+                  operation: "fetch-pull-request-snapshot",
+                  message: "The pull request payload has no valid head commit",
+                  detail: `PR ${item.number} requires a full headRefOid`,
+                }),
+            ),
+          ),
+        )
+      : DEFAULT_BRANCH_REVISION;
   const failures: Array<RepositoryPollFailure> = [];
   let revokedRuns = 0;
   for (const { agent, loop, parentModel } of loops) {
@@ -127,6 +145,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
         payload,
         receivedAt,
         repository,
+        revision,
         task: AttemptTask.make(rendered.success),
         agent,
         parentModel,
@@ -138,6 +157,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
       agent: agent.name,
       item: item.number,
       contentHash: item.contentHash,
+      revision,
       result: submitted._tag,
       ...submissionLogFields(submitted),
     });

@@ -19,6 +19,8 @@ Import each domain concept from its owning subpath. Identities, records, and ope
 
 Branded schemas are exported under their brand name, and each has an `export type` twin of the same name so the name works in type positions too.
 
+`PullRequest` and `Comment` facts use `URL` values in memory and URL strings in JSON, so Step results round-trip through the Attempt channel and durable storage.
+
 The run state machine is `pending → waiting → queued → running → succeeded / failed / canceled`, with `failed → running` on operator retry. The failure taxonomy separates infra failures (the only auto-retryable class, capped), agent failures (always wait for the operator), runaway guard failures, and exhausted child-session budgets. Guard failures never auto-retry.
 
 Each Attempt records the child `BrainSpec` and effective Pi parent model used for that try. The attempt channel includes immutable repository, payload, task, agent context, and child-session budget in its `Start` frame; outbound `SessionEvent` envelopes retain parent and first-level child session identity.
