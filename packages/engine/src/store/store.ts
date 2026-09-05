@@ -1,7 +1,6 @@
-import { Attempt, AttemptNumber, shouldAutoRetry, AttemptId } from "@usine/core/attempt";
+import { Attempt, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
 import { Event } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -9,7 +8,18 @@ import { RunId, Run } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
-import { Cause, Context, DateTime, Effect, Exit, Layer, Option, Schema } from "effect";
+import {
+  Cause,
+  Context,
+  DateTime,
+  Effect,
+  Exit,
+  Layer,
+  Match,
+  Option,
+  Result,
+  Schema,
+} from "effect";
 import type { Workflow } from "effect/unstable/workflow";
 import { RunDatabase } from "../database/database.ts";
 import { Claimed, Ignored, Queued, Submission } from "../engine/submission.ts";
@@ -20,8 +30,15 @@ import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import type { WorkflowCommand } from "../workflow/command.ts";
 import { persistence, submissionFromRow, type WorkflowCommandRow } from "./codec.ts";
 import { queriesFor } from "./queries.ts";
-
-const MAX_AUTO_ATTEMPTS = AttemptNumber.make(3);
+import {
+  beginAttempt as decideBeginAttempt,
+  cancelRun,
+  claimRun,
+  finishAttempt as decideFinishAttempt,
+  reconcileAttempt,
+  retryRun,
+  type FinishDecision,
+} from "../engine/lifecycle.ts";
 
 export class StoredSubmission extends Schema.Class<StoredSubmission>(
   "@usine/engine/internal/StoredSubmission",
@@ -101,17 +118,31 @@ const makeRunStore = Effect.gen(function* () {
     submission: Submission,
     requestedRunId: RunId,
   ) {
+    yield* Effect.annotateCurrentSpan({
+      eventId: submission.event.id,
+      runId: requestedRunId,
+      loop: submission.loop,
+      itemKey: submission.itemKey,
+    });
     return yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const recorded = yield* tx.recordTriggerEvent(submission);
         const existing = yield* tx.runForEvent(recorded.event.id);
         if (existing[0] !== undefined) {
+          yield* Effect.logInfo("Event joined its existing Run", {
+            eventId: recorded.event.id,
+            runId: existing[0].runId,
+          });
           return claimedRun(recorded, existing[0].runId);
         }
 
         const ignored = yield* tx.ignoredEvent(recorded.event.id);
         if (ignored[0] !== undefined) {
+          yield* Effect.logInfo("Event remains ignored", {
+            eventId: recorded.event.id,
+            reason: ignored[0].reason,
+          });
           return new Claim({
             submission: recorded,
             result: new Ignored({
@@ -124,27 +155,30 @@ const makeRunStore = Effect.gen(function* () {
 
         const blocking = yield* tx.blockingRun(recorded.loop, recorded.itemKey);
         const blockedBy = blocking[0];
-        if (blockedBy === undefined) {
-          return yield* openRun(tx, recorded, requestedRunId);
+        const decision = claimRun(
+          blockedBy === undefined
+            ? Option.none()
+            : Option.some((yield* tx.snapshot(blockedBy.runId)).run),
+          recorded.event.id,
+        );
+        yield* Effect.logInfo("Event claim decided", {
+          eventId: recorded.event.id,
+          decision: decision._tag,
+        });
+        switch (decision._tag) {
+          case "QueueEvent":
+            return new Claim({
+              submission: recorded,
+              result: new Queued({ eventId: recorded.event.id }),
+              supersededRun: Option.none(),
+            });
+          case "SupersedeRun":
+            yield* tx.updateState(decision.runId, decision.state);
+            yield* tx.requestInterrupt(decision.runId);
+            return yield* openRun(tx, recorded, requestedRunId, Option.some(decision.runId));
+          case "OpenRun":
+            return yield* openRun(tx, recorded, requestedRunId);
         }
-
-        const blockedSnapshot = yield* tx.snapshot(blockedBy.runId);
-        if (blockedSnapshot.run.state._tag === "Running") {
-          return new Claim({
-            submission: recorded,
-            result: new Queued({ eventId: recorded.event.id }),
-            supersededRun: Option.none(),
-          });
-        }
-        if (RunState.isUnstarted(blockedSnapshot.run.state)) {
-          yield* tx.updateState(
-            blockedSnapshot.run.id,
-            RunState.supersede(blockedSnapshot.run.state, recorded.event.id),
-          );
-          yield* tx.requestInterrupt(blockedSnapshot.run.id);
-          return yield* openRun(tx, recorded, requestedRunId, Option.some(blockedSnapshot.run.id));
-        }
-        return yield* openRun(tx, recorded, requestedRunId);
       }),
     );
   }, persistence("submit Event"));
@@ -161,64 +195,90 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("park run for approval"));
 
+  // All callers supply a transaction: Attempt, Run, Step and outbox writes
+  // either commit together or roll back together (ADRs 0010 and 0020).
+  const applyFinish = Effect.fn("RunStore.applyFinish")(function* (
+    tx: ReturnType<typeof queriesFor>,
+    runId: RunId,
+    decision: FinishDecision,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId });
+    if (decision._tag === "Unchanged") {
+      yield* Effect.logInfo("Attempt completion ignored", { runId, reason: decision.reason });
+      return;
+    }
+    const { attempt, outcome } = decision;
+    yield* Effect.annotateCurrentSpan({ attemptId: attempt.id });
+    const fields = {
+      runId,
+      attemptId: attempt.id,
+      number: attempt.number,
+      decision: decision._tag,
+    };
+    yield* Effect.logInfo(
+      "Attempt completion decided",
+      Match.valueTags(outcome, {
+        Failed: ({ failure }) => ({ ...fields, failure: failure._tag }),
+        Succeeded: () => fields,
+      }),
+    );
+    yield* tx.closeAttempt(attempt.id, outcome);
+    if (decision._tag === "RetryAttempt") return;
+    if (decision._tag === "RunSucceeded") {
+      yield* tx.updateStepResult(runId, attempt.stepName, decision.result);
+    }
+    yield* tx.updateState(runId, decision.state);
+    yield* tx.requestWorkflowCommand(runId, "Continue");
+  });
+
   const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (
     runId: RunId,
     worker: WorkerName,
   ) {
+    yield* Effect.annotateCurrentSpan({ runId });
     return yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const current = yield* tx.snapshot(runId);
-        let runState = current.run.state;
-        const lastAttempt = current.attempts[current.attempts.length - 1];
-        if (
-          runState._tag === "Running" &&
-          lastAttempt !== undefined &&
-          Option.isNone(lastAttempt.outcome)
-        ) {
-          const failure = new InfraFailure({
-            message: "The orchestrator stopped during the attempt",
-            cause: new Error("attempt interrupted by orchestrator restart"),
-          });
-          yield* tx.closeAttempt(lastAttempt.id, new AttemptFailed({ failure }));
-          if (
-            !shouldAutoRetry({
-              failure,
-              number: lastAttempt.number,
-              maxAutoAttempts: MAX_AUTO_ATTEMPTS,
-            })
-          ) {
-            yield* tx.updateState(runId, RunState.fail(runState));
-            yield* tx.requestWorkflowCommand(runId, "Continue");
-            return new AttemptRecoveryFailed({ failure });
-          }
+        const interruption = new InfraFailure({
+          message: "The orchestrator stopped during the attempt",
+          cause: new Error("attempt interrupted by orchestrator restart"),
+        });
+        const decision = decideBeginAttempt(current, interruption);
+        if (decision._tag === "RunClosed") {
+          yield* Effect.logInfo("Attempt start skipped", { runId, state: decision.state._tag });
+          return new RunClosed({ state: decision.state._tag });
         }
-
-        if (RunState.isStartable(runState)) {
-          runState = RunState.start(runState);
-          yield* tx.updateState(runId, runState);
+        if (decision._tag === "RunFailed") {
+          yield* applyFinish(tx, runId, decision);
+          return new AttemptRecoveryFailed({ failure: interruption });
         }
-        if (runState._tag !== "Running") {
-          // Cancel, supersede, and revoke can all land while the run waits
-          // for a worker slot; the caller releases the slot and moves on.
-          return new RunClosed({ state: runState._tag });
+        if (Option.isSome(decision.interrupted)) {
+          yield* applyFinish(tx, runId, decision.interrupted.value);
         }
-
-        const number = AttemptNumber.make((lastAttempt?.number ?? 0) + 1);
-        const attemptId = AttemptId.make(`${runId}/${current.step.name}/${number}`);
+        if (current.run.state._tag !== decision.state._tag) {
+          yield* tx.updateState(runId, decision.state);
+        }
+        const attemptId = AttemptId.make(`${runId}/${current.step.name}/${decision.number}`);
         const startedAt = yield* DateTime.now;
         const attempt = new Attempt({
           id: attemptId,
           runId,
           stepName: current.step.name,
           worker,
-          number,
+          number: decision.number,
           brain: current.agent.brain,
           parentModel: current.parentModel,
           startedAt,
           outcome: Option.none(),
         });
         yield* tx.addAttempt(attempt);
+        yield* Effect.logInfo("Attempt started", {
+          runId,
+          attemptId,
+          number: decision.number,
+          worker,
+        });
         return new AttemptStarted({
           execution: new StepExecution({
             attempt,
@@ -227,7 +287,7 @@ const makeRunStore = Effect.gen(function* () {
               id: current.run.id,
               eventId: current.run.eventId,
               loop: current.run.loop,
-              state: runState,
+              state: decision.state,
               openedAt: current.run.openedAt,
             }),
             step: current.step,
@@ -242,46 +302,21 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("begin attempt"));
 
-  const succeedAttempt = Effect.fn("RunStore.succeedAttempt")(function* (
+  const finishAttempt = Effect.fn("RunStore.finishAttempt")(function* (
     attempt: Attempt,
-    result: StepResult,
+    result: Result.Result<StepResult, AttemptFailure>,
   ) {
-    yield* database.transaction((transaction) =>
-      Effect.gen(function* () {
-        const tx = queriesFor(transaction);
-        const current = yield* tx.snapshot(attempt.runId);
-        if (current.run.state._tag !== "Running") return;
-        yield* tx.closeAttempt(attempt.id, new AttemptSucceeded());
-        yield* tx.updateStepResult(attempt.runId, attempt.stepName, result);
-        yield* tx.updateState(attempt.runId, RunState.succeed(current.run.state));
-        yield* tx.requestWorkflowCommand(attempt.runId, "Continue");
-      }),
-    );
-  }, persistence("succeed attempt"));
-
-  const failAttempt = Effect.fn("RunStore.failAttempt")(function* (
-    attempt: Attempt,
-    failure: AttemptFailure,
-  ) {
+    yield* Effect.annotateCurrentSpan({ runId: attempt.runId, attemptId: attempt.id });
     return yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const current = yield* tx.snapshot(attempt.runId);
-        if (current.run.state._tag !== "Running") return false;
-        yield* tx.closeAttempt(attempt.id, new AttemptFailed({ failure }));
-        const retry = shouldAutoRetry({
-          failure,
-          number: attempt.number,
-          maxAutoAttempts: MAX_AUTO_ATTEMPTS,
-        });
-        if (!retry) {
-          yield* tx.updateState(attempt.runId, RunState.fail(current.run.state));
-          yield* tx.requestWorkflowCommand(attempt.runId, "Continue");
-        }
-        return retry;
+        const decision = decideFinishAttempt(current, attempt.id, result);
+        yield* applyFinish(tx, attempt.runId, decision);
+        return decision;
       }),
     );
-  }, persistence("fail attempt"));
+  }, persistence("finish attempt"));
 
   const approve = Effect.fn("RunStore.approve")(function* (runId: RunId, approval: Event) {
     yield* database.transaction((transaction) =>
@@ -304,21 +339,23 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("approve run"));
 
   const retry = Effect.fn("RunStore.retry")(function* (runId: RunId) {
+    yield* Effect.annotateCurrentSpan({ runId });
     yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const current = yield* tx.snapshot(runId);
-        if (current.run.state._tag === "Failed") {
-          yield* tx.updateState(runId, RunState.retry(current.run.state));
+        const decision = retryRun(current.run.state, yield* tx.workflowCommandsFor(runId));
+        yield* Effect.logInfo("Operator retry decided", {
+          runId,
+          state: current.run.state._tag,
+          decision: decision._tag,
+        });
+        if (decision._tag === "Resume") {
+          yield* tx.updateState(runId, decision.state);
           yield* tx.requestWorkflowCommand(runId, "Resume");
           return;
         }
-        if (
-          current.run.state._tag === "Running" &&
-          (yield* tx.hasWorkflowCommand(runId, "Resume"))
-        ) {
-          return;
-        }
+        if (decision._tag === "ResumePending") return;
         return yield* new RunOperationRejectedError({
           runId,
           operation: "retry",
@@ -329,26 +366,28 @@ const makeRunStore = Effect.gen(function* () {
   }, persistence("retry run"));
 
   const cancel = Effect.fn("RunStore.cancel")(function* (runId: RunId) {
+    yield* Effect.annotateCurrentSpan({ runId });
     return yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const current = yield* tx.snapshot(runId);
-        if (!RunState.isOpen(current.run.state)) {
-          const alreadyClosed: CancelOutcome = { _tag: "AlreadyClosed" };
-          return alreadyClosed;
+        const decision = cancelRun(current);
+        yield* Effect.logInfo("Operator cancellation decided", {
+          runId,
+          state: current.run.state._tag,
+          decision: decision._tag,
+        });
+        if (decision._tag === "AlreadyClosed") return decision;
+        if (Option.isSome(decision.attempt)) {
+          yield* tx.closeAttempt(decision.attempt.value.id, decision.attempt.value.outcome);
         }
-        let openAttempt = Option.none<AttemptId>();
-        if (current.run.state._tag === "Running") {
-          const attempt = current.attempts[current.attempts.length - 1];
-          if (attempt !== undefined && Option.isNone(attempt.outcome)) {
-            yield* tx.closeAttempt(attempt.id, new AttemptCanceled());
-            openAttempt = Option.some(attempt.id);
-          }
-        }
-        yield* tx.updateState(runId, RunState.cancelByOperator(current.run.state));
+        yield* tx.updateState(runId, decision.state);
         yield* tx.requestInterrupt(runId);
         yield* tx.requestWorkflowCommand(runId, "Continue");
-        const canceled: CancelOutcome = { _tag: "Canceled", openAttempt };
+        const canceled: CancelOutcome = {
+          _tag: "Canceled",
+          openAttempt: Option.map(decision.attempt, ({ id }) => id),
+        };
         return canceled;
       }),
     );
@@ -429,26 +468,30 @@ const makeRunStore = Effect.gen(function* () {
     runId: RunId,
     result: Workflow.Result<StepResult, AttemptFailure>,
   ) {
-    if (result._tag !== "Complete") return;
+    yield* Effect.annotateCurrentSpan({ runId });
+    if (result._tag !== "Complete") {
+      yield* Effect.logDebug("Workflow reconciliation skipped", { runId, reason: "Suspended" });
+      return;
+    }
     yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const current = yield* tx.snapshot(runId);
-        if (current.run.state._tag !== "Running") return;
-        const attempt = current.attempts[current.attempts.length - 1];
-        if (attempt === undefined || Option.isSome(attempt.outcome)) return;
-        if (Exit.isSuccess(result.exit)) {
-          yield* tx.closeAttempt(attempt.id, new AttemptSucceeded());
-          yield* tx.updateStepResult(attempt.runId, attempt.stepName, result.exit.value);
-          yield* tx.updateState(runId, RunState.succeed(current.run.state));
-          yield* tx.requestWorkflowCommand(runId, "Continue");
+        // Workflow defects and interruption do not become typed Attempt failures.
+        // Keep the projection available to the existing restart recovery path.
+        const completion: Option.Option<Result.Result<StepResult, AttemptFailure>> = Exit.isSuccess(
+          result.exit,
+        )
+          ? Option.some(Result.succeed(result.exit.value))
+          : Option.map(Cause.findErrorOption(result.exit.cause), Result.fail);
+        if (Option.isNone(completion)) {
+          yield* Effect.logInfo("Workflow reconciliation skipped", {
+            runId,
+            reason: "NoTypedOutcome",
+          });
           return;
         }
-        const failure = Cause.findErrorOption(result.exit.cause);
-        if (Option.isNone(failure)) return;
-        yield* tx.closeAttempt(attempt.id, new AttemptFailed({ failure: failure.value }));
-        yield* tx.updateState(runId, RunState.fail(current.run.state));
-        yield* tx.requestWorkflowCommand(runId, "Continue");
+        yield* applyFinish(tx, runId, reconcileAttempt(current, completion.value));
       }),
     );
   }, persistence("reconcile workflow completion"));
@@ -463,7 +506,7 @@ const makeRunStore = Effect.gen(function* () {
       queries
         .completeWorkflowCommand(runId, command)
         .pipe(persistence("complete workflow command")),
-    failAttempt,
+    finishAttempt,
     nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued Event")),
     parkForApproval,
     pendingWorkflowCommands: queries
@@ -475,7 +518,6 @@ const makeRunStore = Effect.gen(function* () {
     retry,
     revoke,
     snapshot: (runId: RunId) => queries.snapshot(runId).pipe(persistence("read run")),
-    succeedAttempt,
     transcript,
   } as const;
 });
@@ -506,10 +548,15 @@ export class RunStore extends Context.Service<
       runId: RunId,
       command: WorkflowCommand,
     ) => Effect.Effect<void, RunStoreError>;
-    readonly failAttempt: (
+    /**
+     * Records an executor result only if `attempt` is still the Run's open try.
+     * The returned decision tells execution whether to retry; terminal outcomes,
+     * the Step result and continuation request commit together.
+     */
+    readonly finishAttempt: (
       attempt: Attempt,
-      failure: AttemptFailure,
-    ) => Effect.Effect<boolean, RunStoreError>;
+      result: Result.Result<StepResult, AttemptFailure>,
+    ) => Effect.Effect<FinishDecision, RunStoreError>;
     readonly nextQueued: (runId: RunId) => Effect.Effect<Option.Option<Submission>, RunStoreError>;
     readonly parkForApproval: (runId: RunId) => Effect.Effect<void, RunStoreError>;
     readonly pendingWorkflowCommands: Effect.Effect<
@@ -531,10 +578,6 @@ export class RunStore extends Context.Service<
       itemKey: ItemKey,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     readonly snapshot: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
-    readonly succeedAttempt: (
-      attempt: Attempt,
-      result: StepResult,
-    ) => Effect.Effect<void, RunStoreError>;
     readonly transcript: (
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunStoreError>;

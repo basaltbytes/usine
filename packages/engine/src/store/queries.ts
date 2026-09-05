@@ -357,18 +357,16 @@ export const queriesFor = (database: RunDatabaseClient) => {
     yield* requestWorkflowCommand(runId, "Interrupt");
   });
 
-  const hasWorkflowCommand = Effect.fn("RunStoreQueries.hasWorkflowCommand")(function* (
+  const workflowCommandsFor = Effect.fn("RunStoreQueries.workflowCommandsFor")(function* (
     runId: RunId,
-    command: WorkflowCommand,
   ) {
-    return (
-      (yield* database
-        .$count(
-          workflowCommands,
-          and(eq(workflowCommands.runId, runId), eq(workflowCommands.command, command)),
-        )
-        .execute()) > 0
-    );
+    yield* Effect.annotateCurrentSpan({ runId });
+    const rows = yield* database
+      .select({ runId: workflowCommands.runId, command: workflowCommands.command })
+      .from(workflowCommands)
+      .where(eq(workflowCommands.runId, runId))
+      .execute();
+    return (yield* decodeWorkflowCommands(rows)).map(({ command }) => command);
   });
 
   const createRun = Effect.fn("RunStoreQueries.createRun")(function* (
@@ -677,7 +675,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     completeWorkflowCommand,
     createRun,
     eventRouteByRun,
-    hasWorkflowCommand,
+    workflowCommandsFor,
     ignoredEvent,
     nextQueued,
     pendingWorkflowCommands,
