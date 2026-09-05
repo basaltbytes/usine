@@ -9,7 +9,7 @@ import type { GitHubAppError } from "./model.ts";
 const LabelResponse = Schema.Array(Schema.Struct({ name: Schema.NonEmptyString }));
 const LabelNames = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique());
 
-/** Lane-scoped label changes. Labels outside these two sets are never rewritten. */
+/** Labels to add and remove on one Item. Labels outside these two sets are left alone. */
 export class ItemLabelMutation extends Schema.Class<ItemLabelMutation>(
   "@usine/github/ItemLabelMutation",
 )({
@@ -25,11 +25,11 @@ const labelsUrl = (repository: RepositoryName, item: number): string => {
 const labelUrl = (repository: RepositoryName, item: number, label: string): string =>
   `${labelsUrl(repository, item)}/${encodeURIComponent(label)}`;
 
-/** Authenticated GitHub Item writes used by the Board trigger surface. */
+/** Label writes on GitHub Items, used when the Board moves a card between lanes. */
 export class GitHubItemWriter extends Context.Service<
   GitHubItemWriter,
   {
-    /** Adds/removes only the named labels; every other applied label is preserved. */
+    /** Adds and removes only the named labels and keeps every other applied label. */
     readonly updateLabels: (
       repository: RepositoryName,
       item: ItemNumber,

@@ -469,8 +469,8 @@ describe("PollingTriggers", () => {
         assert.strictEqual(coldStart.changedItems, 2);
         const originalRun = claimedRun(coldStart);
         const originalSnapshot = yield* waitForState(firstEngine, originalRun, "Waiting");
-        // The persisted ItemKey wire format: ledger rows written before the codec
-        // existed must keep matching the keys new polls produce.
+        // Ledger rows written before the codec existed must keep matching the
+        // keys new polls produce.
         assert.strictEqual(originalSnapshot.itemKey, '["github","basaltbytes/usine",28]');
         assert.strictEqual(originalSnapshot.task, "Implement issue 28.");
         assert.strictEqual(originalSnapshot.agent.name, "developer");
@@ -684,8 +684,8 @@ describe("PollingTriggers", () => {
   });
 
   it.effect("isolates one loop's prompt rendering failure and still advances the cursor", () => {
-    // A render failure is deterministic loop authoring: re-polling the same
-    // snapshot re-fails identically, so it must not wedge the repository.
+    // A render failure comes from the loop's authoring and would fail the same
+    // way on re-poll, so it must not wedge the repository.
     const broken = issueLoop("broken-prompt");
     const healthy = issueLoop("healthy-prompt");
     const cursorWrites: Array<CursorKey> = [];

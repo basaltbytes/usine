@@ -71,7 +71,7 @@ const emptyCatalog = new RepositoryLabelCatalog({
 const catalogEntityTag = EntityTag.make('W/"labels"');
 const StoredCatalogEntityTag = Schema.Struct({ labelEntityTag: Schema.NullOr(Schema.String) });
 const decodeStoredCatalogEntityTag = Schema.decodeUnknownSync(StoredCatalogEntityTag);
-/** The catalog ETag each persisted poll cursor will send next cycle. */
+/** The catalog ETag each stored poll cursor sends next cycle. */
 const storedCatalogEntityTags = (
   stored: ReadonlyMap<string, Schema.Json>,
 ): ReadonlyArray<string | null> =>
@@ -325,7 +325,7 @@ describe("PollingTriggers label preflight", () => {
         yield* polling.poll(instance);
         assert.deepStrictEqual(storedCatalogEntityTags(cursors.stored), [catalogEntityTag]);
 
-        // The projection reader knows nothing: the stored catalog vanished behind the ETag.
+        // The stored catalog is gone while the cursor still has its ETag.
         const cycle = yield* polling.poll(instance);
 
         assert.deepStrictEqual(catalogRequests, ["none", catalogEntityTag]);

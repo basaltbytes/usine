@@ -27,7 +27,7 @@ const LabelRequest = Schema.Struct({ labels: Schema.Array(Schema.String) });
 describe("GitHubItemWriter", () => {
   it.effect("mutates only lane labels while preserving truncated and concurrent labels", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
-    // The polled Item slice would expose only the first 50 of these labels.
+    // The polled Item slice exposes only the first 50 of these labels.
     const unrelated = Array.from({ length: 60 }, (_, index) => `unrelated-${index}`);
     const current = new Set([...unrelated, "ready"]);
     let concurrentAdded = false;
@@ -41,8 +41,7 @@ describe("GitHubItemWriter", () => {
           );
           body.labels.forEach((label) => current.add(label));
         }
-        // Simulate an unrelated label arriving after the stale projection and
-        // during the multi-request lane move.
+        // An unrelated label arrives after the stale projection, during the multi-request lane move.
         current.add("concurrent-label");
         concurrentAdded = true;
       } else if (request.method === "DELETE") {

@@ -1,9 +1,8 @@
 import { Schema } from "effect";
 
 /**
- * The stable `owner/name` identity shared by the registry and every
- * GitHub-facing block. The original casing is significant to display; GitHub
- * comparisons are handled separately at the adapter boundary.
+ * Full `owner/name` of a GitHub repository, in the casing the operator wrote.
+ * Compare through `canonicalRepositoryName`, since GitHub ignores case.
  */
 export const RepositoryName = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/u, {
@@ -13,11 +12,7 @@ export const RepositoryName = Schema.String.check(
 
 export type RepositoryName = typeof RepositoryName.Type;
 
-/**
- * A git revision resolved when an Attempt workspace is created. Revisions
- * reach `git fetch` as bare arguments, so a leading `-` (which git would parse
- * as an option) and whitespace are unrepresentable by the brand.
- */
+/** The branch, tag, commit, or `HEAD` a Worker fetches when preparing an Attempt; named refs resolve at preparation time. */
 export const RepositoryRevision = Schema.String.check(
   Schema.isPattern(/^[^\s-]\S*$/u, {
     message: "Expected a git revision without whitespace or a leading dash",
@@ -25,7 +20,7 @@ export const RepositoryRevision = Schema.String.check(
 ).pipe(Schema.brand("RepositoryRevision"));
 export type RepositoryRevision = typeof RepositoryRevision.Type;
 
-/** A git object id harvested from an Attempt workspace. */
+/** An exact Git commit recorded for a checkout or produced by an Attempt, unchanged when branch names move. */
 export const CommitSha = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u, {
     message: "Expected a 40- or 64-character lowercase git object id",
@@ -33,7 +28,7 @@ export const CommitSha = Schema.String.check(
 ).pipe(Schema.brand("CommitSha"));
 export type CommitSha = typeof CommitSha.Type;
 
-/** The `owner` and `name` halves of a full repo name; the brand proves the separator exists. */
+/** Splits a repository name into its `owner` and `name`. */
 export const splitRepositoryName = (repository: RepositoryName) => {
   const separator = repository.indexOf("/");
   return {
@@ -42,6 +37,6 @@ export const splitRepositoryName = (repository: RepositoryName) => {
   } as const;
 };
 
-/** Case-insensitive comparison key: GitHub repo names differ only by display casing. */
+/** Lowercases a repository name for comparison, since GitHub ignores case. */
 export const canonicalRepositoryName = (repository: RepositoryName): string =>
   repository.toLowerCase();

@@ -147,8 +147,8 @@ describe("operator HTTP API", () => {
     assert.strictEqual(crossSite.status, 403);
     assert.strictEqual((await crossSite.json()).error, "CrossSiteRequestError");
 
-    // A loopback origin (the Vite dev server) reaches the handler — here the
-    // needs-setup 503, proving the guard let it through.
+    // A loopback origin (the Vite dev server) reaches the handler; the
+    // needs-setup 503 proves the guard let it through.
     const loopback = await app.handler(
       new Request(`http://localhost/api/runs/${runId}/approve`, {
         method: "POST",

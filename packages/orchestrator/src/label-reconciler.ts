@@ -17,9 +17,9 @@ export class LabelPreflightFinding extends Schema.Class<LabelPreflightFinding>(
 export interface LabelReconciliation {
   readonly labels: ReadonlyArray<StoredRepositoryLabel>;
   readonly findings: ReadonlyArray<LabelPreflightFinding>;
-  /** A successful creation invalidates the catalog ETag held by the poll cursor. */
+  /** True when a label was created, so the poll cursor must drop its catalog ETag. */
   readonly catalogChanged: boolean;
-  /** Creation rate limits delay the next cycle without blocking this cycle's triggers. */
+  /** When a creation rate limit asks the next cycle to wait; this cycle's triggers still run. */
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
@@ -60,7 +60,7 @@ const createInput = (label: DeclaredLabel): NewRepositoryLabel =>
     description: label.description,
   });
 
-/** Create-only reconciliation of factory declarations against one stored catalog. */
+/** Creates the labels a factory declares that one repository's stored catalog lacks. */
 export class LabelReconciler extends Context.Service<
   LabelReconciler,
   {

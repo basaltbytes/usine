@@ -47,7 +47,7 @@ export class ServerStartError extends Schema.TaggedError<ServerStartError>(
   "@usine/server/ServerStartError",
 )("ServerStartError", { port: Port, cause: Schema.Defect() }) {}
 
-/** The instance folder sits under a path the OS clears; its runtime store is the only copy of run history. */
+/** Raised when the instance folder sits under a path the OS may clear, since its runtime store is the only copy of run history. */
 export class VolatileInstanceDirectoryError extends Schema.TaggedError<VolatileInstanceDirectoryError>(
   "@usine/server/VolatileInstanceDirectoryError",
 )("VolatileInstanceDirectoryError", {
@@ -131,7 +131,7 @@ const upCommand = (
     return new UpCommand({ port: resolvedPort, allowVolatileInstance });
   });
 
-/** Parse process arguments and environment into one validated CLI command. */
+/** Parses process arguments and the environment into one validated CLI command. */
 export const parseCli = Effect.fn("Cli.parse")((
   args: ReadonlyArray<string>,
   environment: CliEnvironment,
@@ -149,7 +149,7 @@ export const parseCli = Effect.fn("Cli.parse")((
   return upCommand(args.slice(1), environment);
 });
 
-/** Roots the OS may clear: `os.tmpdir()`, `$TMPDIR`, and the usual temp locations. */
+/** Directories the OS may clear: `os.tmpdir()`, `$TMPDIR`, and the usual temp locations. */
 export const volatileRoots = (environmentTmpdir: Option.Option<string>): ReadonlyArray<string> =>
   [
     ...new Set([
@@ -166,7 +166,7 @@ export const volatileRoots = (environmentTmpdir: Option.Option<string>): Readonl
 const isUnder = (directory: string, root: string): boolean =>
   directory === root || directory.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 
-/** The volatile root an instance folder sits under, if any. Paths are compared as given, symlinks unresolved. */
+/** Returns the volatile root the directory sits under, if any. Paths are compared as given, with symlinks unresolved. */
 export const volatileRoot = (
   directory: string,
   roots: ReadonlyArray<string>,
@@ -179,7 +179,7 @@ const PackageMetadataFromJson = Schema.fromJsonString(
   Schema.Struct({ version: Schema.NonEmptyString }),
 );
 
-/** Read the package version npm pinned for this installed server. */
+/** Reads the version of this installed server from its package.json. */
 export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const packagePath = fileURLToPath(new URL("../package.json", import.meta.url));
@@ -194,7 +194,7 @@ export const packageVersion = Effect.fn("Cli.packageVersion")(function* () {
 
 const AddressInUse = Schema.Struct({ code: Schema.Literal("EADDRINUSE") });
 
-/** Translate Effect's low-level bind failure into the CLI's startup vocabulary. */
+/** Maps a bind failure to the CLI's startup error, so an address already in use is reported as such. */
 export const serverStartError = (port: Port, error: ServeError) =>
   Schema.is(AddressInUse)(error.cause)
     ? new PortInUseError({ port })
@@ -208,7 +208,7 @@ const browserCommand = (url: string) => {
   return { command: "xdg-open", args: [url] };
 };
 
-/** Open the setup page after the HTTP server has bound successfully. */
+/** Opens the setup page in a browser; call it only after the HTTP server has bound. */
 export const openBrowser = Effect.fn("Cli.openBrowser")(function* (
   url: string,
   timeout: Duration.Input = BROWSER_OPEN_TIMEOUT,

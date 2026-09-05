@@ -6,7 +6,7 @@ import { API_ROOT, authorized, invalidResponse, statusError, transportError } fr
 import type { GitHubAppError } from "./model.ts";
 import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "./polling/model.ts";
 
-/** One repository-label definition accepted by GitHub's create endpoint. */
+/** One label definition as GitHub's create-label endpoint accepts it. */
 export class NewRepositoryLabel extends Schema.Class<NewRepositoryLabel>(
   "@usine/github/NewRepositoryLabel",
 )({
@@ -32,7 +32,7 @@ const labelsUrl = (repository: RepositoryName): string => {
   return `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/labels`;
 };
 
-/** Authenticated repository-label creation under the App installation token. */
+/** Creates repository labels under the App installation token. */
 export class GitHubLabelWriter extends Context.Service<
   GitHubLabelWriter,
   {

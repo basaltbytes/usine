@@ -177,7 +177,7 @@ const environment = (types: ReadonlyArray<ObjectType>, itemType: string): Enviro
     ],
   });
 
-/** Exact v1 issue payload slice descriptor recorded by issue #11. */
+/** The CEL environment for issue triggers: the `item` type mirrors the issue payload slice. */
 export const issueEnvironment = environment(
   [
     actor,
@@ -195,7 +195,7 @@ export const issueEnvironment = environment(
   "IssuePayload",
 );
 
-/** Exact v1 pull-request payload slice descriptor recorded by issue #11. */
+/** The CEL environment for pull-request triggers: the `item` type mirrors the pull-request payload slice. */
 export const pullRequestEnvironment = environment(
   [
     actor,
@@ -221,7 +221,7 @@ export const pullRequestEnvironment = environment(
   "PullRequestPayload",
 );
 
-/** Schedule payload slice: item.tick = { scheduledAt, scheduledAtLocal, cron, tz }. */
+/** The CEL environment for schedule triggers: `item.tick` has `scheduledAt`, `scheduledAtLocal`, `cron`, and `tz`. */
 export const scheduleEnvironment = environment([tick, schedule], "SchedulePayload");
 
 export const environmentFor = (stream: Stream): Environment => {
@@ -236,8 +236,8 @@ export const environmentFor = (stream: Stream): Environment => {
 };
 
 /**
- * The CEL `repo` variable, built beside the `RepoContext` type it must match —
- * a field added to one belongs in the other.
+ * The value of the CEL `repo` variable. A field added here must also be added
+ * to the `RepoContext` type, and the reverse.
  */
 export const repositoryContext = (repository: ManagedRepo): Schema.JsonObject => {
   const { owner } = splitRepositoryName(repository.name);

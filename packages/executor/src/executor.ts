@@ -9,8 +9,7 @@ import { WorkerName, WorkerKind } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
 import { Context, Effect, Redacted, Schema } from "effect";
 
-/** @usine/executor — platform-free worker execution contract. */
-
+/** The Worker operation that failed during readiness checks or an Attempt's lifecycle. */
 export const ExecutorOperation = Schema.Literals([
   "preflight",
   "prepare",
@@ -20,6 +19,7 @@ export const ExecutorOperation = Schema.Literals([
 ]);
 export type ExecutorOperation = typeof ExecutorOperation.Type;
 
+/** A prerequisite a Worker must satisfy before it can accept Attempts. */
 export const WorkerCapability = Schema.Literals([
   "machine",
   "toolchain",
@@ -29,6 +29,7 @@ export const WorkerCapability = Schema.Literals([
 ]);
 export type WorkerCapability = typeof WorkerCapability.Type;
 
+/** A Worker operation failed before its requested work completed. */
 export class ExecutorOperationError extends Schema.TaggedError<ExecutorOperationError>(
   "@usine/executor/ExecutorOperationError",
 )("ExecutorOperationError", {
@@ -37,6 +38,7 @@ export class ExecutorOperationError extends Schema.TaggedError<ExecutorOperation
   cause: Schema.Defect(),
 }) {}
 
+/** A Worker could not obtain access to the repository assigned to an Attempt. */
 export class CredentialUnavailableError extends Schema.TaggedError<CredentialUnavailableError>(
   "@usine/executor/CredentialUnavailableError",
 )("CredentialUnavailableError", {
@@ -55,6 +57,7 @@ export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityEr
   cause: Schema.Defect(),
 }) {}
 
+/** A readiness, access, or lifecycle failure reported by a Worker operation. */
 export const ExecutorError = Schema.Union([
   ExecutorOperationError,
   CredentialUnavailableError,
@@ -62,7 +65,7 @@ export const ExecutorError = Schema.Union([
 ]);
 export type ExecutorError = typeof ExecutorError.Type;
 
-/** Every preflight refusal is logged: a missing capability must be explainable from logs alone. */
+/** Logs every preflight refusal so a missing capability is explainable from logs alone. */
 export const logPreflightFailure = <A, R>(
   effect: Effect.Effect<A, ExecutorError, R>,
 ): Effect.Effect<A, ExecutorError, R> =>
@@ -86,7 +89,7 @@ export interface RunHostCommand {
   readonly args: ReadonlyArray<string>;
 }
 
-/** Secret-free request used to create one fresh Attempt workspace. */
+/** The repository, revision, and Agent task assigned to a Worker for one fresh Attempt checkout. */
 export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   "@usine/executor/CheckoutRequest",
 )({
@@ -102,11 +105,11 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   parentEffort: Effort,
 }) {}
 
-/** Value object (branded path): one Attempt's disposable checkout directory. */
+/** One Attempt's disposable checkout directory. */
 export const WorktreePath = Schema.NonEmptyString.pipe(Schema.brand("WorktreePath"));
 export type WorktreePath = typeof WorktreePath.Type;
 
-/** Prepared workspace descriptor. Credentials remain private to the adapter. */
+/** A prepared Attempt checkout ready to launch on its assigned Worker; credentials stay with the adapter. */
 export class PreparedAttempt extends Schema.Class<PreparedAttempt>(
   "@usine/executor/PreparedAttempt",
 )({
@@ -126,18 +129,23 @@ export class CredentialProvider extends Context.Service<
   }
 >()("@usine/executor/CredentialProvider") {}
 
-/** The five-operation worker contract from ADR 0006. Preflight verifies only — it never installs. */
+/** Prepares isolated checkouts, runs Attempts on a Worker, and releases their resources (ADR 0006). */
 export class Executor extends Context.Service<
   Executor,
   {
     readonly kind: WorkerKind;
+    /** Verifies that a configured Worker is ready to accept work; never installs tools or logs in. */
     readonly preflight: (worker: WorkerName) => Effect.Effect<void, ExecutorError>;
+    /** Fetches the requested revision and prepares an isolated checkout; successful preparation requires eventual cleanup. */
     readonly prepare: (request: CheckoutRequest) => Effect.Effect<PreparedAttempt, ExecutorError>;
+    /** Runs the prepared Attempt, persists channel activity through `io`, and waits for its result or failure. */
     readonly launch: (
       prepared: PreparedAttempt,
       io: AttemptChannel.Sink,
     ) => Effect.Effect<StepResult, AttemptFailure>;
+    /** Requests an active Attempt to stop, allowing a grace period before forcing termination. */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
+    /** Removes the Attempt's checkout and releases its resources after any outcome. */
     readonly cleanup: (prepared: PreparedAttempt) => Effect.Effect<void, ExecutorError>;
   }
 >()("@usine/executor/Executor") {}

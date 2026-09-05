@@ -67,7 +67,7 @@ import {
   triggerSubmission,
 } from "./trigger-submission.ts";
 
-/** GitHub REST + GraphQL tolerate a handful of parallel calls per token. */
+/** GitHub tolerates a handful of parallel REST and GraphQL calls per token. */
 const REPOSITORY_CONCURRENCY = 4;
 
 const ITEM_CONCURRENCY = 4;
@@ -76,14 +76,11 @@ const WatchKey = Schema.NonEmptyString.pipe(Schema.brand("GitHubPollWatchKey"));
 type WatchKey = typeof WatchKey.Type;
 
 /**
- * The ItemKey of one GitHub issue or pull request: the repository's canonical
+ * The ItemKey of one GitHub issue or pull request: the canonical repository
  * name and the item number, JSON-encoded. The poll encodes with this schema and
- * the web decodes with it to link a Run back to its Item, so the two cannot
- * drift apart. Schedule Runs key the repository alone (see schedule-triggers)
- * and therefore do not decode as an item.
- *
- * `toType` keeps the ItemKey brand on the encoded side, so `encodeSync`
- * returns an `Item.ItemKey` rather than a bare string.
+ * the web decodes with it, so the two cannot drift. Schedule Runs key the
+ * repository alone and do not decode as an item. `toType` keeps the ItemKey
+ * brand on the encoded side, so `encodeSync` returns an `ItemKey`.
  */
 export const GitHubItemKey = Schema.toType(ItemKey).pipe(
   Schema.decodeTo(
@@ -101,7 +98,7 @@ class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   watches: Schema.Array(WatchKey).check(Schema.isUnique()),
 }) {}
 
-/** One repository whose cycle ended in a typed error; siblings were unaffected. */
+/** One repository whose cycle failed; its siblings finished normally. */
 export class RepositoryPollFailure extends Schema.Class<RepositoryPollFailure>(
   "@usine/orchestrator/RepositoryPollFailure",
 )({
@@ -114,7 +111,7 @@ export class PollCycle extends Schema.Class<PollCycle>("@usine/orchestrator/Poll
   repositories: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   changedItems: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   submissions: Schema.Array(SubmissionResult),
-  /** Run ids actually revoked because their item stopped matching. */
+  /** How many Runs this cycle revoked because their item stopped matching. */
   revokedRuns: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   failures: Schema.Array(RepositoryPollFailure),
   preflightFindings: Schema.Array(LabelPreflightFinding),
@@ -150,11 +147,11 @@ interface RepositoryCycle {
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
-/** A completed preflight followed by a failed repository-poll phase. */
+/** A cycle whose preflight finished but whose repository poll failed. */
 interface InterruptedRepositoryCycle {
   readonly _tag: "InterruptedRepositoryCycle";
   readonly error: RepositoryPollError;
-  /** Isolated preflight failures (a failed catalog request) survive the interruption. */
+  /** Preflight failures such as a failed catalog request, kept through the interruption. */
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
   readonly preflightFindings: ReadonlyArray<LabelPreflightFinding>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
@@ -163,27 +160,27 @@ interface InterruptedRepositoryCycle {
 interface ItemCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
-  /** Loop-authoring failures isolated to their loop so the cursor still advances. */
+  /** Failures scoped to one loop; the cursor still advances past them. */
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
 }
 
-/** What one repository's label-catalog request contributed to its cycle. */
+/** What one repository's label-catalog request gave its cycle. */
 interface LabelCatalogCycle {
   readonly labelEntityTag: Option.Option<EntityTag>;
-  /** The ETag moved; the cursor must persist it even when no item changed. */
+  /** True when the ETag changed; the cursor persists it even if no item changed. */
   readonly entityTagChanged: boolean;
   /**
-   * The catalog GitHub confirmed this cycle: the fresh body, or the stored
-   * projection an unchanged (304) answer vouches for. Absent when the request
-   * failed — provisioning then waits for the next confirmed catalog, so a
-   * transient failure never re-creates labels the repository already has.
+   * The catalog GitHub confirmed this cycle: a fresh body, or the stored
+   * projection a 304 vouches for. None when the request failed, so provisioning
+   * waits for a confirmed catalog instead of re-creating labels the repository
+   * already has.
    */
   readonly confirmedLabels: Option.Option<ReadonlyArray<RepositoryLabel>>;
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
 }
 
-/** Nothing to provision: the cycle had no confirmed catalog to compare against. */
+/** The reconciliation result when the cycle had no confirmed catalog to compare against. */
 const DEFERRED_RECONCILIATION: LabelReconciliation = {
   labels: [],
   findings: [],
@@ -253,14 +250,14 @@ const latestPollAt = (
   return epochs.length === 0 ? Option.none() : DateTime.make(Math.max(...epochs));
 };
 
-/** Full selector-pruned GitHub change → snapshot → CEL → Event composition. */
+/** Polls the selected GitHub repositories, evaluates each changed item against the loops, and submits Events. */
 export class PollingTriggers extends Context.Service<
   PollingTriggers,
   {
     /**
-     * One cycle over every watched repository. Per-repository failures are
-     * isolated, logged, and reported on the cycle — one bad repository never
-     * stops its siblings, and only a defect stops the loop.
+     * Runs one cycle over every watched repository. A repository's failure is
+     * logged and reported on the cycle while its siblings continue; only a
+     * defect stops the loop.
      */
     readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle, EnginePersistenceError>;
     readonly run: (instance: LoadedInstance) => Effect.Effect<never>;
@@ -321,7 +318,7 @@ export class PollingTriggers extends Context.Service<
         });
         const loops = watched.loops.filter(({ loop }) => loop.trigger.on === itemStream(item));
         const snapshot = yield* github.snapshot(watched.repository.name, item);
-        // Both snapshot variants carry their payload; the union needs no recheck.
+        // Both snapshot variants have a payload, so the union needs no narrowing.
         const payload: Schema.JsonObject = snapshot.payload;
         const context = { repo: repositoryContext(watched.repository), item: payload };
         const stableItemKey = itemKey(watched.repository, item);
@@ -382,9 +379,9 @@ export class PollingTriggers extends Context.Service<
 
           const dedupKey = eventKey(loop, watched.repository, item, snapshot);
           const receivedAt = yield* DateTime.now;
-          // A render failure is deterministic loop authoring, not transport:
-          // re-polling the same snapshot re-fails identically. Isolate it to
-          // this loop so sibling loops and the cursor still advance.
+          // A render failure comes from the loop's authoring, not transport, so
+          // re-polling would fail the same way. It is scoped to this loop so the
+          // sibling loops and the cursor still advance.
           const rendered = yield* Effect.result(config.renderPrompt(loop, context));
           if (Result.isFailure(rendered)) {
             yield* Effect.logError("Loop prompt rendering failed; sibling loops were unaffected", {
@@ -433,10 +430,9 @@ export class PollingTriggers extends Context.Service<
       });
 
       /**
-       * The label catalog feeds the Board projection and the label preflight.
-       * A failed catalog request keeps the stored catalog and ETag, defers
-       * provisioning, and never blocks trigger evaluation: label-triggered
-       * Loops fire from the change poll alone.
+       * Refreshes the stored label catalog that the Board and the label
+       * preflight read. A failed request keeps the stored catalog and ETag and
+       * defers provisioning; trigger evaluation runs from the change poll alone.
        */
       const applyLabelCatalog = Effect.fn("PollingTriggers.applyLabelCatalog")(function* (
         watched: WatchedRepository,
@@ -485,8 +481,8 @@ export class PollingTriggers extends Context.Service<
         if (!(detection instanceof RepositoryLabelCatalog)) {
           const projection = yield* repositoryLabelReader.get(watched.repository.name);
           if (Option.isNone(projection)) {
-            // The ETag vouches for a projection that is no longer stored:
-            // drop it so the next cycle fetches the catalog in full.
+            // The ETag vouches for a projection that is no longer stored, so drop
+            // it and fetch the catalog in full next cycle.
             yield* Effect.logWarning(
               "Repository label catalog unchanged (304) but its projection is missing; refetching next cycle and deferring label provisioning",
               { repository: watched.repository.name },
@@ -537,8 +533,8 @@ export class PollingTriggers extends Context.Service<
               }),
             );
           }
-          // Label creation is preflight work: it completes before change detection
-          // and Item evaluation begin, including on the first `usine up` cycle.
+          // Label creation finishes before change detection and Item evaluation
+          // begin, including on the first cycle after `usine up`.
           const detected = yield* github.changes(watched.repository.name, stored.cursor);
           const nextCursor = new StoredPollCursor({
             boardVersion: 4,
@@ -574,9 +570,9 @@ export class PollingTriggers extends Context.Service<
             (item) => evaluateItem(watched, item),
             { concurrency: ITEM_CONCURRENCY },
           );
-          // Advancing is the commit point: every changed item was fetched,
-          // evaluated, and submitted/revoked successfully. A prior failure
-          // leaves the old cursor so the next cycle safely re-polls.
+          // Advancing the cursor is the commit point: every changed item was
+          // fetched, evaluated, and submitted or revoked. After a failure the
+          // old cursor stays so the next cycle re-polls.
           yield* writeCursor(watched, nextCursor);
           return {
             changedItems: detected.items.length,
@@ -673,8 +669,8 @@ export class PollingTriggers extends Context.Service<
         return cycle;
       });
 
-      // No Effect.fn here: `run` never returns, so a named wrapper would open
-      // a span that never closes. Each cycle's span lives on `poll`.
+      // `run` never returns, so wrapping it in Effect.fn would open a span that
+      // never closes; `poll` opens the span for each cycle.
       const run = (instance: LoadedInstance): Effect.Effect<never> =>
         Effect.gen(function* () {
           const startedAt = yield* Clock.currentTimeMillis;

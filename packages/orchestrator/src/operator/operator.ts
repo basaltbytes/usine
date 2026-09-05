@@ -60,10 +60,10 @@ export type BoardMoveError =
 export type OperatorError = RunEngineError | TranscriptAttemptNotFoundError | BoardMoveError;
 export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFoundError;
 
-/** Settled Runs kept in the overview beside every open one; history stays bounded. */
+/** How many settled Runs the overview keeps beside the open ones. */
 const OVERVIEW_CLOSED_RUNS = 100;
 
-/** Newest Items projected onto a Board; older ones fall off instead of growing the overview. */
+/** How many newest Items a Board shows; older ones drop off. */
 const OVERVIEW_BOARD_ITEMS = 500;
 
 interface CachedOverview {
@@ -249,8 +249,8 @@ const makeOperatorObservation = Effect.gen(function* () {
           onNone: () => [],
           onSome: ({ failures }) => failures,
         });
-        // A missing invalidation singleton means staleness is undetectable, so the
-        // cache is bypassed entirely rather than trusted.
+        // Without the invalidation singleton staleness cannot be detected, so the
+        // cache is bypassed.
         const token = Option.map(revision, (value) =>
           JSON.stringify([
             value,
@@ -315,13 +315,15 @@ const makeOperatorObservation = Effect.gen(function* () {
   return { detail, overview } as const;
 });
 
-/** Read-only operator surface; safe to build without trigger execution. */
+/** The read-only operator surface. It needs no trigger execution to build. */
 export class OperatorObservation extends Context.Service<
   OperatorObservation,
   {
+    /** Builds the supplied instance's Projects, Boards, Runs, and items needing operator attention. */
     readonly overview: (
       instance: LoadedInstance,
     ) => Effect.Effect<ReadyOverview, OperatorObservationError>;
+    /** Reads one Run and a bounded transcript page; `request` selects the latest, newer, or earlier activity. */
     readonly detail: (
       runId: RunId,
       request?: TranscriptRequest,
@@ -451,18 +453,24 @@ const makeOperator = Effect.gen(function* () {
   return { ...observation, approve, cancel, moveBoardItem, pause, retry, unpause } as const;
 });
 
-/** Observe-and-intervene application service; transports only translate this API. */
+/** The operator's view of the factory and actions for approving, retrying, canceling, and directing work. */
 export class Operator extends Context.Service<
   Operator,
   OperatorObservation["Service"] & {
+    /** Records approval for a waiting Run; execution still waits for Worker capacity. */
     readonly approve: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Requests a new Attempt for a failed Run using its effective task and Agent. */
     readonly retry: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Cancels an open Run and interrupts its current Attempt; an already closed Run is unchanged. */
     readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Swaps lane labels on GitHub; the next poll refreshes the Board's observed position. */
     readonly moveBoardItem: (
       instance: LoadedInstance,
       move: BoardMove,
     ) => Effect.Effect<void, BoardMoveError>;
+    /** Pauses new work for a Loop while its existing Runs continue. */
     readonly pause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+    /** Allows the Loop's triggers to open new Runs again. */
     readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
   }
 >()("@usine/orchestrator/Operator") {

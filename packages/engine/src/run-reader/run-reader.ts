@@ -26,17 +26,19 @@ const makeRunReader = Effect.gen(function* () {
   return { inspect, list, revision, transcript } as const;
 });
 
-/** Read-only durable Run projection; safe to build while execution is idle. */
+/** Reads saved Run state and transcripts without starting or recovering execution. */
 export class RunReader extends Context.Service<
   RunReader,
   {
+    /** Reads a Run's current state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
     /** Every open Run plus the newest `closedLimit` settled ones, newest first. */
     readonly list: (options: {
       readonly closedLimit: number;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
-    /** `None` means the invalidation singleton is absent: treat every cached projection as stale. */
+    /** `None` means the invalidation row is absent: treat every cached projection as stale. */
     readonly revision: () => Effect.Effect<Option.Option<ProjectionRevision>, RunStoreError>;
+    /** Reads the requested portion of one Attempt's saved transcript in append order. */
     readonly transcript: (
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunStoreError>;

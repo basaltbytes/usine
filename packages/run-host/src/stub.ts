@@ -10,7 +10,7 @@ import {
 } from "@usine/core/agent/session";
 import { Cause, Deferred, Effect, Layer, Option, Queue, Stream } from "effect";
 
-/** Explicit deterministic adapter used only by process-level executor tests. */
+/** A deterministic agent runtime for process-level executor tests. */
 export const stubLayer = (delayMillis = 0) =>
   Layer.effect(
     AgentRuntime,

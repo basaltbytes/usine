@@ -61,9 +61,9 @@ export const attemptChannelFor: (
         },
       ),
     );
-    // Identity scrub is safe here because this process never holds a secret
-    // the run host could echo: credentials are edge-injected on the VM by the
-    // exe.dev integration. Revisit if any credential ever crosses this seam.
+    // Nothing to scrub: this process never has a secret the run host could echo,
+    // because the exe.dev integration injects credentials on the VM. If a
+    // credential ever passes through this process, scrub it here.
     return { handle, host: state.vm.sshDest, scrub: (text: string): string => text };
   });
 

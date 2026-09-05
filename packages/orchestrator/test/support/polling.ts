@@ -35,7 +35,7 @@ const forgetfulCursorStore: CursorStore["Service"] = {
   write: () => Effect.void,
 };
 
-/** A cursor store that round-trips encoded cursors, exposing what each poll persisted. */
+/** An in-memory cursor store that also exposes what each poll persisted. */
 export const memoryCursorStore = () => {
   const stored = new Map<string, Schema.Json>();
   const store: CursorStore["Service"] = {

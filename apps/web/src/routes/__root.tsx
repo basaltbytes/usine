@@ -34,13 +34,13 @@ import { overviewQuery } from "../overview.ts";
 import { Suspense, lazy, useState } from "react";
 import { useOpenRun } from "../open-run.ts";
 
-// The drawer carries the transcript, Markdown, and message components; it
-// loads on first open so the first paint of a project stays small (#81).
+// The drawer bundles the transcript, Markdown, and message components, so it
+// loads on first open to keep a project's first paint small.
 const RunDrawer = lazy(() =>
   import("../run-drawer.tsx").then(({ RunDrawer: drawer }) => ({ default: drawer })),
 );
 
-/** The run drawer overlays any screen, so its id lives in the root search. */
+/** The run drawer overlays any screen, so its run id is kept in the root search. */
 const RootSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(RunId) }));
 
 interface RouterContext {

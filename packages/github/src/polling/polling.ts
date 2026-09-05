@@ -40,11 +40,11 @@ import { ISSUE_PAYLOAD_QUERY, PULL_REQUEST_PAYLOAD_QUERY } from "./queries.ts";
 
 const WATERMARK_OVERLAP_MS = 5_000;
 const RATE_LIMIT_PRESSURE_THRESHOLD = 100;
-/** Bounds one cycle's REST walk; the watermark resumes the remainder next cycle. */
+/** Caps one cycle's REST walk. The watermark resumes the remainder next cycle. */
 const MAX_CHANGE_PAGES = 10;
-/** A pathological catalog cannot turn one repository poll into an unbounded walk. */
+/** Caps one repository's label walk so a pathological catalog cannot run unbounded. */
 const MAX_LABEL_PAGES = 100;
-/** GraphQL rate limiting sometimes omits reset headers; wait at least this long. */
+/** GraphQL rate limiting sometimes omits reset headers. Wait at least this long then. */
 const GRAPHQL_RATE_LIMIT_FALLBACK_MS = 60_000;
 
 const RestChangedItem = Schema.Struct({
@@ -68,7 +68,7 @@ const catalogLabel = ({
 }: (typeof RestRepositoryLabels.Type)[number]): RepositoryLabel =>
   new RepositoryLabel({ name, color, description: Option.fromNullishOr(description) });
 
-/** The GraphQL transport envelope; `errors` arrives on HTTP 200 and must be read. */
+/** The GraphQL transport envelope. `errors` arrives on HTTP 200 and must be read. */
 const GraphqlEnvelope = Schema.Struct({
   data: Schema.optionalKey(Schema.Unknown),
   errors: Schema.optionalKey(
@@ -118,7 +118,7 @@ const nextPollAt = (headers: Headers, now: number) =>
     rateLimitResetMillis(headers, RATE_LIMIT_PRESSURE_THRESHOLD),
   ]);
 
-/** `<https://...>; rel="next"` from a Link header, when GitHub has more pages. */
+/** The `rel="next"` URL from a Link header when GitHub has more pages. */
 const nextPageUrl = (link: string | undefined): Option.Option<string> => {
   if (link === undefined) return Option.none();
   const match = /<(?<url>[^>]+)>;\s*rel="next"/u.exec(link);
@@ -171,25 +171,27 @@ const newerWatermark = (cursor: PollCursor, items: ReadonlyArray<ChangedItem>) =
   return epochs.length === 0 ? Option.none<DateTime.Utc>() : dateTimeAt(Math.max(...epochs));
 };
 
-/** GitHub change detection and snapshot fetching behind one external seam. */
+/** Finds changed GitHub Items and fetches the snapshots used to select work for Loops. */
 export class GitHubPolling extends Context.Service<
   GitHubPolling,
   {
+    /** Finds issue and PR updates since the saved cursor; persist the returned cursor after processing the detected Items. */
     readonly changes: (
       repository: RepositoryName,
       cursor: PollCursor,
     ) => Effect.Effect<ChangeDetection, GitHubAppError>;
+    /** Reads the repository's label catalog, or confirms the catalog named by `entityTag` is unchanged. */
     readonly labels: (
       repository: RepositoryName,
       entityTag: Option.Option<EntityTag>,
     ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
+    /** Fetches an Item's selection and prompt payload together with its timestamp-independent content hash. */
     readonly snapshot: (
       repository: RepositoryName,
       item: ChangedItem,
     ) => Effect.Effect<PayloadSnapshot, GitHubAppError>;
   }
 >()("@usine/github/GitHubPolling") {
-  /** Live GitHub polling adapter over an installation token and Effect HTTP. */
   static readonly layer: Layer.Layer<
     GitHubPolling,
     never,
@@ -248,7 +250,7 @@ export class GitHubPolling extends Context.Service<
         };
       });
 
-      /** Walks the pages after an already-fetched first one; one cap for every label walk. */
+      /** Walks the label pages after an already-fetched first page, under the label page cap. */
       const remainingLabelPages = Effect.fn("GitHubPolling.remainingLabelPages")(function* (
         operation: GitHubOperation,
         firstPage: {
@@ -343,9 +345,8 @@ export class GitHubPolling extends Context.Service<
           Effect.mapError((error) => invalidResponse("poll-repository-changes", error.message)),
         );
         const items = toChangedItems(decoded);
-        // The ETag is efficiency-only: a page without one costs conditional
-        // requests next cycle, never correctness. Only the first page's tag
-        // matches the canonical URL the next cycle re-requests.
+        // The ETag is efficiency only: a page without one costs conditional requests next cycle, never correctness.
+        // Only the first page's tag matches the canonical URL the next cycle re-requests.
         const entityTag = Schema.decodeUnknownOption(EntityTag)(response.headers.etag);
         if (Option.isNone(entityTag)) {
           yield* Effect.logWarning("GitHub omitted the changes ETag; next poll is unconditional", {
@@ -399,8 +400,7 @@ export class GitHubPolling extends Context.Service<
         const envelope = yield* HttpClientResponse.schemaBodyJson(GraphqlEnvelope)(response).pipe(
           Effect.mapError((error) => invalidResponse(operation, error.message)),
         );
-        // GraphQL reports failures on HTTP 200: rate limiting becomes a typed
-        // wait; anything else keeps its messages for diagnosis.
+        // GraphQL reports failures on HTTP 200. Rate limiting becomes a typed wait, and anything else keeps its messages for diagnosis.
         if (envelope.errors !== undefined && envelope.errors.length > 0) {
           const rateLimited = envelope.errors.some((error) => error.type === "RATE_LIMITED");
           if (rateLimited) {
@@ -529,8 +529,7 @@ export {
 const makeContentHash = (crypto: Crypto.Crypto) =>
   Effect.fn("GitHubPolling.contentHash")(function* (payload: Schema.Json) {
     const encoded = new TextEncoder().encode(JSON.stringify(canonicalContent(payload)));
-    // An in-memory SHA-256 digest cannot fail for expected reasons: a failure
-    // here is a violated platform invariant, not a domain failure.
+    // An in-memory SHA-256 digest fails only on a broken platform, so a failure here is a defect.
     const digest = yield* crypto.digest("SHA-256", encoded).pipe(Effect.orDie);
     return ContentHash.make(
       Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),

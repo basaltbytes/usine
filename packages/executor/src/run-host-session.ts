@@ -23,7 +23,7 @@ import { invalidFrameDiagnostic, invalidFrameMessage } from "./invalid-frame.ts"
 export interface SpawnedRunHost {
   readonly handle: ChildProcessHandle;
   readonly host: string;
-  /** Redacts the Attempt credential from any run-host output before it is persisted. */
+  /** Redacts the Attempt credential from run-host output before it is persisted. */
   readonly scrub: (text: string) => string;
 }
 
@@ -59,7 +59,7 @@ const STDERR_TAIL_BYTES = 4_096;
 /** Sending SIGKILL is its own bounded step, unrelated to the interrupt grace. */
 const KILL_TIMEOUT = "5 seconds";
 const inputFrameToJson = Schema.encodeSync(AttemptChannel.InputFrameFromJson);
-/** Strict by contract: an unknown key on a protocol frame is a rejected frame. */
+/** Rejects a frame with any unknown key; the protocol is strict by contract. */
 const decodeOutboundEnvelope = (line: string) =>
   Schema.decodeUnknownEffect(AttemptChannel.OutboundEnvelopeFromJson)(line, {
     onExcessProperty: "error",
@@ -83,7 +83,7 @@ const cancelError = (attemptId: AttemptId, cause: unknown) =>
     cause,
   });
 
-/** One canonical byte-channel state machine shared by every process-backed Executor. */
+/** The run-host byte-channel session every process-backed Executor shares. */
 export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effect<RunHostSession> =
   Effect.fn("RunHostSession.for")(function* (options: RunHostSessionOptions) {
     const activeAttempts = yield* Ref.make(new Map<AttemptId, ActiveAttempt>());
@@ -99,8 +99,8 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
         host: active.host,
         reason,
       });
-      // Best-effort by design: the kill failure is logged, never propagated,
-      // so it cannot mask the failure that forced the hard kill.
+      // The kill failure is logged, never propagated, so it cannot mask the
+      // failure that forced the hard kill.
       yield* active.handle.kill({ killSignal: "SIGKILL" }).pipe(
         Effect.timeout(KILL_TIMEOUT),
         Effect.tapError((error) =>
@@ -160,9 +160,9 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
           });
           const delivered = yield* active.io.append("inbound", envelope).pipe(
             Effect.andThen(Queue.offer(active.input, frame(envelope))),
-            // The transcript store is outside the process adapter and may be
-            // parked. Bound it so the uninterruptible cancellation handshake
-            // always reaches the hard-kill phase.
+            // The transcript store sits outside the process adapter and may be
+            // parked; the bound keeps the uninterruptible cancellation handshake
+            // moving on to the hard kill.
             Effect.timeoutOption(options.interruptGrace),
             Effect.result,
           );
@@ -276,8 +276,8 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
             Stream.splitLines,
             Stream.runForEach((rawLine) =>
               Effect.gen(function* () {
-                // Protocol v2 carries raw tool inputs and outputs; scrub the
-                // credential from the line before it is decoded or persisted.
+                // Frames include raw tool inputs and outputs; scrub the credential
+                // from the line before it is decoded or persisted.
                 const line = scrub(rawLine);
                 const envelope = yield* decodeOutboundEnvelope(line).pipe(
                   Effect.catch((cause) => {

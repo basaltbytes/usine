@@ -21,7 +21,7 @@ const factoryError = (error: ConfigFileError): FactoryConfigError =>
     message: error.message,
   });
 
-/** End-to-end instance-folder loader with factory failure and per-loop quarantine. */
+/** Loads an instance folder; an invalid `usine.yaml` fails the load, an invalid loop is quarantined and its siblings still load. */
 export class InstanceFolder extends Context.Service<
   InstanceFolder,
   {

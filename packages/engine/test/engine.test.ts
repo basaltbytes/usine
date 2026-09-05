@@ -194,8 +194,8 @@ describe("durable run engine", () => {
             Option.getOrUndefined(listed[0]?.step.result ?? Option.none())?.message,
             "listed result",
           );
-          // The closed window bounds settled history, but an open Run — here
-          // the older Waiting one — must never fall out of the operator's view.
+          // The closed window bounds settled history, but an open Run, here the
+          // older Waiting one, must never fall out of the operator's view.
           const bounded = yield* reader.list({ closedLimit: 0 });
           assert.deepStrictEqual(
             bounded.map(({ run }) => run.id),
@@ -305,7 +305,7 @@ describe("durable run engine", () => {
           assert.strictEqual(accepted._tag, "Claimed");
           if (accepted._tag !== "Claimed") return;
 
-          // Without the port ACL the defect suspends the workflow and the run
+          // Without the translation the defect suspends the workflow and the run
           // stays Running forever with an open Attempt; with it, the crash is
           // an InfraFailure that auto-retries.
           const finished = yield* waitFor(
@@ -649,8 +649,8 @@ describe("durable run engine", () => {
     withInstance((directory) =>
       Effect.gen(function* () {
         const reserveEntered = yield* Deferred.make<void>();
-        // A 0-capacity scheduler: the run parks in `reserve` forever; only a
-        // cancel that can reach the parked reservation ends it.
+        // A 0-capacity scheduler parks the run in `reserve` forever; only a
+        // cancel that reaches the parked reservation ends it.
         const executor = Layer.succeed(StepExecutor)({
           interrupt: () => Effect.void,
           reserve: () =>

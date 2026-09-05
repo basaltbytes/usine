@@ -22,7 +22,7 @@ export const RepositoryLabelColor = Schema.String.check(
 ).pipe(Schema.brand("GitHubRepositoryLabelColor"));
 export type RepositoryLabelColor = typeof RepositoryLabelColor.Type;
 
-/** One repository label as GitHub defines it: the name routes lanes, the rest is presentation. */
+/** One repository label as GitHub defines it. The name routes lanes, and color and description are presentation only. */
 export class RepositoryLabel extends Schema.Class<RepositoryLabel>("@usine/github/RepositoryLabel")(
   {
     name: RepositoryLabelName,
@@ -36,7 +36,7 @@ const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<RepositoryLabel>>(
   { message: "Expected unique label names" },
 );
 
-/** A complete label catalog and the ETag for its canonical REST URL. */
+/** A complete label catalog with the ETag of its canonical REST URL. */
 export class RepositoryLabelCatalog extends Schema.Class<RepositoryLabelCatalog>(
   "@usine/github/RepositoryLabelCatalog",
 )({
@@ -44,7 +44,7 @@ export class RepositoryLabelCatalog extends Schema.Class<RepositoryLabelCatalog>
   labels: Schema.Array(RepositoryLabel).check(uniqueLabelNames),
 }) {}
 
-/** GitHub confirmed that the catalog named by its ETag has not changed. */
+/** GitHub confirmed the catalog named by its ETag has not changed. */
 export class RepositoryLabelsNotModified extends Schema.TaggedClass<RepositoryLabelsNotModified>(
   "@usine/github/RepositoryLabelsNotModified",
 )("RepositoryLabelsNotModified", {}) {}
@@ -55,7 +55,7 @@ export const RepositoryLabelDetection = Schema.Union([
 ]);
 export type RepositoryLabelDetection = typeof RepositoryLabelDetection.Type;
 
-/** Efficiency-only REST cursor. Losing it is safe because Event dedup is permanent. */
+/** REST cursor for efficiency only. Losing it is safe because Event dedup is permanent (ADR 0007). */
 export class PollCursor extends Schema.Class<PollCursor>("@usine/github/PollCursor")({
   entityTag: Schema.OptionFromNullOr(EntityTag),
   watermark: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
@@ -96,7 +96,7 @@ export class RepositoryChanges extends Schema.TaggedClass<RepositoryChanges>(
 )("RepositoryChanges", {
   cursor: PollCursor,
   items: Schema.Array(ChangedItem),
-  /** True when the page cap ended the walk early; the rest arrives next cycle. */
+  /** True when the page cap ended the walk early. The rest arrives next cycle. */
   backlog: Schema.Boolean,
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
 }) {}
@@ -105,10 +105,9 @@ export const ChangeDetection = Schema.Union([RepositoryNotModified, RepositoryCh
 export type ChangeDetection = typeof ChangeDetection.Type;
 
 /**
- * GitHub declares most GraphQL connections nullable. A null connection and an
- * empty one carry the same information, so the boundary normalizes null to
- * empty — the domain type (and the CEL environment typed on it) stays
- * non-null, and both shapes hash identically.
+ * GitHub declares most GraphQL connections nullable, and a null connection means
+ * the same as an empty one. Decoding null to empty keeps the payload type
+ * non-null and hashes both shapes identically.
  */
 const orEmpty = <A>(schema: Schema.Codec<A, A, never, never>, empty: A) =>
   Schema.NullOr(schema).pipe(
@@ -134,7 +133,7 @@ const IssueComments = Schema.Struct({
   nodes: Schema.Array(IssueComment),
 });
 
-/** Exact v1 issue payload slice recorded by issue #11. */
+/** The issue payload slice that `if:` expressions and prompt interpolation range over. */
 export const IssuePayload = Schema.Struct({
   number: PositiveInt,
   title: Schema.String,
@@ -168,7 +167,7 @@ export const IssuePayload = Schema.Struct({
 });
 export type IssuePayload = typeof IssuePayload.Type;
 
-/** Null when the reviewer is a deleted user or a mannequin — real content, kept. */
+/** Null when the reviewer is a deleted user or a mannequin. That null is real content and stays in the payload. */
 const RequestedReviewer = Schema.NullOr(
   Schema.Struct({ login: Schema.optionalKey(Schema.NonEmptyString) }),
 );
@@ -181,7 +180,7 @@ const Review = Schema.Struct({
 });
 const ReviewThreadComment = Schema.Struct({ author: NullableActor, body: Schema.String });
 
-/** Exact v1 pull-request payload slice recorded by issue #11. */
+/** The pull-request payload slice that `if:` expressions and prompt interpolation range over. */
 export const PullRequestPayload = Schema.Struct({
   number: PositiveInt,
   title: Schema.String,
@@ -239,11 +238,13 @@ export const PullRequestPayload = Schema.Struct({
 });
 export type PullRequestPayload = typeof PullRequestPayload.Type;
 
+/** Identifies an Item's payload content for Event deduplication; timestamp-only changes keep the same hash. */
 export const ContentHash = Schema.String.check(
   Schema.isPattern(/^[a-f0-9]{64}$/u, { message: "Expected a SHA-256 content hash" }),
 ).pipe(Schema.brand("GitHubContentHash"));
 export type ContentHash = typeof ContentHash.Type;
 
+/** An issue's observed payload and the content identity used to decide whether it represents new work. */
 export class IssueSnapshot extends Schema.TaggedClass<IssueSnapshot>("@usine/github/IssueSnapshot")(
   "IssueSnapshot",
   {
@@ -252,6 +253,7 @@ export class IssueSnapshot extends Schema.TaggedClass<IssueSnapshot>("@usine/git
   },
 ) {}
 
+/** A pull request's observed payload and the content identity used to decide whether it represents new work. */
 export class PullRequestSnapshot extends Schema.TaggedClass<PullRequestSnapshot>(
   "@usine/github/PullRequestSnapshot",
 )("PullRequestSnapshot", {
@@ -259,5 +261,6 @@ export class PullRequestSnapshot extends Schema.TaggedClass<PullRequestSnapshot>
   contentHash: ContentHash,
 }) {}
 
+/** The fetched Item state shared by selection, prompt rendering, and Event deduplication. */
 export const PayloadSnapshot = Schema.Union([IssueSnapshot, PullRequestSnapshot]);
 export type PayloadSnapshot = typeof PayloadSnapshot.Type;

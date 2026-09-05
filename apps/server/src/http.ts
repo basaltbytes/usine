@@ -124,10 +124,10 @@ const LOOPBACK_HOSTS = new Set(["127.0.0.1", "localhost", "[::1]", "::1"]);
 
 /**
  * Cross-site request forgery guard. Browsers attach `Origin` to every
- * cross-origin request — including the "simple" POSTs this API accepts — so a
- * present, non-loopback origin can only be another site driving the
- * operator's browser, and its side effect must be refused before the handler
- * runs. Requests without the header (curl, same-origin GETs) pass through.
+ * cross-origin request, including the simple POSTs this API accepts, so a
+ * present non-loopback origin can only be another site driving the operator's
+ * browser and its request is refused before the handler runs. Requests without
+ * the header (curl, same-origin GETs) pass through.
  */
 const crossSiteOrigin = (request: HttpServerRequest.HttpServerRequest): boolean => {
   const origin = request.headers.origin;

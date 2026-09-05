@@ -47,9 +47,9 @@ const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta
 const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
 const TURBO_CACHE_HOST = fileURLToPath(new URL("./fixtures/turbo-cache.mjs", import.meta.url));
 const TOKEN = "one-attempt-test-token";
-// Each live transition crosses real git worktree and child-process boundaries;
-// the 10-second poll horizon absorbs slow shared CI hosts while the 10 ms cadence
-// still reports the last durable state when a transition genuinely stalls.
+// Each live transition crosses real git worktree and child-process boundaries.
+// The 10-second poll horizon absorbs slow CI hosts, and the 10 ms cadence still
+// reports the last durable state when a transition stalls.
 const STATE_POLL_ATTEMPTS = 1_000;
 // The capacity test completes three sequential run-host lifecycles, so its
 // per-test ceiling must cover more than one state-poll horizon plus cleanup.
@@ -263,8 +263,8 @@ describe("local worker", () => {
           skipped.map(({ level }) => level),
           ["Debug", "Debug"],
         );
-        // Issue #84's acceptance criterion: a startup with stray entries logs
-        // no cleanup warning at all, whatever the message says.
+        // A startup with stray entries logs no cleanup warning at all, whatever
+        // the message says.
         const alarming = logs.filter(({ level }) => ["Warn", "Error", "Fatal"].includes(level));
         assert.deepStrictEqual(alarming, []);
       }).pipe(Effect.provide(NodeServices.layer)),
@@ -485,8 +485,8 @@ describe("local worker", () => {
       prepare: () => Effect.succeed(prepared),
       launch: () => Effect.succeed(new StepResult({ message: "done", facts: [] })),
       cancel: () => Effect.void,
-      // ADR 0006 regression: a failed worktree removal must never convert a
-      // finished agent session into a retryable infra failure.
+      // A failed worktree removal must never turn a finished agent session into
+      // a retryable infra failure (ADR 0006).
       cleanup: () =>
         Effect.fail(
           new ExecutorOperationError({

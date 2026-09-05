@@ -21,7 +21,7 @@ export interface PresentedTranscriptEvent {
   readonly agent: string | null;
   readonly label: string;
   readonly detail: string;
-  /** Markdown carries prose written for a reader; plain carries protocol payloads shown verbatim. */
+  /** `markdown` is prose written for a reader; `plain` is a protocol payload shown verbatim. */
   readonly format: "markdown" | "plain";
   readonly isError: boolean;
 }

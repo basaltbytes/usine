@@ -12,7 +12,7 @@ import type { WorkerName } from "@usine/core/worker";
 import type { StepResult } from "@usine/core/step/result";
 import type { Submission } from "./engine/submission.ts";
 
-/** Input passed to the attempt-execution port. */
+/** The saved Event, effective task and Agent, and Step being tried in one Attempt. */
 export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/StepExecution")({
   attempt: Attempt,
   event: Event,
@@ -25,21 +25,21 @@ export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/St
   parentModel: Schema.Option(ModelId),
 }) {}
 
-/** A worker-capacity reservation held while one Attempt runs. */
+/** A reservation of one Worker's capacity for the length of an Attempt. Call `release` when the Attempt ends. */
 export interface WorkerLease {
   readonly worker: WorkerName;
   readonly release: Effect.Effect<void>;
 }
 
-/**
- * Port for one Attempt. #29 supplies the worker-backed adapter; #26 exercises
- * the durable engine against implementations of this interface.
- */
+/** Runs one Attempt on a Worker: reserve capacity, execute the step, interrupt on cancel. */
 export class StepExecutor extends Context.Service<
   StepExecutor,
   {
+    /** Requests that the identified Attempt stop its current work. */
     readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
+    /** Waits for Worker capacity; the returned lease must be released after execution or cancellation. */
     readonly reserve: (submission: Submission) => Effect.Effect<WorkerLease, AttemptFailure>;
+    /** Runs the reserved Attempt, recording channel activity through `io`, and waits for its result. */
     readonly execute: (
       execution: StepExecution,
       io: AttemptChannel.Sink,

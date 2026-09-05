@@ -11,7 +11,7 @@ const MarkdownLink = ({ node: _node, ...props }: ComponentProps<"a"> & { node?: 
 
 const COMPONENTS: Components = { a: MarkdownLink };
 
-/** Agent and operator prose, rendered from Markdown and styled by shadcn/typeset (src/typeset.css). */
+/** Renders agent and operator prose from Markdown, styled by shadcn/typeset (src/typeset.css). */
 export const Markdown = ({
   children,
   className,

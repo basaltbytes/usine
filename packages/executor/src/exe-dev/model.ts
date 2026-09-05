@@ -12,9 +12,8 @@ export const IntegrationName = Schema.String.check(
 export type IntegrationName = typeof IntegrationName.Type;
 
 /**
- * The SSH argv boundary: this string is handed to the local `ssh` client as a
- * destination, so anything that could read as an option (`-oProxyCommand=...`)
- * must be unrepresentable, not merely unexpected.
+ * An SSH destination handed to the local `ssh` client as argv, so anything
+ * that could read as an option (`-oProxyCommand=...`) is unrepresentable.
  */
 export const SshDestination = Schema.String.check(
   Schema.isPattern(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/u, {
@@ -48,11 +47,13 @@ export class HarnessLoginCheck extends Schema.Class<HarnessLoginCheck>(
   args: Schema.Array(Schema.String),
 }) {}
 
+/** How long an exe.dev Worker's repository credential attachment may remain active, in minutes. */
 export const CredentialGrantMinutes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("ExeDevCredentialGrantMinutes"),
 );
 export type CredentialGrantMinutes = typeof CredentialGrantMinutes.Type;
 
+/** Repository access, login checks, and run-host settings for the configured exe.dev Workers. */
 export interface ExeDevExecutorOptions {
   /** Existing native GitHub integrations, one per repository this Worker may receive. */
   readonly githubIntegrations: ReadonlyArray<GitHubIntegration>;
@@ -64,6 +65,7 @@ export interface ExeDevExecutorOptions {
   readonly ssh?: RunHostCommand;
   /** Time-box for the edge credential attachment. Defaults to 65 minutes. */
   readonly credentialGrantMinutes?: CredentialGrantMinutes;
+  /** Grace for delivering a stop request, then for the run host to exit; each wait is bounded separately. Defaults to 10 seconds. */
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
 }
 

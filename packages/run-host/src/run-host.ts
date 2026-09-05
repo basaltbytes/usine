@@ -1,5 +1,3 @@
-/** @usine/run-host — one-shot worker-side Attempt host. */
-
 import {
   AgentRuntime,
   LaunchRequest,
@@ -24,6 +22,7 @@ import {
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+/** The run host could not read its instructions, report activity, or collect the Attempt's Git results. */
 export class RunHostError extends Schema.TaggedError<RunHostError>("@usine/run-host/RunHostError")(
   "RunHostError",
   {
@@ -33,7 +32,7 @@ export class RunHostError extends Schema.TaggedError<RunHostError>("@usine/run-h
   },
 ) {}
 
-/** Strict by contract: an unknown key on a protocol frame is a rejected frame. */
+/** Rejects a frame with any unknown key; the protocol is strict by contract. */
 const decodeInput = (line: string) =>
   Schema.decodeUnknownEffect(AttemptChannel.InputFrameFromJson)(line, {
     onExcessProperty: "error",
@@ -43,7 +42,7 @@ const encodeOutput = Schema.encodeSync(Schema.fromJsonString(AttemptChannel.Outb
 const hostError = (stage: RunHostError["stage"], message: string, cause: unknown): RunHostError =>
   new RunHostError({ stage, message, cause });
 
-/** Runs one real agent session over the strict protocol-v4 newline-delimited channel. */
+/** Hosts one Attempt described by the Start frame on stdin, sending session activity and its final outcome on stdout. */
 export const runHost = () =>
   Effect.scoped(
     Effect.gen(function* () {
@@ -232,9 +231,9 @@ export const runHost = () =>
           yield* Ref.set(expectedInputSequence, expected + 1);
           if (command.payload._tag === "Interrupt") {
             yield* Effect.logInfo("Run host received an Interrupt frame");
-            // Start delivery before waking the terminal race. The SDK's native
-            // promise keeps carrying the interrupt even when terminal cleanup
-            // interrupts this command fiber immediately afterward.
+            // Start delivery before waking the terminal race: the SDK's native
+            // promise keeps delivering the interrupt even when terminal cleanup
+            // interrupts this command fiber right after.
             yield* Effect.forkChild(session.interrupt);
             yield* Deferred.succeed(interrupted, undefined);
           } else {

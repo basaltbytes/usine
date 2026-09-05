@@ -91,7 +91,6 @@ const childNodes = (node: ASTNode): ReadonlyArray<ASTNode> => {
   }
 };
 
-/** A member path always starts at its root identifier. */
 type MemberPath = readonly [string, ...Array<string>];
 
 const pathOf = (node: ASTNode): MemberPath | undefined => {
@@ -113,7 +112,7 @@ const MACROS_WITH_BINDINGS: ReadonlySet<string> = new Set([
 
 type MacroBindings = ReadonlyMap<string, ReadonlyArray<string>>;
 
-/** Resolve a value's source path through macro bindings and collection transformations. */
+/** The member path a node reads from, followed back through macro bindings and collection transformations. */
 const lineagePathOf = (
   node: ASTNode,
   bindings: MacroBindings,
@@ -141,10 +140,10 @@ const startsWithPath = (path: ReadonlyArray<string>, prefix: ReadonlyArray<strin
   prefix.every((part, index) => path[index] === part);
 
 /**
- * String literals an operand can evaluate to. Only result positions count:
- * a conditional contributes its branches, never its test, and a list its
- * elements — so `item.state == "OPEN" ? "ready" : "review"` yields the two
- * label names and not the state.
+ * The string literals an operand can evaluate to. Only result positions count:
+ * a conditional contributes its branches and not its test, a list its
+ * elements. `item.state == "OPEN" ? "ready" : "review"` yields the two labels
+ * and not the state.
  */
 const resultStringLiterals = (node: ASTNode): ReadonlyArray<string> => {
   switch (node.op) {
@@ -193,7 +192,7 @@ const comparisonLiterals = (
   }
 };
 
-/** Track macro-bound collection members to their label-name comparisons. */
+/** Collects the literals compared against `name` on members bound by macros over the watched collection. */
 const scanRelatedLiterals = (
   node: ASTNode,
   memberPath: ReadonlyArray<string>,
@@ -338,9 +337,8 @@ const evaluateRaw = (
 ): Effect.Effect<RuntimeValue, ExpressionEvaluationError> =>
   Effect.try({
     try: () =>
-      // SAFETY: CEL evaluation yields the same value vocabulary the context is
-      // built from; the callers below still decode the expected result type
-      // before anything leaves the seam.
+      // SAFETY: CEL evaluates to the same value vocabulary the context is built
+      // from, and every caller decodes the expected result type before use.
       makeEnvironment(environment).evaluate(
         source,
         normalizeContext(context, environment),
@@ -398,7 +396,7 @@ const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
   );
 });
 
-/** Live CEL adapter backed by the exact-pinned @marcbachmann/cel-js implementation. */
+/** The ExpressionEngine implementation on @marcbachmann/cel-js. */
 export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {
   relatedStringLiterals,
   checkBoolean,

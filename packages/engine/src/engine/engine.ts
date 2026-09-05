@@ -67,10 +67,10 @@ const makeRunEngine = Effect.gen(function* () {
   const awaitWorkflowSettlement = Effect.fn("RunEngine.awaitWorkflowSettlement")(function* (
     runId: RunId,
   ) {
-    // A Failed projection is committed before the workflow finishes suspending.
-    // Poll across that short handover so an immediate operator retry is not
-    // lost. A workflow still absent at the deadline is a corrupted instance
-    // database, not a race — die loudly instead of hanging delivery forever.
+    // A Failed projection commits before the workflow finishes suspending, so
+    // poll across that handover or an immediate operator retry is lost. A
+    // workflow still absent at the deadline means a corrupted instance
+    // database, so fail loudly instead of hanging.
     for (let poll = 0; poll < MAX_SETTLEMENT_POLLS; poll += 1) {
       const status = yield* DurableRun.poll(runId).pipe(provideWorkflowEngine);
       if (Option.isSome(status)) return status.value;
@@ -122,7 +122,7 @@ const makeRunEngine = Effect.gen(function* () {
 
   const cancel = Effect.fn("RunEngine.cancel")(function* (runId: RunId) {
     // The closing transaction decides both facts at once: whether the run was
-    // still open, and which attempt (if any) was in flight when it closed.
+    // still open, and which attempt was in flight when it closed.
     const outcome = yield* store.cancel(runId);
     if (outcome._tag === "AlreadyClosed") {
       yield* Effect.logDebug("Cancel was a no-op; the run was already closed", { runId });
@@ -196,24 +196,31 @@ const makeRunEngine = Effect.gen(function* () {
   return { approve, cancel, inspect, reconcile, retry, revoke, submit, transcript } as const;
 });
 
-/**
- * The public run-engine service. The interface below is the package's declared
- * API — widen it deliberately, never by letting an implementation change leak
- * through inference.
- */
+/** Records Events and manages their Runs through approval, execution, retry, and cancellation. */
 export class RunEngine extends Context.Service<
   RunEngine,
   {
+    /** Records the operator's approval Event and opens the Run's gate; execution still waits for a Worker slot. */
     readonly approve: (runId: RunId, approval: Event) => Effect.Effect<void, RunEngineError>;
+    /** Cancels an open Run and interrupts its active Attempt. An already closed Run is unchanged. */
     readonly cancel: (runId: RunId) => Effect.Effect<void, RunEngineError>;
+    /** Reads the Run's current state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
+    /** Recovers unfinished Runs and outstanding actions from stored state; also runs when the engine starts. */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
+    /** Requests another Attempt for a failed Run using its existing Event and effective task and Agent. */
     readonly retry: (runId: RunId) => Effect.Effect<void, RunEngineError>;
+    /** Cancels unstarted Runs and discards queued Events for a Loop's Item when it stops matching; running Attempts continue. */
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunEngineError>;
+    /**
+     * Records a matching Event and claims its Run, or queues it behind the Item's
+     * running Attempt. Repeated Events are deduplicated; execution continues separately.
+     */
     readonly submit: (submission: Submission) => Effect.Effect<SubmissionResult, RunEngineError>;
+    /** Reads the requested portion of an Attempt's persisted transcript in append order. */
     readonly transcript: (
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunEngineError>;
@@ -221,12 +228,10 @@ export class RunEngine extends Context.Service<
 >()("@usine/engine/RunEngine") {}
 
 /**
- * Builds the durable runtime on a caller-selected SQLite-compatible database.
- * The adapter must provide both Drizzle's run database and the matching Effect
- * SQL client so run projections and cluster tables stay co-located. This entry
- * is platform-free: the deployment supplies its platform `Crypto` (the cluster
- * hashes over-length deduplication keys with it) next to the `StepExecutor`
- * port — see `database/local-sqlite.ts` for the Node composition.
+ * Provides Run execution and recovery on the supplied database.
+ * `database` must supply Drizzle and Effect SQL clients for the same database,
+ * so Run records and pending execution remain together across restarts.
+ * The deployment supplies `Crypto` and the Worker implementation through `StepExecutor`.
  */
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,

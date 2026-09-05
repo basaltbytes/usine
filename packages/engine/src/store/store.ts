@@ -58,7 +58,7 @@ export class AttemptRecoveryFailed extends Schema.TaggedClass<AttemptRecoveryFai
 
 /**
  * The Run closed (canceled, superseded, or revoked) while it waited for a
- * worker slot — a routine outcome once capacity queues exist, never an error.
+ * worker slot. Routine once capacity queues exist, never an error.
  */
 export class RunClosed extends Schema.TaggedClass<RunClosed>("@usine/engine/internal/RunClosed")(
   "RunClosed",
@@ -481,10 +481,9 @@ const makeRunStore = Effect.gen(function* () {
 });
 
 /**
- * The durable Run projection store. The interface below is the store's
- * declared contract — the seam any other backend (for example a Postgres
- * store) implements with its own `Layer.effect(RunStore, ...)`. Methods speak
- * domain vocabulary only and fail only with `RunStoreError`.
+ * The durable Run projection store. Another backend implements this interface
+ * with its own `Layer.effect(RunStore, ...)`; methods speak domain vocabulary
+ * and fail only with `RunStoreError`.
  */
 export class RunStore extends Context.Service<
   RunStore,

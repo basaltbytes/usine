@@ -21,13 +21,11 @@ export class Comment extends Schema.TaggedClass<Comment>("StepResult/Comment")("
   url: Schema.URL,
 }) {}
 
+/** A commit or GitHub artifact recorded as an outcome of the Agent's work. */
 export const StepResultFact = Schema.Union([Commit, PullRequest, Comment]);
 export type StepResultFact = typeof StepResultFact.Type;
 
-/**
- * The Step result carried by the run host's final envelope: the agent's final
- * message plus durable facts that survive workspace cleanup.
- */
+/** The agent's final message plus the facts that survive workspace cleanup. */
 export class StepResult extends Schema.Class<StepResult>("StepResult")({
   message: Schema.NonEmptyString,
   facts: Schema.Array(StepResultFact),

@@ -30,5 +30,6 @@ Standing rules:
 - Name public subpaths by capability (`@usine/github/polling`). Explicitly select same-package exports and keep implementation details private. See [ADR 0012](docs/adr/0012-published-blocks-monorepo-layout.md).
 - Import definitions directly from their owning package; use named imports except for tagged-union namespaces (`RunState.Failed`).
 - Give core branded schemas, their brands, and their exported types the same domain name (`RepositoryName`).
+- Document exported elements in domain terms: what they represent, what arguments mean, and what callers can expect beyond the TypeScript signature. Keep implementation reasoning beside the code it explains, and link an ADR when it explains a rule.
 - Web UI is built from the shadcn registry on Tailwind tokens: read the "How to add UI" section of `apps/web/README.md` before touching `apps/web`.
 - Authored YAML surfaces (`usine.yaml`, loop/agent frontmatter) use snake_case keys; domain fields are camelCase. The rename happens once, at the parse boundary, via `Schema.encodeKeys` — file casing never leaks into domain types (`@usine/config`'s `Settings` is the precedent).

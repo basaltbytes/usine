@@ -24,7 +24,7 @@ const persistence =
   <A, E, R>(effect: Effect.Effect<A, E, R>): Effect.Effect<A, EnginePersistenceError, R> =>
     Effect.mapError(effect, (cause) => new EnginePersistenceError({ operation, cause }));
 
-/** Newest Items first; the bound keeps a long-lived repository's Board response finite. */
+/** Newest Items first. The bound keeps a long-lived repository's Board response finite. */
 export interface ItemProjectionListOptions {
   readonly limit: number;
 }

@@ -77,13 +77,17 @@ const makeLoopControl = Effect.gen(function* () {
   } as const;
 });
 
-/** Durable operator control over Loop runtime state. It never edits the instance repo. */
+/** Records whether triggers may open new Runs for each Loop; existing Runs and authored files stay unchanged. */
 export class LoopControl extends Context.Service<
   LoopControl,
   {
+    /** Whether new Runs are paused; a Loop with no recorded runtime state is unpaused. */
     readonly isPaused: (loop: LoopName) => Effect.Effect<boolean, EnginePersistenceError>;
+    /** Pauses new trigger work for this Loop without stopping its existing Runs. */
     readonly pause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+    /** Recorded runtime states ordered by Loop name; Loops without stored state are omitted. */
     readonly states: Effect.Effect<ReadonlyArray<LoopRuntimeState>, EnginePersistenceError>;
+    /** Allows triggers to open new Runs for this Loop again. */
     readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
   }
 >()("@usine/engine/LoopControl") {

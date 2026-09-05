@@ -12,8 +12,8 @@ const causeMessage = (cause: unknown): string =>
   );
 
 /**
- * Parse YAML source into its Document AST, strictly (unique keys, warnings
- * are errors), with source tokens retained so surgical edits keep formatting.
+ * Parses YAML into a Document AST that keeps source tokens, so an edit through
+ * it preserves formatting. Duplicate keys and parser warnings are errors.
  */
 export const parseYamlDocument = (
   file: InstancePath,

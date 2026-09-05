@@ -1,8 +1,8 @@
 import { fileURLToPath } from "node:url";
 
 /**
- * Node command that launches the executable shipped by this package. Resolved
- * at call time so importing this module stays inert.
+ * The Node command that launches this package's executable, resolved at call
+ * time so importing the module has no side effect.
  */
 export const executableCommand = () => ({
   command: process.execPath,

@@ -48,13 +48,14 @@ export interface ClaudeModelInfo {
   readonly resolvedModel?: string;
 }
 
-/** Narrow vendor seam: tests never need to imitate the SDK's large Query surface. */
+/** A live Claude Code session with its messages, model discovery, and stop controls. */
 export interface ClaudeQuery extends AsyncIterable<Schema.Json> {
   readonly close: () => void;
   readonly interrupt: () => Promise<void>;
   readonly supportedModels: () => Promise<ReadonlyArray<ClaudeModelInfo>>;
 }
 
+/** Opens Claude Code sessions with the supplied task input and session settings. */
 export class ClaudeSdk extends Context.Service<
   ClaudeSdk,
   {
@@ -70,9 +71,10 @@ const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schem
 const vendorMessageJson = (message: SDKMessage): Schema.Json =>
   decodeVendorMessage(JSON.stringify(message));
 
+/** Provides Claude Code's session creation and model discovery. */
 export const claudeSdkLive = Layer.succeed(ClaudeSdk)({
   open: (input, options) => {
-    // SAFETY: ClaudeUserMessage is the exact streaming-input subset of SDKUserMessage.
+    // SAFETY: ClaudeUserMessage is the streaming-input subset of SDKUserMessage.
     const query = openClaudeQuery({ prompt: input as AsyncIterable<SDKUserMessage>, options });
     return {
       close: () => query.close(),
@@ -144,9 +146,9 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
     model: request.session.brain.model,
     permissionMode: "bypassPermissions",
     persistSession: false,
-    // The Attempt worktree is repository-controlled input: its project and
-    // local settings (hooks, env) must never load into a child that carries
-    // the App credential. Only the worker user's own settings apply.
+    // The worktree is repository-controlled input. Its project and local
+    // settings (hooks, env) must not load into a child that runs with the App
+    // credential, so only the worker user's settings apply.
     settingSources: ["user"],
   };
   return effort === "off"
@@ -197,8 +199,8 @@ const sessionEventsFrom = (
   if (!Schema.is(ClaudeContentMessage)(message)) return [];
   const events: Array<AgentSessionEvent> = [];
   for (const block of message.message.content) {
-    // Complete messages only: one TextOutput per finished assistant message
-    // keeps transcript volume at message granularity, matching the parent.
+    // Emit each text block from a completed assistant message; streaming deltas
+    // do not enter the transcript.
     if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
       events.push(new TextOutput({ session, text: block.text }));
     } else if (Schema.is(ClaudeToolUseBlock)(block)) {
@@ -357,5 +359,7 @@ const makeClaudeChild = Effect.gen(function* () {
   return ChildBackend.of({ launch });
 });
 
+/** Uses Claude Code for every task delegated through `ChildBackend`. */
 export const claudeChildLayer = Layer.effect(ChildBackend, makeClaudeChild);
+/** Provides the Claude Code backend for direct use or harness-based dispatch. */
 export const claudeChildBackendLayer = Layer.effect(ClaudeChildBackend, makeClaudeChild);

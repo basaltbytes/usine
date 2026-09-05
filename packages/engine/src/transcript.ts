@@ -3,9 +3,9 @@ import { AttemptId } from "@usine/core/attempt";
 import { Schema } from "effect";
 
 /**
- * Value object: global append order of the persisted transcript — the tail
- * cursor. Distinct from `AttemptChannel.Sequence`, which orders messages
- * within one Attempt's channel direction.
+ * Global append order of the persisted transcript. Distinct from
+ * `AttemptChannel.Sequence`, which orders messages within one Attempt's channel
+ * direction.
  */
 export const TranscriptSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("TranscriptSequence"),
@@ -26,10 +26,10 @@ const LegacyTranscriptEnvelope = Schema.Union([
   }),
 ]);
 
-/** Durable v3 envelopes remain readable; the live Attempt channel stays v4-only. */
+/** Stored v3 envelopes stay readable; the live channel is v4 only. */
 const TranscriptEnvelope = Schema.Union([AttemptChannel.Envelope, LegacyTranscriptEnvelope]);
 
-/** One append-only row in an Attempt transcript. */
+/** One append-only row of an Attempt transcript. */
 export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engine/TranscriptEntry")(
   {
     sequence: TranscriptSequence,
@@ -40,30 +40,34 @@ export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engin
   },
 ) {}
 
-/** Read every row for one Attempt. Intended for execution and diagnostic consumers. */
+/** All persisted rows for one Attempt, in append order. */
 export class TranscriptAllQuery extends Schema.TaggedClass<TranscriptAllQuery>(
   "@usine/engine/TranscriptAllQuery",
 )("TranscriptAllQuery", { attemptId: AttemptId }) {}
 
-/** Read rows appended after a cursor while tailing a live Attempt. */
+/** The next bounded set of rows after a cursor, in append order, for following an Attempt's activity. */
 export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>(
   "@usine/engine/TranscriptTailQuery",
 )("TranscriptTailQuery", {
   attemptId: AttemptId,
+  /** Last row already received; the response excludes this row. */
   after: TranscriptSequence,
+  /** Maximum number of newer rows to return. */
   limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
-/** Read the newest bounded page before a cursor, or from the current tail. */
+/** The newest bounded page before a cursor, returned in append order for loading earlier activity. */
 export class TranscriptPageQuery extends Schema.TaggedClass<TranscriptPageQuery>(
   "@usine/engine/TranscriptPageQuery",
 )("TranscriptPageQuery", {
   attemptId: AttemptId,
+  /** Earliest row already loaded, excluded from the response; `None` starts at the current tail. */
   before: Schema.Option(TranscriptSequence),
+  /** Maximum number of earlier rows to return. */
   limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
-/** Illegal combinations of full, tail, and backward-page reads are unrepresentable. */
+/** Selects a complete Attempt transcript, newer activity, or an earlier page. */
 export const TranscriptQuery = Schema.Union([
   TranscriptAllQuery,
   TranscriptTailQuery,

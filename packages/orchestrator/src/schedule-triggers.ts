@@ -43,9 +43,9 @@ import {
   triggerSubmission,
 } from "./trigger-submission.ts";
 
-/** Fanout submits to local SQLite only — kept small so write transactions don't pile up. */
+/** Fanout submits into local SQLite, so it stays small to keep write transactions from piling up. */
 const FANOUT_CONCURRENCY = 4;
-/** Wake cadence when no schedule can name its next boundary (none exist, or cron math is down). */
+/** How often the loop wakes when no schedule can name its next boundary. */
 const IDLE_WAKE_MILLIS = 60_000;
 
 interface WatchedSchedule {
@@ -80,7 +80,7 @@ const scheduleFailureLogFields = (error: ScheduleTriggerError) => {
   return common;
 };
 
-/** One schedule loop whose authored Agent disappeared from the loaded roster. */
+/** A schedule loop whose agent is no longer in the loaded roster. */
 export class ScheduleAgentFailure extends Schema.TaggedClass<ScheduleAgentFailure>(
   "@usine/orchestrator/ScheduleAgentFailure",
 )("ScheduleAgentFailure", {
@@ -89,7 +89,7 @@ export class ScheduleAgentFailure extends Schema.TaggedClass<ScheduleAgentFailur
   message: Schema.String,
 }) {}
 
-/** One selected repository whose scheduled Tick could not be evaluated or submitted. */
+/** A selected repository whose Tick could not be evaluated or submitted. */
 export class ScheduleTickFailure extends Schema.TaggedClass<ScheduleTickFailure>(
   "@usine/orchestrator/ScheduleTickFailure",
 )("ScheduleTickFailure", {
@@ -101,9 +101,9 @@ export class ScheduleTickFailure extends Schema.TaggedClass<ScheduleTickFailure>
 }) {}
 
 /**
- * One schedule whose cron boundaries could not be computed at this instant —
- * effect's Cron.prev/next can fail inside a DST spring-forward gap even for a
- * cron that parsed cleanly. The schedule retries next cycle; siblings run.
+ * A schedule whose cron boundaries could not be computed at this instant.
+ * Cron.prev and Cron.next fail inside a DST spring-forward gap even for a cron
+ * that parsed; the schedule retries next cycle and its siblings run.
  */
 export class ScheduleCronFailure extends Schema.TaggedClass<ScheduleCronFailure>(
   "@usine/orchestrator/ScheduleCronFailure",
@@ -121,7 +121,7 @@ export const ScheduleFailure = Schema.Union([
 ]);
 export type ScheduleFailure = typeof ScheduleFailure.Type;
 
-/** Observable result of evaluating every schedule loop at one clock instant. */
+/** The result of evaluating every schedule loop at one instant. */
 export class ScheduleCycle extends Schema.Class<ScheduleCycle>("@usine/orchestrator/ScheduleCycle")(
   {
     loops: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
@@ -150,10 +150,10 @@ const watchedSchedules = (instance: LoadedInstance): ReadonlyArray<WatchedSchedu
   });
 
 /**
- * Inclusive latest occurrence: Cron.prev itself is strict at an exact match.
- * Across a DST fall-back the same local time maps to two UTC instants and both
- * are legal boundaries — the payload's zone-local time makes the pair
- * explicable in logs, and the permanent dedup ledger keeps each a single fact.
+ * The latest occurrence at or before `now`; Cron.prev alone excludes an exact
+ * match. Across a DST fall-back one local time maps to two UTC instants and
+ * both are boundaries: the payload's zone-local time tells them apart in logs
+ * and the dedup ledger keeps each a single fact.
  */
 const latestScheduledAt = (cron: Cron.Cron, now: DateTime.Utc): DateTime.Utc => {
   const minuteBoundary = DateTime.toDateUtc(now);
@@ -198,14 +198,14 @@ const tickPayload = (due: DueTick): Schema.JsonObject => ({
   },
 });
 
-/** Clock-driven schedule → per-repository Event composition. */
+/** Turns due schedule ticks into one Event per selected repository. */
 export class ScheduleTriggers extends Context.Service<
   ScheduleTriggers,
   {
     /**
-     * Evaluate only the latest due Tick for every schedule. Per-repository
-     * failures are isolated, logged, and reported without stopping siblings;
-     * cron-math failures (DST gaps) fail only their own schedule.
+     * Evaluates the latest due Tick of every schedule. A repository's failure is
+     * logged and reported without stopping its siblings; a cron failure in a
+     * DST gap fails only its own schedule.
      */
     readonly tick: (
       instance: LoadedInstance,
@@ -222,12 +222,12 @@ export class ScheduleTriggers extends Context.Service<
       const runs = yield* RunEngine;
       const loops = yield* LoopControl;
       const latestCycle = yield* Ref.make(Option.none<ScheduleCycle>());
-      // Efficiency-only fired-tick memory: an empty map after a restart is
-      // exactly ADR 0007's "fire the latest missed tick"; the permanent dedup
-      // ledger stays the correctness guarantee.
+      // Remembers fired ticks to skip repeat work. An empty map after a restart
+      // fires the latest missed tick (ADR 0007); the dedup ledger stays the
+      // correctness guarantee.
       const lastFired = yield* Ref.make(new Map<LoopName, number>());
-      // Cron sources are immutable once parsed at the config boundary; parsing
-      // again per cycle is waste. parseUnsafe trusts that boundary validation.
+      // Cron sources were validated at the config boundary, so parseUnsafe is
+      // safe and the result is cached instead of re-parsed each cycle.
       const parsedCrons = new WeakMap<ScheduleTrigger, Cron.Cron>();
       const cronFor = (trigger: ScheduleTrigger): Cron.Cron => {
         const cached = parsedCrons.get(trigger);
@@ -318,9 +318,9 @@ export class ScheduleTriggers extends Context.Service<
               loop: schedule.loop.name,
             });
           }
-          // Cron evaluation can throw inside a DST spring-forward gap even
-          // though the expression parsed cleanly; one schedule's bad instant
-          // must never take the stream down.
+          // Cron evaluation throws inside a DST spring-forward gap even though
+          // the expression parsed; one schedule's bad instant must not stop the
+          // stream.
           const computed = yield* Effect.try({
             try: (): ScheduleBoundaries => {
               const cron = cronFor(schedule.trigger);
@@ -448,10 +448,10 @@ export class ScheduleTriggers extends Context.Service<
           );
         }
 
-        // Advance the fired-tick memory only for loops that submitted without
-        // a failure: an all-unmatched tick keeps re-evaluating (so a fixed
-        // `if:` still fires it), a failed loop retries every repository next
-        // cycle, and the dedup ledger absorbs the ones that already landed.
+        // Only loops that submitted without a failure advance the fired-tick
+        // memory: an all-unmatched tick keeps re-evaluating so a fixed `if:`
+        // still fires it, a failed loop retries every repository next cycle, and
+        // the dedup ledger absorbs the submissions that already landed.
         yield* Ref.update(lastFired, (current) => {
           const next = new Map(current);
           for (const [loop, latestEpoch] of boundariesByLoop) {
@@ -475,8 +475,8 @@ export class ScheduleTriggers extends Context.Service<
         return cycle;
       });
 
-      // No Effect.fn here: `run` never returns, so a named wrapper would open
-      // a span that never closes. Each cycle's span lives on `tick`.
+      // `run` never returns, so wrapping it in Effect.fn would open a span that
+      // never closes; `tick` opens the span for each cycle.
       const run = (instance: LoadedInstance): Effect.Effect<never> =>
         Effect.gen(function* () {
           const result = yield* Effect.result(tick(instance));
@@ -510,8 +510,7 @@ export class ScheduleTriggers extends Context.Service<
             }),
             sleepMs,
           };
-          // An instance with nothing due should not emit a minutely INFO line
-          // forever; anything that acted or failed stays visible.
+          // Quiet cycles log at Debug; cycles that acted or failed log at Info.
           if (cycle.fanout === 0 && cycle.failures.length === 0) {
             yield* Effect.logDebug("Schedule cycle complete", summary);
           } else {

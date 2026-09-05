@@ -12,22 +12,22 @@ import { type AgentSessionError, SessionResult } from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
 
 export interface SessionChannelOptions {
-  /** Human-readable adapter name used in the terminal log lines. */
+  /** Adapter name printed in the terminal log lines. */
   readonly label: string;
   readonly sessionId: AgentSessionId;
 }
 
 /**
- * Terminal-once state every session adapter shares: one event queue, one
- * result, and a latch guaranteeing exactly one terminal transition. Cleanups
- * registered through `onTerminal` run on whichever transition wins.
+ * Shared session state: one event queue, one result, and a latch so exactly
+ * one terminal transition wins. Cleanups registered through `onTerminal` run
+ * on that transition.
  */
 export interface SessionChannel {
   readonly events: Queue.Queue<AgentSessionEvent, AgentSessionError | Cause.Done>;
   readonly result: Deferred.Deferred<SessionResult, AgentSessionError>;
   readonly isTerminal: Effect.Effect<boolean>;
   readonly onTerminal: (cleanup: () => void) => void;
-  /** Offers one event, logging instead of silently dropping it after the terminal transition. */
+  /** Queues one event; after the terminal transition the event is logged and dropped. */
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
   readonly finish: (session: AgentSession, message: string) => Effect.Effect<void>;
@@ -173,11 +173,10 @@ const sessionEventFrom = (
 };
 
 /**
- * Bridges the Pi SDK's synchronous subscriber onto one session channel.
- * Normalized events reach the queue on the SDK's own tick — no async hop, so
- * nothing can trail the prompt's resolution — while operational events with
- * no normalized shape (retry backoffs, compactions) are logged through the
- * launch fiber's captured services so a silent wait stays explainable.
+ * Subscribes the Pi SDK's synchronous listener to one session channel.
+ * Normalized events reach the queue on the SDK's own tick so none can trail
+ * the prompt's resolution; operational events with no normalized shape (retry
+ * backoffs, compactions) are logged so a silent wait stays explainable.
  */
 export const subscribePiSession = (
   piSession: PiSession,

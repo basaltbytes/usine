@@ -242,9 +242,8 @@ describe("live GitHub polling", () => {
 
                     const unchanged = yield* polling.poll(instance);
                     const unchangedRun = runIdFrom(unchanged.submissions);
-                    // Unconditional dedup claim: an unchanged state either
-                    // submits nothing (304 or empty page) or resolves to the
-                    // very same run — never a second one.
+                    // An unchanged state either submits nothing (304 or empty
+                    // page) or resolves to the same run, never a second one.
                     assert(
                       Option.isNone(unchangedRun) || unchangedRun.value === runId,
                       "an unchanged state must not open a second run",
@@ -260,8 +259,8 @@ describe("live GitHub polling", () => {
                   Effect.gen(function* () {
                     const afterRestart = yield* polling.poll(instance);
                     const restartedRun = runIdFrom(afterRestart.submissions);
-                    // Same claim across restart: the durable ledger, not the
-                    // lost in-memory state, is what prevents a second run.
+                    // The same holds across a restart: the durable ledger, not
+                    // the lost in-memory state, prevents a second run.
                     assert(
                       Option.isNone(restartedRun) || restartedRun.value === first.runId,
                       "a restart must not open a second run for the same state",

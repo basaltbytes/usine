@@ -3,10 +3,10 @@
  *
  * `src/protocol/codex.ts` re-declares the request shapes usine sends because
  * the generated upstream package only resolves under bundler-style module
- * resolution (its internal imports are extensionless). This file — compiled
- * by `tsconfig.conformance.json` under that resolution — is the one place
- * the exact-pinned package is actually read: `pnpm check` fails here when
- * our view drifts from the generated wire types.
+ * resolution (its internal imports are extensionless). This file is compiled
+ * by `tsconfig.conformance.json` under that resolution and is the one place
+ * the exact-pinned package is read, so `pnpm check` fails here when the view
+ * drifts from the generated wire types.
  */
 import type { InitializeParams } from "@pwrdrvr/codex-app-server-protocol";
 import type {

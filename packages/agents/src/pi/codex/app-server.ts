@@ -20,7 +20,7 @@ export interface CodexNotification {
   readonly params: Schema.Json;
 }
 
-/** One scoped JSON-RPC app-server connection, narrow enough to script in tests. */
+/** One JSON-RPC connection to the app server, scoped to its process. */
 export interface CodexConnection {
   readonly notifications: Stream.Stream<CodexNotification, SessionOperationError>;
   readonly request: (
@@ -35,7 +35,7 @@ export interface CodexConnection {
   ) => Effect.Effect<void, SessionOperationError>;
 }
 
-/** Process seam for the Codex app-server transport. */
+/** Spawns the Codex app-server process and exposes its JSON-RPC connection. */
 export class CodexAppServer extends Context.Service<
   CodexAppServer,
   {
@@ -97,12 +97,12 @@ export const codexAppServerCommand = (
   stdin?: ChildProcess.CommandOptions["stdin"],
 ): ChildProcess.Command => {
   const options: ChildProcess.CommandOptions = {
-    // Starting outside the worktree prevents process startup from
-    // discovering repository-owned config before thread trust is set.
+    // Start outside the worktree so process startup cannot read
+    // repository-owned config before thread trust is set.
     cwd: homedir(),
-    // The app-server must die with the run host: staying in the host's
-    // process group keeps the executor's hard kill able to reap it, and the
-    // bounded SIGTERM window implements ADR 0006's grace-then-force stop.
+    // Stay in the run host's process group so the executor's hard kill reaps
+    // the app server too; the bounded SIGTERM window is the grace-then-force
+    // stop (ADR 0006).
     detached: false,
     forceKillAfter: "5 seconds",
   };
@@ -179,9 +179,9 @@ const makeCodexAppServer = Effect.gen(function* () {
         yield* Queue.fail(notifications, error);
       });
 
-      // One effect per stdout line, deliberately span-free: a line is not an
-      // operation, and unrecognized input is logged and skipped so a stray
-      // frame can never fail the session (ADR 0002 would retry it as infra).
+      // One effect per stdout line, without a span: a line is not an
+      // operation. Unrecognized input is logged and skipped so a stray frame
+      // cannot fail the session and trigger an infra retry (ADR 0002).
       const routeLine = (line: string) =>
         Effect.gen(function* () {
           if (line.trim().length === 0) return;

@@ -37,7 +37,7 @@ const derLength = (length: number): Uint8Array => {
 const der = (tag: number, value: Uint8Array): Uint8Array =>
   concat(new Uint8Array([tag]), derLength(value.length), value);
 
-/** WebCrypto imports PKCS#8 only; GitHub downloads PKCS#1, so wrap it. */
+/** WebCrypto imports PKCS#8 keys only, and GitHub downloads PKCS#1, so wrap the key. */
 const wrapPkcs1AsPkcs8 = (pkcs1: Uint8Array): Uint8Array =>
   der(0x30, concat(new Uint8Array([0x02, 0x01, 0x00]), RSA_ALGORITHM_IDENTIFIER, der(0x04, pkcs1)));
 
@@ -67,12 +67,12 @@ const toArrayBuffer = (value: Uint8Array): ArrayBuffer => {
   return buffer;
 };
 
-/** Signs App JWTs: `iat` backdated a minute for clock skew, `exp` under GitHub's ten-minute cap. */
+/** Signs an App JWT with `iat` backdated a minute for clock skew and `exp` under GitHub's ten-minute cap. */
 export type AppJwtSigner = () => Effect.Effect<Redacted.Redacted<string>>;
 
 /**
- * Import the App private key once (platform-free WebCrypto, RS256). A key
- * that cannot be imported fails here, at composition, not on the first request.
+ * Imports the App private key once with WebCrypto RS256. A key that cannot be
+ * imported fails here, when the layer is built, not on the first request.
  */
 export const appJwtSigner = Effect.fn("AppJwt.import")(function* (credentials: AppCredentials) {
   const key = yield* Effect.tryPromise({

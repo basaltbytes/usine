@@ -78,9 +78,9 @@ export const itemFailure = (item: BoardItemView): string | null => {
   return null;
 };
 
-/** The fallback lane holds every unrouted Item, so it leads the board: a drag into an
- * authored lane must not cross every column first. Authored and proposed lanes keep
- * their configured order. */
+/** The fallback lane collects every unrouted Item and comes first, so a drag into an
+ * authored lane does not cross every column. Authored and proposed lanes keep their
+ * configured order. */
 export const orderLanes = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<BoardLaneView> => [
   ...lanes.filter(({ origin }) => origin === "fallback"),
   ...lanes.filter(({ origin }) => origin !== "fallback"),
@@ -125,7 +125,7 @@ export const applyMove = (
 
 type LabelCatalog = ReadonlyMap<string, LabelView>;
 
-/** The keyboard and assistive-technology path for a lane move; drag stays the fast path (#75). */
+/** The keyboard and assistive-technology path for a lane move; drag stays the fast path. */
 export interface MoveMenu {
   readonly targets: ReadonlyArray<BoardLaneView>;
   readonly disabled: boolean;
@@ -350,7 +350,7 @@ const BoardLane = ({
   );
 };
 
-/** Runs whose Item has no card yet (schedule Runs, quarantined Items) stay reachable here. */
+/** Runs whose Item has no card, such as schedule Runs and quarantined Items, so they stay reachable. */
 export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> => {
   const carded = new Set(
     project.board.lanes.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),

@@ -5,11 +5,11 @@ export type PiAuthentication =
   | { readonly _tag: "OAuth"; readonly subscription: boolean };
 export type PiPool = Extract<BillingPool, "apiKeys" | "chatgptPlan">;
 
-/** Billing pool the selected Pi provider must have available before launch. */
+/** The billing pool the chosen Pi provider spends from, checked before launch. */
 export const requiredPiPool = (provider: string): PiPool =>
   provider === "openai-codex" ? "chatgptPlan" : "apiKeys";
 
-/** Resolve Pi's billing source from the credential that will spend the model request. */
+/** Returns the billing pool of the credential that pays for the model request. */
 export const resolvePiPool = (
   provider: string,
   authentication: PiAuthentication | undefined,

@@ -91,7 +91,7 @@ const safeIssuePath = (path: FormattedIssuePath): string =>
     })
     .join(".");
 
-/** Redacted frame diagnostics: shape and schema metadata only, never frame content. */
+/** Describes an invalid frame by shape and schema metadata only, never by its content. */
 export const invalidFrameDiagnostic = (line: string, cause: unknown): InvalidFrameDiagnostic => {
   const byteLength = encoder.encode(line).byteLength;
   const parsed = decodeJsonOption(line);

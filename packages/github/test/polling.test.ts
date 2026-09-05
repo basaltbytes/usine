@@ -229,8 +229,7 @@ describe("GitHubPolling", () => {
 
     return Effect.gen(function* () {
       const polling = yield* GitHubPolling;
-      // The cursor is efficiency-only (ADR 0007): a page without an ETag must
-      // degrade to unconditional polling, never fail the cycle.
+      // The cursor is efficiency only (ADR 0007). A page without an ETag degrades to unconditional polling and never fails the cycle.
       const detected = yield* polling.changes(repository, PollCursor.empty);
       assert.strictEqual(detected._tag, "RepositoryChanges");
       if (detected._tag !== "RepositoryChanges") return;
@@ -261,8 +260,7 @@ describe("GitHubPolling", () => {
       if (detected._tag !== "RepositoryChanges") return;
       assert.strictEqual(detected.items.length, 2);
       assert.strictEqual(detected.backlog, false);
-      // The first page's ETag stays on the cursor: it matches the canonical
-      // URL the next cycle re-requests conditionally.
+      // The first page's ETag stays on the cursor because it matches the canonical URL the next cycle re-requests.
       assert(Option.isSome(detected.cursor.entityTag));
       assert.strictEqual(detected.cursor.entityTag.value, 'W/"page-1"');
       assert(Option.isSome(detected.cursor.watermark));
@@ -559,8 +557,7 @@ describe("GitHubPolling", () => {
       const fromEmpties = yield* polling.snapshot(repository, changed);
       assert.strictEqual(fromNulls._tag, "PullRequestSnapshot");
       if (fromNulls._tag !== "PullRequestSnapshot") return;
-      // A null connection is the same information as an empty one: the domain
-      // payload stays non-null and both shapes hash to the same Event identity.
+      // A null connection is the same information as an empty one. The payload stays non-null and both shapes hash to the same Event identity.
       assert.deepStrictEqual(fromNulls.payload.labels, { totalCount: 0, nodes: [] });
       assert.deepStrictEqual(fromNulls.payload.reviews, { totalCount: 0, nodes: [] });
       assert.strictEqual(fromNulls.contentHash, fromEmpties.contentHash);

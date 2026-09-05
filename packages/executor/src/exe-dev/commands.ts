@@ -36,9 +36,8 @@ export interface ExeDevCommands {
 }
 
 /**
- * The local SSH process receives only what SSH itself needs. In particular,
- * GitHub and factory credentials from the orchestrator environment never
- * cross into either the SSH client or the VM.
+ * The local SSH client inherits only what SSH itself needs; GitHub and factory
+ * credentials from the orchestrator environment never reach it or the VM.
  */
 const SSH_ENVIRONMENT_ALLOWLIST = [
   "HOME",
@@ -59,8 +58,8 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
   const environment = yield* allowlistedEnvironment(SSH_ENVIRONMENT_ALLOWLIST);
   const ssh = configuredSsh ?? {
     command: "ssh",
-    // The keepalive pair turns a dead TCP link into a non-zero SSH exit
-    // instead of a silent forever-park: a lost VM must fail the operation.
+    // The keepalive pair turns a dead TCP link into a non-zero SSH exit instead
+    // of a silent park, so a lost VM fails the operation.
     args: ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4"],
   };
 
@@ -87,9 +86,9 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     return yield* requireSuccess(operation, host, command, args, result);
   });
 
-  // Lobby arguments ride unquoted through OpenSSH's argv join. Every value
-  // passed here must be a brand-validated token (Worker.Name,
-  // IntegrationName, CredentialGrantMinutes); never pass free-form text.
+  // Lobby arguments pass unquoted through OpenSSH's argv join, so every value
+  // must be a brand-validated token (WorkerName, IntegrationName,
+  // CredentialGrantMinutes), never free-form text.
   const lobby = (
     operation: ExecutorOperation,
     args: ReadonlyArray<string>,

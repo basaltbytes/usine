@@ -30,14 +30,14 @@ export interface SubagentsExtensionOptions {
   readonly cwd: WorkingDirectory;
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly maxChildren: ChildSessionBudget;
-  /** Runs on every rejected spawn; the parent decides what a repeat means. */
+  /** Called on every rejected spawn; the parent decides what a repeat means. */
   readonly onBudgetExceeded: (error: ChildSessionBudgetExceededError) => Effect.Effect<void>;
   readonly parentId: AgentSessionId;
   /**
-   * Executes one child program on the parent launch's own services and scope.
-   * Pi invokes the tool outside any usine fiber, so running through the
-   * default runtime would lose the stderr log redirect (corrupting the
-   * protocol stdout) and detach the child from the Attempt's lifetime.
+   * Runs one child program on the parent launch's services and scope. Pi
+   * calls the tool outside any usine fiber, so the default runtime would lose
+   * the stderr log redirect (corrupting the protocol stdout) and detach the
+   * child from the Attempt's lifetime.
    */
   readonly run: <A>(program: Effect.Effect<A, AgentSessionError>) => Promise<A>;
 }
@@ -70,7 +70,7 @@ interface SpawnDetails {
   readonly childSessionId: AgentSessionId;
 }
 
-/** Pi-owned extension factory. Its single tool can only create first-level child descriptors. */
+/** Builds the subagents extension; its single tool creates first-level child sessions only. */
 export const createSubagentsExtension = (options: SubagentsExtensionOptions): ExtensionFactory => {
   let childNumber = 0;
   const spawn = Effect.fn("Subagents.spawn")(function* (
@@ -171,7 +171,7 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
   };
 };
 
-/** Named wrapper keeps the extension identifiable in Pi startup diagnostics. */
+/** Names the extension so Pi startup diagnostics can identify it. */
 export const subagentsExtension = (options: SubagentsExtensionOptions): InlineExtension => ({
   name: "usine-subagents",
   factory: createSubagentsExtension(options),

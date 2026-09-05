@@ -713,9 +713,9 @@ describe("Pi parent runtime", () => {
 
   it.effect("runs subagent tool programs on the launch fiber's own services", () => {
     // Pi invokes the tool callback outside any usine fiber. A detached
-    // Effect.runPromise would reset every fiber reference to its default —
-    // notably the stderr log redirect, whose loss corrupts the protocol
-    // stdout — so the runner must carry the launch context into the child.
+    // Effect.runPromise would reset every fiber reference to its default,
+    // including the stderr log redirect whose loss corrupts the protocol
+    // stdout, so the runner must pass the launch context into the child.
     let options: PiStartOptions | undefined;
     const session: PiSession = {
       abort: () => Promise.resolve(),

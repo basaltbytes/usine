@@ -3,6 +3,7 @@ import type { AttemptTask } from "@usine/core/attempt";
 import type { RepositoryName } from "@usine/core/repository";
 import type { Schema } from "effect";
 
+/** The recorded trigger context, Agent instructions, and effective task presented to the parent. */
 export interface PromptParts {
   readonly repository: RepositoryName;
   readonly payload: Schema.Json;
@@ -11,6 +12,7 @@ export interface PromptParts {
   readonly task: AttemptTask;
 }
 
+/** The Agent's standing instructions and the focused task the parent delegates to a child. */
 export interface ChildPromptParts {
   readonly agent: AgentName;
   readonly persona: AgentPersona;
@@ -18,10 +20,10 @@ export interface ChildPromptParts {
   readonly task: string;
 }
 
-/** Human-visible attribution required on GitHub content authored by an Agent. */
+/** The attribution line every GitHub comment or review written by an Agent ends with. */
 export const githubSignature = (agent: AgentName): string => `— usine agent: ${agent}`;
 
-/** Builds the complete parent prompt from immutable run context. */
+/** Builds the parent's instructions from the saved payload, effective task, and Agent persona, including GitHub attribution. */
 export const assemblePrompt = (parts: PromptParts): string =>
   [
     "# Run context",
@@ -47,7 +49,7 @@ export const assemblePrompt = (parts: PromptParts): string =>
     githubSignature(parts.agent),
   ].join("\n");
 
-/** Builds the isolated prompt given to a first-level child session. */
+/** Builds a child's instructions from the delegated task and Agent persona, including GitHub attribution. */
 export const assembleChildPrompt = (parts: ChildPromptParts): string =>
   [
     "# Agent persona",

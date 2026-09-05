@@ -25,7 +25,7 @@ import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
 import { stepExecutorLayer } from "./scheduler.ts";
 
-/** Complete local-worker engine composition. Credential sourcing stays caller-owned. */
+/** The full engine composition for a local Worker. The caller supplies the credential provider. */
 export const layer = (
   instanceDirectory: InstanceDirectory,
   config: UsineConfig,
@@ -41,16 +41,16 @@ export const layer = (
   return localEngineLayer(instanceDirectory).pipe(Layer.provide(stepExecutor));
 };
 
-/** Read-only local operator composition used while trigger credentials are unavailable. */
+/** A read-only operator composition for when trigger credentials are not available yet. */
 export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =>
   OperatorObservation.layer.pipe(
     Layer.provide(Layer.mergeAll(localObservationLayer(instanceDirectory), idleTriggersLayer)),
   );
 
 /**
- * Complete Node composition for one loaded local factory. The caller still
- * owns GitHub credential sourcing; everything else — both trigger streams,
- * durable engine, worker execution, and operator surface — is included.
+ * The full Node composition for one loaded local factory: both trigger
+ * streams, the durable engine, worker execution, and the operator surface.
+ * The caller supplies the GitHub credentials.
  */
 export const runtimeLayer = (
   instanceDirectory: InstanceDirectory,

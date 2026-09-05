@@ -172,7 +172,7 @@ const makePiChild = Effect.gen(function* () {
             });
             yield* channel.emit(new SessionStarted({ session }));
             const subscription = yield* subscribePiSession(started.session, session, channel);
-            // Once setup succeeds, the ambient scope owns both subscription and SDK session.
+            // After setup succeeds, the ambient scope closes both the subscription and the SDK session.
             yield* Effect.addFinalizer(() =>
               Effect.sync(subscription.unsubscribe).pipe(
                 Effect.andThen(Effect.sync(acquired.dispose)),
@@ -254,10 +254,10 @@ const makePiParent = Effect.gen(function* () {
         sessionId: parentId,
       });
       const childBudgetExceeded = yield* Deferred.make<ChildSessionBudgetExceededError>();
-      // The Pi tool callback runs outside any usine fiber. Child programs must
-      // still carry this fiber's services (stderr logging, tracing) and die
-      // with this launch scope, so the extension receives a runner instead of
-      // reaching for the default runtime.
+      // Pi calls the tool outside any usine fiber. Child programs still need
+      // this fiber's services (stderr logging, tracing) and must end with this
+      // launch scope, so the extension gets a runner instead of the default
+      // runtime.
       const scope = yield* Effect.scope;
       const context = yield* Effect.context<never>();
       const runChild = <A>(program: Effect.Effect<A, AgentSessionError>): Promise<A> =>
@@ -351,7 +351,7 @@ const makePiParent = Effect.gen(function* () {
             });
             yield* channel.emit(new SessionStarted({ session: parent }));
             const subscription = yield* subscribePiSession(started.session, parent, channel);
-            // Once setup succeeds, the ambient scope owns both subscription and SDK session.
+            // After setup succeeds, the ambient scope closes both the subscription and the SDK session.
             yield* Effect.addFinalizer(() =>
               Effect.sync(subscription.unsubscribe).pipe(
                 Effect.andThen(Effect.sync(acquired.dispose)),
@@ -371,7 +371,7 @@ const makePiParent = Effect.gen(function* () {
             });
             // Fail the channel before aborting the SDK: abort settles the
             // in-flight prompt, and its fiber must find the result already
-            // terminal rather than race it to `channel.finish`.
+            // terminal instead of racing it to `channel.finish`.
             const budgetFailure = Deferred.await(childBudgetExceeded).pipe(
               Effect.tap((error) =>
                 Effect.logWarning(
@@ -442,5 +442,7 @@ const makePiParent = Effect.gen(function* () {
   return AgentRuntime.of({ launch });
 });
 
+/** Provides the coordinating Pi parent; supply the child backend that will perform its delegated coding work. */
 export const piParentLayer = Layer.effect(AgentRuntime, makePiParent);
+/** Provides Pi coding sessions for tasks delegated by a parent. */
 export const piChildBackendLayer = Layer.effect(PiChildBackend, makePiChild);

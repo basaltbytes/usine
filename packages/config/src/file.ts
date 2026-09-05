@@ -1,7 +1,7 @@
 import { Source } from "@usine/expression/model";
 import { Schema } from "effect";
 
-/** Instance-relative path of one authored file (`usine.yaml`, `loops/x.md`). */
+/** Path of one authored file, relative to the instance folder. */
 export const InstancePath = Schema.NonEmptyString.pipe(Schema.brand("InstancePath"));
 
 export type InstancePath = typeof InstancePath.Type;
@@ -17,7 +17,7 @@ export const FileStage = Schema.Literals([
 
 export type FileStage = typeof FileStage.Type;
 
-/** One precise, file-owned config failure suitable for quarantine UI. */
+/** A failure pinned to one authored file and one parse stage, so the UI can quarantine that file alone. */
 export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
   "@usine/config/ConfigFileError",
 )("ConfigFileError", {
@@ -27,7 +27,7 @@ export class ConfigFileError extends Schema.TaggedError<ConfigFileError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** A factory-level failure: the registry/settings boundary could not be loaded. */
+/** The registry or settings could not be loaded, which blocks the whole instance. */
 export class FactoryConfigError extends Schema.TaggedError<FactoryConfigError>(
   "@usine/config/FactoryConfigError",
 )("FactoryConfigError", {
@@ -36,7 +36,6 @@ export class FactoryConfigError extends Schema.TaggedError<FactoryConfigError>(
   message: Schema.NonEmptyString,
 }) {}
 
-/** Every failure mode this package's parsers and loaders can produce. */
 export const ConfigError = Schema.Union([ConfigFileError, FactoryConfigError]);
 
 export type ConfigError = typeof ConfigError.Type;

@@ -45,11 +45,9 @@ const directChildren = (
   );
 
 /**
- * Reclaims crash leftovers once, before this process starts work on a VM.
- * Every removal is isolated: one immovable leftover must never block the
- * sweep's siblings or, worse, every future prepare on the Worker — so the
- * sweep is marked done even when parts of it failed, and each failure is
- * logged instead of propagated.
+ * Reclaims crash leftovers once per Worker before this process starts work on
+ * its VM. Each removal is isolated and each failure is logged, so one immovable
+ * leftover never blocks the sweep's siblings or a future prepare.
  */
 export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWorktreeSweepFor")(
   function* (commands: ExeDevCommands) {
@@ -73,9 +71,8 @@ export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWork
             });
             return;
           }
-          // One shot per Worker per process: a partial sweep must not retry
-          // forever in front of every prepare, so mark it done up front and
-          // rely on the next process start to reclaim what failed today.
+          // Mark the sweep done before it runs. A partial sweep must not retry in
+          // front of every prepare; the next process start reclaims what failed.
           yield* Ref.update(swept, (current) => new Set(current).add(worker));
 
           const attemptsRoot = `${root}/attempts`;

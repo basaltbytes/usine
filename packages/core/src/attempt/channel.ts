@@ -10,9 +10,8 @@ import { AttemptFailure } from "./failure.ts";
 export const PROTOCOL_VERSION = 4 as const;
 
 /**
- * Value object: monotonically increasing per-Attempt, per-direction message
- * sequence. Distinct from the engine's transcript sequence, which is the
- * global append order of the persisted transcript rows.
+ * Per-Attempt, per-direction message sequence, starting at 1. Distinct from the
+ * engine's transcript sequence, which orders persisted rows globally.
  */
 export const Sequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("AttemptChannelSequence"),
@@ -20,14 +19,14 @@ export const Sequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
 export type Sequence = typeof Sequence.Type;
 
 /**
- * Run-host-relative: `inbound` frames travel orchestrator → run host (Start,
- * Steer, Interrupt); `outbound` frames travel run host → orchestrator.
+ * Relative to the run host: `inbound` frames go from the orchestrator to the run
+ * host (Start, Steer, Interrupt) and `outbound` frames go the other way.
  */
 export const DIRECTIONS = ["inbound", "outbound"] as const;
 export const Direction = Schema.Literals(DIRECTIONS);
 export type Direction = typeof Direction.Type;
 
-/** Secret-free launch input. Worker credentials are deliberately absent. */
+/** Launch input for one Attempt. Worker credentials are never part of it. */
 export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
   attemptId: AttemptId,
   repository: RepositoryName,
@@ -42,10 +41,8 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
 }) {}
 
 /**
- * The parent model the SDK actually selected at launch — the one effective
- * value the run host knows that the roster may not declare. Child sessions
- * spawn later; their effective brains ride the transcript's `SessionStarted`
- * events (declare by roster, observe by record).
+ * The parent model the SDK selected at launch, which the roster may not declare.
+ * Child sessions report their own model in `SessionStarted` events.
  */
 export class Started extends Schema.TaggedClass<Started>("AttemptChannel/Started")("Started", {
   parentModel: ModelId,
@@ -65,7 +62,7 @@ export class Failed extends Schema.TaggedClass<Failed>("AttemptChannel/Failed")(
   failure: AttemptFailure,
 }) {}
 
-/** Terminal acknowledgement that the run host stopped on an Interrupt frame. */
+/** The run host stopped on an Interrupt frame. Terminal. */
 export class Interrupted extends Schema.TaggedClass<Interrupted>("AttemptChannel/Interrupted")(
   "Interrupted",
   {},
@@ -110,7 +107,7 @@ export class InboundEnvelope extends Schema.TaggedClass<InboundEnvelope>(
 export const Envelope = Schema.Union([OutboundEnvelope, InboundEnvelope]);
 export type Envelope = typeof Envelope.Type;
 
-/** First framed stdin message; later frames are inbound envelopes. */
+/** The first framed stdin message. Later frames are inbound envelopes. */
 export class Start extends Schema.TaggedClass<Start>("AttemptChannel/Start")("Start", {
   version: Schema.Literal(PROTOCOL_VERSION),
   spec: RunSpec,
@@ -123,7 +120,7 @@ export const EnvelopeFromJson = Schema.fromJsonString(Envelope);
 export const InputFrameFromJson = Schema.fromJsonString(InputFrame);
 export const OutboundEnvelopeFromJson = Schema.fromJsonString(OutboundEnvelope);
 
-/** The transcript append seam a channel consumer persists envelopes through. */
+/** Where a channel consumer persists envelopes. */
 export interface Sink {
   readonly append: (
     direction: Direction,
@@ -139,7 +136,7 @@ export interface Progress {
 
 export const initialProgress: Progress = { state: "AwaitingStarted", nextSequence: 1 };
 
-/** One protocol violation, described for the infra-failure that reports it. */
+/** One protocol violation, described for the infra failure that reports it. */
 export interface Violation {
   readonly message: string;
   readonly detail: string;
@@ -149,9 +146,9 @@ const isTerminal = (payload: OutboundPayload): boolean =>
   payload._tag === "Final" || payload._tag === "Failed" || payload._tag === "Interrupted";
 
 /**
- * Pure outbound protocol reducer: admits one envelope
- * against the progress so far, or names the violation. Owning it here keeps
- * every transport adapter folding the same state machine.
+ * Checks one outbound envelope against the progress so far and returns the next
+ * progress, or the violation. Every transport adapter folds the same state
+ * machine through it.
  */
 export const admit = (
   progress: Progress,
