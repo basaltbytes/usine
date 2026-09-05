@@ -7,7 +7,7 @@ import { AttemptFailure } from "@usine/core/attempt/failure";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName, WorkerKind } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
-import { Context, Effect, Redacted, Schema } from "effect";
+import { Context, Effect, Redacted, Schema, Scope } from "effect";
 
 /** The Worker operation that failed during readiness checks or an Attempt's lifecycle. */
 export const ExecutorOperation = Schema.Literals([
@@ -102,6 +102,8 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   agent: Agent,
   parentModel: Schema.Option(ModelId),
   maxChildren: ChildSessionBudget,
+  /** Maximum minutes of live run-host execution; preparation and resource cleanup are outside this budget. */
+  maxAttemptMinutes: Schema.Int.check(Schema.isGreaterThan(0)),
   parentEffort: Effort,
 }) {}
 
@@ -109,14 +111,31 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
 export const WorktreePath = Schema.NonEmptyString.pipe(Schema.brand("WorktreePath"));
 export type WorktreePath = typeof WorktreePath.Type;
 
-/** A prepared Attempt checkout ready to launch on its assigned Worker; credentials stay with the adapter. */
-export class PreparedAttempt extends Schema.Class<PreparedAttempt>(
-  "@usine/executor/PreparedAttempt",
+/** The serializable location and RunSpec of an Attempt checkout. Owning this record does not grant access to live resources or credentials. */
+export class AttemptWorkspace extends Schema.Class<AttemptWorkspace>(
+  "@usine/executor/AttemptWorkspace",
 )({
   worker: WorkerName,
   spec: AttemptChannel.RunSpec,
   worktree: WorktreePath,
 }) {}
+
+/**
+ * One prepared Attempt with a scoped checkout and repository access. Use it within
+ * the scope that prepared it. Closing that scope stops any active run host before
+ * removing the checkout and releasing credentials, including when launch never starts.
+ */
+export interface PreparedAttempt {
+  /** Checkout metadata suitable for inspection or serialization; contains no credentials. */
+  readonly workspace: AttemptWorkspace;
+  /**
+   * Runs this Attempt once, recording channel activity through `io`. Completion,
+   * failure, or interruption releases its resources before returning. Cleanup
+   * failures are logged without replacing the agent's outcome or retrying its work.
+   * Reusing an Attempt after launch or release fails with an infrastructure error.
+   */
+  readonly launch: (io: AttemptChannel.Sink) => Effect.Effect<StepResult, AttemptFailure>;
+}
 
 /** Mints exactly one repository-scoped credential for each prepared Attempt. */
 export class CredentialProvider extends Context.Service<
@@ -136,16 +155,15 @@ export class Executor extends Context.Service<
     readonly kind: WorkerKind;
     /** Verifies that a configured Worker is ready to accept work; never installs tools or logs in. */
     readonly preflight: (worker: WorkerName) => Effect.Effect<void, ExecutorError>;
-    /** Fetches the requested revision and prepares an isolated checkout; successful preparation requires eventual cleanup. */
-    readonly prepare: (request: CheckoutRequest) => Effect.Effect<PreparedAttempt, ExecutorError>;
-    /** Runs the prepared Attempt, persists channel activity through `io`, and waits for its result or failure. */
-    readonly launch: (
-      prepared: PreparedAttempt,
-      io: AttemptChannel.Sink,
-    ) => Effect.Effect<StepResult, AttemptFailure>;
+    /**
+     * Acquires a fresh Attempt in the caller's scope. Clone, fetch, and lock waits
+     * remain interruptible; partial preparation releases everything already acquired
+     * before reporting failure. Each request must identify a fresh Attempt.
+     */
+    readonly prepare: (
+      request: CheckoutRequest,
+    ) => Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope>;
     /** Requests an active Attempt to stop, allowing a grace period before forcing termination. */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
-    /** Removes the Attempt's checkout and releases its resources after any outcome. */
-    readonly cleanup: (prepared: PreparedAttempt) => Effect.Effect<void, ExecutorError>;
   }
 >()("@usine/executor/Executor") {}

@@ -1,21 +1,22 @@
-import { AttemptId } from "@usine/core/attempt";
+import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName } from "@usine/core/repository";
-import { Effect, Layer, Ref, Result, Schema } from "effect";
+import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
+  type AttemptWorkspace,
   CheckoutRequest,
   CredentialUnavailableError,
   Executor,
   ExecutorError,
   ExecutorOperationError,
-  PreparedAttempt,
 } from "../executor.ts";
+import { prepareAttempt } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import { provisionWorktree, safeSegment, type WorkspaceOps } from "../provision.ts";
 import { attemptChannelFor } from "./channel.ts";
 import { commandsFor } from "./commands.ts";
 import { credentialGrantsFor } from "./grants.ts";
-import type { ExeDevExecutorOptions, PreparedState } from "./model.ts";
+import type { ExeDevExecutorOptions } from "./model.ts";
 import { preflightFor } from "./preflight.ts";
 import { RUN_HOST_KILL_SCRIPT, runHostPidFile } from "./shell.ts";
 import { abandonedWorktreeSweepFor } from "./sweep.ts";
@@ -29,7 +30,6 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
   Effect.gen(function* () {
     const commands = yield* commandsFor(options.ssh);
     const fetches = yield* keyedLockFor<RepositoryName>();
-    const preparedStates = yield* Ref.make(new Map<AttemptId, PreparedState>());
     const integrations = new Map(
       options.githubIntegrations.map(({ name, repository }) => [repository, name]),
     );
@@ -53,12 +53,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     const machines = yield* preflightFor(options, commands, runHost);
     const credentialGrants = yield* credentialGrantsFor(options, commands);
     const sweepAbandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
-    const attemptChannel = yield* attemptChannelFor(
-      commands,
-      preparedStates,
-      runHost,
-      interruptGrace,
-    );
+    const attemptChannel = yield* attemptChannelFor(commands, runHost, interruptGrace);
 
     const prepare = Effect.fn("ExeDevExecutor.prepare")(function* (request: CheckoutRequest) {
       yield* Effect.annotateCurrentSpan({
@@ -83,8 +78,11 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       yield* Effect.annotateCurrentSpan({ host: vm.sshDest });
       yield* sweepAbandonedWorktrees(request.attemptId, request.worker, vm, root);
 
-      const remove = (target: string): Effect.Effect<void, ExecutorOperationError> =>
-        Effect.asVoid(commands.remote("prepare", vm.sshDest, "rm", ["-rf", target]));
+      const remove = (
+        operation: "prepare" | "cleanup",
+        target: string,
+      ): Effect.Effect<void, ExecutorOperationError> =>
+        Effect.asVoid(commands.remote(operation, vm.sshDest, "rm", ["-rf", target]));
       const ops: WorkspaceOps<ExecutorOperationError> = {
         ensureRoots: Effect.asVoid(
           commands.remote("prepare", vm.sshDest, "mkdir", [
@@ -106,29 +104,87 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         promoteStaging: Effect.asVoid(
           commands.remote("prepare", vm.sshDest, "mv", [staging, cache]),
         ),
-        git: (args: ReadonlyArray<string>): Effect.Effect<string, ExecutorOperationError> =>
-          commands.remote("prepare", vm.sshDest, "git", args),
+        git: (operation, args) => commands.remote(operation, vm.sshDest, "git", args),
       };
 
-      const prepared = yield* fetches
+      const releaseWorkspace = Effect.fn("ExeDevExecutor.releaseWorkspace")(
+        function* (
+          resource: { readonly workspace: AttemptWorkspace; readonly scope: Scope.Closeable },
+          exit: Exit.Exit<unknown, unknown>,
+        ) {
+          yield* Effect.annotateCurrentSpan({
+            attemptId: request.attemptId,
+            worker: request.worker,
+            host: vm.sshDest,
+          });
+          // The remote run host and its checkout form one cleanup dependency:
+          // an SSH exit does not prove the process on the VM has stopped. Never
+          // close the checkout scope unless this independent stop request succeeds.
+          const confirmed = yield* commands.remote("cleanup", vm.sshDest, "sh", [
+            "-c",
+            RUN_HOST_KILL_SCRIPT,
+            "sh",
+            runHostPidFile(resource.workspace.worktree),
+          ]);
+          yield* Effect.logInfo("Confirmed the remote run host before workspace removal", {
+            attemptId: request.attemptId,
+            worker: request.worker,
+            host: vm.sshDest,
+            runHost: confirmed.trim(),
+          });
+          yield* Scope.close(resource.scope, exit);
+        },
+        (effect) =>
+          effect.pipe(
+            Effect.tapError((error) =>
+              Effect.logError("Remote termination failed; Attempt checkout retained for recovery", {
+                attemptId: request.attemptId,
+                worker: request.worker,
+                host: vm.sshDest,
+                worktree,
+                message: error.message,
+              }),
+            ),
+            Effect.ignore,
+          ),
+      );
+
+      const { workspace: prepared } = yield* fetches
         .withLock(request.repository)(
           Effect.gen(function* () {
-            // The grant attaches inside the compensated region, so an interrupt
-            // parked on the repository lock cannot leak an attachment.
-            yield* credentialGrants.acquire(request.worker, request.repository, integration);
-            const provisioned = yield* provisionWorktree({
-              request,
-              url: remoteUrl,
-              host: vm.sshDest,
-              layout: { cache, staging, worktree },
-              ops,
-            });
-            yield* Ref.update(preparedStates, (current) => {
-              const next = new Map(current);
-              next.set(request.attemptId, { cache, integration, vm });
-              return next;
-            });
-            return provisioned;
+            // Credentials belong to the Attempt scope independently of the checkout:
+            // refusing destructive cleanup must still release this grant exactly once.
+            yield* credentialGrants.acquire(
+              request.attemptId,
+              request.worker,
+              request.repository,
+              integration,
+            );
+            return yield* Effect.acquireRelease(
+              Effect.uninterruptibleMask((restore) =>
+                Effect.gen(function* () {
+                  const scope = yield* Scope.make();
+                  // Before preparation succeeds no run host can exist. Roll back the
+                  // partial checkout unconditionally; only a completed workspace is
+                  // transferred to the guarded remote-process release above.
+                  const workspace = yield* restore(
+                    provisionWorktree({
+                      request,
+                      url: remoteUrl,
+                      host: vm.sshDest,
+                      layout: { cache, staging, worktree },
+                      ops,
+                    }),
+                  ).pipe(
+                    Scope.provide(scope),
+                    Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
+                  );
+                  return { workspace, scope };
+                }),
+              ),
+              releaseWorkspace,
+              { interruptible: true },
+            );
           }),
         )
         .pipe(
@@ -136,37 +192,6 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
             isExecutorError(cause)
               ? cause
               : executorError("exe.dev workspace preparation failed", cause),
-          ),
-          Effect.onError(() =>
-            Effect.gen(function* () {
-              yield* Ref.update(preparedStates, (current) => {
-                const next = new Map(current);
-                next.delete(request.attemptId);
-                return next;
-              });
-              yield* commands.remote("cleanup", vm.sshDest, "rm", ["-rf", worktree, staging]).pipe(
-                Effect.tapError((error) =>
-                  Effect.logWarning("Could not remove a partial exe.dev workspace", {
-                    attemptId: request.attemptId,
-                    worker: request.worker,
-                    host: vm.sshDest,
-                    message: error.message,
-                  }),
-                ),
-                Effect.ignore,
-              );
-              yield* credentialGrants.release(request.worker, integration).pipe(
-                Effect.tapError((error) =>
-                  Effect.logWarning("Could not detach credentials after prepare failed", {
-                    attemptId: request.attemptId,
-                    worker: request.worker,
-                    host: vm.sshDest,
-                    message: error.message,
-                  }),
-                ),
-                Effect.ignore,
-              );
-            }),
           ),
         );
 
@@ -178,121 +203,15 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         baseCommit: prepared.spec.baseCommit,
         worktree,
       });
-      return prepared;
-    });
-
-    const cleanWorktree = Effect.fn("ExeDevExecutor.cleanWorktree")(function* (
-      prepared: PreparedAttempt,
-      state: PreparedState,
-    ) {
-      yield* Effect.annotateCurrentSpan({
-        attemptId: prepared.spec.attemptId,
-        worker: prepared.worker,
-        host: state.vm.sshDest,
-      });
-      // Killing the local SSH client says nothing about the VM. Confirm the
-      // recorded run host is dead before destroying the workspace under it.
-      const confirmed = yield* commands.remoteRaw("cleanup", state.vm.sshDest, "sh", [
-        "-c",
-        RUN_HOST_KILL_SCRIPT,
-        "sh",
-        runHostPidFile(prepared.worktree),
-      ]);
-      yield* Effect.logInfo("Confirmed the remote run host before workspace removal", {
-        attemptId: prepared.spec.attemptId,
-        worker: prepared.worker,
-        host: state.vm.sshDest,
-        runHost: confirmed.stdout.trim() || `exit ${String(confirmed.exitCode)}`,
-      });
-      const removed = yield* commands.remoteRaw("cleanup", state.vm.sshDest, "git", [
-        "--git-dir",
-        state.cache,
-        "worktree",
-        "remove",
-        "--force",
-        prepared.worktree,
-      ]);
-      if (removed.exitCode !== 0) {
-        yield* Effect.logDebug("Remote Git worktree removal returned non-zero", {
-          attemptId: prepared.spec.attemptId,
-          worker: prepared.worker,
-          host: state.vm.sshDest,
-          exitCode: String(removed.exitCode),
-        });
-      }
-      yield* commands.remote("cleanup", state.vm.sshDest, "rm", ["-rf", prepared.worktree]);
-      yield* commands.remote("cleanup", state.vm.sshDest, "git", [
-        "--git-dir",
-        state.cache,
-        "worktree",
-        "prune",
-      ]);
-    });
-
-    const cleanup = Effect.fn("ExeDevExecutor.cleanup")(function* (prepared: PreparedAttempt) {
-      const attemptId = prepared.spec.attemptId;
-      yield* Effect.annotateCurrentSpan({
-        attemptId,
-        worker: prepared.worker,
-      });
-      yield* Effect.logInfo("Cleaning exe.dev Attempt workspace", {
-        attemptId,
-        worker: prepared.worker,
-        worktree: prepared.worktree,
-      });
-      const state = (yield* Ref.get(preparedStates)).get(attemptId);
-      if (state === undefined) {
-        yield* Effect.logDebug("exe.dev Attempt cleanup was already complete", {
-          attemptId,
-          worker: prepared.worker,
-        });
-        return;
-      }
-      yield* Effect.annotateCurrentSpan({ host: state.vm.sshDest });
-      // The state entry drops exactly once whatever the outcome. A failed cleanup
-      // must not leave a retry path that releases the grant twice and detaches a
-      // running sibling's credentials.
-      const [worktreeResult, grantResult] = yield* Effect.all([
-        cleanWorktree(prepared, state).pipe(Effect.result),
-        credentialGrants.release(prepared.worker, state.integration).pipe(Effect.result),
-      ]).pipe(
-        Effect.ensuring(
-          Ref.update(preparedStates, (current) => {
-            const next = new Map(current);
-            next.delete(attemptId);
-            return next;
-          }),
-        ),
-      );
-      const results = [
-        ["worktree", worktreeResult],
-        ["credential-grant", grantResult],
-      ] as const;
-      for (const [resource, result] of results) {
-        if (Result.isFailure(result)) {
-          yield* Effect.logError("exe.dev Attempt cleanup operation failed", {
-            attemptId,
-            worker: prepared.worker,
-            host: state.vm.sshDest,
-            resource,
-            message: result.failure.message,
-          });
-        }
-      }
-      if (Result.isFailure(worktreeResult)) return yield* worktreeResult.failure;
-      if (Result.isFailure(grantResult)) return yield* grantResult.failure;
-      yield* Effect.logInfo("exe.dev Attempt cleanup completed", {
-        attemptId,
-        worker: prepared.worker,
-        host: state.vm.sshDest,
-      });
-    });
+      return {
+        workspace: prepared,
+        launch: (io: AttemptChannel.Sink) => attemptChannel.launch(prepared, vm, io),
+      };
+    }, prepareAttempt);
 
     return Executor.of({
       kind: "exe.dev",
       cancel: attemptChannel.cancel,
-      cleanup,
-      launch: attemptChannel.launch,
       preflight: machines.preflight,
       prepare,
     });

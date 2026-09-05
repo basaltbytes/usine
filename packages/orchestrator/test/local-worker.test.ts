@@ -1,34 +1,29 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { UsineConfig } from "@usine/config/factory";
+import { Settings, UsineConfig } from "@usine/config/factory";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
-import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
-import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
-import { RunId, Run } from "@usine/core/run";
-import { StepName, Step } from "@usine/core/step";
-import { WorkerName } from "@usine/core/worker";
+import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import * as RunState from "@usine/core/run/state";
-import { StepResult } from "@usine/core/step/result";
-import {
-  CredentialProvider,
-  Executor,
-  ExecutorOperationError,
-  PreparedAttempt,
-  WorktreePath,
-} from "@usine/executor";
+import { Run, RunId } from "@usine/core/run";
+import { Step, StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
+import { CheckoutRequest, CredentialProvider, Executor, ExecutorError } from "@usine/executor";
 import { InstanceDirectory } from "@usine/core/instance";
-import { RunEngine, Submission } from "@usine/engine/engine";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
-import { TranscriptAllQuery, TranscriptTailQuery } from "@usine/engine/transcript";
 import { stepExecutorLayer } from "../src/scheduler.ts";
+import { TestClock } from "effect/testing";
+import { RunEngine, Submission } from "@usine/engine/engine";
+import { TranscriptAllQuery, TranscriptTailQuery } from "@usine/engine/transcript";
 import {
   DateTime,
+  Deferred,
+  Fiber,
   Effect,
   FileSystem,
   Layer,
@@ -41,6 +36,7 @@ import {
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
+import { layer as localExecutorLayer } from "@usine/executor/local";
 import { layer as localLayer } from "../src/local.ts";
 
 const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
@@ -188,6 +184,253 @@ const withLocalEngine = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer));
 
 describe("local worker", () => {
+  it.effect(
+    "keeps completed agent work successful when checkout cleanup passes the Attempt deadline",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-cleanup-budget-" });
+        const instance = InstanceDirectory.make(root);
+        const remote = yield* makeRemote(root);
+        const cleanupStarted = yield* Deferred.make<void>();
+        const finishCleanup = yield* Deferred.make<void>();
+        const delayedCleanup = ChildProcessSpawner.make(
+          Effect.fn("test.delayCleanup")(function* (command) {
+            if (
+              command._tag === "StandardCommand" &&
+              command.command === "git" &&
+              command.args.includes("worktree") &&
+              command.args.includes("remove")
+            ) {
+              yield* Deferred.succeed(cleanupStarted, undefined);
+              yield* Deferred.await(finishCleanup);
+            }
+            return yield* spawner.spawn(command);
+          }),
+        );
+        const credential = Redacted.make(TOKEN);
+        const executor = localExecutorLayer({
+          instanceDirectory: instance,
+          repositoryUrl: () => remote,
+          runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
+        }).pipe(
+          Layer.provide(
+            Layer.succeed(CredentialProvider)({ issue: () => Effect.succeed(credential) }),
+          ),
+          Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
+        );
+        const budgetConfig = new UsineConfig({
+          ...config,
+          settings: new Settings({ ...config.settings, maxAttemptMinutes: 1 }),
+        });
+        const runtime = stepExecutorLayer(budgetConfig).pipe(Layer.provide(executor));
+        yield* Effect.gen(function* () {
+          const scheduler = yield* StepExecutor;
+          const selected = submission(7);
+          const runId = RunId.make("cleanup-budget-run");
+          const execution = new StepExecution({
+            attempt: new Attempt({
+              id: AttemptId.make("cleanup-budget-run/execute/1"),
+              runId,
+              stepName: selected.step,
+              worker: WorkerName.make("local"),
+              number: AttemptNumber.make(1),
+              brain: testAgent.brain,
+              parentModel: Option.none(),
+              startedAt: selected.event.receivedAt,
+              outcome: Option.none(),
+            }),
+            event: selected.event,
+            run: new Run({
+              id: runId,
+              eventId: selected.event.id,
+              loop: selected.loop,
+              state: RunState.start(new RunState.Pending()),
+              openedAt: selected.event.receivedAt,
+            }),
+            step: new Step({ runId, name: selected.step, result: Option.none() }),
+            repository: selected.repository,
+            revision: selected.revision,
+            task: selected.task,
+            agent: selected.agent,
+            parentModel: selected.parentModel,
+          });
+          const running = yield* scheduler
+            .execute(execution, { append: () => Effect.void })
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(cleanupStarted);
+          // Agent work is complete; only resource release crosses the one-minute budget.
+          yield* TestClock.adjust("2 minutes");
+          yield* Deferred.succeed(finishCleanup, undefined);
+          const result = yield* Fiber.join(running);
+          assert.strictEqual(result.message, "Completed: Complete local task 7");
+          assert.throws(() => Redacted.value(credential));
+          assert.deepStrictEqual(
+            yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`),
+            [],
+          );
+        }).pipe(Effect.provide(runtime));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "interrupts local clone and fetch waits and redacts Git diagnostics before releasing tokens",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-prepare-" });
+        const remote = yield* makeRemote(root);
+        const staging = `${root}/.usine/workers/local/repos/acme_demo.git.cloning`;
+        for (const phase of ["clone", "fetch", "diagnostic"] as const) {
+          const started = yield* Deferred.make<void>();
+          const credential = Redacted.make(TOKEN);
+          const controlledSpawner = ChildProcessSpawner.make(
+            Effect.fn("test.controlGit")(function* (command) {
+              if (
+                command._tag === "StandardCommand" &&
+                command.command === "git" &&
+                command.args.includes(phase === "diagnostic" ? "fetch" : phase)
+              ) {
+                if (phase === "clone")
+                  yield* fileSystem.makeDirectory(staging, { recursive: true });
+                const handle = yield* spawner.spawn(
+                  ChildProcess.make(
+                    process.execPath,
+                    [
+                      "-e",
+                      phase === "diagnostic"
+                        ? "process.stderr.write(process.env.GITHUB_TOKEN); process.exit(1)"
+                        : "setInterval(() => {}, 1000)",
+                    ],
+                    command.options,
+                  ),
+                );
+                yield* Deferred.succeed(started, undefined);
+                return handle;
+              }
+              return yield* spawner.spawn(command);
+            }),
+          );
+          const runtime = localExecutorLayer({
+            instanceDirectory: InstanceDirectory.make(root),
+            repositoryUrl: () => remote,
+            runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
+          }).pipe(
+            Layer.provide(
+              Layer.merge(
+                Layer.succeed(CredentialProvider)({ issue: () => Effect.succeed(credential) }),
+                Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, controlledSpawner),
+              ),
+            ),
+          );
+          yield* Effect.gen(function* () {
+            const executor = yield* Executor;
+            const preparing = executor.prepare(
+              new CheckoutRequest({
+                attemptId: AttemptId.make(`prepare-${phase}/run/1`),
+                worker: WorkerName.make("local"),
+                repository: RepositoryName.make("acme/demo"),
+                revision: RepositoryRevision.make("main"),
+                payload: {},
+                task: AttemptTask.make("Exercise interrupted preparation"),
+                agent: testAgent,
+                parentModel: Option.none(),
+                maxChildren: ChildSessionBudget.make(4),
+                maxAttemptMinutes: 60,
+                parentEffort: "high",
+              }),
+            );
+            if (phase === "diagnostic") {
+              const error = yield* preparing.pipe(Effect.flip);
+              const encoded = Schema.encodeSync(Schema.fromJsonString(ExecutorError))(error);
+              assert(!encoded.includes(TOKEN));
+              assert(encoded.includes("[REDACTED]"));
+            } else {
+              const fiber = yield* preparing.pipe(Effect.forkChild);
+              yield* Deferred.await(started);
+              yield* Fiber.interrupt(fiber);
+            }
+            assert.throws(() => Redacted.value(credential));
+            assert(!(yield* fileSystem.exists(staging)));
+            assert.deepStrictEqual(
+              yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`),
+              [],
+            );
+          }).pipe(Effect.provide(runtime));
+        }
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "releases an unlaunched checkout and wipes credentials after successful or failed preparation",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-resource-" });
+        const remote = yield* makeRemote(root);
+        const issued: Array<Redacted.Redacted<string>> = [];
+        const credentials = Layer.succeed(CredentialProvider)({
+          issue: () =>
+            Effect.sync(() => {
+              const token = Redacted.make(TOKEN);
+              issued.push(token);
+              return token;
+            }),
+        });
+        const runtime = localExecutorLayer({
+          instanceDirectory: InstanceDirectory.make(root),
+          repositoryUrl: () => remote,
+          runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
+        }).pipe(Layer.provide(credentials));
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const request = new CheckoutRequest({
+            attemptId: AttemptId.make("unlaunched/run/1"),
+            worker: WorkerName.make("local"),
+            repository: RepositoryName.make("acme/demo"),
+            revision: RepositoryRevision.make("main"),
+            payload: {},
+            task: AttemptTask.make("Prepare without launching"),
+            agent: testAgent,
+            parentModel: Option.none(),
+            maxChildren: ChildSessionBudget.make(4),
+            maxAttemptMinutes: 60,
+            parentEffort: "high",
+          });
+          const prepared = yield* executor.prepare(request).pipe(Effect.scoped);
+          assert(!(yield* fileSystem.exists(prepared.workspace.worktree)));
+          const registration = yield* output("git", [
+            "--git-dir",
+            `${root}/.usine/workers/local/repos/acme_demo.git`,
+            "worktree",
+            "list",
+            "--porcelain",
+          ]);
+          assert(!registration.includes(prepared.workspace.worktree));
+          const error = yield* executor
+            .prepare(
+              new CheckoutRequest({
+                ...request,
+                attemptId: AttemptId.make("unlaunched/run/2"),
+                revision: RepositoryRevision.make("missing-revision"),
+              }),
+            )
+            .pipe(Effect.flip);
+          assert.strictEqual(error._tag, "ExecutorOperationError");
+          // The surrounding scope is still open: failure must release immediately.
+          assert.strictEqual(issued.length, 2);
+          for (const token of issued) assert.throws(() => Redacted.value(token));
+          const reused = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.flip);
+          assert.strictEqual(reused._tag, "InfraFailure");
+        }).pipe(Effect.provide(runtime));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
   it.live(
     "prunes bare caches while ignoring stray files and directories under repos/",
     () =>
@@ -460,85 +703,4 @@ describe("local worker", () => {
       ),
     LIVE_TEST_TIMEOUT,
   );
-
-  it.effect("keeps a successful attempt successful when cleanup fails", () => {
-    const spec = new AttemptChannel.RunSpec({
-      attemptId: AttemptId.make("cleanup-run/run/1"),
-      repository: RepositoryName.make("acme/demo"),
-      revision: RepositoryRevision.make("main"),
-      baseCommit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
-      payload: {},
-      task: AttemptTask.make("Prove cleanup stays out of the outcome"),
-      agent: testAgent,
-      parentModel: Option.none(),
-      maxChildren: ChildSessionBudget.make(4),
-      parentEffort: "high",
-    });
-    const prepared = new PreparedAttempt({
-      worker: WorkerName.make("local"),
-      spec,
-      worktree: WorktreePath.make("/tmp/usine-cleanup-test"),
-    });
-    const executor = Layer.succeed(Executor)({
-      kind: "local",
-      preflight: () => Effect.void,
-      prepare: () => Effect.succeed(prepared),
-      launch: () => Effect.succeed(new StepResult({ message: "done", facts: [] })),
-      cancel: () => Effect.void,
-      // A failed worktree removal must never turn a finished agent session into
-      // a retryable infra failure (ADR 0006).
-      cleanup: () =>
-        Effect.fail(
-          new ExecutorOperationError({
-            operation: "cleanup",
-            message: "worktree removal failed",
-            cause: new Error("EBUSY"),
-          }),
-        ),
-    });
-    const runId = RunId.make("cleanup-run");
-    const event = new Event({
-      id: EventId.make("cleanup-event"),
-      dedupKey: DedupKey.make("cleanup/event"),
-      payload: {},
-      receivedAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
-    });
-    const execution = new StepExecution({
-      attempt: new Attempt({
-        id: spec.attemptId,
-        runId,
-        stepName: StepName.make("run"),
-        worker: WorkerName.make("local"),
-        number: AttemptNumber.make(1),
-        brain: testAgent.brain,
-        parentModel: Option.none(),
-        startedAt: DateTime.makeUnsafe("2026-08-30T12:00:01Z"),
-        outcome: Option.none(),
-      }),
-      event,
-      run: new Run({
-        id: runId,
-        eventId: event.id,
-        loop: LoopName.make("review"),
-        state: RunState.start(new RunState.Pending()),
-        openedAt: DateTime.makeUnsafe("2026-08-30T12:00:00Z"),
-      }),
-      step: new Step({
-        runId,
-        name: StepName.make("run"),
-        result: Option.none(),
-      }),
-      repository: spec.repository,
-      revision: spec.revision,
-      task: spec.task,
-      agent: testAgent,
-      parentModel: Option.none(),
-    });
-
-    return Effect.gen(function* () {
-      const stepExecutor = yield* StepExecutor;
-      const result = yield* stepExecutor.execute(execution, { append: () => Effect.void });
-      assert.strictEqual(result.message, "done");
-    }).pipe(Effect.provide(stepExecutorLayer(config).pipe(Layer.provide(executor))));
-  });
 });

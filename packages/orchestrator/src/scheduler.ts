@@ -162,8 +162,6 @@ export const stepExecutorLayer = (
             runId: execution.run.id,
             worker: execution.attempt.worker,
           });
-          // `prepare` stays interruptible so a cancel can stop a hung clone or
-          // fetch; the adapter cleans its partial state on any non-success exit.
           const prepared = yield* executor
             .prepare(
               new CheckoutRequest({
@@ -176,54 +174,14 @@ export const stepExecutorLayer = (
                 agent: execution.agent,
                 parentModel: execution.parentModel,
                 maxChildren: config.settings.maxChildren,
+                maxAttemptMinutes: config.settings.maxAttemptMinutes,
                 parentEffort: resolveParentEffort(execution.agent, config.settings.parentEffort),
               }),
             )
             .pipe(Effect.mapError(asInfrastructureFailure));
-          return yield* executor.launch(prepared, io).pipe(
-            Effect.onInterrupt(() =>
-              executor.cancel(execution.attempt.id).pipe(
-                Effect.tapError((error) =>
-                  Effect.logWarning("Cancel-on-interrupt failed", {
-                    attemptId: execution.attempt.id,
-                    message: error.message,
-                  }),
-                ),
-                Effect.ignore,
-              ),
-            ),
-            // The attempt ends before its credential grant does: past the
-            // configured budget a hung run host or dead link interrupts the
-            // launch through the cancel handshake above and reports an infra
-            // failure instead of parking forever (ADR 0006).
-            Effect.timeoutOrElse({
-              duration: `${config.settings.maxAttemptMinutes} minutes`,
-              orElse: () =>
-                Effect.fail(
-                  new InfraFailure({
-                    message: `Attempt exceeded the ${config.settings.maxAttemptMinutes}-minute budget`,
-                    cause: new Error("attempt timeout"),
-                  }),
-                ),
-            }),
-            // The worktree is removed at attempt end whatever the outcome, and
-            // cleanup never changes that outcome: a failed removal is logged
-            // rather than turned into a retryable infra failure that would
-            // re-run non-idempotent work (ADR 0006).
-            Effect.ensuring(
-              executor.cleanup(prepared).pipe(
-                Effect.tapError((error) =>
-                  Effect.logError("Attempt cleanup failed; the worktree may need manual removal", {
-                    attemptId: execution.attempt.id,
-                    worktree: prepared.worktree,
-                    message: error.message,
-                  }),
-                ),
-                Effect.ignore,
-              ),
-            ),
-          );
+          return yield* prepared.launch(io);
         },
+        Effect.scoped,
       );
 
       const interrupt: StepExecutor["Service"]["interrupt"] = (attemptId) =>

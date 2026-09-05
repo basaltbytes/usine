@@ -1,7 +1,7 @@
 {
   "name": "@usine/executor",
   "version": "0.1.0",
-  "description": "The usine five-operation Worker contract with local and exe.dev adapters.",
+  "description": "The usine scoped Worker contract with local and exe.dev adapters.",
   "license": "MIT",
   "repository": {
     "type": "git",

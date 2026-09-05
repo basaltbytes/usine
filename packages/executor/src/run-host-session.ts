@@ -17,7 +17,7 @@ import {
   type PlatformError,
 } from "effect";
 import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpawner";
-import { ExecutorError, ExecutorOperationError, type PreparedAttempt } from "./executor.ts";
+import { ExecutorError, ExecutorOperationError, type AttemptWorkspace } from "./executor.ts";
 import { invalidFrameDiagnostic, invalidFrameMessage } from "./invalid-frame.ts";
 
 export interface SpawnedRunHost {
@@ -31,17 +31,18 @@ export type RunHostInput = Queue.Queue<Uint8Array, Cause.Done>;
 
 export interface RunHostSessionOptions {
   readonly interruptGrace: Parameters<typeof Effect.timeoutOption>[1];
-  readonly spawn: (
-    prepared: PreparedAttempt,
-    input: RunHostInput,
-  ) => Effect.Effect<SpawnedRunHost, AttemptFailure | PlatformError.PlatformError, Scope.Scope>;
 }
+
+export type SpawnRunHost = (
+  input: RunHostInput,
+) => Effect.Effect<SpawnedRunHost, AttemptFailure | PlatformError.PlatformError, Scope.Scope>;
 
 export interface RunHostSession {
   readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
   readonly launch: (
-    prepared: PreparedAttempt,
+    prepared: AttemptWorkspace,
     io: AttemptChannel.Sink,
+    spawn: SpawnRunHost,
   ) => Effect.Effect<StepResult, AttemptFailure>;
 }
 
@@ -52,7 +53,7 @@ interface ActiveAttempt {
   readonly input: Queue.Queue<Uint8Array, Cause.Done>;
   readonly io: AttemptChannel.Sink;
   readonly sequence: Ref.Ref<number>;
-  readonly worker: PreparedAttempt["worker"];
+  readonly worker: AttemptWorkspace["worker"];
 }
 
 const STDERR_TAIL_BYTES = 4_096;
@@ -221,8 +222,9 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
     });
 
     const launch = Effect.fn("RunHostSession.launch")(function* (
-      prepared: PreparedAttempt,
+      prepared: AttemptWorkspace,
       io: AttemptChannel.Sink,
+      spawn: SpawnRunHost,
     ) {
       const attemptId = prepared.spec.attemptId;
       yield* Effect.annotateCurrentSpan({ attemptId, worker: prepared.worker });
@@ -230,7 +232,7 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
       const execute = Effect.scoped(
         Effect.gen(function* () {
           const input = yield* Queue.make<Uint8Array, Cause.Done>();
-          const { handle, host, scrub } = yield* options.spawn(prepared, input);
+          const { handle, host, scrub } = yield* spawn(input);
           yield* Effect.annotateCurrentSpan({ host });
           const active: ActiveAttempt = {
             cancelStarted: yield* Ref.make(false),

@@ -1,6 +1,35 @@
 # @usine/executor
 
-Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free package root defines five operations: preflight, prepare, launch, cancel, and cleanup. It also owns the credential provider, Worker capability errors, and adapter-neutral request types.
+Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free package root defines Worker preflight, scoped Attempt preparation, and cancellation. Each prepared Attempt launches its own run host and releases its resources at completion or when its scope closes. It also owns the credential provider, Worker capability errors, and adapter-neutral request types.
+
+## Attempt lifetime
+
+Call `Executor.prepare(request)` inside `Effect.scoped`, then call `prepared.launch(io)`
+once. The returned `PreparedAttempt` owns the checkout and repository access. Its
+`workspace` is an `AttemptWorkspace` descriptor containing the Worker, RunSpec, and
+worktree path; it can be serialized without exposing credentials or live handles.
+
+```ts
+const result = yield* Effect.scoped(
+  Effect.gen(function* () {
+    const prepared = yield* executor.prepare(request)
+    return yield* prepared.launch(transcriptSink)
+  }),
+)
+```
+
+Preparation remains interruptible during clone, fetch, credential requests, and lock
+waits. A failed prepare releases partial acquisitions immediately. An unlaunched
+Attempt releases its resources when the surrounding scope closes. Launch finishes
+cleanup before returning on success, failure, or interruption; closing the owner
+scope also stops a launch running in another fiber. Each Attempt launches at most
+once. Cleanup failures are logged without replacing a successful agent result with
+a retryable failure. Set `CheckoutRequest.maxAttemptMinutes` to bound live run-host
+execution; preparation and resource cleanup are outside that time budget.
+
+This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prepared)`
+methods. Consumers supply a scope instead of coordinating cleanup. The engine's
+`StepExecutor` reservation, execution, and interruption contract remains unchanged.
 
 ## Local Worker
 
@@ -28,7 +57,7 @@ Prepare attaches the repository's integration to the VM with a bounded `--for` g
 
 The first prepare on each VM after orchestrator startup sweeps abandoned Attempt worktrees and prunes cached worktree registrations left by a crash. Each sweep removal is isolated and logged: an immovable leftover never blocks its siblings or later prepares, and the sweep runs once per process regardless of partial failures. One-shot lobby and SSH commands carry a ten-minute timeout, and the SSH client sends keepalives so a dead link fails the operation instead of parking it. Cancellation also bounds interrupt persistence and delivery before escalating to a hard kill, so a parked store or remote process cannot stall shutdown; before removing a workspace, cleanup reads the run host's recorded pid on the VM and confirms the process is dead, because killing the local SSH client alone says nothing about the remote side.
 
-Concurrent Attempts against different repositories leave their integrations attached to the VM simultaneously; each grant stays time-boxed, and the refcounted release detaches an integration only after its last Attempt finishes. A failed detach is logged and left to lapse with its time-box.
+Concurrent Attempts against different repositories leave their integrations attached to the VM simultaneously; each grant stays time-boxed, and the refcounted release detaches an integration only after its last Attempt finishes. A failed detach is logged and left to lapse with its time-box. If remote termination cannot be confirmed, cleanup retains the checkout and its Git registration for recovery, logs its location, and still releases the credential grant. Partial preparation rolls back without requiring remote-process confirmation because no run host has launched.
 
 ```ts
 import { RepositoryName } from "@usine/core/repository"

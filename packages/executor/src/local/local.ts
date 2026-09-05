@@ -1,6 +1,4 @@
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { InfraFailure } from "@usine/core/attempt/failure";
-import { AttemptId } from "@usine/core/attempt";
 import { RepositoryName } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
 import {
@@ -10,7 +8,6 @@ import {
   Path,
   type PlatformError,
   Redacted,
-  Ref,
   Result,
   Schema,
   Stream,
@@ -24,11 +21,12 @@ import {
   ExecutorError,
   ExecutorOperationError,
   logPreflightFailure,
-  type PreparedAttempt,
+  type AttemptWorkspace,
   type RunHostCommand,
   WorkerCapabilityError,
   type ExecutorOperation,
 } from "../executor.ts";
+import { prepareAttempt } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
   cacheDirectoryName,
@@ -51,11 +49,6 @@ export interface LocalExecutorOptions {
   readonly repositoryUrl?: (repository: RepositoryName) => string;
   /** Grace for delivering a stop request, then for the run host to exit; each wait is bounded separately. Defaults to two seconds. */
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
-}
-
-interface PreparedState {
-  readonly cache: string;
-  readonly credential: Redacted.Redacted<string>;
 }
 
 const isExecutorError = Schema.is(ExecutorError);
@@ -107,7 +100,6 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const path = yield* Path.Path;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const fetches = yield* keyedLockFor<RepositoryName>();
-    const preparedStates = yield* Ref.make(new Map<AttemptId, PreparedState>());
     const baseEnvironment = yield* allowlistedEnvironment(HOST_ENVIRONMENT_ALLOWLIST);
     const repositoryUrl =
       options.repositoryUrl ??
@@ -259,7 +251,14 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         host: "local",
         repository: request.repository,
       });
-      const credential = yield* credentials.issue(request.repository, request.attemptId);
+      const credential = yield* Effect.acquireRelease(
+        credentials.issue(request.repository, request.attemptId),
+        (token) =>
+          Effect.sync(() => {
+            Redacted.wipeUnsafe(token);
+          }),
+        { interruptible: true },
+      );
       const workerRoot = path.join(workersRoot, request.worker);
       const cache = path.join(workerRoot, "repos", cacheDirectoryName(request.repository));
       const worktree = path.join(workerRoot, "attempts", safeSegment(request.attemptId));
@@ -274,7 +273,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         worktree,
       });
 
-      const remove = (target: string): Effect.Effect<void, PlatformError.PlatformError> =>
+      const remove = (
+        _operation: "prepare" | "cleanup",
+        target: string,
+      ): Effect.Effect<void, PlatformError.PlatformError> =>
         fileSystem.remove(target, { recursive: true, force: true });
       const ops: WorkspaceOps<PlatformError.PlatformError | ExecutorOperationError> = {
         ensureRoots: Effect.andThen(
@@ -284,8 +286,17 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         removePath: remove,
         cacheExists: fileSystem.exists(cache),
         promoteStaging: fileSystem.rename(`${cache}.cloning`, cache),
-        git: (args: ReadonlyArray<string>): Effect.Effect<string, ExecutorOperationError> =>
-          executeCommand("prepare", "git", args, commandOptions),
+        git: (operation, args) =>
+          Effect.gen(function* () {
+            // Git can echo the ambient token in diagnostics. Scrub before forming
+            // an error or passing its stdout to the revision parser.
+            const result = yield* collectCommand(spawner, operation, "git", args, commandOptions);
+            return yield* requireSuccess(operation, "local", "git", args, {
+              ...result,
+              stdout: scrubbed(result.stdout, credential),
+              stderr: scrubbed(result.stderr, credential),
+            });
+          }),
       };
       const prepared = yield* fetches
         .withLock(request.repository)(
@@ -303,40 +314,23 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
               ? error
               : executorError("prepare", "Attempt workspace preparation failed", error),
           ),
-          Effect.onError(() =>
-            Effect.gen(function* () {
-              yield* fileSystem.remove(worktree, { recursive: true, force: true }).pipe(
-                Effect.tapError((error) =>
-                  Effect.logWarning("Could not remove a partial local workspace", {
-                    attemptId: request.attemptId,
-                    worker: request.worker,
-                    host: "local",
-                    worktree,
-                    message: String(error),
-                  }),
-                ),
-                Effect.ignore,
-              );
-              Redacted.wipeUnsafe(credential);
-            }),
-          ),
         );
 
-      yield* Ref.update(preparedStates, (current) => {
-        const next = new Map(current);
-        next.set(request.attemptId, { cache, credential });
-        return next;
-      });
       yield* Effect.logInfo("Attempt workspace ready", {
         attemptId: request.attemptId,
         baseCommit: prepared.spec.baseCommit,
         worktree,
       });
-      return prepared;
-    });
+      return {
+        workspace: prepared,
+        launch: (io: AttemptChannel.Sink) =>
+          session.launch(prepared, io, (input) => spawn(prepared, credential, input)),
+      };
+    }, prepareAttempt);
 
     const spawn = Effect.fn("LocalExecutor.spawnRunHost")(function* (
-      prepared: PreparedAttempt,
+      prepared: AttemptWorkspace,
+      credential: Redacted.Redacted<string>,
       input: RunHostInput,
     ) {
       const attemptId = prepared.spec.attemptId;
@@ -345,13 +339,6 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         worker: prepared.worker,
         host: "local",
       });
-      const stored = (yield* Ref.get(preparedStates)).get(attemptId);
-      if (stored === undefined) {
-        return yield* new InfraFailure({
-          message: `Attempt ${attemptId} has no prepared credential`,
-          cause: new Error("prepared Attempt state missing"),
-        });
-      }
       // A linked worktree's git common dir is the bare cache itself, and Turbo
       // puts its cache next to the common dir, so an unscoped run from the
       // worktree would write `repos/.turbo` beside the bare caches. The Worker
@@ -370,7 +357,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         ChildProcess.make(runHost.command, runHost.args, {
           cwd: prepared.worktree,
           env: {
-            ...credentialEnvironment(baseEnvironment, stored.credential),
+            ...credentialEnvironment(baseEnvironment, credential),
             TURBO_CACHE_DIR: turboCache,
           },
           extendEnv: false,
@@ -380,95 +367,15 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       return {
         handle,
         host: "local",
-        scrub: (text: string): string => scrubbed(text, stored.credential),
+        scrub: (text: string): string => scrubbed(text, credential),
       };
     });
 
-    const session = yield* runHostSessionFor({ interruptGrace, spawn });
-
-    const cleanup = Effect.fn("LocalExecutor.cleanup")(function* (prepared: PreparedAttempt) {
-      const attemptId = prepared.spec.attemptId;
-      yield* Effect.annotateCurrentSpan({
-        attemptId,
-        worker: prepared.worker,
-        host: "local",
-      });
-      yield* Effect.logInfo("Cleaning Attempt workspace", {
-        attemptId,
-        worker: prepared.worker,
-        host: "local",
-        worktree: prepared.worktree,
-      });
-      const state = (yield* Ref.get(preparedStates)).get(attemptId);
-      if (state === undefined) {
-        yield* fileSystem
-          .remove(prepared.worktree, { recursive: true, force: true })
-          .pipe(
-            Effect.mapError((cause) =>
-              executorError("cleanup", `Could not remove ${prepared.worktree}`, cause),
-            ),
-          );
-        return;
-      }
-      const finish = Effect.gen(function* () {
-        const removedFromGit = yield* run("cleanup", "git", [
-          "--git-dir",
-          state.cache,
-          "worktree",
-          "remove",
-          "--force",
-          prepared.worktree,
-        ]).pipe(Effect.result);
-        const removedFromDisk = yield* fileSystem
-          .remove(prepared.worktree, { recursive: true, force: true })
-          .pipe(
-            Effect.mapError((cause) =>
-              executorError("cleanup", `Could not remove ${prepared.worktree}`, cause),
-            ),
-            Effect.result,
-          );
-        const pruned = yield* run("cleanup", "git", [
-          "--git-dir",
-          state.cache,
-          "worktree",
-          "prune",
-        ]).pipe(Effect.result);
-        for (const result of [removedFromGit, removedFromDisk, pruned]) {
-          if (Result.isFailure(result)) {
-            return yield* result.failure;
-          }
-        }
-      }).pipe(
-        Effect.mapError((cause) =>
-          isExecutorError(cause)
-            ? cause
-            : executorError("cleanup", `Could not clean Attempt ${attemptId}`, cause),
-        ),
-      );
-      yield* finish.pipe(
-        Effect.ensuring(
-          Effect.gen(function* () {
-            yield* Ref.update(preparedStates, (current) => {
-              const next = new Map(current);
-              next.delete(attemptId);
-              return next;
-            });
-            Redacted.wipeUnsafe(state.credential);
-          }),
-        ),
-      );
-      yield* Effect.logInfo("Attempt cleanup completed", {
-        attemptId,
-        worker: prepared.worker,
-        host: "local",
-      });
-    });
+    const session = yield* runHostSessionFor({ interruptGrace });
 
     return Executor.of({
       kind: "local",
       cancel: session.cancel,
-      cleanup,
-      launch: session.launch,
       preflight,
       prepare,
     });
