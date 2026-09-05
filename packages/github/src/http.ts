@@ -9,7 +9,7 @@ import {
 } from "./model.ts";
 
 export const API_ROOT = "https://api.github.com";
-export const API_VERSION = "2026-03-10";
+const API_VERSION = "2026-03-10";
 
 export const authorized = (credential: Redacted.Redacted<string>) =>
   HttpClientRequest.setHeaders({

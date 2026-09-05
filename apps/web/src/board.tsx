@@ -126,7 +126,7 @@ export const applyMove = (
 type LabelCatalog = ReadonlyMap<string, LabelView>;
 
 /** The keyboard and assistive-technology path for a lane move; drag stays the fast path. */
-export interface MoveMenu {
+interface MoveMenu {
   readonly targets: ReadonlyArray<BoardLaneView>;
   readonly disabled: boolean;
   readonly onMove: (item: BoardItemView, lane: BoardLaneView) => void;

@@ -68,7 +68,7 @@ const toArrayBuffer = (value: Uint8Array): ArrayBuffer => {
 };
 
 /** Signs an App JWT with `iat` backdated a minute for clock skew and `exp` under GitHub's ten-minute cap. */
-export type AppJwtSigner = () => Effect.Effect<Redacted.Redacted<string>>;
+type AppJwtSigner = () => Effect.Effect<Redacted.Redacted<string>>;
 
 /**
  * Imports the App private key once with WebCrypto RS256. A key that cannot be

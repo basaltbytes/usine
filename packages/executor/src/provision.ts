@@ -27,7 +27,7 @@ export const isCacheDirectoryName = (entry: string): boolean =>
 
 const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
 
-export interface WorkspaceLayout {
+interface WorkspaceLayout {
   readonly cache: string;
   readonly staging: string;
   readonly worktree: string;

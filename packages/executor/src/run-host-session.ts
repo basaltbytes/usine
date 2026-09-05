@@ -20,7 +20,7 @@ import type { ChildProcessHandle } from "effect/unstable/process/ChildProcessSpa
 import { ExecutorError, ExecutorOperationError, type AttemptWorkspace } from "./executor.ts";
 import { invalidFrameDiagnostic, invalidFrameMessage } from "./invalid-frame.ts";
 
-export interface SpawnedRunHost {
+interface SpawnedRunHost {
   readonly handle: ChildProcessHandle;
   readonly host: string;
   /** Redacts the Attempt credential from run-host output before it is persisted. */
@@ -33,7 +33,7 @@ export interface RunHostSessionOptions {
   readonly interruptGrace: Parameters<typeof Effect.timeoutOption>[1];
 }
 
-export type SpawnRunHost = (
+type SpawnRunHost = (
   input: RunHostInput,
 ) => Effect.Effect<SpawnedRunHost, AttemptFailure | PlatformError.PlatformError, Scope.Scope>;
 

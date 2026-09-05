@@ -31,9 +31,9 @@ import {
 } from "./model.ts";
 
 /** How many newest rows one cold drawer open loads per Attempt. */
-export const COLD_TRANSCRIPT_LIMIT = 500;
+const COLD_TRANSCRIPT_LIMIT = 500;
 /** The row cap for one live catch-up response across all Attempts. */
-export const TAIL_TRANSCRIPT_LIMIT = 500;
+const TAIL_TRANSCRIPT_LIMIT = 500;
 
 export const failureView = (failure: AttemptFailure): FailureView =>
   Match.valueTags(failure, {
