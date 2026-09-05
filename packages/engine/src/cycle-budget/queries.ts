@@ -1,8 +1,9 @@
 import { CycleBudgetAsk, CycleBudgetAskId, LoopCycleCount } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
 import { EventId } from "@usine/core/event";
+import * as RunState from "@usine/core/run/state";
 import { RunId } from "@usine/core/run";
-import { and, asc, eq, exists, isNotNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, exists, isNotNull, ne, notInArray, or, sql } from "drizzle-orm";
 import { Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import {
@@ -28,9 +29,9 @@ const decodeBudget = Schema.decodeUnknownEffect(Schema.Array(BudgetRow), {
 
 /** Transaction-local admission and reservation operations shared with the Run store. */
 export const cycleQueries = (database: RunDatabaseClient) => {
-  // Filter before queue ordering as well as at admission: a newer stale Event
-  // must not hide an older Event that fresh polling has confirmed.
-  const confirmedEvent = eq(
+  // Apply the same immutable observation generation at admission and before
+  // queue ordering, so stale Events cannot hide eligible work after a reset.
+  const currentEvent = eq(
     triggerEvents.cycleGeneration,
     sql`coalesce((
     select ${itemCycleBudgets.generation} from ${itemCycleBudgets}
@@ -61,7 +62,7 @@ export const cycleQueries = (database: RunDatabaseClient) => {
       .select({
         loop: cycleReservations.loop,
         admitted: sql<number>`count(*)`,
-        completed: sql<number>`sum(case when ${state} in ('Succeeded', 'Failed', 'Canceled') and ${started} then 1 else 0 end)`,
+        completed: sql<number>`sum(case when ${notInArray(state, [...RunState.OPEN_STATE_TAGS])} and ${started} then 1 else 0 end)`,
       })
       .from(cycleReservations)
       .innerJoin(runs, eq(runs.runId, cycleReservations.runId))
@@ -182,49 +183,25 @@ export const cycleQueries = (database: RunDatabaseClient) => {
       .pipe(Effect.flatMap(decodeBudget));
   });
 
-  const confirm = Effect.fn("CycleBudget.confirmObservedEvent")(function* (submission: Submission) {
+  const isCurrentEvent = Effect.fn("CycleBudget.isCurrentEvent")(function* (
+    submission: Submission,
+  ) {
     yield* Effect.annotateCurrentSpan({
       eventId: submission.event.id,
       itemKey: submission.itemKey,
     });
     const budget = yield* get(submission.itemKey);
-    const generation = Option.match(budget, {
-      onNone: () => 0,
-      onSome: (value) => value.generation,
-    });
-    yield* database
-      .update(triggerEvents)
-      .set({ cycleGeneration: generation })
-      .where(eq(triggerEvents.eventId, submission.event.id))
-      .execute();
-  });
-
-  const canContinue = Effect.fn("CycleBudget.canContinue")(function* (submission: Submission) {
-    yield* Effect.annotateCurrentSpan({
-      eventId: submission.event.id,
-      itemKey: submission.itemKey,
-    });
-    const budget = yield* get(submission.itemKey);
-    if (Option.isNone(budget)) return true;
-    const confirmed = yield* database
-      .select({ eventId: triggerEvents.eventId })
-      .from(triggerEvents)
-      .where(and(eq(triggerEvents.eventId, submission.event.id), confirmedEvent))
-      .execute()
-      .pipe(
-        Effect.flatMap(
-          Schema.decodeUnknownEffect(Schema.Array(Schema.Struct({ eventId: EventId }))),
-        ),
-      );
-    const current = confirmed.length > 0;
+    const generation = Option.match(budget, { onNone: () => 0, onSome: (row) => row.generation });
+    const current = submission.cycleGeneration === generation;
     if (!current)
-      yield* Effect.logInfo("Queued Event awaits fresh trigger evaluation after cycle reset", {
+      yield* Effect.logInfo("Event observation was superseded by a cycle reset", {
         eventId: submission.event.id,
         itemKey: submission.itemKey,
-        generation: budget.value.generation,
+        observedGeneration: submission.cycleGeneration,
+        generation,
       });
     return current;
   });
 
-  return { admit, reserve, get, asks, pendingResets, confirm, canContinue, confirmedEvent };
+  return { admit, reserve, get, asks, pendingResets, isCurrentEvent, currentEvent };
 };

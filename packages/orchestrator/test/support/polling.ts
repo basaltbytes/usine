@@ -1,3 +1,4 @@
+import { CycleGeneration } from "@usine/core/cycle-budget";
 import { ConfigParser } from "@usine/config/parser";
 import { CursorStore } from "@usine/engine/cursor";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
@@ -20,6 +21,7 @@ export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
 });
 
 export const emptyCycleBudgets: CycleBudgets["Service"] = {
+  generation: () => Effect.succeed(CycleGeneration.make(0)),
   asks: () => Effect.succeed([]),
   pendingResets: () => Effect.succeed([]),
   reset: () => Effect.die("unused cycle reset"),

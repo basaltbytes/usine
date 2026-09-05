@@ -6,7 +6,7 @@ import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
-import { CycleLimit } from "@usine/core/cycle-budget";
+import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { Event, EventId, DedupKey } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
@@ -51,6 +51,16 @@ const submission = (loop: string, round: number, item = "pr-72") =>
     agent,
     parentModel: Option.none(),
   });
+const afterReset = (value: Submission) =>
+  new Submission({
+    ...value,
+    cycleGeneration: CycleGeneration.make(1),
+    event: new Event({
+      ...value.event,
+      id: EventId.make(`${value.event.id}/generation-1`),
+      dedupKey: DedupKey.make(`${value.event.dedupKey}/generation-1`),
+    }),
+  });
 const idFor = (value: Submission) => RunId.make(value.event.id);
 const services = Layer.mergeAll(RunStore.layer, CycleBudgets.layer);
 const inDatabase = <A, E>(
@@ -78,7 +88,7 @@ const complete = Effect.fn("test.completeCycleRun")(function* (value: Submission
 });
 
 describe("Item cycle budgets", () => {
-  it.live("selects confirmed queued work even when a newer stale Event exists", () =>
+  it.live("selects current-generation queued work even when a newer stale Event exists", () =>
     withDirectory((directory) =>
       inDatabase(
         directory,
@@ -107,11 +117,12 @@ describe("Item cycle budgets", () => {
           assert(blocked.result._tag === "CycleBlocked");
           yield* budgets.reset(blocked.result.ask.id, event("reset-ordering"));
           assert(Option.isNone(yield* store.nextQueued(idFor(running))));
-          yield* store.recordAndClaim(older, idFor(older));
+          const fresh = afterReset(older);
+          yield* store.recordAndClaim(fresh, idFor(fresh));
           yield* store.finishAttempt(started.execution.attempt, success);
           const eligible = yield* store.nextQueued(idFor(running));
           assert(Option.isSome(eligible));
-          assert.strictEqual(eligible.value.event.id, older.event.id);
+          assert.strictEqual(eligible.value.event.id, fresh.event.id);
           assert(Option.isSome(yield* store.claimQueued(eligible.value, idFor(eligible.value))));
         }),
       ),
@@ -185,7 +196,7 @@ describe("Item cycle budgets", () => {
       ),
   );
 
-  it.live("requires a fresh trigger submission before a pre-reset queued Event can continue", () =>
+  it.live("supersedes pre-reset observations and admits only fresh-generation Events", () =>
     withDirectory((directory) =>
       inDatabase(
         directory,
@@ -213,6 +224,11 @@ describe("Item cycle budgets", () => {
           assert(Option.isNone(yield* store.claimQueued(queued, idFor(queued))));
           assert.strictEqual(
             (yield* store.recordAndClaim(queued, idFor(queued))).result._tag,
+            "Ignored",
+          );
+          const fresh = afterReset(queued);
+          assert.strictEqual(
+            (yield* store.recordAndClaim(fresh, idFor(fresh))).result._tag,
             "Claimed",
           );
         }),
@@ -283,8 +299,8 @@ describe("Item cycle budgets", () => {
               assert.strictEqual((yield* budgets.pendingResets()).length, 1);
               yield* budgets.reset(ask.id, event("operator-reset-1"));
               for (let round = 5; round <= 7; round += 1)
-                yield* complete(submission("review", round));
-              const next = submission("review", 8);
+                yield* complete(afterReset(submission("review", round)));
+              const next = afterReset(submission("review", 8));
               const blocked = yield* store.recordAndClaim(next, idFor(next));
               assert(blocked.result._tag === "CycleBlocked");
               const newerAsk = blocked.result.ask;

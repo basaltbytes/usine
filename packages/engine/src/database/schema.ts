@@ -46,7 +46,7 @@ export const triggerEvents = snakeCase.table(
     stepName: text().$type<StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
     cycleLimit: integer().$type<CycleLimit>(),
-    // Last cycle generation for which the trigger confirmed this Event still matches.
+    // Item allowance observed before fetching this Event's trigger input.
     cycleGeneration: integer().notNull().default(0),
     // The execution context as submitted, part of the immutable Event fact. A
     // queued Event is claimed later from these columns, while execution reads

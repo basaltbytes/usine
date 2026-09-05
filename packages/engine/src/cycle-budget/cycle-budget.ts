@@ -1,4 +1,5 @@
-import { CycleBudgetAsk, CycleBudgetAskId } from "@usine/core/cycle-budget";
+import { CycleBudgetAsk, CycleBudgetAskId, CycleGeneration } from "@usine/core/cycle-budget";
+import { ItemKey } from "@usine/core/item";
 import { Event } from "@usine/core/event";
 import * as RunState from "@usine/core/run/state";
 import { and, eq, inArray, sql } from "drizzle-orm";
@@ -29,6 +30,10 @@ const persistence = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
 export class CycleBudgets extends Context.Service<
   CycleBudgets,
   {
+    /** Capture this generation before fetching an Item's trigger input and include it in its Event identity. */
+    readonly generation: (
+      itemKey: ItemKey,
+    ) => Effect.Effect<CycleGeneration, EnginePersistenceError>;
     /** All unanswered cycle-budget Asks, including Items whose labels no longer match. */
     readonly asks: () => Effect.Effect<ReadonlyArray<CycleBudgetAsk>, EnginePersistenceError>;
     /** Records an answer for this exact Ask and requests fresh trigger evaluation. Repeats are idempotent. */
@@ -52,6 +57,20 @@ export class CycleBudgets extends Context.Service<
     Effect.gen(function* () {
       const database = yield* RunDatabase;
       const queries = cycleQueries(database);
+      const generation = Effect.fn("CycleBudgets.generation")(function* (itemKey: ItemKey) {
+        yield* Effect.annotateCurrentSpan({ itemKey });
+        const budget = yield* queries
+          .get(itemKey)
+          .pipe(
+            Effect.mapError(
+              (cause) => new EnginePersistenceError({ operation: "read cycle generation", cause }),
+            ),
+          );
+        return Option.match(budget, {
+          onNone: () => CycleGeneration.make(0),
+          onSome: (row) => row.generation,
+        });
+      });
       const asks = Effect.fn("CycleBudgets.asks")(() =>
         queries
           .asks()
@@ -174,7 +193,7 @@ export class CycleBudgets extends Context.Service<
           generation: reset.generation,
         });
       });
-      return { asks, reset, pendingResets, acknowledgeReset };
+      return { generation, asks, reset, pendingResets, acknowledgeReset };
     }),
   );
 }

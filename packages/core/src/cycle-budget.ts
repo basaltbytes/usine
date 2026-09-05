@@ -10,6 +10,12 @@ export const CycleLimit = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pip
 );
 export type CycleLimit = typeof CycleLimit.Type;
 
+/** Identifies one Item allowance between explicit operator resets. */
+export const CycleGeneration = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+  Schema.brand("CycleGeneration"),
+);
+export type CycleGeneration = typeof CycleGeneration.Type;
+
 /** The safe default for unattended rounds on an Item. */
 export const DEFAULT_CYCLE_LIMIT = CycleLimit.make(3);
 

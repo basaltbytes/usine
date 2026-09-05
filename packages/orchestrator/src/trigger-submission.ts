@@ -6,6 +6,7 @@ import { Agent, resolveParentModel, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
+import { CycleGeneration } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryRevision } from "@usine/core/repository";
@@ -92,6 +93,7 @@ export const resolveTriggerLoops = Effect.fn("TriggerRouting.resolveLoops")(func
 interface TriggerSubmissionOptions {
   readonly agent: Agent;
   readonly dedupKey: DedupKey;
+  readonly cycleGeneration: CycleGeneration;
   readonly itemKey: ItemKey;
   readonly loop: LoopFile;
   readonly payload: Schema.Json;
@@ -112,6 +114,7 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
       receivedAt: options.receivedAt,
     }),
     itemKey: options.itemKey,
+    cycleGeneration: options.cycleGeneration,
     loop: options.loop.name,
     step: options.loop.step,
     approval: options.loop.approval,

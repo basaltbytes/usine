@@ -150,6 +150,6 @@ The test removes its kick and result comments during cleanup.
 
 Everything here is 0.x, so APIs can change between minor releases. Supply `effect` at the version pinned by the usine workspace.
 
-Item cycle exhaustion appears as a `CycleBudgetNeed` in the overview and marks the Item’s Board card as needing attention. `Operator.resetCycleBudget` records an answer to the exact Ask; polling restarts the repository cursor, fetches current Items, and evaluates active Loops before opening further Runs. A failed refresh is retried. GitHub delivery of these Asks is tracked separately in [#36](https://github.com/basaltbytes/usine/issues/36).
+Item cycle exhaustion appears as a `CycleBudgetNeed` in the overview and marks the Item’s Board card as needing attention. `Operator.resetCycleBudget` records an answer to the exact Ask; polling restarts the repository cursor, fetches current Items, and evaluates active Loops before opening further Runs. A failed refresh is retried. Each Item fetch captures its budget generation; resets supersede in-flight observations and fresh Events use the current Loop configuration. GitHub delivery of these Asks is tracked separately in [#36](https://github.com/basaltbytes/usine/issues/36).
 
 The operator HTTP API exposes `POST /api/cycle-budgets/reset` with `{ "askId": "…" }`. A stale or differently answered Ask returns HTTP 409.

@@ -6,7 +6,7 @@ import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey } from "@usine/core/event";
 import { CommitSha, RepositoryRevision, canonicalRepositoryName } from "@usine/core/repository";
 import { RunEngine, type SubmissionResult } from "@usine/engine/engine";
-import type { ItemProjection } from "@usine/engine/item-projection";
+import type { ObservedItem } from "./repository-sync.ts";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import { DateTime, Effect, Result, Schema } from "effect";
@@ -26,13 +26,20 @@ interface ItemCycle {
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
 }
 
-const eventKey = (loop: LoopFile, repository: ManagedRepo, item: ItemProjection): DedupKey =>
+const eventKey = (
+  loop: LoopFile,
+  repository: ManagedRepo,
+  { projection: item, cycleGeneration }: ObservedItem,
+): DedupKey =>
   DedupKey.make(
     JSON.stringify([
       loop.name,
       canonicalRepositoryName(repository.name),
       item.number,
       item.contentHash,
+      // Preserve pre-budget identities while making every reset a fresh Event
+      // with the current rendered task, Agent and authored limit.
+      ...(cycleGeneration === 0 ? [] : [cycleGeneration]),
     ]),
   );
 
@@ -45,8 +52,9 @@ const eventKey = (loop: LoopFile, repository: ManagedRepo, item: ItemProjection)
 export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* (
   repository: ManagedRepo,
   resolved: ReadonlyArray<ResolvedLoop>,
-  item: ItemProjection,
+  observed: ObservedItem,
 ) {
+  const { projection: item, cycleGeneration } = observed;
   yield* Effect.annotateCurrentSpan({
     repository: repository.name,
     item: item.number,
@@ -112,7 +120,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
       continue;
     }
 
-    const dedupKey = eventKey(loop, repository, item);
+    const dedupKey = eventKey(loop, repository, observed);
     const receivedAt = yield* DateTime.now;
     // A render failure comes from the loop's authoring, not transport, so
     // re-polling would fail the same way. It is scoped to this loop so the
@@ -140,6 +148,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
     const submitted = yield* runs.submit(
       triggerSubmission({
         dedupKey,
+        cycleGeneration,
         itemKey: item.itemKey,
         loop,
         payload,

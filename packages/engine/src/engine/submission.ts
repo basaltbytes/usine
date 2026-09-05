@@ -1,5 +1,10 @@
 import { Agent } from "@usine/core/agent";
-import { CycleBudgetAsk, CycleLimit, DEFAULT_CYCLE_LIMIT } from "@usine/core/cycle-budget";
+import {
+  CycleBudgetAsk,
+  CycleGeneration,
+  CycleLimit,
+  DEFAULT_CYCLE_LIMIT,
+} from "@usine/core/cycle-budget";
 import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { Event, EventId } from "@usine/core/event";
@@ -21,6 +26,11 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   cycleLimit: Schema.Option(CycleLimit).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.some(DEFAULT_CYCLE_LIMIT))),
     Schema.withConstructorDefault(Effect.succeed(Option.some(DEFAULT_CYCLE_LIMIT))),
+  ),
+  /** Capture before fetching trigger input. A reset supersedes older observations. */
+  cycleGeneration: CycleGeneration.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(CycleGeneration.make(0))),
+    Schema.withConstructorDefault(Effect.succeed(CycleGeneration.make(0))),
   ),
   repository: RepositoryName,
   revision: RepositoryRevision,

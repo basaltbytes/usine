@@ -1,3 +1,4 @@
+import { CycleGeneration } from "@usine/core/cycle-budget";
 import type { ConfigFileError } from "@usine/config/file";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { LoopFile } from "@usine/config/loop";
@@ -268,6 +269,7 @@ export class ScheduleTriggers extends Context.Service<
         const task = yield* config.renderPrompt(due.loop, context);
         const submitted = yield* runs.submit(
           triggerSubmission({
+            cycleGeneration: CycleGeneration.make(0),
             agent: due.agent,
             dedupKey,
             itemKey: itemKey(due.repository),

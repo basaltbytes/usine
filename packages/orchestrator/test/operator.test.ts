@@ -1,3 +1,4 @@
+import { CycleGeneration } from "@usine/core/cycle-budget";
 import { assert, describe, it } from "@effect/vitest";
 import {
   CycleBudgetAsk,
@@ -424,6 +425,7 @@ describe("Operator", () => {
       const reads = yield* Ref.make(0);
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
       const budgets = Layer.succeed(CycleBudgets)({
+        generation: () => Effect.succeed(CycleGeneration.make(0)),
         asks: () => Ref.get(asks),
         pendingResets: () => Effect.succeed([]),
         acknowledgeReset: () => Effect.die("unused"),

@@ -257,6 +257,7 @@ export class PollingTriggers extends Context.Service<
       >()).pipe(
         Context.pick(
           ConfigParser,
+          CycleBudgets,
           ExpressionEngine,
           GitHubPolling,
           ItemProjectionWriter,

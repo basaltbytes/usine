@@ -143,7 +143,6 @@ const makeRunStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const recorded = yield* tx.recordTriggerEvent(submission);
-        yield* tx.cycles.confirm(recorded);
         const existing = yield* tx.runForEvent(recorded.event.id);
         if (existing[0] !== undefined) {
           yield* Effect.logInfo("Event joined its existing Run", {
@@ -169,6 +168,13 @@ const makeRunStore = Effect.gen(function* () {
           });
         }
 
+        if (!(yield* tx.cycles.isCurrentEvent(recorded))) {
+          return new Claim({
+            submission: recorded,
+            supersededRun: Option.none(),
+            result: new Ignored({ eventId: recorded.event.id, reason: "superseded" }),
+          });
+        }
         const blocking = yield* tx.blockingRun(recorded.loop, recorded.itemKey);
         const blockedBy = blocking[0];
         const decision = claimRun(
@@ -443,7 +449,7 @@ const makeRunStore = Effect.gen(function* () {
         if ((yield* tx.blockingRun(submission.loop, submission.itemKey)).length > 0) {
           return Option.none<StoredSubmission>();
         }
-        if (!(yield* tx.cycles.canContinue(submission))) return Option.none<StoredSubmission>();
+        if (!(yield* tx.cycles.isCurrentEvent(submission))) return Option.none<StoredSubmission>();
         const claimed = yield* openRun(tx, submission, runId);
         return claimed.result._tag === "Claimed"
           ? Option.some(new StoredSubmission({ submission, runId }))

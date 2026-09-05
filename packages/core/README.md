@@ -27,4 +27,4 @@ Each Attempt records the child `BrainSpec` and effective Pi parent model used fo
 
 Everything is 0.x: APIs change without notice while the engine grows. `effect` is a peer dependency — supply it yourself at the pinned version.
 
-Import `CycleLimit`, `CycleCount`, `LoopCycleCount`, and `CycleBudgetAsk` from `@usine/core/cycle-budget`. An Item-level Ask records the exhausted Loop, its limit, and participating Loops’ admitted and completed Runs; it can exist before another Run is opened.
+Import `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, and `CycleBudgetAsk` from `@usine/core/cycle-budget`. An Item-level Ask records the exhausted Loop, its limit, and participating Loops’ admitted and completed Runs; it can exist before another Run is opened.

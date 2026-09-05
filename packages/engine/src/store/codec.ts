@@ -1,5 +1,5 @@
 import { Agent } from "@usine/core/agent";
-import { CycleLimit } from "@usine/core/cycle-budget";
+import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -30,6 +30,7 @@ export const EventRouteRow = Schema.Struct({
   step: StepName,
   approval: ApprovalRequirement,
   cycleLimit: Schema.NullOr(CycleLimit),
+  cycleGeneration: CycleGeneration,
   repository: RepositoryName,
   revision: RepositoryRevision,
   task: AttemptTask,
@@ -139,6 +140,7 @@ export const submissionFromRow = (row: EventRouteRow): Submission =>
     step: row.step,
     approval: row.approval,
     cycleLimit: Option.fromNullishOr(row.cycleLimit),
+    cycleGeneration: row.cycleGeneration,
     repository: row.repository,
     revision: row.revision,
     task: row.task,

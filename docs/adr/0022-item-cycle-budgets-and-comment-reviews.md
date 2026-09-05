@@ -57,8 +57,11 @@ tokens do not change the App's author identity.
 - Changing labels, restarting, or renaming a Loop cannot clear an existing Ask.
   A new Loop name has no prior count before exhaustion; Loop-file edits are trusted
   operator configuration, not an agent-controlled way to resume a blocked Item.
-- Queued Events carry the generation in which a trigger last confirmed them.
-  Queue selection and admission exclude older generations until fresh polling
-  confirms that each Event still matches, including on later pages of a backlog.
+- Trigger adapters capture the Item's generation before fetching its snapshot.
+  That generation is immutable in the Event route and part of its deduplication
+  key after a reset. Queue selection and admission reject older observations,
+  including polls that were already fetching or rendering when the reset occurred.
+  Fresh polling produces a new Event with the current task, Agent, and limit;
+  previously queued Events are never promoted into the new allowance.
 - Old CEL review-count workarounds should be removed from fix and finishing Loops;
   the [migration guide](../guides/review-fix-loops.md) shows the replacement.

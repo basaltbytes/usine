@@ -1,11 +1,7 @@
-import { CycleBudgetAsk, CycleBudgetAskId } from "@usine/core/cycle-budget";
+import { CycleBudgetAsk, CycleBudgetAskId, CycleGeneration } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
-
-const CycleGeneration = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
-  Schema.brand("CycleGeneration"),
-);
 
 /** A reset whose Item still needs fresh trigger evaluation; acknowledgement is generation-bound. */
 export class CycleBudgetReset extends Schema.Class<CycleBudgetReset>("CycleBudgetReset")({
