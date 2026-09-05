@@ -42,6 +42,7 @@ import { layer as localLayer } from "../src/local.ts";
 const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
 const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
 const TURBO_CACHE_HOST = fileURLToPath(new URL("./fixtures/turbo-cache.mjs", import.meta.url));
+const STDOUT_NOISE_HOST = fileURLToPath(new URL("./fixtures/stdout-noise.mjs", import.meta.url));
 const TOKEN = "one-attempt-test-token";
 // Each live transition crosses real git worktree and child-process boundaries.
 // The 10-second poll horizon absorbs slow CI hosts, and the 10 ms cadence still
@@ -184,6 +185,50 @@ const withLocalEngine = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer));
 
 describe("local worker", () => {
+  it.live(
+    "completes one Attempt despite stray Effect and console logs",
+    () =>
+      withLocalEngine(
+        ["--stub"],
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
+            assert.strictEqual(snapshot.attempts.length, 1);
+            const attempt = snapshot.attempts[0] ?? assert.fail("missing Attempt");
+            const transcript = yield* engine.transcript(
+              new TranscriptAllQuery({ attemptId: attempt.id }),
+            );
+            assert.strictEqual(transcript.at(-1)?.envelope.payload._tag, "Final");
+            assert(!JSON.stringify(transcript).includes("library diagnostic"));
+          }),
+        STDOUT_NOISE_HOST,
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "still fails schema-invalid protocol frames",
+    () =>
+      withLocalEngine(
+        ["--stub", "--malformed-frame"],
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            const outcome = Option.getOrUndefined(snapshot.attempts[0]?.outcome ?? Option.none());
+            assert.strictEqual(outcome?._tag, "Failed");
+            if (outcome?._tag !== "Failed") return;
+            assert.match(outcome.failure.message, /schema-invalid frame/u);
+          }),
+        STDOUT_NOISE_HOST,
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
   it.effect(
     "keeps completed agent work successful when checkout cleanup passes the Attempt deadline",
     () =>

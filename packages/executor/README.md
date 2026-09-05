@@ -27,6 +27,8 @@ once. Cleanup failures are logged without replacing a successful agent result wi
 a retryable failure. Set `CheckoutRequest.maxAttemptMinutes` to bound live run-host
 execution; preparation and resource cleanup are outside that time budget.
 
+Recognizable Effect log lines on run-host stdout are dropped with a warning that records safe shape metadata. Invalid JSON, schema-invalid frames, and protocol sequence violations still fail the Attempt.
+
 This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prepared)`
 methods. Consumers supply a scope instead of coordinating cleanup. The engine's
 `StepExecutor` reservation, execution, and interruption contract remains unchanged.
