@@ -1,47 +1,89 @@
-import { Duration, Effect, Fiber, Option } from "effect";
+import { Deferred, Duration, Effect, Exit, Fiber, Option, Scope } from "effect";
 
-// NodeRuntime interrupts the main fiber on either signal. This observer keeps
-// the second signal available while the interrupt finalizer drains the engine.
-const secondSignal = Effect.callback<void>((resume) => {
-  let received = 0;
-  const onSignal = () => {
-    received += 1;
-    if (received === 2) resume(Effect.void);
-  };
-  process.on("SIGINT", onSignal);
-  process.on("SIGTERM", onSignal);
-  return Effect.sync(() => {
-    process.removeListener("SIGINT", onSignal);
-    process.removeListener("SIGTERM", onSignal);
-  });
-});
+// This listener runs before NodeRuntime's main-fiber interruption. Admission is
+// closed synchronously at the signal boundary, including during Layer startup.
+const observeSignals = (requested: Deferred.Deferred<void>, forced: Deferred.Deferred<void>) =>
+  Effect.acquireRelease(
+    Effect.sync(() => {
+      let received = 0;
+      const onSignal = () => {
+        received += 1;
+        Deferred.doneUnsafe(received === 1 ? requested : forced, Effect.void);
+      };
+      process.prependListener("SIGINT", onSignal);
+      process.prependListener("SIGTERM", onSignal);
+      return onSignal;
+    }),
+    (onSignal) =>
+      Effect.sync(() => {
+        process.removeListener("SIGINT", onSignal);
+        process.removeListener("SIGTERM", onSignal);
+      }),
+  );
 
-/** Drains admitted work on interruption while the enclosing runtime scope stays open; a second signal or deadline ends the wait. */
-export const withGracefulShutdown = <A, E, R>(
-  running: Effect.Effect<A, E, R>,
-  drain: Effect.Effect<void>,
+/** Protects startup and running work with a bounded drain before runtime resources close. */
+export const withGracefulShutdown = <A, E, R, E2, R2>(
+  startup: Effect.Effect<
+    {
+      readonly running: Effect.Effect<A, E, R>;
+      readonly drain: Effect.Effect<void>;
+    },
+    E2,
+    R2
+  >,
+  requested: Deferred.Deferred<void>,
   deadline: Duration.Duration,
-): Effect.Effect<A, E, R> =>
+) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const forced = yield* Effect.forkScoped(secondSignal, { startImmediately: true });
-      return yield* running.pipe(
+      const forced = yield* Deferred.make<void>();
+      yield* observeSignals(requested, forced);
+      // Acquired before the forks: their shutdown completes while runtime
+      // resources (database, executor, HTTP) are still available.
+      const runtimeScope = yield* Effect.acquireRelease(Scope.make(), (scope, exit) =>
+        Scope.close(scope, exit),
+      );
+      const started = yield* Effect.forkScoped(Scope.provide(startup, runtimeScope));
+      const running = yield* Effect.forkScoped(
+        Fiber.join(started).pipe(
+          Effect.flatMap(({ running }) =>
+            Deferred.isDone(requested).pipe(
+              Effect.flatMap((stopped) =>
+                stopped ? Effect.never : Scope.provide(running, runtimeScope),
+              ),
+            ),
+          ),
+        ),
+      );
+      return yield* Fiber.join(running).pipe(
         Effect.onInterrupt(() =>
           Effect.gen(function* () {
+            yield* Deferred.succeed(requested, undefined);
             yield* Effect.logInfo("Orchestrator shutdown started", {
               deadlineMilliseconds: Duration.toMillis(deadline),
             });
-            // Finalizers are uninterruptible. The raced child waits must remain
+            const stopping = yield* Effect.forkScoped(
+              Fiber.interrupt(running).pipe(Effect.interruptible),
+              { startImmediately: true },
+            );
+            const drain = Fiber.join(started).pipe(
+              Effect.matchEffect({
+                onFailure: (error) =>
+                  Effect.logWarning("Runtime startup failed during shutdown", { error }),
+                onSuccess: ({ drain }) => drain,
+              }),
+            );
+            // Finalizers are uninterruptible; raced waits must remain
             // interruptible so the losing drain or signal wait can be stopped.
             const outcome = yield* Effect.raceFirst(
-              drain.pipe(
+              Effect.all([drain, Fiber.join(stopping)], { concurrency: "unbounded" }).pipe(
                 Effect.timeoutOption(deadline),
                 Effect.map((result) =>
                   Option.isSome(result) ? ("drained" as const) : ("deadline" as const),
                 ),
                 Effect.interruptible,
               ),
-              Fiber.join(forced).pipe(Effect.as("forced" as const), Effect.interruptible),
+              Deferred.await(forced).pipe(Effect.as("forced" as const), Effect.interruptible),
             );
             if (outcome === "drained") {
               yield* Effect.logInfo("Orchestrator exiting after graceful drain");
@@ -49,6 +91,11 @@ export const withGracefulShutdown = <A, E, R>(
               yield* Effect.logWarning(
                 "Orchestrator stopping before drain completed; unfinished Attempts will recover on restart",
                 { reason: outcome },
+              );
+              // Cancel Attempts now, even if a trigger's finalizer is slow.
+              yield* Effect.all(
+                [Fiber.interrupt(started), Scope.close(runtimeScope, Exit.interrupt())],
+                { concurrency: "unbounded" },
               );
             }
           }),

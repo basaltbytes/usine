@@ -15,7 +15,8 @@ import {
 import { Effect, Schema } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../src/board/projection.ts";
 import {
-  BoardItemView,
+  BoardTaskView,
+  BoardItemLink,
   BoardLaneId,
   BoardView,
   ReadOnlyBoardLaneView,
@@ -266,19 +267,112 @@ describe("Board projection", () => {
       assert.strictEqual(card?.needsYou, true);
       assert.deepStrictEqual(
         card?.runs.map(({ id }) => id),
-        [running.id, waiting.id, failed.id],
+        [failed.id, running.id, waiting.id],
       );
     }),
   );
 
+  it.effect(
+    "keeps issue development and PR review in one Task after the issue loses its label",
+    () =>
+      Effect.gen(function* () {
+        const config = Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [{ name: repository, lanes: [{ name: "Review", sources: [{ label: review }] }] }],
+        });
+        const managed = config.repos[0];
+        assert(managed !== undefined);
+        const pr = new ItemProjection({
+          ...mergedPullRequest,
+          payload: {
+            ...mergedPullRequest.payload,
+            state: "OPEN",
+            merged: false,
+            mergedAt: null,
+            labels: { totalCount: 1, nodes: [{ name: review }] },
+          },
+        });
+        const development = new RunView({
+          ...runForBoard("development", "Succeeded"),
+          pullRequestUrl: "https://github.com/basaltbytes/usine/pull/98",
+        });
+        const reviewRun = new RunView({
+          ...runForBoard("review", "Running"),
+          itemKey: pr.itemKey,
+          openedAt: "2026-09-02T12:00:00.000Z",
+        });
+        const board = yield* projectBoard(
+          managed,
+          [],
+          [itemWithLabels([]), pr],
+          [reviewRun, development],
+          [itemKey],
+        );
+        const card = board.lanes[0]?.items[0];
+        assert(card !== undefined);
+        assert.strictEqual(card.title, "Board lanes");
+        assert.strictEqual(card.itemKey, pr.itemKey);
+        assert.deepStrictEqual(
+          card.items.map(({ number }) => number),
+          [33, 98],
+        );
+        assert.deepStrictEqual(
+          card.runs.map(({ id }) => id),
+          [development.id, reviewRun.id],
+        );
+        assert.strictEqual(card.needsYou, true);
+        assert.strictEqual(board.lanes.at(-1)?.items.length, 0);
+      }),
+  );
+
+  it.effect(
+    "joins observed closing links without Runs and keeps cross-repository URLs separate",
+    () =>
+      Effect.gen(function* () {
+        const config = Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [{ name: repository }],
+        });
+        const managed = config.repos[0];
+        assert(managed !== undefined);
+        for (const [url, count] of [
+          ["https://github.com/basaltbytes/usine/pull/98", 1],
+          ["https://github.com/another/repository/pull/98", 2],
+        ] as const) {
+          const linked = new ItemProjection({
+            ...closedItem,
+            payload: {
+              ...closedItem.payload,
+              closedByPullRequestsReferences: {
+                totalCount: 1,
+                nodes: [{ number: 98, url, state: "MERGED", isDraft: false }],
+              },
+            },
+          });
+          const board = yield* projectBoard(managed, [], [linked, mergedPullRequest], []);
+          assert.strictEqual(board.failures.length, 0);
+          assert.strictEqual(board.lanes.flatMap(({ items }) => items).length, count);
+        }
+      }),
+  );
+
   it("derives an authored lane mutation without trusting truncated card labels", () => {
-    const card = new BoardItemView({
+    const card = new BoardTaskView({
       itemKey,
       kind: "issue",
       number: CoreItemNumber.make(33),
       title: "Board lanes",
       url: "https://github.com/basaltbytes/usine/issues/33",
       state: "issue-open",
+      items: [
+        new BoardItemLink({
+          itemKey,
+          kind: "issue",
+          number: ItemNumber.make(33),
+          title: "Board lanes",
+          url: "https://github.com/basaltbytes/usine/issues/33",
+        }),
+      ],
       labels: [bug],
       runs: [],
       run: null,

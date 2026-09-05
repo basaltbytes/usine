@@ -31,7 +31,7 @@ import {
 import { SqlClient } from "effect/unstable/sql";
 import { layer } from "../src/database/local-sqlite.ts";
 import { InstanceDirectory } from "@usine/core/instance";
-import { RunEngine } from "../src/engine/engine.ts";
+import { RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
 import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
@@ -203,6 +203,17 @@ describe("durable run engine", () => {
             bounded.map(({ run }) => run.id),
             [first.runId],
           );
+          const history = yield* reader.forItems([
+            ...Array.from({ length: 120 }, (_, i) => ItemKey.make(`absent-${i}`)),
+            ItemKey.make("listed-two"),
+            ItemKey.make("listed-two"),
+          ]);
+          assert.deepStrictEqual(
+            history.map(({ run }) => run.id),
+            [second.runId],
+          );
+          assert.strictEqual(history[0]?.attempts.length, 1);
+          assert.deepStrictEqual(yield* reader.forItems([]), []);
           const runRevision = Option.getOrThrow(yield* reader.revision());
           assert(runRevision > initialRevision);
           yield* controls.pause(LoopName.make("review"));
@@ -657,6 +668,54 @@ describe("durable run engine", () => {
             assert.strictEqual(completed.attempts.length, 1);
           }
           yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
+    ),
+  );
+
+  it.live("a host shutdown latch closes admission before startup recovery", () =>
+    withInstance((directory) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const entered = yield* Deferred.make<void>();
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+            Effect.succeed(stepResult("recovered after restart")),
+          ]);
+          const runtime = layer(directory).pipe(Layer.provide(executorLayer(plans)));
+          const firstScope = yield* Scope.make();
+          const first = Context.get(
+            yield* Scope.provide(Layer.build(runtime), firstScope),
+            RunEngine,
+          );
+          const accepted = yield* first.submit(submission({ number: 48 }));
+          assert(accepted._tag === "Claimed");
+          yield* Deferred.await(entered);
+          yield* Scope.close(firstScope, Exit.void);
+
+          const stopped = yield* Deferred.make<void>();
+          yield* Deferred.succeed(stopped, undefined);
+          const secondScope = yield* Scope.make();
+          const second = Context.get(
+            yield* Scope.provide(Layer.build(runtime), secondScope).pipe(
+              Effect.provideService(RunEngineShutdown, stopped),
+            ),
+            RunEngine,
+          );
+          yield* second.drain();
+          assert.strictEqual((yield* second.inspect(accepted.runId)).attempts.length, 1);
+          assert.strictEqual((yield* Ref.get(plans)).length, 1);
+          yield* Scope.close(secondScope, Exit.void);
+
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const recovered = yield* waitFor(
+              engine,
+              accepted.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.strictEqual(recovered.attempts.length, 2);
+          }).pipe(Effect.provide(runtime));
         }),
       ),
     ),

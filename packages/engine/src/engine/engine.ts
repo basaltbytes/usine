@@ -302,6 +302,7 @@ export {
   IgnoreReason,
   SubmissionResult,
 } from "./submission.ts";
+export { RunEngineShutdown } from "./shutdown.ts";
 export {
   RunNotFoundError,
   RunOperationRejectedError,

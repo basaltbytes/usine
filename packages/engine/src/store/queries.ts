@@ -12,7 +12,7 @@ import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { DateTime, Effect, Match, Option, Schema } from "effect";
+import { Array as EffectArray, DateTime, Effect, Match, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import {
   approvals,
@@ -33,6 +33,7 @@ import { TranscriptQuery } from "../transcript.ts";
 import { WORKFLOW_COMMAND_PRIORITY, type WorkflowCommand } from "../workflow/command.ts";
 import { cycleQueries } from "../cycle-budget/queries.ts";
 import {
+  type RunRow,
   attemptFromRow,
   decodeAttemptRows,
   decodeDiscards,
@@ -58,6 +59,10 @@ import {
   submissionFromRow,
   transcriptEntryFromRow,
 } from "./codec.ts";
+
+const newestRunFirst = (left: RunRow, right: RunRow) =>
+  DateTime.toEpochMillis(right.openedAt) - DateTime.toEpochMillis(left.openedAt) ||
+  right.runId.localeCompare(left.runId);
 
 const eventRouteSelection = {
   eventId: events.eventId,
@@ -186,6 +191,53 @@ export const queriesFor = (database: RunDatabaseClient) => {
     });
   });
 
+  const summariesWithAttempts = Effect.fn("RunStoreQueries.summariesWithAttempts")(function* (
+    storedRuns: ReadonlyArray<RunRow>,
+  ) {
+    const runIds = storedRuns.map(({ runId }) => runId);
+    // Keep history queries below adapter bind-parameter limits, even for a
+    // long-lived Task with many Runs.
+    const storedAttempts = (yield* Effect.forEach(EffectArray.chunksOf(runIds, 100), (ids) =>
+      database
+        .select(attemptSelection)
+        .from(attempts)
+        .where(inArray(attempts.runId, ids))
+        .orderBy(asc(attempts.runId), asc(attempts.attemptNumber))
+        .execute()
+        .pipe(Effect.flatMap(decodeAttemptRows)),
+    )).flat();
+    const attemptsByRun = new Map<RunId, Array<(typeof storedAttempts)[number]>>();
+    for (const attempt of storedAttempts) {
+      const grouped = attemptsByRun.get(attempt.runId) ?? [];
+      grouped.push(attempt);
+      attemptsByRun.set(attempt.runId, grouped);
+    }
+    return storedRuns.map((row): RunSummary =>
+      runSummaryFromRow(row, attemptsByRun.get(row.runId) ?? []),
+    );
+  });
+
+  const itemRunSummaries = Effect.fn("RunStoreQueries.itemRunSummaries")(function* (
+    itemKeys: ReadonlyArray<ItemKey>,
+  ) {
+    if (itemKeys.length === 0) return [];
+    const storedRuns = (yield* Effect.forEach(
+      EffectArray.chunksOf([...new Set(itemKeys)], 100),
+      (keys) =>
+        database
+          .select(runSelection)
+          .from(runs)
+          .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+          .innerJoin(steps, eq(steps.runId, runs.runId))
+          .where(inArray(triggerEvents.itemKey, keys))
+          .execute()
+          .pipe(Effect.flatMap(decodeRunRows)),
+    ))
+      .flat()
+      .sort(newestRunFirst);
+    return yield* summariesWithAttempts(storedRuns);
+  });
+
   // Every open Run plus the newest `closedLimit` settled ones, so an old
   // Waiting run never falls out of the operator's view while history stays bounded.
   const runSummaries = Effect.fn("RunStoreQueries.runSummaries")(function* (closedLimit: number) {
@@ -210,31 +262,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
         .execute()
         .pipe(Effect.flatMap(decodeRunRows)),
     ]);
-    const storedRuns = [...openRuns, ...closedRuns].sort(
-      (left, right) =>
-        DateTime.toEpochMillis(right.openedAt) - DateTime.toEpochMillis(left.openedAt) ||
-        (right.runId > left.runId ? 1 : -1),
-    );
-    const runIds = storedRuns.map(({ runId }) => runId);
-    const storedAttempts =
-      runIds.length === 0
-        ? []
-        : yield* database
-            .select(attemptSelection)
-            .from(attempts)
-            .where(inArray(attempts.runId, runIds))
-            .orderBy(asc(attempts.runId), asc(attempts.attemptNumber))
-            .execute()
-            .pipe(Effect.flatMap(decodeAttemptRows));
-    const attemptsByRun = new Map<RunId, Array<(typeof storedAttempts)[number]>>();
-    for (const attempt of storedAttempts) {
-      const grouped = attemptsByRun.get(attempt.runId) ?? [];
-      grouped.push(attempt);
-      attemptsByRun.set(attempt.runId, grouped);
-    }
-    return storedRuns.map((row): RunSummary =>
-      runSummaryFromRow(row, attemptsByRun.get(row.runId) ?? []),
-    );
+    const storedRuns = [...openRuns, ...closedRuns].sort(newestRunFirst);
+    return yield* summariesWithAttempts(storedRuns);
   });
 
   const revision = Effect.fn("RunStoreQueries.projectionRevision")(function* () {
@@ -694,6 +723,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     revision,
     revokeUnstarted,
     runSummaries,
+    itemRunSummaries,
     runForEvent,
     snapshot,
     transcript,

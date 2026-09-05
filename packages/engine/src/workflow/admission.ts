@@ -1,5 +1,6 @@
 import type { RunId } from "@usine/core/run";
-import { Context, Deferred, Effect, Layer, Ref } from "effect";
+import { Context, Deferred, Effect, Layer, Option, Ref } from "effect";
+import { RunEngineShutdown } from "../engine/shutdown.ts";
 
 interface AdmissionState {
   readonly phase: "Accepting" | "Draining";
@@ -18,13 +19,17 @@ export class AttemptAdmission extends Context.Service<
   static readonly layer = Layer.effect(
     AttemptAdmission,
     Effect.gen(function* () {
+      const hostShutdown = yield* Effect.serviceOption(RunEngineShutdown);
+      const shutdown = Option.isSome(hostShutdown)
+        ? hostShutdown.value
+        : yield* Deferred.make<void>();
       const state = yield* Ref.make<AdmissionState>({ phase: "Accepting", active: new Set() });
       const empty = yield* Deferred.make<void>();
 
       const enter = Effect.fn("AttemptAdmission.enter")(function* (runId: RunId) {
         yield* Effect.annotateCurrentSpan({ runId });
         const admitted = yield* Ref.modify(state, (current) =>
-          current.phase === "Draining"
+          current.phase === "Draining" || Deferred.isDoneUnsafe(shutdown)
             ? ([false, current] as const)
             : ([true, { ...current, active: new Set([...current.active, runId]) }] as const),
         );
@@ -52,6 +57,7 @@ export class AttemptAdmission extends Context.Service<
       });
 
       const drain = Effect.fn("AttemptAdmission.drain")(function* () {
+        yield* Deferred.succeed(shutdown, undefined);
         const current = yield* Ref.getAndUpdate(state, (value) => ({
           ...value,
           phase: "Draining" as const,

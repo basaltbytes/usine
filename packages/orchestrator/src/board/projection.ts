@@ -7,14 +7,12 @@ import {
   type LaneSource,
 } from "@usine/config/board";
 import type { ManagedRepo } from "@usine/config/factory";
-import { ItemKey, ItemNumber } from "@usine/core/item";
-import * as RunState from "@usine/core/run/state";
+import { ItemKey } from "@usine/core/item";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { ItemLabelMutation } from "@usine/github/item-writer";
-import { IssuePayload, PullRequestPayload } from "@usine/github/polling";
-import { Effect, Result, Schema } from "effect";
+import { Effect, Result } from "effect";
 import {
-  BoardItemView,
+  BoardTaskView,
   BoardLaneId,
   BoardProjectionError,
   BoardView,
@@ -22,72 +20,13 @@ import {
   WritableBoardLaneView,
 } from "../operator/board.ts";
 import { type RunView } from "../operator/run.ts";
-
-interface ProjectedItem {
-  readonly itemKey: ItemKey;
-  readonly kind: "issue" | "pr";
-  readonly number: ItemNumber;
-  readonly title: string;
-  readonly url: string;
-  readonly state: LaneItemState;
-  readonly labels: ReadonlyArray<GitHubLabelName>;
-}
+import { projectedItem, type ProjectedItem } from "./items.ts";
+import { taskCards } from "./tasks.ts";
 
 interface LaneDefinition {
   readonly lane: Lane;
   readonly origin: "authored" | "proposed";
 }
-
-const labelsFrom = Schema.decodeUnknownEffect(Schema.Array(GitHubLabelName));
-
-const projectionError = (item: ItemProjection, message: string) =>
-  new BoardProjectionError({
-    repository: item.repository,
-    itemKey: item.itemKey,
-    message,
-  });
-
-const projectedItem = (item: ItemProjection): Effect.Effect<ProjectedItem, BoardProjectionError> =>
-  Effect.gen(function* () {
-    if (item.source === "issue") {
-      const payload = yield* Schema.decodeUnknownEffect(IssuePayload)(item.payload).pipe(
-        Effect.mapError((error) => projectionError(item, error.message)),
-      );
-      return {
-        itemKey: item.itemKey,
-        kind: "issue",
-        number: ItemNumber.make(item.number),
-        title: payload.title,
-        url: payload.url,
-        state: payload.state === "OPEN" ? "issue-open" : "issue-closed",
-        labels: yield* labelsFrom(payload.labels.nodes.map(({ name }) => name)).pipe(
-          Effect.mapError((error) => projectionError(item, error.message)),
-        ),
-      };
-    }
-    if (item.source === "pr") {
-      const payload = yield* Schema.decodeUnknownEffect(PullRequestPayload)(item.payload).pipe(
-        Effect.mapError((error) => projectionError(item, error.message)),
-      );
-      const state: LaneItemState = payload.merged
-        ? "pr-merged"
-        : payload.state === "OPEN"
-          ? "pr-open"
-          : "pr-closed";
-      return {
-        itemKey: item.itemKey,
-        kind: "pr",
-        number: ItemNumber.make(item.number),
-        title: payload.title,
-        url: payload.url,
-        state,
-        labels: yield* labelsFrom(payload.labels.nodes.map(({ name }) => name)).pipe(
-          Effect.mapError((error) => projectionError(item, error.message)),
-        ),
-      };
-    }
-    return yield* projectionError(item, `Unsupported Item projection source: ${item.source}`);
-  });
 
 const labelSources = (sources: ReadonlyArray<LaneSource>): ReadonlyArray<GitHubLabelName> =>
   sources.flatMap((source) => ("label" in source ? [source.label] : []));
@@ -121,35 +60,28 @@ const laneId = (definition: LaneDefinition): BoardLaneId =>
 
 const SETTLED_STATES: ReadonlyArray<LaneItemState> = ["pr-merged", "pr-closed", "issue-closed"];
 
-const isSettled = (item: ProjectedItem): boolean => SETTLED_STATES.includes(item.state);
+const isSettled = (item: Pick<ProjectedItem, "state" | "labels">): boolean =>
+  SETTLED_STATES.includes(item.state);
 
 const labelLaneFor = (
-  item: ProjectedItem,
+  item: Pick<ProjectedItem, "state" | "labels">,
   lanes: ReadonlyArray<LaneDefinition>,
 ): LaneDefinition | undefined =>
   lanes.find(({ lane }) => labelSources(lane.sources).some((label) => item.labels.includes(label)));
 
 const stateLaneFor = (
-  item: ProjectedItem,
+  item: Pick<ProjectedItem, "state" | "labels">,
   lanes: ReadonlyArray<LaneDefinition>,
 ): LaneDefinition | undefined =>
   lanes.find(({ lane }) => stateSources(lane.sources).includes(item.state));
 
 const laneFor = (
-  item: ProjectedItem,
+  item: Pick<ProjectedItem, "state" | "labels">,
   lanes: ReadonlyArray<LaneDefinition>,
 ): LaneDefinition | undefined =>
   isSettled(item)
     ? stateLaneFor(item, lanes)
     : (labelLaneFor(item, lanes) ?? stateLaneFor(item, lanes));
-
-const isOpenRun = (run: RunView): boolean =>
-  RunState.OPEN_STATE_TAGS.some((state) => state === run.state);
-
-const needsOperator = (run: RunView): boolean => run.state === "Waiting" || run.state === "Failed";
-
-const preferredRun = (runs: ReadonlyArray<RunView>): RunView | null =>
-  runs.find(needsOperator) ?? runs.find(isOpenRun) ?? runs[0] ?? null;
 
 export const projectBoard = Effect.fn("Board.project")(
   (
@@ -180,31 +112,22 @@ export const projectBoard = Effect.fn("Board.project")(
         });
       }
       const lanes = effectiveLanes(repository, repositoryLabels);
-      const runsByItem = new Map<ItemKey, Array<RunView>>();
-      for (const run of runs) {
-        const itemRuns = runsByItem.get(run.itemKey) ?? [];
-        itemRuns.push(run);
-        runsByItem.set(run.itemKey, itemRuns);
-      }
-      const cards = items.map((item) => {
-        const itemRuns = runsByItem.get(item.itemKey) ?? [];
-        const run = preferredRun(itemRuns);
-        return new BoardItemView({
-          ...item,
-          runs: itemRuns,
-          run,
-          needsYou: itemRuns.some(needsOperator) || cycleBlockedItems.includes(item.itemKey),
-        });
+      const cards = taskCards(repository.name, items, runs, cycleBlockedItems);
+      yield* Effect.logDebug("Projected Task cards from linked Items", {
+        repository: repository.name,
+        items: items.length,
+        tasks: cards.length,
+        runs: runs.length,
       });
-      const grouped = new Map<BoardLaneId, Array<BoardItemView>>();
+      const grouped = new Map<BoardLaneId, Array<BoardTaskView>>();
       for (const definition of lanes) grouped.set(laneId(definition), []);
-      const unmatched: Array<BoardItemView> = [];
+      const unmatched: Array<BoardTaskView> = [];
       for (const card of cards) {
         const definition = laneFor(card, lanes);
         if (definition === undefined) unmatched.push(card);
         else grouped.get(laneId(definition))?.push(card);
       }
-      const sortItems = (values: Array<BoardItemView>) =>
+      const sortItems = (values: Array<BoardTaskView>) =>
         values.sort((left, right) => right.number - left.number);
       return new BoardView({
         failures,

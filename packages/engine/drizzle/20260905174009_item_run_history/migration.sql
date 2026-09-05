@@ -1,0 +1,1 @@
+CREATE INDEX `usine_trigger_events_item_history` ON `usine_trigger_events` (`item_key`);

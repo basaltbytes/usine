@@ -13,17 +13,25 @@ export type BoardLaneId = typeof BoardLaneId.Type;
 export const BoardLaneOrigin = Schema.Literals(["authored", "proposed", "fallback"]);
 export type BoardLaneOrigin = typeof BoardLaneOrigin.Type;
 
-/** A Board card with the Item's GitHub state, labels, retained Runs, and intervention status. */
-export class BoardItemView extends Schema.Class<BoardItemView>("@usine/orchestrator/BoardItemView")(
+/** An Item linked to a Task, with its own title and external destination. */
+export class BoardItemLink extends Schema.Class<BoardItemLink>("@usine/orchestrator/BoardItemLink")(
   {
     itemKey: ItemKey,
     kind: Schema.Literals(["issue", "pr"]),
     number: ItemNumber,
     title: Schema.String,
     url: Schema.NonEmptyString,
+  },
+) {}
+
+/** A Task projected from linked Items. The current Item determines the key, lane, labels, and move destination; the first issue supplies the Task title. */
+export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestrator/BoardTaskView")(
+  {
+    ...BoardItemLink.fields,
     state: LaneItemState,
     labels: Schema.Array(GitHubLabelName),
-    /** Every retained Run for this card, each with the actions the operator can take on it. */
+    items: Schema.Array(BoardItemLink).check(Schema.isNonEmpty()),
+    /** Every saved Run for the visible Items, ordered from earliest to latest. */
     runs: Schema.Array(RunView),
     run: Schema.NullOr(RunView),
     needsYou: Schema.Boolean,
@@ -35,7 +43,7 @@ const BoardLaneViewFields = {
   name: LaneName,
   sources: Schema.Array(LaneSource),
   origin: BoardLaneOrigin,
-  items: Schema.Array(BoardItemView),
+  items: Schema.Array(BoardTaskView),
 } as const;
 
 /** A lane the operator can move Items into by applying its configured GitHub labels. */

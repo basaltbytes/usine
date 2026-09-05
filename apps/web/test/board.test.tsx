@@ -11,7 +11,8 @@ import { LaneName } from "@usine/config/board";
 import {
   AgentFailureView,
   AttemptView,
-  BoardItemView,
+  BoardTaskView,
+  BoardItemLink,
   BoardLaneId,
   BoardView,
   ChildSessionBudgetFailureView,
@@ -27,6 +28,7 @@ import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { applyMove, itemFailure, laneUnder, orderLanes, runsWithoutCard } from "../src/board.tsx";
+import { TaskHistory } from "../src/components/task-history.tsx";
 import { RunLinks } from "../src/components/run-links.tsx";
 import { failureMessage, needCopy } from "../src/operator-copy.ts";
 
@@ -73,12 +75,21 @@ const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Attemp
 
 const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {
   const run = runOnItem(state, attempts);
-  return new BoardItemView({
+  return new BoardTaskView({
     itemKey,
     kind: "issue",
     number: ItemNumber.make(33),
     title: "Board lanes",
     url: "https://github.com/basaltbytes/usine/issues/33",
+    items: [
+      new BoardItemLink({
+        itemKey,
+        kind: "issue",
+        number: ItemNumber.make(33),
+        title: "Board lanes",
+        url: "https://github.com/basaltbytes/usine/issues/33",
+      }),
+    ],
     state: "issue-open",
     labels: [],
     runs: [run],
@@ -139,6 +150,19 @@ describe("Board Run failure copy", () => {
         itemWithRun("Failed", [attempt(1, "old failure"), attempt(2, "current failure")]),
       ),
       "current failure",
+    );
+  });
+
+  it("shows the newest failure across development and review Runs", () => {
+    const card = itemWithRun("Failed", [attempt(1, "old development failure")]);
+    const review = new RunView({
+      ...runOnItem("Failed", [attempt(1, "new review failure")]),
+      id: RunId.make("review-new"),
+      openedAt: "2026-09-02T12:00:00.000Z",
+    });
+    assert.strictEqual(
+      itemFailure(new BoardTaskView({ ...card, runs: [...card.runs, review], run: review })),
+      "new review failure",
     );
   });
 
@@ -232,7 +256,7 @@ describe("Board lane order", () => {
 });
 
 describe("Board drag targets", () => {
-  const lane = (id: string, items: ReadonlyArray<BoardItemView>) =>
+  const lane = (id: string, items: ReadonlyArray<BoardTaskView>) =>
     new ReadOnlyBoardLaneView({
       id: BoardLaneId.make(id),
       name: LaneName.make(id),
@@ -262,5 +286,26 @@ describe("Board drag targets", () => {
         ["review", 0],
       ],
     );
+  });
+});
+
+describe("Task history", () => {
+  it("renders each stage with its saved Attempt count and a Run action", () => {
+    const development = new RunView({
+      ...runOnItem("Succeeded", [attempt(1, null)]),
+      id: RunId.make("development"),
+      loop: LoopName.make("develop"),
+    });
+    const review = new RunView({
+      ...runOnItem("Failed", [attempt(1, "first"), attempt(2, "latest")]),
+      id: RunId.make("review"),
+    });
+    const markup = renderToStaticMarkup(
+      <TaskHistory runs={[development, review]} openRun={() => {}} />,
+    );
+    assert.ok(markup.includes("2 Runs · 3 Attempts"));
+    assert.ok(markup.includes("Open develop Run: Succeeded"));
+    assert.ok(markup.includes("Open review Run: Failed"));
+    assert.ok(markup.indexOf("Open develop") < markup.indexOf("Open review"));
   });
 });

@@ -4,7 +4,7 @@ import { NodeServices } from "@effect/platform-node";
 import { InstanceFolder } from "@usine/config/instance-folder";
 import { ConfigParser } from "@usine/config/parser";
 import { InstanceDirectory } from "@usine/core/instance";
-import { RunEngine } from "@usine/engine/engine";
+import { RunEngine, RunEngineShutdown } from "@usine/engine/engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubCredentials } from "@usine/github/github-app";
 import { loadLocalCredentials } from "@usine/github/local-secrets";
@@ -16,6 +16,7 @@ import {
   Console,
   Context,
   Duration,
+  Deferred,
   Effect,
   FileSystem,
   Layer,
@@ -127,35 +128,42 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
         return yield* serve({ backend, webRoot, port, url, openSetupPage: true });
       }
 
-      const runtime = runtimeLayer(directory, instance, {}).pipe(
-        Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
-      );
-      const context = yield* Layer.build(runtime);
-      const operator = Context.get(context, Operator);
-      const orchestrator = Context.get(context, Orchestrator);
-      const engine = Context.get(context, RunEngine);
-      // Race rather than fork: a defect in the trigger streams or the HTTP server
-      // must take the whole process down instead of leaving a live UI over a dead factory.
-      return yield* withGracefulShutdown(
-        Effect.raceFirst(
-          serve({
-            backend: liveBackendLayer(instance, operator),
-            webRoot,
-            port,
-            url,
-            openSetupPage: false,
-          }),
-          orchestrator
-            .run(instance)
-            .pipe(
+      const shutdown = yield* Deferred.make<void>();
+      const startup = Effect.gen(function* () {
+        const runtime = runtimeLayer(directory, instance, {}).pipe(
+          Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
+        );
+        const context = yield* Layer.build(runtime).pipe(
+          Effect.provideService(RunEngineShutdown, shutdown),
+        );
+        const operator = Context.get(context, Operator);
+        const orchestrator = Context.get(context, Orchestrator);
+        const engine = Context.get(context, RunEngine);
+        return {
+          drain: engine.drain(),
+          running: Effect.raceFirst(
+            serve({
+              backend: liveBackendLayer(instance, operator),
+              webRoot,
+              port,
+              url,
+              openSetupPage: false,
+            }),
+            orchestrator.run(instance).pipe(
               Effect.tapCause((cause) =>
                 Cause.hasInterruptsOnly(cause)
                   ? Effect.void
-                  : Effect.logFatal("Trigger streams stopped; shutting the server down", { cause }),
+                  : Effect.logFatal("Trigger streams stopped; shutting the server down", {
+                      cause,
+                    }),
               ),
             ),
-        ),
-        engine.drain(),
+          ),
+        };
+      });
+      return yield* withGracefulShutdown(
+        startup,
+        shutdown,
         Duration.minutes(instance.config.settings.maxAttemptMinutes),
       );
     }),

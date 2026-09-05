@@ -26,7 +26,7 @@ import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RunId } from "@usine/core/run";
 import { splitRepositoryName } from "@usine/core/repository";
 import type {
-  BoardItemView,
+  BoardTaskView,
   BoardLaneView,
   LabelView,
   ProjectView,
@@ -35,7 +35,7 @@ import type {
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { LabelBadge } from "@/components/label-badge";
-import { RunLinks } from "@/components/run-links";
+import { TaskHistory } from "@/components/task-history";
 import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -65,9 +65,9 @@ import { cn } from "@/lib/utils";
 import { api } from "./api.ts";
 import { failureMessage } from "./operator-copy.ts";
 
-export const itemFailure = (item: BoardItemView): string | null => {
+export const itemFailure = (item: BoardTaskView): string | null => {
   const failedRun =
-    item.runs.find(({ state }) => state === "Failed") ??
+    [...item.runs].reverse().find(({ state }) => state === "Failed") ??
     (item.run?.state === "Failed" ? item.run : null);
   if (failedRun === null) return null;
   const attempts = failedRun.attempts;
@@ -129,7 +129,7 @@ type LabelCatalog = ReadonlyMap<string, LabelView>;
 interface MoveMenu {
   readonly targets: ReadonlyArray<BoardLaneView>;
   readonly disabled: boolean;
-  readonly onMove: (item: BoardItemView, lane: BoardLaneView) => void;
+  readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
 }
 
 const CardBody = ({
@@ -138,7 +138,7 @@ const CardBody = ({
   openRun,
   move,
 }: {
-  readonly item: BoardItemView;
+  readonly item: BoardTaskView;
   readonly catalog: LabelCatalog;
   readonly openRun: (runId: RunId) => void;
   readonly move?: MoveMenu;
@@ -146,7 +146,6 @@ const CardBody = ({
   const failure = itemFailure(item);
   const run = item.run;
   const visibleRuns = item.runs.filter(({ state }) => state === "Waiting" || state === "Failed");
-  const runsToShow = visibleRuns.length > 0 ? visibleRuns : run === null ? [] : [run];
   const moveTargets = move?.targets ?? [];
   const titleClass =
     "h-auto justify-start p-0 text-left text-xs/relaxed font-medium whitespace-normal text-card-foreground hover:text-primary";
@@ -154,7 +153,19 @@ const CardBody = ({
     <>
       <CardHeader className="gap-0.5">
         <CardDescription className="font-mono">
-          {item.kind === "pr" ? "PR" : "Issue"} #{item.number}
+          {item.items.map((member) => (
+            <a
+              key={member.itemKey}
+              href={member.url}
+              target="_blank"
+              rel="noreferrer"
+              draggable={false}
+              className="mr-2 hover:text-primary"
+              title={member.title}
+            >
+              {member.kind === "pr" ? "PR" : "Issue"} #{member.number}
+            </a>
+          ))}
         </CardDescription>
         <CardTitle className="font-sans text-xs/relaxed">
           {run === null ? (
@@ -174,7 +185,7 @@ const CardBody = ({
         </CardTitle>
       </CardHeader>
       {(item.labels.length > 0 ||
-        runsToShow.length > 0 ||
+        item.runs.length > 0 ||
         item.needsYou ||
         failure !== null ||
         moveTargets.length > 0) && (
@@ -186,26 +197,13 @@ const CardBody = ({
               ))}
             </div>
           )}
-          {runsToShow.map((cardRun) => (
-            <div className="flex flex-wrap items-center gap-2" key={cardRun.id}>
-              <Button
-                variant="ghost"
-                size="sm"
-                className="-ml-2 gap-2"
-                onClick={() => openRun(cardRun.id)}
-              >
-                <StatusBadge state={cardRun.state} />
-                <span className="text-muted-foreground">{cardRun.agent}</span>
-              </Button>
-              <RunLinks run={cardRun} />
-            </div>
-          ))}
+          <TaskHistory runs={item.runs} openRun={openRun} />
           {item.needsYou && <NeedsYouBadge />}
           {failure !== null && <p className="text-destructive wrap-anywhere">{failure}</p>}
           {visibleRuns.some(({ state }) => state === "Waiting") && (
-            <p className="text-needs-you">A run on this item is waiting for approval.</p>
+            <p className="text-needs-you">A Run in this task is waiting for approval.</p>
           )}
-          {runsToShow.some(({ state }) => state === "Queued") && (
+          {item.runs.some(({ state }) => state === "Queued") && (
             <p className="text-muted-foreground">Approved. Waiting for a free worker slot.</p>
           )}
           {move !== undefined && moveTargets.length > 0 && (
@@ -215,7 +213,7 @@ const CardBody = ({
                 render={<Button variant="ghost" size="sm" className="-ml-2" />}
                 aria-label={`Move ${item.kind === "pr" ? "PR" : "issue"} #${item.number} to a lane`}
               >
-                Move to
+                Move {item.kind === "pr" ? "PR" : "issue"} #{item.number} to
                 <CaretDownIcon aria-hidden="true" />
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start">
@@ -242,7 +240,7 @@ const BoardCard = ({
   openRun,
   move,
 }: {
-  readonly item: BoardItemView;
+  readonly item: BoardTaskView;
   readonly catalog: LabelCatalog;
   readonly disabled: boolean;
   readonly openRun: (runId: RunId) => void;
@@ -285,7 +283,7 @@ const BoardLane = ({
   readonly dragging: boolean;
   readonly pending: boolean;
   readonly openRun: (runId: RunId) => void;
-  readonly onMove: (item: BoardItemView, lane: BoardLaneView) => void;
+  readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
 }) => {
   const move: MoveMenu = {
     targets: lanes.filter((other) => other._tag === "WritableBoardLane" && other.id !== lane.id),
@@ -308,7 +306,7 @@ const BoardLane = ({
       <CardHeader>
         <CardTitle className="wrap-anywhere">{lane.name}</CardTitle>
         <CardDescription>
-          {lane.items.length} item{lane.items.length === 1 ? "" : "s"}
+          {lane.items.length} task{lane.items.length === 1 ? "" : "s"}
         </CardDescription>
         {lane.sources.length > 0 && (
           <CardAction className="flex flex-wrap justify-end gap-1">
@@ -333,7 +331,7 @@ const BoardLane = ({
           items={lane.items.map(({ itemKey }) => itemKey)}
           strategy={verticalListSortingStrategy}
         >
-          {lane.items.length === 0 && <p className="text-muted-foreground">No items.</p>}
+          {lane.items.length === 0 && <p className="text-muted-foreground">No tasks.</p>}
           {lane.items.map((item) => (
             <BoardCard
               key={item.itemKey}
@@ -353,7 +351,9 @@ const BoardLane = ({
 /** Runs whose Item has no card, such as schedule Runs and quarantined Items, so they stay reachable. */
 export const runsWithoutCard = (project: ProjectView): ReadonlyArray<RunView> => {
   const carded = new Set(
-    project.board.lanes.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
+    project.board.lanes.flatMap(({ items }) =>
+      items.flatMap(({ items }) => items.map(({ itemKey }) => itemKey)),
+    ),
   );
   return project.runs.filter(({ itemKey }) => !carded.has(itemKey));
 };
@@ -423,7 +423,7 @@ export const ProjectBoard = ({
   readonly openRun: (runId: RunId) => void;
 }) => {
   const queryClient = useQueryClient();
-  const [active, setActive] = useState<BoardItemView | null>(null);
+  const [active, setActive] = useState<BoardTaskView | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -450,7 +450,7 @@ export const ProjectBoard = ({
     const item = lanes.flatMap(({ items }) => items).find(({ itemKey }) => itemKey === dragged.id);
     setActive(item ?? null);
   };
-  const moveItem = (item: BoardItemView, target: BoardLaneView) => {
+  const moveItem = (item: BoardTaskView, target: BoardLaneView) => {
     if (target._tag !== "WritableBoardLane" || target.id === laneOf(item.itemKey, lanes)?.id) {
       return;
     }

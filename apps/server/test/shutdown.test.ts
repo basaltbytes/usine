@@ -2,7 +2,16 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assert, describe, it } from "vitest";
 
-const signalScenario = (mode: "complete" | "force" | "deadline") => {
+const signalScenario = (
+  mode:
+    | "complete"
+    | "force"
+    | "deadline"
+    | "startup"
+    | "startup-force"
+    | "startup-deadline"
+    | "slow-cleanup",
+) => {
   const result = spawnSync(
     process.execPath,
     [
@@ -15,6 +24,7 @@ const signalScenario = (mode: "complete" | "force" | "deadline") => {
   assert.strictEqual(result.error, undefined);
   assert.strictEqual(result.signal, null);
   assert.strictEqual(result.status, 130, result.stderr);
+  assert.notMatch(result.stdout, /ERROR admission still open/);
   return result.stdout;
 };
 
@@ -37,5 +47,28 @@ describe("graceful process shutdown", () => {
     const output = signalScenario("deadline");
     assert.match(output, /reason: 'deadline'/);
     assert.match(output, /attempt interrupted/);
+  });
+
+  it("drains recovery during startup without starting trigger streams", () => {
+    const output = signalScenario("startup");
+    assert.match(output, /attempt completed/);
+    assert.match(output, /startup completed/);
+    assert.match(output, /exiting after graceful drain/);
+    assert.notMatch(output, /triggers started|attempt interrupted/);
+  });
+
+  it.each(["startup-force", "startup-deadline"] as const)(
+    "bounds interrupted startup: %s",
+    (mode) => {
+      const output = signalScenario(mode);
+      assert.match(output, /attempt interrupted/);
+      assert.notMatch(output, /startup completed|triggers started/);
+    },
+  );
+
+  it("forces Attempt cancellation before a slow trigger finalizer completes", () => {
+    const output = signalScenario("slow-cleanup");
+    assert.match(output, /reason: 'forced'/);
+    assert(output.indexOf("attempt interrupted") < output.indexOf("trigger cleanup completed"));
   });
 });

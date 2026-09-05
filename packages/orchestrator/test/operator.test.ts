@@ -269,6 +269,7 @@ const testLayer = (
     cancel: () => Effect.void,
     inspect: () => Effect.succeed(runSnapshot),
     reconcile: () => Effect.void,
+    drain: () => Effect.void,
     retry: () => Effect.void,
     revoke: () => Effect.succeed([]),
     submit: () => Effect.die("unused"),
@@ -281,6 +282,7 @@ const testLayer = (
         Effect.andThen(Effect.yieldNow),
         Effect.as([runSnapshot]),
       ),
+    forItems: () => Effect.succeed([runSnapshot]),
     revision: () => Ref.get(projectionRevision),
     transcript: readTranscript,
   });
