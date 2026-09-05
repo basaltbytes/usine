@@ -319,9 +319,11 @@ const makeOperatorObservation = Effect.gen(function* () {
 export class OperatorObservation extends Context.Service<
   OperatorObservation,
   {
+    /** Builds the supplied instance's Projects, Boards, Runs, and items needing operator attention. */
     readonly overview: (
       instance: LoadedInstance,
     ) => Effect.Effect<ReadyOverview, OperatorObservationError>;
+    /** Reads one Run and a bounded transcript page; `request` selects the latest, newer, or earlier activity. */
     readonly detail: (
       runId: RunId,
       request?: TranscriptRequest,
@@ -451,18 +453,24 @@ const makeOperator = Effect.gen(function* () {
   return { ...observation, approve, cancel, moveBoardItem, pause, retry, unpause } as const;
 });
 
-/** The observe-and-intervene service. Transports translate this API and add no logic of their own. */
+/** The operator's view of the factory and actions for approving, retrying, canceling, and directing work. */
 export class Operator extends Context.Service<
   Operator,
   OperatorObservation["Service"] & {
+    /** Records approval for a waiting Run; execution still waits for Worker capacity. */
     readonly approve: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Requests a new Attempt for a failed Run using its effective task and Agent. */
     readonly retry: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Cancels an open Run and interrupts its current Attempt; an already closed Run is unchanged. */
     readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Swaps lane labels on GitHub; the next poll refreshes the Board's observed position. */
     readonly moveBoardItem: (
       instance: LoadedInstance,
       move: BoardMove,
     ) => Effect.Effect<void, BoardMoveError>;
+    /** Pauses new work for a Loop while its existing Runs continue. */
     readonly pause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
+    /** Allows the Loop's triggers to open new Runs again. */
     readonly unpause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
   }
 >()("@usine/orchestrator/Operator") {

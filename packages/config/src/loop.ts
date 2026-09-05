@@ -13,12 +13,14 @@ const KebabCase = Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
 
 const LoopFileName = LoopName.check(KebabCase);
 
+/** The Loop's Markdown task template, with CEL expressions inside `{{ ... }}`. */
 export const PromptTemplate = nonBlankString("Expected a non-blank Markdown prompt").pipe(
   Schema.brand("PromptTemplate"),
 );
 
 export type PromptTemplate = typeof PromptTemplate.Type;
 
+/** A Loop parsed from `loops/<name>.md`; the filename defines its identity. */
 export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
   name: LoopFileName,
   trigger: Trigger,
@@ -29,6 +31,7 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
   body: PromptTemplate,
 }) {}
 
+/** A Loop excluded from execution because its file could not be loaded or its references resolved. */
 export class QuarantinedLoop extends Schema.Class<QuarantinedLoop>("@usine/config/QuarantinedLoop")(
   {
     file: InstancePath,

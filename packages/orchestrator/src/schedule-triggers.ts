@@ -510,8 +510,7 @@ export class ScheduleTriggers extends Context.Service<
             }),
             sleepMs,
           };
-          // A quiet cycle logs nothing so an idle instance does not emit an INFO
-          // line every minute; a cycle that acted or failed is still logged.
+          // Quiet cycles log at Debug; cycles that acted or failed log at Info.
           if (cycle.fanout === 0 && cycle.failures.length === 0) {
             yield* Effect.logDebug("Schedule cycle complete", summary);
           } else {

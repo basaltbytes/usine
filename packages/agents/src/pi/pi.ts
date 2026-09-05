@@ -442,5 +442,7 @@ const makePiParent = Effect.gen(function* () {
   return AgentRuntime.of({ launch });
 });
 
+/** Provides the coordinating Pi parent; supply the child backend that will perform its delegated coding work. */
 export const piParentLayer = Layer.effect(AgentRuntime, makePiParent);
+/** Provides Pi coding sessions for tasks delegated by a parent. */
 export const piChildBackendLayer = Layer.effect(PiChildBackend, makePiChild);

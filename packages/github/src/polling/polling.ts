@@ -171,18 +171,21 @@ const newerWatermark = (cursor: PollCursor, items: ReadonlyArray<ChangedItem>) =
   return epochs.length === 0 ? Option.none<DateTime.Utc>() : dateTimeAt(Math.max(...epochs));
 };
 
-/** Change detection and payload snapshot fetching against GitHub. */
+/** Finds changed GitHub Items and fetches the snapshots used to select work for Loops. */
 export class GitHubPolling extends Context.Service<
   GitHubPolling,
   {
+    /** Finds issue and PR updates since the saved cursor; persist the returned cursor after processing the detected Items. */
     readonly changes: (
       repository: RepositoryName,
       cursor: PollCursor,
     ) => Effect.Effect<ChangeDetection, GitHubAppError>;
+    /** Reads the repository's label catalog, or confirms the catalog named by `entityTag` is unchanged. */
     readonly labels: (
       repository: RepositoryName,
       entityTag: Option.Option<EntityTag>,
     ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
+    /** Fetches an Item's selection and prompt payload together with its timestamp-independent content hash. */
     readonly snapshot: (
       repository: RepositoryName,
       item: ChangedItem,

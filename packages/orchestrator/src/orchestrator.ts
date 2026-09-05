@@ -13,10 +13,11 @@ const makeOrchestrator = Effect.gen(function* () {
   return { run } as const;
 });
 
-/** The embeddable runtime: polling, schedules, and the operator acts that reach the engine. */
+/** Coordinates polling and schedule triggers for one loaded factory instance. */
 export class Orchestrator extends Context.Service<
   Orchestrator,
   {
+    /** Evaluates the supplied instance's triggers until interrupted, using that snapshot of its Loops and roster. */
     readonly run: (instance: LoadedInstance) => Effect.Effect<never>;
   }
 >()("@usine/orchestrator/Orchestrator") {

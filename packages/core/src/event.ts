@@ -1,5 +1,6 @@
 import { Schema } from "effect";
 
+/** Identity of one recorded fact; repeated sightings are matched through its dedup key. */
 export const EventId = Schema.NonEmptyString.pipe(Schema.brand("EventId"));
 
 export type EventId = typeof EventId.Type;
@@ -14,8 +15,8 @@ export type DedupKey = typeof DedupKey.Type;
 
 /**
  * One deduplicated fact the engine may react to: a trigger match or an operator
- * approval. The payload is the stream's slice in GitHub's own shapes, which
- * expressions and loop bodies read as is.
+ * approval. Trigger payloads retain the snapshot that selection expressions
+ * and prompt interpolation use; retries keep that recorded snapshot.
  */
 export class Event extends Schema.Class<Event>("Event")({
   id: EventId,

@@ -21,12 +21,13 @@ import { Context, Effect, Match, Schema, Scope, Stream } from "effect";
 export const WorkingDirectory = Schema.NonEmptyString.pipe(Schema.brand("AgentWorkingDirectory"));
 export type WorkingDirectory = typeof WorkingDirectory.Type;
 
+/** The Attempt's task and Agent choices, together with the prepared checkout where its parent starts. */
 export class LaunchRequest extends Schema.Class<LaunchRequest>("@usine/agents/LaunchRequest")({
   spec: AttemptChannel.RunSpec,
   cwd: WorkingDirectory,
 }) {}
 
-/** Starts one first-level child session; a child cannot request children of its own. */
+/** Work delegated to one child, with its assigned identity and the checkout it shares with the parent. */
 export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/ChildRequest")({
   session: ChildSession,
   cwd: WorkingDirectory,
@@ -98,6 +99,7 @@ export class SessionOperationError extends Schema.TaggedError<SessionOperationEr
   cause: Schema.Defect(),
 }) {}
 
+/** A session could not start, continue, or finish its work; the failure determines whether retry needs an operator. */
 export const AgentSessionError = Schema.Union([
   UnknownModelError,
   PoolUnavailableError,
@@ -125,45 +127,52 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
       new ChildSessionBudgetFailure({ attemptedChildren, maxChildren }),
   });
 
-/** A running session: the same event stream and controls whichever backend runs it. */
+/** A live parent or child session whose activity can be observed while its work continues. */
 export interface RunningSession {
   readonly session: AgentSession;
+  /** Activity to record in the Attempt transcript while waiting for the result. */
   readonly events: Stream.Stream<AgentSessionEvent, AgentSessionError>;
+  /** Waits for the final message or the failure that ends this session's work. */
   readonly result: Effect.Effect<SessionResult, AgentSessionError>;
+  /** Adds operator guidance to the running session without creating a new Attempt. */
   readonly steer: (message: string) => Effect.Effect<void, AgentSessionError>;
+  /** Requests that this session stop its current work. */
   readonly interrupt: Effect.Effect<void, AgentSessionError>;
 }
 
+/** Launches coding sessions for tasks delegated by an Attempt's parent. */
 export interface ChildBackendService {
+  /** Starts the assigned child and returns its controls; its result is awaited separately. */
   readonly launch: (
     request: ChildRequest,
   ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;
 }
 
-/** Starts first-level child sessions; the dispatcher picks the implementation from the BrainSpec harness. */
+/** Runs the coding work delegated by an Attempt's parent. */
 export class ChildBackend extends Context.Service<ChildBackend, ChildBackendService>()(
   "@usine/agents/ChildBackend",
 ) {}
 
-/** Claude child sessions; reached through the dispatcher, not directly. */
+/** Runs delegated coding work with Claude Code. */
 export class ClaudeChildBackend extends Context.Service<ClaudeChildBackend, ChildBackendService>()(
   "@usine/agents/ClaudeChildBackend",
 ) {}
 
-/** Codex child sessions; reached through the dispatcher, not directly. */
+/** Runs delegated coding work with Codex. */
 export class CodexChildBackend extends Context.Service<CodexChildBackend, ChildBackendService>()(
   "@usine/agents/CodexChildBackend",
 ) {}
 
-/** Pi child sessions; reached through the dispatcher, not directly. */
+/** Runs delegated coding work with Pi. */
 export class PiChildBackend extends Context.Service<PiChildBackend, ChildBackendService>()(
   "@usine/agents/PiChildBackend",
 ) {}
 
-/** Launches the parent session for one Attempt; the run host calls it. */
+/** Starts the parent that coordinates one Attempt's task and delegates coding work to children. */
 export class AgentRuntime extends Context.Service<
   AgentRuntime,
   {
+    /** Starts work in the prepared checkout and returns controls for observing and guiding the parent. */
     readonly launch: (
       request: LaunchRequest,
     ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;

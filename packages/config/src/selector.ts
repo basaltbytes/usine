@@ -2,6 +2,7 @@ import { RepositoryName } from "@usine/core/repository";
 import { Option, Schema } from "effect";
 import { RegistryTag, type ManagedRepo } from "./factory.ts";
 
+/** Narrows a Loop to registry repositories by name, by any listed tag, or by both criteria together. */
 export class Selector extends Schema.Class<Selector>("@usine/config/Selector")({
   repos: Schema.OptionFromOptionalKey(
     Schema.Array(RepositoryName).check(Schema.isNonEmpty(), Schema.isUnique()),
@@ -11,6 +12,7 @@ export class Selector extends Schema.Class<Selector>("@usine/config/Selector")({
   ),
 }) {}
 
+/** An authored selector must name repositories or tags; omit the selector entirely to include every repository. */
 export const ValidSelector = Selector.check(
   Schema.makeFilter((selector) => Option.isSome(selector.repos) || Option.isSome(selector.tags), {
     message: "Expected selector.repos, selector.tags, or both",

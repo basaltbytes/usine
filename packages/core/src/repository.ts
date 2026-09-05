@@ -12,7 +12,7 @@ export const RepositoryName = Schema.String.check(
 
 export type RepositoryName = typeof RepositoryName.Type;
 
-/** A git revision safe to pass to `git fetch` as a bare argument: no whitespace and no leading dash. */
+/** The branch, tag, commit, or `HEAD` a Worker fetches when preparing an Attempt; named refs resolve at preparation time. */
 export const RepositoryRevision = Schema.String.check(
   Schema.isPattern(/^[^\s-]\S*$/u, {
     message: "Expected a git revision without whitespace or a leading dash",
@@ -20,7 +20,7 @@ export const RepositoryRevision = Schema.String.check(
 ).pipe(Schema.brand("RepositoryRevision"));
 export type RepositoryRevision = typeof RepositoryRevision.Type;
 
-/** A 40- or 64-character lowercase git object id. */
+/** An exact Git commit recorded for a checkout or produced by an Attempt, unchanged when branch names move. */
 export const CommitSha = Schema.String.check(
   Schema.isPattern(/^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u, {
     message: "Expected a 40- or 64-character lowercase git object id",

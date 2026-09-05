@@ -7,6 +7,7 @@ import { Cron as EffectCron, DateTime, Effect, Option, Result, Schema } from "ef
 const isFiveFieldCron = (value: string): boolean =>
   value.trim().split(/\s+/u).length === 5 && Result.isSuccess(EffectCron.parse(value));
 
+/** A five-field schedule evaluated in the trigger's time zone. */
 export const Cron = Schema.String.check(
   Schema.makeFilter(isFiveFieldCron, { message: "Expected a valid five-field cron expression" }),
 ).pipe(Schema.brand("Cron"));
@@ -15,17 +16,20 @@ export type Cron = typeof Cron.Type;
 
 const isTimeZone = (value: string): boolean => Option.isSome(DateTime.zoneMakeNamed(value));
 
+/** The IANA time zone whose local clock defines a schedule's firing times. */
 export const TimeZone = Schema.String.check(
   Schema.makeFilter(isTimeZone, { message: "Expected an IANA time-zone name" }),
 ).pipe(Schema.brand("TimeZone"));
 
 export type TimeZone = typeof TimeZone.Type;
 
+/** Watches issues and selects matching payloads with the Loop's `if` expression. */
 export class IssueTrigger extends Schema.Class<IssueTrigger>("@usine/config/IssueTrigger")({
   on: Schema.Literal("issue"),
   if: Source,
 }) {}
 
+/** Watches pull requests and selects matching payloads with the Loop's `if` expression. */
 export class PullRequestTrigger extends Schema.Class<PullRequestTrigger>(
   "@usine/config/PullRequestTrigger",
 )({
@@ -33,6 +37,7 @@ export class PullRequestTrigger extends Schema.Class<PullRequestTrigger>(
   if: Source,
 }) {}
 
+/** Fires per selected repository on a schedule, catching up only the latest missed Tick after downtime. */
 export class ScheduleTrigger extends Schema.Class<ScheduleTrigger>("@usine/config/ScheduleTrigger")(
   {
     on: Schema.Literal("schedule"),
@@ -42,9 +47,10 @@ export class ScheduleTrigger extends Schema.Class<ScheduleTrigger>("@usine/confi
   },
 ) {}
 
+/** The standing Item condition or schedule that produces Events for a Loop. */
 export const Trigger = Schema.Union([IssueTrigger, PullRequestTrigger, ScheduleTrigger]);
 
 export type Trigger = typeof Trigger.Type;
 
-/** The watched streams. Add a stream by adding a Trigger variant. */
+/** The class of state a Loop watches: issues, pull requests, or scheduled Ticks. */
 export type Stream = Trigger["on"];

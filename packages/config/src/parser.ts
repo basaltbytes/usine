@@ -281,29 +281,31 @@ const makeConfigWarnings = (engine: ExpressionEngine["Service"]) =>
     return warnings;
   });
 
-/**
- * Parses authored config files and renders prompts. The interface is declared
- * explicitly so an implementation change cannot widen it through inference.
- */
+/** Parses supplied instance-file contents and checks the expressions that select Items and render task prompts. */
 export class ConfigParser extends Context.Service<
   ConfigParser,
   {
+    /** Reads registry and factory settings from `source`; `file` identifies the source in diagnostics. */
     readonly parseUsineYaml: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<UsineConfig, ConfigFileError>;
+    /** Reads an Agent's brain and standing instructions; `file` supplies its filename-derived identity. */
     readonly parseAgentFile: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<AgentFile, ConfigFileError>;
+    /** Reads a Loop and checks its selection and prompt expressions; `file` supplies its identity. */
     readonly parseLoopFile: (
       file: InstancePath,
       source: string,
     ) => Effect.Effect<LoopFile, ConfigFileError>;
+    /** Reports undeclared labels used by Board lanes or Loop conditions without rejecting otherwise valid configuration. */
     readonly configWarnings: (
       config: UsineConfig,
       loops: ReadonlyArray<LoopFile>,
     ) => Effect.Effect<ReadonlyArray<ConfigWarning>, ExpressionCheckError>;
+    /** Renders the Loop's `{{ ... }}` expressions using `context.item` for the trigger payload and `context.repo` for the repository. */
     readonly renderPrompt: (
       loop: LoopFile,
       context: Schema.JsonObject,

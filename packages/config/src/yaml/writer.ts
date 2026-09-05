@@ -3,7 +3,9 @@ import type { ConfigFileError, InstancePath } from "../file.ts";
 import { splitMarkdown } from "../frontmatter.ts";
 import { parseYamlDocument } from "./document.ts";
 
+/** One replacement in authored YAML, preserving the surrounding file. */
 export class YamlEdit extends Schema.Class<YamlEdit>("@usine/config/YamlEdit")({
+  /** Path in file-key spelling, for example `["settings", "max_children"]`. */
   path: Schema.Array(Schema.NonEmptyString).check(Schema.isNonEmpty()),
   value: Schema.Json,
 }) {}

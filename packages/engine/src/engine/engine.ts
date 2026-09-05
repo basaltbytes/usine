@@ -196,23 +196,31 @@ const makeRunEngine = Effect.gen(function* () {
   return { approve, cancel, inspect, reconcile, retry, revoke, submit, transcript } as const;
 });
 
-/**
- * The run engine's public service. Widen this interface on purpose, never by
- * letting an implementation change leak through inference.
- */
+/** Records Events and manages their Runs through approval, execution, retry, and cancellation. */
 export class RunEngine extends Context.Service<
   RunEngine,
   {
+    /** Records the operator's approval Event and opens the Run's gate; execution still waits for a Worker slot. */
     readonly approve: (runId: RunId, approval: Event) => Effect.Effect<void, RunEngineError>;
+    /** Cancels an open Run and interrupts its active Attempt. An already closed Run is unchanged. */
     readonly cancel: (runId: RunId) => Effect.Effect<void, RunEngineError>;
+    /** Reads the Run's current state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
+    /** Recovers unfinished Runs and outstanding actions from stored state; also runs when the engine starts. */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
+    /** Requests another Attempt for a failed Run using its existing Event and effective task and Agent. */
     readonly retry: (runId: RunId) => Effect.Effect<void, RunEngineError>;
+    /** Cancels unstarted Runs and discards queued Events for a Loop's Item when it stops matching; running Attempts continue. */
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunEngineError>;
+    /**
+     * Records a matching Event and claims its Run, or queues it behind the Item's
+     * running Attempt. Repeated Events are deduplicated; execution continues separately.
+     */
     readonly submit: (submission: Submission) => Effect.Effect<SubmissionResult, RunEngineError>;
+    /** Reads the requested portion of an Attempt's persisted transcript in append order. */
     readonly transcript: (
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunEngineError>;
@@ -220,10 +228,10 @@ export class RunEngine extends Context.Service<
 >()("@usine/engine/RunEngine") {}
 
 /**
- * Builds the durable runtime on a caller-selected SQLite-compatible database;
- * the adapter supplies both Drizzle's run database and the matching Effect SQL
- * client. The deployment supplies the platform `Crypto` and the `StepExecutor`,
- * as `database/local-sqlite.ts` does for Node.
+ * Provides Run execution and recovery on the supplied database.
+ * `database` must supply Drizzle and Effect SQL clients for the same database,
+ * so Run records and pending execution remain together across restarts.
+ * The deployment supplies `Crypto` and the Worker implementation through `StepExecutor`.
  */
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,

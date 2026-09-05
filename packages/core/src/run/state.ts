@@ -61,10 +61,11 @@ export class Canceled extends Schema.TaggedClass<Canceled>("RunState/Canceled")(
   reason: CancelReason,
 }) {}
 
-/** The open states. `RunState`, `isOpen`, and the tag lists derive from this union. */
+/** Runs that still owe work, including those waiting for approval or a Worker. */
 export const Open = Schema.Union([Pending, Waiting, Queued, Running]);
 export type Open = typeof Open.Type;
 
+/** A Run's progress from creation through approval and execution to a recorded outcome. */
 export const RunState = Schema.Union([...Open.members, Succeeded, Failed, Canceled]);
 export type RunState = typeof RunState.Type;
 
@@ -112,10 +113,10 @@ export const UNSTARTED_STATE_TAGS = tagsOf<Unstarted>()("Pending", "Waiting", "Q
 /** Parks a pending run on its loop's approval gate. */
 export const awaitApproval = (_state: Pending): Waiting => new Waiting();
 
-/** Opens the gate: the run now waits for a worker slot. */
+/** Returns the approved state; the Run still waits for a Worker slot before execution. */
 export const approve = (_state: Waiting): Queued => new Queued();
 
-/** Starts the first attempt. A waiting run must be approved first. */
+/** Returns the running state for a first Attempt after any required approval has been granted. */
 export const start = (_state: Startable): Running => new Running();
 
 /** Closes the run after a successful attempt. */
@@ -124,7 +125,7 @@ export const succeed = (_state: Running): Succeeded => new Succeeded();
 /** Closes the run after a failed attempt when no auto-retry applies; `shouldAutoRetry` decides that. */
 export const fail = (_state: Running): Failed => new Failed();
 
-/** Reopens a failed run for attempt N+1 under the same Step. */
+/** Returns the reopened state for operator retry; attempt N+1 belongs to the same Run and Step. */
 export const retry = (_state: Failed): Running => new Running();
 
 /** Cancels from any open state. */

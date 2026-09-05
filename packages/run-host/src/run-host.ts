@@ -22,6 +22,7 @@ import {
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
+/** The run host could not read its instructions, report activity, or collect the Attempt's Git results. */
 export class RunHostError extends Schema.TaggedError<RunHostError>("@usine/run-host/RunHostError")(
   "RunHostError",
   {
@@ -41,7 +42,7 @@ const encodeOutput = Schema.encodeSync(Schema.fromJsonString(AttemptChannel.Outb
 const hostError = (stage: RunHostError["stage"], message: string, cause: unknown): RunHostError =>
   new RunHostError({ stage, message, cause });
 
-/** Runs one real agent session over the strict protocol-v4 newline-delimited channel. */
+/** Hosts one Attempt described by the Start frame on stdin, sending session activity and its final outcome on stdout. */
 export const runHost = () =>
   Effect.scoped(
     Effect.gen(function* () {

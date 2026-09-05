@@ -298,7 +298,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     });
   });
 
-/** The exe.dev Executor layer. Node-only; the rest of the package stays platform-free. */
+/** Runs Attempts on exe.dev Workers over SSH. Requires Node; worker contracts are platform-free. */
 export const layer = (
   options: ExeDevExecutorOptions,
 ): Layer.Layer<Executor, never, ChildProcessSpawner.ChildProcessSpawner> =>

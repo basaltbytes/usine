@@ -9,7 +9,7 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { Schema } from "effect";
 
-/** Everything the engine needs to turn one Event into a Run. */
+/** A matched Event with the Loop, Item, and execution choices that determine the work owed. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
   event: Event,
   itemKey: ItemKey,
@@ -46,6 +46,7 @@ export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored"
   reason: IgnoreReason,
 }) {}
 
+/** Whether a recorded Event owns a Run, waits behind running work, or can no longer open a Run. */
 export const SubmissionResult = Schema.Union([Claimed, Queued, Ignored]);
 
 export type SubmissionResult = typeof SubmissionResult.Type;

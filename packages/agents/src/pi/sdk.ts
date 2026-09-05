@@ -71,7 +71,7 @@ export type PiStartResult =
 /** The parent works only through usine extensions; repository tools belong to the harness children. */
 export const piParentSessionToolPolicy = { noTools: "builtin" } as const;
 
-/** Starts a Pi SDK session; a service so tests substitute it without module mocking. */
+/** Opens a Pi session with the selected model and the tools allowed for its parent or child role. */
 export class PiSdk extends Context.Service<
   PiSdk,
   { readonly start: (options: PiStartOptions) => Promise<PiStartResult> }

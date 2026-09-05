@@ -41,11 +41,15 @@ import { runHostSessionFor, type RunHostInput } from "../run-host-session.ts";
 
 export type { RunHostCommand } from "../executor.ts";
 
+/** Storage and run-host settings for Attempts executed on the local machine. */
 export interface LocalExecutorOptions {
+  /** Factory folder under which local Worker caches and Attempt checkouts are stored. */
   readonly instanceDirectory: InstanceDirectory;
   /** How to launch the one-shot run host; the composition root resolves it. */
   readonly runHost: RunHostCommand;
+  /** Repository fetch URL override, for example a local mirror; defaults to the GitHub HTTPS clone URL. */
   readonly repositoryUrl?: (repository: RepositoryName) => string;
+  /** Grace for delivering a stop request, then for the run host to exit; each wait is bounded separately. Defaults to two seconds. */
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
 }
 
@@ -470,7 +474,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     });
   });
 
-/** The local Executor layer. Node-only; the rest of the package stays platform-free. */
+/** Runs Attempts in isolated checkouts on the local machine. Requires Node; worker contracts are platform-free. */
 export const layer = (
   options: LocalExecutorOptions,
 ): Layer.Layer<

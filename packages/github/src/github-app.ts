@@ -89,18 +89,22 @@ const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema
       };
 
 /**
- * GitHub App identity for one usine instance over a caller-supplied Effect HttpClient.
- * Orchestrator-side calls share one installation-wide token until it nears expiry,
- * and worker tokens are minted per call.
+ * The factory's GitHub identity and repository access.
+ * Orchestrator operations share installation-wide access; each Worker token is
+ * newly minted for the repository assigned to its Attempt.
  */
 export class GitHubApp extends Context.Service<
   GitHubApp,
   {
+    /** Returns the App installation after checking its required permissions. */
     readonly installation: () => Effect.Effect<Installation, GitHubAppError>;
+    /** Returns the shared installation-wide token for orchestrator operations, renewing it near expiry. */
     readonly installationToken: () => Effect.Effect<InstallationToken, GitHubAppError>;
+    /** Reports access for every registry repository, retaining uncovered Projects as individual errors. */
     readonly projectAccess: (
       registry: ReadonlyArray<RepositoryName>,
     ) => Effect.Effect<ReadonlyArray<ProjectAccess>, GitHubAppError>;
+    /** Mints a fresh token restricted to the covered Project's repository for a Worker. */
     readonly workerToken: (
       project: CoveredProject,
     ) => Effect.Effect<InstallationToken, GitHubAppError>;

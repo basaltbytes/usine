@@ -3,6 +3,7 @@ import { EventId } from "../event.ts";
 import { LoopName } from "../loop.ts";
 import { RunState } from "./state.ts";
 
+/** Identity of the work owed to one Event, retained across retries of its Step. */
 export const RunId = Schema.NonEmptyString.pipe(Schema.brand("RunId"));
 
 export type RunId = typeof RunId.Type;

@@ -24,5 +24,8 @@ const makeChildDispatcher = Effect.gen(function* () {
   });
 });
 
-/** Routes each child request to the backend named by its BrainSpec harness. */
+/**
+ * Selects Claude Code, Codex, or Pi for each delegated task from the Agent's harness.
+ * Supply the three backend layers here, or use a concrete backend directly.
+ */
 export const childDispatcherLayer = Layer.effect(ChildBackend, makeChildDispatcher);

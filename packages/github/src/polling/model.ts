@@ -238,11 +238,13 @@ export const PullRequestPayload = Schema.Struct({
 });
 export type PullRequestPayload = typeof PullRequestPayload.Type;
 
+/** Identifies an Item's payload content for Event deduplication; timestamp-only changes keep the same hash. */
 export const ContentHash = Schema.String.check(
   Schema.isPattern(/^[a-f0-9]{64}$/u, { message: "Expected a SHA-256 content hash" }),
 ).pipe(Schema.brand("GitHubContentHash"));
 export type ContentHash = typeof ContentHash.Type;
 
+/** An issue's observed payload and the content identity used to decide whether it represents new work. */
 export class IssueSnapshot extends Schema.TaggedClass<IssueSnapshot>("@usine/github/IssueSnapshot")(
   "IssueSnapshot",
   {
@@ -251,6 +253,7 @@ export class IssueSnapshot extends Schema.TaggedClass<IssueSnapshot>("@usine/git
   },
 ) {}
 
+/** A pull request's observed payload and the content identity used to decide whether it represents new work. */
 export class PullRequestSnapshot extends Schema.TaggedClass<PullRequestSnapshot>(
   "@usine/github/PullRequestSnapshot",
 )("PullRequestSnapshot", {
@@ -258,5 +261,6 @@ export class PullRequestSnapshot extends Schema.TaggedClass<PullRequestSnapshot>
   contentHash: ContentHash,
 }) {}
 
+/** The fetched Item state shared by selection, prompt rendering, and Event deduplication. */
 export const PayloadSnapshot = Schema.Union([IssueSnapshot, PullRequestSnapshot]);
 export type PayloadSnapshot = typeof PayloadSnapshot.Type;

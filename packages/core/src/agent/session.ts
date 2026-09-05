@@ -2,21 +2,21 @@ import { Schema } from "effect";
 import { AgentName } from "./agent.ts";
 import { BrainSpec } from "./brain.ts";
 
-/** The SDK's own id for a parent or child session. */
+/** Identity usine assigns to a parent or child session within an Attempt. */
 export const AgentSessionId = Schema.NonEmptyString.pipe(Schema.brand("AgentSessionId"));
 export type AgentSessionId = typeof AgentSessionId.Type;
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
-/** Maximum child sessions one Attempt may spawn. */
+/** Maximum child sessions one Attempt may spawn over its lifetime, including sequential spawns. */
 export const ChildSessionBudget = PositiveInt.pipe(Schema.brand("ChildSessionBudget"));
 export type ChildSessionBudget = typeof ChildSessionBudget.Type;
 
-/** How many child sessions the Attempt has spawned so far, counting this one. */
+/** The 1-based child spawn request number within an Attempt, including requests rejected by the budget. */
 export const ChildSessionCount = PositiveInt.pipe(Schema.brand("ChildSessionCount"));
 export type ChildSessionCount = typeof ChildSessionCount.Type;
 
-/** The parent session. It cannot name a parent, so nesting stays one level deep. */
+/** The session coordinating an Attempt and delegating work to its coding children. */
 export class ParentSession extends Schema.TaggedClass<ParentSession>("Agent/ParentSession")(
   "ParentSession",
   {
@@ -26,7 +26,7 @@ export class ParentSession extends Schema.TaggedClass<ParentSession>("Agent/Pare
   },
 ) {}
 
-/** A child session with exactly one parent. */
+/** A coding session delegated by the Attempt's parent; children cannot delegate to further children. */
 export class ChildSession extends Schema.TaggedClass<ChildSession>("Agent/ChildSession")(
   "ChildSession",
   {
@@ -37,19 +37,23 @@ export class ChildSession extends Schema.TaggedClass<ChildSession>("Agent/ChildS
   },
 ) {}
 
+/** A participant in an Attempt, with its role, Agent, and effective brain recorded. */
 export const AgentSession = Schema.Union([ParentSession, ChildSession]);
 export type AgentSession = typeof AgentSession.Type;
 
+/** Records the session identity and brain actually selected at launch. */
 export class SessionStarted extends Schema.TaggedClass<SessionStarted>("Agent/SessionStarted")(
   "SessionStarted",
   { session: AgentSession },
 ) {}
 
+/** Completed assistant text emitted during the session, which may precede its final result. */
 export class TextOutput extends Schema.TaggedClass<TextOutput>("Agent/TextOutput")("TextOutput", {
   session: AgentSession,
   text: Schema.NonEmptyString,
 }) {}
 
+/** A session began a tool call; `callId` pairs it with the corresponding result. */
 export class ToolStarted extends Schema.TaggedClass<ToolStarted>("Agent/ToolStarted")(
   "ToolStarted",
   {
@@ -60,6 +64,7 @@ export class ToolStarted extends Schema.TaggedClass<ToolStarted>("Agent/ToolStar
   },
 ) {}
 
+/** A tool call returned its output; a tool error does not by itself close the session. */
 export class ToolFinished extends Schema.TaggedClass<ToolFinished>("Agent/ToolFinished")(
   "ToolFinished",
   {
@@ -71,6 +76,7 @@ export class ToolFinished extends Schema.TaggedClass<ToolFinished>("Agent/ToolFi
   },
 ) {}
 
+/** Marks the end of a session's activity in the transcript; the Attempt's outcome is recorded separately. */
 export class SessionFinished extends Schema.TaggedClass<SessionFinished>("Agent/SessionFinished")(
   "SessionFinished",
   { session: AgentSession },
@@ -80,12 +86,17 @@ export class SessionFinished extends Schema.TaggedClass<SessionFinished>("Agent/
 export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPlan"] as const);
 export type BillingPool = typeof BillingPool.Type;
 
+/** A billing pool's observed usage for one allowance window. */
 export class RateLimitWindow extends Schema.Class<RateLimitWindow>("Agent/RateLimitWindow")({
+  /** Percentage of the allowance already consumed, including usage outside this Attempt. */
   usedPercent: Schema.Number,
+  /** Length of the allowance window; absent when the provider omits it. */
   windowDurationMinutes: Schema.OptionFromNullOr(Schema.Number),
+  /** When the allowance resets; absent when the provider omits it. */
   resetsAt: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString),
 }) {}
 
+/** The allowance windows reported together by a provider; omitted windows remain unknown. */
 export class RateLimitsSnapshot extends Schema.Class<RateLimitsSnapshot>(
   "Agent/RateLimitsSnapshot",
 )({
@@ -104,7 +115,7 @@ export class PoolRateLimitsUpdated extends Schema.TaggedClass<PoolRateLimitsUpda
   rateLimits: RateLimitsSnapshot,
 }) {}
 
-/** The normalized events every parent and child SDK backend emits. */
+/** Session activity and billing observations recorded in an Attempt's transcript. */
 export const AgentSessionEvent = Schema.Union([
   SessionStarted,
   TextOutput,

@@ -499,4 +499,5 @@ const makeCodexChild = Effect.gen(function* () {
   return CodexChildBackend.of({ launch });
 });
 
+/** Provides Codex coding sessions for tasks delegated by a parent. */
 export const codexChildBackendLayer = Layer.effect(CodexChildBackend, makeCodexChild);

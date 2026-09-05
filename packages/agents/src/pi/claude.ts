@@ -48,13 +48,14 @@ export interface ClaudeModelInfo {
   readonly resolvedModel?: string;
 }
 
-/** The subset of the Claude SDK query the adapter uses, so tests fake only this. */
+/** A live Claude Code session with its messages, model discovery, and stop controls. */
 export interface ClaudeQuery extends AsyncIterable<Schema.Json> {
   readonly close: () => void;
   readonly interrupt: () => Promise<void>;
   readonly supportedModels: () => Promise<ReadonlyArray<ClaudeModelInfo>>;
 }
 
+/** Opens Claude Code sessions with the supplied task input and session settings. */
 export class ClaudeSdk extends Context.Service<
   ClaudeSdk,
   {
@@ -70,6 +71,7 @@ const decodeVendorMessage = Schema.decodeUnknownSync(Schema.fromJsonString(Schem
 const vendorMessageJson = (message: SDKMessage): Schema.Json =>
   decodeVendorMessage(JSON.stringify(message));
 
+/** Provides Claude Code's session creation and model discovery. */
 export const claudeSdkLive = Layer.succeed(ClaudeSdk)({
   open: (input, options) => {
     // SAFETY: ClaudeUserMessage is the streaming-input subset of SDKUserMessage.
@@ -197,8 +199,8 @@ const sessionEventsFrom = (
   if (!Schema.is(ClaudeContentMessage)(message)) return [];
   const events: Array<AgentSessionEvent> = [];
   for (const block of message.message.content) {
-    // Only complete assistant messages become TextOutput events, one per
-    // message, matching the parent's granularity.
+    // Emit each text block from a completed assistant message; streaming deltas
+    // do not enter the transcript.
     if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
       events.push(new TextOutput({ session, text: block.text }));
     } else if (Schema.is(ClaudeToolUseBlock)(block)) {
@@ -357,5 +359,7 @@ const makeClaudeChild = Effect.gen(function* () {
   return ChildBackend.of({ launch });
 });
 
+/** Uses Claude Code for every task delegated through `ChildBackend`. */
 export const claudeChildLayer = Layer.effect(ChildBackend, makeClaudeChild);
+/** Provides the Claude Code backend for direct use or harness-based dispatch. */
 export const claudeChildBackendLayer = Layer.effect(ClaudeChildBackend, makeClaudeChild);

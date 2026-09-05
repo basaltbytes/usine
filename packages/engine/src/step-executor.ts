@@ -12,7 +12,7 @@ import type { WorkerName } from "@usine/core/worker";
 import type { StepResult } from "@usine/core/step/result";
 import type { Submission } from "./engine/submission.ts";
 
-/** What the engine hands a `StepExecutor` for one Attempt. */
+/** The saved Event, effective task and Agent, and Step being tried in one Attempt. */
 export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/StepExecution")({
   attempt: Attempt,
   event: Event,
@@ -35,8 +35,11 @@ export interface WorkerLease {
 export class StepExecutor extends Context.Service<
   StepExecutor,
   {
+    /** Requests that the identified Attempt stop its current work. */
     readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
+    /** Waits for Worker capacity; the returned lease must be released after execution or cancellation. */
     readonly reserve: (submission: Submission) => Effect.Effect<WorkerLease, AttemptFailure>;
+    /** Runs the reserved Attempt, recording channel activity through `io`, and waits for its result. */
     readonly execute: (
       execution: StepExecution,
       io: AttemptChannel.Sink,

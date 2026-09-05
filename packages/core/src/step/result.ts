@@ -21,6 +21,7 @@ export class Comment extends Schema.TaggedClass<Comment>("StepResult/Comment")("
   url: Schema.URL,
 }) {}
 
+/** A commit or GitHub artifact recorded as an outcome of the Agent's work. */
 export const StepResultFact = Schema.Union([Commit, PullRequest, Comment]);
 export type StepResultFact = typeof StepResultFact.Type;
 

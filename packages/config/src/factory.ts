@@ -7,12 +7,14 @@ import { nonBlankString } from "./checks.ts";
 import { LaneSource, Lane } from "./board.ts";
 import { canonicalLabelName, DeclaredLabel } from "./label.ts";
 
+/** A factory-defined repository grouping that Loops can select by tag. */
 export const RegistryTag = nonBlankString("Expected a non-blank registry tag").pipe(
   Schema.brand("RegistryTag"),
 );
 
 export type RegistryTag = typeof RegistryTag.Type;
 
+/** GitHub login identifying the human operator for this factory. */
 export const OperatorLogin = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/u, {
     message: "Expected a GitHub login",
@@ -48,6 +50,7 @@ const uniqueLabelNames = Schema.makeFilter<ReadonlyArray<DeclaredLabel>>(
 
 const DeclaredLabels = Schema.Array(DeclaredLabel).check(uniqueLabelNames);
 
+/** A repository the factory manages, with its selector tags and configured Board lanes. */
 export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/ManagedRepo")({
   name: RepositoryName,
   tags: Schema.Array(RegistryTag)
@@ -56,22 +59,30 @@ export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/Manage
   lanes: Lanes.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}
 
+/** A named place to execute Attempts, with the number it may run at the same time. */
 export class Worker extends Schema.Class<Worker>("@usine/config/Worker")({
   name: WorkerName,
   kind: WorkerKind,
   maxConcurrentAttempts: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(1))),
 }) {}
 
+/** Factory-wide polling, Attempt limits, and defaults for the coordinating parent. */
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
+  /** Seconds between routine GitHub polling cycles; defaults to 60. */
   pollInterval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
-  /** Total child sessions one Attempt may spawn over its lifetime, not a concurrency limit. */
+  /** Total child sessions allowed over one Attempt's lifetime, including sequential spawns; defaults to four. */
   maxChildren: ChildSessionBudget.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
+  /** Configured Attempt duration ceiling in minutes; defaults to 60. */
   maxAttemptMinutes: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
+  /** Configured total-token ceiling per Attempt; defaults to 10,000,000. */
   maxAttemptTokens: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(10_000_000))),
+  /** Parent model used when the Agent has no override; an absent default leaves selection to Pi. */
   parentModel: Schema.OptionFromOptionalKey(ModelId),
+  /** Default parent reasoning effort; if neither Agent nor factory supplies one, the child's effort applies. */
   parentEffort: Schema.OptionFromOptionalKey(Effort),
 }) {}
 
+/** How GitHub hints reach the factory to request earlier polling; routine polling remains the backstop. */
 export const Webhooks = Schema.Union([
   Schema.Struct({ mode: Schema.Literal("off") }),
   Schema.Struct({ mode: Schema.Literal("deliveries") }),
@@ -103,7 +114,7 @@ const ManagedRepos = Schema.Array(ManagedRepo).check(uniqueNames);
 
 const Workers = Schema.Array(WorkerFromYaml).check(Schema.isNonEmpty(), uniqueNames);
 
-/** The parsed `usine.yaml`. */
+/** The factory's repository registry, Worker capacity, labels, and operating defaults from `usine.yaml`. */
 export class UsineConfig extends Schema.Class<UsineConfig>("@usine/config/UsineConfig")({
   version: Schema.Literal(1),
   labels: DeclaredLabels.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
