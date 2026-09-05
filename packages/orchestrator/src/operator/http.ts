@@ -1,4 +1,5 @@
 import { AttemptId } from "@usine/core/attempt";
+import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
@@ -24,6 +25,7 @@ const errorStatuses = {
   BoardItemNotFoundError: 404,
   BoardLaneNotFoundError: 404,
   RunOperationRejectedError: 409,
+  CycleBudgetResetRejectedError: 409,
   BoardLaneReadOnlyError: 409,
   EnginePersistenceError: 500,
   AttemptCancellationError: 500,
@@ -145,6 +147,12 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
   HttpApiGroup.make("operator")
     .add(
       HttpApiEndpoint.get("overview", "/api/overview", { success: FactoryOverview }),
+      HttpApiEndpoint.post("resetCycleBudget", "/api/cycle-budgets/reset", {
+        payload: Schema.Struct({ askId: CycleBudgetAskId }).annotate({
+          parseOptions: { onExcessProperty: "error" },
+        }),
+        success: acknowledged,
+      }),
       HttpApiEndpoint.get("detail", "/api/runs/:runId", {
         params: runParams,
         query: transcriptQuery,

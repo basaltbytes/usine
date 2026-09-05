@@ -41,3 +41,5 @@ USINE_PI_INTEGRATION_MODEL=anthropic/claude-sonnet-4-6 pnpm --filter @usine/agen
 ```
 
 Everything here is 0.x, so APIs can change between minor releases. Supply `effect` at the version pinned by the usine workspace.
+
+Agents share the installation’s GitHub App identity. Runtime instructions require comment reviews at the reviewed head commit and the outcome labels defined by the Loop. An agent success label does not satisfy GitHub’s required-review rule; an independent reviewer supplies required approval and the operator merges. See the [review/fix guide](../../docs/guides/review-fix-loops.md).

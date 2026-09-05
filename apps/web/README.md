@@ -21,3 +21,5 @@ The registry is the component library; the theme is the only place colors and ty
 - **Screens are file routes.** `src/routes/` is the TanStack Router routes directory (`__root.tsx` shell, `index.tsx` projects, `projects/$owner/$name.tsx` board, `configuration/loops.tsx`); the Vite plugin regenerates `src/route-tree.gen.ts`, which is committed and excluded from lint and format. Route files export only `Route`; shared pieces live outside `src/routes/`. The run drawer is a root search param (`?run=`) so it overlays any screen.
 - **Navigation lives in `src/components/app-sidebar.tsx`**, composed from the `sidebar` registry component; screens render inside `SidebarInset` under a breadcrumb header.
 - **Keep the scale.** Body text is `text-xs/relaxed`, titles `text-sm`, screen headings `text-xl` in `font-heading`; identifiers and ids use `font-mono`. Sentence case everywhere; no uppercase labels.
+
+An exhausted Item cycle budget appears in Needs you with the participating Loops and counts. **Reset cycle budget** records an explicit answer and refreshes the overview. The runtime fetches current trigger input before opening further work.

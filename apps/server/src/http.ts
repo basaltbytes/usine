@@ -20,6 +20,8 @@ const operatorFailure = (error: BackendError) => {
         return `Run ${error.runId} was not found.`;
       case "RunOperationRejectedError":
         return `Cannot ${error.operation} Run ${error.runId} while it is ${error.state}.`;
+      case "CycleBudgetResetRejectedError":
+        return `Cycle budget Ask ${error.askId} is no longer awaiting this answer.`;
       case "TranscriptAttemptNotFoundError":
         return `Attempt ${error.attemptId} does not belong to Run ${error.runId}.`;
       case "BackendUnavailableError":
@@ -125,6 +127,9 @@ const fromBackend = <A>(
 const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
   routes
     .handle("overview", () => fromBackend((backend) => backend.overview))
+    .handle("resetCycleBudget", ({ payload }) =>
+      fromBackend((backend) => backend.resetCycleBudget(payload.askId)).pipe(acknowledge),
+    )
     .handle("detail", ({ params, query }) =>
       fromBackend((backend) => backend.detail(params.runId, query)),
     )

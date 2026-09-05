@@ -15,6 +15,10 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./cycle-budget": {
+      "types": "./dist/cycle-budget/cycle-budget.d.ts",
+      "default": "./dist/cycle-budget/cycle-budget.js"
+    },
     "./engine": {
       "types": "./dist/engine/engine.d.ts",
       "default": "./dist/engine/engine.js"

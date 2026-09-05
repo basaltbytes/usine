@@ -1,4 +1,6 @@
 import type { DeclaredLabel } from "@usine/config/label";
+import { CycleGeneration } from "@usine/core/cycle-budget";
+import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import {
@@ -199,6 +201,12 @@ export const synchronizeLabels = Effect.fn("PollingTriggers.synchronizeLabels")(
   return preflight;
 });
 
+/** A fetched snapshot paired with the allowance observed before its request began. */
+export interface ObservedItem {
+  readonly projection: ItemProjection;
+  readonly cycleGeneration: CycleGeneration;
+}
+
 /**
  * Fetches a detected Item and durably updates its Board projection regardless of
  * whether any Loop applies. Evaluation uses the returned projection's snapshot,
@@ -211,13 +219,16 @@ export const observeItem = Effect.fn("PollingTriggers.observeItem")(function* (
   yield* Effect.annotateCurrentSpan({ repository, item: changed.number });
   const github = yield* GitHubPolling;
   const items = yield* ItemProjectionWriter;
+  const budgets = yield* CycleBudgets;
+  const itemKey = encodeGitHubItemKey([
+    "github",
+    RepositoryName.make(canonicalRepositoryName(repository)),
+    ItemNumber.make(changed.number),
+  ]);
+  const cycleGeneration = yield* budgets.generation(itemKey);
   const snapshot = yield* github.snapshot(repository, changed);
   const projection = new ItemProjection({
-    itemKey: encodeGitHubItemKey([
-      "github",
-      RepositoryName.make(canonicalRepositoryName(repository)),
-      ItemNumber.make(changed.number),
-    ]),
+    itemKey,
     repository,
     source: ItemProjectionSource.make(changed._tag === "ChangedIssue" ? "issue" : "pr"),
     number: ItemNumber.make(changed.number),
@@ -231,5 +242,5 @@ export const observeItem = Effect.fn("PollingTriggers.observeItem")(function* (
     stream: projection.source,
     contentHash: projection.contentHash,
   });
-  return projection;
+  return { projection, cycleGeneration } satisfies ObservedItem;
 });

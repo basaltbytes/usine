@@ -157,6 +157,7 @@ export const projectBoard = Effect.fn("Board.project")(
     repositoryLabels: ReadonlyArray<string>,
     storedItems: ReadonlyArray<ItemProjection>,
     runs: ReadonlyArray<RunView>,
+    cycleBlockedItems: ReadonlyArray<ItemKey> = [],
   ): Effect.Effect<BoardView> =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ repository: repository.name });
@@ -192,7 +193,7 @@ export const projectBoard = Effect.fn("Board.project")(
           ...item,
           runs: itemRuns,
           run,
-          needsYou: itemRuns.some(needsOperator),
+          needsYou: itemRuns.some(needsOperator) || cycleBlockedItems.includes(item.itemKey),
         });
       });
       const grouped = new Map<BoardLaneId, Array<BoardItemView>>();

@@ -1,5 +1,7 @@
+import { CycleGeneration } from "@usine/core/cycle-budget";
 import { ConfigParser } from "@usine/config/parser";
 import { CursorStore } from "@usine/engine/cursor";
+import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { RunEngine } from "@usine/engine/engine";
 import { ItemProjectionWriter } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
@@ -17,6 +19,16 @@ import { PollingTriggers } from "../../src/polling-triggers.ts";
 export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
   upsert: () => Effect.succeed(true),
 });
+
+export const emptyCycleBudgets: CycleBudgets["Service"] = {
+  generation: () => Effect.succeed(CycleGeneration.make(0)),
+  asks: () => Effect.succeed([]),
+  pendingResets: () => Effect.succeed([]),
+  reset: () => Effect.die("unused cycle reset"),
+  acknowledgeReset: () => Effect.die("unused cycle reset acknowledgement"),
+};
+
+export const noCycleBudgets = Layer.succeed(CycleBudgets)(emptyCycleBudgets);
 
 export const repositoryLabelProjectionWriterLayer = Layer.succeed(RepositoryLabelProjectionWriter)({
   replace: () => Effect.succeed(true),
@@ -75,6 +87,7 @@ export const pollingTestLayer = (
   labelWriter: GitHubLabelWriter["Service"] = inertGitHubLabelWriter,
   labelProjections: RepositoryLabelProjectionReader["Service"] = noRepositoryLabelProjections,
   cursorStore: CursorStore["Service"] = forgetfulCursorStore,
+  cycleBudgets: CycleBudgets["Service"] = emptyCycleBudgets,
 ) => {
   const cursors = Layer.succeed(CursorStore)(cursorStore);
   const expressions = Layer.succeed(ExpressionEngine)({
@@ -98,6 +111,7 @@ export const pollingTestLayer = (
   const writer = Layer.succeed(GitHubLabelWriter)(labelWriter);
   const reconciler = LabelReconciler.layer.pipe(Layer.provide(writer));
   const dependencies = Layer.mergeAll(
+    Layer.succeed(CycleBudgets)(cycleBudgets),
     cursors,
     expressions,
     itemProjectionWriterLayer,

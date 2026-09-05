@@ -31,6 +31,7 @@ import { RunSnapshot, RunSummary } from "../run-reader/model.ts";
 import { Submission } from "../engine/submission.ts";
 import { TranscriptQuery } from "../transcript.ts";
 import { WORKFLOW_COMMAND_PRIORITY, type WorkflowCommand } from "../workflow/command.ts";
+import { cycleQueries } from "../cycle-budget/queries.ts";
 import {
   attemptFromRow,
   decodeAttemptRows,
@@ -67,6 +68,8 @@ const eventRouteSelection = {
   loop: triggerEvents.loopName,
   step: triggerEvents.stepName,
   approval: triggerEvents.approval,
+  cycleLimit: triggerEvents.cycleLimit,
+  cycleGeneration: triggerEvents.cycleGeneration,
   repository: triggerEvents.repository,
   revision: triggerEvents.revision,
   task: triggerEvents.task,
@@ -483,6 +486,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
           loopName: submission.loop,
           stepName: submission.step,
           approval: submission.approval,
+          cycleLimit: Option.getOrNull(submission.cycleLimit),
+          cycleGeneration: submission.cycleGeneration,
           repository: submission.repository,
           revision: submission.revision,
           task: submission.task,
@@ -509,6 +514,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
         and(
           eq(triggerEvents.loopName, current.loop),
           eq(triggerEvents.itemKey, current.itemKey),
+          cycleQueries(database).currentEvent,
           isNull(runs.runId),
           isNull(ignoredEvents.eventId),
         ),
@@ -667,6 +673,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   return {
+    cycles: cycleQueries(database),
     addAttempt,
     appendTranscript,
     approvalExists,

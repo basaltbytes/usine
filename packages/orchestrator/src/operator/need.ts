@@ -1,4 +1,5 @@
 import { LoopName } from "@usine/core/loop";
+import { CycleBudgetAsk } from "@usine/core/cycle-budget";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { Schema } from "effect";
@@ -61,8 +62,20 @@ export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>
   failure: ScheduleFailure,
 }) {}
 
+/** An Item stopped opening Runs and requires an explicit reset of its shared cycle budget. */
+export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleBudgetNeed")(
+  "CycleBudgetNeed",
+  {
+    id: Schema.String,
+    ask: CycleBudgetAsk,
+    itemLabel: Schema.String,
+    itemUrl: Schema.NullOr(Schema.String),
+  },
+) {}
+
 /** One reason the factory asks for operator attention in the overview. */
 export const NeedView = Schema.Union([
+  CycleBudgetNeed,
   ApprovalNeed,
   BoardProjectionNeed,
   RunFailureNeed,

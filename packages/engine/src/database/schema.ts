@@ -3,6 +3,7 @@ import { AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
+import { CycleLimit, CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { LoopName, APPROVAL_REQUIREMENTS, type ApprovalRequirement } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -44,6 +45,9 @@ export const triggerEvents = snakeCase.table(
     loopName: text().$type<LoopName>().notNull(),
     stepName: text().$type<StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
+    cycleLimit: integer().$type<CycleLimit>(),
+    // Item allowance observed before fetching this Event's trigger input.
+    cycleGeneration: integer().notNull().default(0),
     // The execution context as submitted, part of the immutable Event fact. A
     // queued Event is claimed later from these columns, while execution reads
     // the Run's own copy below.
@@ -55,10 +59,65 @@ export const triggerEvents = snakeCase.table(
   },
   (table) => [
     check("usine_trigger_events_approval", sql`${table.approval} in ('none', 'required')`),
+    check(
+      "usine_trigger_events_cycle_limit",
+      sql`${table.cycleLimit} is null or ${table.cycleLimit} >= 1`,
+    ),
     check("usine_trigger_events_agent_json_valid", sql`json_valid(${table.agentJson})`),
     index("usine_trigger_events_item").on(table.loopName, table.itemKey),
   ],
 );
+
+export const itemCycleBudgets = snakeCase.table(
+  "usine_item_cycle_budgets",
+  {
+    itemKey: text().$type<ItemKey>().primaryKey(),
+    repository: text().$type<RepositoryName>().notNull(),
+    generation: integer().notNull().default(0),
+    askJson: text({ mode: "json" }).$type<unknown>(),
+    resetPending: integer({ mode: "boolean" }).notNull().default(false),
+  },
+  (table) => [
+    check("usine_item_cycle_generation", sql`${table.generation} >= 0`),
+    check(
+      "usine_item_cycle_ask_json",
+      sql`${table.askJson} is null or json_valid(${table.askJson})`,
+    ),
+  ],
+);
+
+export const cycleReservations = snakeCase.table(
+  "usine_cycle_reservations",
+  {
+    runId: text()
+      .$type<RunId>()
+      .primaryKey()
+      .references(() => runs.runId),
+    itemKey: text()
+      .$type<ItemKey>()
+      .notNull()
+      .references(() => itemCycleBudgets.itemKey),
+    generation: integer().notNull(),
+    loop: text().$type<LoopName>().notNull(),
+  },
+  (table) => [
+    index("usine_cycle_reservations_item").on(table.itemKey, table.generation, table.loop),
+    check("usine_cycle_reservations_generation", sql`${table.generation} >= 0`),
+  ],
+);
+
+export const cycleResets = snakeCase.table("usine_cycle_resets", {
+  askId: text().$type<CycleBudgetAskId>().primaryKey(),
+  eventId: text()
+    .$type<EventId>()
+    .notNull()
+    .unique()
+    .references(() => events.eventId),
+  itemKey: text()
+    .$type<ItemKey>()
+    .notNull()
+    .references(() => itemCycleBudgets.itemKey),
+});
 
 export const runs = snakeCase.table(
   "usine_runs",

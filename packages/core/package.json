@@ -14,6 +14,10 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./cycle-budget": {
+      "types": "./dist/cycle-budget.d.ts",
+      "default": "./dist/cycle-budget.js"
+    },
     "./agent": {
       "types": "./dist/agent/agent.d.ts",
       "default": "./dist/agent/agent.js"

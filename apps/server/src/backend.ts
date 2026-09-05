@@ -1,5 +1,6 @@
 import type { LoadedInstance } from "@usine/config/instance";
 import { LoopName } from "@usine/core/loop";
+import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { RunId } from "@usine/core/run";
 import {
   type BoardMove,
@@ -30,6 +31,7 @@ export class FactoryBackend extends Context.Service<
       request: TranscriptRequest,
     ) => Effect.Effect<RunDetailView, BackendError>;
     readonly approve: (runId: RunId) => Effect.Effect<void, BackendError>;
+    readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, BackendError>;
     readonly retry: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly cancel: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly moveBoardItem: (move: BoardMove) => Effect.Effect<void, BackendError>;
@@ -46,6 +48,7 @@ export const liveBackendLayer = (
     overview: operator.overview(instance),
     detail: operator.detail,
     approve: operator.approve,
+    resetCycleBudget: operator.resetCycleBudget,
     retry: operator.retry,
     cancel: operator.cancel,
     moveBoardItem: (move) => operator.moveBoardItem(instance, move),
@@ -74,6 +77,7 @@ export const needsSetupBackendLayer = (
     overview,
     detail: observation.detail,
     approve: fail,
+    resetCycleBudget: fail,
     retry: fail,
     cancel: fail,
     moveBoardItem: fail,

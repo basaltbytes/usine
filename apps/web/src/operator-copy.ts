@@ -40,6 +40,12 @@ export const failureMessage = (failure: FailureView): string =>
 
 export const needCopy = (need: NeedView): NeedCopy =>
   Match.valueTags(need, {
+    CycleBudgetNeed: ({ ask, itemLabel }) => ({
+      title: "Cycle budget exhausted",
+      detail: `${itemLabel}: ${ask.completedCycles} completed rounds. ${ask.counts.map(({ loop, admitted }) => `${loop}: ${admitted} Runs`).join("; ")}. Reset to allow up to ${ask.limit} more rounds of ${ask.loop}.`,
+      repository: ask.repository,
+      runId: null,
+    }),
     ApprovalNeed: ({ loop, repository, runId }) => ({
       title: "Approval required",
       detail: `${loop} is waiting to run on ${repository}.`,

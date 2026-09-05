@@ -1,6 +1,8 @@
 import { GitHubLabelName } from "@usine/config/label";
 import type { LoadedInstance } from "@usine/config/instance";
 import { Event, DedupKey, EventId } from "@usine/core/event";
+import { CycleBudgetAskId } from "@usine/core/cycle-budget";
+import { CycleBudgets, type CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import {
@@ -16,13 +18,14 @@ import { type ProjectionRevision, RunReader } from "@usine/engine/run-reader";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import type { GitHubAppError } from "@usine/github/github-app";
-import { Context, DateTime, Effect, Layer, Option, SynchronizedRef } from "effect";
+import { Context, DateTime, Effect, Layer, Option, Schema, SynchronizedRef } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
-import { PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
+import { GitHubItemKey, PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import {
   ApprovalNeed,
+  CycleBudgetNeed,
   BoardProjectionNeed,
   PollFailureNeed,
   PreflightFindingNeed,
@@ -58,7 +61,11 @@ export type BoardMoveError =
   | BoardProjectNotFoundError
   | EnginePersistenceError
   | GitHubAppError;
-export type OperatorError = RunEngineError | TranscriptAttemptNotFoundError | BoardMoveError;
+export type OperatorError =
+  | RunEngineError
+  | TranscriptAttemptNotFoundError
+  | BoardMoveError
+  | CycleBudgetResetRejectedError;
 export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFoundError;
 
 /** How many settled Runs the overview keeps beside the open ones. */
@@ -73,6 +80,7 @@ interface CachedOverview {
 }
 
 const makeOperatorObservation = Effect.gen(function* () {
+  const budgets = yield* CycleBudgets;
   const reader = yield* RunReader;
   const controls = yield* LoopControl;
   const itemReader = yield* ItemProjectionReader;
@@ -88,8 +96,12 @@ const makeOperatorObservation = Effect.gen(function* () {
     scheduleFailures: ReadonlyArray<ScheduleFailure>,
     revision: Option.Option<ProjectionRevision>,
   ) {
-    const [snapshots, states] = yield* Effect.all(
-      [reader.list({ closedLimit: OVERVIEW_CLOSED_RUNS }), controls.states] as const,
+    const [snapshots, states, cycleAsks] = yield* Effect.all(
+      [
+        reader.list({ closedLimit: OVERVIEW_CLOSED_RUNS }),
+        controls.states,
+        budgets.asks(),
+      ] as const,
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
@@ -125,8 +137,10 @@ const makeOperatorObservation = Effect.gen(function* () {
             catalog.map(({ name }) => name),
             boardItems,
             projectRuns,
+            cycleAsks.map(({ itemKey }) => itemKey),
           );
           const status: ProjectStatus =
+            cycleAsks.some((ask) => ask.repository === name) ||
             board.failures.length > 0 ||
             projectFindings.length > 0 ||
             projectRuns.some((run) => run.state === "Waiting" || run.state === "Failed")
@@ -162,6 +176,23 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
     );
     const needsYou: Array<NeedView> = [];
+    for (const ask of cycleAsks) {
+      const item = Schema.decodeUnknownOption(GitHubItemKey)(ask.itemKey);
+      needsYou.push(
+        new CycleBudgetNeed({
+          id: `cycle-budget:${ask.id}`,
+          ask,
+          itemLabel: Option.match(item, {
+            onNone: () => ask.itemKey,
+            onSome: ([, repository, number]) => `${repository}#${number}`,
+          }),
+          itemUrl: Option.match(item, {
+            onNone: () => null,
+            onSome: ([, repository, number]) => `https://github.com/${repository}/issues/${number}`,
+          }),
+        }),
+      );
+    }
     for (const run of views) {
       if (run.state === "Waiting") {
         needsYou.push(
@@ -335,6 +366,7 @@ export class OperatorObservation extends Context.Service<
 }
 
 const makeOperator = Effect.gen(function* () {
+  const budgets = yield* CycleBudgets;
   const observation = yield* OperatorObservation;
   const runs = yield* RunEngine;
   const controls = yield* LoopControl;
@@ -451,13 +483,40 @@ const makeOperator = Effect.gen(function* () {
     ),
   );
 
-  return { ...observation, approve, cancel, moveBoardItem, pause, retry, unpause } as const;
+  const resetCycleBudget = Effect.fn("Operator.resetCycleBudget")(function* (
+    askId: CycleBudgetAskId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ askId });
+    const key = `cycle-budget-reset:${askId}`;
+    yield* budgets.reset(
+      askId,
+      new Event({
+        id: EventId.make(key),
+        dedupKey: DedupKey.make(key),
+        payload: { action: "reset-cycle-budget", askId },
+        receivedAt: yield* DateTime.now,
+      }),
+    );
+  });
+
+  return {
+    ...observation,
+    approve,
+    cancel,
+    moveBoardItem,
+    pause,
+    retry,
+    unpause,
+    resetCycleBudget,
+  } as const;
 });
 
 /** The operator's view of the factory and actions for approving, retrying, canceling, and directing work. */
 export class Operator extends Context.Service<
   Operator,
   OperatorObservation["Service"] & {
+    /** Answers the Item's current cycle Ask; polling refreshes its state before more Runs open. */
+    readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, OperatorError>;
     /** Records approval for a waiting Run; execution still waits for Worker capacity. */
     readonly approve: (runId: RunId) => Effect.Effect<void, OperatorError>;
     /** Requests a new Attempt for a failed Run using its effective task and Agent. */
@@ -519,6 +578,7 @@ export {
 } from "./board.ts";
 export {
   ApprovalNeed,
+  CycleBudgetNeed,
   RunFailureNeed,
   PollFailureNeed,
   PreflightFindingNeed,

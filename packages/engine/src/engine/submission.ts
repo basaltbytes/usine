@@ -1,4 +1,10 @@
 import { Agent } from "@usine/core/agent";
+import {
+  CycleBudgetAsk,
+  CycleGeneration,
+  CycleLimit,
+  DEFAULT_CYCLE_LIMIT,
+} from "@usine/core/cycle-budget";
 import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { Event, EventId } from "@usine/core/event";
@@ -7,7 +13,7 @@ import { LoopName, ApprovalRequirement } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
-import { Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 
 /** A matched Event with the Loop, Item, and execution choices that determine the work owed. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
@@ -16,6 +22,16 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   loop: LoopName,
   step: StepName,
   approval: ApprovalRequirement,
+  /** Item Runs default to three rounds; schedule adapters explicitly supply None. */
+  cycleLimit: Schema.Option(CycleLimit).pipe(
+    Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.some(DEFAULT_CYCLE_LIMIT))),
+    Schema.withConstructorDefault(Effect.succeed(Option.some(DEFAULT_CYCLE_LIMIT))),
+  ),
+  /** Capture before fetching trigger input. A reset supersedes older observations. */
+  cycleGeneration: CycleGeneration.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(CycleGeneration.make(0))),
+    Schema.withConstructorDefault(Effect.succeed(CycleGeneration.make(0))),
+  ),
   repository: RepositoryName,
   revision: RepositoryRevision,
   task: AttemptTask,
@@ -46,7 +62,13 @@ export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored"
   reason: IgnoreReason,
 }) {}
 
+/** No Run opened because this Item requires an explicit cycle-budget reset. */
+export class CycleBlocked extends Schema.TaggedClass<CycleBlocked>("@usine/engine/CycleBlocked")(
+  "CycleBlocked",
+  { eventId: EventId, ask: CycleBudgetAsk },
+) {}
+
 /** Whether a recorded Event owns a Run, waits behind running work, or can no longer open a Run. */
-export const SubmissionResult = Schema.Union([Claimed, Queued, Ignored]);
+export const SubmissionResult = Schema.Union([Claimed, Queued, Ignored, CycleBlocked]);
 
 export type SubmissionResult = typeof SubmissionResult.Type;

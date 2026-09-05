@@ -6,11 +6,13 @@ import { LoadedInstance } from "@usine/config/instance";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
 import { AttemptId } from "@usine/core/attempt";
+import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { RunNotFoundError, RunOperationRejectedError } from "@usine/engine/engine";
+import { CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   ApprovalNeed,
@@ -228,6 +230,7 @@ describe("operator HTTP API", () => {
         Effect.fail(
           new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
         ),
+      resetCycleBudget: () => Effect.void,
       retry: () => Effect.void,
       cancel: () => Effect.void,
       moveBoardItem: (move) => Effect.sync(() => void (moved = move)),
@@ -326,6 +329,10 @@ describe("operator HTTP API", () => {
           : Effect.fail(
               new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
             ),
+      resetCycleBudget: (id) =>
+        id === "current-ask"
+          ? record(`reset:${id}`)
+          : Effect.fail(new CycleBudgetResetRejectedError({ askId: id })),
       retry: (id) => record(`retry:${id}`),
       cancel: (id) => record(`cancel:${id}`),
       pause: (loop) =>
@@ -354,6 +361,12 @@ describe("operator HTTP API", () => {
           assert.deepStrictEqual(yield* client.detail({ params: { runId }, query }), detail);
         }
         assert.deepStrictEqual(observed, requests);
+        assert.deepStrictEqual(
+          yield* client.resetCycleBudget({
+            payload: { askId: CycleBudgetAskId.make("current-ask") },
+          }),
+          { ok: true },
+        );
         for (const action of ["approve", "retry", "cancel"] as const) {
           assert.deepStrictEqual(yield* client[action]({ params: { runId } }), { ok: true });
         }
@@ -370,6 +383,7 @@ describe("operator HTTP API", () => {
           { ok: true },
         );
         assert.deepStrictEqual(interventions, [
+          "reset:current-ask",
           `approve:${runId}`,
           `retry:${runId}`,
           `cancel:${runId}`,
@@ -379,6 +393,12 @@ describe("operator HTTP API", () => {
         ]);
 
         const missingId = RunId.make("missing/run");
+        const staleReset = yield* Effect.flip(
+          client.resetCycleBudget({ payload: { askId: CycleBudgetAskId.make("stale-ask") } }),
+        );
+        assert.instanceOf(staleReset, OperatorHttpError);
+        assert.strictEqual(staleReset.status, 409);
+        assert.strictEqual(staleReset.error, "CycleBudgetResetRejectedError");
         const missing = yield* Effect.flip(
           client.detail({ params: { runId: missingId }, query: new ColdTranscriptRequest() }),
         );

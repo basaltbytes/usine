@@ -305,6 +305,21 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("defaults Item rounds to three and accepts only positive snake_case max_cycles", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const source = (field: string) =>
+        `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${field}---\nReview the Item.`;
+      const parse = (field: string) =>
+        parser.parseLoopFile(InstancePath.make("loops/review.md"), source(field));
+      expect((yield* parse("")).maxCycles).toBe(3);
+      expect((yield* parse("max_cycles: 5\n")).maxCycles).toBe(5);
+      for (const invalid of ["max_cycles: 0\n", "max_cycles: 1.5\n", "maxCycles: 5\n"]) {
+        expect((yield* parse(invalid).pipe(Effect.flip)).stage).toBe("schema");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("rejects enabled in loop frontmatter instead of silently accepting it", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

@@ -1,3 +1,4 @@
+import { CycleGeneration } from "@usine/core/cycle-budget";
 import { assert, it } from "@effect/vitest";
 import { AgentFile } from "@usine/config/agent";
 import { UsineConfig } from "@usine/config/factory";
@@ -72,7 +73,10 @@ it.effect.each(["issue", "pr"] as const)(
           contentHash: digit.repeat(64),
           payload: source === "pr" ? { number: 63, headRefOid: sha } : { number: 63 },
         });
-        yield* evaluateItem(repository, [resolved], projection).pipe(Effect.provide(engine));
+        yield* evaluateItem(repository, [resolved], {
+          projection,
+          cycleGeneration: CycleGeneration.make(0),
+        }).pipe(Effect.provide(engine));
         assert.strictEqual(submissions.at(-1)?.revision, source === "pr" ? sha : "HEAD");
       }
       assert.strictEqual(submissions.length, 2);
@@ -86,10 +90,10 @@ it.effect.each(["issue", "pr"] as const)(
           contentHash: "c".repeat(64),
           payload: { number: 63, headRefOid: "missing-head" },
         });
-        const error = yield* evaluateItem(repository, [resolved], invalid).pipe(
-          Effect.provide(engine),
-          Effect.flip,
-        );
+        const error = yield* evaluateItem(repository, [resolved], {
+          projection: invalid,
+          cycleGeneration: CycleGeneration.make(0),
+        }).pipe(Effect.provide(engine), Effect.flip);
         assert.strictEqual(error._tag, "InvalidGitHubResponseError");
         assert.strictEqual(submissions.length, 2);
       }

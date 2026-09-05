@@ -34,7 +34,12 @@ class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopF
   approval: ApprovalRequirement.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
   step: StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
   agent: AgentName,
+  maxCycles: LoopFile.fields.maxCycles,
 }) {}
+
+const AuthoredLoopFrontmatter = LoopFrontmatter.pipe(
+  Schema.encodeKeys({ maxCycles: "max_cycles" }),
+);
 
 class AgentFrontmatter extends Schema.Class<AgentFrontmatter>("@usine/config/AgentFrontmatter")({
   harness: Harness,
@@ -214,7 +219,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
         const name = yield* loopName(file);
         const markdown = yield* splitMarkdown(file, source);
         const yaml = yield* parseYaml(file, markdown.yaml);
-        const frontmatter = yield* Schema.decodeUnknownEffect(LoopFrontmatter)(yaml, {
+        const frontmatter = yield* Schema.decodeUnknownEffect(AuthoredLoopFrontmatter)(yaml, {
           onExcessProperty: "error",
         }).pipe(Effect.mapError((error) => schemaError(file, error)));
         const body = yield* Schema.decodeUnknownEffect(PromptTemplate)(markdown.body).pipe(
@@ -238,6 +243,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
           trigger: frontmatter.trigger,
           selector: frontmatter.selector,
           approval: frontmatter.approval,
+          maxCycles: frontmatter.maxCycles,
           step: frontmatter.step,
           agent: frontmatter.agent,
           body,

@@ -22,7 +22,14 @@ import {
 } from "effect";
 import type { Workflow } from "effect/unstable/workflow";
 import { RunDatabase } from "../database/database.ts";
-import { Claimed, Ignored, Queued, Submission } from "../engine/submission.ts";
+import {
+  Claimed,
+  CycleBlocked,
+  Ignored,
+  Queued,
+  Submission,
+  SubmissionResult,
+} from "../engine/submission.ts";
 import { RunOperationRejectedError, type RunStoreError } from "../engine/error.ts";
 import { RunSnapshot } from "../run-reader/model.ts";
 import { StepExecution } from "../step-executor.ts";
@@ -57,7 +64,7 @@ export class RecoverableRun extends Schema.Class<RecoverableRun>(
 
 export class Claim extends Schema.Class<Claim>("@usine/engine/internal/Claim")({
   submission: Submission,
-  result: Schema.Union([Claimed, Queued, Ignored]),
+  result: SubmissionResult,
   supersededRun: Schema.Option(RunId),
 }) {}
 
@@ -110,7 +117,15 @@ const makeRunStore = Effect.gen(function* () {
     runId: RunId,
     supersededRun: Option.Option<RunId> = Option.none(),
   ) {
+    const blocked = yield* tx.cycles.admit(submission);
+    if (Option.isSome(blocked))
+      return new Claim({
+        submission,
+        supersededRun,
+        result: new CycleBlocked({ eventId: submission.event.id, ask: blocked.value }),
+      });
     yield* tx.createRun(submission, submission.event.id, runId);
+    yield* tx.cycles.reserve(submission, runId);
     return claimedRun(submission, runId, supersededRun);
   });
 
@@ -153,6 +168,13 @@ const makeRunStore = Effect.gen(function* () {
           });
         }
 
+        if (!(yield* tx.cycles.isCurrentEvent(recorded))) {
+          return new Claim({
+            submission: recorded,
+            supersededRun: Option.none(),
+            result: new Ignored({ eventId: recorded.event.id, reason: "superseded" }),
+          });
+        }
         const blocking = yield* tx.blockingRun(recorded.loop, recorded.itemKey);
         const blockedBy = blocking[0];
         const decision = claimRun(
@@ -427,8 +449,11 @@ const makeRunStore = Effect.gen(function* () {
         if ((yield* tx.blockingRun(submission.loop, submission.itemKey)).length > 0) {
           return Option.none<StoredSubmission>();
         }
-        yield* tx.createRun(submission, submission.event.id, runId);
-        return Option.some(new StoredSubmission({ submission, runId }));
+        if (!(yield* tx.cycles.isCurrentEvent(submission))) return Option.none<StoredSubmission>();
+        const claimed = yield* openRun(tx, submission, runId);
+        return claimed.result._tag === "Claimed"
+          ? Option.some(new StoredSubmission({ submission, runId }))
+          : Option.none<StoredSubmission>();
       }),
     );
   }, persistence("claim queued Event"));

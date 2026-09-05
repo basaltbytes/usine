@@ -36,7 +36,10 @@ describe("assemblePrompt", () => {
         "",
         "# GitHub identity",
         "",
-        "Append this signature to every GitHub comment, issue, or pull request you publish:",
+        "All factory Agents use the same GitHub App identity, including the Agent that opened a pull request.",
+        "Submit pull request reviews with event COMMENT (gh pr review --comment), never APPROVE or REQUEST_CHANGES. Attach each review to the exact commit you reviewed.",
+        "Use the Loop's outcome labels to report findings or a passed review, and remove the opposite outcome label. A passed label does not satisfy GitHub required approvals; the operator provides any independent approval and merges.",
+        "Append this signature to every GitHub comment, issue, pull request, or review you publish:",
         "— usine agent: developer",
       ].join("\n"),
     );
@@ -62,7 +65,10 @@ describe("assemblePrompt", () => {
         "",
         "# GitHub identity",
         "",
-        "Append this signature to every GitHub comment, issue, or pull request you publish:",
+        "All factory Agents use the same GitHub App identity, including the Agent that opened a pull request.",
+        "Submit pull request reviews with event COMMENT (gh pr review --comment), never APPROVE or REQUEST_CHANGES. Attach each review to the exact commit you reviewed.",
+        "Use the Loop's outcome labels to report findings or a passed review, and remove the opposite outcome label. A passed label does not satisfy GitHub required approvals; the operator provides any independent approval and merges.",
+        "Append this signature to every GitHub comment, issue, pull request, or review you publish:",
         "— usine agent: implementation-agent",
       ].join("\n"),
     );
