@@ -14,9 +14,73 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./agent": {
+      "types": "./dist/agent/agent.d.ts",
+      "default": "./dist/agent/agent.js"
+    },
+    "./agent/brain": {
+      "types": "./dist/agent/brain.d.ts",
+      "default": "./dist/agent/brain.js"
+    },
+    "./agent/session": {
+      "types": "./dist/agent/session.d.ts",
+      "default": "./dist/agent/session.js"
+    },
+    "./attempt": {
+      "types": "./dist/attempt/attempt.d.ts",
+      "default": "./dist/attempt/attempt.js"
+    },
+    "./attempt/channel": {
+      "types": "./dist/attempt/channel.d.ts",
+      "default": "./dist/attempt/channel.js"
+    },
+    "./attempt/failure": {
+      "types": "./dist/attempt/failure.d.ts",
+      "default": "./dist/attempt/failure.js"
+    },
+    "./attempt/outcome": {
+      "types": "./dist/attempt/outcome.d.ts",
+      "default": "./dist/attempt/outcome.js"
+    },
+    "./event": {
+      "types": "./dist/event.d.ts",
+      "default": "./dist/event.js"
+    },
+    "./instance": {
+      "types": "./dist/instance.d.ts",
+      "default": "./dist/instance.js"
+    },
+    "./item": {
+      "types": "./dist/item.d.ts",
+      "default": "./dist/item.js"
+    },
+    "./loop": {
+      "types": "./dist/loop.d.ts",
+      "default": "./dist/loop.js"
+    },
+    "./repository": {
+      "types": "./dist/repository.d.ts",
+      "default": "./dist/repository.js"
+    },
+    "./run": {
+      "types": "./dist/run/run.d.ts",
+      "default": "./dist/run/run.js"
+    },
+    "./run/state": {
+      "types": "./dist/run/state.d.ts",
+      "default": "./dist/run/state.js"
+    },
+    "./step": {
+      "types": "./dist/step/step.d.ts",
+      "default": "./dist/step/step.js"
+    },
+    "./step/result": {
+      "types": "./dist/step/result.d.ts",
+      "default": "./dist/step/result.js"
+    },
+    "./worker": {
+      "types": "./dist/worker.d.ts",
+      "default": "./dist/worker.js"
     }
   },
   "publishConfig": {

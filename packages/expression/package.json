@@ -14,9 +14,17 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./expression-engine": {
+      "types": "./dist/expression-engine.d.ts",
+      "default": "./dist/expression-engine.js"
+    },
+    "./marcbachmann-cel": {
+      "types": "./dist/marcbachmann-cel.d.ts",
+      "default": "./dist/marcbachmann-cel.js"
+    },
+    "./model": {
+      "types": "./dist/model.d.ts",
+      "default": "./dist/model.js"
     }
   },
   "publishConfig": {

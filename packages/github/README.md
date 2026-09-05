@@ -7,6 +7,8 @@
 
 Both token requests use a one-hour maximum lifetime. Token values and the App private key stay inside Effect `Redacted` values.
 
+Import `GitHubApp`, credentials, access results, and typed App errors from `@usine/github/github-app`. `@usine/github/polling` provides `GitHubPolling` with its cursors, change-detection results, and payload snapshots. Item and label writes use `/item-writer` and `/label-writer`; local credential loading uses `/local-secrets`.
+
 ## Create the App manually
 
 Open your GitHub account or organization settings, select **Developer settings → GitHub Apps**, then select **New GitHub App**. Use a name that identifies the factory and set **Where can this GitHub App be installed?** to **Only on this account**. User authorization isn't required. You can turn off active webhooks for a polling-only development factory.
@@ -55,13 +57,13 @@ The package root has no Node dependency. Supply an HTTP client plus platform fil
 
 ```ts
 import { NodeFileSystem, NodePath } from "@effect/platform-node"
-import { Instance } from "@usine/core"
-import { GitHubApp } from "@usine/github"
+import { InstanceDirectory } from "@usine/core/instance"
+import { GitHubApp } from "@usine/github/github-app"
 import { localSecretsLayer } from "@usine/github/local-secrets"
 import { Layer } from "effect"
 import { FetchHttpClient } from "effect/unstable/http"
 
-const instance = Instance.Directory.make("/path/to/instance")
+const instance = InstanceDirectory.make("/path/to/instance")
 const platformLayer = Layer.merge(NodeFileSystem.layer, NodePath.layer)
 const credentialsLayer = localSecretsLayer(instance).pipe(
   Layer.provide(platformLayer),

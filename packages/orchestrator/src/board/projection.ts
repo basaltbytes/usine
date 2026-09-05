@@ -1,15 +1,17 @@
+import { GitHubLabelName } from "@usine/config/label";
 import {
-  GitHubLabelName,
   LabelLaneSource,
   Lane,
   type LaneItemState,
   LaneName,
   type LaneSource,
-  type ManagedRepo,
-} from "@usine/config";
-import { Item, RunState } from "@usine/core";
-import type { ItemProjection } from "@usine/engine";
-import { IssuePayload, ItemLabelMutation, PullRequestPayload } from "@usine/github";
+} from "@usine/config/board";
+import type { ManagedRepo } from "@usine/config/factory";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import * as RunState from "@usine/core/run/state";
+import type { ItemProjection } from "@usine/engine/item-projection";
+import { ItemLabelMutation } from "@usine/github/item-writer";
+import { IssuePayload, PullRequestPayload } from "@usine/github/polling";
 import { Effect, Result, Schema } from "effect";
 import {
   BoardItemView,
@@ -22,9 +24,9 @@ import {
 } from "../operator/model.ts";
 
 interface ProjectedItem {
-  readonly itemKey: Item.ItemKey;
+  readonly itemKey: ItemKey;
   readonly kind: "issue" | "pr";
-  readonly number: Item.Number;
+  readonly number: ItemNumber;
   readonly title: string;
   readonly url: string;
   readonly state: LaneItemState;
@@ -54,7 +56,7 @@ const projectedItem = (item: ItemProjection): Effect.Effect<ProjectedItem, Board
       return {
         itemKey: item.itemKey,
         kind: "issue",
-        number: Item.Number.make(item.number),
+        number: ItemNumber.make(item.number),
         title: payload.title,
         url: payload.url,
         state: payload.state === "OPEN" ? "issue-open" : "issue-closed",
@@ -75,7 +77,7 @@ const projectedItem = (item: ItemProjection): Effect.Effect<ProjectedItem, Board
       return {
         itemKey: item.itemKey,
         kind: "pr",
-        number: Item.Number.make(item.number),
+        number: ItemNumber.make(item.number),
         title: payload.title,
         url: payload.url,
         state,
@@ -177,7 +179,7 @@ export const projectBoard = Effect.fn("Board.project")(
         });
       }
       const lanes = effectiveLanes(repository, repositoryLabels);
-      const runsByItem = new Map<Item.ItemKey, Array<RunView>>();
+      const runsByItem = new Map<ItemKey, Array<RunView>>();
       for (const run of runs) {
         const itemRuns = runsByItem.get(run.itemKey) ?? [];
         itemRuns.push(run);

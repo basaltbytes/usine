@@ -1,4 +1,4 @@
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/repository";
 import {
   Clock,
   Context,
@@ -59,7 +59,7 @@ const InstallationsResponse = Schema.Array(InstallationResponse);
 
 const RepositoryResponse = Schema.Struct({
   id: RepositoryId,
-  name: Repository.Name,
+  name: RepositoryName,
 }).pipe(Schema.encodeKeys({ name: "full_name" }));
 
 const RepositoriesResponse = Schema.Struct({
@@ -102,7 +102,7 @@ export class GitHubApp extends Context.Service<
     readonly installation: () => Effect.Effect<Installation, GitHubAppError>;
     readonly installationToken: () => Effect.Effect<InstallationToken, GitHubAppError>;
     readonly projectAccess: (
-      registry: ReadonlyArray<Repository.Name>,
+      registry: ReadonlyArray<RepositoryName>,
     ) => Effect.Effect<ReadonlyArray<ProjectAccess>, GitHubAppError>;
     readonly workerToken: (
       project: CoveredProject,
@@ -271,7 +271,7 @@ export class GitHubApp extends Context.Service<
           Effect.map(lease(), (current) => current.token),
         ),
         projectAccess: Effect.fn("GitHubApp.projectAccess")(function* (
-          registry: ReadonlyArray<Repository.Name>,
+          registry: ReadonlyArray<RepositoryName>,
         ) {
           const { installation, token } = yield* lease();
           const installed = yield* installedRepositories(token);
@@ -290,3 +290,35 @@ export class GitHubApp extends Context.Service<
     }),
   );
 }
+
+export {
+  REQUIRED_REPOSITORY_PERMISSIONS,
+  deriveProjectAccess,
+  missingPermissions,
+  type InstalledRepository,
+  type RequiredRepositoryPermission,
+  AppId,
+  InstallationId,
+  RepositoryId,
+  PrivateKey,
+  RedactedPrivateKey,
+  GitHubOperation,
+  AppCredentials,
+  GitHubCredentials,
+  Installation,
+  InstallationWide,
+  SingleRepository,
+  TokenScope,
+  InstallationToken,
+  CoveredProject,
+  ProjectNotInstalledError,
+  ProjectAccess,
+  AppAuthenticationError,
+  InstallationDiscoveryReason,
+  InstallationDiscoveryError,
+  AppPermissionError,
+  GitHubApiError,
+  GitHubRateLimitError,
+  InvalidGitHubResponseError,
+  GitHubAppError,
+} from "./model.ts";

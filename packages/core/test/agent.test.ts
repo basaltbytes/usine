@@ -2,13 +2,12 @@ import { describe, expect, it } from "@effect/vitest";
 import { Option, Schema } from "effect";
 import {
   Agent,
-  BrainSpec,
-  ModelId,
-  Name,
-  Persona,
+  AgentPersona,
   resolveParentEffort,
   resolveParentModel,
-} from "../src/agent.ts";
+  AgentName,
+} from "../src/agent/agent.ts";
+import { BrainSpec, ModelId } from "../src/agent/brain.ts";
 
 const decodeBrain = Schema.decodeUnknownSync(BrainSpec);
 
@@ -29,13 +28,13 @@ describe("Agent brain specs", () => {
     const inherited = ModelId.make("anthropic/instance-parent");
     const override = ModelId.make("anthropic/agent-parent");
     const base = {
-      name: Name.make("developer"),
+      name: AgentName.make("developer"),
       brain: new BrainSpec({
         harness: "claude",
         model: ModelId.make("claude-sonnet-4-6"),
         effort: "high",
       }),
-      persona: Persona.make("Implement the issue."),
+      persona: AgentPersona.make("Implement the issue."),
     } as const;
 
     const defaulted = new Agent({
@@ -55,14 +54,14 @@ describe("Agent brain specs", () => {
 
   it("resolves the parent effort from the roster, then the instance, then the child brain", () => {
     const base = {
-      name: Name.make("developer"),
+      name: AgentName.make("developer"),
       brain: new BrainSpec({
         harness: "codex",
         model: ModelId.make("gpt-5.6-sol"),
         effort: "xhigh",
       }),
       parentModel: Option.none(),
-      persona: Persona.make("Implement the issue."),
+      persona: AgentPersona.make("Implement the issue."),
     } as const;
     const inherited = new Agent({ ...base, parentEffort: Option.none() });
     const overridden = new Agent({ ...base, parentEffort: Option.some("low") });

@@ -1,6 +1,6 @@
 import { CaretRightIcon } from "@phosphor-icons/react";
-import type { Agent } from "@usine/core";
-import type { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator";
+import type { BillingPool, RateLimitWindow } from "@usine/core/agent/session";
+import type { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { useMemo } from "react";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -44,7 +44,7 @@ const isRateLimitUpdate = (event: TranscriptEventView): boolean =>
   event.payload._tag === "SessionEvent" && event.payload.event._tag === "PoolRateLimitsUpdated";
 
 export interface PoolMeter {
-  readonly pool: Agent.Pool;
+  readonly pool: BillingPool;
   readonly primaryUsedPercent: number | null;
   readonly secondaryUsedPercent: number | null;
 }
@@ -53,12 +53,12 @@ export interface PoolMeter {
 export const poolMeters = (
   events: ReadonlyArray<TranscriptEventView>,
 ): ReadonlyArray<PoolMeter> => {
-  const latest = new Map<Agent.Pool, PoolMeter>();
+  const latest = new Map<BillingPool, PoolMeter>();
   for (const event of events) {
     if (event.payload._tag !== "SessionEvent") continue;
     const session = event.payload.event;
     if (session._tag !== "PoolRateLimitsUpdated") continue;
-    const percent = (window: Option.Option<Agent.RateLimitWindow>) =>
+    const percent = (window: Option.Option<RateLimitWindow>) =>
       Option.match(window, { onNone: () => null, onSome: ({ usedPercent }) => usedPercent });
     latest.set(session.pool, {
       pool: session.pool,

@@ -1,4 +1,15 @@
-import { Agent } from "@usine/core";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import {
+  AgentSessionId,
+  ChildSession,
+  PoolRateLimitsUpdated,
+  RateLimitsSnapshot,
+  RateLimitWindow as CoreRateLimitWindow,
+  SessionStarted,
+  TextOutput,
+  ToolFinished,
+  ToolStarted,
+} from "@usine/core/agent/session";
 import { DateTime, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import type {
   InitializeParams,
@@ -19,6 +30,8 @@ import {
 } from "../../runtime.ts";
 import { sessionChannel } from "../session.ts";
 import { CodexAppServer, operationError } from "./app-server.ts";
+
+export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
 
 type CodexRequestPayload =
   | InitializeParams
@@ -122,7 +135,7 @@ const decodeResponse = <S extends Schema.Top>(
 const decodeNotification = <S extends Schema.Top>(
   schema: S,
   label: string,
-  sessionId: Agent.SessionId,
+  sessionId: AgentSessionId,
   value: Schema.Json,
 ): Effect.Effect<Option.Option<S["Type"]>, never, S["DecodingServices"]> =>
   Schema.decodeUnknownEffect(schema)(value).pipe(
@@ -153,8 +166,8 @@ const toolName = (item: typeof ToolItem.Type): string => {
   }
 };
 
-const rateLimitWindow = (window: typeof RateLimitWindow.Type): Agent.RateLimitWindow =>
-  new Agent.RateLimitWindow({
+const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLimitWindow =>
+  new CoreRateLimitWindow({
     usedPercent: window.usedPercent,
     windowDurationMinutes: Option.fromNullishOr(window.windowDurationMins),
     resetsAt: Option.fromNullishOr(window.resetsAt).pipe(Option.map(DateTime.fromEpochSeconds)),
@@ -261,13 +274,13 @@ const makeCodexChild = Effect.gen(function* () {
         model: thread.model,
         sessionId: request.session.id,
       });
-      const session = new Agent.ChildSession({
+      const session = new ChildSession({
         id: request.session.id,
         parentId: request.session.parentId,
         agent: request.session.agent,
-        brain: new Agent.BrainSpec({
+        brain: new BrainSpec({
           harness: "codex",
-          model: Agent.ModelId.make(thread.model),
+          model: ModelId.make(thread.model),
           effort: request.session.brain.effort,
         }),
       });
@@ -275,7 +288,7 @@ const makeCodexChild = Effect.gen(function* () {
         label: "Codex child session",
         sessionId: session.id,
       });
-      yield* channel.emit(new Agent.SessionStarted({ session }));
+      yield* channel.emit(new SessionStarted({ session }));
       const turnParams: TurnStartParams = {
         threadId: thread.thread.id,
         input: [{ type: "text", text: request.prompt, text_elements: [] }],
@@ -314,7 +327,7 @@ const makeCodexChild = Effect.gen(function* () {
               }
               if (!Schema.is(ToolItem)(notification.value.item)) return;
               return yield* channel.emit(
-                new Agent.ToolStarted({
+                new ToolStarted({
                   session,
                   callId: notification.value.item.id,
                   tool: toolName(notification.value.item),
@@ -342,11 +355,11 @@ const makeCodexChild = Effect.gen(function* () {
                 if (text.length === 0) return;
                 lastText = text;
                 if (item.phase === "final_answer") finalText = text;
-                return yield* channel.emit(new Agent.TextOutput({ session, text }));
+                return yield* channel.emit(new TextOutput({ session, text }));
               }
               if (!Schema.is(ToolItem)(item)) return;
               return yield* channel.emit(
-                new Agent.ToolFinished({
+                new ToolFinished({
                   session,
                   callId: item.id,
                   tool: toolName(item),
@@ -368,13 +381,13 @@ const makeCodexChild = Effect.gen(function* () {
               if (Option.isNone(notification)) return;
               const snapshot = notification.value.rateLimits;
               return yield* channel.emit(
-                new Agent.PoolRateLimitsUpdated({
+                new PoolRateLimitsUpdated({
                   session,
                   // Workers provision Codex children on ChatGPT-plan login
                   // state (ADR 0005); an API-key login would misattribute
                   // these windows, and preflighting it is issue #60's scope.
                   pool: "chatgptPlan",
-                  rateLimits: new Agent.RateLimitsSnapshot({
+                  rateLimits: new RateLimitsSnapshot({
                     limitId: Option.fromNullishOr(snapshot.limitId),
                     limitName: Option.fromNullishOr(snapshot.limitName),
                     primary: Option.fromNullishOr(snapshot.primary).pipe(

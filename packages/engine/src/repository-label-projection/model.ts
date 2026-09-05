@@ -1,4 +1,4 @@
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
 
 const RepositoryLabelName = Schema.String.check(
@@ -28,6 +28,6 @@ const RepositoryLabels = Schema.Array(RepositoryLabel).check(uniqueLabelNames);
 export class RepositoryLabelProjection extends Schema.Class<RepositoryLabelProjection>(
   "@usine/engine/RepositoryLabelProjection",
 )({
-  repository: Repository.Name,
+  repository: RepositoryName,
   labels: RepositoryLabels,
 }) {}

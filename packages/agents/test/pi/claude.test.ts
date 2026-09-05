@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Agent } from "@usine/core";
+import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
+import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
+import { AgentName } from "@usine/core/agent";
 import { Effect, Layer, Schema, Stream } from "effect";
 import {
   AgentResultError,
@@ -8,7 +10,7 @@ import {
   SessionOperationError,
   UnknownModelError,
   WorkingDirectory,
-} from "../../src/index.ts";
+} from "../../src/runtime.ts";
 import {
   ClaudeSdk,
   claudeChildLayer,
@@ -19,16 +21,16 @@ import {
 
 const request = (
   model = "claude-sonnet-4-6",
-  options?: { readonly harness?: Agent.Harness; readonly effort?: Agent.Effort },
+  options?: { readonly harness?: Harness; readonly effort?: Effort },
 ) =>
   new ChildRequest({
-    session: new Agent.ChildSession({
-      id: Agent.SessionId.make("child-1"),
-      parentId: Agent.SessionId.make("parent-1"),
-      agent: Agent.Name.make("developer"),
-      brain: new Agent.BrainSpec({
+    session: new ChildSession({
+      id: AgentSessionId.make("child-1"),
+      parentId: AgentSessionId.make("parent-1"),
+      agent: AgentName.make("developer"),
+      brain: new BrainSpec({
         harness: "claude",
-        model: Agent.ModelId.make(model),
+        model: ModelId.make(model),
         effort: "high",
         ...options,
       }),

@@ -1,4 +1,6 @@
-import { Repository } from "@usine/core";
+import { ContentHash } from "./model.ts";
+import { canonicalContent } from "./content.ts";
+import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../github-app.ts";
@@ -17,7 +19,6 @@ import { GitHubRateLimitError, type GitHubAppError, type GitHubOperation } from 
 import {
   ChangedIssue,
   ChangedPullRequest,
-  ContentHash,
   EntityTag,
   IssuePayload,
   IssueSnapshot,
@@ -31,7 +32,6 @@ import {
   RepositoryLabelName,
   RepositoryChanges,
   RepositoryNotModified,
-  TIMESTAMP_FIELDS,
   type ChangeDetection,
   type ChangedItem,
   type PayloadSnapshot,
@@ -92,19 +92,6 @@ const PullRequestData = Schema.Struct({
   ),
 });
 
-const canonicalContent = (value: Schema.Json): Schema.Json => {
-  if (Array.isArray(value)) return value.map(canonicalContent);
-  if (Schema.is(Schema.JsonObject)(value)) {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([key]) => !TIMESTAMP_FIELDS.has(key))
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([key, child]) => [key, canonicalContent(child)]),
-    );
-  }
-  return value;
-};
-
 type Headers = HttpClientResponse.HttpClientResponse["headers"];
 
 const dateTimeAt = (epochMillis: number) => DateTime.make(epochMillis);
@@ -143,8 +130,8 @@ const sinceParameter = (watermark: DateTime.Utc): string => {
   return `${new Date(epoch - (epoch % 1_000)).toISOString().slice(0, 19)}Z`;
 };
 
-const changesUrl = (repository: Repository.Name, cursor: PollCursor): string => {
-  const { name, owner } = Repository.parts(repository);
+const changesUrl = (repository: RepositoryName, cursor: PollCursor): string => {
+  const { name, owner } = splitRepositoryName(repository);
   const url = new URL(
     `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues`,
   );
@@ -158,8 +145,8 @@ const changesUrl = (repository: Repository.Name, cursor: PollCursor): string => 
   return url.toString();
 };
 
-const labelsUrl = (repository: Repository.Name): string => {
-  const { name, owner } = Repository.parts(repository);
+const labelsUrl = (repository: RepositoryName): string => {
+  const { name, owner } = splitRepositoryName(repository);
   const url = new URL(
     `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/labels`,
   );
@@ -167,8 +154,8 @@ const labelsUrl = (repository: Repository.Name): string => {
   return url.toString();
 };
 
-const itemLabelsUrl = (repository: Repository.Name, item: number): string => {
-  const { name, owner } = Repository.parts(repository);
+const itemLabelsUrl = (repository: RepositoryName, item: number): string => {
+  const { name, owner } = splitRepositoryName(repository);
   const url = new URL(
     `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${item}/labels`,
   );
@@ -184,31 +171,20 @@ const newerWatermark = (cursor: PollCursor, items: ReadonlyArray<ChangedItem>) =
   return epochs.length === 0 ? Option.none<DateTime.Utc>() : dateTimeAt(Math.max(...epochs));
 };
 
-const makeContentHash = (crypto: Crypto.Crypto) =>
-  Effect.fn("GitHubPolling.contentHash")(function* (payload: Schema.Json) {
-    const encoded = new TextEncoder().encode(JSON.stringify(canonicalContent(payload)));
-    // An in-memory SHA-256 digest cannot fail for expected reasons: a failure
-    // here is a violated platform invariant, not a domain failure.
-    const digest = yield* crypto.digest("SHA-256", encoded).pipe(Effect.orDie);
-    return ContentHash.make(
-      Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),
-    );
-  });
-
 /** GitHub change detection and snapshot fetching behind one external seam. */
 export class GitHubPolling extends Context.Service<
   GitHubPolling,
   {
     readonly changes: (
-      repository: Repository.Name,
+      repository: RepositoryName,
       cursor: PollCursor,
     ) => Effect.Effect<ChangeDetection, GitHubAppError>;
     readonly labels: (
-      repository: Repository.Name,
+      repository: RepositoryName,
       entityTag: Option.Option<EntityTag>,
     ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
     readonly snapshot: (
-      repository: Repository.Name,
+      repository: RepositoryName,
       item: ChangedItem,
     ) => Effect.Effect<PayloadSnapshot, GitHubAppError>;
   }
@@ -306,7 +282,7 @@ export class GitHubPolling extends Context.Service<
       });
 
       const labels = Effect.fn("GitHubPolling.labels")(function* (
-        repository: Repository.Name,
+        repository: RepositoryName,
         entityTag: Option.Option<EntityTag>,
       ) {
         yield* Effect.annotateCurrentSpan({ repository });
@@ -343,7 +319,7 @@ export class GitHubPolling extends Context.Service<
       });
 
       const changes = Effect.fn("GitHubPolling.changes")(function* (
-        repository: Repository.Name,
+        repository: RepositoryName,
         cursor: PollCursor,
       ) {
         const token = yield* app.installationToken();
@@ -406,13 +382,13 @@ export class GitHubPolling extends Context.Service<
         S extends Schema.Codec<unknown, unknown, never, unknown>,
       >(
         operation: GitHubOperation,
-        repository: Repository.Name,
+        repository: RepositoryName,
         number: number,
         query: string,
         dataSchema: S,
       ) {
         const token = yield* app.installationToken();
-        const { name, owner } = Repository.parts(repository);
+        const { name, owner } = splitRepositoryName(repository);
         const request = HttpClientRequest.post(`${API_ROOT}/graphql`).pipe(
           HttpClientRequest.bodyJsonUnsafe({ query, variables: { owner, name, number } }),
           authorized(token.value),
@@ -450,7 +426,7 @@ export class GitHubPolling extends Context.Service<
 
       const snapshot = Effect.fn("GitHubPolling.snapshot")(
         (
-          repository: Repository.Name,
+          repository: RepositoryName,
           item: ChangedItem,
         ): Effect.Effect<PayloadSnapshot, GitHubAppError> =>
           Effect.gen(function* () {
@@ -527,3 +503,37 @@ export class GitHubPolling extends Context.Service<
     }),
   );
 }
+
+export {
+  EntityTag,
+  RepositoryLabelName,
+  RepositoryLabelColor,
+  RepositoryLabel,
+  RepositoryLabelCatalog,
+  RepositoryLabelsNotModified,
+  RepositoryLabelDetection,
+  PollCursor,
+  ChangedIssue,
+  ChangedPullRequest,
+  ChangedItem,
+  RepositoryNotModified,
+  RepositoryChanges,
+  ChangeDetection,
+  IssuePayload,
+  PullRequestPayload,
+  IssueSnapshot,
+  PullRequestSnapshot,
+  PayloadSnapshot,
+} from "./model.ts";
+
+const makeContentHash = (crypto: Crypto.Crypto) =>
+  Effect.fn("GitHubPolling.contentHash")(function* (payload: Schema.Json) {
+    const encoded = new TextEncoder().encode(JSON.stringify(canonicalContent(payload)));
+    // An in-memory SHA-256 digest cannot fail for expected reasons: a failure
+    // here is a violated platform invariant, not a domain failure.
+    const digest = yield* crypto.digest("SHA-256", encoded).pipe(Effect.orDie);
+    return ContentHash.make(
+      Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),
+    );
+  });
+export { ContentHash } from "./model.ts";

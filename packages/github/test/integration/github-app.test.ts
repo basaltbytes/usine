@@ -1,9 +1,10 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Instance, Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/repository";
+import { InstanceDirectory } from "@usine/core/instance";
 import { Config, Effect, Layer, Redacted, Schema } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { GitHubApp } from "../../src/index.ts";
+import { GitHubApp } from "../../src/github-app.ts";
 import { localSecretsLayer } from "../../src/local-secrets.ts";
 
 const API_VERSION = "2026-03-10";
@@ -37,7 +38,7 @@ const fetchJson = Effect.fn("integration.fetchJson")(function* <S extends Schema
 });
 
 const deleteComment = Effect.fn("integration.deleteComment")(function* (
-  repository: Repository.Name,
+  repository: RepositoryName,
   commentId: number,
   token: string,
 ) {
@@ -63,8 +64,8 @@ describe("operator-created GitHub App", () => {
         issueNumber: Config.schema(PositiveIntFromString, "USINE_GITHUB_INTEGRATION_ISSUE_NUMBER"),
         botLogin: Config.string("USINE_GITHUB_INTEGRATION_BOT_LOGIN"),
       });
-      const root = Instance.Directory.make(settings.instanceDirectory);
-      const repository = Repository.Name.make(settings.repository);
+      const root = InstanceDirectory.make(settings.instanceDirectory);
+      const repository = RepositoryName.make(settings.repository);
       const platformLayer = Layer.merge(NodeFileSystem.layer, NodePath.layer);
       const credentialsLayer = localSecretsLayer(root).pipe(Layer.provide(platformLayer));
       const githubLayer = GitHubApp.layer.pipe(

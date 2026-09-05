@@ -1,20 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
-import {
-  GitHubApp,
-  GitHubLabelWriter,
-  Installation,
-  InstallationId,
-  InstallationToken,
-  InstallationWide,
-  NewRepositoryLabel,
-  RepositoryLabelColor,
-  RepositoryLabelName,
-} from "../src/index.ts";
+import { GitHubApp } from "../src/github-app.ts";
+import { GitHubLabelWriter, NewRepositoryLabel } from "../src/label-writer.ts";
+import { Installation, InstallationId, InstallationToken, InstallationWide } from "../src/model.ts";
+import { RepositoryLabelColor, RepositoryLabelName } from "../src/polling/model.ts";
 
-const repository = Repository.Name.make("basaltbytes/usine");
+const repository = RepositoryName.make("basaltbytes/usine");
 const token = new InstallationToken({
   value: Redacted.make("label-writer-token"),
   expiresAt: DateTime.makeUnsafe("2026-09-01T22:00:00Z"),

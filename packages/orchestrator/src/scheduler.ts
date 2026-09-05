@@ -1,14 +1,14 @@
-/** Configured FIFO worker scheduler: the platform-free Executor-to-engine adapter. */
-
-import type { Worker as ConfigWorker, UsineConfig } from "@usine/config";
-import { Agent, AttemptFailure, Worker } from "@usine/core";
+import type { UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
+import { resolveParentEffort } from "@usine/core/agent";
+import { InfraFailure } from "@usine/core/attempt/failure";
+import { WorkerName } from "@usine/core/worker";
 import {
   CheckoutRequest,
   Executor,
   ExecutorError,
   type ExecutorOperationError,
 } from "@usine/executor";
-import { StepExecutor, type WorkerLease } from "@usine/engine";
+import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
 import {
   DateTime,
   Deferred,
@@ -22,10 +22,12 @@ import {
   TxPriorityQueue,
 } from "effect";
 
+/** Configured FIFO worker scheduler: the platform-free Executor-to-engine adapter. */
+
 export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorkerError>(
   "@usine/orchestrator/UnsupportedWorkerError",
 )("UnsupportedWorkerError", {
-  worker: Worker.Name,
+  worker: WorkerName,
   kind: Schema.String,
 }) {}
 
@@ -47,7 +49,7 @@ const reservationOrder = Order.combine(
 );
 
 const asInfrastructureFailure = (error: ExecutorError | ExecutorOperationError) =>
-  new AttemptFailure.InfraFailure({
+  new InfraFailure({
     message:
       error._tag === "ExecutorOperationError"
         ? `Executor ${error.operation} failed: ${error.message}`
@@ -56,8 +58,8 @@ const asInfrastructureFailure = (error: ExecutorError | ExecutorOperationError) 
   });
 
 const makeLease = Effect.fn("WorkerScheduler.makeLease")(function* (
-  worker: Worker.Name,
-  available: Queue.Queue<Worker.Name>,
+  worker: WorkerName,
+  available: Queue.Queue<WorkerName>,
 ) {
   const released = yield* Ref.make(false);
   return {
@@ -93,7 +95,7 @@ export const stepExecutorLayer = (
         discard: true,
       });
 
-      const available = yield* Queue.make<Worker.Name>();
+      const available = yield* Queue.make<WorkerName>();
       yield* Queue.offerAll(
         available,
         workers.flatMap(({ maxConcurrentAttempts, name }) =>
@@ -177,10 +179,7 @@ export const stepExecutorLayer = (
                 agent: execution.agent,
                 parentModel: execution.parentModel,
                 maxChildren: config.settings.maxChildren,
-                parentEffort: Agent.resolveParentEffort(
-                  execution.agent,
-                  config.settings.parentEffort,
-                ),
+                parentEffort: resolveParentEffort(execution.agent, config.settings.parentEffort),
               }),
             )
             .pipe(Effect.mapError(asInfrastructureFailure));
@@ -204,7 +203,7 @@ export const stepExecutorLayer = (
               duration: `${config.settings.maxAttemptMinutes} minutes`,
               orElse: () =>
                 Effect.fail(
-                  new AttemptFailure.InfraFailure({
+                  new InfraFailure({
                     message: `Attempt exceeded the ${config.settings.maxAttemptMinutes}-minute budget`,
                     cause: new Error("attempt timeout"),
                   }),

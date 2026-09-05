@@ -2,7 +2,7 @@
 
 `@usine/orchestrator` connects loaded loop files to GitHub polling, the durable run engine, and configured workers for [usine](https://github.com/basaltbytes/usine).
 
-Its platform-free root exports the complete embeddable application surface: `PollingTriggers`, `ScheduleTriggers`, `Orchestrator`, and `Operator`. `Orchestrator.run(instance)` runs both trigger streams; `Operator` provides run and Board observation, structured protocol transcript pages, label-backed Board moves, approve/retry/cancel, and database-backed Loop pause/unpause. Transcript payloads, Attempt brains/outcomes, and items needing attention remain typed data; consuming apps own their wording and presentation. `OperatorObservation` exposes the same read-only projection without constructing execution services. The latest polling and schedule failures remain visible through `Operator.overview(instance)` after their sibling work continues. Concurrent overview reads with the same durable revision share one projection computation.
+Its platform-free entry points provide `PollingTriggers` at `/polling-triggers`, `ScheduleTriggers` at `/schedule-triggers`, `Orchestrator` at `/orchestrator`, and `Operator` with its request and response types at `/operator`. `Orchestrator.run(instance)` runs both trigger streams; `Operator` provides run and Board observation, structured protocol transcript pages, label-backed Board moves, approve/retry/cancel, and database-backed Loop pause/unpause. Transcript payloads, Attempt brains/outcomes, and items needing attention remain typed data; consuming apps own their wording and presentation. `OperatorObservation` exposes the same read-only projection without constructing execution services. The latest polling and schedule failures remain visible through `Operator.overview(instance)` after their sibling work continues. Concurrent overview reads with the same durable revision share one projection computation.
 
 `Operator.overview(instance)` groups the latest polled Items into each repository's authored lanes. Repositories without configured lanes receive proposals from the repository label catalog, including unused labels and repositories with no Items. Items that match no source appear in a read-only `Unmapped` lane, and label matches take precedence over state sources. Each card references its newest recorded Run for the same Item. A malformed Item projection is quarantined and reported in the Board and needs-you strip while valid siblings remain visible. Failed declared-label creation also appears as a repository preflight finding without blocking trigger work.
 
@@ -24,7 +24,7 @@ Polling cursors live in the engine's `CursorStore`. When a loop starts watching 
 
 ```ts
 import { Layer } from "effect"
-import { PollingTriggers } from "@usine/orchestrator"
+import { PollingTriggers } from "@usine/orchestrator/polling-triggers"
 
 const dependencies = Layer.mergeAll(
   engineLayer,
@@ -50,7 +50,7 @@ The Event key covers the loop, canonical repository, and scheduled time. An in-m
 
 ## Worker scheduling
 
-The platform-free root entry exports `stepExecutorLayer`. At startup it verifies every configured worker, creates one capacity slot per `max_concurrent_attempts`, and assigns slots by Event receipt time. Runs stay pending while every slot is occupied. Each Attempt receives the configured `max_children` child-session budget. The layer rejects worker kinds that its supplied executor cannot run.
+`@usine/orchestrator/scheduler` exports the platform-free `stepExecutorLayer`. At startup it verifies every configured worker, creates one capacity slot per `max_concurrent_attempts`, and assigns slots by Event receipt time. Runs stay pending while every slot is occupied. Each Attempt receives the configured `max_children` child-session budget. The layer rejects worker kinds that its supplied executor cannot run.
 
 `@usine/orchestrator/local` composes the scheduler with the Node local executor and the engine's local SQLite adapter. It requires a caller-owned `CredentialProvider`; use `gitHubCredentialLayer` with `@usine/github`, or supply another provider that mints one repository credential per Attempt.
 
@@ -69,14 +69,14 @@ For the whole local application, `runtimeLayer(instanceDirectory, instance, opti
 For an exe.dev Worker, use the `@usine/orchestrator/exe-dev` composition. It keeps the engine and SQLite runtime local while the unchanged Worker contract runs on the named VM:
 
 ```ts
-import { Repository } from "@usine/core"
+import { RepositoryName } from "@usine/core/repository"
 import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev"
 import { layer as exeDevLayer } from "@usine/orchestrator/exe-dev"
 
 const EngineLive = exeDevLayer(instanceDirectory, config, {
   githubIntegrations: [
     new GitHubIntegration({
-      repository: Repository.Name.make("acme/widget"),
+      repository: RepositoryName.make("acme/widget"),
       name: IntegrationName.make("usine-acme-widget"),
     }),
   ],

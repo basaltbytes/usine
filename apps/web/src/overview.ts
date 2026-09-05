@@ -1,11 +1,11 @@
 import type { Query } from "@tanstack/react-query";
-import { Repository } from "@usine/core";
-import { FactoryOverview } from "@usine/orchestrator";
+import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
+import { FactoryOverview } from "@usine/orchestrator/operator";
 import { api } from "./api.ts";
 
 /** Path params for /projects/$owner/$name, in the parsed shape the route declares. */
-export const projectParams = (repository: Repository.Name) => ({
-  ...Repository.parts(repository),
+export const projectParams = (repository: RepositoryName) => ({
+  ...splitRepositoryName(repository),
   repository,
 });
 

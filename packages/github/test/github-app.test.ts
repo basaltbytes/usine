@@ -1,19 +1,19 @@
 import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
 import { assert, describe, it } from "@effect/vitest";
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/repository";
 import { Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
+import { GitHubApp } from "../src/github-app.ts";
 import {
   AppCredentials,
   AppId,
   CoveredProject,
-  GitHubApp,
   GitHubCredentials,
   InstallationId,
   PrivateKey,
-  REQUIRED_REPOSITORY_PERMISSIONS,
   RepositoryId,
-} from "../src/index.ts";
+  REQUIRED_REPOSITORY_PERMISSIONS,
+} from "../src/model.ts";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const privatePem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
@@ -122,8 +122,8 @@ describe("GitHubApp", () => {
         assert(!String(wide).includes("installation-secret"));
 
         const access = yield* app.projectAccess([
-          Repository.Name.make("BasaltBytes/Usine"),
-          Repository.Name.make("basaltbytes/missing"),
+          RepositoryName.make("BasaltBytes/Usine"),
+          RepositoryName.make("basaltbytes/missing"),
         ]);
         assert.strictEqual(access[0]?._tag, "CoveredProject");
         assert.strictEqual(access[1]?._tag, "ProjectNotInstalledError");
@@ -229,7 +229,7 @@ describe("GitHubApp", () => {
         .workerToken(
           new CoveredProject({
             installationId: InstallationId.make(77),
-            repository: Repository.Name.make("basaltbytes/usine"),
+            repository: RepositoryName.make("basaltbytes/usine"),
             repositoryId: RepositoryId.make(99),
           }),
         )
@@ -256,7 +256,7 @@ describe("GitHubApp", () => {
         .workerToken(
           new CoveredProject({
             installationId: InstallationId.make(77),
-            repository: Repository.Name.make("basaltbytes/usine"),
+            repository: RepositoryName.make("basaltbytes/usine"),
             repositoryId: RepositoryId.make(99),
           }),
         )

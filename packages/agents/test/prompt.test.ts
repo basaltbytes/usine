@@ -1,16 +1,17 @@
 import { assert, describe, it } from "@effect/vitest";
-import { AttemptChannel, Repository } from "@usine/core";
-import { Agent } from "@usine/core";
-import { assembleChildPrompt, assemblePrompt, githubSignature } from "../src/index.ts";
+import { AgentPersona, AgentName } from "@usine/core/agent";
+import { AttemptTask } from "@usine/core/attempt";
+import { RepositoryName } from "@usine/core/repository";
+import { assembleChildPrompt, assemblePrompt, githubSignature } from "../src/prompt.ts";
 
 describe("assemblePrompt", () => {
   it("prepends the repository and payload snapshot before the persona and rendered task", () => {
     const prompt = assemblePrompt({
-      repository: Repository.Name.make("acme/demo"),
+      repository: RepositoryName.make("acme/demo"),
       payload: { number: 30, title: "Build the agent layer" },
-      agent: Agent.Name.make("developer"),
-      persona: Agent.Persona.make("You are the factory's implementation agent."),
-      task: AttemptChannel.Task.make("Implement issue #30: Build the agent layer"),
+      agent: AgentName.make("developer"),
+      persona: AgentPersona.make("You are the factory's implementation agent."),
+      task: AttemptTask.make("Implement issue #30: Build the agent layer"),
     });
 
     assert.strictEqual(
@@ -42,12 +43,12 @@ describe("assemblePrompt", () => {
   });
 
   it("injects the rostered persona and GitHub signature into child work", () => {
-    const name = Agent.Name.make("implementation-agent");
+    const name = AgentName.make("implementation-agent");
     assert.strictEqual(githubSignature(name), "— usine agent: implementation-agent");
     assert.strictEqual(
       assembleChildPrompt({
         agent: name,
-        persona: Agent.Persona.make("You implement focused TypeScript changes."),
+        persona: AgentPersona.make("You implement focused TypeScript changes."),
         task: "Add the session interrupt adapter.",
       }),
       [

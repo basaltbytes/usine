@@ -1,14 +1,17 @@
 import {
+  type CollisionDetection,
   DndContext,
+  type DragEndEvent,
   DragOverlay,
+  type DragStartEvent,
   KeyboardSensor,
   PointerSensor,
+  pointerWithin,
+  rectIntersection,
+  type UniqueIdentifier,
   useDroppable,
   useSensor,
   useSensors,
-  type DragEndEvent,
-  type DragStartEvent,
-  type UniqueIdentifier,
 } from "@dnd-kit/core";
 import {
   SortableContext,
@@ -16,18 +19,19 @@ import {
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
-import { pointerWithin, rectIntersection, type CollisionDetection } from "@dnd-kit/core";
 import { CSS } from "@dnd-kit/utilities";
 import { ArrowUpRightIcon, CaretDownIcon } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Item, Repository, Run } from "@usine/core";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { RunId } from "@usine/core/run";
+import { splitRepositoryName } from "@usine/core/repository";
 import type {
   BoardItemView,
   BoardLaneView,
   LabelView,
   ProjectView,
   RunView,
-} from "@usine/orchestrator";
+} from "@usine/orchestrator/operator";
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { LabelBadge } from "@/components/label-badge";
@@ -90,10 +94,7 @@ export const laneUnder = (
   lanes.find((lane) => lane.id === over) ??
   lanes.find((lane) => lane.items.some(({ itemKey }) => itemKey === over));
 
-const laneOf = (
-  itemKey: Item.ItemKey,
-  lanes: ReadonlyArray<BoardLaneView>,
-): BoardLaneView | undefined =>
+const laneOf = (itemKey: ItemKey, lanes: ReadonlyArray<BoardLaneView>): BoardLaneView | undefined =>
   lanes.find((lane) => lane.items.some((item) => item.itemKey === itemKey));
 
 /** The lane under the pointer wins; corner distance would hand a tall empty lane's drop to the
@@ -104,7 +105,7 @@ const dropCollision: CollisionDetection = (args) => {
 };
 
 export interface PendingMove {
-  readonly itemKey: Item.ItemKey;
+  readonly itemKey: ItemKey;
   readonly toLane: BoardLaneView["id"];
 }
 
@@ -139,7 +140,7 @@ const CardBody = ({
 }: {
   readonly item: BoardItemView;
   readonly catalog: LabelCatalog;
-  readonly openRun: (runId: Run.RunId) => void;
+  readonly openRun: (runId: RunId) => void;
   readonly move?: MoveMenu;
 }) => {
   const failure = itemFailure(item);
@@ -244,7 +245,7 @@ const BoardCard = ({
   readonly item: BoardItemView;
   readonly catalog: LabelCatalog;
   readonly disabled: boolean;
-  readonly openRun: (runId: Run.RunId) => void;
+  readonly openRun: (runId: RunId) => void;
   readonly move: MoveMenu;
 }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -283,7 +284,7 @@ const BoardLane = ({
   readonly catalog: LabelCatalog;
   readonly dragging: boolean;
   readonly pending: boolean;
-  readonly openRun: (runId: Run.RunId) => void;
+  readonly openRun: (runId: RunId) => void;
   readonly onMove: (item: BoardItemView, lane: BoardLaneView) => void;
 }) => {
   const move: MoveMenu = {
@@ -362,7 +363,7 @@ const UncardedRuns = ({
   openRun,
 }: {
   readonly runs: ReadonlyArray<RunView>;
-  readonly openRun: (runId: Run.RunId) => void;
+  readonly openRun: (runId: RunId) => void;
 }) => (
   <Card className="max-w-5xl">
     <CardHeader>
@@ -419,7 +420,7 @@ export const ProjectBoard = ({
 }: {
   readonly project: ProjectView;
   readonly disabled: boolean;
-  readonly openRun: (runId: Run.RunId) => void;
+  readonly openRun: (runId: RunId) => void;
 }) => {
   const queryClient = useQueryClient();
   const [active, setActive] = useState<BoardItemView | null>(null);
@@ -430,8 +431,8 @@ export const ProjectBoard = ({
   );
   const uncarded = runsWithoutCard(project);
   const move = useMutation({
-    mutationFn: ({ item, lane }: { readonly item: Item.Number; readonly lane: BoardLaneView }) => {
-      const { owner, name } = Repository.parts(project.repository);
+    mutationFn: ({ item, lane }: { readonly item: ItemNumber; readonly lane: BoardLaneView }) => {
+      const { owner, name } = splitRepositoryName(project.repository);
       return api(
         `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/items/${item}/lane`,
         ApiOk,

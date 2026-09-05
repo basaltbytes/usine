@@ -1,5 +1,13 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Agent } from "@usine/core";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import {
+  AgentSessionId,
+  ChildSession,
+  ChildSessionBudget,
+  ChildSessionCount,
+  ParentSession,
+} from "@usine/core/agent/session";
+import { AgentName } from "@usine/core/agent";
 import { Option, Schema } from "effect";
 import {
   AgentResultError,
@@ -11,27 +19,27 @@ import {
   UnknownModelError,
   UnsupportedEffortError,
   WorkingDirectory,
-} from "../src/index.ts";
+} from "../src/runtime.ts";
 
 describe("agent runtime contract", () => {
   it("round-trips one explicitly first-level child request", () => {
-    const parent = new Agent.ParentSession({
-      id: Agent.SessionId.make("parent-1"),
-      agent: Agent.Name.make("developer"),
-      brain: new Agent.BrainSpec({
+    const parent = new ParentSession({
+      id: AgentSessionId.make("parent-1"),
+      agent: AgentName.make("developer"),
+      brain: new BrainSpec({
         harness: "pi",
-        model: Agent.ModelId.make("anthropic/claude-opus-4-6"),
+        model: ModelId.make("anthropic/claude-opus-4-6"),
         effort: "high",
       }),
     });
     const request = new ChildRequest({
-      session: new Agent.ChildSession({
-        id: Agent.SessionId.make("child-1"),
+      session: new ChildSession({
+        id: AgentSessionId.make("child-1"),
         parentId: parent.id,
         agent: parent.agent,
-        brain: new Agent.BrainSpec({
+        brain: new BrainSpec({
           harness: "claude",
-          model: Agent.ModelId.make("claude-sonnet-4-6"),
+          model: ModelId.make("claude-sonnet-4-6"),
           effort: "high",
         }),
       }),
@@ -43,7 +51,7 @@ describe("agent runtime contract", () => {
   });
 
   it("retries SDK trouble as infrastructure and parks everything else on the operator", () => {
-    const sessionId = Option.some(Agent.SessionId.make("child-1"));
+    const sessionId = Option.some(AgentSessionId.make("child-1"));
     const infra = toAttemptFailure(
       new SessionOperationError({
         operation: "stream",
@@ -57,18 +65,18 @@ describe("agent runtime contract", () => {
     const terminal = [
       new UnknownModelError({
         harness: "claude",
-        model: Agent.ModelId.make("claude-never-existed"),
+        model: ModelId.make("claude-never-existed"),
         message: "Claude does not expose model claude-never-existed",
       }),
       new PoolUnavailableError({
         harness: "pi",
-        model: Agent.ModelId.make("github-copilot/gpt-5.6-sol"),
+        model: ModelId.make("github-copilot/gpt-5.6-sol"),
         pool: "apiKeys",
         message: "Pi model github-copilot/gpt-5.6-sol must use an API key",
       }),
       new UnsupportedEffortError({
         harness: "codex",
-        model: Agent.ModelId.make("gpt-5.6-terra"),
+        model: ModelId.make("gpt-5.6-terra"),
         effort: "max",
         message: "Codex model gpt-5.6-terra does not support effort max",
       }),
@@ -80,8 +88,8 @@ describe("agent runtime contract", () => {
 
     const budget = toAttemptFailure(
       new ChildSessionBudgetExceededError({
-        maxChildren: Agent.ChildSessionBudget.make(4),
-        attemptedChildren: Agent.ChildSessionCount.make(5),
+        maxChildren: ChildSessionBudget.make(4),
+        attemptedChildren: ChildSessionCount.make(5),
         message: "Attempt tried to spawn child 5 after reaching its 4-child budget",
       }),
     );

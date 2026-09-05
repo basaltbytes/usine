@@ -1,17 +1,18 @@
-import { ConfigParser } from "@usine/config";
+import { ConfigParser } from "@usine/config/parser";
+import { CursorStore } from "@usine/engine/cursor";
+import { RunEngine } from "@usine/engine/engine";
+import { ItemProjectionWriter } from "@usine/engine/item-projection";
+import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
 import {
-  CursorStore,
-  ItemProjectionWriter,
-  LoopControl,
-  type LoopRuntimeState,
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
-  RunEngine,
-} from "@usine/engine";
-import { ExpressionEngine } from "@usine/expression";
-import { GitHubLabelWriter, GitHubPolling } from "@usine/github";
+} from "@usine/engine/repository-label-projection";
+import { ExpressionEngine } from "@usine/expression/expression-engine";
+import { GitHubLabelWriter } from "@usine/github/label-writer";
+import { GitHubPolling } from "@usine/github/polling";
 import { Effect, Layer, Option, Schema } from "effect";
-import { LabelReconciler, PollingTriggers } from "../../src/index.ts";
+import { LabelReconciler } from "../../src/label-reconciler.ts";
+import { PollingTriggers } from "../../src/polling-triggers.ts";
 
 export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
   upsert: () => Effect.succeed(true),

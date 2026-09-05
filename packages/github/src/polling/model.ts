@@ -8,20 +8,6 @@ const Timestamp = Schema.String.check(
   }),
 );
 
-/**
- * The payload keys that hold a `Timestamp` above. Bound to the slice schemas:
- * a field added to a slice with a `Timestamp` value MUST be listed here, or it
- * silently joins the content hash and re-fires every item once (ADR 0007 keeps
- * timestamps in the payload but out of the hash).
- */
-export const TIMESTAMP_FIELDS: ReadonlySet<string> = new Set([
-  "closedAt",
-  "createdAt",
-  "mergedAt",
-  "submittedAt",
-  "updatedAt",
-]);
-
 export const EntityTag = Schema.NonEmptyString.pipe(Schema.brand("GitHubEntityTag"));
 export type EntityTag = typeof EntityTag.Type;
 

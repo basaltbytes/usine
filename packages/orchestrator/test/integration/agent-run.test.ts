@@ -1,22 +1,26 @@
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import {
-  AgentFile,
-  AgentName,
-  ConfigParser,
-  IssueTrigger,
-  LoadedInstance,
-  LoopFile,
-  LoopName,
-  Persona,
-  PromptTemplate,
-  Selector,
-  UsineConfig,
-} from "@usine/config";
-import { Agent, Instance, Repository, Run, Step } from "@usine/core";
-import { RunEngine, TranscriptAllQuery } from "@usine/engine";
-import { MarcbachmannCelLayer, Source } from "@usine/expression";
-import { GitHubApp, GitHubLabelWriter, GitHubPolling, IssuePayload } from "@usine/github";
+import { AgentName, AgentPersona } from "@usine/core/agent";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { StepName } from "@usine/core/step";
+import { AgentFile } from "@usine/config/agent";
+import { IssueTrigger } from "@usine/config/trigger";
+import { LoadedInstance } from "@usine/config/instance";
+import { LoopFile, PromptTemplate } from "@usine/config/loop";
+import { LoopName } from "@usine/core/loop";
+import { Selector } from "@usine/config/selector";
+import { UsineConfig } from "@usine/config/factory";
+import { ConfigParser } from "@usine/config/parser";
+import { ModelId } from "@usine/core/agent/brain";
+import { InstanceDirectory } from "@usine/core/instance";
+import { RunEngine } from "@usine/engine/engine";
+import { TranscriptAllQuery } from "@usine/engine/transcript";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
+import { Source } from "@usine/expression/model";
+import { GitHubApp } from "@usine/github/github-app";
+import { GitHubLabelWriter } from "@usine/github/label-writer";
+import { IssuePayload, GitHubPolling } from "@usine/github/polling";
 import { localSecretsLayer } from "@usine/github/local-secrets";
 import {
   Config,
@@ -31,7 +35,9 @@ import {
   Scope,
 } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
-import { LabelReconciler, PollingTriggers, gitHubCredentialLayer } from "../../src/index.ts";
+import { gitHubCredentialLayer } from "../../src/credentials.ts";
+import { LabelReconciler } from "../../src/label-reconciler.ts";
+import { PollingTriggers } from "../../src/polling-triggers.ts";
 import { layer as localWorkerLayer } from "../../src/local.ts";
 
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
@@ -45,7 +51,7 @@ const GitHubComment = Schema.Struct({
 });
 const GitHubComments = Schema.Array(GitHubComment);
 
-const repositoryApi = (repository: Repository.Name): string =>
+const repositoryApi = (repository: RepositoryName): string =>
   `https://api.github.com/repos/${repository
     .split("/")
     .map((part) => encodeURIComponent(part))
@@ -105,12 +111,12 @@ const requestEmpty = Effect.fn("agentIntegration.requestEmpty")(function* (optio
 });
 
 const makeInstance = (options: {
-  readonly childModel: Agent.ModelId;
+  readonly childModel: ModelId;
   readonly issueNumber: number;
   readonly kick: string;
   readonly marker: string;
-  readonly parentModel: Agent.ModelId;
-  readonly repository: Repository.Name;
+  readonly parentModel: ModelId;
+  readonly repository: RepositoryName;
 }): LoadedInstance => {
   const config = Schema.decodeUnknownSync(UsineConfig)({
     version: 1,
@@ -125,7 +131,7 @@ const makeInstance = (options: {
     effort: "low",
     parentModel: Option.none(),
     parentEffort: Option.none(),
-    persona: Persona.make(
+    persona: AgentPersona.make(
       "Act conservatively. Perform only the requested GitHub operation and report its result.",
     ),
   });
@@ -141,7 +147,7 @@ const makeInstance = (options: {
       new Selector({ repos: Option.some([options.repository]), tags: Option.none() }),
     ),
     approval: "none",
-    step: Step.StepName.make("comment"),
+    step: StepName.make("comment"),
     agent: agent.name,
     body: PromptTemplate.make(
       [
@@ -165,8 +171,8 @@ const makeInstance = (options: {
 };
 
 const runtimeLayer = (
-  credentialsDirectory: Instance.Directory,
-  runtimeDirectory: Instance.Directory,
+  credentialsDirectory: InstanceDirectory,
+  runtimeDirectory: InstanceDirectory,
   instance: LoadedInstance,
 ) => {
   const platform = Layer.merge(NodeFileSystem.layer, NodePath.layer);
@@ -225,7 +231,7 @@ const waitForClaim = Effect.fn("agentIntegration.waitForClaim")(function* (
 
 const waitForTerminal = Effect.fn("agentIntegration.waitForTerminal")(function* (
   engine: RunEngine["Service"],
-  runId: Run.RunId,
+  runId: RunId,
 ) {
   for (let poll = 0; poll < 600; poll += 1) {
     const snapshot = yield* engine.inspect(runId);
@@ -251,22 +257,22 @@ describe("live agent loop", () => {
           parentModel: Config.string("USINE_AGENT_INTEGRATION_PARENT_MODEL"),
           repository: Config.string("USINE_GITHUB_INTEGRATION_REPO"),
         });
-        const repository = Repository.Name.make(settings.repository);
+        const repository = RepositoryName.make(settings.repository);
         const marker = `usine live agent contract ${globalThis.crypto.randomUUID()}`;
         const kick = `usine live agent kick ${globalThis.crypto.randomUUID()}`;
         const instance = makeInstance({
-          childModel: Agent.ModelId.make(settings.childModel),
+          childModel: ModelId.make(settings.childModel),
           issueNumber: settings.issueNumber,
           kick,
           marker,
-          parentModel: Agent.ModelId.make(settings.parentModel),
+          parentModel: ModelId.make(settings.parentModel),
           repository,
         });
         const fileSystem = yield* FileSystem.FileSystem;
-        const runtimeDirectory = Instance.Directory.make(
+        const runtimeDirectory = InstanceDirectory.make(
           yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-live-agent-" }),
         );
-        const credentialsDirectory = Instance.Directory.make(settings.credentialsDirectory);
+        const credentialsDirectory = InstanceDirectory.make(settings.credentialsDirectory);
         const scope = yield* Scope.make();
         yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
         const context = yield* Scope.provide(

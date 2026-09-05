@@ -1,4 +1,5 @@
-import { Item, Repository } from "@usine/core";
+import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
+import { ItemNumber } from "@usine/core/item";
 import { Clock, Context, Effect, Layer, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "./github-app.ts";
@@ -16,12 +17,12 @@ export class ItemLabelMutation extends Schema.Class<ItemLabelMutation>(
   remove: LabelNames,
 }) {}
 
-const labelsUrl = (repository: Repository.Name, item: number): string => {
-  const { name, owner } = Repository.parts(repository);
+const labelsUrl = (repository: RepositoryName, item: number): string => {
+  const { name, owner } = splitRepositoryName(repository);
   return `${API_ROOT}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/issues/${item}/labels`;
 };
 
-const labelUrl = (repository: Repository.Name, item: number, label: string): string =>
+const labelUrl = (repository: RepositoryName, item: number, label: string): string =>
   `${labelsUrl(repository, item)}/${encodeURIComponent(label)}`;
 
 /** Authenticated GitHub Item writes used by the Board trigger surface. */
@@ -30,8 +31,8 @@ export class GitHubItemWriter extends Context.Service<
   {
     /** Adds/removes only the named labels; every other applied label is preserved. */
     readonly updateLabels: (
-      repository: Repository.Name,
-      item: Item.Number,
+      repository: RepositoryName,
+      item: ItemNumber,
       mutation: ItemLabelMutation,
     ) => Effect.Effect<ReadonlyArray<string>, GitHubAppError>;
   }
@@ -58,8 +59,8 @@ export class GitHubItemWriter extends Context.Service<
 
         return {
           updateLabels: Effect.fn("GitHubItemWriter.updateLabels")(function* (
-            repository: Repository.Name,
-            item: Item.Number,
+            repository: RepositoryName,
+            item: ItemNumber,
             mutation: ItemLabelMutation,
           ) {
             yield* Effect.annotateCurrentSpan({ repository, item });

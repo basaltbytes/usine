@@ -25,20 +25,25 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 
 ## Composition
 
-The root entry (`@usine/engine`) is platform-free; the Node local adapter lives behind `@usine/engine/local-sqlite`. Its `layer` supplies local SQLite, Effect `SingleRunner`, workflow registration, and startup reconciliation. Provide a `StepExecutor` implementation at the composition root:
+Every subpath is platform-free except the Node local adapter at `@usine/engine/local-sqlite`. Its `layer` supplies local SQLite, Effect `SingleRunner`, workflow registration, and startup reconciliation. Provide a `StepExecutor` implementation at the composition root:
 
 ```ts
 import { Effect, Layer } from "effect"
-import { StepResult, Worker } from "@usine/core"
-import { CursorStore, InstanceDirectory, LoopControl, RunEngine, StepExecutor } from "@usine/engine"
+import { WorkerName } from "@usine/core/worker"
+import { InstanceDirectory } from "@usine/core/instance"
+import { StepResult } from "@usine/core/step/result"
+import { StepExecutor } from "@usine/engine/step-executor"
 import { layer } from "@usine/engine/local-sqlite"
+import { RunEngine } from "@usine/engine/engine"
+import { CursorStore } from "@usine/engine/cursor"
+import { LoopControl } from "@usine/engine/loop-control"
 
 const StepExecutorLive = Layer.succeed(StepExecutor)({
   reserve: () => Effect.succeed({
-    worker: Worker.Name.make("local"),
+    worker: WorkerName.make("local"),
     release: Effect.void,
   }),
-  execute: ({ event }) => Effect.succeed(new StepResult.StepResult({
+  execute: ({ event }) => Effect.succeed(new StepResult({
     message: `Handled ${event.id}`,
     facts: [],
   })),
@@ -58,7 +63,9 @@ const program = Effect.gen(function* () {
 })
 ```
 
-`layerWithDatabase` (from the root entry) accepts another SQLite-compatible database layer. That layer must provide both `RunDatabase` and the matching Effect `SqlClient`, preserving atomic transactions and keeping the run projections beside Effect's cluster tables; the deployment also supplies its platform `Crypto` layer, which the cluster uses to hash over-length deduplication keys. Cloudflare D1 is not supported by Drizzle RC.4 for this use yet because its Effect driver cannot execute the store's transactions.
+`@usine/engine/engine` provides `RunEngine`, `Submission`, submission results, and typed engine errors. `@usine/engine/run-reader` provides `RunReader` and its snapshot and summary types; `/transcript` provides transcript entries, sequence values, and query variants. Import projection contracts from `/item-projection` and `/repository-label-projection`, and loop pause state with `LoopControl` from `/loop-control`.
+
+`layerWithDatabase` from `@usine/engine/engine` accepts another SQLite-compatible database layer. That layer must provide both `RunDatabase` from `@usine/engine/database` and the matching Effect `SqlClient`, preserving atomic transactions and keeping the run projections beside Effect's cluster tables; the deployment also supplies its platform `Crypto` layer, which the cluster uses to hash over-length deduplication keys. Cloudflare D1 is not supported by Drizzle RC.4 for this use yet because its Effect driver cannot execute the store's transactions.
 
 The Drizzle schema is the source of truth for usine tables. After changing it, generate and review a migration with:
 

@@ -12,7 +12,12 @@ import {
   SettingsManager,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { Agent, Attempt, AttemptChannel, Repository } from "@usine/core";
+import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { AgentSessionId, ChildSession, ChildSessionBudget } from "@usine/core/agent/session";
+import { AttemptTask, AttemptId } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { Effect, Fiber, Layer, Option, Stream } from "effect";
 import { Type } from "typebox";
 import {
@@ -28,17 +33,17 @@ import {
   UnknownModelError,
   UnsupportedEffortError,
   WorkingDirectory,
-} from "../../src/index.ts";
+} from "@usine/agents/runtime";
 import {
   PiSdk,
   piChildBackendLayer,
-  piParentSessionToolPolicy,
   piParentLayer,
   type PiSession,
   type PiSessionEvent,
   type PiStartOptions,
   type PiStartResult,
-} from "../../src/pi/pi.ts";
+} from "@usine/agents/pi";
+import { piParentSessionToolPolicy } from "../../src/pi/sdk.ts";
 import { resolvePiPool } from "../../src/pi/authentication.ts";
 
 describe("Pi pool resolution", () => {
@@ -105,27 +110,27 @@ const delayedPiStart = () => {
   };
 };
 
-const agent = new Agent.Agent({
-  name: Agent.Name.make("developer"),
-  brain: new Agent.BrainSpec({
+const agent = new Agent({
+  name: AgentName.make("developer"),
+  brain: new BrainSpec({
     harness: "claude",
-    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Agent.Persona.make("Implement the issue carefully."),
+  persona: AgentPersona.make("Implement the issue carefully."),
 });
 
 describe("Pi child backend", () => {
   const childRequest = new ChildRequest({
-    session: new Agent.ChildSession({
-      id: Agent.SessionId.make("pi-child-1"),
-      parentId: Agent.SessionId.make("parent-1"),
-      agent: Agent.Name.make("developer"),
-      brain: new Agent.BrainSpec({
+    session: new ChildSession({
+      id: AgentSessionId.make("pi-child-1"),
+      parentId: AgentSessionId.make("parent-1"),
+      agent: AgentName.make("developer"),
+      brain: new BrainSpec({
         harness: "pi",
-        model: Agent.ModelId.make("openai/gpt-5.6-terra"),
+        model: ModelId.make("openai/gpt-5.6-terra"),
         effort: "medium",
       }),
     }),
@@ -176,7 +181,7 @@ describe("Pi child backend", () => {
         return () => undefined;
       },
     };
-    const effectiveModel = Agent.ModelId.make("openai/gpt-5.6-terra-2026-08-01");
+    const effectiveModel = ModelId.make("openai/gpt-5.6-terra-2026-08-01");
     const sdk = Layer.succeed(PiSdk)({
       start: (found) => {
         options = found;
@@ -230,7 +235,7 @@ describe("Pi child backend", () => {
   });
 
   it.effect("rejects a child model outside the API-key pool", () => {
-    const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    const model = ModelId.make("openai-codex/gpt-5.6-sol");
     let disposed = false;
     const session: PiSession = {
       abort: () => Promise.resolve(),
@@ -302,18 +307,18 @@ describe("Pi child backend", () => {
     );
   });
 });
-const parentModel = Agent.ModelId.make("anthropic/claude-opus-4-6");
+const parentModel = ModelId.make("anthropic/claude-opus-4-6");
 const request = new LaunchRequest({
   spec: new AttemptChannel.RunSpec({
-    attemptId: Attempt.AttemptId.make("run/step/1"),
-    repository: Repository.Name.make("basaltbytes/usine"),
-    revision: Repository.Revision.make("main"),
-    baseCommit: Repository.CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+    attemptId: AttemptId.make("run/step/1"),
+    repository: RepositoryName.make("basaltbytes/usine"),
+    revision: RepositoryRevision.make("main"),
+    baseCommit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
     payload: { number: 30 },
-    task: AttemptChannel.Task.make("Implement issue 30."),
+    task: AttemptTask.make("Implement issue 30."),
     agent,
     parentModel: Option.some(parentModel),
-    maxChildren: Agent.ChildSessionBudget.make(4),
+    maxChildren: ChildSessionBudget.make(4),
     parentEffort: "medium",
   }),
   cwd: WorkingDirectory.make("/workspace/usine"),
@@ -540,7 +545,7 @@ describe("Pi parent runtime", () => {
       ...request,
       spec: new AttemptChannel.RunSpec({
         ...request.spec,
-        maxChildren: Agent.ChildSessionBudget.make(1),
+        maxChildren: ChildSessionBudget.make(1),
       }),
     });
 
@@ -599,7 +604,7 @@ describe("Pi parent runtime", () => {
   );
 
   it.effect("runs a parent model from the ChatGPT subscription pool", () => {
-    const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    const model = ModelId.make("openai-codex/gpt-5.6-sol");
     let listener: ((event: PiSessionEvent) => void) | undefined;
     const session: PiSession = {
       abort: () => Promise.resolve(),
@@ -639,7 +644,7 @@ describe("Pi parent runtime", () => {
   });
 
   it.effect("rejects an OAuth parent without a known billing pool", () => {
-    const model = Agent.ModelId.make("github-copilot/gpt-5.6-sol");
+    const model = ModelId.make("github-copilot/gpt-5.6-sol");
     const sdk = Layer.succeed(PiSdk)({
       start: () =>
         Promise.resolve({
@@ -661,7 +666,7 @@ describe("Pi parent runtime", () => {
   });
 
   it.effect("reports a missing parent credential as a terminal pool failure", () => {
-    const model = Agent.ModelId.make("openai-codex/gpt-5.6-sol");
+    const model = ModelId.make("openai-codex/gpt-5.6-sol");
     const sdk = Layer.succeed(PiSdk)({
       start: () =>
         Promise.resolve({

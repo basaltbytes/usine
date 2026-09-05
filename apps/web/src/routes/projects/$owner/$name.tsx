@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { Repository } from "@usine/core";
+import { RepositoryName } from "@usine/core/repository";
 import { BootScreen } from "@/components/boot-screen";
 import { Button } from "@/components/ui/button";
 import { ProjectBoard } from "../../../board.tsx";
@@ -34,7 +34,7 @@ export const Route = createFileRoute("/projects/$owner/$name")({
     parse: ({ owner, name }) => ({
       owner,
       name,
-      repository: Repository.Name.make(`${owner}/${name}`),
+      repository: RepositoryName.make(`${owner}/${name}`),
     }),
     stringify: ({ owner, name }) => ({ owner, name }),
   },

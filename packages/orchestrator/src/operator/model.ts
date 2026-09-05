@@ -1,25 +1,22 @@
-import {
-  Agent,
-  Attempt,
-  AttemptChannel,
-  AttemptFailure,
-  Item,
-  Loop,
-  Repository,
-  Run,
-  RunState,
-  Worker,
-} from "@usine/core";
-import { GitHubLabelName, LaneItemState, LaneName, LaneSource } from "@usine/config";
-import { TranscriptSequence } from "@usine/engine";
+import { BrainSpec } from "@usine/core/agent/brain";
+import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
+import { AttemptNumber, AttemptId } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { RunawayCeiling } from "@usine/core/attempt/failure";
+import { AgentName } from "@usine/core/agent";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
+import * as RunState from "@usine/core/run/state";
+import { GitHubLabelName } from "@usine/config/label";
+import { LaneItemState, LaneName, LaneSource } from "@usine/config/board";
+import { TranscriptSequence } from "@usine/engine/transcript";
 import { Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleFailure } from "../schedule-triggers.ts";
-
-/** Cursor for tailing the append-only transcript without replaying older events. */
-export const TranscriptCursor = TranscriptSequence;
-export type TranscriptCursor = TranscriptSequence;
 
 export const ProjectStatus = Schema.Literals(["clear", "active", "needs-you"]);
 export type ProjectStatus = typeof ProjectStatus.Type;
@@ -40,13 +37,13 @@ export class AgentFailureView extends Schema.TaggedClass<AgentFailureView>(
 
 export class RunawayFailureView extends Schema.TaggedClass<RunawayFailureView>(
   "@usine/orchestrator/RunawayFailureView",
-)("RunawayFailure", { ceiling: AttemptFailure.RunawayCeiling }) {}
+)("RunawayFailure", { ceiling: RunawayCeiling }) {}
 
 export class ChildSessionBudgetFailureView extends Schema.TaggedClass<ChildSessionBudgetFailureView>(
   "@usine/orchestrator/ChildSessionBudgetFailureView",
 )("ChildSessionBudgetFailure", {
-  maxChildren: Agent.ChildSessionBudget,
-  attemptedChildren: Agent.ChildSessionCount,
+  maxChildren: ChildSessionBudget,
+  attemptedChildren: ChildSessionCount,
 }) {}
 
 export const FailureView = Schema.Union([
@@ -77,20 +74,20 @@ export const AttemptOutcomeView = Schema.Union([
 export type AttemptOutcomeView = typeof AttemptOutcomeView.Type;
 
 export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/AttemptView")({
-  id: Attempt.AttemptId,
-  number: Attempt.AttemptNumber,
-  worker: Worker.Name,
-  brain: Agent.BrainSpec,
+  id: AttemptId,
+  number: AttemptNumber,
+  worker: WorkerName,
+  brain: BrainSpec,
   startedAt: Schema.String,
   outcome: Schema.NullOr(AttemptOutcomeView),
 }) {}
 
 export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView")({
-  id: Run.RunId,
-  itemKey: Item.ItemKey,
-  loop: Loop.LoopName,
-  repository: Repository.Name,
-  agent: Agent.Name,
+  id: RunId,
+  itemKey: ItemKey,
+  loop: LoopName,
+  repository: RepositoryName,
+  agent: AgentName,
   state: RunStateTag,
   loopPaused: Schema.Boolean,
   openedAt: Schema.String,
@@ -111,9 +108,9 @@ export type BoardLaneOrigin = typeof BoardLaneOrigin.Type;
 
 export class BoardItemView extends Schema.Class<BoardItemView>("@usine/orchestrator/BoardItemView")(
   {
-    itemKey: Item.ItemKey,
+    itemKey: ItemKey,
     kind: Schema.Literals(["issue", "pr"]),
-    number: Item.Number,
+    number: ItemNumber,
     title: Schema.String,
     url: Schema.NonEmptyString,
     state: LaneItemState,
@@ -150,8 +147,8 @@ export type BoardLaneView = typeof BoardLaneView.Type;
 export class BoardProjectionError extends Schema.TaggedError<BoardProjectionError>(
   "@usine/orchestrator/BoardProjectionError",
 )("BoardProjectionError", {
-  repository: Repository.Name,
-  itemKey: Item.ItemKey,
+  repository: RepositoryName,
+  itemKey: ItemKey,
   message: Schema.NonEmptyString,
 }) {}
 
@@ -168,7 +165,7 @@ export class LabelView extends Schema.Class<LabelView>("@usine/orchestrator/Labe
 }) {}
 
 export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/ProjectView")({
-  repository: Repository.Name,
+  repository: RepositoryName,
   status: ProjectStatus,
   runs: Schema.Array(RunView),
   board: BoardView,
@@ -179,42 +176,42 @@ export class ProjectView extends Schema.Class<ProjectView>("@usine/orchestrator/
 }) {}
 
 export class BoardMove extends Schema.Class<BoardMove>("@usine/orchestrator/BoardMove")({
-  repository: Repository.Name,
-  item: Item.Number,
+  repository: RepositoryName,
+  item: ItemNumber,
   toLane: BoardLaneId,
 }) {}
 
 export class BoardProjectNotFoundError extends Schema.TaggedError<BoardProjectNotFoundError>(
   "@usine/orchestrator/BoardProjectNotFoundError",
 )("BoardProjectNotFoundError", {
-  repository: Repository.Name,
+  repository: RepositoryName,
 }) {}
 
 export class BoardItemNotFoundError extends Schema.TaggedError<BoardItemNotFoundError>(
   "@usine/orchestrator/BoardItemNotFoundError",
 )("BoardItemNotFoundError", {
-  repository: Repository.Name,
-  item: Item.Number,
+  repository: RepositoryName,
+  item: ItemNumber,
 }) {}
 
 export class BoardLaneNotFoundError extends Schema.TaggedError<BoardLaneNotFoundError>(
   "@usine/orchestrator/BoardLaneNotFoundError",
 )("BoardLaneNotFoundError", {
-  repository: Repository.Name,
+  repository: RepositoryName,
   lane: BoardLaneId,
 }) {}
 
 export class BoardLaneReadOnlyError extends Schema.TaggedError<BoardLaneReadOnlyError>(
   "@usine/orchestrator/BoardLaneReadOnlyError",
 )("BoardLaneReadOnlyError", {
-  repository: Repository.Name,
+  repository: RepositoryName,
   lane: BoardLaneId,
 }) {}
 
 export class LoopView extends Schema.Class<LoopView>("@usine/orchestrator/LoopView")({
-  name: Loop.LoopName,
+  name: LoopName,
   trigger: Schema.String,
-  agent: Agent.Name,
+  agent: AgentName,
   paused: Schema.Boolean,
 }) {}
 
@@ -222,18 +219,18 @@ export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
   "@usine/orchestrator/ApprovalNeed",
 )("ApprovalNeed", {
   id: Schema.String,
-  repository: Repository.Name,
-  runId: Run.RunId,
-  loop: Loop.LoopName,
+  repository: RepositoryName,
+  runId: RunId,
+  loop: LoopName,
 }) {}
 
 export class RunFailureNeed extends Schema.TaggedClass<RunFailureNeed>(
   "@usine/orchestrator/RunFailureNeed",
 )("RunFailureNeed", {
   id: Schema.String,
-  repository: Repository.Name,
-  runId: Run.RunId,
-  loop: Loop.LoopName,
+  repository: RepositoryName,
+  runId: RunId,
+  loop: LoopName,
   failure: FailureView,
 }) {}
 
@@ -293,8 +290,8 @@ export type TranscriptPayload = typeof TranscriptPayload.Type;
 export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
   "@usine/orchestrator/TranscriptEventView",
 )({
-  sequence: TranscriptCursor,
-  attemptId: Attempt.AttemptId,
+  sequence: TranscriptSequence,
+  attemptId: AttemptId,
   receivedAt: Schema.String,
   direction: AttemptChannel.Direction,
   payload: TranscriptPayload,
@@ -304,8 +301,8 @@ export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
 export class TranscriptPageCursor extends Schema.Class<TranscriptPageCursor>(
   "@usine/orchestrator/TranscriptPageCursor",
 )({
-  attemptId: Attempt.AttemptId,
-  before: TranscriptCursor,
+  attemptId: AttemptId,
+  before: TranscriptSequence,
 }) {}
 
 export class ColdTranscriptRequest extends Schema.TaggedClass<ColdTranscriptRequest>(
@@ -314,13 +311,13 @@ export class ColdTranscriptRequest extends Schema.TaggedClass<ColdTranscriptRequ
 
 export class TailTranscriptRequest extends Schema.TaggedClass<TailTranscriptRequest>(
   "@usine/orchestrator/TailTranscriptRequest",
-)("TailTranscriptRequest", { after: TranscriptCursor }) {}
+)("TailTranscriptRequest", { after: TranscriptSequence }) {}
 
 export class EarlierTranscriptRequest extends Schema.TaggedClass<EarlierTranscriptRequest>(
   "@usine/orchestrator/EarlierTranscriptRequest",
 )("EarlierTranscriptRequest", {
-  attemptId: Attempt.AttemptId,
-  before: TranscriptCursor,
+  attemptId: AttemptId,
+  before: TranscriptSequence,
 }) {}
 
 export const TranscriptRequest = Schema.Union([
@@ -333,8 +330,8 @@ export type TranscriptRequest = typeof TranscriptRequest.Type;
 export class TranscriptAttemptNotFoundError extends Schema.TaggedError<TranscriptAttemptNotFoundError>(
   "@usine/orchestrator/TranscriptAttemptNotFoundError",
 )("TranscriptAttemptNotFoundError", {
-  runId: Run.RunId,
-  attemptId: Attempt.AttemptId,
+  runId: RunId,
+  attemptId: AttemptId,
 }) {}
 
 export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestrator/RunDetailView")(

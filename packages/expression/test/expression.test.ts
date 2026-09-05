@@ -1,15 +1,15 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Effect, Schema } from "effect";
+import { ExpressionEngine } from "../src/expression-engine.ts";
+import { MarcbachmannCelLayer } from "../src/marcbachmann-cel.ts";
 import {
   Environment,
-  ExpressionEngine,
-  MarcbachmannCelLayer,
   ObjectField,
   ObjectType,
   Source,
   TypeReference,
   Variable,
-} from "../src/index.ts";
+} from "../src/model.ts";
 
 const typeReference = Schema.decodeUnknownSync(TypeReference);
 const source = Schema.decodeUnknownSync(Source);

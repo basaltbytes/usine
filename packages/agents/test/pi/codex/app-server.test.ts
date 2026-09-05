@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Agent } from "@usine/core";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
+import { AgentName } from "@usine/core/agent";
 import {
   Deferred,
   Effect,
@@ -14,7 +16,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { ChildRequest, SessionOperationError, WorkingDirectory } from "../../../src/index.ts";
+import { ChildRequest, SessionOperationError, WorkingDirectory } from "../../../src/runtime.ts";
 import {
   CodexAppServer,
   codexAppServerCommand,
@@ -22,13 +24,13 @@ import {
 } from "../../../src/pi/codex/app-server.ts";
 
 const request = new ChildRequest({
-  session: new Agent.ChildSession({
-    id: Agent.SessionId.make("codex-child-1"),
-    parentId: Agent.SessionId.make("parent-1"),
-    agent: Agent.Name.make("developer"),
-    brain: new Agent.BrainSpec({
+  session: new ChildSession({
+    id: AgentSessionId.make("codex-child-1"),
+    parentId: AgentSessionId.make("parent-1"),
+    agent: AgentName.make("developer"),
+    brain: new BrainSpec({
       harness: "codex",
-      model: Agent.ModelId.make("gpt-5.6-terra"),
+      model: ModelId.make("gpt-5.6-terra"),
       effort: "medium",
     }),
   }),

@@ -1,28 +1,25 @@
 # @usine/core
 
-Domain model for [usine](https://github.com/basaltbytes/usine), an agent-agnostic software factory: the Event → Run → Step → Attempt vocabulary every other block types against, plus shared instance and repository value objects.
+Domain model for [usine](https://github.com/basaltbytes/usine), an agent-agnostic software factory: the Event → Run → Step → Attempt vocabulary every other block types against, plus the shared instance, repository, worker, and agent values.
 
-Everything lives in the `lifecycle` cluster: a deduplicated Event opens a Run, the Run's named Step is tried as Attempts, and the state machine closes it.
+Import each domain concept from its owning subpath. Identities, records, and operations share that domain module.
 
-## What each export is
-
-| Export | Kind |
+| Subpath | Exports |
 | --- | --- |
-| `Event`, `Run`, `Step`, `Attempt` | Entities — the four ledger rows, identity plus validated construction |
-| `EventId`, `RunId`, `AttemptId` | Value objects — branded ids; identities that cannot be swapped for each other |
-| `DedupKey`, `ItemKey`, `Item.Number`, `LoopName`, `StepName`, `AttemptNumber` | Value objects — branded primitives carrying a domain constraint; Item numbers are positive integers |
-| `Instance.Directory`, `Repository.Name`, `Repository.Revision`, `Repository.CommitSha` | Shared value objects — paths and validated Git identities |
-| `Worker.Name`, `Worker.Kind` | Value objects — a Worker identity and its local or exe.dev adapter kind |
-| `Agent.Agent`, `Agent.BrainSpec` | Agent values — a named persona, its child brain, and optional Pi parent-model override |
-| `Agent.SessionEvent`, `Agent.ChildSessionBudget`, `Agent.ChildSessionCount` | Session values — typed parent or first-level child events plus per-Attempt child limits and counts |
-| `AttemptChannel.*` | Protocol values: the secret-free run spec, framed input, and protocol-v4 Attempt envelopes (`Started` contains the effective parent model) |
-| `StepResult.*` | Result values — the final agent message plus commit, pull-request, and comment facts |
-| `RunState.*`, `CancelReason`, `Attempt.Outcome` | State value objects — discriminated unions, including a distinct canceled Attempt outcome |
-| `RunState.awaitApproval/start/succeed/fail/retry/cancelByOperator/supersede/revoke` | Typestate transitions — each accepts only the states it is legal on, so an illegal transition is a compile error |
-| `InfraFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure` | Typed errors — the attempt-failure taxonomy |
-| `AttemptFailure.isAutoRetryable`, `Attempt.shouldAutoRetry` | Derivers — pure decision functions stating the auto-retry law (class rule; class rule capped by attempt count) |
+| `@usine/core/event` | `Event`, `EventId`, `DedupKey` |
+| `@usine/core/run`, `@usine/core/run/state` | `Run`, `RunId`; the run state machine as a tagged union with typestate transitions (`RunState.start`, `RunState.supersede`, ...) |
+| `@usine/core/step`, `@usine/core/step/result` | `Step`, `StepName`; `StepResult` and its facts (`Commit`, `PullRequest`, `Comment`) |
+| `@usine/core/attempt` | `Attempt`, `AttemptId`, `AttemptNumber`, `AttemptTask`, `shouldAutoRetry` |
+| `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptOutcome` |
+| `@usine/core/attempt/failure` | `InfraFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
+| `@usine/core/attempt/channel` | The protocol-v4 attempt channel: `RunSpec`, `Start`, the envelopes, and the `admit` reducer. Import it as a namespace (`AttemptChannel.Started`) |
+| `@usine/core/agent`, `@usine/core/agent/brain`, `@usine/core/agent/session` | `Agent`, `AgentName`, `AgentPersona`, parent-model resolution; `BrainSpec`, `ModelId`, `Harness`, `Effort`; `AgentSessionId`, session descriptors, `AgentSessionEvent`, `ChildSessionBudget`, `ChildSessionCount` |
+| `@usine/core/repository` | `RepositoryName`, `RepositoryRevision`, `CommitSha`, `splitRepositoryName`, `canonicalRepositoryName` |
+| `@usine/core/worker`, `@usine/core/item`, `@usine/core/loop`, `@usine/core/instance` | `WorkerName`, `WorkerKind`; `ItemKey`, `ItemNumber`; `LoopName`, `ApprovalRequirement`; `InstanceDirectory` |
 
-The run state machine is `pending → waiting → running → succeeded / failed / canceled`, with `failed → running` on operator retry. The failure taxonomy separates infra failures (the only auto-retryable class, capped), agent failures (always wait for the operator), runaway guard failures, and exhausted child-session budgets. Guard failures never auto-retry.
+Branded schemas are exported under their brand name, and each has an `export type` twin of the same name so the name works in type positions too.
+
+The run state machine is `pending → waiting → queued → running → succeeded / failed / canceled`, with `failed → running` on operator retry. The failure taxonomy separates infra failures (the only auto-retryable class, capped), agent failures (always wait for the operator), runaway guard failures, and exhausted child-session budgets. Guard failures never auto-retry.
 
 Each Attempt records the child `BrainSpec` and effective Pi parent model used for that try. The attempt channel includes immutable repository, payload, task, agent context, and child-session budget in its `Start` frame; outbound `SessionEvent` envelopes retain parent and first-level child session identity.
 

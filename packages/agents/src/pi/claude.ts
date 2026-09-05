@@ -4,7 +4,15 @@ import {
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { Agent } from "@usine/core";
+import { ModelId } from "@usine/core/agent/brain";
+import {
+  AgentSessionEvent,
+  ChildSession,
+  SessionStarted,
+  TextOutput,
+  ToolFinished,
+  ToolStarted,
+} from "@usine/core/agent/session";
 import { Context, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import {
   AgentResultError,
@@ -150,7 +158,7 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
       };
 };
 
-const modelExists = (models: ReadonlyArray<ClaudeModelInfo>, model: Agent.ModelId): boolean =>
+const modelExists = (models: ReadonlyArray<ClaudeModelInfo>, model: ModelId): boolean =>
   models.some((candidate) => candidate.value === model || candidate.resolvedModel === model);
 
 const ClaudeTextBlock = Schema.Struct({
@@ -183,20 +191,20 @@ const ClaudeResultMessage = Schema.Struct({
 
 const sessionEventsFrom = (
   message: Schema.Json,
-  session: Agent.ChildSession,
+  session: ChildSession,
   tools: Map<string, string>,
-): ReadonlyArray<Agent.SessionEvent> => {
+): ReadonlyArray<AgentSessionEvent> => {
   if (!Schema.is(ClaudeContentMessage)(message)) return [];
-  const events: Array<Agent.SessionEvent> = [];
+  const events: Array<AgentSessionEvent> = [];
   for (const block of message.message.content) {
     // Complete messages only: one TextOutput per finished assistant message
     // keeps transcript volume at message granularity, matching the parent.
     if (message.type === "assistant" && Schema.is(ClaudeTextBlock)(block)) {
-      events.push(new Agent.TextOutput({ session, text: block.text }));
+      events.push(new TextOutput({ session, text: block.text }));
     } else if (Schema.is(ClaudeToolUseBlock)(block)) {
       tools.set(block.id, block.name);
       events.push(
-        new Agent.ToolStarted({
+        new ToolStarted({
           session,
           callId: block.id,
           tool: block.name,
@@ -205,7 +213,7 @@ const sessionEventsFrom = (
       );
     } else if (Schema.is(ClaudeToolResultBlock)(block)) {
       events.push(
-        new Agent.ToolFinished({
+        new ToolFinished({
           session,
           callId: block.tool_use_id,
           tool: tools.get(block.tool_use_id) ?? "unknown",
@@ -261,7 +269,7 @@ const makeClaudeChild = Effect.gen(function* () {
         input.end();
       });
       const tools = new Map<string, string>();
-      yield* channel.emit(new Agent.SessionStarted({ session: request.session }));
+      yield* channel.emit(new SessionStarted({ session: request.session }));
       input.offer(userMessage(request.prompt));
 
       const consume = Stream.fromAsyncIterable(query, (cause) =>

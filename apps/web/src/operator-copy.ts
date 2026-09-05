@@ -1,12 +1,15 @@
-import { Agent, Repository, Run } from "@usine/core";
-import type { FailureView, NeedView, TranscriptEventView } from "@usine/orchestrator";
+import { BrainSpec } from "@usine/core/agent/brain";
+import { AgentSessionEvent, RateLimitWindow } from "@usine/core/agent/session";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import type { FailureView, NeedView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { Match, Option, Schema } from "effect";
 
 export interface NeedCopy {
   readonly title: string;
   readonly detail: string;
-  readonly repository: Repository.Name | null;
-  readonly runId: Run.RunId | null;
+  readonly repository: RepositoryName | null;
+  readonly runId: RunId | null;
 }
 
 export interface PresentedTranscriptEvent {
@@ -23,7 +26,7 @@ export interface PresentedTranscriptEvent {
   readonly isError: boolean;
 }
 
-export const brainLine = (brain: Agent.BrainSpec): string =>
+export const brainLine = (brain: BrainSpec): string =>
   `${brain.harness} · ${brain.model} · ${brain.effort}`;
 
 export const failureMessage = (failure: FailureView): string =>
@@ -79,7 +82,7 @@ const jsonDetail = (value: Schema.Json): string => JSON.stringify(value, null, 2
 
 const rateLimitWindow = (
   name: string,
-  window: Option.Option<Agent.RateLimitWindow>,
+  window: Option.Option<RateLimitWindow>,
 ): ReadonlyArray<string> =>
   Option.match(window, {
     onNone: () => [],
@@ -87,7 +90,7 @@ const rateLimitWindow = (
   });
 
 const sessionPresentation = (
-  event: Agent.SessionEvent,
+  event: AgentSessionEvent,
 ): Omit<PresentedTranscriptEvent, "sequence" | "receivedAt"> => {
   const session = event.session;
   const base = {

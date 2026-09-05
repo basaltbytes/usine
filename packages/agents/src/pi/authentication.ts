@@ -1,9 +1,9 @@
-import type { Agent } from "@usine/core";
+import type { BillingPool } from "@usine/core/agent/session";
 
 export type PiAuthentication =
   | { readonly _tag: "ApiKey" }
   | { readonly _tag: "OAuth"; readonly subscription: boolean };
-export type PiPool = Extract<Agent.Pool, "apiKeys" | "chatgptPlan">;
+export type PiPool = Extract<BillingPool, "apiKeys" | "chatgptPlan">;
 
 /** Billing pool the selected Pi provider must have available before launch. */
 export const requiredPiPool = (provider: string): PiPool =>

@@ -1,15 +1,13 @@
-import {
-  Agent,
-  Attempt,
-  AttemptChannel,
-  Event,
-  Item,
-  Loop,
-  Repository,
-  Run,
-  Step,
-  Worker,
-} from "@usine/core";
+import { ModelId } from "@usine/core/agent/brain";
+import { AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { DedupKey, EventId } from "@usine/core/event";
+import { ItemKey } from "@usine/core/item";
+import { LoopName, APPROVAL_REQUIREMENTS, type ApprovalRequirement } from "@usine/core/loop";
+import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -21,20 +19,14 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import {
-  APPROVAL_REQUIREMENTS,
-  IGNORED_REASONS,
-  WORKFLOW_COMMANDS,
-  type ApprovalRequirement,
-  type IgnoreReason,
-  type WorkflowCommand,
-} from "../model.ts";
+import { IGNORED_REASONS, type IgnoreReason } from "../engine/submission.ts";
+import { WORKFLOW_COMMANDS, type WorkflowCommand } from "../workflow/command.ts";
 
 export const events = snakeCase.table(
   "usine_events",
   {
-    eventId: text().$type<Event.EventId>().primaryKey(),
-    dedupKey: text().$type<Event.DedupKey>().notNull().unique(),
+    eventId: text().$type<EventId>().primaryKey(),
+    dedupKey: text().$type<DedupKey>().notNull().unique(),
     payloadJson: text({ mode: "json" }).$type<unknown>().notNull(),
     receivedAt: text().notNull(),
   },
@@ -45,21 +37,21 @@ export const triggerEvents = snakeCase.table(
   "usine_trigger_events",
   {
     eventId: text()
-      .$type<Event.EventId>()
+      .$type<EventId>()
       .primaryKey()
       .references(() => events.eventId),
-    itemKey: text().$type<Item.ItemKey>().notNull(),
-    loopName: text().$type<Loop.LoopName>().notNull(),
-    stepName: text().$type<Step.StepName>().notNull(),
+    itemKey: text().$type<ItemKey>().notNull(),
+    loopName: text().$type<LoopName>().notNull(),
+    stepName: text().$type<StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
     // The submitted execution context, part of the immutable Event fact. A
     // queued Event (blocked behind a running Run) is claimed later from these
     // columns; the Run's own copy below is what execution reads.
-    repository: text().$type<Repository.Name>().notNull(),
-    revision: text().$type<Repository.Revision>().notNull(),
-    task: text().$type<AttemptChannel.Task>().notNull(),
+    repository: text().$type<RepositoryName>().notNull(),
+    revision: text().$type<RepositoryRevision>().notNull(),
+    task: text().$type<AttemptTask>().notNull(),
     agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
-    parentModel: text().$type<Agent.ModelId>(),
+    parentModel: text().$type<ModelId>(),
   },
   (table) => [
     check("usine_trigger_events_approval", sql`${table.approval} in ('none', 'required')`),
@@ -71,22 +63,22 @@ export const triggerEvents = snakeCase.table(
 export const runs = snakeCase.table(
   "usine_runs",
   {
-    runId: text().$type<Run.RunId>().primaryKey(),
+    runId: text().$type<RunId>().primaryKey(),
     eventId: text()
-      .$type<Event.EventId>()
+      .$type<EventId>()
       .notNull()
       .unique()
       .references(() => triggerEvents.eventId),
-    loopName: text().$type<Loop.LoopName>().notNull(),
+    loopName: text().$type<LoopName>().notNull(),
     stateJson: text({ mode: "json" }).$type<unknown>().notNull(),
     openedAt: text().notNull(),
     // The Run's *effective* context, seeded from the claiming submission.
     // ADR 0018's edit-and-retry amends these; the Event columns never change.
-    repository: text().$type<Repository.Name>().notNull(),
-    revision: text().$type<Repository.Revision>().notNull(),
-    task: text().$type<AttemptChannel.Task>().notNull(),
+    repository: text().$type<RepositoryName>().notNull(),
+    revision: text().$type<RepositoryRevision>().notNull(),
+    task: text().$type<AttemptTask>().notNull(),
     agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
-    parentModel: text().$type<Agent.ModelId>(),
+    parentModel: text().$type<ModelId>(),
   },
   (table) => [
     check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`),
@@ -98,10 +90,10 @@ export const steps = snakeCase.table(
   "usine_steps",
   {
     runId: text()
-      .$type<Run.RunId>()
+      .$type<RunId>()
       .notNull()
       .references(() => runs.runId),
-    stepName: text().$type<Step.StepName>().notNull(),
+    stepName: text().$type<StepName>().notNull(),
     result: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
@@ -116,13 +108,13 @@ export const steps = snakeCase.table(
 export const attempts = snakeCase.table(
   "usine_attempts",
   {
-    attemptId: text().$type<Attempt.AttemptId>().primaryKey(),
-    runId: text().$type<Run.RunId>().notNull(),
-    stepName: text().$type<Step.StepName>().notNull(),
-    workerName: text().$type<Worker.Name>().notNull(),
-    attemptNumber: integer({ mode: "number" }).$type<Attempt.AttemptNumber>().notNull(),
+    attemptId: text().$type<AttemptId>().primaryKey(),
+    runId: text().$type<RunId>().notNull(),
+    stepName: text().$type<StepName>().notNull(),
+    workerName: text().$type<WorkerName>().notNull(),
+    attemptNumber: integer({ mode: "number" }).$type<AttemptNumber>().notNull(),
     brainJson: text({ mode: "json" }).$type<unknown>().notNull(),
-    parentModel: text().$type<Agent.ModelId>(),
+    parentModel: text().$type<ModelId>(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
   },
@@ -149,7 +141,7 @@ export const attemptTranscripts = snakeCase.table(
   {
     sequence: integer({ mode: "number" }).primaryKey({ autoIncrement: true }),
     attemptId: text()
-      .$type<Attempt.AttemptId>()
+      .$type<AttemptId>()
       .notNull()
       .references(() => attempts.attemptId),
     direction: text({ enum: AttemptChannel.DIRECTIONS }).notNull(),
@@ -175,11 +167,11 @@ export const attemptTranscripts = snakeCase.table(
 
 export const approvals = snakeCase.table("usine_approvals", {
   runId: text()
-    .$type<Run.RunId>()
+    .$type<RunId>()
     .primaryKey()
     .references(() => runs.runId),
   eventId: text()
-    .$type<Event.EventId>()
+    .$type<EventId>()
     .notNull()
     .unique()
     .references(() => events.eventId),
@@ -189,7 +181,7 @@ export const ignoredEvents = snakeCase.table(
   "usine_ignored_events",
   {
     eventId: text()
-      .$type<Event.EventId>()
+      .$type<EventId>()
       .primaryKey()
       .references(() => triggerEvents.eventId),
     reason: text({ enum: IGNORED_REASONS }).$type<IgnoreReason>().notNull(),
@@ -203,7 +195,7 @@ export const workflowCommands = snakeCase.table(
   "usine_workflow_commands",
   {
     runId: text()
-      .$type<Run.RunId>()
+      .$type<RunId>()
       .notNull()
       .references(() => runs.runId),
     command: text({ enum: WORKFLOW_COMMANDS }).$type<WorkflowCommand>().notNull(),
@@ -231,8 +223,8 @@ export const cursors = snakeCase.table(
 export const itemProjections = snakeCase.table(
   "usine_item_projections",
   {
-    itemKey: text().$type<Item.ItemKey>().primaryKey(),
-    repository: text().$type<Repository.Name>().notNull(),
+    itemKey: text().$type<ItemKey>().primaryKey(),
+    repository: text().$type<RepositoryName>().notNull(),
     source: text().notNull(),
     itemNumber: integer({ mode: "number" }).notNull(),
     contentHash: text().notNull(),
@@ -250,7 +242,7 @@ export const itemProjections = snakeCase.table(
 export const repositoryLabelProjections = snakeCase.table(
   "usine_repository_label_projections",
   {
-    repository: text().$type<Repository.Name>().primaryKey(),
+    repository: text().$type<RepositoryName>().primaryKey(),
     labelsJson: text({ mode: "json" }).$type<unknown>().notNull(),
   },
   (table) => [
@@ -263,7 +255,7 @@ export const repositoryLabelProjections = snakeCase.table(
 
 /** Operator-owned runtime toggles; deliberately separate from authored Loop files (ADR 0009). */
 export const loopRuntime = snakeCase.table("usine_loop_runtime", {
-  loopName: text().$type<Loop.LoopName>().primaryKey(),
+  loopName: text().$type<LoopName>().primaryKey(),
   paused: integer({ mode: "boolean" }).notNull(),
 });
 

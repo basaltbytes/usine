@@ -5,7 +5,14 @@ import {
   type ExtensionFactory,
   type InlineExtension,
 } from "@earendil-works/pi-coding-agent";
-import { Agent } from "@usine/core";
+import { Agent } from "@usine/core/agent";
+import {
+  AgentSessionEvent,
+  AgentSessionId,
+  ChildSession,
+  ChildSessionBudget,
+  ChildSessionCount,
+} from "@usine/core/agent/session";
 import { Effect, Fiber, Stream } from "effect";
 import { Type } from "typebox";
 import { assembleChildPrompt } from "../prompt.ts";
@@ -18,14 +25,14 @@ import {
 } from "../runtime.ts";
 
 export interface SubagentsExtensionOptions {
-  readonly agent: Agent.Agent;
+  readonly agent: Agent;
   readonly backend: ChildBackend["Service"];
   readonly cwd: WorkingDirectory;
-  readonly emit: (event: Agent.SessionEvent) => Effect.Effect<void>;
-  readonly maxChildren: Agent.ChildSessionBudget;
+  readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
+  readonly maxChildren: ChildSessionBudget;
   /** Runs on every rejected spawn; the parent decides what a repeat means. */
   readonly onBudgetExceeded: (error: ChildSessionBudgetExceededError) => Effect.Effect<void>;
-  readonly parentId: Agent.SessionId;
+  readonly parentId: AgentSessionId;
   /**
    * Executes one child program on the parent launch's own services and scope.
    * Pi invokes the tool outside any usine fiber, so running through the
@@ -46,7 +53,7 @@ const taskExcerpt = (task: string): string => {
 
 const interrupted = (
   signal: AbortSignal | undefined,
-  sessionId: Agent.SessionId,
+  sessionId: AgentSessionId,
 ): Effect.Effect<void> =>
   signal === undefined
     ? Effect.logWarning("Pi supplied no abort signal; the child outlives only its scope", {
@@ -60,14 +67,14 @@ const interrupted = (
       });
 
 interface SpawnDetails {
-  readonly childSessionId: Agent.SessionId;
+  readonly childSessionId: AgentSessionId;
 }
 
 /** Pi-owned extension factory. Its single tool can only create first-level child descriptors. */
 export const createSubagentsExtension = (options: SubagentsExtensionOptions): ExtensionFactory => {
   let childNumber = 0;
   const spawn = Effect.fn("Subagents.spawn")(function* (
-    attemptedChildren: Agent.ChildSessionCount,
+    attemptedChildren: ChildSessionCount,
     task: string,
     signal: AbortSignal | undefined,
     onUpdate: AgentToolUpdateCallback<SpawnDetails> | undefined,
@@ -93,8 +100,8 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
       yield* options.onBudgetExceeded(error);
       return yield* error;
     }
-    const session = new Agent.ChildSession({
-      id: Agent.SessionId.make(`${options.parentId}:child:${attemptedChildren}`),
+    const session = new ChildSession({
+      id: AgentSessionId.make(`${options.parentId}:child:${attemptedChildren}`),
       parentId: options.parentId,
       agent: options.agent.name,
       brain: options.agent.brain,
@@ -156,7 +163,7 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
         execute: (_toolCallId, params, signal, onUpdate) => {
           childNumber += 1;
           return options.run(
-            spawn(Agent.ChildSessionCount.make(childNumber), params.task, signal, onUpdate),
+            spawn(ChildSessionCount.make(childNumber), params.task, signal, onUpdate),
           );
         },
       }),

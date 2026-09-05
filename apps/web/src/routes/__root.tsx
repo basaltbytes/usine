@@ -9,8 +9,9 @@ import {
   useParams,
   useRouter,
 } from "@tanstack/react-router";
-import { Repository, Run } from "@usine/core";
-import type { NeedView } from "@usine/orchestrator";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import type { NeedView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { AppSidebar } from "@/components/app-sidebar";
 import { BootScreen } from "@/components/boot-screen";
@@ -40,7 +41,7 @@ const RunDrawer = lazy(() =>
 );
 
 /** The run drawer overlays any screen, so its id lives in the root search. */
-const RootSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(Run.RunId) }));
+const RootSearch = Schema.toStandardSchemaV1(Schema.Struct({ run: Schema.optional(RunId) }));
 
 interface RouterContext {
   readonly queryClient: QueryClient;
@@ -111,7 +112,7 @@ const NeedStrip = ({ needs }: { readonly needs: ReadonlyArray<NeedView> }) => {
   );
 };
 
-const Crumbs = ({ project }: { readonly project: Repository.Name | undefined }) => {
+const Crumbs = ({ project }: { readonly project: RepositoryName | undefined }) => {
   const matchRoute = useMatchRoute();
   const configuration = matchRoute({ to: "/configuration/loops" }) !== false;
   if (configuration)

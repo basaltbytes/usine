@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { AttemptChannel } from "@usine/core";
+import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Effect, Logger, Stdio, Stream } from "effect";
 
 const program = Effect.gen(function* () {
@@ -21,10 +21,10 @@ const program = Effect.gen(function* () {
   const useStub = args.includes("--stub") || delayFlag >= 0;
   const [{ runHost }, agentLayer] = yield* Effect.promise(() =>
     Promise.all([
-      import("./index.ts"),
+      import("./run-host.ts"),
       useStub
         ? import("./stub.ts").then(({ stubLayer }) => stubLayer(stubDelayMillis))
-        : import("@usine/agents/pi").then(({ layer }) => layer),
+        : import("@usine/agents/pi/live").then(({ layer }) => layer),
     ]),
   );
   yield* runHost().pipe(Effect.provide(agentLayer));

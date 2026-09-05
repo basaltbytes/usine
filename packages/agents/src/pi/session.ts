@@ -1,4 +1,12 @@
-import { Agent } from "@usine/core";
+import {
+  AgentSession,
+  AgentSessionEvent,
+  AgentSessionId,
+  SessionFinished,
+  TextOutput,
+  ToolFinished,
+  ToolStarted,
+} from "@usine/core/agent/session";
 import { Cause, Deferred, Effect, Queue, Ref, Schema } from "effect";
 import { type AgentSessionError, SessionResult } from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
@@ -6,7 +14,7 @@ import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
 export interface SessionChannelOptions {
   /** Human-readable adapter name used in the terminal log lines. */
   readonly label: string;
-  readonly sessionId: Agent.SessionId;
+  readonly sessionId: AgentSessionId;
 }
 
 /**
@@ -15,20 +23,20 @@ export interface SessionChannelOptions {
  * registered through `onTerminal` run on whichever transition wins.
  */
 export interface SessionChannel {
-  readonly events: Queue.Queue<Agent.SessionEvent, AgentSessionError | Cause.Done>;
+  readonly events: Queue.Queue<AgentSessionEvent, AgentSessionError | Cause.Done>;
   readonly result: Deferred.Deferred<SessionResult, AgentSessionError>;
   readonly isTerminal: Effect.Effect<boolean>;
   readonly onTerminal: (cleanup: () => void) => void;
   /** Offers one event, logging instead of silently dropping it after the terminal transition. */
-  readonly emit: (event: Agent.SessionEvent) => Effect.Effect<void>;
+  readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
-  readonly finish: (session: Agent.Session, message: string) => Effect.Effect<void>;
+  readonly finish: (session: AgentSession, message: string) => Effect.Effect<void>;
 }
 
 export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   options: SessionChannelOptions,
 ) {
-  const events = yield* Queue.make<Agent.SessionEvent, AgentSessionError | Cause.Done>();
+  const events = yield* Queue.make<AgentSessionEvent, AgentSessionError | Cause.Done>();
   const result = yield* Deferred.make<SessionResult, AgentSessionError>();
   const terminal = yield* Ref.make(false);
   const cleanups: Array<() => void> = [];
@@ -36,7 +44,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     for (const cleanup of cleanups.splice(0)) cleanup();
   });
 
-  const emit = (event: Agent.SessionEvent) =>
+  const emit = (event: AgentSessionEvent) =>
     Queue.offer(events, event).pipe(
       Effect.flatMap((accepted) =>
         accepted
@@ -61,11 +69,11 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   });
 
   const finish = Effect.fn("SessionChannel.finish")(function* (
-    session: Agent.Session,
+    session: AgentSession,
     message: string,
   ) {
     if (yield* Ref.getAndSet(terminal, true)) return;
-    yield* Queue.offer(events, new Agent.SessionFinished({ session }));
+    yield* Queue.offer(events, new SessionFinished({ session }));
     yield* Deferred.succeed(result, new SessionResult({ message }));
     yield* Queue.end(events);
     yield* runCleanups;
@@ -138,14 +146,14 @@ export const lastPiMessageText = (messages: ReadonlyArray<PiMessage>): string | 
 
 const sessionEventFrom = (
   event: PiSessionEvent,
-  session: Agent.Session,
-): Agent.SessionEvent | undefined => {
+  session: AgentSession,
+): AgentSessionEvent | undefined => {
   if (event.type === "message_end") {
     const text = messageText(event.message);
-    return text === undefined ? undefined : new Agent.TextOutput({ session, text });
+    return text === undefined ? undefined : new TextOutput({ session, text });
   }
   if (event.type === "tool_execution_start") {
-    return new Agent.ToolStarted({
+    return new ToolStarted({
       session,
       callId: event.toolCallId,
       tool: event.toolName,
@@ -153,7 +161,7 @@ const sessionEventFrom = (
     });
   }
   if (event.type === "tool_execution_end") {
-    return new Agent.ToolFinished({
+    return new ToolFinished({
       session,
       callId: event.toolCallId,
       tool: event.toolName,
@@ -173,7 +181,7 @@ const sessionEventFrom = (
  */
 export const subscribePiSession = (
   piSession: PiSession,
-  session: Agent.Session,
+  session: AgentSession,
   channel: SessionChannel,
 ) =>
   Effect.gen(function* () {

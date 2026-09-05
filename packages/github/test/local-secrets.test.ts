@@ -1,6 +1,6 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Instance } from "@usine/core";
+import { InstanceDirectory } from "@usine/core/instance";
 import { ConfigProvider, Effect, FileSystem, Layer, Path, Redacted } from "effect";
 import { GITHUB_APP_SECRETS_PATH, loadLocalCredentials } from "../src/local-secrets.ts";
 
@@ -13,11 +13,11 @@ const TEST_PRIVATE_KEY = [
 
 const nodeLayer = Layer.merge(NodeFileSystem.layer, NodePath.layer);
 
-const withInstance = <A, E, R>(use: (root: Instance.Directory) => Effect.Effect<A, E, R>) =>
+const withInstance = <A, E, R>(use: (root: InstanceDirectory) => Effect.Effect<A, E, R>) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const root = Instance.Directory.make(
+    const root = InstanceDirectory.make(
       yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-github-secrets-" }),
     );
     yield* fileSystem.makeDirectory(path.join(root, ".usine"));

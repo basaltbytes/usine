@@ -1,35 +1,28 @@
-import { Loop as CoreLoop, Step } from "@usine/core";
+import { StepName } from "@usine/core/step";
+import { ApprovalRequirement, LoopName } from "@usine/core/loop";
+import { ExpressionEngine } from "@usine/expression/expression-engine";
 import {
   type Environment,
   type ExpressionCheckError,
-  ExpressionEngine,
   type ExpressionError,
   Source,
-} from "@usine/expression";
+} from "@usine/expression/model";
 import { Context, Effect, Layer, Option, Schema, SchemaIssue } from "effect";
 import { splitMarkdown } from "./frontmatter.ts";
+import { AgentFile } from "./agent.ts";
+import { canonicalLabelName, GitHubLabelName } from "./label.ts";
+import { ConfigFileError, InstancePath } from "./file.ts";
 import {
-  AgentFile,
-  AgentName,
-  canonicalLabelName,
   type ConfigWarning,
-  ConfigFileError,
-  Effort,
-  GitHubLabelName,
-  Harness,
-  InstancePath,
-  LoopFile,
-  LoopName,
-  loopPath,
-  ModelId,
-  Persona,
-  PromptTemplate,
-  Trigger,
   UndeclaredLaneLabelWarning,
   UndeclaredTriggerLabelWarning,
-  UsineConfig,
-  ValidSelector,
-} from "./model.ts";
+} from "./instance/diagnostics.ts";
+import { LoopFile, loopPath, PromptTemplate } from "./loop.ts";
+import { AgentPersona, AgentName } from "@usine/core/agent";
+import { Trigger } from "./trigger.ts";
+import { UsineConfig } from "./factory.ts";
+import { ValidSelector } from "./selector.ts";
+import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { environmentFor } from "./payload-slices.ts";
 import { parseYamlDocument } from "./yaml/document.ts";
 
@@ -38,10 +31,8 @@ const formatIssue = SchemaIssue.makeFormatterDefault();
 class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopFrontmatter")({
   trigger: Trigger,
   selector: Schema.OptionFromOptionalKey(ValidSelector),
-  approval: CoreLoop.ApprovalRequirement.pipe(
-    Schema.withDecodingDefaultKey(Effect.succeed("none")),
-  ),
-  step: Step.StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
+  approval: ApprovalRequirement.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
+  step: StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
   agent: AgentName,
 }) {}
 
@@ -112,7 +103,7 @@ const markdownName = (file: InstancePath): Effect.Effect<string, ConfigFileError
 const loopName = (file: InstancePath): Effect.Effect<LoopName, ConfigFileError> =>
   markdownName(file).pipe(
     Effect.flatMap((name) =>
-      Schema.decodeUnknownEffect(LoopName)(name).pipe(
+      Schema.decodeUnknownEffect(LoopFile.fields.name)(name).pipe(
         Effect.mapError((error) => schemaError(file, error)),
       ),
     ),
@@ -201,7 +192,7 @@ const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
       const frontmatter = yield* Schema.decodeUnknownEffect(AgentFrontmatter)(yaml, {
         onExcessProperty: "error",
       }).pipe(Effect.mapError((error) => schemaError(file, error)));
-      const persona = yield* Schema.decodeUnknownEffect(Persona)(markdown.body).pipe(
+      const persona = yield* Schema.decodeUnknownEffect(AgentPersona)(markdown.body).pipe(
         Effect.mapError((error) => schemaError(file, error)),
       );
       return new AgentFile({

@@ -4,7 +4,17 @@ import type {
   ExtensionContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { Agent } from "@usine/core";
+import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import {
+  AgentSessionEvent,
+  AgentSessionId,
+  ChildSessionBudget,
+  ParentSession,
+  SessionFinished,
+  SessionStarted,
+  TextOutput,
+} from "@usine/core/agent/session";
 import { Effect, Logger, Option, Stream } from "effect";
 import {
   type AgentSessionError,
@@ -12,26 +22,26 @@ import {
   ChildSessionBudgetExceededError,
   SessionResult,
   WorkingDirectory,
-} from "../../src/index.ts";
+} from "../../src/runtime.ts";
 import { createSubagentsExtension } from "../../src/pi/subagents.ts";
 
-const agent = new Agent.Agent({
-  name: Agent.Name.make("developer"),
-  brain: new Agent.BrainSpec({
+const agent = new Agent({
+  name: AgentName.make("developer"),
+  brain: new BrainSpec({
     harness: "claude",
-    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Agent.Persona.make("Implement focused TypeScript changes."),
+  persona: AgentPersona.make("Implement focused TypeScript changes."),
 });
-const parent = new Agent.ParentSession({
-  id: Agent.SessionId.make("parent-1"),
+const parent = new ParentSession({
+  id: AgentSessionId.make("parent-1"),
   agent: agent.name,
-  brain: new Agent.BrainSpec({
+  brain: new BrainSpec({
     harness: "pi",
-    model: Agent.ModelId.make("anthropic/claude-opus-4-6"),
+    model: ModelId.make("anthropic/claude-opus-4-6"),
     effort: "high",
   }),
 });
@@ -47,9 +57,9 @@ describe("owned Pi subagents extension", () => {
         return Effect.succeed({
           session: request.session,
           events: Stream.make(
-            new Agent.SessionStarted({ session: request.session }),
-            new Agent.TextOutput({ session: request.session, text: "working" }),
-            new Agent.SessionFinished({ session: request.session }),
+            new SessionStarted({ session: request.session }),
+            new TextOutput({ session: request.session, text: "working" }),
+            new SessionFinished({ session: request.session }),
           ),
           result: Effect.succeed(new SessionResult({ message: "child done" })),
           steer: () => Effect.void,
@@ -57,7 +67,7 @@ describe("owned Pi subagents extension", () => {
         });
       },
     });
-    const events: Array<Agent.SessionEvent> = [];
+    const events: Array<AgentSessionEvent> = [];
     const logs: Array<unknown> = [];
     const logger = Logger.make<unknown, void>(({ message }) => {
       logs.push(message);
@@ -68,7 +78,7 @@ describe("owned Pi subagents extension", () => {
       backend: child,
       cwd: WorkingDirectory.make("/workspace/repo"),
       emit: (event) => Effect.sync(() => events.push(event)),
-      maxChildren: Agent.ChildSessionBudget.make(4),
+      maxChildren: ChildSessionBudget.make(4),
       onBudgetExceeded: () => Effect.void,
       parentId: parent.id,
       run: (program) => Effect.runPromise(program.pipe(Effect.withLogger(logger))),
@@ -132,7 +142,7 @@ describe("owned Pi subagents extension", () => {
       backend: child,
       cwd: WorkingDirectory.make("/workspace/repo"),
       emit: () => Effect.void,
-      maxChildren: Agent.ChildSessionBudget.make(1),
+      maxChildren: ChildSessionBudget.make(1),
       onBudgetExceeded: (error) => Effect.sync(() => reported.push(error)),
       parentId: parent.id,
       run: (program) =>

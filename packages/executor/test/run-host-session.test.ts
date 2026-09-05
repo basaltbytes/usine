@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Agent, Attempt, AttemptChannel } from "@usine/core";
+import { ModelId } from "@usine/core/agent/brain";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { AttemptId } from "@usine/core/attempt";
 import { DateTime, Result, Schema } from "effect";
 import { invalidFrameDiagnostic } from "../src/invalid-frame.ts";
 
@@ -7,11 +9,11 @@ const validStartedLine = () =>
   Schema.encodeSync(AttemptChannel.OutboundEnvelopeFromJson)(
     new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,
-      attemptId: Attempt.AttemptId.make("run/step/1"),
+      attemptId: AttemptId.make("run/step/1"),
       sequence: AttemptChannel.Sequence.make(1),
       sentAt: DateTime.makeUnsafe("2026-09-01T12:00:00Z"),
       payload: new AttemptChannel.Started({
-        parentModel: Agent.ModelId.make("openai-codex/gpt-5.4-mini"),
+        parentModel: ModelId.make("openai-codex/gpt-5.4-mini"),
       }),
     }),
   );

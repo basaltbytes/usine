@@ -1,7 +1,14 @@
-import { Repository } from "@usine/core";
-import { Environment, ObjectField, ObjectType, TypeReference, Variable } from "@usine/expression";
+import { splitRepositoryName } from "@usine/core/repository";
+import {
+  Environment,
+  ObjectField,
+  ObjectType,
+  TypeReference,
+  Variable,
+} from "@usine/expression/model";
 import { Schema } from "effect";
-import type { ManagedRepo, Stream } from "./model.ts";
+import type { ManagedRepo } from "./factory.ts";
+import type { Stream } from "./trigger.ts";
 
 const reference = Schema.decodeUnknownSync(TypeReference);
 
@@ -233,7 +240,7 @@ export const environmentFor = (stream: Stream): Environment => {
  * a field added to one belongs in the other.
  */
 export const repositoryContext = (repository: ManagedRepo): Schema.JsonObject => {
-  const { owner } = Repository.parts(repository.name);
+  const { owner } = splitRepositoryName(repository.name);
   return {
     name: repository.name,
     owner,

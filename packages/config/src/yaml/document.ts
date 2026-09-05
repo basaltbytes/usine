@@ -1,6 +1,6 @@
 import { Effect, Option, Schema } from "effect";
 import { type Document, parseDocument } from "yaml";
-import { ConfigFileError, type InstancePath } from "../model.ts";
+import { ConfigFileError, type InstancePath } from "../file.ts";
 
 const causeMessage = (cause: unknown): string =>
   Option.match(

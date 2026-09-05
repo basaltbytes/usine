@@ -1,7 +1,11 @@
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
-import { Attempt, Item, Loop, Repository, Run } from "@usine/core";
+import { AttemptId } from "@usine/core/attempt";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { ItemNumber } from "@usine/core/item";
 import {
   BoardLaneId,
   BoardMove,
@@ -10,35 +14,37 @@ import {
   FactoryOverview,
   RunDetailView,
   TailTranscriptRequest,
-  TranscriptCursor,
   type TranscriptRequest,
-} from "@usine/orchestrator";
+} from "@usine/orchestrator/operator";
+import { TranscriptSequence } from "@usine/engine/transcript";
 import { Effect, Layer, Match, Schema } from "effect";
 import { HttpBody, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { FactoryBackend, type BackendError } from "./backend.ts";
 
-const PathRun = Schema.Struct({ runId: Run.RunId });
-const PathLoop = Schema.Struct({ loop: Loop.LoopName });
+const PathRun = Schema.Struct({ runId: RunId });
+const PathLoop = Schema.Struct({ loop: LoopName });
 const RepositoryPart = Schema.String.check(
   Schema.isPattern(/^[A-Za-z0-9_.-]+$/u, { message: "Expected a repository path segment" }),
 );
 const PathBoardItem = Schema.Struct({
   owner: RepositoryPart,
   repository: RepositoryPart,
-  item: Schema.FiniteFromString.pipe(Schema.decodeTo(Item.Number)),
+  item: Schema.FiniteFromString.pipe(Schema.decodeTo(ItemNumber)),
 });
 const BoardMoveBody = Schema.Struct({ toLane: BoardLaneId });
-const TranscriptCursorFromString = Schema.FiniteFromString.pipe(Schema.decodeTo(TranscriptCursor));
+const TranscriptSequenceFromString = Schema.FiniteFromString.pipe(
+  Schema.decodeTo(TranscriptSequence),
+);
 const RunDetailSearch = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("ColdTranscriptRequest") }),
   Schema.Struct({
     _tag: Schema.Literal("TailTranscriptRequest"),
-    after: TranscriptCursorFromString,
+    after: TranscriptSequenceFromString,
   }),
   Schema.Struct({
     _tag: Schema.Literal("EarlierTranscriptRequest"),
-    attemptId: Attempt.AttemptId,
-    before: TranscriptCursorFromString,
+    attemptId: AttemptId,
+    before: TranscriptSequenceFromString,
   }),
 ]);
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });
@@ -152,7 +158,7 @@ const handled = <A, E extends RouteError, R>(effect: Effect.Effect<A, E, R>) =>
 const runAction = (
   action: (
     backend: FactoryBackend["Service"],
-    runId: Run.RunId,
+    runId: RunId,
   ) => ReturnType<FactoryBackend["Service"]["approve"]>,
 ) =>
   handled(
@@ -167,7 +173,7 @@ const runAction = (
 const loopAction = (
   action: (
     backend: FactoryBackend["Service"],
-    loop: Loop.LoopName,
+    loop: LoopName,
   ) => ReturnType<FactoryBackend["Service"]["pause"]>,
 ) =>
   handled(
@@ -208,7 +214,7 @@ const transcriptRequest = (
 
 const boardMove = Effect.fn("Http.boardMove")(function* () {
   const { owner, repository: name, item } = yield* HttpRouter.schemaPathParams(PathBoardItem);
-  const repository = yield* Schema.decodeUnknownEffect(Repository.Name)(`${owner}/${name}`);
+  const repository = yield* Schema.decodeUnknownEffect(RepositoryName)(`${owner}/${name}`);
   const { toLane } = yield* HttpServerRequest.schemaBodyJson(BoardMoveBody, {
     onExcessProperty: "error",
   }).pipe(

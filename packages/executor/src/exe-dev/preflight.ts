@@ -1,4 +1,5 @@
-import { AttemptChannel, Worker } from "@usine/core";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
 import {
   ExecutorOperationError,
@@ -6,7 +7,7 @@ import {
   type RunHostCommand,
   WorkerCapabilityError,
   type WorkerCapability,
-} from "../index.ts";
+} from "../executor.ts";
 import type { ExeDevCommands } from "./commands.ts";
 import { HomePath, SshDestination, type ExeDevExecutorOptions, type VmState } from "./model.ts";
 
@@ -22,7 +23,7 @@ const decodeVmList = Schema.decodeUnknownEffect(Schema.fromJsonString(VmList));
 const decodeHome = Schema.decodeUnknownEffect(HomePath);
 
 const capabilityError = (
-  worker: Worker.Name,
+  worker: WorkerName,
   capability: WorkerCapability,
   message: string,
   cause: unknown,
@@ -33,9 +34,9 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   commands: ExeDevCommands,
   runHost: RunHostCommand,
 ) {
-  const workers = yield* Ref.make(new Map<Worker.Name, VmState>());
+  const workers = yield* Ref.make(new Map<WorkerName, VmState>());
 
-  const resolveVm = Effect.fn("ExeDevExecutor.resolveVm")(function* (worker: Worker.Name) {
+  const resolveVm = Effect.fn("ExeDevExecutor.resolveVm")(function* (worker: WorkerName) {
     const response = yield* commands.lobbyJson("preflight", ["ls", worker]);
     const decoded = yield* decodeVmList(response).pipe(
       Effect.mapError((cause) =>
@@ -79,14 +80,14 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   });
 
   const asCapability = <A>(
-    worker: Worker.Name,
+    worker: WorkerName,
     capability: WorkerCapability,
     message: string,
     effect: Effect.Effect<A, ExecutorOperationError>,
   ): Effect.Effect<A, WorkerCapabilityError> =>
     effect.pipe(Effect.mapError((cause) => capabilityError(worker, capability, message, cause)));
 
-  const preflight = Effect.fn("ExeDevExecutor.preflight")(function* (worker: Worker.Name) {
+  const preflight = Effect.fn("ExeDevExecutor.preflight")(function* (worker: WorkerName) {
     const vm = yield* resolveVm(worker).pipe(
       Effect.catchTag("ExecutorOperationError", (cause) =>
         capabilityError(worker, "machine", `Could not reach exe.dev Worker ${worker}`, cause),
@@ -178,7 +179,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
 
   // Both resolveVm failures sit inside the ExecutorError union prepare
   // reports, so a stopped VM keeps its typed capability shape.
-  const vmFor = Effect.fn("ExeDevExecutor.vmFor")(function* (worker: Worker.Name) {
+  const vmFor = Effect.fn("ExeDevExecutor.vmFor")(function* (worker: WorkerName) {
     const cached = (yield* Ref.get(workers)).get(worker);
     if (cached !== undefined) return cached;
     return yield* resolveVm(worker);

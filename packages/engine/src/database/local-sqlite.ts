@@ -5,16 +5,17 @@ import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { migrate } from "drizzle-orm/effect-sqlite-node/migrator";
 import { sql } from "drizzle-orm";
 import { Effect, FileSystem, Layer, Path } from "effect";
-import { CursorStore } from "../cursor/store.ts";
-import { ItemProjectionReader, ItemProjectionWriter } from "../item-projection/service.ts";
+import { CursorStore } from "../cursor/cursor.ts";
+import { ItemProjectionReader, ItemProjectionWriter } from "../item-projection/item-projection.ts";
 import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
-} from "../repository-label-projection/service.ts";
-import { LoopControl } from "../loop-control.ts";
-import { layerWithDatabase, type RunEngine } from "../engine.ts";
-import { EnginePersistenceError, type InstanceDirectory, type RunEngineError } from "../model.ts";
-import { RunReader } from "../run-reader.ts";
+} from "../repository-label-projection/repository-label-projection.ts";
+import { LoopControl } from "../loop-control/loop-control.ts";
+import { layerWithDatabase, type RunEngine } from "../engine/engine.ts";
+import type { InstanceDirectory } from "@usine/core/instance";
+import { EnginePersistenceError, type RunEngineError } from "../engine/error.ts";
+import { RunReader } from "../run-reader/run-reader.ts";
 import type { StepExecutor } from "../step-executor.ts";
 import { RunDatabase } from "./database.ts";
 

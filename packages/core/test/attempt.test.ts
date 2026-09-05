@@ -1,15 +1,15 @@
 import { describe, expect, it } from "@effect/vitest";
 import { DateTime, Schema } from "effect";
-import { AttemptNumber, shouldAutoRetry } from "../src/lifecycle/attempt.ts";
+import { ChildSessionBudget, ChildSessionCount } from "../src/agent/session.ts";
+import { AttemptNumber, shouldAutoRetry } from "../src/attempt/attempt.ts";
 import {
   AgentFailure,
   ChildSessionBudgetFailure,
   InfraFailure,
-  isAutoRetryable,
+  isAutoRetryableFailure,
   RunawayFailure,
-} from "../src/lifecycle/attempt-failure.ts";
-import { ChildSessionBudget, ChildSessionCount } from "../src/agent.ts";
-import { DedupKey, Event, EventId } from "../src/lifecycle/event.ts";
+} from "../src/attempt/failure.ts";
+import { Event, DedupKey, EventId } from "../src/event.ts";
 
 const infra = new InfraFailure({ message: "worker unreachable", cause: new Error("ECONNREFUSED") });
 const agent = new AgentFailure({ message: "agent reported failure" });
@@ -24,10 +24,10 @@ const decodeChildSessionBudget = Schema.decodeUnknownSync(ChildSessionBudget);
 
 describe("auto-retry law (ADR 0002, ADR 0013)", () => {
   it("only infra failures are auto-retryable at the class level", () => {
-    expect(isAutoRetryable(infra)).toBe(true);
-    expect(isAutoRetryable(agent)).toBe(false);
-    expect(isAutoRetryable(runaway)).toBe(false);
-    expect(isAutoRetryable(childBudget)).toBe(false);
+    expect(isAutoRetryableFailure(infra)).toBe(true);
+    expect(isAutoRetryableFailure(agent)).toBe(false);
+    expect(isAutoRetryableFailure(runaway)).toBe(false);
+    expect(isAutoRetryableFailure(childBudget)).toBe(false);
   });
 
   it("infra auto-retry stops at the cap", () => {

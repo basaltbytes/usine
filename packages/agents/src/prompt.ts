@@ -1,23 +1,25 @@
-import type { Agent, AttemptChannel, Repository } from "@usine/core";
+import type { AgentPersona, AgentName } from "@usine/core/agent";
+import type { AttemptTask } from "@usine/core/attempt";
+import type { RepositoryName } from "@usine/core/repository";
 import type { Schema } from "effect";
 
 export interface PromptParts {
-  readonly repository: Repository.Name;
+  readonly repository: RepositoryName;
   readonly payload: Schema.Json;
-  readonly agent: Agent.Name;
-  readonly persona: Agent.Persona;
-  readonly task: AttemptChannel.Task;
+  readonly agent: AgentName;
+  readonly persona: AgentPersona;
+  readonly task: AttemptTask;
 }
 
 export interface ChildPromptParts {
-  readonly agent: Agent.Name;
-  readonly persona: Agent.Persona;
+  readonly agent: AgentName;
+  readonly persona: AgentPersona;
   /** Free text authored by the parent model, not the rendered loop task. */
   readonly task: string;
 }
 
 /** Human-visible attribution required on GitHub content authored by an Agent. */
-export const githubSignature = (agent: Agent.Name): string => `— usine agent: ${agent}`;
+export const githubSignature = (agent: AgentName): string => `— usine agent: ${agent}`;
 
 /** Builds the complete parent prompt from immutable run context. */
 export const assemblePrompt = (parts: PromptParts): string =>

@@ -1,15 +1,15 @@
-import {
-  Attempt,
-  AttemptChannel,
-  Event,
-  Item,
-  Loop,
-  Run,
-  RunState,
-  Step,
-  StepResult,
-} from "@usine/core";
-import type { Agent } from "@usine/core";
+import type { Agent } from "@usine/core/agent";
+import type { ModelId } from "@usine/core/agent/brain";
+import { Attempt, AttemptId } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { AttemptOutcome } from "@usine/core/attempt/outcome";
+import { Event, DedupKey, EventId } from "@usine/core/event";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RunId } from "@usine/core/run";
+import { StepName } from "@usine/core/step";
+import * as RunState from "@usine/core/run/state";
+import { StepResult } from "@usine/core/step/result";
 import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { DateTime, Effect, Match, Option, Schema } from "effect";
@@ -26,15 +26,11 @@ import {
   triggerEvents,
   workflowCommands,
 } from "../database/schema.ts";
-import {
-  RunNotFoundError,
-  RunSnapshot,
-  RunSummary,
-  Submission,
-  TranscriptQuery,
-  WORKFLOW_COMMAND_PRIORITY,
-  type WorkflowCommand,
-} from "../model.ts";
+import { RunNotFoundError } from "../engine/error.ts";
+import { RunSnapshot, RunSummary } from "../run-reader/model.ts";
+import { Submission } from "../engine/submission.ts";
+import { TranscriptQuery } from "../transcript.ts";
+import { WORKFLOW_COMMAND_PRIORITY, type WorkflowCommand } from "../workflow/command.ts";
 import {
   attemptFromRow,
   decodeAttemptRows,
@@ -113,14 +109,14 @@ const openState = inArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]);
 const unstartedState = inArray(storedStateTag, [...RunState.UNSTARTED_STATE_TAGS]);
 // The Json round-trip is the portable named type for `queriesFor`'s inferred
 // signature — without it tsc cannot emit the declaration (TS2883).
-const storedAgent = (agent: Agent.Agent): Schema.Json =>
+const storedAgent = (agent: Agent): Schema.Json =>
   Schema.decodeUnknownSync(Schema.Json)(encodeAgent(agent));
 
 export const queriesFor = (database: RunDatabaseClient) => {
   // Keep `.execute()` explicit: RC.4's yieldable wrapper can cross an Effect
   // Workflow suspension before its final mutation is observable (ADR 0020).
   const eventRouteByDedup = Effect.fn("RunStoreQueries.eventRouteByDedup")(function* (
-    dedupKey: Event.DedupKey,
+    dedupKey: DedupKey,
   ) {
     const rows = yield* database
       .select(eventRouteSelection)
@@ -131,9 +127,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* decodeEventRoutes(rows);
   });
 
-  const eventRouteByRun = Effect.fn("RunStoreQueries.eventRouteByRun")(function* (
-    runId: Run.RunId,
-  ) {
+  const eventRouteByRun = Effect.fn("RunStoreQueries.eventRouteByRun")(function* (runId: RunId) {
     const rows = yield* database
       .select(eventRouteSelection)
       .from(runs)
@@ -144,7 +138,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* decodeEventRoutes(rows);
   });
 
-  const runRows = Effect.fn("RunStoreQueries.runRows")(function* (runId: Run.RunId) {
+  const runRows = Effect.fn("RunStoreQueries.runRows")(function* (runId: RunId) {
     const rows = yield* database
       .select(runSelection)
       .from(runs)
@@ -155,7 +149,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* decodeRunRows(rows);
   });
 
-  const attemptRows = Effect.fn("RunStoreQueries.attemptRows")(function* (runId: Run.RunId) {
+  const attemptRows = Effect.fn("RunStoreQueries.attemptRows")(function* (runId: RunId) {
     const rows = yield* database
       .select(attemptSelection)
       .from(attempts)
@@ -165,7 +159,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* decodeAttemptRows(rows);
   });
 
-  const snapshot = Effect.fn("RunStoreQueries.snapshot")(function* (runId: Run.RunId) {
+  const snapshot = Effect.fn("RunStoreQueries.snapshot")(function* (runId: RunId) {
     const [storedRuns, storedAttempts, routes] = yield* Effect.all([
       runRows(runId),
       attemptRows(runId),
@@ -231,7 +225,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
             .orderBy(asc(attempts.runId), asc(attempts.attemptNumber))
             .execute()
             .pipe(Effect.flatMap(decodeAttemptRows));
-    const attemptsByRun = new Map<Run.RunId, Array<(typeof storedAttempts)[number]>>();
+    const attemptsByRun = new Map<RunId, Array<(typeof storedAttempts)[number]>>();
     for (const attempt of storedAttempts) {
       const grouped = attemptsByRun.get(attempt.runId) ?? [];
       grouped.push(attempt);
@@ -255,7 +249,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const updateState = Effect.fn("RunStoreQueries.updateState")(function* (
-    runId: Run.RunId,
+    runId: RunId,
     state: RunState.RunState,
   ) {
     const updated = yield* database
@@ -269,7 +263,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     }
   });
 
-  const addAttempt = Effect.fn("RunStoreQueries.addAttempt")(function* (attempt: Attempt.Attempt) {
+  const addAttempt = Effect.fn("RunStoreQueries.addAttempt")(function* (attempt: Attempt) {
     yield* database
       .insert(attempts)
       .values({
@@ -287,8 +281,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const closeAttempt = Effect.fn("RunStoreQueries.closeAttempt")(function* (
-    attemptId: Attempt.AttemptId,
-    outcome: Attempt.Outcome,
+    attemptId: AttemptId,
+    outcome: AttemptOutcome,
   ) {
     yield* database
       .update(attempts)
@@ -298,8 +292,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const updateAttemptParentModel = Effect.fn("RunStoreQueries.updateAttemptParentModel")(function* (
-    attemptId: Attempt.AttemptId,
-    parentModel: Agent.ModelId,
+    attemptId: AttemptId,
+    parentModel: ModelId,
   ) {
     yield* database
       .update(attempts)
@@ -309,9 +303,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const updateStepResult = Effect.fn("RunStoreQueries.updateStepResult")(function* (
-    runId: Run.RunId,
-    stepName: Step.StepName,
-    result: StepResult.StepResult,
+    runId: RunId,
+    stepName: StepName,
+    result: StepResult,
   ) {
     yield* database
       .update(steps)
@@ -320,13 +314,13 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
-  const approvalExists = Effect.fn("RunStoreQueries.approvalExists")(function* (runId: Run.RunId) {
+  const approvalExists = Effect.fn("RunStoreQueries.approvalExists")(function* (runId: RunId) {
     return (yield* database.$count(approvals, eq(approvals.runId, runId)).execute()) > 0;
   });
 
   const recordApproval = Effect.fn("RunStoreQueries.recordApproval")(function* (
-    runId: Run.RunId,
-    approval: Event.Event,
+    runId: RunId,
+    approval: Event,
   ) {
     yield* database
       .insert(events)
@@ -342,7 +336,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const requestWorkflowCommand = Effect.fn("RunStoreQueries.requestWorkflowCommand")(function* (
-    runId: Run.RunId,
+    runId: RunId,
     command: WorkflowCommand,
   ) {
     yield* database
@@ -352,9 +346,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
-  const requestInterrupt = Effect.fn("RunStoreQueries.requestInterrupt")(function* (
-    runId: Run.RunId,
-  ) {
+  const requestInterrupt = Effect.fn("RunStoreQueries.requestInterrupt")(function* (runId: RunId) {
     yield* database
       .delete(workflowCommands)
       .where(
@@ -368,7 +360,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const hasWorkflowCommand = Effect.fn("RunStoreQueries.hasWorkflowCommand")(function* (
-    runId: Run.RunId,
+    runId: RunId,
     command: WorkflowCommand,
   ) {
     return (
@@ -383,8 +375,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   const createRun = Effect.fn("RunStoreQueries.createRun")(function* (
     submission: Submission,
-    eventId: Event.EventId,
-    runId: Run.RunId,
+    eventId: EventId,
+    runId: RunId,
   ) {
     const candidate = alias(triggerEvents, "candidate");
     const candidateRun = alias(runs, "candidate_run");
@@ -435,7 +427,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
-  const runForEvent = Effect.fn("RunStoreQueries.runForEvent")(function* (eventId: Event.EventId) {
+  const runForEvent = Effect.fn("RunStoreQueries.runForEvent")(function* (eventId: EventId) {
     return yield* decodeRunIds(
       yield* database
         .select({ runId: runs.runId })
@@ -445,9 +437,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     );
   });
 
-  const ignoredEvent = Effect.fn("RunStoreQueries.ignoredEvent")(function* (
-    eventId: Event.EventId,
-  ) {
+  const ignoredEvent = Effect.fn("RunStoreQueries.ignoredEvent")(function* (eventId: EventId) {
     return yield* decodeDiscards(
       yield* database
         .select({ reason: ignoredEvents.reason })
@@ -458,8 +448,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const blockingRun = Effect.fn("RunStoreQueries.blockingRun")(function* (
-    loop: Loop.LoopName,
-    itemKey: Item.ItemKey,
+    loop: LoopName,
+    itemKey: ItemKey,
   ) {
     return yield* decodeRunIds(
       yield* database
@@ -509,7 +499,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return submissionFromRow(existing);
   });
 
-  const nextQueued = Effect.fn("RunStoreQueries.nextQueued")(function* (runId: Run.RunId) {
+  const nextQueued = Effect.fn("RunStoreQueries.nextQueued")(function* (runId: RunId) {
     const routes = yield* eventRouteByRun(runId);
     const current = routes[0];
     if (current === undefined) return Option.none<Submission>();
@@ -633,7 +623,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   );
 
   const completeWorkflowCommand = Effect.fn("RunStoreQueries.completeWorkflowCommand")(function* (
-    runId: Run.RunId,
+    runId: RunId,
     command: WorkflowCommand,
   ) {
     yield* database
@@ -643,8 +633,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   const revokeUnstarted = Effect.fn("RunStoreQueries.revokeUnstarted")(function* (
-    loop: Loop.LoopName,
-    itemKey: Item.ItemKey,
+    loop: LoopName,
+    itemKey: ItemKey,
   ) {
     const rows = yield* decodeRunIds(
       yield* database

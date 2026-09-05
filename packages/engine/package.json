@@ -15,13 +15,45 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+    "./engine": {
+      "types": "./dist/engine/engine.d.ts",
+      "default": "./dist/engine/engine.js"
     },
     "./local-sqlite": {
       "types": "./dist/database/local-sqlite.d.ts",
       "default": "./dist/database/local-sqlite.js"
+    },
+    "./loop-control": {
+      "types": "./dist/loop-control/loop-control.d.ts",
+      "default": "./dist/loop-control/loop-control.js"
+    },
+    "./run-reader": {
+      "types": "./dist/run-reader/run-reader.d.ts",
+      "default": "./dist/run-reader/run-reader.js"
+    },
+    "./step-executor": {
+      "types": "./dist/step-executor.d.ts",
+      "default": "./dist/step-executor.js"
+    },
+    "./transcript": {
+      "types": "./dist/transcript.d.ts",
+      "default": "./dist/transcript.js"
+    },
+    "./database": {
+      "types": "./dist/database/database.d.ts",
+      "default": "./dist/database/database.js"
+    },
+    "./item-projection": {
+      "types": "./dist/item-projection/item-projection.d.ts",
+      "default": "./dist/item-projection/item-projection.js"
+    },
+    "./repository-label-projection": {
+      "types": "./dist/repository-label-projection/repository-label-projection.d.ts",
+      "default": "./dist/repository-label-projection/repository-label-projection.js"
+    },
+    "./cursor": {
+      "types": "./dist/cursor/cursor.d.ts",
+      "default": "./dist/cursor/cursor.js"
     }
   },
   "publishConfig": {

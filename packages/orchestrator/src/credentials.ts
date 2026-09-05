@@ -1,7 +1,7 @@
-import type { UsineConfig } from "@usine/config";
-import type { Repository } from "@usine/core";
+import type { UsineConfig } from "@usine/config/factory";
+import type { RepositoryName } from "@usine/core/repository";
 import { CredentialProvider, CredentialUnavailableError } from "@usine/executor";
-import { CoveredProject, GitHubApp } from "@usine/github";
+import { GitHubApp, CoveredProject } from "@usine/github/github-app";
 import { Effect, Layer, Option, SynchronizedRef } from "effect";
 
 /**
@@ -18,10 +18,10 @@ export const gitHubCredentialLayer = (
     Effect.gen(function* () {
       const app = yield* GitHubApp;
       const projectsRef = yield* SynchronizedRef.make(
-        Option.none<ReadonlyMap<Repository.Name, CoveredProject>>(),
+        Option.none<ReadonlyMap<RepositoryName, CoveredProject>>(),
       );
 
-      const discover = (repository: Repository.Name) =>
+      const discover = (repository: RepositoryName) =>
         app.projectAccess(config.repos.map(({ name }) => name)).pipe(
           Effect.map(
             (access) =>
@@ -43,7 +43,7 @@ export const gitHubCredentialLayer = (
 
       /** Cached map; on a miss, refresh once before concluding "not covered". */
       const projectFor = Effect.fn("GitHubCredentialProvider.projectFor")(function* (
-        repository: Repository.Name,
+        repository: RepositoryName,
       ) {
         const project = yield* SynchronizedRef.modifyEffect(projectsRef, (current) =>
           Effect.gen(function* () {
@@ -60,7 +60,7 @@ export const gitHubCredentialLayer = (
             const refreshed = yield* discover(repository);
             const refreshedResult: [
               Option.Option<CoveredProject>,
-              Option.Option<ReadonlyMap<Repository.Name, CoveredProject>>,
+              Option.Option<ReadonlyMap<RepositoryName, CoveredProject>>,
             ] = [Option.fromNullishOr(refreshed.get(repository)), Option.some(refreshed)];
             return refreshedResult;
           }),

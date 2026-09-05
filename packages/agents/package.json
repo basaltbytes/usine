@@ -14,13 +14,33 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
     "./pi": {
-      "types": "./dist/pi/index.d.ts",
-      "default": "./dist/pi/index.js"
+      "types": "./dist/pi/pi.d.ts",
+      "default": "./dist/pi/pi.js"
+    },
+    "./children": {
+      "types": "./dist/pi/children.d.ts",
+      "default": "./dist/pi/children.js"
+    },
+    "./claude": {
+      "types": "./dist/pi/claude.d.ts",
+      "default": "./dist/pi/claude.js"
+    },
+    "./codex": {
+      "types": "./dist/pi/codex/codex.d.ts",
+      "default": "./dist/pi/codex/codex.js"
+    },
+    "./pi/live": {
+      "types": "./dist/pi/live.d.ts",
+      "default": "./dist/pi/live.js"
+    },
+    "./prompt": {
+      "types": "./dist/prompt.d.ts",
+      "default": "./dist/prompt.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
     }
   },
   "publishConfig": {

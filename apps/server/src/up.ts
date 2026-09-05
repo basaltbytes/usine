@@ -1,12 +1,14 @@
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
-import { ConfigParser, InstanceFolder } from "@usine/config";
-import { Instance } from "@usine/core";
-import { MarcbachmannCelLayer } from "@usine/expression";
-import { GitHubCredentials } from "@usine/github";
+import { InstanceFolder } from "@usine/config/instance-folder";
+import { ConfigParser } from "@usine/config/parser";
+import { InstanceDirectory } from "@usine/core/instance";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
+import { GitHubCredentials } from "@usine/github/github-app";
 import { loadLocalCredentials } from "@usine/github/local-secrets";
-import { Operator, OperatorObservation, Orchestrator } from "@usine/orchestrator";
+import { Operator, OperatorObservation } from "@usine/orchestrator/operator";
+import { Orchestrator } from "@usine/orchestrator/orchestrator";
 import { operatorObservationLayer, runtimeLayer } from "@usine/orchestrator/local";
 import { Console, Context, Effect, FileSystem, Layer, Option, Result } from "effect";
 import { liveBackendLayer, needsSetupBackendLayer } from "./backend.ts";
@@ -20,7 +22,7 @@ import {
 } from "./cli.ts";
 import { serverLayer } from "./http.ts";
 
-const loadInstance = (directory: Instance.Directory) => {
+const loadInstance = (directory: InstanceDirectory) => {
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
   const folder = InstanceFolder.layer.pipe(
     Layer.provide(parser),
@@ -62,7 +64,7 @@ const serve = Effect.fn("Server.serve")(function* (options: {
 });
 
 const refuseVolatileInstance = Effect.fn("Server.refuseVolatileInstance")(function* (
-  directory: Instance.Directory,
+  directory: InstanceDirectory,
   allowVolatileInstance: boolean,
 ) {
   const realDirectory = yield* Effect.flatMap(FileSystem.FileSystem, (fileSystem) =>
@@ -85,7 +87,7 @@ const refuseVolatileInstance = Effect.fn("Server.refuseVolatileInstance")(functi
 export const up = (port: Port, allowVolatileInstance: boolean) =>
   Effect.scoped(
     Effect.gen(function* () {
-      const directory = Instance.Directory.make(process.cwd());
+      const directory = InstanceDirectory.make(process.cwd());
       yield* refuseVolatileInstance(directory, allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),
       );

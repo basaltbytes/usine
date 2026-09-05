@@ -1,32 +1,34 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import {
-  Agent,
-  AttemptChannel,
-  AttemptFailure,
-  Event,
-  Item,
-  Loop,
-  Repository,
-  Run,
-  Step,
-  Worker,
-} from "@usine/core";
+import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
+import { AttemptTask } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { InfraFailure } from "@usine/core/attempt/failure";
+import { Event, DedupKey, EventId } from "@usine/core/event";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { eq } from "drizzle-orm";
 import { DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { RunDatabase } from "../src/database/database.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { attemptTranscripts } from "../src/database/schema.ts";
-import { CursorKey } from "../src/cursor/model.ts";
-import { CursorStore } from "../src/cursor/store.ts";
-import { LoopControl } from "../src/loop-control.ts";
+import { CursorKey, CursorStore } from "../src/cursor/cursor.ts";
+import { LoopControl } from "../src/loop-control/loop-control.ts";
 import {
   ItemContentHash,
-  ItemNumber,
   ItemProjection,
   ItemProjectionSource,
 } from "../src/item-projection/model.ts";
-import { ItemProjectionReader, ItemProjectionWriter } from "../src/item-projection/service.ts";
+import {
+  ItemProjectionReader,
+  ItemProjectionWriter,
+} from "../src/item-projection/item-projection.ts";
 import {
   RepositoryLabel,
   RepositoryLabelProjection,
@@ -34,28 +36,28 @@ import {
 import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
-} from "../src/repository-label-projection/service.ts";
+} from "../src/repository-label-projection/repository-label-projection.ts";
+import { Submission } from "../src/engine/submission.ts";
 import {
-  InstanceDirectory,
-  Submission,
   TranscriptAllQuery,
   TranscriptPageQuery,
   TranscriptSequence,
   TranscriptTailQuery,
-} from "../src/model.ts";
-import { RunReader } from "../src/run-reader.ts";
+} from "../src/transcript.ts";
+import { InstanceDirectory } from "@usine/core/instance";
+import { RunReader } from "../src/run-reader/run-reader.ts";
 import { RunStore } from "../src/store/store.ts";
 
-const testAgent = new Agent.Agent({
-  name: Agent.Name.make("developer"),
-  brain: new Agent.BrainSpec({
+const testAgent = new Agent({
+  name: AgentName.make("developer"),
+  brain: new BrainSpec({
     harness: "claude",
-    model: Agent.ModelId.make("claude-sonnet-4-6"),
+    model: ModelId.make("claude-sonnet-4-6"),
     effort: "high",
   }),
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Agent.Persona.make("Implement the task."),
+  persona: AgentPersona.make("Implement the task."),
 });
 
 describe("run store", () => {
@@ -65,26 +67,26 @@ describe("run store", () => {
       const directory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-" }),
       );
-      const event = new Event.Event({
-        id: Event.EventId.make("store-event"),
-        dedupKey: Event.DedupKey.make("store/event/revision"),
+      const event = new Event({
+        id: EventId.make("store-event"),
+        dedupKey: DedupKey.make("store/event/revision"),
         payload: {},
         receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
       });
       const submission = new Submission({
         event,
-        itemKey: Item.ItemKey.make("store-item"),
-        loop: Loop.LoopName.make("store-loop"),
-        step: Step.StepName.make("store-step"),
+        itemKey: ItemKey.make("store-item"),
+        loop: LoopName.make("store-loop"),
+        step: StepName.make("store-step"),
         approval: "none",
-        repository: Repository.Name.make("basaltbytes/usine"),
-        revision: Repository.Revision.make("store-revision"),
-        task: AttemptChannel.Task.make("Run the store test"),
+        repository: RepositoryName.make("basaltbytes/usine"),
+        revision: RepositoryRevision.make("store-revision"),
+        task: AttemptTask.make("Run the store test"),
         agent: testAgent,
         parentModel: Option.none(),
       });
-      const runId = Run.RunId.make("store-run");
-      const failure = new AttemptFailure.InfraFailure({
+      const runId = RunId.make("store-run");
+      const failure = new InfraFailure({
         message: "offline",
         cause: new Error("offline"),
       });
@@ -93,7 +95,7 @@ describe("run store", () => {
         const store = yield* RunStore;
         yield* store.recordAndClaim(submission, runId);
         for (let number = 1; number <= 3; number += 1) {
-          const started = yield* store.beginAttempt(runId, Worker.Name.make("local"));
+          const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
           assert.strictEqual(started._tag, "AttemptStarted");
           if (started._tag !== "AttemptStarted") return;
           assert.deepStrictEqual(started.execution.attempt.brain, testAgent.brain);
@@ -119,29 +121,29 @@ describe("run store", () => {
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-queued-" }),
       );
       const submission = new Submission({
-        event: new Event.Event({
-          id: Event.EventId.make("queued-event"),
-          dedupKey: Event.DedupKey.make("queued/event/revision"),
+        event: new Event({
+          id: EventId.make("queued-event"),
+          dedupKey: DedupKey.make("queued/event/revision"),
           payload: {},
           receivedAt: DateTime.makeUnsafe("2026-09-03T00:00:00Z"),
         }),
-        itemKey: Item.ItemKey.make("queued-item"),
-        loop: Loop.LoopName.make("queued-loop"),
-        step: Step.StepName.make("queued-step"),
+        itemKey: ItemKey.make("queued-item"),
+        loop: LoopName.make("queued-loop"),
+        step: StepName.make("queued-step"),
         approval: "required",
-        repository: Repository.Name.make("basaltbytes/usine"),
-        revision: Repository.Revision.make("queued-revision"),
-        task: AttemptChannel.Task.make("Wait for a worker"),
+        repository: RepositoryName.make("basaltbytes/usine"),
+        revision: RepositoryRevision.make("queued-revision"),
+        task: AttemptTask.make("Wait for a worker"),
         agent: testAgent,
         parentModel: Option.none(),
       });
-      const approval = new Event.Event({
-        id: Event.EventId.make("queued-approval"),
-        dedupKey: Event.DedupKey.make("queued/approval"),
+      const approval = new Event({
+        id: EventId.make("queued-approval"),
+        dedupKey: DedupKey.make("queued/approval"),
         payload: { approved: true },
         receivedAt: DateTime.makeUnsafe("2026-09-03T00:01:00Z"),
       });
-      const runId = Run.RunId.make("queued-run");
+      const runId = RunId.make("queued-run");
 
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
@@ -156,7 +158,7 @@ describe("run store", () => {
         yield* store.approve(runId, approval);
         assert.strictEqual(yield* state(), "Queued");
 
-        const started = yield* store.beginAttempt(runId, Worker.Name.make("local"));
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
         assert.strictEqual(started._tag, "AttemptStarted");
         assert.strictEqual(yield* state(), "Running");
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
@@ -170,29 +172,29 @@ describe("run store", () => {
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-started-" }),
       );
       const submission = new Submission({
-        event: new Event.Event({
-          id: Event.EventId.make("started-event"),
-          dedupKey: Event.DedupKey.make("started/event/revision"),
+        event: new Event({
+          id: EventId.make("started-event"),
+          dedupKey: DedupKey.make("started/event/revision"),
           payload: {},
           receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
         }),
-        itemKey: Item.ItemKey.make("started-item"),
-        loop: Loop.LoopName.make("started-loop"),
-        step: Step.StepName.make("started-step"),
+        itemKey: ItemKey.make("started-item"),
+        loop: LoopName.make("started-loop"),
+        step: StepName.make("started-step"),
         approval: "none",
-        repository: Repository.Name.make("basaltbytes/usine"),
-        revision: Repository.Revision.make("started-revision"),
-        task: AttemptChannel.Task.make("Record the selected models"),
+        repository: RepositoryName.make("basaltbytes/usine"),
+        revision: RepositoryRevision.make("started-revision"),
+        task: AttemptTask.make("Record the selected models"),
         agent: testAgent,
         parentModel: Option.none(),
       });
-      const runId = Run.RunId.make("started-run");
-      const effectiveParentModel = Agent.ModelId.make("openai/gpt-5.6-sol");
+      const runId = RunId.make("started-run");
+      const effectiveParentModel = ModelId.make("openai/gpt-5.6-sol");
 
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
         yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, Worker.Name.make("local"));
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
         assert.strictEqual(started._tag, "AttemptStarted");
         if (started._tag !== "AttemptStarted") return;
         const attemptId = started.execution.attempt.id;
@@ -206,8 +208,8 @@ describe("run store", () => {
             payload: new AttemptChannel.Started({ parentModel: effectiveParentModel }),
           }),
         );
-        const parent = new Agent.ParentSession({
-          id: Agent.SessionId.make("store-parent"),
+        const parent = new ParentSession({
+          id: AgentSessionId.make("store-parent"),
           agent: testAgent.name,
           brain: testAgent.brain,
         });
@@ -220,7 +222,7 @@ describe("run store", () => {
               sequence: AttemptChannel.Sequence.make(sequence),
               sentAt: DateTime.makeUnsafe(`2026-08-25T00:00:0${sequence}Z`),
               payload: new AttemptChannel.SessionEvent({
-                event: new Agent.TextOutput({ session: parent, text: `update ${sequence}` }),
+                event: new TextOutput({ session: parent, text: `update ${sequence}` }),
               }),
             }),
           );
@@ -287,29 +289,29 @@ describe("run store", () => {
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-protocol-v3-" }),
       );
       const submission = new Submission({
-        event: new Event.Event({
-          id: Event.EventId.make("protocol-v3-event"),
-          dedupKey: Event.DedupKey.make("protocol-v3/event/revision"),
+        event: new Event({
+          id: EventId.make("protocol-v3-event"),
+          dedupKey: DedupKey.make("protocol-v3/event/revision"),
           payload: {},
           receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
         }),
-        itemKey: Item.ItemKey.make("protocol-v3-item"),
-        loop: Loop.LoopName.make("protocol-v3-loop"),
-        step: Step.StepName.make("protocol-v3-step"),
+        itemKey: ItemKey.make("protocol-v3-item"),
+        loop: LoopName.make("protocol-v3-loop"),
+        step: StepName.make("protocol-v3-step"),
         approval: "none",
-        repository: Repository.Name.make("basaltbytes/usine"),
-        revision: Repository.Revision.make("protocol-v3-revision"),
-        task: AttemptChannel.Task.make("Read a durable protocol-v3 transcript"),
+        repository: RepositoryName.make("basaltbytes/usine"),
+        revision: RepositoryRevision.make("protocol-v3-revision"),
+        task: AttemptTask.make("Read a durable protocol-v3 transcript"),
         agent: testAgent,
         parentModel: Option.none(),
       });
-      const runId = Run.RunId.make("protocol-v3-run");
+      const runId = RunId.make("protocol-v3-run");
 
       yield* Effect.gen(function* () {
         const database = yield* RunDatabase;
         const store = yield* RunStore;
         yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, Worker.Name.make("local"));
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
         assert.strictEqual(started._tag, "AttemptStarted");
         if (started._tag !== "AttemptStarted") return;
         const attemptId = started.execution.attempt.id;
@@ -345,23 +347,23 @@ describe("run store", () => {
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-closed-" }),
       );
       const submission = new Submission({
-        event: new Event.Event({
-          id: Event.EventId.make("closed-event"),
-          dedupKey: Event.DedupKey.make("closed/event/revision"),
+        event: new Event({
+          id: EventId.make("closed-event"),
+          dedupKey: DedupKey.make("closed/event/revision"),
           payload: {},
           receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
         }),
-        itemKey: Item.ItemKey.make("closed-item"),
-        loop: Loop.LoopName.make("closed-loop"),
-        step: Step.StepName.make("closed-step"),
+        itemKey: ItemKey.make("closed-item"),
+        loop: LoopName.make("closed-loop"),
+        step: StepName.make("closed-step"),
         approval: "none",
-        repository: Repository.Name.make("basaltbytes/usine"),
-        revision: Repository.Revision.make("closed-revision"),
-        task: AttemptChannel.Task.make("Close before starting"),
+        repository: RepositoryName.make("basaltbytes/usine"),
+        revision: RepositoryRevision.make("closed-revision"),
+        task: AttemptTask.make("Close before starting"),
         agent: testAgent,
         parentModel: Option.none(),
       });
-      const runId = Run.RunId.make("closed-run");
+      const runId = RunId.make("closed-run");
 
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
@@ -370,7 +372,7 @@ describe("run store", () => {
         // begin. That is a routine outcome, never a defect.
         const outcome = yield* store.cancel(runId);
         assert.strictEqual(outcome._tag, "Canceled");
-        const started = yield* store.beginAttempt(runId, Worker.Name.make("local"));
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
         assert.strictEqual(started._tag, "RunClosed");
         const snapshot = yield* store.snapshot(runId);
         assert.strictEqual(snapshot.attempts.length, 0);
@@ -386,9 +388,9 @@ describe("Item projections", () => {
       const directory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-item-projection-" }),
       );
-      const repository = Repository.Name.make("basaltbytes/usine");
+      const repository = RepositoryName.make("basaltbytes/usine");
       const item = new ItemProjection({
-        itemKey: Item.ItemKey.make("github:basaltbytes/usine:33"),
+        itemKey: ItemKey.make("github:basaltbytes/usine:33"),
         repository,
         source: ItemProjectionSource.make("issue"),
         number: ItemNumber.make(33),
@@ -429,7 +431,7 @@ describe("repository label projections", () => {
       const directory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-label-projection-" }),
       );
-      const repository = Repository.Name.make("basaltbytes/usine");
+      const repository = RepositoryName.make("basaltbytes/usine");
       const projection = new RepositoryLabelProjection({
         repository,
         labels: [
@@ -512,7 +514,7 @@ describe("Loop runtime state", () => {
       const directory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-loop-runtime-" }),
       );
-      const loop = Loop.LoopName.make("review");
+      const loop = LoopName.make("review");
       const database = localSqliteLayer(directory);
 
       yield* Effect.gen(function* () {

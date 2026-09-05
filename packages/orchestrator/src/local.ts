@@ -1,20 +1,25 @@
 import { NodeServices } from "@effect/platform-node";
-import { ConfigParser, type LoadedInstance, type UsineConfig } from "@usine/config";
-import type { Instance } from "@usine/core";
+import type { LoadedInstance } from "@usine/config/instance";
+import type { UsineConfig } from "@usine/config/factory";
+import { ConfigParser } from "@usine/config/parser";
+import type { InstanceDirectory } from "@usine/core/instance";
 import { layer as localExecutorLayer, type LocalExecutorOptions } from "@usine/executor/local";
 import {
   layer as localEngineLayer,
   observationLayer as localObservationLayer,
 } from "@usine/engine/local-sqlite";
-import { MarcbachmannCelLayer } from "@usine/expression";
-import { GitHubApp, GitHubItemWriter, GitHubLabelWriter, GitHubPolling } from "@usine/github";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
+import { GitHubApp } from "@usine/github/github-app";
+import { GitHubItemWriter } from "@usine/github/item-writer";
+import { GitHubLabelWriter } from "@usine/github/label-writer";
+import { GitHubPolling } from "@usine/github/polling";
 import { executableCommand } from "@usine/run-host/executable";
 import { Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { gitHubCredentialLayer } from "./credentials.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
 import { LabelReconciler } from "./label-reconciler.ts";
-import { Operator, OperatorObservation } from "./operator/service.ts";
+import { Operator, OperatorObservation } from "./operator/operator.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
@@ -22,7 +27,7 @@ import { stepExecutorLayer } from "./scheduler.ts";
 
 /** Complete local-worker engine composition. Credential sourcing stays caller-owned. */
 export const layer = (
-  instanceDirectory: Instance.Directory,
+  instanceDirectory: InstanceDirectory,
   config: UsineConfig,
   options: Omit<LocalExecutorOptions, "instanceDirectory" | "runHost"> &
     Partial<Pick<LocalExecutorOptions, "runHost">>,
@@ -37,7 +42,7 @@ export const layer = (
 };
 
 /** Read-only local operator composition used while trigger credentials are unavailable. */
-export const operatorObservationLayer = (instanceDirectory: Instance.Directory) =>
+export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =>
   OperatorObservation.layer.pipe(
     Layer.provide(Layer.mergeAll(localObservationLayer(instanceDirectory), idleTriggersLayer)),
   );
@@ -48,7 +53,7 @@ export const operatorObservationLayer = (instanceDirectory: Instance.Directory) 
  * durable engine, worker execution, and operator surface — is included.
  */
 export const runtimeLayer = (
-  instanceDirectory: Instance.Directory,
+  instanceDirectory: InstanceDirectory,
   instance: LoadedInstance,
   options: Omit<LocalExecutorOptions, "instanceDirectory" | "runHost"> &
     Partial<Pick<LocalExecutorOptions, "runHost">>,

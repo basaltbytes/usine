@@ -1,7 +1,7 @@
-import { AttemptFailure } from "@usine/core";
+import { InfraFailure } from "@usine/core/attempt/failure";
 import { Effect, Ref, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import type { PreparedAttempt, RunHostCommand } from "../index.ts";
+import type { PreparedAttempt, RunHostCommand } from "../executor.ts";
 import { runHostSessionFor, type RunHostInput, type RunHostSession } from "../run-host-session.ts";
 import type { ExeDevCommands } from "./commands.ts";
 import type { PreparedStates } from "./model.ts";
@@ -29,7 +29,7 @@ export const attemptChannelFor: (
     const attemptId = prepared.spec.attemptId;
     const state = (yield* Ref.get(preparedStates)).get(attemptId);
     if (state === undefined) {
-      return yield* new AttemptFailure.InfraFailure({
+      return yield* new InfraFailure({
         message: `Attempt ${attemptId} has no prepared exe.dev workspace`,
         cause: new Error("prepared Attempt state missing"),
       });

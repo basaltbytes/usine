@@ -1,28 +1,24 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
-import { Instance } from "@usine/core";
-import { MarcbachmannCelLayer } from "@usine/expression";
+import { InstanceDirectory } from "@usine/core/instance";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Effect, Layer, Option, Schema } from "effect";
-import {
-  ConfigParser,
-  InstanceFolder,
-  InstancePath,
-  LoadedInstance,
-  ManagedRepo,
-  YamlEdit,
-  matchesSelector,
-  updateFrontmatter,
-  updateYaml,
-} from "../src/index.ts";
+import { InstanceFolder } from "../src/instance-folder.ts";
+import { InstancePath } from "../src/file.ts";
+import { LoadedInstance } from "../src/instance/instance.ts";
+import { ManagedRepo } from "../src/factory.ts";
+import { ConfigParser } from "../src/parser.ts";
+import { matchesSelector } from "../src/selector.ts";
+import { updateFrontmatter, updateYaml, YamlEdit } from "../src/yaml/writer.ts";
 
 const parserLayer = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
 const instanceFolderLayer = InstanceFolder.layer.pipe(
   Layer.provide(Layer.mergeAll(parserLayer, NodeFileSystem.layer, NodePath.layer)),
 );
-const acceptanceRoot = Instance.Directory.make(
+const acceptanceRoot = InstanceDirectory.make(
   decodeURIComponent(new URL("./fixtures/acceptance", import.meta.url).pathname),
 );
-const invalidFactoryRoot = Instance.Directory.make(
+const invalidFactoryRoot = InstanceDirectory.make(
   decodeURIComponent(new URL("./fixtures/invalid-factory", import.meta.url).pathname),
 );
 

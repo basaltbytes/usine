@@ -1,42 +1,38 @@
 import { assert, describe, it } from "@effect/vitest";
-import {
-  AgentFile,
-  AgentName,
-  IssueTrigger,
-  LoadedInstance,
-  LoopFile,
-  LoopName,
-  ModelId,
-  Persona,
-  PromptTemplate,
-  Selector,
-  UsineConfig,
-} from "@usine/config";
-import { Repository, Step } from "@usine/core";
+import { ModelId } from "@usine/core/agent/brain";
+import { AgentName, AgentPersona } from "@usine/core/agent";
+import { RepositoryName } from "@usine/core/repository";
+import { StepName } from "@usine/core/step";
+import { AgentFile } from "@usine/config/agent";
+import { IssueTrigger } from "@usine/config/trigger";
+import { LoadedInstance } from "@usine/config/instance";
+import { LoopFile, PromptTemplate } from "@usine/config/loop";
+import { LoopName } from "@usine/core/loop";
+import { Selector } from "@usine/config/selector";
+import { UsineConfig } from "@usine/config/factory";
 import {
   RepositoryLabel as StoredRepositoryLabel,
   RepositoryLabelProjection,
   RepositoryLabelProjectionReader,
-} from "@usine/engine";
-import { Source } from "@usine/expression";
+} from "@usine/engine/repository-label-projection";
+import { Source } from "@usine/expression/model";
+import { GitHubLabelWriter } from "@usine/github/label-writer";
+import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
 import {
   EntityTag,
-  GitHubApiError,
-  GitHubLabelWriter,
-  GitHubPolling,
-  GitHubRateLimitError,
   RepositoryLabel,
   RepositoryLabelCatalog,
   RepositoryLabelColor,
   RepositoryLabelName,
   RepositoryLabelsNotModified,
   RepositoryNotModified,
-} from "@usine/github";
+  GitHubPolling,
+} from "@usine/github/polling";
 import { DateTime, Effect, Option, Schema } from "effect";
-import { PollingTriggers } from "../src/index.ts";
+import { PollingTriggers } from "../src/polling-triggers.ts";
 import { memoryCursorStore, pollingTestLayer } from "./support/polling.ts";
 
-const repository = Repository.Name.make("basaltbytes/usine");
+const repository = RepositoryName.make("basaltbytes/usine");
 const agent = new AgentFile({
   name: AgentName.make("developer"),
   harness: "codex",
@@ -44,14 +40,14 @@ const agent = new AgentFile({
   effort: "high",
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Persona.make("Implement the issue."),
+  persona: AgentPersona.make("Implement the issue."),
 });
 const loop = new LoopFile({
   name: LoopName.make("start-dev"),
   trigger: new IssueTrigger({ on: "issue", if: Source.make("true") }),
   selector: Option.some(new Selector({ repos: Option.some([repository]), tags: Option.none() })),
   approval: "required",
-  step: Step.StepName.make("run"),
+  step: StepName.make("run"),
   agent: agent.name,
   body: PromptTemplate.make("Implement it."),
 });

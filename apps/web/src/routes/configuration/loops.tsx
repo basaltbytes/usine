@@ -1,7 +1,7 @@
 import { PauseIcon, PlayIcon } from "@phosphor-icons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
-import type { LoopView } from "@usine/orchestrator";
+import type { LoopView } from "@usine/orchestrator/operator";
 import { ErrorAlert } from "@/components/error-alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
