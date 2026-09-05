@@ -332,6 +332,8 @@ describe("PollingTriggers label preflight", () => {
         assert.deepStrictEqual(cycle.preflightFindings, []);
         assert.deepStrictEqual(cycle.failures, []);
         assert.deepStrictEqual(storedCatalogEntityTags(cursors.stored), [null]);
+        yield* polling.poll(instance);
+        assert.deepStrictEqual(catalogRequests, ["none", catalogEntityTag, "none"]);
       }).pipe(Effect.provide(pollingTestLayer(github, [], writer, undefined, cursors.store)));
     },
   );
