@@ -1,7 +1,7 @@
 import { createPublicKey, generateKeyPairSync, verify } from "node:crypto";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
-import { Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Clock, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../src/github-app.ts";
 import { AppCredentials, AppId, GitHubCredentials, PrivateKey } from "../src/credentials.ts";
@@ -231,8 +231,35 @@ describe("GitHubApp", () => {
     }).pipe(Effect.provide(appLayer(client)));
   });
 
-  it.live("rejects an installation token whose reported lifetime exceeds one hour", () => {
-    const expiresAt = new Date(Date.now() + 61 * 60 * 1_000).toISOString();
+  it.effect("accepts clock skew without extending the worker or shared lease past one hour", () => {
+    const client = HttpClient.make((request) =>
+      Effect.gen(function* () {
+        if (request.method !== "POST") return jsonResponse(request, [installation]);
+        return jsonResponse(request, {
+          token: "skewed-token",
+          expires_at: new Date((yield* Clock.currentTimeMillis) + 62 * 60_000).toISOString(),
+          repositories: [{ id: 99, full_name: "basaltbytes/usine" }],
+        });
+      }),
+    );
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const now = yield* Clock.currentTimeMillis;
+      const worker = yield* app.workerToken(
+        new CoveredProject({
+          installationId: InstallationId.make(77),
+          repository: RepositoryName.make("basaltbytes/usine"),
+          repositoryId: RepositoryId.make(99),
+        }),
+      );
+      const shared = yield* app.installationToken();
+      assert.strictEqual(DateTime.toEpochMillis(worker.expiresAt), now + 60 * 60_000);
+      assert.strictEqual(DateTime.toEpochMillis(shared.expiresAt), now + 60 * 60_000);
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
+  it.live.each([-1, 0, 70])("rejects an invalid token with %s minutes left", (minutes) => {
+    const expiresAt = new Date(Date.now() + minutes * 60 * 1_000).toISOString();
     const client = HttpClient.make((request) =>
       Effect.succeed(
         jsonResponse(request, {

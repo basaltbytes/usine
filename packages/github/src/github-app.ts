@@ -42,6 +42,8 @@ import {
 } from "./installation.ts";
 
 const TOKEN_MAX_LIFETIME_MS = 60 * 60 * 1_000;
+/** GitHub's expiry uses its own clock; ordinary worker/orchestrator skew is not a bad token. */
+const TOKEN_CLOCK_SKEW_MARGIN_MS = 3 * 60 * 1_000;
 /** Renew the shared lease when its token has less than this long left. */
 const LEASE_RENEWAL_MARGIN_MS = 5 * 60 * 1_000;
 
@@ -185,6 +187,7 @@ export class GitHubApp extends Context.Service<
         scope: TokenScope,
       ) {
         const { operation, body } = mintPlan(scope);
+        yield* Effect.annotateCurrentSpan({ installationId, operation, scope: scope._tag });
         const jwt = yield* sign();
         const response = yield* fetchJson(
           operation,
@@ -193,13 +196,20 @@ export class GitHubApp extends Context.Service<
           ).pipe(HttpClientRequest.bodyJsonUnsafe(body), authorized(jwt)),
           TokenResponse,
         );
-        const lifetime =
-          DateTime.toEpochMillis(response.expiresAt) - (yield* Clock.currentTimeMillis);
-        if (lifetime <= 0 || lifetime > TOKEN_MAX_LIFETIME_MS) {
+        const now = yield* Clock.currentTimeMillis;
+        const lifetime = DateTime.toEpochMillis(response.expiresAt) - now;
+        if (lifetime <= 0 || lifetime > TOKEN_MAX_LIFETIME_MS + TOKEN_CLOCK_SKEW_MARGIN_MS) {
           return yield* new InvalidGitHubResponseError({
             operation,
             message: "GitHub returned an installation token outside the one-hour lifetime bound",
             detail: `expires_at ${DateTime.formatIso(response.expiresAt)} leaves ${lifetime}ms to live`,
+          });
+        }
+        if (lifetime > TOKEN_MAX_LIFETIME_MS) {
+          yield* Effect.logInfo("Accepted GitHub token clock skew; capped the local lease", {
+            installationId,
+            operation,
+            skewMillis: lifetime - TOKEN_MAX_LIFETIME_MS,
           });
         }
         const confirmed = Option.getOrElse(response.repositories, () => []);
@@ -215,7 +225,7 @@ export class GitHubApp extends Context.Service<
         }
         return new InstallationToken({
           value: Redacted.make(response.token),
-          expiresAt: response.expiresAt,
+          expiresAt: DateTime.makeUnsafe(now + Math.min(lifetime, TOKEN_MAX_LIFETIME_MS)),
           scope,
         });
       });

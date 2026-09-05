@@ -5,7 +5,7 @@
 - an installation-wide token for orchestrator polling and writes;
 - a token restricted to one repository for a worker attempt.
 
-Both token requests use a one-hour maximum lifetime. Token values and the App private key stay inside Effect `Redacted` values.
+Both token requests use a one-hour maximum lifetime. Expiry validation tolerates up to three minutes of clock skew while capping the local lease at one hour; expired tokens are rejected. Token values and the App private key stay inside Effect `Redacted` values.
 
 Import `GitHubApp`, credentials, access results, and typed App errors from `@usine/github/github-app`. `@usine/github/polling` provides `GitHubPolling` with its cursors, change-detection results, and payload snapshots. Item and label writes use `/item-writer` and `/label-writer`; local credential loading uses `/local-secrets`.
 
