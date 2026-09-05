@@ -16,8 +16,13 @@ import { UsineConfig } from "@usine/config/factory";
 import { ConfigParser } from "@usine/config/parser";
 import { InstanceDirectory } from "@usine/core/instance";
 import { CursorKey, CursorStore } from "@usine/engine/cursor";
-import { RunEngine, Claimed } from "@usine/engine/engine";
-import { LoopRuntimeState } from "@usine/engine/loop-control";
+import { RunEngine, Claimed, EnginePersistenceError } from "@usine/engine/engine";
+import { LoopControl } from "@usine/engine/loop-control";
+import {
+  ItemProjectionReader,
+  ItemProjectionWriter,
+  type ItemProjection,
+} from "@usine/engine/item-projection";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
@@ -44,6 +49,7 @@ import {
   Context,
   Clock,
   DateTime,
+  Deferred,
   Effect,
   Exit,
   Fiber,
@@ -61,6 +67,7 @@ import {
   inertLabelReconcilerLayer,
   itemProjectionWriterLayer,
   loopControlLayer,
+  memoryCursorStore,
   pollingTestLayer,
   repositoryLabelProjectionReaderLayer,
   repositoryLabelProjectionWriterLayer,
@@ -214,30 +221,62 @@ describe("PollingTriggers", () => {
     }).pipe(Effect.provide(pollingTestLayer(github)));
   });
 
-  it.effect("keeps Board projection polling while paused Loops open no Runs", () => {
-    const loop = issueLoop("paused-issues");
-    let changeRequests = 0;
-    const github: GitHubPolling["Service"] = {
-      changes: (_repository, cursor) => {
-        changeRequests += 1;
-        return Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() }));
-      },
-      labels: () => Effect.succeed(emptyLabelCatalog),
-      snapshot: () => Effect.die("an unchanged repository has no snapshots"),
-    };
-    const state = new LoopRuntimeState({ loop: loop.name, paused: true });
+  it.live(
+    "keeps Board Items current for paused Loops and repositories without matching Loops",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const directory = InstanceDirectory.make(
+          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-paused-polling-" }),
+        );
+        const loop = issueLoop("paused-issues");
+        const payload = issuePayload(["ready"]);
+        const github: GitHubPolling["Service"] = {
+          changes: (_repository, cursor) =>
+            Effect.succeed(
+              new RepositoryChanges({
+                cursor,
+                items: [
+                  new ChangedIssue({
+                    number: 28,
+                    updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+                  }),
+                ],
+                backlog: false,
+                nextPollAt: Option.none(),
+              }),
+            ),
+          labels: () => Effect.succeed(emptyLabelCatalog),
+          snapshot: () =>
+            Effect.succeed(
+              new IssueSnapshot({
+                payload,
+                contentHash: ContentHash.make("a".repeat(64)),
+              }),
+            ),
+        };
 
-    return Effect.gen(function* () {
-      const polling = yield* PollingTriggers;
-      const cycle = yield* polling.poll(instanceWith([loop]));
-      assert.strictEqual(cycle.repositories, 2);
-      assert.strictEqual(cycle.submissions.length, 0);
-      assert.strictEqual(changeRequests, 2);
-      const latest = yield* polling.latest;
-      assert(Option.isSome(latest));
-      assert.strictEqual(latest.value, cycle);
-    }).pipe(Effect.provide(pollingTestLayer(github, [state])));
-  });
+        yield* Effect.gen(function* () {
+          const polling = yield* PollingTriggers;
+          const controls = yield* LoopControl;
+          const items = yield* ItemProjectionReader;
+          yield* controls.pause(loop.name);
+          const cycle = yield* polling.poll(instanceWith([loop]));
+          assert.strictEqual(cycle.repositories, 2);
+          assert.strictEqual(cycle.changedItems, 2);
+          assert.strictEqual(cycle.submissions.length, 0);
+          assert.deepStrictEqual(cycle.failures, []);
+          for (const repository of config.repos) {
+            const projected = yield* items.list(repository.name, { limit: 10 });
+            assert.strictEqual(projected.length, 1);
+            assert.deepStrictEqual(projected[0]?.payload, payload);
+          }
+          const latest = yield* polling.latest;
+          assert(Option.isSome(latest));
+          assert.strictEqual(latest.value, cycle);
+        }).pipe(Effect.provide(runtimeLayer(directory, github)));
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
 
   it.effect("turns a rate-limited label catalog into a backoff, not a failed cycle", () => {
     const github: GitHubPolling["Service"] = {
@@ -682,6 +721,147 @@ describe("PollingTriggers", () => {
       assert.strictEqual(cycle.submissions.length, 1);
     }).pipe(Effect.provide(layer));
   });
+
+  it.effect("retains the cursor until every Item's durable Run decision succeeds", () =>
+    Effect.gen(function* () {
+      const cursors = memoryCursorStore();
+      const projections = new Map<number, ItemProjection>();
+      const observedCursors: Array<PollCursor> = [];
+      const baseline = new PollCursor({
+        entityTag: Option.some(EntityTag.make('W/"baseline"')),
+        watermark: Option.some(DateTime.makeUnsafe("2026-08-30T19:00:00Z")),
+      });
+      const advanced = new PollCursor({
+        entityTag: Option.some(EntityTag.make('W/"advanced"')),
+        watermark: Option.some(DateTime.makeUnsafe("2026-08-30T20:00:00Z")),
+      });
+      const submitStarted = yield* Deferred.make<void>();
+      const revokeStarted = yield* Deferred.make<void>();
+      const submitFinished = yield* Deferred.make<void>();
+      const allowSubmit = yield* Deferred.make<void>();
+      const allowRevoke = yield* Deferred.make<void, EnginePersistenceError>();
+      let phase: "baseline" | "interrupted" | "recovered" = "baseline";
+      const github: GitHubPolling["Service"] = {
+        labels: () => Effect.succeed(emptyLabelCatalog),
+        changes: (repository, cursor) =>
+          Effect.sync(() => {
+            if (repository !== watchedRepository) {
+              return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+            }
+            observedCursors.push(cursor);
+            return new RepositoryChanges({
+              cursor: phase === "baseline" ? baseline : advanced,
+              items:
+                phase === "baseline"
+                  ? []
+                  : [28, 29].map(
+                      (number) =>
+                        new ChangedIssue({
+                          number,
+                          updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+                        }),
+                    ),
+              backlog: false,
+              nextPollAt: Option.none(),
+            });
+          }),
+        snapshot: (_repository, item) =>
+          Effect.succeed(
+            new IssueSnapshot({
+              payload: issuePayload(item.number === 28 ? ["ready"] : [], item.number),
+              contentHash: ContentHash.make("a".repeat(64)),
+            }),
+          ),
+      };
+      const runs = Layer.succeed(RunEngine)({
+        approve: () => Effect.die("unused"),
+        cancel: () => Effect.die("unused"),
+        inspect: () => Effect.die("unused"),
+        reconcile: () => Effect.die("unused"),
+        retry: () => Effect.die("unused"),
+        transcript: () => Effect.die("unused"),
+        submit: (submission) =>
+          Effect.gen(function* () {
+            if (phase === "interrupted") {
+              yield* Deferred.succeed(submitStarted, undefined);
+              yield* Deferred.await(allowSubmit);
+              yield* Deferred.succeed(submitFinished, undefined);
+            }
+            return new Claimed({ eventId: submission.event.id, runId: RunId.make("submitted") });
+          }),
+        revoke: () =>
+          Effect.gen(function* () {
+            if (phase === "interrupted") {
+              yield* Deferred.succeed(revokeStarted, undefined);
+              yield* Deferred.await(allowRevoke);
+            }
+            return [RunId.make("revoked")];
+          }),
+      });
+      const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
+      const layer = PollingTriggers.layer.pipe(
+        Layer.provide(
+          Layer.mergeAll(
+            Layer.succeed(CursorStore)(cursors.store),
+            Layer.succeed(ItemProjectionWriter)({
+              upsert: (projection) =>
+                Effect.sync(() => {
+                  projections.set(projection.number, projection);
+                  return true;
+                }),
+            }),
+            repositoryLabelProjectionReaderLayer,
+            repositoryLabelProjectionWriterLayer,
+            inertLabelReconcilerLayer,
+            runs,
+            MarcbachmannCelLayer,
+            parser,
+            Layer.succeed(GitHubPolling, github),
+            loopControlLayer(),
+          ),
+        ),
+      );
+      const savedCursor = () =>
+        Schema.decodeUnknownSync(Schema.Struct({ cursor: PollCursor }))(
+          cursors.stored.get(`github-poll:${watchedRepository}`),
+        ).cursor;
+
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const instance = instanceWith([issueLoop("watch-ready")]);
+        yield* polling.poll(instance);
+        assert.deepStrictEqual(savedCursor(), baseline);
+
+        phase = "interrupted";
+        const pending = yield* polling.poll(instance).pipe(Effect.forkChild);
+        yield* Deferred.await(submitStarted);
+        yield* Deferred.await(revokeStarted);
+        assert.deepStrictEqual([...projections.keys()].sort(), [28, 29]);
+        assert.deepStrictEqual(savedCursor(), baseline);
+        yield* Deferred.succeed(allowSubmit, undefined);
+        yield* Deferred.await(submitFinished);
+        assert.deepStrictEqual(savedCursor(), baseline);
+        yield* Deferred.fail(
+          allowRevoke,
+          new EnginePersistenceError({
+            operation: "revoke Run",
+            cause: "storage unavailable",
+          }),
+        );
+        const interrupted = yield* Fiber.join(pending);
+        assert.strictEqual(interrupted.failures[0]?.errorTag, "EnginePersistenceError");
+        assert.deepStrictEqual(savedCursor(), baseline);
+
+        phase = "recovered";
+        const recovered = yield* polling.poll(instance);
+        assert.deepStrictEqual(recovered.failures, []);
+        assert.strictEqual(recovered.submissions.length, 1);
+        assert.strictEqual(recovered.revokedRuns, 1);
+        assert.deepStrictEqual(savedCursor(), advanced);
+        assert.deepStrictEqual(observedCursors, [PollCursor.empty, baseline, baseline]);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
 
   it.effect("isolates one loop's prompt rendering failure and still advances the cursor", () => {
     // A render failure comes from the loop's authoring and would fail the same

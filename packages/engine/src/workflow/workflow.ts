@@ -122,17 +122,12 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
     }
 
     const { result, started } = attempted;
-    if (Result.isSuccess(result)) {
-      yield* store.succeedAttempt(started.execution.attempt, result.success).pipe(asAttemptFailure);
-      yield* continueWithNewest(store, runId).pipe(asAttemptFailure);
-      return result.success;
-    }
-
-    const retry = yield* store
-      .failAttempt(started.execution.attempt, result.failure)
+    const decision = yield* store
+      .finishAttempt(started.execution.attempt, result)
       .pipe(asAttemptFailure);
-    if (!retry) {
+    if (decision._tag !== "RetryAttempt") {
       yield* continueWithNewest(store, runId).pipe(asAttemptFailure);
+      if (Result.isSuccess(result)) return result.success;
       return yield* result.failure;
     }
   }

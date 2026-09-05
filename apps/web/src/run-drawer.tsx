@@ -1,6 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { RunId } from "@usine/core/run";
-import { RunDetailView, type TranscriptPageCursor } from "@usine/orchestrator/operator";
+import {
+  ColdTranscriptRequest,
+  EarlierTranscriptRequest,
+  TailTranscriptRequest,
+  RunDetailView,
+  type TranscriptPageCursor,
+} from "@usine/orchestrator/operator";
 import type { Schema } from "effect";
 import { useState, type ReactNode } from "react";
 import { ErrorAlert } from "@/components/error-alert";
@@ -24,7 +30,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { ApiOk, api } from "./api.ts";
+import { api } from "./api.ts";
 import { brainLine, failureMessage } from "./operator-copy.ts";
 import {
   mergeTranscript,
@@ -69,8 +75,15 @@ export const RunDrawer = ({
       const key = ["run", runId] as const;
       const previous = queryClient.getQueryData<RunDetailView>(key);
       const cursor = previous?.transcript.at(-1)?.sequence;
-      const search = cursor === undefined ? "" : `?after=${cursor}`;
-      const next = await api(`/api/runs/${encodeURIComponent(runId)}${search}`, RunDetailView);
+      const next = await api((client) =>
+        client.detail({
+          params: { runId },
+          query:
+            cursor === undefined
+              ? new ColdTranscriptRequest()
+              : new TailTranscriptRequest({ after: cursor }),
+        }),
+      );
       const current = queryClient.getQueryData<RunDetailView>(key);
       if (cursor === undefined || current === undefined) return next;
       return new RunDetailView({
@@ -85,9 +98,7 @@ export const RunDrawer = ({
   });
   const mutation = useMutation({
     mutationFn: (act: "approve" | "retry" | "cancel") =>
-      api(`/api/runs/${encodeURIComponent(runId)}/${act}`, ApiOk, {
-        method: "POST",
-      }),
+      api((client) => client[act]({ params: { runId } })),
     onSuccess: async () => {
       setConfirmCancel(false);
       await Promise.all([
@@ -98,9 +109,8 @@ export const RunDrawer = ({
   });
   const earlierMutation = useMutation({
     mutationFn: (cursor: TranscriptPageCursor) =>
-      api(
-        `/api/runs/${encodeURIComponent(runId)}?attempt=${encodeURIComponent(cursor.attemptId)}&before=${cursor.before}`,
-        RunDetailView,
+      api((client) =>
+        client.detail({ params: { runId }, query: new EarlierTranscriptRequest(cursor) }),
       ),
     onSuccess: (page, cursor) => {
       const key = ["run", runId] as const;

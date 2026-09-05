@@ -1,34 +1,45 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { NodeHttpPlatform } from "@effect/platform-node";
+import { NodeHttpPlatform, NodeHttpServer } from "@effect/platform-node";
 import { LoadedInstance } from "@usine/config/instance";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
 import { AttemptId } from "@usine/core/attempt";
-import { ItemKey } from "@usine/core/item";
+import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { RunNotFoundError, RunOperationRejectedError } from "@usine/engine/engine";
+import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   ApprovalNeed,
   BoardLaneId,
   type BoardMove,
   BoardView,
+  ColdTranscriptRequest,
+  EarlierTranscriptRequest,
   FactoryOverview,
+  FailedTranscriptView,
+  InfraFailureView,
   LoopView,
   ProjectView,
   ReadyOverview,
   RunDetailView,
   RunView,
   TranscriptAttemptNotFoundError,
+  TranscriptEventView,
+  TranscriptPageCursor,
+  TailTranscriptRequest,
+  type TranscriptRequest,
   OperatorObservation,
 } from "@usine/orchestrator/operator";
+import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter } from "effect/unstable/http";
+import { HttpApiClient } from "effect/unstable/httpapi";
 import { afterAll, assert, describe, it } from "vitest";
-import { FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
+import { BackendUnavailableError, FactoryBackend, needsSetupBackendLayer } from "../src/backend.ts";
 import { apiRoutes, staticRoutes } from "../src/http.ts";
 
 const runId = RunId.make("run-1");
@@ -68,8 +79,23 @@ const detail = new RunDetailView({
   run,
   eventDedupKey: "issue:31",
   eventPayload: { number: 31 },
-  transcript: [],
-  earlierTranscript: [],
+  transcript: [
+    new TranscriptEventView({
+      attemptId: AttemptId.make("attempt/1"),
+      sequence: TranscriptSequence.make(7),
+      receivedAt: "2026-09-01T12:00:00.000Z",
+      direction: "outbound",
+      payload: new FailedTranscriptView({
+        failure: new InfraFailureView({ message: "Worker disconnected" }),
+      }),
+    }),
+  ],
+  earlierTranscript: [
+    new TranscriptPageCursor({
+      attemptId: AttemptId.make("attempt/1"),
+      before: TranscriptSequence.make(7),
+    }),
+  ],
 });
 const overview = new ReadyOverview({
   projects: [
@@ -116,6 +142,17 @@ describe("operator HTTP API", () => {
     assert.strictEqual(runResponse.status, 200);
     assert.strictEqual((await runResponse.json()).eventDedupKey, "issue:31");
 
+    for (const search of [
+      "after=2&after=0",
+      "attempt=a&attempt=b&before=2",
+      "after=2&unrelated=x",
+    ]) {
+      const repeated = await app.handler(
+        new Request(`http://localhost/api/runs/${runId}?${search}`),
+      );
+      assert.strictEqual(repeated.status, 200, search);
+    }
+
     const action = await app.handler(
       new Request(`http://localhost/api/runs/${runId}/approve`, { method: "POST" }),
     );
@@ -131,10 +168,19 @@ describe("operator HTTP API", () => {
     assert.strictEqual(invalidCursor.status, 400);
     assert.strictEqual((await invalidCursor.json()).error, "SchemaError");
 
-    const incompleteEarlierPage = await app.handler(
-      new Request(`http://localhost/api/runs/${runId}?before=2`),
-    );
-    assert.strictEqual(incompleteEarlierPage.status, 400);
+    for (const search of [
+      "before=2",
+      "attempt=a",
+      "after=2&before=3",
+      "after=2&attempt=a",
+      "after=2&attempt=a&before=3",
+    ]) {
+      const invalid = await app.handler(
+        new Request(`http://localhost/api/runs/${runId}?${search}`),
+      );
+      assert.strictEqual(invalid.status, 400, search);
+      assert.strictEqual((await invalid.json()).error, "SchemaError");
+    }
   });
 
   it("refuses cross-site requests before their side effect while loopback origins pass", async () => {
@@ -156,6 +202,16 @@ describe("operator HTTP API", () => {
       }),
     );
     assert.strictEqual(loopback.status, 503);
+
+    const malformed = await app.handler(
+      new Request("http://localhost/api/projects/a/b/items/0/lane", {
+        method: "POST",
+        headers: { origin: "null" },
+        body: "not JSON",
+      }),
+    );
+    assert.strictEqual(malformed.status, 403);
+    assert.strictEqual((await malformed.json()).error, "CrossSiteRequestError");
   });
 
   it("maps typed engine errors onto operator-readable statuses", async () => {
@@ -220,9 +276,142 @@ describe("operator HTTP API", () => {
       assert.strictEqual(moved?.repository, repositoryName);
       assert.strictEqual(moved?.item, 31);
       assert.strictEqual(moved?.toLane, "authored:Review");
+
+      // Authored fields are strict even though JSON has always been accepted
+      // independently of the caller's Content-Type.
+      for (const body of ["{", '{"toLane":"authored:Review","typo":true}', '{"toLane":42}']) {
+        const invalid = await rejectingApp.handler(
+          new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
+            method: "POST",
+            body,
+          }),
+        );
+        assert.strictEqual(invalid.status, 400);
+        assert.strictEqual((await invalid.json()).error, "InvalidRequestError");
+      }
+      const simplePost = await rejectingApp.handler(
+        new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
+          method: "POST",
+          body: '{"toLane":"authored:Done"}',
+        }),
+      );
+      assert.strictEqual(simplePost.status, 200);
+      assert.strictEqual(moved?.toLane, "authored:Done");
     } finally {
       await rejectingApp.dispose();
     }
+  });
+
+  it("round-trips the derived client through a listening server for reads, interventions, cursors, and typed failures", async () => {
+    const observed: Array<TranscriptRequest> = [];
+    const interventions: Array<string> = [];
+    const record = (operation: string) => Effect.sync(() => void interventions.push(operation));
+    const live = Layer.succeed(FactoryBackend)({
+      overview: Effect.succeed(overview),
+      detail: (id, request) => {
+        if (id !== runId) return Effect.fail(new RunNotFoundError({ runId: id }));
+        if (request._tag === "EarlierTranscriptRequest" && request.attemptId !== "attempt/1") {
+          return Effect.fail(
+            new TranscriptAttemptNotFoundError({ runId: id, attemptId: request.attemptId }),
+          );
+        }
+        return Effect.sync(() => {
+          observed.push(request);
+          return detail;
+        });
+      },
+      approve: (id) =>
+        id === runId
+          ? record(`approve:${id}`)
+          : Effect.fail(
+              new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
+            ),
+      retry: (id) => record(`retry:${id}`),
+      cancel: (id) => record(`cancel:${id}`),
+      pause: (loop) =>
+        loop === loopName
+          ? record(`pause:${loop}`)
+          : Effect.fail(new BackendUnavailableError({ message: "Setup is required." })),
+      unpause: (loop) => record(`unpause:${loop}`),
+      moveBoardItem: (move) => record(`move:${move.repository}#${move.item}:${move.toLane}`),
+    });
+    const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
+      Layer.provideMerge(NodeHttpServer.layerTest),
+    );
+    await Effect.runPromise(
+      Effect.gen(function* () {
+        const { operator: client } = yield* HttpApiClient.make(OperatorApi);
+        assert.deepStrictEqual(yield* client.overview(), overview);
+        const requests = [
+          new ColdTranscriptRequest(),
+          new TailTranscriptRequest({ after: TranscriptSequence.make(7) }),
+          new EarlierTranscriptRequest({
+            attemptId: AttemptId.make("attempt/1"),
+            before: TranscriptSequence.make(4),
+          }),
+        ];
+        for (const query of requests) {
+          assert.deepStrictEqual(yield* client.detail({ params: { runId }, query }), detail);
+        }
+        assert.deepStrictEqual(observed, requests);
+        for (const action of ["approve", "retry", "cancel"] as const) {
+          assert.deepStrictEqual(yield* client[action]({ params: { runId } }), { ok: true });
+        }
+        for (const action of ["pause", "unpause"] as const) {
+          assert.deepStrictEqual(yield* client[action]({ params: { loop: loopName } }), {
+            ok: true,
+          });
+        }
+        assert.deepStrictEqual(
+          yield* client.moveBoardItem({
+            params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
+            payload: { toLane: BoardLaneId.make("authored:Review") },
+          }),
+          { ok: true },
+        );
+        assert.deepStrictEqual(interventions, [
+          `approve:${runId}`,
+          `retry:${runId}`,
+          `cancel:${runId}`,
+          `pause:${loopName}`,
+          `unpause:${loopName}`,
+          "move:basaltbytes/usine#31:authored:Review",
+        ]);
+
+        const missingId = RunId.make("missing/run");
+        const missing = yield* Effect.flip(
+          client.detail({ params: { runId: missingId }, query: new ColdTranscriptRequest() }),
+        );
+        assert.instanceOf(missing, OperatorHttpError);
+        assert.strictEqual(missing.error, "RunNotFoundError");
+        assert.strictEqual(missing.status, 404);
+        assert.strictEqual(missing.message, `Run ${missingId} was not found.`);
+        const wrongAttempt = yield* Effect.flip(
+          client.detail({
+            params: { runId },
+            query: new EarlierTranscriptRequest({
+              attemptId: AttemptId.make("other-attempt"),
+              before: TranscriptSequence.make(4),
+            }),
+          }),
+        );
+        assert.instanceOf(wrongAttempt, OperatorHttpError);
+        assert.strictEqual(wrongAttempt.error, "TranscriptAttemptNotFoundError");
+        assert.strictEqual(wrongAttempt.status, 404);
+
+        const rejected = yield* Effect.flip(client.approve({ params: { runId: missingId } }));
+        assert.instanceOf(rejected, OperatorHttpError);
+        assert.strictEqual(rejected.error, "RunOperationRejectedError");
+        assert.strictEqual(rejected.status, 409);
+        const unavailable = yield* Effect.flip(
+          client.pause({ params: { loop: LoopName.make("setup-required") } }),
+        );
+        assert.instanceOf(unavailable, OperatorHttpError);
+        assert.strictEqual(unavailable.error, "BackendUnavailableError");
+        assert.strictEqual(unavailable.status, 503);
+        assert.strictEqual(unavailable.message, "Setup is required.");
+      }).pipe(Effect.provide(server)),
+    );
   });
 
   it("serves client routes without masking missing API routes or static files", async () => {

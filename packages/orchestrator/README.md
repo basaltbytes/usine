@@ -10,6 +10,23 @@ Its platform-free entry points provide `PollingTriggers` at `/polling-triggers`,
 
 `Operator.detail` accepts distinct cold, live-tail, and earlier-page requests. A cold read keeps the newest 500 rows per Attempt and returns an earlier cursor for every truncated Attempt; clients can page each cursor backward until the entire transcript is reachable without ballooning the first drawer response. A live-tail response returns at most 500 rows across the Run and advances its cursor from the last returned row.
 
+## Operator HTTP
+
+`@usine/orchestrator/operator/http` exports `OperatorApi`, the shared HTTP contract
+for operator observation and interventions. Use Effect's `HttpApiClient.make` with
+an `HttpClient` layer to call it, or `HttpApiBuilder.group` to implement its
+`operator` group. Server implementations provide `OperatorHttpPolicy` to enforce
+origin checks and translate request failures; `apps/server` provides the local
+server implementation.
+
+The generated client accepts the same `ColdTranscriptRequest`,
+`TailTranscriptRequest`, and `EarlierTranscriptRequest` values as `Operator.detail`.
+It encodes their exclusive query parameters and decodes responses through the
+shared read-model schemas. `OperatorHttpError` preserves the failure's `error`
+discriminator, operator-readable `message`, and associated `status`. The wire
+response remains `{ error, message }`. Successful actions return `{ ok: true }`;
+clients observe subsequent Run or Board progress through the read endpoints.
+
 ## Polling triggers
 
 `PollingTriggers.poll(instance)` performs one cycle; `PollingTriggers.run(instance)` repeats cycles using the instance's factory-wide `poll_interval` and waits longer when GitHub reports rate-limit pressure. Per-repository failures are isolated and reported on the cycle — one failing repository never stops its siblings.

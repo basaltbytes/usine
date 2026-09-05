@@ -14,7 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ApiOk, api } from "../../api.ts";
+import { api } from "../../api.ts";
 import { overviewQuery } from "../../overview.ts";
 
 const Loops = () => {
@@ -22,11 +22,7 @@ const Loops = () => {
   const queryClient = useQueryClient();
   const pauseMutation = useMutation({
     mutationFn: (loop: LoopView) =>
-      api(
-        `/api/loops/${encodeURIComponent(loop.name)}/${loop.paused ? "unpause" : "pause"}`,
-        ApiOk,
-        { method: "POST" },
-      ),
+      api((client) => client[loop.paused ? "unpause" : "pause"]({ params: { loop: loop.name } })),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["overview"] }),
   });
   const loops = data.loops;
