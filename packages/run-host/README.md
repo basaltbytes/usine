@@ -6,6 +6,6 @@ The host uses protocol v4 as newline-delimited JSON. Its first input must be a s
 
 The executable runs the production Pi parent with Claude Code, Codex, and Pi child backends. `--stub` and `--stub-delay-ms` select the deterministic adapter used by process tests. Runtime logs and process-console output go to stderr because stdout belongs exclusively to the attempt channel, including logs from libraries with separate Effect runtimes.
 
-After the agent session finishes, the host records commits created after the supplied base commit. A final result contains the agent message and structured commit facts; pull-request and comment facts use the same `StepResult` union.
+After the agent session finishes, the host records commits created after the supplied base commit. For a changed checkout, an agent-created branch, or an Attempt pinned to a commit, it also asks GitHub for PRs whose head matches the final checkout commit. These structured `PullRequest` facts persist with the result and supply the operator's PR link. Discovery uses `gh api` with the worker's existing repository access, including the exe.dev GitHub host; it does not parse the agent's message. A failed lookup or ten-second timeout logs a warning and preserves the completed agent result. Worker images need the GitHub CLI for PR discovery.
 
 Everything is 0.x, so APIs may change. Supply `effect` at the version pinned by the usine workspace.

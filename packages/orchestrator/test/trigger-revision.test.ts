@@ -70,12 +70,28 @@ it.effect.each(["issue", "pr"] as const)(
           number: 63,
           itemKey: "acme/demo/63",
           contentHash: digit.repeat(64),
-          payload: { number: 63, ...(source === "pr" ? { headRefOid: sha } : {}) },
+          payload: source === "pr" ? { number: 63, headRefOid: sha } : { number: 63 },
         });
         yield* evaluateItem(repository, [resolved], projection).pipe(Effect.provide(engine));
         assert.strictEqual(submissions.at(-1)?.revision, source === "pr" ? sha : "HEAD");
       }
       assert.strictEqual(submissions.length, 2);
       assert.notStrictEqual(submissions[0]?.event.id, submissions[1]?.event.id);
+      if (source === "pr") {
+        const invalid = Schema.decodeUnknownSync(ItemProjection)({
+          repository: repository.name,
+          source,
+          number: 63,
+          itemKey: "acme/demo/63",
+          contentHash: "c".repeat(64),
+          payload: { number: 63, headRefOid: "missing-head" },
+        });
+        const error = yield* evaluateItem(repository, [resolved], invalid).pipe(
+          Effect.provide(engine),
+          Effect.flip,
+        );
+        assert.strictEqual(error._tag, "InvalidGitHubResponseError");
+        assert.strictEqual(submissions.length, 2);
+      }
     }).pipe(Effect.provide(ConfigParser.layer.pipe(Layer.provideMerge(MarcbachmannCelLayer)))),
 );
