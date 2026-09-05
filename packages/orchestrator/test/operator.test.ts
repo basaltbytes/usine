@@ -1,28 +1,20 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import {
-  AgentName,
-  AttemptId,
-  DedupKey,
-  EventId,
-  ItemKey,
-  RepositoryName,
-  RunId,
-  StepName,
-  WorkerName,
-} from "@usine/core/ids";
-import {
-  AgentFile,
-  GitHubLabelName,
-  IssueTrigger,
-  LoadedInstance,
-  LoopFile,
-  LoopName,
-  Persona,
-  PromptTemplate,
-  UsineConfig,
-} from "@usine/config/model";
-import { Agent } from "@usine/core/agent";
+import { AgentName, Agent, AgentPersona } from "@usine/core/agent";
+import { AttemptId, Attempt, AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import { DedupKey, EventId, Event } from "@usine/core/event";
+import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
+import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { RunId, Run } from "@usine/core/run";
+import { StepName, Step } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
+import { AgentFile } from "@usine/config/agent";
+import { GitHubLabelName } from "@usine/config/label";
+import { IssueTrigger } from "@usine/config/trigger";
+import { LoadedInstance } from "@usine/config/instance";
+import { LoopFile, PromptTemplate } from "@usine/config/loop";
+import { LoopName } from "@usine/core/loop";
+import { UsineConfig } from "@usine/config/factory";
 import {
   AgentSessionId,
   ChildSession,
@@ -30,33 +22,24 @@ import {
   TextOutput,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Attempt, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
-import { Event } from "@usine/core/event";
-import { ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
-import { RepositoryRevision } from "@usine/core/repository";
-import { Run } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
-import { Step } from "@usine/core/step";
 import { RunEngine } from "@usine/engine/engine";
 import {
   ItemContentHash,
   ItemProjection,
   ItemProjectionSource,
-} from "@usine/engine/item-projection/model";
-import { ItemProjectionReader } from "@usine/engine/item-projection/service";
-import { LoopControl } from "@usine/engine/loop-control";
+  ItemProjectionReader,
+} from "@usine/engine/item-projection";
+import { LoopControl, LoopRuntimeState } from "@usine/engine/loop-control";
+import { ProjectionRevision, RunSnapshot, RunReader } from "@usine/engine/run-reader";
 import {
-  LoopRuntimeState,
-  ProjectionRevision,
-  RunSnapshot,
   TranscriptEntry,
   type TranscriptQuery,
   TranscriptSequence,
-} from "@usine/engine/model";
-import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection/service";
-import { RunReader } from "@usine/engine/run-reader";
+} from "@usine/engine/transcript";
+import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { Source } from "@usine/expression/model";
 import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
@@ -68,9 +51,8 @@ import {
   EarlierTranscriptRequest,
   FailureView,
   TailTranscriptRequest,
-  TranscriptCursor,
 } from "../src/operator/model.ts";
-import { Operator } from "../src/operator/service.ts";
+import { Operator } from "../src/operator/operator.ts";
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { failureView } from "../src/operator/projection.ts";
@@ -109,7 +91,7 @@ const agentFile = new AgentFile({
   effort: brain.effort,
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Persona.make("Review the issue."),
+  persona: AgentPersona.make("Review the issue."),
 });
 const loop = new LoopFile({
   name: loopName,
@@ -503,7 +485,7 @@ describe("Operator", () => {
 
         const tail = yield* operator.detail(
           runId,
-          new TailTranscriptRequest({ after: TranscriptCursor.make(1) }),
+          new TailTranscriptRequest({ after: TranscriptSequence.make(1) }),
         );
         assert.strictEqual(tail.transcript.length, 500);
         assert.strictEqual(tail.transcript[0]?.sequence, 2);
@@ -511,7 +493,7 @@ describe("Operator", () => {
         assert.deepStrictEqual(tail.earlierTranscript, []);
         const remainingTail = yield* operator.detail(
           runId,
-          new TailTranscriptRequest({ after: TranscriptCursor.make(501) }),
+          new TailTranscriptRequest({ after: TranscriptSequence.make(501) }),
         );
         assert.deepStrictEqual(
           remainingTail.transcript.map(({ sequence }) => sequence),
@@ -522,7 +504,7 @@ describe("Operator", () => {
           runId,
           new EarlierTranscriptRequest({
             attemptId,
-            before: TranscriptCursor.make(3),
+            before: TranscriptSequence.make(3),
           }),
         );
         assert.deepStrictEqual(
@@ -539,7 +521,7 @@ describe("Operator", () => {
             runId,
             new EarlierTranscriptRequest({
               attemptId: AttemptId.make("another-attempt"),
-              before: TranscriptCursor.make(3),
+              before: TranscriptSequence.make(3),
             }),
           )
           .pipe(Effect.flip);

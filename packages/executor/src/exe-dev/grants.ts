@@ -1,4 +1,5 @@
-import { RepositoryName, WorkerName } from "@usine/core/ids";
+import { RepositoryName } from "@usine/core/repository";
+import { WorkerName } from "@usine/core/worker";
 import { Effect, Ref } from "effect";
 import { CredentialUnavailableError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";

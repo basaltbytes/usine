@@ -1,6 +1,7 @@
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
-import { AttemptId, RepositoryName } from "@usine/core/ids";
+import { AttemptId } from "@usine/core/attempt";
+import { RepositoryName } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
 import {
   Effect,

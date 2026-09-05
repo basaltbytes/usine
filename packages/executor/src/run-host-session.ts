@@ -1,6 +1,6 @@
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { AttemptId } from "@usine/core/ids";
+import { AttemptId } from "@usine/core/attempt";
 import { StepResult } from "@usine/core/step/result";
 import {
   Cause,

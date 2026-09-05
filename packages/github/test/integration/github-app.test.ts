@@ -1,6 +1,6 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { RepositoryName } from "@usine/core/ids";
+import { RepositoryName } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
 import { Config, Effect, Layer, Redacted, Schema } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";

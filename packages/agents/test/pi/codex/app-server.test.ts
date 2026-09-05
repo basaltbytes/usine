@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
-import { AgentName } from "@usine/core/ids";
+import { AgentName } from "@usine/core/agent";
 import {
   Deferred,
   Effect,

@@ -1,3 +1,6 @@
+import { Schema } from "effect";
+import { EventId } from "../event.ts";
+
 /**
  * The run state machine (ADR 0002):
  *
@@ -16,8 +19,6 @@
  * error. Construct states through these transitions (or by parsing a stored
  * row via the `RunState` union) — they are the state machine.
  */
-import { Schema } from "effect";
-import { EventId } from "../ids.ts";
 
 /** Cancel reason — value object: the operator closed the run by hand. */
 export class OperatorCanceled extends Schema.TaggedClass<OperatorCanceled>(

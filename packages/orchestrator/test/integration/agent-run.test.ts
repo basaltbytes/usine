@@ -1,28 +1,26 @@
 import { NodeFileSystem, NodePath, NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { AgentName, RepositoryName, RunId, StepName } from "@usine/core/ids";
-import {
-  AgentFile,
-  IssueTrigger,
-  LoadedInstance,
-  LoopFile,
-  LoopName,
-  Persona,
-  PromptTemplate,
-  Selector,
-  UsineConfig,
-} from "@usine/config/model";
+import { AgentName, AgentPersona } from "@usine/core/agent";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { StepName } from "@usine/core/step";
+import { AgentFile } from "@usine/config/agent";
+import { IssueTrigger } from "@usine/config/trigger";
+import { LoadedInstance } from "@usine/config/instance";
+import { LoopFile, PromptTemplate } from "@usine/config/loop";
+import { LoopName } from "@usine/core/loop";
+import { Selector } from "@usine/config/selector";
+import { UsineConfig } from "@usine/config/factory";
 import { ConfigParser } from "@usine/config/parser";
 import { ModelId } from "@usine/core/agent/brain";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunEngine } from "@usine/engine/engine";
-import { TranscriptAllQuery } from "@usine/engine/model";
+import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Source } from "@usine/expression/model";
 import { GitHubApp } from "@usine/github/github-app";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
-import { IssuePayload } from "@usine/github/polling/model";
-import { GitHubPolling } from "@usine/github/polling/polling";
+import { IssuePayload, GitHubPolling } from "@usine/github/polling";
 import { localSecretsLayer } from "@usine/github/local-secrets";
 import {
   Config,
@@ -133,7 +131,7 @@ const makeInstance = (options: {
     effort: "low",
     parentModel: Option.none(),
     parentEffort: Option.none(),
-    persona: Persona.make(
+    persona: AgentPersona.make(
       "Act conservatively. Perform only the requested GitHub operation and report its result.",
     ),
   });

@@ -1,4 +1,5 @@
-import { AttemptId, RepositoryName } from "@usine/core/ids";
+import { AttemptId } from "@usine/core/attempt";
+import { RepositoryName } from "@usine/core/repository";
 import { Effect, Layer, Ref, Result, Schema } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
@@ -302,3 +303,11 @@ export const layer = (
   options: ExeDevExecutorOptions,
 ): Layer.Layer<Executor, never, ChildProcessSpawner.ChildProcessSpawner> =>
   Layer.effect(Executor, makeExeDevExecutor(options));
+
+export {
+  CredentialGrantMinutes,
+  type ExeDevExecutorOptions,
+  GitHubIntegration,
+  HarnessLoginCheck,
+  IntegrationName,
+} from "./model.ts";

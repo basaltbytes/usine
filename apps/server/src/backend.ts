@@ -1,17 +1,16 @@
-import type { LoadedInstance } from "@usine/config/model";
-import { LoopName, RunId } from "@usine/core/ids";
+import type { LoadedInstance } from "@usine/config/instance";
+import { LoopName } from "@usine/core/loop";
+import { RunId } from "@usine/core/run";
 import {
   type BoardMove,
   type FactoryOverview,
   NeedsSetupOverview,
   type RunDetailView,
   type TranscriptRequest,
-} from "@usine/orchestrator/operator/model";
-import type {
-  Operator,
-  OperatorError,
-  OperatorObservation,
-} from "@usine/orchestrator/operator/service";
+  type Operator,
+  type OperatorError,
+  type OperatorObservation,
+} from "@usine/orchestrator/operator";
 import { Context, Effect, Layer, Schema } from "effect";
 
 export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailableError>(

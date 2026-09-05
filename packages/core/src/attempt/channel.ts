@@ -2,10 +2,9 @@ import { Result, Schema, type Effect } from "effect";
 import { Agent } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
 import { AgentSessionEvent, ChildSessionBudget } from "../agent/session.ts";
-import { AttemptId, RepositoryName } from "../ids.ts";
-import { CommitSha, RepositoryRevision } from "../repository.ts";
+import { AttemptId, AttemptTask } from "./attempt.ts";
+import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
 import { StepResult } from "../step/result.ts";
-import { AttemptTask } from "./attempt.ts";
 import { AttemptFailure } from "./failure.ts";
 
 export const PROTOCOL_VERSION = 4 as const;

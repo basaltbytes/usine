@@ -4,7 +4,7 @@ import type {
   ExtensionContext,
   ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { Agent, AgentPersona } from "@usine/core/agent";
+import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionEvent,
@@ -15,7 +15,6 @@ import {
   SessionStarted,
   TextOutput,
 } from "@usine/core/agent/session";
-import { AgentName } from "@usine/core/ids";
 import { Effect, Logger, Option, Stream } from "effect";
 import {
   type AgentSessionError,

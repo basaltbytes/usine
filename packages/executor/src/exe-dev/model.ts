@@ -1,4 +1,5 @@
-import { AttemptId, RepositoryName } from "@usine/core/ids";
+import { AttemptId } from "@usine/core/attempt";
+import { RepositoryName } from "@usine/core/repository";
 import { Schema, type Effect, type Ref } from "effect";
 import type { RunHostCommand } from "../executor.ts";
 

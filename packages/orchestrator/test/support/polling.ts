@@ -1,16 +1,15 @@
 import { ConfigParser } from "@usine/config/parser";
-import { CursorStore } from "@usine/engine/cursor/store";
+import { CursorStore } from "@usine/engine/cursor";
 import { RunEngine } from "@usine/engine/engine";
-import { ItemProjectionWriter } from "@usine/engine/item-projection/service";
-import { LoopControl } from "@usine/engine/loop-control";
-import type { LoopRuntimeState } from "@usine/engine/model";
+import { ItemProjectionWriter } from "@usine/engine/item-projection";
+import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
 import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
-} from "@usine/engine/repository-label-projection/service";
+} from "@usine/engine/repository-label-projection";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
-import { GitHubPolling } from "@usine/github/polling/polling";
+import { GitHubPolling } from "@usine/github/polling";
 import { Effect, Layer, Option, Schema } from "effect";
 import { LabelReconciler } from "../../src/label-reconciler.ts";
 import { PollingTriggers } from "../../src/polling-triggers.ts";

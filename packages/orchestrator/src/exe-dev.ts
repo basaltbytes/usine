@@ -1,8 +1,8 @@
 import { NodeServices } from "@effect/platform-node";
-import type { UsineConfig } from "@usine/config/model";
+import type { UsineConfig } from "@usine/config/factory";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { layer as exeDevExecutorLayer } from "@usine/executor/exe-dev";
-import { CredentialGrantMinutes, type ExeDevExecutorOptions } from "@usine/executor/exe-dev/model";
+import { CredentialGrantMinutes, type ExeDevExecutorOptions } from "@usine/executor/exe-dev";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { Layer } from "effect";
 import { stepExecutorLayer } from "./scheduler.ts";

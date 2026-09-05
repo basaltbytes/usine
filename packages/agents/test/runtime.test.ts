@@ -7,7 +7,7 @@ import {
   ChildSessionCount,
   ParentSession,
 } from "@usine/core/agent/session";
-import { AgentName } from "@usine/core/ids";
+import { AgentName } from "@usine/core/agent";
 import { Option, Schema } from "effect";
 import {
   AgentResultError,

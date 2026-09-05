@@ -18,10 +18,6 @@
       "types": "./dist/instance-folder.d.ts",
       "default": "./dist/instance-folder.js"
     },
-    "./model": {
-      "types": "./dist/model.d.ts",
-      "default": "./dist/model.js"
-    },
     "./parser": {
       "types": "./dist/parser.d.ts",
       "default": "./dist/parser.js"
@@ -37,6 +33,38 @@
     "./yaml/writer": {
       "types": "./dist/yaml/writer.d.ts",
       "default": "./dist/yaml/writer.js"
+    },
+    "./file": {
+      "types": "./dist/file.d.ts",
+      "default": "./dist/file.js"
+    },
+    "./board": {
+      "types": "./dist/board.d.ts",
+      "default": "./dist/board.js"
+    },
+    "./label": {
+      "types": "./dist/label.d.ts",
+      "default": "./dist/label.js"
+    },
+    "./factory": {
+      "types": "./dist/factory.d.ts",
+      "default": "./dist/factory.js"
+    },
+    "./loop": {
+      "types": "./dist/loop.d.ts",
+      "default": "./dist/loop.js"
+    },
+    "./trigger": {
+      "types": "./dist/trigger.d.ts",
+      "default": "./dist/trigger.js"
+    },
+    "./agent": {
+      "types": "./dist/agent.d.ts",
+      "default": "./dist/agent.js"
+    },
+    "./instance": {
+      "types": "./dist/instance/instance.d.ts",
+      "default": "./dist/instance/instance.js"
     }
   },
   "publishConfig": {

@@ -1,6 +1,5 @@
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { RepositoryName } from "@usine/core/ids";
-import { CommitSha } from "@usine/core/repository";
+import { RepositoryName, CommitSha } from "@usine/core/repository";
 import { Effect, Schema } from "effect";
 import {
   ExecutorOperationError,

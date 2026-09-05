@@ -1,4 +1,4 @@
-import { RepositoryName } from "@usine/core/ids";
+import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
 
 const RepositoryLabelName = Schema.String.check(

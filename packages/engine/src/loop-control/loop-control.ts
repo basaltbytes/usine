@@ -1,9 +1,10 @@
-import { LoopName } from "@usine/core/ids";
+import { LoopName } from "@usine/core/loop";
 import { asc, eq } from "drizzle-orm";
 import { Context, Effect, Layer } from "effect";
-import { RunDatabase } from "./database/database.ts";
-import { loopRuntime } from "./database/schema.ts";
-import { EnginePersistenceError, LoopRuntimeState } from "./model.ts";
+import { RunDatabase } from "../database/database.ts";
+import { loopRuntime } from "../database/schema.ts";
+import { EnginePersistenceError } from "../engine/error.ts";
+import { LoopRuntimeState } from "./model.ts";
 
 const persistence =
   (operation: string) =>
@@ -88,3 +89,5 @@ export class LoopControl extends Context.Service<
 >()("@usine/engine/LoopControl") {
   static readonly layer = Layer.effect(LoopControl, makeLoopControl);
 }
+
+export { LoopRuntimeState } from "./model.ts";

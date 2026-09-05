@@ -1,11 +1,8 @@
 import { BrainSpec } from "@usine/core/agent/brain";
 import { AgentSessionEvent, RateLimitWindow } from "@usine/core/agent/session";
-import { RepositoryName, RunId } from "@usine/core/ids";
-import type {
-  FailureView,
-  NeedView,
-  TranscriptEventView,
-} from "@usine/orchestrator/operator/model";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import type { FailureView, NeedView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { Match, Option, Schema } from "effect";
 
 export interface NeedCopy {

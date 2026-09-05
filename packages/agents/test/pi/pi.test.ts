@@ -12,13 +12,12 @@ import {
   SettingsManager,
   type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
-import { Agent, AgentPersona } from "@usine/core/agent";
+import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession, ChildSessionBudget } from "@usine/core/agent/session";
-import { AttemptTask } from "@usine/core/attempt";
+import { AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AgentName, AttemptId, RepositoryName } from "@usine/core/ids";
-import { CommitSha, RepositoryRevision } from "@usine/core/repository";
+import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { Effect, Fiber, Layer, Option, Stream } from "effect";
 import { Type } from "typebox";
 import {
@@ -34,17 +33,17 @@ import {
   UnknownModelError,
   UnsupportedEffortError,
   WorkingDirectory,
-} from "../../src/runtime.ts";
+} from "@usine/agents/runtime";
 import {
   PiSdk,
   piChildBackendLayer,
-  piParentSessionToolPolicy,
   piParentLayer,
   type PiSession,
   type PiSessionEvent,
   type PiStartOptions,
   type PiStartResult,
-} from "../../src/pi/pi.ts";
+} from "@usine/agents/pi";
+import { piParentSessionToolPolicy } from "../../src/pi/sdk.ts";
 import { resolvePiPool } from "../../src/pi/authentication.ts";
 
 describe("Pi pool resolution", () => {

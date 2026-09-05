@@ -1,23 +1,17 @@
 import { assert, describe, it } from "@effect/vitest";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
-import { Agent, AgentPersona } from "@usine/core/agent";
+import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { AgentFailure, AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { Event } from "@usine/core/event";
-import {
-  AgentName,
-  DedupKey,
-  EventId,
-  ItemKey,
-  LoopName,
-  RepositoryName,
-  RunId,
-  StepName,
-  WorkerName,
-} from "@usine/core/ids";
-import { RepositoryRevision } from "@usine/core/repository";
+import { Event, DedupKey, EventId } from "@usine/core/event";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
 import {
   Context,
@@ -36,10 +30,10 @@ import {
 import { SqlClient } from "effect/unstable/sql";
 import { layer } from "../src/database/local-sqlite.ts";
 import { InstanceDirectory } from "@usine/core/instance";
-import { RunEngine } from "../src/engine.ts";
-import { LoopControl } from "../src/loop-control.ts";
-import { Submission } from "../src/model.ts";
-import { RunReader } from "../src/run-reader.ts";
+import { RunEngine } from "../src/engine/engine.ts";
+import { LoopControl } from "../src/loop-control/loop-control.ts";
+import { Submission } from "../src/engine/submission.ts";
+import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 
 const stepResult = (message: string) => new StepResult({ message, facts: [] });

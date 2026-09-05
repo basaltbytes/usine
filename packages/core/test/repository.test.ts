@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
 import { Schema } from "effect";
-import { RepositoryName } from "../src/ids.ts";
+import { RepositoryName } from "../src/repository.ts";
 
 describe("Repository.Name", () => {
   it("rejects a repository without its owner", () => {

@@ -1,7 +1,10 @@
 import { createServer } from "node:http";
 import { extname, resolve, sep } from "node:path";
 import { NodeHttpServer } from "@effect/platform-node";
-import { AttemptId, LoopName, RepositoryName, RunId } from "@usine/core/ids";
+import { AttemptId } from "@usine/core/attempt";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
 import { ItemNumber } from "@usine/core/item";
 import {
   BoardLaneId,
@@ -11,9 +14,9 @@ import {
   FactoryOverview,
   RunDetailView,
   TailTranscriptRequest,
-  TranscriptCursor,
   type TranscriptRequest,
-} from "@usine/orchestrator/operator/model";
+} from "@usine/orchestrator/operator";
+import { TranscriptSequence } from "@usine/engine/transcript";
 import { Effect, Layer, Match, Schema } from "effect";
 import { HttpBody, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { FactoryBackend, type BackendError } from "./backend.ts";
@@ -29,17 +32,19 @@ const PathBoardItem = Schema.Struct({
   item: Schema.FiniteFromString.pipe(Schema.decodeTo(ItemNumber)),
 });
 const BoardMoveBody = Schema.Struct({ toLane: BoardLaneId });
-const TranscriptCursorFromString = Schema.FiniteFromString.pipe(Schema.decodeTo(TranscriptCursor));
+const TranscriptSequenceFromString = Schema.FiniteFromString.pipe(
+  Schema.decodeTo(TranscriptSequence),
+);
 const RunDetailSearch = Schema.Union([
   Schema.Struct({ _tag: Schema.Literal("ColdTranscriptRequest") }),
   Schema.Struct({
     _tag: Schema.Literal("TailTranscriptRequest"),
-    after: TranscriptCursorFromString,
+    after: TranscriptSequenceFromString,
   }),
   Schema.Struct({
     _tag: Schema.Literal("EarlierTranscriptRequest"),
     attemptId: AttemptId,
-    before: TranscriptCursorFromString,
+    before: TranscriptSequenceFromString,
   }),
 ]);
 const ApiOk = Schema.Struct({ ok: Schema.Literal(true) });

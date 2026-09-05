@@ -1,29 +1,19 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { UsineConfig } from "@usine/config/model";
-import { Agent, AgentPersona } from "@usine/core/agent";
+import { UsineConfig } from "@usine/config/factory";
+import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
-import { Event } from "@usine/core/event";
-import {
-  AgentName,
-  DedupKey,
-  EventId,
-  ItemKey,
-  LoopName,
-  RepositoryName,
-  StepName,
-  WorkerName,
-} from "@usine/core/ids";
+import { Event, DedupKey, EventId } from "@usine/core/event";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { InstanceDirectory } from "@usine/core/instance";
-import { RepositoryRevision } from "@usine/core/repository";
-import {
-  GitHubIntegration,
-  HarnessLoginCheck,
-  IntegrationName,
-} from "@usine/executor/exe-dev/model";
-import { RunEngine } from "@usine/engine/engine";
-import { Submission, TranscriptAllQuery } from "@usine/engine/model";
+import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev";
+import { RunEngine, Submission } from "@usine/engine/engine";
+import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { Config, DateTime, Effect, FileSystem, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as exeDevLayer } from "../../src/exe-dev.ts";

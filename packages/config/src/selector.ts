@@ -1,5 +1,21 @@
-import { Option } from "effect";
-import type { ManagedRepo, Selector } from "./model.ts";
+import { RepositoryName } from "@usine/core/repository";
+import { Option, Schema } from "effect";
+import { RegistryTag, type ManagedRepo } from "./factory.ts";
+
+export class Selector extends Schema.Class<Selector>("@usine/config/Selector")({
+  repos: Schema.OptionFromOptionalKey(
+    Schema.Array(RepositoryName).check(Schema.isNonEmpty(), Schema.isUnique()),
+  ),
+  tags: Schema.OptionFromOptionalKey(
+    Schema.Array(RegistryTag).check(Schema.isNonEmpty(), Schema.isUnique()),
+  ),
+}) {}
+
+export const ValidSelector = Selector.check(
+  Schema.makeFilter((selector) => Option.isSome(selector.repos) || Option.isSome(selector.tags), {
+    message: "Expected selector.repos, selector.tags, or both",
+  }),
+);
 
 /** Match both selector axes when both are present; an omitted selector matches every repo. */
 export const matchesSelector = (selector: Option.Option<Selector>, repo: ManagedRepo): boolean =>

@@ -1,5 +1,4 @@
-import { RepositoryName } from "@usine/core/ids";
-import { splitRepositoryName } from "@usine/core/repository";
+import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "./github-app.ts";

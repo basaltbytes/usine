@@ -1,6 +1,6 @@
-import type { AgentPersona } from "@usine/core/agent";
+import type { AgentPersona, AgentName } from "@usine/core/agent";
 import type { AttemptTask } from "@usine/core/attempt";
-import type { AgentName, RepositoryName } from "@usine/core/ids";
+import type { RepositoryName } from "@usine/core/repository";
 import type { Schema } from "effect";
 
 export interface PromptParts {

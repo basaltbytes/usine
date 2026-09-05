@@ -1,9 +1,7 @@
-/** Configured FIFO worker scheduler: the platform-free Executor-to-engine adapter. */
-
-import type { UsineConfig, Worker as ConfigWorker } from "@usine/config/model";
+import type { UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
 import { resolveParentEffort } from "@usine/core/agent";
 import { InfraFailure } from "@usine/core/attempt/failure";
-import { WorkerName } from "@usine/core/ids";
+import { WorkerName } from "@usine/core/worker";
 import {
   CheckoutRequest,
   Executor,
@@ -23,6 +21,8 @@ import {
   Schema,
   TxPriorityQueue,
 } from "effect";
+
+/** Configured FIFO worker scheduler: the platform-free Executor-to-engine adapter. */
 
 export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorkerError>(
   "@usine/orchestrator/UnsupportedWorkerError",

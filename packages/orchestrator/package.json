@@ -38,14 +38,6 @@
       "types": "./dist/local.d.ts",
       "default": "./dist/local.js"
     },
-    "./operator/model": {
-      "types": "./dist/operator/model.d.ts",
-      "default": "./dist/operator/model.js"
-    },
-    "./operator/service": {
-      "types": "./dist/operator/service.d.ts",
-      "default": "./dist/operator/service.js"
-    },
     "./orchestrator": {
       "types": "./dist/orchestrator.d.ts",
       "default": "./dist/orchestrator.js"
@@ -61,6 +53,10 @@
     "./scheduler": {
       "types": "./dist/scheduler.d.ts",
       "default": "./dist/scheduler.js"
+    },
+    "./operator": {
+      "types": "./dist/operator/operator.d.ts",
+      "default": "./dist/operator/operator.js"
     }
   },
   "publishConfig": {

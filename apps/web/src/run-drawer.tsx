@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { RunId } from "@usine/core/ids";
-import { RunDetailView, type TranscriptPageCursor } from "@usine/orchestrator/operator/model";
+import type { RunId } from "@usine/core/run";
+import { RunDetailView, type TranscriptPageCursor } from "@usine/orchestrator/operator";
 import type { Schema } from "effect";
 import { useState, type ReactNode } from "react";
 import { ErrorAlert } from "@/components/error-alert";

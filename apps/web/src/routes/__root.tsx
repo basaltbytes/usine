@@ -9,8 +9,9 @@ import {
   useParams,
   useRouter,
 } from "@tanstack/react-router";
-import { RepositoryName, RunId } from "@usine/core/ids";
-import type { NeedView } from "@usine/orchestrator/operator/model";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import type { NeedView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { AppSidebar } from "@/components/app-sidebar";
 import { BootScreen } from "@/components/boot-screen";

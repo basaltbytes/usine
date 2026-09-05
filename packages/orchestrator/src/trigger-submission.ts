@@ -1,11 +1,15 @@
-import type { ConfigFileError, LoadedInstance, LoopFile, ManagedRepo } from "@usine/config/model";
-import { Agent, resolveParentModel } from "@usine/core/agent";
+import type { ConfigFileError } from "@usine/config/file";
+import type { LoadedInstance } from "@usine/config/instance";
+import type { LoopFile } from "@usine/config/loop";
+import type { ManagedRepo } from "@usine/config/factory";
+import { Agent, resolveParentModel, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
-import { Event } from "@usine/core/event";
-import { AgentName, DedupKey, EventId, ItemKey, LoopName } from "@usine/core/ids";
+import { Event, DedupKey, EventId } from "@usine/core/event";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryRevision } from "@usine/core/repository";
-import { Submission, type SubmissionResult } from "@usine/engine/model";
+import { Submission, type SubmissionResult } from "@usine/engine/engine";
 import { type DateTime, Effect, Match, Option, Result, Schema } from "effect";
 
 /**

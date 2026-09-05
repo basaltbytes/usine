@@ -1,16 +1,11 @@
 import { Context, Effect, Layer, Option } from "effect";
-import { RunId } from "@usine/core/ids";
-import { RunDatabase } from "./database/database.ts";
-import {
-  ProjectionRevision,
-  RunSnapshot,
-  RunSummary,
-  TranscriptEntry,
-  TranscriptQuery,
-  type RunStoreError,
-} from "./model.ts";
-import { persistence } from "./store/codec.ts";
-import { queriesFor } from "./store/queries.ts";
+import { RunId } from "@usine/core/run";
+import { RunDatabase } from "../database/database.ts";
+import { ProjectionRevision, RunSnapshot, RunSummary } from "./model.ts";
+import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
+import type { RunStoreError } from "../engine/error.ts";
+import { persistence } from "../store/codec.ts";
+import { queriesFor } from "../store/queries.ts";
 
 const makeRunReader = Effect.gen(function* () {
   const queries = queriesFor(yield* RunDatabase);
@@ -49,3 +44,5 @@ export class RunReader extends Context.Service<
 >()("@usine/engine/RunReader") {
   static readonly layer = Layer.effect(RunReader, makeRunReader);
 }
+
+export { RunSnapshot, RunSummary, ProjectionRevision } from "./model.ts";

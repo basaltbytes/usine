@@ -1,5 +1,5 @@
 import { Effect, Schema } from "effect";
-import type { ConfigFileError, InstancePath } from "../model.ts";
+import type { ConfigFileError, InstancePath } from "../file.ts";
 import { splitMarkdown } from "../frontmatter.ts";
 import { parseYamlDocument } from "./document.ts";
 

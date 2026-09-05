@@ -1,4 +1,4 @@
-import { RepositoryName } from "@usine/core/ids";
+import { RepositoryName } from "@usine/core/repository";
 import {
   Clock,
   Context,
@@ -290,3 +290,35 @@ export class GitHubApp extends Context.Service<
     }),
   );
 }
+
+export {
+  REQUIRED_REPOSITORY_PERMISSIONS,
+  deriveProjectAccess,
+  missingPermissions,
+  type InstalledRepository,
+  type RequiredRepositoryPermission,
+  AppId,
+  InstallationId,
+  RepositoryId,
+  PrivateKey,
+  RedactedPrivateKey,
+  GitHubOperation,
+  AppCredentials,
+  GitHubCredentials,
+  Installation,
+  InstallationWide,
+  SingleRepository,
+  TokenScope,
+  InstallationToken,
+  CoveredProject,
+  ProjectNotInstalledError,
+  ProjectAccess,
+  AppAuthenticationError,
+  InstallationDiscoveryReason,
+  InstallationDiscoveryError,
+  AppPermissionError,
+  GitHubApiError,
+  GitHubRateLimitError,
+  InvalidGitHubResponseError,
+  GitHubAppError,
+} from "./model.ts";

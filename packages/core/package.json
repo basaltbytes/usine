@@ -46,10 +46,6 @@
       "types": "./dist/event.d.ts",
       "default": "./dist/event.js"
     },
-    "./ids": {
-      "types": "./dist/ids.d.ts",
-      "default": "./dist/ids.js"
-    },
     "./instance": {
       "types": "./dist/instance.d.ts",
       "default": "./dist/instance.js"

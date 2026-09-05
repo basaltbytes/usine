@@ -9,13 +9,11 @@ import {
   TextOutput,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AgentName, AttemptId } from "@usine/core/ids";
+import { AgentName } from "@usine/core/agent";
+import { AttemptId } from "@usine/core/attempt";
 import { Option } from "effect";
-import {
-  TranscriptCursor,
-  TranscriptEventView,
-  TranscriptPageCursor,
-} from "@usine/orchestrator/operator/model";
+import { TranscriptSequence } from "@usine/engine/transcript";
+import { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator/operator";
 import { QueryClient } from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
@@ -55,7 +53,7 @@ const event = (
           brain,
         });
   return new TranscriptEventView({
-    sequence: TranscriptCursor.make(sequence),
+    sequence: TranscriptSequence.make(sequence),
     attemptId,
     receivedAt: "2026-09-01T12:00:00.000Z",
     direction: "outbound",
@@ -72,7 +70,7 @@ const event = (
 
 const rateLimits = (sequence: number, usedPercent: number) =>
   new TranscriptEventView({
-    sequence: TranscriptCursor.make(sequence),
+    sequence: TranscriptSequence.make(sequence),
     attemptId,
     receivedAt: "2026-09-01T12:00:00.000Z",
     direction: "outbound",
@@ -170,17 +168,17 @@ describe("run transcript", () => {
     const cursors = [
       new TranscriptPageCursor({
         attemptId: firstAttempt,
-        before: TranscriptCursor.make(100),
+        before: TranscriptSequence.make(100),
       }),
       new TranscriptPageCursor({
         attemptId: secondAttempt,
-        before: TranscriptCursor.make(200),
+        before: TranscriptSequence.make(200),
       }),
     ];
     const replaced = replaceEarlierCursor(cursors, secondAttempt, [
       new TranscriptPageCursor({
         attemptId: secondAttempt,
-        before: TranscriptCursor.make(50),
+        before: TranscriptSequence.make(50),
       }),
     ]);
 
@@ -203,7 +201,7 @@ describe("run transcript", () => {
       earlierTranscript: [
         new TranscriptPageCursor({
           attemptId,
-          before: TranscriptCursor.make(300),
+          before: TranscriptSequence.make(300),
         }),
       ],
     });
@@ -215,7 +213,7 @@ describe("run transcript", () => {
           earlierTranscript: replaceEarlierCursor(previous?.earlierTranscript ?? [], attemptId, [
             new TranscriptPageCursor({
               attemptId,
-              before: TranscriptCursor.make(before),
+              before: TranscriptSequence.make(before),
             }),
           ]),
         }),
@@ -224,7 +222,7 @@ describe("run transcript", () => {
         earlierTranscript: ReadonlyArray<TranscriptPageCursor>;
       }>(key)?.earlierTranscript[0]?.before;
       assert(current !== undefined);
-      assert.strictEqual(current, TranscriptCursor.make(before));
+      assert.strictEqual(current, TranscriptSequence.make(before));
     }
 
     queryClient.setQueryData<{ earlierTranscript: ReadonlyArray<TranscriptPageCursor> }>(

@@ -1,23 +1,24 @@
-import type {
-  ConfigFileError,
-  LoadedInstance,
-  LoopFile,
-  ManagedRepo,
-  ScheduleTrigger,
-} from "@usine/config/model";
+import type { ConfigFileError } from "@usine/config/file";
+import type { LoadedInstance } from "@usine/config/instance";
+import type { LoopFile } from "@usine/config/loop";
+import type { ManagedRepo } from "@usine/config/factory";
+import type { ScheduleTrigger } from "@usine/config/trigger";
 import { ConfigParser } from "@usine/config/parser";
 import { environmentFor, repositoryContext } from "@usine/config/payload-slices";
 import { matchesSelector } from "@usine/config/selector";
 import { AttemptTask } from "@usine/core/attempt";
-import { AgentName, DedupKey, ItemKey, LoopName, RepositoryName } from "@usine/core/ids";
-import { canonicalRepositoryName } from "@usine/core/repository";
-import { RunEngine } from "@usine/engine/engine";
-import { LoopControl } from "@usine/engine/loop-control";
+import { AgentName } from "@usine/core/agent";
+import { DedupKey } from "@usine/core/event";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
 import {
+  RunEngine,
   type EnginePersistenceError,
   type RunEngineError,
   SubmissionResult,
-} from "@usine/engine/model";
+} from "@usine/engine/engine";
+import { LoopControl } from "@usine/engine/loop-control";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import type { ExpressionError } from "@usine/expression/model";
 import {

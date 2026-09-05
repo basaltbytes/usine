@@ -1,21 +1,21 @@
-import { GitHubLabelName, type LoadedInstance } from "@usine/config/model";
-import { Event } from "@usine/core/event";
-import { DedupKey, EventId, LoopName, RunId } from "@usine/core/ids";
-import { RunEngine } from "@usine/engine/engine";
-import { ItemProjectionReader } from "@usine/engine/item-projection/service";
-import { LoopControl } from "@usine/engine/loop-control";
+import { GitHubLabelName } from "@usine/config/label";
+import type { LoadedInstance } from "@usine/config/instance";
+import { Event, DedupKey, EventId } from "@usine/core/event";
+import { LoopName } from "@usine/core/loop";
+import { RunId } from "@usine/core/run";
 import {
+  RunEngine,
   type EnginePersistenceError,
-  type LoopRuntimeState,
-  type ProjectionRevision,
   type RunEngineError,
   RunOperationRejectedError,
   type RunStoreError,
-} from "@usine/engine/model";
-import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection/service";
-import { RunReader } from "@usine/engine/run-reader";
+} from "@usine/engine/engine";
+import { ItemProjectionReader } from "@usine/engine/item-projection";
+import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
+import { type ProjectionRevision, RunReader } from "@usine/engine/run-reader";
+import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { GitHubItemWriter } from "@usine/github/item-writer";
-import type { GitHubAppError } from "@usine/github/model";
+import type { GitHubAppError } from "@usine/github/github-app";
 import { Context, DateTime, Effect, Layer, Option, SynchronizedRef } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
@@ -470,3 +470,55 @@ export class Operator extends Context.Service<
     Layer.provide(OperatorObservation.layer),
   );
 }
+
+export {
+  ProjectStatus,
+  RunStateTag,
+  InfraFailureView,
+  AgentFailureView,
+  RunawayFailureView,
+  ChildSessionBudgetFailureView,
+  FailureView,
+  SucceededAttemptView,
+  FailedAttemptView,
+  CanceledAttemptView,
+  AttemptOutcomeView,
+  AttemptView,
+  RunView,
+  BoardLaneId,
+  BoardLaneOrigin,
+  BoardItemView,
+  WritableBoardLaneView,
+  ReadOnlyBoardLaneView,
+  BoardLaneView,
+  BoardProjectionError,
+  BoardView,
+  LabelView,
+  ProjectView,
+  BoardMove,
+  BoardProjectNotFoundError,
+  BoardItemNotFoundError,
+  BoardLaneNotFoundError,
+  BoardLaneReadOnlyError,
+  LoopView,
+  ApprovalNeed,
+  RunFailureNeed,
+  PollFailureNeed,
+  PreflightFindingNeed,
+  BoardProjectionNeed,
+  ScheduleFailureNeed,
+  NeedView,
+  FailedTranscriptView,
+  TranscriptPayload,
+  TranscriptEventView,
+  TranscriptPageCursor,
+  ColdTranscriptRequest,
+  TailTranscriptRequest,
+  EarlierTranscriptRequest,
+  TranscriptRequest,
+  TranscriptAttemptNotFoundError,
+  RunDetailView,
+  ReadyOverview,
+  NeedsSetupOverview,
+  FactoryOverview,
+} from "./model.ts";

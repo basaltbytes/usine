@@ -1,5 +1,18 @@
 import { Schema } from "effect";
-import { DedupKey, EventId } from "./ids.ts";
+
+/** Identity of one Event in the ledger. */
+export const EventId = Schema.NonEmptyString.pipe(Schema.brand("EventId"));
+
+export type EventId = typeof EventId.Type;
+
+/**
+ * The engine-derived, never-expiring idempotency key — timestamps aside, the
+ * same watched state is the same Event, forever. Derived per trigger type,
+ * never authored in a loop file (ADR 0002).
+ */
+export const DedupKey = Schema.NonEmptyString.pipe(Schema.brand("DedupKey"));
+
+export type DedupKey = typeof DedupKey.Type;
 
 /**
  * Ledger row: one deduplicated fact the engine may react to — a trigger

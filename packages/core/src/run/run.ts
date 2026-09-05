@@ -1,6 +1,12 @@
 import { Schema } from "effect";
-import { EventId, LoopName, RunId } from "../ids.ts";
+import { EventId } from "../event.ts";
+import { LoopName } from "../loop.ts";
 import { RunState } from "./state.ts";
+
+/** Identity of one Run. */
+export const RunId = Schema.NonEmptyString.pipe(Schema.brand("RunId"));
+
+export type RunId = typeof RunId.Type;
 
 /**
  * Ledger row: the work a loop owes one Event. At most one open run exists per

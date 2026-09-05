@@ -1,29 +1,22 @@
 import { BrainSpec } from "@usine/core/agent/brain";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
-import { AttemptNumber } from "@usine/core/attempt";
+import { AttemptNumber, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { RunawayCeiling } from "@usine/core/attempt/failure";
-import {
-  AgentName,
-  AttemptId,
-  ItemKey,
-  LoopName,
-  RepositoryName,
-  RunId,
-  WorkerName,
-} from "@usine/core/ids";
-import { ItemNumber } from "@usine/core/item";
+import { AgentName } from "@usine/core/agent";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
-import { GitHubLabelName, LaneItemState, LaneName, LaneSource } from "@usine/config/model";
-import { TranscriptSequence } from "@usine/engine/model";
+import { GitHubLabelName } from "@usine/config/label";
+import { LaneItemState, LaneName, LaneSource } from "@usine/config/board";
+import { TranscriptSequence } from "@usine/engine/transcript";
 import { Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleFailure } from "../schedule-triggers.ts";
-
-/** Cursor for tailing the append-only transcript without replaying older events. */
-export const TranscriptCursor = TranscriptSequence;
-export type TranscriptCursor = TranscriptSequence;
 
 export const ProjectStatus = Schema.Literals(["clear", "active", "needs-you"]);
 export type ProjectStatus = typeof ProjectStatus.Type;
@@ -297,7 +290,7 @@ export type TranscriptPayload = typeof TranscriptPayload.Type;
 export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
   "@usine/orchestrator/TranscriptEventView",
 )({
-  sequence: TranscriptCursor,
+  sequence: TranscriptSequence,
   attemptId: AttemptId,
   receivedAt: Schema.String,
   direction: AttemptChannel.Direction,
@@ -309,7 +302,7 @@ export class TranscriptPageCursor extends Schema.Class<TranscriptPageCursor>(
   "@usine/orchestrator/TranscriptPageCursor",
 )({
   attemptId: AttemptId,
-  before: TranscriptCursor,
+  before: TranscriptSequence,
 }) {}
 
 export class ColdTranscriptRequest extends Schema.TaggedClass<ColdTranscriptRequest>(
@@ -318,13 +311,13 @@ export class ColdTranscriptRequest extends Schema.TaggedClass<ColdTranscriptRequ
 
 export class TailTranscriptRequest extends Schema.TaggedClass<TailTranscriptRequest>(
   "@usine/orchestrator/TailTranscriptRequest",
-)("TailTranscriptRequest", { after: TranscriptCursor }) {}
+)("TailTranscriptRequest", { after: TranscriptSequence }) {}
 
 export class EarlierTranscriptRequest extends Schema.TaggedClass<EarlierTranscriptRequest>(
   "@usine/orchestrator/EarlierTranscriptRequest",
 )("EarlierTranscriptRequest", {
   attemptId: AttemptId,
-  before: TranscriptCursor,
+  before: TranscriptSequence,
 }) {}
 
 export const TranscriptRequest = Schema.Union([

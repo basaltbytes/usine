@@ -7,7 +7,8 @@ import {
   Variable,
 } from "@usine/expression/model";
 import { Schema } from "effect";
-import type { ManagedRepo, Stream } from "./model.ts";
+import type { ManagedRepo } from "./factory.ts";
+import type { Stream } from "./trigger.ts";
 
 const reference = Schema.decodeUnknownSync(TypeReference);
 

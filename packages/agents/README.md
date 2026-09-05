@@ -8,6 +8,21 @@ The agent runtime for [usine](https://github.com/basaltbytes/usine). Each Attemp
 import { layer as agentLayer } from "@usine/agents/pi/live";
 ```
 
+Use `@usine/agents/pi` to compose the Pi parent with your own child backend:
+
+```ts
+import { Layer } from "effect";
+import { piParentLayer, piSdkLive } from "@usine/agents/pi";
+
+// childBackendLayer supplies ChildBackend from @usine/agents/runtime.
+const agentLayer = piParentLayer.pipe(
+  Layer.provide(piSdkLive),
+  Layer.provide(childBackendLayer),
+);
+```
+
+`@usine/agents/children` provides `childDispatcherLayer`, which selects a child backend by harness. Compose its `ClaudeChildBackend`, `CodexChildBackend`, and `PiChildBackend` requirements with the adapter layers from `/claude`, `/codex`, and `/pi`. These Node entry points also provide their SDK service contracts and production SDK layers for caller-controlled composition. `/pi/live` assembles the parent and all three child backends.
+
 The production layer resolves the Pi parent model from the Run spec, installs the subagents extension, and dispatches each child from the rostered `harness` field. The Run spec also defines the per-Attempt child-session budget. Every accepted spawn logs its cumulative count and a 160-character task excerpt; an excess spawn stops the parent with `ChildSessionBudgetExceededError`. The parent accepts API-key-backed Pi models and ChatGPT subscription models from the `openai-codex` provider. Claude Code runs with `bypassPermissions` and reads only worker-user settings. Codex uses app-server JSON-RPC over standard input and output with `approvalPolicy: never`; it uses an ephemeral thread and records ChatGPT plan rate-window updates as `PoolRateLimitsUpdated` session events. Pi children remain API-key-only.
 
 The Attempt worktree counts as repository-controlled input. Pi ignores project `.pi/` settings, extensions, prompt templates, skills, and themes. Claude omits project setting sources, while Codex marks the worktree untrusted before starting its thread. AGENTS instructions remain available to the coding harnesses. Worker isolation remains the executor's responsibility.

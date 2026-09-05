@@ -1,6 +1,6 @@
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute, Link, notFound } from "@tanstack/react-router";
-import { RepositoryName } from "@usine/core/ids";
+import { RepositoryName } from "@usine/core/repository";
 import { BootScreen } from "@/components/boot-screen";
 import { Button } from "@/components/ui/button";
 import { ProjectBoard } from "../../../board.tsx";

@@ -1,12 +1,17 @@
 import { assert, describe, it } from "@effect/vitest";
-import { GitHubLabelName, LabelLaneSource, LaneName, UsineConfig } from "@usine/config/model";
-import { AgentName, ItemKey, LoopName, RepositoryName, RunId } from "@usine/core/ids";
-import { ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
+import { GitHubLabelName } from "@usine/config/label";
+import { LabelLaneSource, LaneName } from "@usine/config/board";
+import { UsineConfig } from "@usine/config/factory";
+import { AgentName } from "@usine/core/agent";
+import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
 import {
   ItemContentHash,
   ItemProjection,
   ItemProjectionSource,
-} from "@usine/engine/item-projection/model";
+} from "@usine/engine/item-projection";
 import { Effect, Schema } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../src/board/projection.ts";
 import {

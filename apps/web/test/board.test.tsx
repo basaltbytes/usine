@@ -1,17 +1,13 @@
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
-import { AttemptNumber } from "@usine/core/attempt";
-import {
-  AgentName,
-  AttemptId,
-  ItemKey,
-  LoopName,
-  RepositoryName,
-  RunId,
-  WorkerName,
-} from "@usine/core/ids";
-import { ItemNumber } from "@usine/core/item";
-import { LaneName } from "@usine/config/model";
+import { AttemptNumber, AttemptId } from "@usine/core/attempt";
+import { AgentName } from "@usine/core/agent";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
+import { LaneName } from "@usine/config/board";
 import {
   AgentFailureView,
   AttemptView,
@@ -25,7 +21,7 @@ import {
   RunFailureNeed,
   RunView,
   SucceededAttemptView,
-} from "@usine/orchestrator/operator/model";
+} from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";

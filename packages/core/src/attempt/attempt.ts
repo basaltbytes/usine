@@ -1,8 +1,15 @@
 import { Schema } from "effect";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
-import { AttemptId, RunId, StepName, WorkerName } from "../ids.ts";
+import { RunId } from "../run/run.ts";
+import { StepName } from "../step/step.ts";
+import { WorkerName } from "../worker.ts";
 import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
 import { AttemptOutcome } from "./outcome.ts";
+
+/** Identity of one Attempt. */
+export const AttemptId = Schema.NonEmptyString.pipe(Schema.brand("AttemptId"));
+
+export type AttemptId = typeof AttemptId.Type;
 
 /**
  * 1-based position of a try under its step — retries are attempt N+1 under

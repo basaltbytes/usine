@@ -1,4 +1,4 @@
-import { RepositoryName } from "@usine/core/ids";
+import { RepositoryName } from "@usine/core/repository";
 import { Context, Schema } from "effect";
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));

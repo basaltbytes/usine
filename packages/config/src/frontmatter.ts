@@ -1,5 +1,5 @@
 import { Effect, Option } from "effect";
-import { ConfigFileError, type InstancePath } from "./model.ts";
+import { ConfigFileError, type InstancePath } from "./file.ts";
 
 export interface MarkdownParts {
   readonly yaml: string;

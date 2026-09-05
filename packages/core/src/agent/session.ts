@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { AgentName } from "../ids.ts";
+import { AgentName } from "./agent.ts";
 import { BrainSpec } from "./brain.ts";
 
 /** SDK-local identity of one parent or child agent session. */

@@ -1,7 +1,7 @@
 import { CircleIcon, KanbanIcon, SlidersHorizontalIcon, WarningIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
-import type { RepositoryName } from "@usine/core/ids";
-import type { ProjectView } from "@usine/orchestrator/operator/model";
+import type { RepositoryName } from "@usine/core/repository";
+import type { ProjectView } from "@usine/orchestrator/operator";
 import {
   Sidebar,
   SidebarContent,

@@ -1,25 +1,23 @@
 import { assert, describe, it } from "@effect/vitest";
 import { ModelId } from "@usine/core/agent/brain";
-import { AgentName, RepositoryName, StepName } from "@usine/core/ids";
-import {
-  AgentFile,
-  IssueTrigger,
-  LoadedInstance,
-  LoopFile,
-  LoopName,
-  Persona,
-  PromptTemplate,
-  Selector,
-  UsineConfig,
-} from "@usine/config/model";
+import { AgentName, AgentPersona } from "@usine/core/agent";
+import { RepositoryName } from "@usine/core/repository";
+import { StepName } from "@usine/core/step";
+import { AgentFile } from "@usine/config/agent";
+import { IssueTrigger } from "@usine/config/trigger";
+import { LoadedInstance } from "@usine/config/instance";
+import { LoopFile, PromptTemplate } from "@usine/config/loop";
+import { LoopName } from "@usine/core/loop";
+import { Selector } from "@usine/config/selector";
+import { UsineConfig } from "@usine/config/factory";
 import {
   RepositoryLabel as StoredRepositoryLabel,
   RepositoryLabelProjection,
-} from "@usine/engine/repository-label-projection/model";
-import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection/service";
+  RepositoryLabelProjectionReader,
+} from "@usine/engine/repository-label-projection";
 import { Source } from "@usine/expression/model";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
-import { GitHubApiError, GitHubRateLimitError } from "@usine/github/model";
+import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
 import {
   EntityTag,
   RepositoryLabel,
@@ -28,8 +26,8 @@ import {
   RepositoryLabelName,
   RepositoryLabelsNotModified,
   RepositoryNotModified,
-} from "@usine/github/polling/model";
-import { GitHubPolling } from "@usine/github/polling/polling";
+  GitHubPolling,
+} from "@usine/github/polling";
 import { DateTime, Effect, Option, Schema } from "effect";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { memoryCursorStore, pollingTestLayer } from "./support/polling.ts";
@@ -42,7 +40,7 @@ const agent = new AgentFile({
   effort: "high",
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Persona.make("Implement the issue."),
+  persona: AgentPersona.make("Implement the issue."),
 });
 const loop = new LoopFile({
   name: LoopName.make("start-dev"),

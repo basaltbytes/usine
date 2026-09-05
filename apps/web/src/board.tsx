@@ -22,8 +22,8 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { ArrowUpRightIcon, CaretDownIcon } from "@phosphor-icons/react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ItemKey, RunId } from "@usine/core/ids";
-import { ItemNumber } from "@usine/core/item";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { RunId } from "@usine/core/run";
 import { splitRepositoryName } from "@usine/core/repository";
 import type {
   BoardItemView,
@@ -31,7 +31,7 @@ import type {
   LabelView,
   ProjectView,
   RunView,
-} from "@usine/orchestrator/operator/model";
+} from "@usine/orchestrator/operator";
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { LabelBadge } from "@/components/label-badge";

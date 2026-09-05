@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { RepositoryName } from "@usine/core/ids";
+import { RepositoryName } from "@usine/core/repository";
 import { ItemNumber } from "@usine/core/item";
 import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";

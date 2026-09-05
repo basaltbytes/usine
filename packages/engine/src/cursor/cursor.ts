@@ -1,9 +1,13 @@
-import { Context, Effect, Layer, Option, Schema } from "effect";
+import { Schema, Context, Effect, Layer, Option } from "effect";
 import { eq } from "drizzle-orm";
 import { RunDatabase } from "../database/database.ts";
 import { cursors } from "../database/schema.ts";
-import { EnginePersistenceError } from "../model.ts";
-import { type CursorKey } from "./model.ts";
+import { EnginePersistenceError } from "../engine/error.ts";
+
+/** Stable identity of one efficiency-only runtime cursor. */
+export const CursorKey = Schema.NonEmptyString.pipe(Schema.brand("CursorKey"));
+
+export type CursorKey = typeof CursorKey.Type;
 
 const CursorRow = Schema.Struct({ value: Schema.Json });
 const decodeCursorRows = Schema.decodeUnknownEffect(Schema.Array(CursorRow));

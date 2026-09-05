@@ -1,14 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
-import { DeclaredLabel, GitHubLabelColor, GitHubLabelName } from "@usine/config/model";
-import { RepositoryName } from "@usine/core/ids";
-import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine/repository-label-projection/model";
+import { DeclaredLabel, GitHubLabelColor, GitHubLabelName } from "@usine/config/label";
+import { RepositoryName } from "@usine/core/repository";
+import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine/repository-label-projection";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
-import { GitHubApiError, GitHubRateLimitError } from "@usine/github/model";
-import {
-  RepositoryLabel,
-  RepositoryLabelColor,
-  RepositoryLabelName,
-} from "@usine/github/polling/model";
+import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
+import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "@usine/github/polling";
 import { DateTime, Effect, Layer, Logger, Option } from "effect";
 import { LabelReconciler } from "../src/label-reconciler.ts";
 

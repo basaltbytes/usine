@@ -1,5 +1,5 @@
-import { ItemKey, RepositoryName } from "@usine/core/ids";
-import { ItemNumber } from "@usine/core/item";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
 
 export const ItemProjectionSource = Schema.NonEmptyString.pipe(

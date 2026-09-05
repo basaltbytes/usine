@@ -1,32 +1,21 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ModelId } from "@usine/core/agent/brain";
-import { AgentName, RunId, StepName } from "@usine/core/ids";
-import {
-  AgentFile,
-  ConfigFileError,
-  Cron as CronExpression,
-  InstancePath,
-  LoadedInstance,
-  LoopFile,
-  LoopName,
-  Persona,
-  PromptTemplate,
-  ScheduleTrigger,
-  Selector,
-  TimeZone,
-  UsineConfig,
-} from "@usine/config/model";
+import { AgentName, AgentPersona } from "@usine/core/agent";
+import { RunId } from "@usine/core/run";
+import { StepName } from "@usine/core/step";
+import { AgentFile } from "@usine/config/agent";
+import { ConfigFileError, InstancePath } from "@usine/config/file";
+import { Cron as CronExpression, ScheduleTrigger, TimeZone } from "@usine/config/trigger";
+import { LoadedInstance } from "@usine/config/instance";
+import { LoopFile, PromptTemplate } from "@usine/config/loop";
+import { LoopName } from "@usine/core/loop";
+import { Selector } from "@usine/config/selector";
+import { UsineConfig } from "@usine/config/factory";
 import { ConfigParser } from "@usine/config/parser";
 import { InstanceDirectory } from "@usine/core/instance";
-import { RunEngine } from "@usine/engine/engine";
-import { LoopControl } from "@usine/engine/loop-control";
-import {
-  Claimed,
-  EnginePersistenceError,
-  LoopRuntimeState,
-  type Submission,
-} from "@usine/engine/model";
+import { RunEngine, Claimed, EnginePersistenceError, type Submission } from "@usine/engine/engine";
+import { LoopControl, LoopRuntimeState } from "@usine/engine/loop-control";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
@@ -58,7 +47,7 @@ const agent = new AgentFile({
   effort: "high",
   parentModel: Option.none(),
   parentEffort: Option.none(),
-  persona: Persona.make("Implement the issue."),
+  persona: AgentPersona.make("Implement the issue."),
 });
 
 const isSchedulePayload = Schema.is(

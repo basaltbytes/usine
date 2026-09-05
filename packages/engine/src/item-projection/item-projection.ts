@@ -1,9 +1,9 @@
-import { RepositoryName } from "@usine/core/ids";
+import { RepositoryName } from "@usine/core/repository";
 import { desc, eq, ne } from "drizzle-orm";
 import { Context, Effect, Layer, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import { itemProjections } from "../database/schema.ts";
-import { EnginePersistenceError } from "../model.ts";
+import { EnginePersistenceError } from "../engine/error.ts";
 import { ItemNumber } from "@usine/core/item";
 import { ItemContentHash, ItemProjection, ItemProjectionSource } from "./model.ts";
 
@@ -131,3 +131,5 @@ export class ItemProjectionWriter extends Context.Service<
 >()("@usine/engine/ItemProjectionWriter") {
   static readonly layer = Layer.effect(ItemProjectionWriter, makeWriter);
 }
+
+export { ItemContentHash, ItemProjection, ItemProjectionSource } from "./model.ts";

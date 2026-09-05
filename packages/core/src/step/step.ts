@@ -1,6 +1,15 @@
 import { Schema } from "effect";
-import { RunId, StepName } from "../ids.ts";
+import { RunId } from "../run/run.ts";
 import { StepResult } from "./result.ts";
+
+/**
+ * Step identity within its run — the loop-authored name (ADR 0002). Renaming a
+ * step in the loop file retires it — prior results stay under the old name.
+ * There is deliberately no synthetic step id.
+ */
+export const StepName = Schema.NonEmptyString.pipe(Schema.brand("StepName"));
+
+export type StepName = typeof StepName.Type;
 
 /**
  * Ledger row: a named unit of work inside a run, its stored result addressable

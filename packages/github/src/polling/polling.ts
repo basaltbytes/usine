@@ -1,5 +1,6 @@
-import { RepositoryName } from "@usine/core/ids";
-import { splitRepositoryName } from "@usine/core/repository";
+import { ContentHash } from "./model.ts";
+import { canonicalContent } from "./content.ts";
+import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../github-app.ts";
@@ -18,7 +19,6 @@ import { GitHubRateLimitError, type GitHubAppError, type GitHubOperation } from 
 import {
   ChangedIssue,
   ChangedPullRequest,
-  ContentHash,
   EntityTag,
   IssuePayload,
   IssueSnapshot,
@@ -32,7 +32,6 @@ import {
   RepositoryLabelName,
   RepositoryChanges,
   RepositoryNotModified,
-  TIMESTAMP_FIELDS,
   type ChangeDetection,
   type ChangedItem,
   type PayloadSnapshot,
@@ -92,19 +91,6 @@ const PullRequestData = Schema.Struct({
     Schema.Struct({ pullRequest: Schema.OptionFromNullOr(PullRequestPayload) }),
   ),
 });
-
-const canonicalContent = (value: Schema.Json): Schema.Json => {
-  if (Array.isArray(value)) return value.map(canonicalContent);
-  if (Schema.is(Schema.JsonObject)(value)) {
-    return Object.fromEntries(
-      Object.entries(value)
-        .filter(([key]) => !TIMESTAMP_FIELDS.has(key))
-        .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-        .map(([key, child]) => [key, canonicalContent(child)]),
-    );
-  }
-  return value;
-};
 
 type Headers = HttpClientResponse.HttpClientResponse["headers"];
 
@@ -184,17 +170,6 @@ const newerWatermark = (cursor: PollCursor, items: ReadonlyArray<ChangedItem>) =
   }
   return epochs.length === 0 ? Option.none<DateTime.Utc>() : dateTimeAt(Math.max(...epochs));
 };
-
-const makeContentHash = (crypto: Crypto.Crypto) =>
-  Effect.fn("GitHubPolling.contentHash")(function* (payload: Schema.Json) {
-    const encoded = new TextEncoder().encode(JSON.stringify(canonicalContent(payload)));
-    // An in-memory SHA-256 digest cannot fail for expected reasons: a failure
-    // here is a violated platform invariant, not a domain failure.
-    const digest = yield* crypto.digest("SHA-256", encoded).pipe(Effect.orDie);
-    return ContentHash.make(
-      Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),
-    );
-  });
 
 /** GitHub change detection and snapshot fetching behind one external seam. */
 export class GitHubPolling extends Context.Service<
@@ -528,3 +503,37 @@ export class GitHubPolling extends Context.Service<
     }),
   );
 }
+
+export {
+  EntityTag,
+  RepositoryLabelName,
+  RepositoryLabelColor,
+  RepositoryLabel,
+  RepositoryLabelCatalog,
+  RepositoryLabelsNotModified,
+  RepositoryLabelDetection,
+  PollCursor,
+  ChangedIssue,
+  ChangedPullRequest,
+  ChangedItem,
+  RepositoryNotModified,
+  RepositoryChanges,
+  ChangeDetection,
+  IssuePayload,
+  PullRequestPayload,
+  IssueSnapshot,
+  PullRequestSnapshot,
+  PayloadSnapshot,
+} from "./model.ts";
+
+const makeContentHash = (crypto: Crypto.Crypto) =>
+  Effect.fn("GitHubPolling.contentHash")(function* (payload: Schema.Json) {
+    const encoded = new TextEncoder().encode(JSON.stringify(canonicalContent(payload)));
+    // An in-memory SHA-256 digest cannot fail for expected reasons: a failure
+    // here is a violated platform invariant, not a domain failure.
+    const digest = yield* crypto.digest("SHA-256", encoded).pipe(Effect.orDie);
+    return ContentHash.make(
+      Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),
+    );
+  });
+export { ContentHash } from "./model.ts";

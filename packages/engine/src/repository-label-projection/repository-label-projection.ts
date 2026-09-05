@@ -1,9 +1,9 @@
-import { RepositoryName } from "@usine/core/ids";
+import { RepositoryName } from "@usine/core/repository";
 import { eq, ne } from "drizzle-orm";
 import { Context, Effect, Layer, Option, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import { repositoryLabelProjections } from "../database/schema.ts";
-import { EnginePersistenceError } from "../model.ts";
+import { EnginePersistenceError } from "../engine/error.ts";
 import { RepositoryLabel, RepositoryLabelProjection } from "./model.ts";
 
 /** Rows written before colors were kept hold bare names; they read as colorless labels. */
@@ -113,3 +113,5 @@ export class RepositoryLabelProjectionWriter extends Context.Service<
 >()("@usine/engine/RepositoryLabelProjectionWriter") {
   static readonly layer = Layer.effect(RepositoryLabelProjectionWriter, makeWriter);
 }
+
+export { RepositoryLabel, RepositoryLabelColor, RepositoryLabelProjection } from "./model.ts";

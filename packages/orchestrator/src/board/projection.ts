@@ -1,18 +1,17 @@
+import { GitHubLabelName } from "@usine/config/label";
 import {
-  GitHubLabelName,
   LabelLaneSource,
   Lane,
   type LaneItemState,
   LaneName,
   type LaneSource,
-  type ManagedRepo,
-} from "@usine/config/model";
-import { ItemKey } from "@usine/core/ids";
-import { ItemNumber } from "@usine/core/item";
+} from "@usine/config/board";
+import type { ManagedRepo } from "@usine/config/factory";
+import { ItemKey, ItemNumber } from "@usine/core/item";
 import * as RunState from "@usine/core/run/state";
-import type { ItemProjection } from "@usine/engine/item-projection/model";
+import type { ItemProjection } from "@usine/engine/item-projection";
 import { ItemLabelMutation } from "@usine/github/item-writer";
-import { IssuePayload, PullRequestPayload } from "@usine/github/polling/model";
+import { IssuePayload, PullRequestPayload } from "@usine/github/polling";
 import { Effect, Result, Schema } from "effect";
 import {
   BoardItemView,

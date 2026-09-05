@@ -1,4 +1,4 @@
-import type { LabelView } from "@usine/orchestrator/operator/model";
+import type { LabelView } from "@usine/orchestrator/operator";
 import { Badge } from "@/components/ui/badge";
 
 const channel = (hex: string, offset: number): number =>

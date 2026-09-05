@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { ModelId } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AttemptId } from "@usine/core/ids";
+import { AttemptId } from "@usine/core/attempt";
 import { DateTime, Result, Schema } from "effect";
 import { invalidFrameDiagnostic } from "../src/invalid-frame.ts";
 

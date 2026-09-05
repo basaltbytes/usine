@@ -1,6 +1,14 @@
-import { Option, Schema } from "effect";
-import { AgentName } from "../ids.ts";
+import { Schema, Option } from "effect";
 import { BrainSpec, Effort, ModelId } from "./brain.ts";
+
+/** The filename-keyed identity of one rostered Agent. */
+export const AgentName = Schema.String.check(
+  Schema.isPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, {
+    message: "Expected a kebab-case Agent name",
+  }),
+).pipe(Schema.brand("AgentName"));
+
+export type AgentName = typeof AgentName.Type;
 
 /** Standing Markdown instructions for one Agent. */
 export const AgentPersona = Schema.String.check(

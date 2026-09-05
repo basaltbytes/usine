@@ -2,9 +2,15 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeHttpPlatform } from "@effect/platform-node";
-import { LoadedInstance, UsineConfig } from "@usine/config/model";
-import { AgentName, AttemptId, ItemKey, LoopName, RepositoryName, RunId } from "@usine/core/ids";
-import { RunNotFoundError, RunOperationRejectedError } from "@usine/engine/model";
+import { LoadedInstance } from "@usine/config/instance";
+import { UsineConfig } from "@usine/config/factory";
+import { AgentName } from "@usine/core/agent";
+import { AttemptId } from "@usine/core/attempt";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { RunNotFoundError, RunOperationRejectedError } from "@usine/engine/engine";
 import {
   ApprovalNeed,
   BoardLaneId,
@@ -17,8 +23,8 @@ import {
   RunDetailView,
   RunView,
   TranscriptAttemptNotFoundError,
-} from "@usine/orchestrator/operator/model";
-import { OperatorObservation } from "@usine/orchestrator/operator/service";
+  OperatorObservation,
+} from "@usine/orchestrator/operator";
 import { Effect, Layer, Schema } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { afterAll, assert, describe, it } from "vitest";

@@ -1,28 +1,19 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { UsineConfig } from "@usine/config/model";
-import { Agent, AgentPersona } from "@usine/core/agent";
+import { UsineConfig } from "@usine/config/factory";
+import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
-import { Attempt, AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Event } from "@usine/core/event";
-import {
-  AgentName,
-  AttemptId,
-  DedupKey,
-  EventId,
-  ItemKey,
-  LoopName,
-  RepositoryName,
-  RunId,
-  StepName,
-  WorkerName,
-} from "@usine/core/ids";
-import { CommitSha, RepositoryRevision } from "@usine/core/repository";
-import { Run } from "@usine/core/run";
+import { Event, DedupKey, EventId } from "@usine/core/event";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
+import { RunId, Run } from "@usine/core/run";
+import { StepName, Step } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
-import { Step } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import {
   CredentialProvider,
@@ -32,14 +23,9 @@ import {
   WorktreePath,
 } from "@usine/executor";
 import { InstanceDirectory } from "@usine/core/instance";
-import { RunEngine } from "@usine/engine/engine";
-import {
-  StepExecution,
-  Submission,
-  TranscriptAllQuery,
-  TranscriptTailQuery,
-} from "@usine/engine/model";
-import { StepExecutor } from "@usine/engine/step-executor";
+import { RunEngine, Submission } from "@usine/engine/engine";
+import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
+import { TranscriptAllQuery, TranscriptTailQuery } from "@usine/engine/transcript";
 import { stepExecutorLayer } from "../src/scheduler.ts";
 import {
   DateTime,

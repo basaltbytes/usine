@@ -1,7 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
-import { AgentPersona } from "@usine/core/agent";
+import { AgentPersona, AgentName } from "@usine/core/agent";
 import { AttemptTask } from "@usine/core/attempt";
-import { AgentName, RepositoryName } from "@usine/core/ids";
+import { RepositoryName } from "@usine/core/repository";
 import { assembleChildPrompt, assemblePrompt, githubSignature } from "../src/prompt.ts";
 
 describe("assemblePrompt", () => {

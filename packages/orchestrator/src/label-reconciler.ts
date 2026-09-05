@@ -1,8 +1,8 @@
-import { canonicalLabelName, type DeclaredLabel, GitHubLabelName } from "@usine/config/model";
-import { RepositoryName } from "@usine/core/ids";
-import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine/repository-label-projection/model";
+import { canonicalLabelName, type DeclaredLabel, GitHubLabelName } from "@usine/config/label";
+import { RepositoryName } from "@usine/core/repository";
+import { RepositoryLabel as StoredRepositoryLabel } from "@usine/engine/repository-label-projection";
 import { GitHubLabelWriter, NewRepositoryLabel } from "@usine/github/label-writer";
-import { RepositoryLabelColor, RepositoryLabelName } from "@usine/github/polling/model";
+import { RepositoryLabelColor, RepositoryLabelName } from "@usine/github/polling";
 import { Context, DateTime, Effect, Layer, Option, Result, Schema } from "effect";
 
 export class LabelPreflightFinding extends Schema.Class<LabelPreflightFinding>(

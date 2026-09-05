@@ -1,19 +1,13 @@
 import { ModelId } from "@usine/core/agent/brain";
-import { AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import { AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import {
-  AttemptId,
-  DedupKey,
-  EventId,
-  ItemKey,
-  LoopName,
-  RepositoryName,
-  RunId,
-  StepName,
-  WorkerName,
-} from "@usine/core/ids";
-import { APPROVAL_REQUIREMENTS, type ApprovalRequirement } from "@usine/core/loop";
-import { RepositoryRevision } from "@usine/core/repository";
+import { DedupKey, EventId } from "@usine/core/event";
+import { ItemKey } from "@usine/core/item";
+import { LoopName, APPROVAL_REQUIREMENTS, type ApprovalRequirement } from "@usine/core/loop";
+import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { sql } from "drizzle-orm";
 import {
   check,
@@ -25,12 +19,8 @@ import {
   text,
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
-import {
-  IGNORED_REASONS,
-  WORKFLOW_COMMANDS,
-  type IgnoreReason,
-  type WorkflowCommand,
-} from "../model.ts";
+import { IGNORED_REASONS, type IgnoreReason } from "../engine/submission.ts";
+import { WORKFLOW_COMMANDS, type WorkflowCommand } from "../workflow/command.ts";
 
 export const events = snakeCase.table(
   "usine_events",

@@ -1,6 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Option, Result, Schema } from "effect";
-import { Agent, AgentPersona } from "../src/agent/agent.ts";
+import { Agent, AgentPersona, AgentName } from "../src/agent/agent.ts";
 import { BrainSpec, ModelId } from "../src/agent/brain.ts";
 import {
   AgentSessionId,
@@ -12,11 +12,10 @@ import {
   RateLimitWindow,
   SessionStarted,
 } from "../src/agent/session.ts";
-import { AttemptTask } from "../src/attempt/attempt.ts";
+import { AttemptTask, AttemptId } from "../src/attempt/attempt.ts";
 import * as AttemptChannel from "../src/attempt/channel.ts";
 import { AgentFailure, ChildSessionBudgetFailure } from "../src/attempt/failure.ts";
-import { AgentName, AttemptId, RepositoryName } from "../src/ids.ts";
-import { CommitSha, RepositoryRevision } from "../src/repository.ts";
+import { RepositoryName, CommitSha, RepositoryRevision } from "../src/repository.ts";
 import { Commit, StepResult } from "../src/step/result.ts";
 
 const agent = new Agent({

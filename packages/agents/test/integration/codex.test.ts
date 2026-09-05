@@ -5,7 +5,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
-import { AgentName } from "@usine/core/ids";
+import { AgentName } from "@usine/core/agent";
 import { Effect, Stream } from "effect";
 import { ChildRequest, CodexChildBackend, WorkingDirectory } from "../../src/runtime.ts";
 import { codexAppServerLive } from "../../src/pi/codex/app-server.ts";

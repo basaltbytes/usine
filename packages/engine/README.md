@@ -29,11 +29,14 @@ Every subpath is platform-free except the Node local adapter at `@usine/engine/l
 
 ```ts
 import { Effect, Layer } from "effect"
-import { WorkerName } from "@usine/core/ids"
+import { WorkerName } from "@usine/core/worker"
 import { InstanceDirectory } from "@usine/core/instance"
 import { StepResult } from "@usine/core/step/result"
 import { StepExecutor } from "@usine/engine/step-executor"
 import { layer } from "@usine/engine/local-sqlite"
+import { RunEngine } from "@usine/engine/engine"
+import { CursorStore } from "@usine/engine/cursor"
+import { LoopControl } from "@usine/engine/loop-control"
 
 const StepExecutorLive = Layer.succeed(StepExecutor)({
   reserve: () => Effect.succeed({
@@ -60,7 +63,9 @@ const program = Effect.gen(function* () {
 })
 ```
 
-`layerWithDatabase` (from the root entry) accepts another SQLite-compatible database layer. That layer must provide both `RunDatabase` and the matching Effect `SqlClient`, preserving atomic transactions and keeping the run projections beside Effect's cluster tables; the deployment also supplies its platform `Crypto` layer, which the cluster uses to hash over-length deduplication keys. Cloudflare D1 is not supported by Drizzle RC.4 for this use yet because its Effect driver cannot execute the store's transactions.
+`@usine/engine/engine` provides `RunEngine`, `Submission`, submission results, and typed engine errors. `@usine/engine/run-reader` provides `RunReader` and its snapshot and summary types; `/transcript` provides transcript entries, sequence values, and query variants. Import projection contracts from `/item-projection` and `/repository-label-projection`, and loop pause state with `LoopControl` from `/loop-control`.
+
+`layerWithDatabase` from `@usine/engine/engine` accepts another SQLite-compatible database layer. That layer must provide both `RunDatabase` from `@usine/engine/database` and the matching Effect `SqlClient`, preserving atomic transactions and keeping the run projections beside Effect's cluster tables; the deployment also supplies its platform `Crypto` layer, which the cluster uses to hash over-length deduplication keys. Cloudflare D1 is not supported by Drizzle RC.4 for this use yet because its Effect driver cannot execute the store's transactions.
 
 The Drizzle schema is the source of truth for usine tables. After changing it, generate and review a migration with:
 

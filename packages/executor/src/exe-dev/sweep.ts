@@ -1,4 +1,5 @@
-import { AttemptId, WorkerName } from "@usine/core/ids";
+import { AttemptId } from "@usine/core/attempt";
+import { WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
 import { ExecutorOperationError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";

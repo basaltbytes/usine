@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
-import { AgentName } from "@usine/core/ids";
+import { AgentName } from "@usine/core/agent";
 import { Effect, Stream } from "effect";
 import { ChildRequest, PiChildBackend, WorkingDirectory } from "../../src/runtime.ts";
 import { piChildBackendLayer, piSdkLive } from "../../src/pi/pi.ts";

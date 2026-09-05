@@ -1,16 +1,15 @@
-/** @usine/executor — platform-free worker execution contract. */
-
 import { Agent } from "@usine/core/agent";
 import { Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
-import { AttemptTask } from "@usine/core/attempt";
+import { AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
-import { AttemptId, RepositoryName, WorkerName } from "@usine/core/ids";
-import { RepositoryRevision } from "@usine/core/repository";
+import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { WorkerName, WorkerKind } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
-import { WorkerKind } from "@usine/core/worker";
 import { Context, Effect, Redacted, Schema } from "effect";
+
+/** @usine/executor — platform-free worker execution contract. */
 
 export const ExecutorOperation = Schema.Literals([
   "preflight",

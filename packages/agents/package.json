@@ -14,6 +14,22 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./pi": {
+      "types": "./dist/pi/pi.d.ts",
+      "default": "./dist/pi/pi.js"
+    },
+    "./children": {
+      "types": "./dist/pi/children.d.ts",
+      "default": "./dist/pi/children.js"
+    },
+    "./claude": {
+      "types": "./dist/pi/claude.d.ts",
+      "default": "./dist/pi/claude.js"
+    },
+    "./codex": {
+      "types": "./dist/pi/codex/codex.d.ts",
+      "default": "./dist/pi/codex/codex.js"
+    },
     "./pi/live": {
       "types": "./dist/pi/live.d.ts",
       "default": "./dist/pi/live.js"

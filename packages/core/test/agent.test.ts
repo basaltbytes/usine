@@ -5,9 +5,9 @@ import {
   AgentPersona,
   resolveParentEffort,
   resolveParentModel,
+  AgentName,
 } from "../src/agent/agent.ts";
 import { BrainSpec, ModelId } from "../src/agent/brain.ts";
-import { AgentName } from "../src/ids.ts";
 
 const decodeBrain = Schema.decodeUnknownSync(BrainSpec);
 

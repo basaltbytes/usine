@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { Agent, AgentPersona } from "@usine/core/agent";
+import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
@@ -7,10 +7,10 @@ import {
   ParentSession,
   TextOutput,
 } from "@usine/core/agent/session";
-import { AttemptTask } from "@usine/core/attempt";
+import { AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AgentName, AttemptId, RepositoryName, WorkerName } from "@usine/core/ids";
-import { CommitSha, RepositoryRevision } from "@usine/core/repository";
+import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
+import { WorkerName } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
 import { CheckoutRequest, Executor, type PreparedAttempt } from "../src/executor.ts";
 import { layer as exeDevLayer } from "../src/exe-dev/exe-dev.ts";

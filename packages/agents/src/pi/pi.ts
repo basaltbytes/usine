@@ -27,7 +27,6 @@ import { subagentsExtension } from "./subagents.ts";
 
 export {
   PiSdk,
-  piParentSessionToolPolicy,
   piSdkLive,
   type PiSession,
   type PiSessionEvent,

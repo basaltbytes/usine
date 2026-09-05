@@ -1,17 +1,10 @@
 import { InstanceDirectory } from "@usine/core/instance";
 import { Context, Effect, FileSystem, Layer, Option, Path, Result } from "effect";
-import {
-  type AgentFile,
-  ConfigFileError,
-  FactoryConfigError,
-  InstancePath,
-  InvalidAgent,
-  LoadedInstance,
-  type LoopFile,
-  loopReferenceFailure,
-  QuarantinedLoop,
-  referenceIndex,
-} from "./model.ts";
+import { type AgentFile, InvalidAgent } from "./agent.ts";
+import { ConfigFileError, FactoryConfigError, InstancePath } from "./file.ts";
+import { LoadedInstance } from "./instance/instance.ts";
+import { type LoopFile, QuarantinedLoop } from "./loop.ts";
+import { loopReferenceFailure, referenceIndex } from "./instance/references.ts";
 import { ConfigParser } from "./parser.ts";
 
 const FILE_CONCURRENCY = 16;

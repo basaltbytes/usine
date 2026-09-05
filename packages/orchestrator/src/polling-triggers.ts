@@ -1,43 +1,38 @@
-import type {
-  ConfigFileError,
-  DeclaredLabel,
-  LoadedInstance,
-  LoopFile,
-  ManagedRepo,
-} from "@usine/config/model";
+import type { ConfigFileError } from "@usine/config/file";
+import type { DeclaredLabel } from "@usine/config/label";
+import type { LoadedInstance } from "@usine/config/instance";
+import type { LoopFile } from "@usine/config/loop";
+import type { ManagedRepo } from "@usine/config/factory";
 import { ConfigParser } from "@usine/config/parser";
 import { environmentFor, repositoryContext } from "@usine/config/payload-slices";
 import { matchesSelector } from "@usine/config/selector";
 import { AttemptTask } from "@usine/core/attempt";
-import { DedupKey, ItemKey, RepositoryName } from "@usine/core/ids";
-import { ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
-import { canonicalRepositoryName } from "@usine/core/repository";
-import { CursorKey } from "@usine/engine/cursor/model";
-import { CursorStore } from "@usine/engine/cursor/store";
-import { RunEngine } from "@usine/engine/engine";
+import { DedupKey } from "@usine/core/event";
+import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
+import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
+import { CursorKey, CursorStore } from "@usine/engine/cursor";
+import {
+  RunEngine,
+  type EnginePersistenceError,
+  type RunEngineError,
+  SubmissionResult,
+} from "@usine/engine/engine";
 import {
   ItemContentHash,
   ItemProjection,
   ItemProjectionSource,
-} from "@usine/engine/item-projection/model";
-import { ItemProjectionWriter } from "@usine/engine/item-projection/service";
+  ItemProjectionWriter,
+} from "@usine/engine/item-projection";
 import { LoopControl } from "@usine/engine/loop-control";
-import {
-  type EnginePersistenceError,
-  type RunEngineError,
-  SubmissionResult,
-} from "@usine/engine/model";
 import {
   RepositoryLabel,
   RepositoryLabelProjection,
-} from "@usine/engine/repository-label-projection/model";
-import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
-} from "@usine/engine/repository-label-projection/service";
+} from "@usine/engine/repository-label-projection";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import type { ExpressionError } from "@usine/expression/model";
-import type { GitHubAppError } from "@usine/github/model";
+import type { GitHubAppError } from "@usine/github/github-app";
 import {
   type ChangedItem,
   EntityTag,
@@ -45,8 +40,8 @@ import {
   PollCursor,
   RepositoryLabelCatalog,
   type RepositoryLabelDetection,
-} from "@usine/github/polling/model";
-import { GitHubPolling } from "@usine/github/polling/polling";
+  GitHubPolling,
+} from "@usine/github/polling";
 import {
   Clock,
   Context,

@@ -44,6 +44,8 @@ Valid state sources are `issue-open`, `issue-closed`, `pr-open`, `pr-closed`, an
 
 `InstanceFolder.load` takes an `InstanceDirectory` (from `@usine/core/instance`) and returns one atomic `LoadedInstance` snapshot. An invalid `usine.yaml` fails the load with a `FactoryConfigError`; an invalid loop enters `quarantinedLoops` with a `ConfigFileError` naming the file and stage, without blocking valid siblings. Invalid agents appear in `invalidAgents`, and loops that name them are quarantined. A `LoadedInstance` always satisfies its own reference rule: every loaded loop names a rostered agent and registered selector entries, enforced at construction. Non-blocking authored-reference diagnostics appear in `warnings`. The `ConfigError` union covers both failure types.
 
-The package exports Effect services and layers. Supply `FileSystem.FileSystem` and `Path.Path` implementations when composing `InstanceFolder.layer`; `ConfigParser.layer` requires `ExpressionEngine` from `@usine/expression`.
+Import factory settings and registry types from `@usine/config/factory`, Board lanes from `@usine/config/board`, and label declarations from `@usine/config/label`. Authored loop, trigger, and agent schemas are available at `/loop`, `/trigger`, and `/agent`; `/selector` provides both the selector schema and matching operation. `/instance` provides `LoadedInstance` and its warnings, while `/file` provides file paths and typed loading failures. Shared identities and agent personas come from their owning `@usine/core` modules.
+
+The package exports Effect services and layers. Import `InstanceFolder` from `@usine/config/instance-folder` and `ConfigParser` from `@usine/config/parser`. Supply `FileSystem.FileSystem` and `Path.Path` implementations when composing `InstanceFolder.layer`; `ConfigParser.layer` requires `ExpressionEngine` from `@usine/expression/expression-engine`.
 
 All APIs remain 0.x and can change between minor releases.

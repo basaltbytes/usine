@@ -1,5 +1,5 @@
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { WorkerName } from "@usine/core/ids";
+import { WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
 import {
   ExecutorOperationError,

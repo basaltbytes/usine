@@ -31,6 +31,8 @@ import {
 import { sessionChannel } from "../session.ts";
 import { CodexAppServer, operationError } from "./app-server.ts";
 
+export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
+
 type CodexRequestPayload =
   | InitializeParams
   | ModelListParams

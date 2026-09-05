@@ -1,6 +1,6 @@
 import { CaretRightIcon } from "@phosphor-icons/react";
 import type { BillingPool, RateLimitWindow } from "@usine/core/agent/session";
-import type { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator/operator/model";
+import type { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { useMemo } from "react";
 import { Bubble, BubbleContent } from "@/components/ui/bubble";

@@ -9,8 +9,7 @@ import {
   isAutoRetryableFailure,
   RunawayFailure,
 } from "../src/attempt/failure.ts";
-import { Event } from "../src/event.ts";
-import { DedupKey, EventId } from "../src/ids.ts";
+import { Event, DedupKey, EventId } from "../src/event.ts";
 
 const infra = new InfraFailure({ message: "worker unreachable", cause: new Error("ECONNREFUSED") });
 const agent = new AgentFailure({ message: "agent reported failure" });

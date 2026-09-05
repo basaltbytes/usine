@@ -1,8 +1,7 @@
-import type { UsineConfig } from "@usine/config/model";
-import type { RepositoryName } from "@usine/core/ids";
+import type { UsineConfig } from "@usine/config/factory";
+import type { RepositoryName } from "@usine/core/repository";
 import { CredentialProvider, CredentialUnavailableError } from "@usine/executor";
-import { GitHubApp } from "@usine/github/github-app";
-import { CoveredProject } from "@usine/github/model";
+import { GitHubApp, CoveredProject } from "@usine/github/github-app";
 import { Effect, Layer, Option, SynchronizedRef } from "effect";
 
 /**

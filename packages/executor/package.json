@@ -22,10 +22,6 @@
       "types": "./dist/exe-dev/exe-dev.d.ts",
       "default": "./dist/exe-dev/exe-dev.js"
     },
-    "./exe-dev/model": {
-      "types": "./dist/exe-dev/model.d.ts",
-      "default": "./dist/exe-dev/model.js"
-    },
     "./local": {
       "types": "./dist/local/local.d.ts",
       "default": "./dist/local/local.js"

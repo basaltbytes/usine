@@ -1,38 +1,34 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Agent, AgentPersona } from "@usine/core/agent";
+import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
 import { AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
-import { Event } from "@usine/core/event";
-import {
-  AgentName,
-  DedupKey,
-  EventId,
-  ItemKey,
-  LoopName,
-  RepositoryName,
-  RunId,
-  StepName,
-  WorkerName,
-} from "@usine/core/ids";
-import { RepositoryRevision } from "@usine/core/repository";
+import { Event, DedupKey, EventId } from "@usine/core/event";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { eq } from "drizzle-orm";
 import { DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { RunDatabase } from "../src/database/database.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { attemptTranscripts } from "../src/database/schema.ts";
-import { CursorKey } from "../src/cursor/model.ts";
-import { CursorStore } from "../src/cursor/store.ts";
-import { LoopControl } from "../src/loop-control.ts";
+import { CursorKey, CursorStore } from "../src/cursor/cursor.ts";
+import { LoopControl } from "../src/loop-control/loop-control.ts";
 import {
   ItemContentHash,
   ItemProjection,
   ItemProjectionSource,
 } from "../src/item-projection/model.ts";
-import { ItemProjectionReader, ItemProjectionWriter } from "../src/item-projection/service.ts";
+import {
+  ItemProjectionReader,
+  ItemProjectionWriter,
+} from "../src/item-projection/item-projection.ts";
 import {
   RepositoryLabel,
   RepositoryLabelProjection,
@@ -40,17 +36,16 @@ import {
 import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
-} from "../src/repository-label-projection/service.ts";
+} from "../src/repository-label-projection/repository-label-projection.ts";
+import { Submission } from "../src/engine/submission.ts";
 import {
-  Submission,
   TranscriptAllQuery,
   TranscriptPageQuery,
   TranscriptSequence,
   TranscriptTailQuery,
-} from "../src/model.ts";
+} from "../src/transcript.ts";
 import { InstanceDirectory } from "@usine/core/instance";
-import { ItemNumber } from "@usine/core/item";
-import { RunReader } from "../src/run-reader.ts";
+import { RunReader } from "../src/run-reader/run-reader.ts";
 import { RunStore } from "../src/store/store.ts";
 
 const testAgent = new Agent({
