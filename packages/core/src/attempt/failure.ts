@@ -13,6 +13,11 @@ export class InfraFailure extends Schema.TaggedError<InfraFailure>("AttemptFailu
   },
 ) {}
 
+/** A programmer defect captured at the durable execution boundary. Retains its cause for diagnosis and requires an operator retry. */
+export class DefectFailure extends Schema.TaggedError<DefectFailure>(
+  "AttemptFailure/DefectFailure",
+)("DefectFailure", { message: Schema.String, cause: Schema.Defect() }) {}
+
 /**
  * The agent ran and failed the work itself. Never auto-retried, since the same
  * agent would fail the same way; the operator decides what changes first.
@@ -48,6 +53,7 @@ export class ChildSessionBudgetFailure extends Schema.TaggedError<ChildSessionBu
 
 export const AttemptFailure = Schema.Union([
   InfraFailure,
+  DefectFailure,
   AgentFailure,
   RunawayFailure,
   ChildSessionBudgetFailure,

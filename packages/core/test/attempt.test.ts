@@ -5,6 +5,7 @@ import { AttemptNumber, shouldAutoRetry } from "../src/attempt/attempt.ts";
 import {
   AgentFailure,
   ChildSessionBudgetFailure,
+  DefectFailure,
   InfraFailure,
   isAutoRetryableFailure,
   RunawayFailure,
@@ -12,6 +13,7 @@ import {
 import { Event, DedupKey, EventId } from "../src/event.ts";
 
 const infra = new InfraFailure({ message: "worker unreachable", cause: new Error("ECONNREFUSED") });
+const defect = new DefectFailure({ message: "executor crashed", cause: new Error("bug") });
 const agent = new AgentFailure({ message: "agent reported failure" });
 const runaway = new RunawayFailure({ ceiling: "tokens" });
 const childBudget = new ChildSessionBudgetFailure({
@@ -26,6 +28,7 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
   it("only infra failures are auto-retryable at the class level", () => {
     expect(isAutoRetryableFailure(infra)).toBe(true);
     expect(isAutoRetryableFailure(agent)).toBe(false);
+    expect(isAutoRetryableFailure(defect)).toBe(false);
     expect(isAutoRetryableFailure(runaway)).toBe(false);
     expect(isAutoRetryableFailure(childBudget)).toBe(false);
   });
@@ -35,7 +38,8 @@ describe("auto-retry law (ADR 0002, ADR 0013)", () => {
     expect(shouldAutoRetry({ failure: infra, number: n(3), maxAutoAttempts: n(3) })).toBe(false);
   });
 
-  it("agent failures and guard failures never auto-retry, even on the first attempt", () => {
+  it("agent, defect, and guard failures never auto-retry, even on the first attempt", () => {
+    expect(shouldAutoRetry({ failure: defect, number: n(1), maxAutoAttempts: n(3) })).toBe(false);
     expect(shouldAutoRetry({ failure: agent, number: n(1), maxAutoAttempts: n(3) })).toBe(false);
     expect(shouldAutoRetry({ failure: runaway, number: n(1), maxAutoAttempts: n(3) })).toBe(false);
     expect(shouldAutoRetry({ failure: childBudget, number: n(1), maxAutoAttempts: n(3) })).toBe(

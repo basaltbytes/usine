@@ -27,13 +27,13 @@
     "@effect/platform-node": "catalog:",
     "@usine/config": "workspace:*",
     "@usine/core": "workspace:*",
+    "@usine/engine": "workspace:*",
     "@usine/expression": "workspace:*",
     "@usine/github": "workspace:*",
     "@usine/orchestrator": "workspace:*",
     "effect": "catalog:"
   },
   "devDependencies": {
-    "@usine/engine": "workspace:*",
     "@usine/tsconfig": "workspace:*",
     "@usine/web": "workspace:*",
     "typescript": "catalog:",

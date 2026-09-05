@@ -9,8 +9,10 @@ describe("run state machine (ADR 0002)", () => {
   it("a gated run reaches running only through waiting and queued", () => {
     const waiting = RunState.awaitApproval(new RunState.Pending());
     expect(waiting._tag).toBe("Waiting");
+    expect(RunState.operatorActions(waiting).canApprove).toBe(true);
     const queued = RunState.approve(waiting);
     expect(queued._tag).toBe("Queued");
+    expect(RunState.operatorActions(queued).canApprove).toBe(false);
     expect(RunState.start(queued)._tag).toBe("Running");
   });
 
@@ -26,7 +28,9 @@ describe("run state machine (ADR 0002)", () => {
 
   it("operator retry reopens a failed run for attempt N+1", () => {
     const failed = RunState.fail(new RunState.Running());
+    expect(RunState.operatorActions(failed).canRetry).toBe(true);
     expect(RunState.retry(failed)._tag).toBe("Running");
+    expect(RunState.operatorActions(RunState.retry(failed)).canRetry).toBe(false);
   });
 
   it("operator cancel reaches every open state and records the operator as reason", () => {
@@ -38,6 +42,8 @@ describe("run state machine (ADR 0002)", () => {
     ];
     for (const state of open) {
       const canceled = RunState.cancelByOperator(state);
+      expect(RunState.operatorActions(state).canCancel).toBe(true);
+      expect(RunState.operatorActions(canceled).canCancel).toBe(false);
       expect(canceled._tag).toBe("Canceled");
       expect(canceled.reason._tag).toBe("OperatorCanceled");
     }

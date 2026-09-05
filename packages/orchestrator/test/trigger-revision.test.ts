@@ -51,6 +51,7 @@ it.effect.each(["issue", "pr"] as const)(
         cancel: () => Effect.die("unused"),
         inspect: () => Effect.die("unused"),
         reconcile: () => Effect.die("unused"),
+        drain: () => Effect.void,
         retry: () => Effect.die("unused"),
         revoke: () => Effect.succeed([]),
         transcript: () => Effect.die("unused"),

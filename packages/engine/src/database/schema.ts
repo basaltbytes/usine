@@ -65,6 +65,7 @@ export const triggerEvents = snakeCase.table(
     ),
     check("usine_trigger_events_agent_json_valid", sql`json_valid(${table.agentJson})`),
     index("usine_trigger_events_item").on(table.loopName, table.itemKey),
+    index("usine_trigger_events_item_history").on(table.itemKey),
   ],
 );
 

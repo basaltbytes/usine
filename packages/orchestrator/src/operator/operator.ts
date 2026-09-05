@@ -117,7 +117,6 @@ const makeOperatorObservation = Effect.gen(function* () {
       (repository) =>
         Effect.gen(function* () {
           const { name } = repository;
-          const projectRuns = runsByRepository.get(name) ?? [];
           const projectFindings = preflightFindings.filter(
             ({ repository: findingRepository }) => findingRepository === name,
           );
@@ -127,6 +126,15 @@ const makeOperatorObservation = Effect.gen(function* () {
               repositoryLabels.get(name),
             ] as const,
             { concurrency: "unbounded" },
+          );
+          const history = yield* reader.forItems(boardItems.map(({ itemKey }) => itemKey));
+          const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
+          for (const saved of history) {
+            const view = runView(saved, paused);
+            merged.set(view.id, view);
+          }
+          const projectRuns = [...merged.values()].sort(
+            (a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id),
           );
           const catalog = Option.match(labelProjection, {
             onNone: () => [],
@@ -193,7 +201,9 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
       );
     }
-    for (const run of views) {
+    const allRuns = new Map(views.map((run) => [run.id, run]));
+    for (const project of projects) for (const run of project.runs) allRuns.set(run.id, run);
+    for (const run of allRuns.values()) {
       if (run.state === "Waiting") {
         needsYou.push(
           new ApprovalNeed({
@@ -451,7 +461,7 @@ const makeOperator = Effect.gen(function* () {
         [],
       );
       const source = board.lanes.find(({ items: laneItems }) =>
-        laneItems.some(({ number }) => number === move.item),
+        laneItems.some(({ items }) => items.some(({ number }) => number === move.item)),
       );
       if (source === undefined) {
         return yield* new BoardItemNotFound({ repository: move.repository, item: move.item });
@@ -550,6 +560,7 @@ export {
 export { RunStateTag, RunView, RunDetailView } from "./run.ts";
 export {
   InfraFailureView,
+  DefectFailureView,
   AgentFailureView,
   RunawayFailureView,
   ChildSessionBudgetFailureView,
@@ -563,7 +574,8 @@ export {
 export {
   BoardLaneId,
   BoardLaneOrigin,
-  BoardItemView,
+  BoardItemLink,
+  BoardTaskView,
   WritableBoardLaneView,
   ReadOnlyBoardLaneView,
   BoardLaneView,

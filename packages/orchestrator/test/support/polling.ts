@@ -102,6 +102,7 @@ export const pollingTestLayer = (
     cancel: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
     reconcile: () => Effect.die("unused"),
+    drain: () => Effect.void,
     retry: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),
     submit: () => Effect.die("unused"),

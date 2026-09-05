@@ -1,5 +1,6 @@
 import { Context, Effect, Layer, Option } from "effect";
 import { RunId } from "@usine/core/run";
+import { ItemKey } from "@usine/core/item";
 import { RunDatabase } from "../database/database.ts";
 import { ProjectionRevision, RunSnapshot, RunSummary } from "./model.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
@@ -19,11 +20,14 @@ const makeRunReader = Effect.gen(function* () {
   const revision = Effect.fn("RunReader.revision")(() =>
     queries.revision().pipe(persistence("read projection revision")),
   );
+  const forItems = Effect.fn("RunReader.forItems")((itemKeys: ReadonlyArray<ItemKey>) =>
+    queries.itemRunSummaries(itemKeys).pipe(persistence("read Item Run histories")),
+  );
   const transcript = Effect.fn("RunReader.transcript")((query: TranscriptQuery) =>
     queries.transcript(query).pipe(persistence("read Attempt transcript")),
   );
 
-  return { inspect, list, revision, transcript } as const;
+  return { inspect, list, forItems, revision, transcript } as const;
 });
 
 /** Reads saved Run state and transcripts without starting or recovering execution. */
@@ -36,6 +40,10 @@ export class RunReader extends Context.Service<
     readonly list: (options: {
       readonly closedLimit: number;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
+    /** Every saved Run for the supplied Items, newest first, including all their Attempts. */
+    readonly forItems: (
+      itemKeys: ReadonlyArray<ItemKey>,
+    ) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
     /** `None` means the invalidation row is absent: treat every cached projection as stale. */
     readonly revision: () => Effect.Effect<Option.Option<ProjectionRevision>, RunStoreError>;
     /** Reads the requested portion of one Attempt's saved transcript in append order. */

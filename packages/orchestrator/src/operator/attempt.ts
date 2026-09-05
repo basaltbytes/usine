@@ -10,6 +10,11 @@ export class InfraFailureView extends Schema.TaggedClass<InfraFailureView>(
   "@usine/orchestrator/InfraFailureView",
 )("InfraFailure", { message: Schema.String }) {}
 
+/** A captured programmer defect requiring operator intervention; the original cause stays behind this boundary. */
+export class DefectFailureView extends Schema.TaggedClass<DefectFailureView>(
+  "@usine/orchestrator/DefectFailureView",
+)("DefectFailure", { message: Schema.String }) {}
+
 /** An agent failure message safe to display to the operator. */
 export class AgentFailureView extends Schema.TaggedClass<AgentFailureView>(
   "@usine/orchestrator/AgentFailureView",
@@ -31,6 +36,7 @@ export class ChildSessionBudgetFailureView extends Schema.TaggedClass<ChildSessi
 /** An Attempt failure with only the details the operator can inspect. */
 export const FailureView = Schema.Union([
   InfraFailureView,
+  DefectFailureView,
   AgentFailureView,
   RunawayFailureView,
   ChildSessionBudgetFailureView,

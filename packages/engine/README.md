@@ -6,7 +6,7 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 
 `CursorStore` keeps typed keys with JSON values in that database. Trigger adapters use it for efficiency-only cursors such as GitHub watermarks and ETags; deleting a cursor causes a safe replay because the Event ledger remains the source of deduplication.
 
-`LoopControl` keeps runtime pause state in the same database. Pausing or unpausing a Loop never edits its authored Markdown file. `RunReader.list()` returns lightweight durable Run summaries newest first for observe-and-intervene surfaces, without loading Event payloads or issuing one snapshot read per Run. `RunReader.revision()` lets callers reuse an unchanged projection without rescanning history.
+`LoopControl` keeps runtime pause state in the same database. Pausing or unpausing a Loop never edits its authored Markdown file. `RunReader.list()` returns lightweight durable Run summaries newest first for observe-and-intervene surfaces, without loading Event payloads or issuing one snapshot read per Run. `RunReader.forItems(itemKeys)` reads every saved Run and its Attempts for the selected Items, independently of the recent-history window. `RunReader.revision()` lets callers reuse an unchanged projection without rescanning history.
 
 `ItemProjectionReader` and `ItemProjectionWriter` store the latest issue and pull-request snapshots already fetched by trigger polling. Board consumers can read that projection after a restart without making a second GitHub query; `ItemProjectionReader.list` returns the newest Items first, bounded by the caller's `limit`. Item writes update the shared projection revision only when the content hash changes.
 
@@ -15,11 +15,11 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 ## Runtime rules
 
 - Approval-gated Runs wait for an approval Event before their first Attempt.
-- Infrastructure failures retry automatically, with a cap of three Attempts. Agent and runaway failures wait for an operator retry.
+- Infrastructure failures retry automatically, with a cap of three Attempts. Agent, defect, and guard failures wait for an operator retry.
 - A newer Event supersedes a pending, waiting, or queued Run. A running Attempt finishes first, then the engine opens only the newest queued Event for that Item.
 - Revoke stops pending, waiting, and queued Runs. Operator cancellation can also stop a running Attempt.
 - The startup sweep rejoins open workflow executions. If the process stopped during an Attempt, the engine records that Attempt as an infrastructure failure and resumes as N+1.
-- A crash inside the `StepExecutor` adapter is recorded as an infrastructure failure like any other. If the engine itself hits an invariant defect, the workflow suspends for inspection; `RunEngine.reconcile` (or a restart) repairs the projection.
+- A defect escaping `StepExecutor` is saved as `DefectFailure`, preserving its original cause and requiring an operator retry. If the engine itself hits an invariant defect, the workflow suspends for inspection; `RunEngine.reconcile` (or a restart) repairs the projection.
 - Attempt channel envelopes are stored in an append-only transcript. Durable protocol-v3 envelopes remain readable after the live channel upgrades to v4. Normalized parent and child session events retain their session identity. `RunEngine.transcript` accepts distinct `TranscriptAllQuery`, `TranscriptTailQuery`, and `TranscriptPageQuery` variants, so full diagnostics, bounded live tails, and bounded backward pages cannot be confused. Tail and page queries require a positive row limit. A protocol-v4 `Started` frame writes the SDK-selected parent model onto the Attempt.
 - The submitted agent, rendered task, payload snapshot, effective parent model, and per-Attempt child brain survive restarts in the run ledger.
 
@@ -80,3 +80,7 @@ Everything is 0.x, so APIs may change. Supply `effect` at the version pinned by 
 `CycleBudgets` at `@usine/engine/cycle-budget` persists Item-level exhaustion Asks and explicit, idempotent reset Events. `Submission.cycleLimit` defaults to three; schedule adapters supply `None`. Run admission reserves the allowance transactionally and returns `CycleBlocked` when the Item needs a reset. Attempt retries do not charge again, and canceled Runs without Attempts return their reservation. Existing history and queued Item Events acquire the default budget on upgrade.
 
 Reset records a fresh polling request. Trigger adapters capture `CycleBudgets.generation(itemKey)` before fetching input and include it in both `Submission.cycleGeneration` and the Event identity. Older observations are superseded at admission, including in-flight polls and queued Events; fresh polling creates a new Event with current execution settings. Labels, restarts, and Loop configuration changes never clear an Ask. See [ADR 0022](../../docs/adr/0022-item-cycle-budgets-and-comment-reviews.md).
+
+`RunEngine.drain()` permanently closes Attempt admission for that runtime and waits for admitted Attempts to persist their outcomes. Worker reservations, approval gates, and subsequent retries resume after restarting the runtime. Interrupting the drain wait keeps admission closed. The host supplies a shutdown deadline and closes its runtime scope after the wait; see [ADR 0023](../../docs/adr/0023-graceful-attempt-drain.md).
+
+Hosts that handle shutdown during startup can provide `RunEngineShutdown` from `/engine`: a fresh `Deferred<void>` allocated before building the runtime. Completing it immediately closes Attempt admission, including recovered work. After startup completes, `RunEngine.drain()` waits for the admitted outcomes. The server installs this protection before building its runtime.

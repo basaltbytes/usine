@@ -17,6 +17,7 @@ import {
   AttemptView,
   CanceledAttemptView,
   ChildSessionBudgetFailureView,
+  DefectFailureView,
   FailedAttemptView,
   type FailureView,
   InfraFailureView,
@@ -40,6 +41,7 @@ const TAIL_TRANSCRIPT_LIMIT = 500;
 export const failureView = (failure: AttemptFailure): FailureView =>
   Match.valueTags(failure, {
     InfraFailure: ({ message }) => new InfraFailureView({ message }),
+    DefectFailure: ({ message }) => new DefectFailureView({ message }),
     AgentFailure: ({ message }) => new AgentFailureView({ message }),
     RunawayFailure: ({ ceiling }) => new RunawayFailureView({ ceiling }),
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
@@ -85,9 +87,7 @@ export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<LoopName>
     attempts: snapshot.attempts.map(attemptView),
     resultMessage: result?.message ?? null,
     pullRequestUrl: pullRequest?.url.toString() ?? null,
-    canApprove: snapshot.run.state._tag === "Waiting",
-    canRetry: snapshot.run.state._tag === "Failed",
-    canCancel: RunState.isOpen(snapshot.run.state),
+    ...RunState.operatorActions(snapshot.run.state),
   });
 };
 

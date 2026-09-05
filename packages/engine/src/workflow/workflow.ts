@@ -1,9 +1,16 @@
-import { AgentFailure, AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import {
+  AgentFailure,
+  AttemptFailure,
+  DefectFailure,
+  InfraFailure,
+} from "@usine/core/attempt/failure";
 import { RunId } from "@usine/core/run";
+import type { WorkerName } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
 import { Effect, Option, Result, Schema } from "effect";
 import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { StepExecutor } from "../step-executor.ts";
+import { AttemptAdmission } from "./admission.ts";
 import { AttemptRecoveryFailed, RunStore } from "../store/store.ts";
 import {
   EnginePersistenceError,
@@ -60,6 +67,44 @@ export const continueWithNewest: (
   yield* store.completeWorkflowCommand(completedRunId, "Continue");
 });
 
+const executeAttempt = Effect.fn("DurableRun.attempt")(function* (
+  runId: RunId,
+  worker: WorkerName,
+) {
+  yield* Effect.annotateCurrentSpan({ runId, worker });
+  const store = yield* RunStore;
+  const executor = yield* StepExecutor;
+  const started = yield* store.beginAttempt(runId, worker).pipe(asAttemptFailure);
+  if (started instanceof AttemptRecoveryFailed || started._tag === "RunClosed") {
+    return started;
+  }
+
+  // Durable workflows need a serializable terminal outcome. Preserve an
+  // executor defect without turning a programming bug into an automatic retry.
+  const result = yield* executor
+    .execute(started.execution, {
+      append: (direction, envelope) =>
+        store.appendTranscript(direction, envelope).pipe(asAttemptFailure),
+    })
+    .pipe(
+      Effect.catchDefect((defect) =>
+        Effect.logError("Step executor defect; operator intervention required", { runId }).pipe(
+          Effect.andThen(
+            new DefectFailure({
+              message: "The step executor crashed outside its typed failure channel",
+              cause: defect,
+            }),
+          ),
+        ),
+      ),
+      Effect.result,
+    );
+  const decision = yield* store
+    .finishAttempt(started.execution.attempt, result)
+    .pipe(asAttemptFailure);
+  return { _tag: "AttemptExecuted" as const, result, decision };
+});
+
 const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
   { submission }: WorkflowPayload,
   executionId: string,
@@ -67,6 +112,7 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
   const runId = RunId.make(executionId);
   const store = yield* RunStore;
   const executor = yield* StepExecutor;
+  const admission = yield* AttemptAdmission;
 
   if (submission.approval === "required") {
     yield* store.parkForApproval(runId).pipe(asAttemptFailure);
@@ -77,33 +123,15 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
     // The wait for a worker slot stays interruptible so a cancel can reach a run
     // parked in `reserve`; the scheduler releases or reoffers the slot in its own
     // onInterrupt. The release obligation begins only once the lease exists.
-    const lease = yield* executor.reserve(submission);
-    const attempted = yield* Effect.gen(function* () {
-      const started = yield* store.beginAttempt(runId, lease.worker).pipe(asAttemptFailure);
-      if (started instanceof AttemptRecoveryFailed || started._tag === "RunClosed") {
-        return started;
-      }
-
-      // The executor's contract is the typed AttemptFailure channel. A defect
-      // escaping the adapter is infrastructure breakage around the agent, so it
-      // is translated before reaching the durable workflow.
-      const result = yield* executor
-        .execute(started.execution, {
-          append: (direction, envelope) =>
-            store.appendTranscript(direction, envelope).pipe(asAttemptFailure),
-        })
-        .pipe(
-          Effect.catchDefect(
-            (defect) =>
-              new InfraFailure({
-                message: "The step executor crashed outside its typed failure channel",
-                cause: defect,
-              }),
+    const attempted = yield* Effect.uninterruptibleMask((restore) =>
+      restore(executor.reserve(submission)).pipe(
+        Effect.flatMap((lease) =>
+          restore(admission.withAttempt(runId, executeAttempt(runId, lease.worker))).pipe(
+            Effect.ensuring(lease.release),
           ),
-          Effect.result,
-        );
-      return { _tag: "AttemptExecuted" as const, result, started };
-    }).pipe(Effect.ensuring(lease.release));
+        ),
+      ),
+    );
     if (attempted._tag === "RunClosed") {
       // Canceled, superseded, or revoked while queued: release was the only
       // obligation, and the closing operation already delivered the interrupt.
@@ -121,10 +149,7 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
       return yield* attempted.failure;
     }
 
-    const { result, started } = attempted;
-    const decision = yield* store
-      .finishAttempt(started.execution.attempt, result)
-      .pipe(asAttemptFailure);
+    const { result, decision } = attempted;
     if (decision._tag !== "RetryAttempt") {
       yield* continueWithNewest(store, runId).pipe(asAttemptFailure);
       if (Result.isSuccess(result)) return result.success;

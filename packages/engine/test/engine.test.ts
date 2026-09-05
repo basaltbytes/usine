@@ -20,6 +20,7 @@ import {
   Effect,
   Exit,
   FileSystem,
+  Fiber,
   Layer,
   Option,
   Path,
@@ -30,11 +31,12 @@ import {
 import { SqlClient } from "effect/unstable/sql";
 import { layer } from "../src/database/local-sqlite.ts";
 import { InstanceDirectory } from "@usine/core/instance";
-import { RunEngine } from "../src/engine/engine.ts";
+import { RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
 import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
+import { runIdFor } from "../src/workflow/workflow.ts";
 
 const stepResult = (message: string) => new StepResult({ message, facts: [] });
 const testAgent = new Agent({
@@ -201,6 +203,17 @@ describe("durable run engine", () => {
             bounded.map(({ run }) => run.id),
             [first.runId],
           );
+          const history = yield* reader.forItems([
+            ...Array.from({ length: 120 }, (_, i) => ItemKey.make(`absent-${i}`)),
+            ItemKey.make("listed-two"),
+            ItemKey.make("listed-two"),
+          ]);
+          assert.deepStrictEqual(
+            history.map(({ run }) => run.id),
+            [second.runId],
+          );
+          assert.strictEqual(history[0]?.attempts.length, 1);
+          assert.deepStrictEqual(yield* reader.forItems([]), []);
           const runRevision = Option.getOrThrow(yield* reader.revision());
           assert(runRevision > initialRevision);
           yield* controls.pause(LoopName.make("review"));
@@ -288,7 +301,7 @@ describe("durable run engine", () => {
     ),
   );
 
-  it.live("translates an executor defect into a typed infrastructure failure", () =>
+  it.live("persists executor defects without automatic retry and permits an operator retry", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
@@ -305,22 +318,35 @@ describe("durable run engine", () => {
           assert.strictEqual(accepted._tag, "Claimed");
           if (accepted._tag !== "Claimed") return;
 
-          // Without the translation the defect suspends the workflow and the run
-          // stays Running forever with an open Attempt; with it, the crash is
-          // an InfraFailure that auto-retries.
+          // A defect must neither strand an open Attempt nor repeat agent work automatically.
           const finished = yield* waitFor(
             engine,
             accepted.runId,
-            ({ run }) => run.state._tag === "Succeeded",
+            ({ run }) => run.state._tag === "Failed",
           );
-          assert.strictEqual(finished.attempts.length, 2);
+          assert.strictEqual(finished.attempts.length, 1);
+          assert.strictEqual((yield* Ref.get(plans)).length, 1);
           const crashed = finished.attempts[0]?.outcome;
           assert(crashed !== undefined);
           assert(Option.isSome(crashed));
           assert.strictEqual(crashed.value._tag, "Failed");
           if (crashed.value._tag === "Failed") {
-            assert.strictEqual(crashed.value.failure._tag, "InfraFailure");
+            assert.strictEqual(crashed.value.failure._tag, "DefectFailure");
+            if (crashed.value.failure._tag === "DefectFailure") {
+              assert(crashed.value.failure.cause instanceof Error);
+              assert.strictEqual(
+                crashed.value.failure.cause.message,
+                "the executor adapter crashed",
+              );
+            }
           }
+          yield* engine.retry(accepted.runId);
+          const retried = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(retried.attempts.length, 2);
         }).pipe(Effect.provide(runtime));
       }),
     ),
@@ -602,6 +628,162 @@ describe("durable run engine", () => {
         }
         yield* Scope.close(secondScope, Exit.void);
       }),
+    ),
+  );
+
+  it.live("drains an admitted Attempt and leaves queued and new work for restart", () =>
+    withInstance((directory) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* Deferred.make<void>();
+          const finish = yield* Deferred.make<void>();
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(finish)),
+              Effect.as(stepResult("finished before shutdown")),
+            ),
+            Effect.succeed(stepResult("queued work after restart")),
+            Effect.succeed(stepResult("new work after restart")),
+          ]);
+          const runtime = layer(directory).pipe(Layer.provide(executorLayer(plans)));
+          const firstScope = yield* Scope.make();
+          const first = Context.get(
+            yield* Scope.provide(Layer.build(runtime), firstScope),
+            RunEngine,
+          );
+          const accepted = yield* first.submit(submission({ number: 42 }));
+          assert(accepted._tag === "Claimed");
+          yield* Deferred.await(started);
+          const queued = submission({ number: 43 });
+          assert.strictEqual((yield* first.submit(queued))._tag, "Queued");
+          const draining = yield* Effect.forkScoped(first.drain(), { startImmediately: true });
+          const next = submission({ number: 44, item: "another-item" });
+          yield* first.submit(next);
+          yield* Deferred.succeed(finish, undefined);
+          yield* Fiber.join(draining);
+          const completed = yield* first.inspect(accepted.runId);
+          assert.strictEqual(completed.run.state._tag, "Succeeded");
+          assert.strictEqual(completed.attempts.length, 1);
+          assert.strictEqual((yield* Ref.get(plans)).length, 2);
+          yield* Scope.close(firstScope, Exit.void);
+
+          const secondScope = yield* Scope.make();
+          const second = Context.get(
+            yield* Scope.provide(Layer.build(runtime), secondScope),
+            RunEngine,
+          );
+          for (const pending of [queued, next]) {
+            const completed = yield* waitFor(
+              second,
+              yield* runIdFor(pending),
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.strictEqual(completed.attempts.length, 1);
+          }
+          yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
+    ),
+  );
+
+  it.live("a host shutdown latch closes admission before startup recovery", () =>
+    withInstance((directory) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const entered = yield* Deferred.make<void>();
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
+            Effect.succeed(stepResult("recovered after restart")),
+          ]);
+          const runtime = layer(directory).pipe(Layer.provide(executorLayer(plans)));
+          const firstScope = yield* Scope.make();
+          const first = Context.get(
+            yield* Scope.provide(Layer.build(runtime), firstScope),
+            RunEngine,
+          );
+          const accepted = yield* first.submit(submission({ number: 48 }));
+          assert(accepted._tag === "Claimed");
+          yield* Deferred.await(entered);
+          yield* Scope.close(firstScope, Exit.void);
+
+          const stopped = yield* Deferred.make<void>();
+          yield* Deferred.succeed(stopped, undefined);
+          const secondScope = yield* Scope.make();
+          const second = Context.get(
+            yield* Scope.provide(Layer.build(runtime), secondScope).pipe(
+              Effect.provideService(RunEngineShutdown, stopped),
+            ),
+            RunEngine,
+          );
+          yield* second.drain();
+          assert.strictEqual((yield* second.inspect(accepted.runId)).attempts.length, 1);
+          assert.strictEqual((yield* Ref.get(plans)).length, 1);
+          yield* Scope.close(secondScope, Exit.void);
+
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const recovered = yield* waitFor(
+              engine,
+              accepted.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.strictEqual(recovered.attempts.length, 2);
+          }).pipe(Effect.provide(runtime));
+        }),
+      ),
+    ),
+  );
+
+  it.live("defers an automatic retry during drain without adding an interruption failure", () =>
+    withInstance((directory) =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          const started = yield* Deferred.make<void>();
+          const finish = yield* Deferred.make<void>();
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(finish)),
+              Effect.andThen(
+                new InfraFailure({ message: "temporary worker failure", cause: "test" }),
+              ),
+            ),
+            Effect.succeed(stepResult("retried after restart")),
+          ]);
+          const runtime = layer(directory).pipe(Layer.provide(executorLayer(plans)));
+          const firstScope = yield* Scope.make();
+          const first = Context.get(
+            yield* Scope.provide(Layer.build(runtime), firstScope),
+            RunEngine,
+          );
+          const accepted = yield* first.submit(submission({ number: 45 }));
+          assert(accepted._tag === "Claimed");
+          yield* Deferred.await(started);
+          const draining = yield* Effect.forkScoped(first.drain(), { startImmediately: true });
+          yield* Deferred.succeed(finish, undefined);
+          yield* Fiber.join(draining);
+          assert.strictEqual((yield* first.inspect(accepted.runId)).attempts.length, 1);
+          assert.strictEqual((yield* Ref.get(plans)).length, 1);
+          yield* Scope.close(firstScope, Exit.void);
+          const secondScope = yield* Scope.make();
+          const second = Context.get(
+            yield* Scope.provide(Layer.build(runtime), secondScope),
+            RunEngine,
+          );
+          const completed = yield* waitFor(
+            second,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(completed.attempts.length, 2);
+          const outcome = completed.attempts[0]?.outcome;
+          assert(
+            outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed",
+          );
+          assert(outcome.value.failure._tag === "InfraFailure");
+          assert.strictEqual(outcome.value.failure.message, "temporary worker failure");
+          yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
     ),
   );
 

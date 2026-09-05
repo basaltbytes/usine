@@ -13,3 +13,5 @@ Rather than hand-rolling crash-safe resume, usine delegates durable execution �
 - Deterministic execution ids (hash of workflow name + idempotency key) make "the same Event joins the same run" free — usine's dedup key is the idempotency key.
 - A crash mid-step re-runs that step's agent session from scratch — acceptable: it is a new Attempt.
 - The known SQLite lock issue ([Effect-TS/effect#6176](https://github.com/Effect-TS/effect/issues/6176)) concerns concurrent multi-process access; the single orchestrator process, or Postgres, sidesteps it.
+
+A defect escaping the StepExecutor port is captured as `DefectFailure` at the durable boundary. Its original cause is retained for diagnosis, its Attempt records a terminal failure, and it never qualifies for automatic retry. This avoids both suspending a Run forever with an open Attempt and repeating agent work after a programming bug. Other engine defects retain their defect semantics.
