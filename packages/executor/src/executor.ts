@@ -102,6 +102,8 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   agent: Agent,
   parentModel: Schema.Option(ModelId),
   maxChildren: ChildSessionBudget,
+  /** Maximum minutes of live run-host execution; preparation and resource cleanup are outside this budget. */
+  maxAttemptMinutes: Schema.Int.check(Schema.isGreaterThan(0)),
   parentEffort: Effort,
 }) {}
 

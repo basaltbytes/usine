@@ -1,10 +1,11 @@
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { Effect, Exit, Fiber, Ref, Scope } from "effect";
-import type { ExecutorError, PreparedAttempt } from "./executor.ts";
+import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor.ts";
 
 /** Owns partial preparation and the run host in one child scope, released at the Attempt's end. */
 export const prepareAttempt = (
   acquire: Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope>,
+  request: CheckoutRequest,
 ): Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope> =>
   Effect.uninterruptibleMask((restore) =>
     Effect.gen(function* () {
@@ -35,7 +36,23 @@ export const prepareAttempt = (
           // credential finalizers. Interrupting a caller waiting on join must also
           // stop that scoped fiber, so timeout/cancel completes the handshake first.
           return yield* Effect.acquireUseRelease(
-            Effect.forkIn(prepared.launch(io), scope),
+            Effect.forkIn(
+              prepared.launch(io).pipe(
+                // End the timer with the live session. Checkout/grant finalizers run
+                // afterward and cannot turn completed agent work into a retry.
+                Effect.timeoutOrElse({
+                  duration: `${request.maxAttemptMinutes} minutes`,
+                  orElse: () =>
+                    Effect.fail(
+                      new InfraFailure({
+                        message: `Attempt exceeded the ${request.maxAttemptMinutes}-minute budget`,
+                        cause: new Error("attempt timeout"),
+                      }),
+                    ),
+                }),
+              ),
+              scope,
+            ),
             Fiber.join,
             Fiber.interrupt,
           ).pipe(Effect.onExit((exit) => Scope.close(scope, exit)));

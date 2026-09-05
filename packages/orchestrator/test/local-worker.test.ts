@@ -1,19 +1,23 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { UsineConfig } from "@usine/config/factory";
+import { Settings, UsineConfig } from "@usine/config/factory";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
-import { AttemptTask, AttemptId } from "@usine/core/attempt";
+import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { RunId } from "@usine/core/run";
-import { StepName } from "@usine/core/step";
+import * as RunState from "@usine/core/run/state";
+import { Run, RunId } from "@usine/core/run";
+import { Step, StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, CredentialProvider, Executor, ExecutorError } from "@usine/executor";
 import { InstanceDirectory } from "@usine/core/instance";
+import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
+import { stepExecutorLayer } from "../src/scheduler.ts";
+import { TestClock } from "effect/testing";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery, TranscriptTailQuery } from "@usine/engine/transcript";
 import {
@@ -180,6 +184,97 @@ const withLocalEngine = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer));
 
 describe("local worker", () => {
+  it.effect(
+    "keeps completed agent work successful when checkout cleanup passes the Attempt deadline",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-cleanup-budget-" });
+        const instance = InstanceDirectory.make(root);
+        const remote = yield* makeRemote(root);
+        const cleanupStarted = yield* Deferred.make<void>();
+        const finishCleanup = yield* Deferred.make<void>();
+        const delayedCleanup = ChildProcessSpawner.make(
+          Effect.fn("test.delayCleanup")(function* (command) {
+            if (
+              command._tag === "StandardCommand" &&
+              command.command === "git" &&
+              command.args.includes("worktree") &&
+              command.args.includes("remove")
+            ) {
+              yield* Deferred.succeed(cleanupStarted, undefined);
+              yield* Deferred.await(finishCleanup);
+            }
+            return yield* spawner.spawn(command);
+          }),
+        );
+        const credential = Redacted.make(TOKEN);
+        const executor = localExecutorLayer({
+          instanceDirectory: instance,
+          repositoryUrl: () => remote,
+          runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
+        }).pipe(
+          Layer.provide(
+            Layer.succeed(CredentialProvider)({ issue: () => Effect.succeed(credential) }),
+          ),
+          Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
+        );
+        const budgetConfig = new UsineConfig({
+          ...config,
+          settings: new Settings({ ...config.settings, maxAttemptMinutes: 1 }),
+        });
+        const runtime = stepExecutorLayer(budgetConfig).pipe(Layer.provide(executor));
+        yield* Effect.gen(function* () {
+          const scheduler = yield* StepExecutor;
+          const selected = submission(7);
+          const runId = RunId.make("cleanup-budget-run");
+          const execution = new StepExecution({
+            attempt: new Attempt({
+              id: AttemptId.make("cleanup-budget-run/execute/1"),
+              runId,
+              stepName: selected.step,
+              worker: WorkerName.make("local"),
+              number: AttemptNumber.make(1),
+              brain: testAgent.brain,
+              parentModel: Option.none(),
+              startedAt: selected.event.receivedAt,
+              outcome: Option.none(),
+            }),
+            event: selected.event,
+            run: new Run({
+              id: runId,
+              eventId: selected.event.id,
+              loop: selected.loop,
+              state: RunState.start(new RunState.Pending()),
+              openedAt: selected.event.receivedAt,
+            }),
+            step: new Step({ runId, name: selected.step, result: Option.none() }),
+            repository: selected.repository,
+            revision: selected.revision,
+            task: selected.task,
+            agent: selected.agent,
+            parentModel: selected.parentModel,
+          });
+          const running = yield* scheduler
+            .execute(execution, { append: () => Effect.void })
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(cleanupStarted);
+          // Agent work is complete; only resource release crosses the one-minute budget.
+          yield* TestClock.adjust("2 minutes");
+          yield* Deferred.succeed(finishCleanup, undefined);
+          const result = yield* Fiber.join(running);
+          assert.strictEqual(result.message, "Completed: Complete local task 7");
+          assert.throws(() => Redacted.value(credential));
+          assert.deepStrictEqual(
+            yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`),
+            [],
+          );
+        }).pipe(Effect.provide(runtime));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
   it.live(
     "interrupts local clone and fetch waits and redacts Git diagnostics before releasing tokens",
     () =>
@@ -244,6 +339,7 @@ describe("local worker", () => {
                 agent: testAgent,
                 parentModel: Option.none(),
                 maxChildren: ChildSessionBudget.make(4),
+                maxAttemptMinutes: 60,
                 parentEffort: "high",
               }),
             );
@@ -302,6 +398,7 @@ describe("local worker", () => {
             agent: testAgent,
             parentModel: Option.none(),
             maxChildren: ChildSessionBudget.make(4),
+            maxAttemptMinutes: 60,
             parentEffort: "high",
           });
           const prepared = yield* executor.prepare(request).pipe(Effect.scoped);

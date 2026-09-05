@@ -174,24 +174,12 @@ export const stepExecutorLayer = (
                 agent: execution.agent,
                 parentModel: execution.parentModel,
                 maxChildren: config.settings.maxChildren,
+                maxAttemptMinutes: config.settings.maxAttemptMinutes,
                 parentEffort: resolveParentEffort(execution.agent, config.settings.parentEffort),
               }),
             )
             .pipe(Effect.mapError(asInfrastructureFailure));
-          return yield* prepared.launch(io).pipe(
-            // The Attempt owns interruption and cleanup. This budget remains a
-            // scheduling policy and cannot outlast the configured credential grant.
-            Effect.timeoutOrElse({
-              duration: `${config.settings.maxAttemptMinutes} minutes`,
-              orElse: () =>
-                Effect.fail(
-                  new InfraFailure({
-                    message: `Attempt exceeded the ${config.settings.maxAttemptMinutes}-minute budget`,
-                    cause: new Error("attempt timeout"),
-                  }),
-                ),
-            }),
-          );
+          return yield* prepared.launch(io);
         },
         Effect.scoped,
       );

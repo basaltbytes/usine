@@ -88,9 +88,10 @@ interface FakeSshState {
   /** When set, the next `rm -rf` on the Attempt worktree exits non-zero. */
   failWorktreeRm: boolean;
   /** The simulated remote operation parks until its SSH client is killed. */
-  hangPreparation: "none" | "clone" | "fetch" | "attach" | "promotion";
+  hangPreparation: "none" | "clone" | "fetch" | "attach" | "promotion" | "checkout";
   parked: boolean;
   failAttach: boolean;
+  failStop: boolean;
   cacheExists: boolean;
 }
 
@@ -277,6 +278,7 @@ const fakeSsh = (
     hangPreparation: "none",
     parked: false,
     failAttach: false,
+    failStop: false,
     cacheExists: false,
   };
   const service = ChildProcessSpawner.make(
@@ -285,6 +287,9 @@ const fakeSsh = (
       state.commands.push(command);
       const remote = remoteArgs(command);
       const remoteLine = remote[0] ?? "";
+      if (state.failStop && remoteLine.startsWith("exec 'sh' '-c'")) {
+        return oneShotHandle("", 255, "remote stop request lost");
+      }
       if (state.failAttach && command.args.includes("attach"))
         return oneShotHandle("", 255, "lost reply after attachment");
       if (remoteLine.startsWith("exec 'mv' ")) state.cacheExists = true;
@@ -292,7 +297,8 @@ const fakeSsh = (
         (state.hangPreparation === "clone" && remoteLine.includes("'clone'")) ||
         (state.hangPreparation === "fetch" && remoteLine.includes("'fetch'")) ||
         (state.hangPreparation === "attach" && command.args.includes("attach")) ||
-        (state.hangPreparation === "promotion" && remoteLine.startsWith("exec 'mv' "))
+        (state.hangPreparation === "promotion" && remoteLine.startsWith("exec 'mv' ")) ||
+        (state.hangPreparation === "checkout" && remoteLine.includes("'worktree' 'add'"))
       ) {
         state.parked = true;
         return yield* hangingHandle(state);
@@ -374,6 +380,7 @@ const request = new CheckoutRequest({
   agent: TEST_AGENT,
   parentModel: Option.none(),
   maxChildren: ChildSessionBudget.make(4),
+  maxAttemptMinutes: 60,
   parentEffort: "high",
 });
 
@@ -475,10 +482,51 @@ describe("exe.dev executor", () => {
     );
   });
 
-  for (const phase of ["clone", "fetch", "attach", "promotion"] as const) {
+  it.effect(
+    "retains the checkout when remote termination fails without changing success or leaking the grant",
+    () => {
+      const ssh = fakeSsh(PROTOCOL);
+      const errors: Array<unknown> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Error") errors.push(message);
+      });
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER);
+        const owner = yield* Scope.make();
+        const prepared = yield* executor.prepare(request).pipe(Scope.provide(owner));
+        ssh.state.failStop = true;
+        const beforeLaunch = ssh.state.commands.length;
+        const result = yield* prepared.launch({ append: () => Effect.void });
+        assert.strictEqual(result.message, "done");
+        const issued = ssh.state.commands.slice(beforeLaunch);
+        const remote = issued.map((command) => remoteArgs(command)[0] ?? "");
+        assert(remote.some((line) => line.startsWith("exec 'sh' '-c'")));
+        assert(!remote.some((line) => line.includes("'worktree' 'remove'")));
+        assert(!remote.some((line) => line.includes("'worktree' 'prune'")));
+        assert(!remote.some((line) => line.startsWith("exec 'rm'")));
+        assert.strictEqual(issued.filter(({ args }) => args.includes("detach")).length, 1);
+        assert(JSON.stringify(errors).includes("retained for recovery"));
+        assert(JSON.stringify(errors).includes(prepared.workspace.worktree));
+        const completed = ssh.state.commands.length;
+        yield* Scope.close(owner, Exit.void);
+        yield* Scope.close(owner, Exit.void);
+        assert.strictEqual(ssh.state.commands.length, completed);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(ssh.layer)),
+        Effect.provide(Logger.layer([logger])),
+      );
+    },
+  );
+
+  for (const phase of ["clone", "fetch", "attach", "promotion", "checkout"] as const) {
     it.effect(`releases acquired resources when preparation is interrupted during ${phase}`, () => {
       const ssh = fakeSsh(PROTOCOL);
       ssh.state.hangPreparation = phase;
+      // Partial preparation has never launched a run host and must roll back
+      // without requiring a working remote-stop channel.
+      ssh.state.failStop = true;
       return Effect.gen(function* () {
         const executor = yield* Executor;
         yield* executor.preflight(WORKER);
@@ -489,6 +537,16 @@ describe("exe.dev executor", () => {
           ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
           1,
         );
+        if (phase === "checkout") {
+          const commands = ssh.state.commands.map((command) => remoteArgs(command)[0] ?? "");
+          const add = commands.findIndex((line) => line.includes("'worktree' 'add'"));
+          assert(
+            commands.some((line, index) => index > add && line.includes("'worktree' 'remove'")),
+          );
+          assert(
+            commands.some((line, index) => index > add && line.includes("'worktree' 'prune'")),
+          );
+        }
         if (phase === "clone" || phase === "promotion") {
           const commands = ssh.state.commands.map((command) => remoteArgs(command)[0] ?? "");
           const clone = commands.findIndex((line) => line.includes("'clone'"));
@@ -771,6 +829,48 @@ describe("exe.dev executor", () => {
       assert.strictEqual(ssh.state.kills, 0);
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
+
+  it.effect(
+    "bounds live execution and releases resources after the timeout cancellation handshake",
+    () => {
+      const ssh = fakeSsh(PROTOCOL, "ignore-interrupt");
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER);
+        const prepared = yield* executor.prepare(
+          new CheckoutRequest({ ...request, maxAttemptMinutes: 1 }),
+        );
+        const started = yield* Deferred.make<void>();
+        const stopping = yield* Deferred.make<void>();
+        const running = yield* prepared
+          .launch({
+            append: (_direction, envelope) => {
+              if (envelope.payload._tag === "Started")
+                return Effect.asVoid(Deferred.succeed(started, undefined));
+              if (envelope.payload._tag === "Interrupt")
+                return Effect.asVoid(Deferred.succeed(stopping, undefined));
+              return Effect.void;
+            },
+          })
+          .pipe(Effect.result, Effect.forkChild);
+        yield* Deferred.await(started);
+        yield* TestClock.adjust("1 minute");
+        yield* Deferred.await(stopping);
+        yield* TestClock.adjust("2 seconds");
+        const outcome = yield* Fiber.join(running);
+        assert(Result.isFailure(outcome));
+        assert.strictEqual(outcome.failure._tag, "InfraFailure");
+        assert.strictEqual(outcome.failure.message, "Attempt exceeded the 1-minute budget");
+        assert.strictEqual(ssh.state.kills, 1);
+        assert.strictEqual(
+          ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+          1,
+        );
+        yield* executor.cancel(ATTEMPT_ID);
+        assert.strictEqual(ssh.state.kills, 1);
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+    },
+  );
 
   it.effect("kills a stalled SSH session after the interrupt grace", () => {
     const ssh = fakeSsh(PROTOCOL, "ignore-interrupt");

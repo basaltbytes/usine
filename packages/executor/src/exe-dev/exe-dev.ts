@@ -1,8 +1,9 @@
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName } from "@usine/core/repository";
-import { Effect, Layer, Schema } from "effect";
+import { Effect, Exit, Layer, Schema, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
+  type AttemptWorkspace,
   CheckoutRequest,
   CredentialUnavailableError,
   Executor,
@@ -106,23 +107,84 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         git: (operation, args) => commands.remote(operation, vm.sshDest, "git", args),
       };
 
-      const prepared = yield* fetches
+      const releaseWorkspace = Effect.fn("ExeDevExecutor.releaseWorkspace")(
+        function* (
+          resource: { readonly workspace: AttemptWorkspace; readonly scope: Scope.Closeable },
+          exit: Exit.Exit<unknown, unknown>,
+        ) {
+          yield* Effect.annotateCurrentSpan({
+            attemptId: request.attemptId,
+            worker: request.worker,
+            host: vm.sshDest,
+          });
+          // The remote run host and its checkout form one cleanup dependency:
+          // an SSH exit does not prove the process on the VM has stopped. Never
+          // close the checkout scope unless this independent stop request succeeds.
+          const confirmed = yield* commands.remote("cleanup", vm.sshDest, "sh", [
+            "-c",
+            RUN_HOST_KILL_SCRIPT,
+            "sh",
+            runHostPidFile(resource.workspace.worktree),
+          ]);
+          yield* Effect.logInfo("Confirmed the remote run host before workspace removal", {
+            attemptId: request.attemptId,
+            worker: request.worker,
+            host: vm.sshDest,
+            runHost: confirmed.trim(),
+          });
+          yield* Scope.close(resource.scope, exit);
+        },
+        (effect) =>
+          effect.pipe(
+            Effect.tapError((error) =>
+              Effect.logError("Remote termination failed; Attempt checkout retained for recovery", {
+                attemptId: request.attemptId,
+                worker: request.worker,
+                host: vm.sshDest,
+                worktree,
+                message: error.message,
+              }),
+            ),
+            Effect.ignore,
+          ),
+      );
+
+      const { workspace: prepared } = yield* fetches
         .withLock(request.repository)(
           Effect.gen(function* () {
-            // Grant ownership starts only after this Attempt acquires the lock.
+            // Credentials belong to the Attempt scope independently of the checkout:
+            // refusing destructive cleanup must still release this grant exactly once.
             yield* credentialGrants.acquire(
               request.attemptId,
               request.worker,
               request.repository,
               integration,
             );
-            return yield* provisionWorktree({
-              request,
-              url: remoteUrl,
-              host: vm.sshDest,
-              layout: { cache, staging, worktree },
-              ops,
-            });
+            return yield* Effect.acquireRelease(
+              Effect.uninterruptibleMask((restore) =>
+                Effect.gen(function* () {
+                  const scope = yield* Scope.make();
+                  // Before preparation succeeds no run host can exist. Roll back the
+                  // partial checkout unconditionally; only a completed workspace is
+                  // transferred to the guarded remote-process release above.
+                  const workspace = yield* restore(
+                    provisionWorktree({
+                      request,
+                      url: remoteUrl,
+                      host: vm.sshDest,
+                      layout: { cache, staging, worktree },
+                      ops,
+                    }),
+                  ).pipe(
+                    Scope.provide(scope),
+                    Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
+                  );
+                  return { workspace, scope };
+                }),
+              ),
+              releaseWorkspace,
+              { interruptible: true },
+            );
           }),
         )
         .pipe(
@@ -132,45 +194,6 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
               : executorError("exe.dev workspace preparation failed", cause),
           ),
         );
-
-      // This finalizer precedes checkout removal and grant release. An SSH exit
-      // only describes the local client; the recorded remote process is a separate
-      // obligation even when the channel disappears or launch fails.
-      yield* Effect.addFinalizer(
-        Effect.fn("ExeDevExecutor.releaseRunHost")(
-          function* () {
-            yield* Effect.annotateCurrentSpan({
-              attemptId: request.attemptId,
-              worker: request.worker,
-              host: vm.sshDest,
-            });
-            const confirmed = yield* commands.remote("cleanup", vm.sshDest, "sh", [
-              "-c",
-              RUN_HOST_KILL_SCRIPT,
-              "sh",
-              runHostPidFile(prepared.worktree),
-            ]);
-            yield* Effect.logInfo("Confirmed the remote run host before workspace removal", {
-              attemptId: request.attemptId,
-              worker: request.worker,
-              host: vm.sshDest,
-              runHost: confirmed.trim(),
-            });
-          },
-          (effect) =>
-            effect.pipe(
-              Effect.tapError((error) =>
-                Effect.logError("Remote run-host cleanup failed", {
-                  attemptId: request.attemptId,
-                  worker: request.worker,
-                  host: vm.sshDest,
-                  message: error.message,
-                }),
-              ),
-              Effect.ignore,
-            ),
-        ),
-      );
 
       yield* Effect.logInfo("exe.dev Attempt workspace ready", {
         attemptId: request.attemptId,
