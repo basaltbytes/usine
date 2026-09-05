@@ -3,8 +3,8 @@ import { Clock, Context, Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "./github-app.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
-import type { GitHubAppError } from "./model.ts";
-import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "./polling/model.ts";
+import type { GitHubAppError } from "./error.ts";
+import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "./polling/labels.ts";
 
 /** One label definition as GitHub's create-label endpoint accepts it. */
 export class NewRepositoryLabel extends Schema.Class<NewRepositoryLabel>(

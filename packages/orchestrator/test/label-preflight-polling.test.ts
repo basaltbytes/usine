@@ -15,7 +15,7 @@ import {
   RepositoryLabelProjection,
   RepositoryLabelProjectionReader,
 } from "@usine/engine/repository-label-projection";
-import { Source } from "@usine/expression/model";
+import { Source } from "@usine/expression/expression-engine";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
 import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
 import {

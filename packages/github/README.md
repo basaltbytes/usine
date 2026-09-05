@@ -9,6 +9,10 @@ Both token requests use a one-hour maximum lifetime. Token values and the App pr
 
 Import `GitHubApp`, credentials, access results, and typed App errors from `@usine/github/github-app`. `@usine/github/polling` provides `GitHubPolling` with its cursors, change-detection results, and payload snapshots. Item and label writes use `/item-writer` and `/label-writer`; local credential loading uses `/local-secrets`.
 
+`/polling` also exports `RepositoryLabel`, `RepositoryLabelCatalog`, and
+`RepositoryLabelsNotModified` for reading label catalogs and handling conditional
+responses. These contracts share the same entry point as `GitHubPolling`.
+
 ## Create the App manually
 
 Open your GitHub account or organization settings, select **Developer settings → GitHub Apps**, then select **New GitHub App**. Use a name that identifies the factory and set **Where can this GitHub App be installed?** to **Only on this account**. User authorization isn't required. You can turn off active webhooks for a polling-only development factory.

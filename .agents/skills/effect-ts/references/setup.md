@@ -5,6 +5,7 @@
 - [Effect Language Service](#effect-language-service)
 - [TypeScript Configuration](#typescript-configuration)
 - [Module Settings by Project Type](#module-settings-by-project-type)
+- [Project Structure](#project-structure)
 - [Reference Repositories](#reference-repositories)
 - [Development Workflow](#development-workflow)
 
@@ -152,6 +153,26 @@ Additional library settings:
 ```
 
 **Rule of thumb:** Build tool compiling your code? Use `preserve` + `bundler`. TypeScript compiling your code? Use `NodeNext`.
+
+## Project Structure
+
+Group modules by responsibility. Keep identities, records, schemas, and pure
+operations for a concept together. Split a file when its responsibilities or
+dependencies differ; keep a small, cohesive model together. `Model` is a useful
+name when it describes a concept the module implements.
+
+Use the pinned Effect source as a reference: `src/Option.ts` defines the type and
+its operations, `src/internal/` contains implementation helpers, and
+`src/unstable/schema/Model.ts` implements database and JSON model variants.
+These examples illustrate ownership; the repository's architecture determines
+its filenames and public imports.
+
+For usine, read [AGENTS.md](../../../../AGENTS.md) and
+[ADR 0012](../../../../docs/adr/0012-published-blocks-monorepo-layout.md) before
+changing module boundaries. Public subpaths describe capabilities. Their entry
+modules explicitly select same-package exports, allowing implementation files to
+change while callers keep the same imports. Keep platform dependencies behind
+the adapter entry points, and check the resulting import graph after a split.
 
 ## Reference Repositories
 

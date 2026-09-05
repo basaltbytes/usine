@@ -1,12 +1,12 @@
 import { StepName } from "@usine/core/step";
 import { ApprovalRequirement, LoopName } from "@usine/core/loop";
-import { ExpressionEngine } from "@usine/expression/expression-engine";
 import {
+  ExpressionEngine,
   type Environment,
   type ExpressionCheckError,
   type ExpressionError,
   Source,
-} from "@usine/expression/model";
+} from "@usine/expression/expression-engine";
 import { Context, Effect, Layer, Option, Schema, SchemaIssue } from "effect";
 import { splitMarkdown } from "./frontmatter.ts";
 import { AgentFile } from "./agent.ts";

@@ -5,7 +5,7 @@ import {
   ObjectType,
   TypeReference,
   Variable,
-} from "@usine/expression/model";
+} from "@usine/expression/expression-engine";
 import { Schema } from "effect";
 import type { ManagedRepo } from "./factory.ts";
 import type { Stream } from "./trigger.ts";

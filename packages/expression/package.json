@@ -21,10 +21,6 @@
     "./marcbachmann-cel": {
       "types": "./dist/marcbachmann-cel.d.ts",
       "default": "./dist/marcbachmann-cel.js"
-    },
-    "./model": {
-      "types": "./dist/model.d.ts",
-      "default": "./dist/model.js"
     }
   },
   "publishConfig": {

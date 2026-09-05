@@ -6,16 +6,14 @@ import {
   parse,
 } from "@marcbachmann/cel-js";
 import { Effect, Layer, Option, Schema } from "effect";
-import { ExpressionEngine } from "./expression-engine.ts";
+import { type Environment, type ObjectType, TypeReference } from "./environment.ts";
 import {
-  type Environment,
+  ExpressionEngine,
   ExpressionCheckError,
   ExpressionEvaluationError,
-  type ObjectType,
   Scalar,
   type Source,
-  TypeReference,
-} from "./model.ts";
+} from "./expression-engine.ts";
 
 const decodeTypeReference = Schema.decodeUnknownSync(TypeReference);
 

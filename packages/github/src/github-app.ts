@@ -13,30 +13,33 @@ import {
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { appJwtSigner } from "./jwt.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
+import { type AppAuthenticationError, GitHubCredentials } from "./credentials.ts";
 import {
-  type AppAuthenticationError,
   AppPermissionError,
   type CoveredProject,
+  type InstalledRepository,
+  type ProjectAccess,
+  REQUIRED_REPOSITORY_PERMISSIONS,
+  deriveProjectAccess,
+  missingPermissions,
+} from "./access.ts";
+import {
   type GitHubApiError,
   type GitHubAppError,
   type GitHubRateLimitError,
-  GitHubCredentials,
   type GitHubOperation,
+  InvalidGitHubResponseError,
+} from "./error.ts";
+import {
   Installation,
   InstallationDiscoveryError,
   InstallationId,
   InstallationToken,
   InstallationWide,
-  InvalidGitHubResponseError,
-  type InstalledRepository,
-  type ProjectAccess,
-  REQUIRED_REPOSITORY_PERMISSIONS,
   RepositoryId,
   SingleRepository,
   type TokenScope,
-  deriveProjectAccess,
-  missingPermissions,
-} from "./model.ts";
+} from "./installation.ts";
 
 const TOKEN_MAX_LIFETIME_MS = 60 * 60 * 1_000;
 /** Renew the shared lease when its token has less than this long left. */
@@ -298,28 +301,34 @@ export {
   missingPermissions,
   type InstalledRepository,
   type RequiredRepositoryPermission,
+  CoveredProject,
+  ProjectNotInstalledError,
+  ProjectAccess,
+  AppPermissionError,
+} from "./access.ts";
+export {
   AppId,
-  InstallationId,
-  RepositoryId,
   PrivateKey,
   RedactedPrivateKey,
-  GitHubOperation,
   AppCredentials,
   GitHubCredentials,
+  AppAuthenticationError,
+} from "./credentials.ts";
+export {
+  InstallationId,
+  RepositoryId,
   Installation,
   InstallationWide,
   SingleRepository,
   TokenScope,
   InstallationToken,
-  CoveredProject,
-  ProjectNotInstalledError,
-  ProjectAccess,
-  AppAuthenticationError,
   InstallationDiscoveryReason,
   InstallationDiscoveryError,
-  AppPermissionError,
+} from "./installation.ts";
+export {
+  GitHubOperation,
   GitHubApiError,
   GitHubRateLimitError,
   InvalidGitHubResponseError,
   GitHubAppError,
-} from "./model.ts";
+} from "./error.ts";

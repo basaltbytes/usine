@@ -4,7 +4,7 @@ import { Clock, Context, Effect, Layer, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "./github-app.ts";
 import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
-import type { GitHubAppError } from "./model.ts";
+import type { GitHubAppError } from "./error.ts";
 
 const LabelResponse = Schema.Array(Schema.Struct({ name: Schema.NonEmptyString }));
 const LabelNames = Schema.Array(Schema.NonEmptyString).check(Schema.isUnique());

@@ -19,9 +19,9 @@ import {
   BoardLaneId,
   BoardView,
   ReadOnlyBoardLaneView,
-  RunView,
   WritableBoardLaneView,
-} from "../src/operator/model.ts";
+} from "../src/operator/board.ts";
+import { RunView } from "../src/operator/run.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = ItemKey.make("github:basaltbytes/usine:33");

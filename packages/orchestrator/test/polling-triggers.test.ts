@@ -27,7 +27,7 @@ import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-
 import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { Source } from "@usine/expression/model";
+import { Source } from "@usine/expression/expression-engine";
 import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
 import {
   ChangedIssue,

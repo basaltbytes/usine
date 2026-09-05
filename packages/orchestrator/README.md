@@ -12,6 +12,10 @@ Its platform-free entry points provide `PollingTriggers` at `/polling-triggers`,
 
 ## Operator HTTP
 
+Import `FactoryOverview`, `RunView`, `RunDetailView`, Board views, operator needs,
+and transcript request types from `@usine/orchestrator/operator`. The `Operator`
+service and its HTTP contract use the same schemas for these views and requests.
+
 `@usine/orchestrator/operator/http` exports `OperatorApi`, the shared HTTP contract
 for operator observation and interventions. Use Effect's `HttpApiClient.make` with
 an `HttpClient` layer to call it, or `HttpApiBuilder.group` to implement its

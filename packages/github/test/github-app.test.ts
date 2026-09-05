@@ -4,16 +4,9 @@ import { RepositoryName } from "@usine/core/repository";
 import { Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../src/github-app.ts";
-import {
-  AppCredentials,
-  AppId,
-  CoveredProject,
-  GitHubCredentials,
-  InstallationId,
-  PrivateKey,
-  RepositoryId,
-  REQUIRED_REPOSITORY_PERMISSIONS,
-} from "../src/model.ts";
+import { AppCredentials, AppId, GitHubCredentials, PrivateKey } from "../src/credentials.ts";
+import { CoveredProject, REQUIRED_REPOSITORY_PERMISSIONS } from "../src/access.ts";
+import { InstallationId, RepositoryId } from "../src/installation.ts";
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const privatePem = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
