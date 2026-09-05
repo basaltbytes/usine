@@ -12,11 +12,8 @@ import { RepositoryRevision } from "@usine/core/repository";
 import { Submission, type SubmissionResult } from "@usine/engine/engine";
 import { type DateTime, Effect, Match, Option, Result, Schema } from "effect";
 
-/**
- * What a worker fetches until loops can name a revision: `HEAD` resolves the
- * remote's default branch at prepare time.
- */
-const DEFAULT_BRANCH_REVISION = RepositoryRevision.make("HEAD");
+/** Issue and schedule Attempts resolve the remote's default branch at prepare time. */
+export const DEFAULT_BRANCH_REVISION = RepositoryRevision.make("HEAD");
 
 export interface ResolvedLoop {
   readonly agent: Agent;
@@ -100,6 +97,7 @@ interface TriggerSubmissionOptions {
   readonly payload: Schema.Json;
   readonly receivedAt: DateTime.Utc;
   readonly repository: ManagedRepo;
+  readonly revision: RepositoryRevision;
   readonly task: AttemptTask;
   readonly parentModel: Option.Option<ModelId>;
 }
@@ -118,7 +116,7 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     step: options.loop.step,
     approval: options.loop.approval,
     repository: options.repository.name,
-    revision: DEFAULT_BRANCH_REVISION,
+    revision: options.revision,
     task: options.task,
     agent: options.agent,
     parentModel: options.parentModel,

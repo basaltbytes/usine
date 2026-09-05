@@ -41,6 +41,8 @@ After label preflight, the cycle asks `GitHubPolling` for changed items, fetches
 
 Polling cursors live in the engine's `CursorStore`. When a loop starts watching a repository or its trigger expression changes, the orchestrator discards that repository's efficiency cursor and performs a cold poll, while the permanent Event ledger absorbs repeated state.
 
+PR-triggered Attempts fetch and check out the immutable `headRefOid` saved in their Event payload. A later push creates a new Event with its new head commit. Issue and schedule Attempts use the repository's default branch.
+
 `PollingTriggers.layer` requires `CursorStore`, `LoopControl`, `RunEngine`, `ConfigParser`, `ExpressionEngine`, `GitHubPolling`, the repository-label projection reader/writer, and `LabelReconciler`. `LabelReconciler.layer` in turn requires `GitHubLabelWriter`. The engine's local SQLite layer supplies the engine services:
 
 ```ts

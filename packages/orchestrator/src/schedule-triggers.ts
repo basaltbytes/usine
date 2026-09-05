@@ -35,6 +35,7 @@ import {
 } from "effect";
 import {
   configFileErrorLogFields,
+  DEFAULT_BRANCH_REVISION,
   type LoopAgentResolutionError,
   type ResolvedLoop,
   resolveTriggerLoop,
@@ -274,6 +275,7 @@ export class ScheduleTriggers extends Context.Service<
             payload,
             receivedAt,
             repository: due.repository,
+            revision: DEFAULT_BRANCH_REVISION,
             task: AttemptTask.make(task),
             parentModel: due.parentModel,
           }),

@@ -218,6 +218,7 @@ describe("ScheduleTriggers", () => {
         const schedules = yield* ScheduleTriggers;
         const cycle = yield* schedules.tick(instanceWith(config, [loop]));
         const captured = yield* Ref.get(submissions);
+        assert(captured.every((submission) => submission.revision === "HEAD"));
 
         assert.strictEqual(cycle.loops, 1);
         assert.strictEqual(cycle.fanout, 2);
