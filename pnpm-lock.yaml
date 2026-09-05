@@ -92,6 +92,9 @@ importers:
       '@usine/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@usine/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
       '@usine/expression':
         specifier: workspace:*
         version: link:../../packages/expression
@@ -105,9 +108,6 @@ importers:
         specifier: 'catalog:'
         version: 4.0.0-rc.111
     devDependencies:
-      '@usine/engine':
-        specifier: workspace:*
-        version: link:../../packages/engine
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig

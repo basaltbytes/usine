@@ -29,11 +29,13 @@ import { StepExecutor } from "../step-executor.ts";
 import { CursorStore } from "../cursor/cursor.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
+import { AttemptAdmission } from "../workflow/admission.ts";
 
 const MAX_SETTLEMENT_POLLS = 500;
 
 const makeRunEngine = Effect.gen(function* () {
   const store = yield* RunStore;
+  const admission = yield* AttemptAdmission;
   const stepExecutor = yield* StepExecutor;
   const workflowEngine = yield* WorkflowEngine.WorkflowEngine;
   const provideWorkflowEngine = <A, E>(
@@ -194,13 +196,25 @@ const makeRunEngine = Effect.gen(function* () {
 
   yield* reconcile();
 
-  return { approve, cancel, inspect, reconcile, retry, revoke, submit, transcript } as const;
+  return {
+    approve,
+    cancel,
+    drain: admission.drain,
+    inspect,
+    reconcile,
+    retry,
+    revoke,
+    submit,
+    transcript,
+  } as const;
 });
 
 /** Records Events and manages their Runs through approval, execution, retry, and cancellation. */
 export class RunEngine extends Context.Service<
   RunEngine,
   {
+    /** Stops admitting Attempts, including retries, and waits for admitted work to settle. Interrupting this wait keeps admission closed until restart. */
+    readonly drain: () => Effect.Effect<void>;
     /** Records the operator's approval Event and opens the Run's gate; execution still waits for a Worker slot. */
     readonly approve: (runId: RunId, approval: Event) => Effect.Effect<void, RunEngineError>;
     /** Cancels an open Run and interrupts its active Attempt. An already closed Run is unchanged. */
@@ -259,9 +273,11 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     },
   }).pipe(Layer.provide(database), Layer.orDie);
   const workflowEngine = ClusterWorkflowEngine.layer.pipe(Layer.provide(cluster));
+  const admission = AttemptAdmission.layer;
   const runtime = durableRunLayer.pipe(
     Layer.provideMerge(workflowEngine),
     Layer.provideMerge(store),
+    Layer.provideMerge(admission),
   );
   const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(runtime));
   return Layer.mergeAll(
