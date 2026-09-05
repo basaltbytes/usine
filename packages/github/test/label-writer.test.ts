@@ -4,8 +4,13 @@ import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../src/github-app.ts";
 import { GitHubLabelWriter, NewRepositoryLabel } from "../src/label-writer.ts";
-import { Installation, InstallationId, InstallationToken, InstallationWide } from "../src/model.ts";
-import { RepositoryLabelColor, RepositoryLabelName } from "../src/polling/model.ts";
+import {
+  Installation,
+  InstallationId,
+  InstallationToken,
+  InstallationWide,
+} from "../src/installation.ts";
+import { RepositoryLabelColor, RepositoryLabelName } from "../src/polling/labels.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const token = new InstallationToken({

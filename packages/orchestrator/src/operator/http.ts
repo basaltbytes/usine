@@ -5,14 +5,14 @@ import { RunId } from "@usine/core/run";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { Record, Schema, SchemaTransformation } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi";
+import { BoardLaneId } from "./board.ts";
 import {
-  BoardLaneId,
   ColdTranscriptRequest,
   EarlierTranscriptRequest,
-  FactoryOverview,
-  RunDetailView,
   TailTranscriptRequest,
-} from "./model.ts";
+} from "./transcript.ts";
+import { FactoryOverview } from "./overview.ts";
+import { RunDetailView } from "./run.ts";
 
 const errorStatuses = {
   SchemaError: 400,

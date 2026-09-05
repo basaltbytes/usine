@@ -1,11 +1,5 @@
 import { Schema } from "effect";
 
-/** Non-blank CEL source text. */
-export const Source = Schema.String.check(
-  Schema.isPattern(/\S/u, { message: "Expected a non-blank CEL expression" }),
-).pipe(Schema.brand("ExpressionSource"));
-export type Source = typeof Source.Type;
-
 /** A type name in CEL syntax such as `string`, `Issue`, or `list<Label>`. */
 export const TypeReference = Schema.String.check(
   Schema.isPattern(
@@ -31,6 +25,7 @@ const uniqueNames = (message: string) =>
     { message },
   );
 
+/** One named field and its CEL type within an object descriptor. */
 export class ObjectField extends Schema.Class<ObjectField>("@usine/expression/ObjectField")({
   name: Identifier,
   type: TypeReference,
@@ -42,6 +37,7 @@ export class ObjectType extends Schema.Class<ObjectType>("@usine/expression/Obje
   fields: Schema.Array(ObjectField).check(uniqueNames("Expected unique CEL object-field names")),
 }) {}
 
+/** A root variable available to CEL expressions in an Environment. */
 export class Variable extends Schema.Class<Variable>("@usine/expression/Variable")({
   name: Identifier,
   type: TypeReference,
@@ -52,44 +48,3 @@ export class Environment extends Schema.Class<Environment>("@usine/expression/En
   types: Schema.Array(ObjectType).check(uniqueNames("Expected unique CEL object-type names")),
   variables: Schema.Array(Variable).check(uniqueNames("Expected unique CEL variable names")),
 }) {}
-
-const Position = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
-
-export const CheckErrorCode = Schema.Literals([
-  "check_failed",
-  "parse_error",
-  "type_error",
-  "unexpected_result_type",
-]);
-export type CheckErrorCode = typeof CheckErrorCode.Type;
-
-/** The expression failed to parse, to type-check, or to produce the expected result type. */
-export class ExpressionCheckError extends Schema.TaggedError<ExpressionCheckError>(
-  "@usine/expression/ExpressionCheckError",
-)("ExpressionCheckError", {
-  source: Source,
-  code: CheckErrorCode,
-  message: Schema.NonEmptyString,
-  position: Schema.Option(Position),
-}) {}
-
-/** Evaluation failed on an expression that had already checked. */
-export class ExpressionEvaluationError extends Schema.TaggedError<ExpressionEvaluationError>(
-  "@usine/expression/ExpressionEvaluationError",
-)("ExpressionEvaluationError", {
-  source: Source,
-  message: Schema.NonEmptyString,
-}) {}
-
-export const ExpressionError = Schema.Union([ExpressionCheckError, ExpressionEvaluationError]);
-export type ExpressionError = typeof ExpressionError.Type;
-
-/** Values prompt interpolation can render. CEL ints stay bigint. */
-export const Scalar = Schema.Union([
-  Schema.String,
-  Schema.Number,
-  Schema.BigInt,
-  Schema.Boolean,
-  Schema.Null,
-]);
-export type Scalar = typeof Scalar.Type;

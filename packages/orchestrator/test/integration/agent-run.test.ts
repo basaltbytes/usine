@@ -17,7 +17,7 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { RunEngine } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { Source } from "@usine/expression/model";
+import { Source } from "@usine/expression/expression-engine";
 import { GitHubApp } from "@usine/github/github-app";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
 import { IssuePayload, GitHubPolling } from "@usine/github/polling";

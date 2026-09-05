@@ -1,4 +1,4 @@
-import { Source } from "@usine/expression/model";
+import { Source } from "@usine/expression/expression-engine";
 import { Schema } from "effect";
 
 /** Path of one authored file, relative to the instance folder. */

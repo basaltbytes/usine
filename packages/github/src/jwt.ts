@@ -1,5 +1,5 @@
 import { Clock, Effect, Redacted } from "effect";
-import { AppAuthenticationError, type AppCredentials } from "./model.ts";
+import { AppAuthenticationError, type AppCredentials } from "./credentials.ts";
 
 interface JwtHeader {
   readonly alg: "RS256";

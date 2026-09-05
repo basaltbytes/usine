@@ -1,4 +1,3 @@
-import { ContentHash } from "./model.ts";
 import { canonicalContent } from "./content.ts";
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect";
@@ -15,27 +14,32 @@ import {
   statusError,
   transportError,
 } from "../http.ts";
-import { GitHubRateLimitError, type GitHubAppError, type GitHubOperation } from "../model.ts";
+import { GitHubRateLimitError, type GitHubAppError, type GitHubOperation } from "../error.ts";
 import {
   ChangedIssue,
   ChangedPullRequest,
   EntityTag,
+  PollCursor,
+  RepositoryChanges,
+  RepositoryNotModified,
+  type ChangeDetection,
+  type ChangedItem,
+} from "./detection.ts";
+import {
+  ContentHash,
   IssuePayload,
   IssueSnapshot,
-  PollCursor,
   PullRequestPayload,
   PullRequestSnapshot,
+  type PayloadSnapshot,
+} from "./payload.ts";
+import {
   RepositoryLabel,
   RepositoryLabelCatalog,
   RepositoryLabelColor,
   RepositoryLabelsNotModified,
   RepositoryLabelName,
-  RepositoryChanges,
-  RepositoryNotModified,
-  type ChangeDetection,
-  type ChangedItem,
-  type PayloadSnapshot,
-} from "./model.ts";
+} from "./labels.ts";
 import { ISSUE_PAYLOAD_QUERY, PULL_REQUEST_PAYLOAD_QUERY } from "./queries.ts";
 
 const WATERMARK_OVERLAP_MS = 5_000;
@@ -506,12 +510,6 @@ export class GitHubPolling extends Context.Service<
 
 export {
   EntityTag,
-  RepositoryLabelName,
-  RepositoryLabelColor,
-  RepositoryLabel,
-  RepositoryLabelCatalog,
-  RepositoryLabelsNotModified,
-  RepositoryLabelDetection,
   PollCursor,
   ChangedIssue,
   ChangedPullRequest,
@@ -519,12 +517,23 @@ export {
   RepositoryNotModified,
   RepositoryChanges,
   ChangeDetection,
+} from "./detection.ts";
+export {
+  RepositoryLabelName,
+  RepositoryLabelColor,
+  RepositoryLabel,
+  RepositoryLabelCatalog,
+  RepositoryLabelsNotModified,
+  RepositoryLabelDetection,
+} from "./labels.ts";
+export {
+  ContentHash,
   IssuePayload,
   PullRequestPayload,
   IssueSnapshot,
   PullRequestSnapshot,
   PayloadSnapshot,
-} from "./model.ts";
+} from "./payload.ts";
 
 const makeContentHash = (crypto: Crypto.Crypto) =>
   Effect.fn("GitHubPolling.contentHash")(function* (payload: Schema.Json) {
@@ -535,4 +544,3 @@ const makeContentHash = (crypto: Crypto.Crypto) =>
       Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join(""),
     );
   });
-export { ContentHash } from "./model.ts";

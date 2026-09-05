@@ -1,4 +1,4 @@
-import { Source } from "@usine/expression/model";
+import { Source } from "@usine/expression/expression-engine";
 import { Cron as EffectCron, DateTime, Effect, Option, Result, Schema } from "effect";
 
 // Uses the same Cron parser the scheduler evaluates with, so a cron that parses

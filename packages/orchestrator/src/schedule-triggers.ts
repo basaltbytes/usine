@@ -19,8 +19,7 @@ import {
   SubmissionResult,
 } from "@usine/engine/engine";
 import { LoopControl } from "@usine/engine/loop-control";
-import { ExpressionEngine } from "@usine/expression/expression-engine";
-import type { ExpressionError } from "@usine/expression/model";
+import { ExpressionEngine, type ExpressionError } from "@usine/expression/expression-engine";
 import {
   Clock,
   Context,

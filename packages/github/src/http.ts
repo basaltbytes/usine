@@ -6,7 +6,7 @@ import {
   GitHubRateLimitError,
   InvalidGitHubResponseError,
   type GitHubOperation,
-} from "./model.ts";
+} from "./error.ts";
 
 export const API_ROOT = "https://api.github.com";
 const API_VERSION = "2026-03-10";

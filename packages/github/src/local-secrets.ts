@@ -1,6 +1,6 @@
 import { InstanceDirectory } from "@usine/core/instance";
 import { Config, Effect, FileSystem, Layer, Option, Path, Schema } from "effect";
-import { AppCredentials, AppId, GitHubCredentials, RedactedPrivateKey } from "./model.ts";
+import { AppCredentials, AppId, GitHubCredentials, RedactedPrivateKey } from "./credentials.ts";
 
 export const GITHUB_APP_SECRETS_PATH = ".usine/github-app.json";
 

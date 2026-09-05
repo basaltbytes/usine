@@ -23,6 +23,14 @@ import { PollingTriggers, type RepositoryPollFailure } from "../polling-triggers
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import {
   ApprovalNeed,
+  BoardProjectionNeed,
+  PollFailureNeed,
+  PreflightFindingNeed,
+  RunFailureNeed,
+  ScheduleFailureNeed,
+  type NeedView,
+} from "./need.ts";
+import {
   type BoardItemNotFoundError,
   BoardItemNotFoundError as BoardItemNotFound,
   type BoardLaneNotFoundError,
@@ -30,24 +38,17 @@ import {
   type BoardLaneReadOnlyError,
   BoardLaneReadOnlyError as BoardLaneReadOnly,
   type BoardMove,
-  BoardProjectionNeed,
   type BoardProjectNotFoundError,
   BoardProjectNotFoundError as BoardProjectNotFound,
+  LabelView,
+} from "./board.ts";
+import {
   ColdTranscriptRequest,
-  LoopView,
-  PollFailureNeed,
-  PreflightFindingNeed,
-  ProjectView,
-  ReadyOverview,
-  RunDetailView,
-  RunFailureNeed,
-  ScheduleFailureNeed,
   type TranscriptAttemptNotFoundError,
   type TranscriptRequest,
-  type NeedView,
-  type ProjectStatus,
-  LabelView,
-} from "./model.ts";
+} from "./transcript.ts";
+import { LoopView, ProjectView, ReadyOverview, type ProjectStatus } from "./overview.ts";
+import { RunDetailView } from "./run.ts";
 import { readTranscript, runView } from "./projection.ts";
 
 export type BoardMoveError =
@@ -481,7 +482,14 @@ export class Operator extends Context.Service<
 
 export {
   ProjectStatus,
-  RunStateTag,
+  ProjectView,
+  LoopView,
+  ReadyOverview,
+  NeedsSetupOverview,
+  FactoryOverview,
+} from "./overview.ts";
+export { RunStateTag, RunView, RunDetailView } from "./run.ts";
+export {
   InfraFailureView,
   AgentFailureView,
   RunawayFailureView,
@@ -492,7 +500,8 @@ export {
   CanceledAttemptView,
   AttemptOutcomeView,
   AttemptView,
-  RunView,
+} from "./attempt.ts";
+export {
   BoardLaneId,
   BoardLaneOrigin,
   BoardItemView,
@@ -502,13 +511,13 @@ export {
   BoardProjectionError,
   BoardView,
   LabelView,
-  ProjectView,
   BoardMove,
   BoardProjectNotFoundError,
   BoardItemNotFoundError,
   BoardLaneNotFoundError,
   BoardLaneReadOnlyError,
-  LoopView,
+} from "./board.ts";
+export {
   ApprovalNeed,
   RunFailureNeed,
   PollFailureNeed,
@@ -516,6 +525,8 @@ export {
   BoardProjectionNeed,
   ScheduleFailureNeed,
   NeedView,
+} from "./need.ts";
+export {
   FailedTranscriptView,
   TranscriptPayload,
   TranscriptEventView,
@@ -525,8 +536,4 @@ export {
   EarlierTranscriptRequest,
   TranscriptRequest,
   TranscriptAttemptNotFoundError,
-  RunDetailView,
-  ReadyOverview,
-  NeedsSetupOverview,
-  FactoryOverview,
-} from "./model.ts";
+} from "./transcript.ts";

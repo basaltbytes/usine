@@ -41,17 +41,16 @@ import {
 } from "@usine/engine/transcript";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
-import { Source } from "@usine/expression/model";
+import { Source } from "@usine/expression/expression-engine";
 import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
 import { LabelPreflightFinding } from "../src/label-reconciler.ts";
+import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
 import {
-  BoardLaneId,
-  BoardMove,
   ColdTranscriptRequest,
   EarlierTranscriptRequest,
-  FailureView,
   TailTranscriptRequest,
-} from "../src/operator/model.ts";
+} from "../src/operator/transcript.ts";
+import { FailureView } from "../src/operator/attempt.ts";
 import { Operator } from "../src/operator/operator.ts";
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";

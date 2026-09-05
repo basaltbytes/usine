@@ -5,7 +5,12 @@ import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../src/github-app.ts";
 import { GitHubItemWriter, ItemLabelMutation } from "../src/item-writer.ts";
-import { Installation, InstallationId, InstallationToken, InstallationWide } from "../src/model.ts";
+import {
+  Installation,
+  InstallationId,
+  InstallationToken,
+  InstallationWide,
+} from "../src/installation.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const token = new InstallationToken({

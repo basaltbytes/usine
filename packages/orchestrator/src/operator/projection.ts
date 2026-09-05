@@ -18,17 +18,19 @@ import {
   CanceledAttemptView,
   ChildSessionBudgetFailureView,
   FailedAttemptView,
-  FailedTranscriptView,
   type FailureView,
   InfraFailureView,
   RunawayFailureView,
   SucceededAttemptView,
+} from "./attempt.ts";
+import {
+  FailedTranscriptView,
   type TranscriptRequest,
   TranscriptAttemptNotFoundError,
-  RunView,
   TranscriptPageCursor,
   TranscriptEventView,
-} from "./model.ts";
+} from "./transcript.ts";
+import { RunView } from "./run.ts";
 
 /** How many newest rows one cold drawer open loads per Attempt. */
 const COLD_TRANSCRIPT_LIMIT = 500;

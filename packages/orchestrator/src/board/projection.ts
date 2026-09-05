@@ -19,9 +19,9 @@ import {
   BoardProjectionError,
   BoardView,
   ReadOnlyBoardLaneView,
-  type RunView,
   WritableBoardLaneView,
-} from "../operator/model.ts";
+} from "../operator/board.ts";
+import { type RunView } from "../operator/run.ts";
 
 interface ProjectedItem {
   readonly itemKey: ItemKey;

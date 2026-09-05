@@ -9,3 +9,9 @@ Unknown variables and object paths fail during checking, including paths inside 
 `MarcbachmannCelLayer` uses `@marcbachmann/cel-js@8.0.0`. The exported `ExpressionEngine` contract contains CEL type names and usine-owned descriptors rather than library objects; an `@bufbuild/cel` adapter can provide the same service tag without changing callers.
 
 All APIs remain 0.x and can change between minor releases.
+
+Import `ExpressionEngine`, `Source`, `Environment`, the environment descriptors,
+`Scalar`, and the typed expression errors from `@usine/expression/expression-engine`.
+This entry point replaces `@usine/expression/model`; existing imports from that
+subpath must use `/expression-engine`. Import the CEL adapter layer separately
+from `@usine/expression/marcbachmann-cel`.

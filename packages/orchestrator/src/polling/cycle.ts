@@ -1,7 +1,7 @@
 import type { ConfigFileError } from "@usine/config/file";
 import { RepositoryName } from "@usine/core/repository";
 import { type RunEngineError, SubmissionResult } from "@usine/engine/engine";
-import type { ExpressionError } from "@usine/expression/model";
+import type { ExpressionError } from "@usine/expression/expression-engine";
 import type { GitHubAppError } from "@usine/github/github-app";
 import { DateTime, Option, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";

@@ -4,14 +4,14 @@ import { RepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../src/github-app.ts";
-import { Installation, InstallationId, InstallationToken, InstallationWide } from "../src/model.ts";
 import {
-  ChangedIssue,
-  ChangedPullRequest,
-  PollCursor,
-  RepositoryLabelCatalog,
-  RepositoryLabelsNotModified,
-} from "../src/polling/model.ts";
+  Installation,
+  InstallationId,
+  InstallationToken,
+  InstallationWide,
+} from "../src/installation.ts";
+import { ChangedIssue, ChangedPullRequest, PollCursor } from "../src/polling/detection.ts";
+import { RepositoryLabelCatalog, RepositoryLabelsNotModified } from "../src/polling/labels.ts";
 import { GitHubPolling } from "../src/polling/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");

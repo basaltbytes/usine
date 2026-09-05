@@ -19,7 +19,7 @@ import { LoopControl, LoopRuntimeState } from "@usine/engine/loop-control";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { Source } from "@usine/expression/model";
+import { Source } from "@usine/expression/expression-engine";
 import {
   Context,
   DateTime,
