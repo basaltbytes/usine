@@ -81,6 +81,13 @@ export const isOpen = Schema.is(Open);
 export const isUnstarted = Schema.is(Unstarted);
 export const isStartable = Schema.is(Startable);
 
+/** The operator actions permitted by a Run's lifecycle state. Command handlers still apply the typed transitions. */
+export const operatorActions = (state: RunState) => ({
+  canApprove: state._tag === "Waiting",
+  canRetry: state._tag === "Failed",
+  canCancel: isOpen(state),
+});
+
 /**
  * Builds a tag tuple that must name every `_tag` of `State` and nothing else,
  * so the SQL-side lists below cannot drift from the unions above. A foreign tag

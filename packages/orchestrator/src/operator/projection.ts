@@ -85,9 +85,7 @@ export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<LoopName>
     attempts: snapshot.attempts.map(attemptView),
     resultMessage: result?.message ?? null,
     pullRequestUrl: pullRequest?.url.toString() ?? null,
-    canApprove: snapshot.run.state._tag === "Waiting",
-    canRetry: snapshot.run.state._tag === "Failed",
-    canCancel: RunState.isOpen(snapshot.run.state),
+    ...RunState.operatorActions(snapshot.run.state),
   });
 };
 
