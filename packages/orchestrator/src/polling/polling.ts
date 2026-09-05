@@ -5,6 +5,7 @@ import { ConfigParser } from "@usine/config/parser";
 import { matchesSelector } from "@usine/config/selector";
 import { canonicalRepositoryName } from "@usine/core/repository";
 import { CursorKey, CursorStore } from "@usine/engine/cursor";
+import { CycleBudgets } from "@usine/engine/cycle-budget";
 import {
   RunEngine,
   type EnginePersistenceError,
@@ -123,6 +124,7 @@ export class PollingTriggers extends Context.Service<
     PollingTriggers,
     Effect.gen(function* () {
       const cursors = yield* CursorStore;
+      const budgets = yield* CycleBudgets;
       const github = yield* GitHubPolling;
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
@@ -164,7 +166,18 @@ export class PollingTriggers extends Context.Service<
         watched: WatchedRepository,
       ) {
         yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
-        const stored = yield* readCursor(watched);
+        const resets = (yield* budgets.pendingResets()).filter(
+          ({ repository }) =>
+            canonicalRepositoryName(repository) ===
+            canonicalRepositoryName(watched.repository.name),
+        );
+        const stored =
+          resets.length > 0 ? emptyCursor(watched.watches) : yield* readCursor(watched);
+        if (resets.length > 0)
+          yield* Effect.logInfo("Cycle budget reset requests fresh repository polling", {
+            repository: watched.repository.name,
+            items: resets.map(({ itemKey }) => itemKey),
+          });
         const preflight = yield* synchronizeLabels(
           watched.repository.name,
           watched.declaredLabels,
@@ -217,6 +230,7 @@ export class PollingTriggers extends Context.Service<
           // fetched, evaluated, and submitted or revoked. After a failure the
           // old cursor stays so the next cycle re-polls.
           yield* writeCursor(watched, nextCursor);
+          yield* Effect.forEach(resets, budgets.acknowledgeReset, { discard: true });
           return {
             changedItems: detected.items.length,
             submissions: itemCycles.flatMap(({ submissions }) => submissions),

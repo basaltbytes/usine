@@ -1,7 +1,8 @@
 import { AgentName } from "@usine/core/agent";
+import { CycleLimit, DEFAULT_CYCLE_LIMIT } from "@usine/core/cycle-budget";
 import { LoopName, ApprovalRequirement } from "@usine/core/loop";
 import { StepName } from "@usine/core/step";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 import { InstancePath, ConfigFileError } from "./file.ts";
 import { nonBlankString } from "./checks.ts";
 import { ValidSelector } from "./selector.ts";
@@ -26,6 +27,10 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
   trigger: Trigger,
   selector: Schema.Option(ValidSelector),
   approval: ApprovalRequirement,
+  maxCycles: CycleLimit.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
+    Schema.withConstructorDefault(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
+  ),
   step: StepName,
   agent: AgentName,
   body: PromptTemplate,

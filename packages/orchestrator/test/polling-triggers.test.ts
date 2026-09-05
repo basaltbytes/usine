@@ -1,3 +1,4 @@
+import { noCycleBudgets } from "./support/polling.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ModelId } from "@usine/core/agent/brain";
@@ -694,6 +695,7 @@ describe("PollingTriggers", () => {
     const layer = PollingTriggers.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
+          noCycleBudgets,
           cursors,
           itemProjectionWriterLayer,
           repositoryLabelProjectionReaderLayer,
@@ -802,6 +804,7 @@ describe("PollingTriggers", () => {
       const layer = PollingTriggers.layer.pipe(
         Layer.provide(
           Layer.mergeAll(
+            noCycleBudgets,
             Layer.succeed(CursorStore)(cursors.store),
             Layer.succeed(ItemProjectionWriter)({
               upsert: (projection) =>
@@ -936,6 +939,7 @@ describe("PollingTriggers", () => {
     const layer = PollingTriggers.layer.pipe(
       Layer.provide(
         Layer.mergeAll(
+          noCycleBudgets,
           cursors,
           itemProjectionWriterLayer,
           repositoryLabelProjectionReaderLayer,

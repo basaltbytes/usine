@@ -12,6 +12,7 @@ import {
   RepositoryLabelProjectionWriter,
 } from "../repository-label-projection/repository-label-projection.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
+import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 import { layerWithDatabase, type RunEngine } from "../engine/engine.ts";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { EnginePersistenceError, type RunEngineError } from "../engine/error.ts";
@@ -60,6 +61,7 @@ export const layer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<
   | CursorStore
+  | CycleBudgets
   | ItemProjectionReader
   | ItemProjectionWriter
   | LoopControl
@@ -75,11 +77,12 @@ export const layer = (
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<
-  ItemProjectionReader | LoopControl | RepositoryLabelProjectionReader | RunReader,
+  CycleBudgets | ItemProjectionReader | LoopControl | RepositoryLabelProjectionReader | RunReader,
   RunEngineError
 > => {
   const database = localSqliteLayer(instanceDirectory);
   return Layer.mergeAll(
+    CycleBudgets.layer,
     ItemProjectionReader.layer,
     LoopControl.layer,
     RepositoryLabelProjectionReader.layer,

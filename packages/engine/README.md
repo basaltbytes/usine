@@ -76,3 +76,7 @@ pnpm --filter @usine/engine db:generate --name <migration_name>
 ```
 
 Everything is 0.x, so APIs may change. Supply `effect` at the version pinned by the usine workspace.
+
+`CycleBudgets` at `@usine/engine/cycle-budget` persists Item-level exhaustion Asks and explicit, idempotent reset Events. `Submission.cycleLimit` defaults to three; schedule adapters supply `None`. Run admission reserves the allowance transactionally and returns `CycleBlocked` when the Item needs a reset. Attempt retries do not charge again, and canceled Runs without Attempts return their reservation. Existing history and queued Item Events acquire the default budget on upgrade.
+
+Reset records a fresh polling request. Queued Events from the previous allowance cannot continue until a trigger adapter confirms them from current input through a fresh submission. Labels, restarts, and Loop configuration changes never clear an Ask. See [ADR 0022](../../docs/adr/0022-item-cycle-budgets-and-comment-reviews.md).

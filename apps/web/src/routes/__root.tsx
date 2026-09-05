@@ -33,6 +33,7 @@ import { needCopy } from "../operator-copy.ts";
 import { overviewQuery } from "../overview.ts";
 import { Suspense, lazy, useState } from "react";
 import { useOpenRun } from "../open-run.ts";
+import { CycleBudgetAsk } from "../cycle-budget-ask.tsx";
 
 // The drawer bundles the transcript, Markdown, and message components, so it
 // loads on first open to keep a project's first paint small.
@@ -73,6 +74,8 @@ const NeedStrip = ({ needs }: { readonly needs: ReadonlyArray<NeedView> }) => {
       {needs.length > 0 && (
         <div className="mt-2 flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
           {needs.map((need) => {
+            if (need._tag === "CycleBudgetNeed")
+              return <CycleBudgetAsk key={need.id} need={need} />;
             const copy = needCopy(need);
             const runId = copy.runId;
             const body = (

@@ -49,3 +49,5 @@ Import factory settings and registry types from `@usine/config/factory`, Board l
 The package exports Effect services and layers. Import `InstanceFolder` from `@usine/config/instance-folder` and `ConfigParser` from `@usine/config/parser`. Supply `FileSystem.FileSystem` and `Path.Path` implementations when composing `InstanceFolder.layer`; `ConfigParser.layer` requires `ExpressionEngine` from `@usine/expression/expression-engine`.
 
 All APIs remain 0.x and can change between minor releases.
+
+Issue and pull-request Loops accept `max_cycles`, a positive integer defaulting to three. Each Loop may open that many Runs on an Item between operator resets. The first excess admission blocks further Runs from every Loop on the Item. Schedule Loops are exempt. See the [review/fix guide](../../docs/guides/review-fix-loops.md) for authored examples.

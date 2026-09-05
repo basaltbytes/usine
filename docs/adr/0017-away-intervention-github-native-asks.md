@@ -20,3 +20,5 @@ The single operator must be able to unblock runs from a phone with **zero inboun
 - Additive to [ADR 0005](./0005-pi-parent-agent-layer-team-roster.md): the usine-owned Pi extension gains the ask tool the parent blocks on.
 - Bootstrap (issue #23) captures the operator's GitHub login into `usine.yaml`; the @mention target and answer auth both read it.
 - Schedule-stream runs have no item to anchor an ask — their blocking moments are strip-only until a bespoke notifier lands (the seam's first customer).
+
+[ADR 0022](./0022-item-cycle-budgets-and-comment-reviews.md) extends this decision with durable Item cycle budgets, operator reset Asks, and comment-only reviews under the shared App identity.

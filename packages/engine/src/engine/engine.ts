@@ -28,6 +28,7 @@ import {
 import { StepExecutor } from "../step-executor.ts";
 import { CursorStore } from "../cursor/cursor.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
+import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 
 const MAX_SETTLEMENT_POLLS = 500;
 
@@ -237,6 +238,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,
 ): Layer.Layer<
   | CursorStore
+  | CycleBudgets
   | ItemProjectionReader
   | ItemProjectionWriter
   | LoopControl
@@ -264,6 +266,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(runtime));
   return Layer.mergeAll(
     runEngine,
+    CycleBudgets.layer.pipe(Layer.provide(database)),
     RunReader.layer.pipe(Layer.provide(database)),
     CursorStore.layer.pipe(Layer.provide(database)),
     ItemProjectionReader.layer.pipe(Layer.provide(database)),
@@ -279,6 +282,7 @@ export {
   Claimed,
   Queued,
   Ignored,
+  CycleBlocked,
   IgnoreReason,
   SubmissionResult,
 } from "./submission.ts";

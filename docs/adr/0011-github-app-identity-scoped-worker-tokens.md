@@ -20,3 +20,5 @@ The factory authenticates to GitHub as a single operator-owned **GitHub App**, c
 - Polling (ADR 0007) runs on installation tokens the orchestrator self-mints — the operator's personal rate pool is untouched; conditional 304s remain free.
 - CI-repair loops cannot edit `.github/workflows/` by default; the failure is a typed push rejection, and the remedy is an explicit operator grant on the App.
 - Per-loop permission-subset minting (e.g. read-only tokens for review loops) stays additive: the token-mint API already accepts permission subsets; nothing in the seam precludes it.
+
+[ADR 0022](./0022-item-cycle-budgets-and-comment-reviews.md) extends this decision with durable Item cycle budgets, operator reset Asks, and comment-only reviews under the shared App identity.

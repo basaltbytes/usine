@@ -156,6 +156,10 @@ _Avoid_: budget, timeout (the wall-clock half only), kill switch
 The maximum number of child sessions a parent may spawn during one Attempt. It counts sequential and concurrent spawns; the next spawn fails the Attempt and requires operator action.
 _Avoid_: child concurrency, concurrent-children cap
 
+**Cycle budget**:
+The number of rounds an Item's Loops may perform before the operator must reset it. A round permits each participating Loop one Run; retries remain within that Run. Exhaustion opens an Item-level Ask and stops further unattended work on the Item.
+_Avoid_: review count, retry limit, token budget
+
 **Block**:
 A standalone piece of the engine, published on its own so a factory can be assembled from parts — usine's orchestrator is the first composition, not the only intended one.
 _Avoid_: module (any code unit; a block is published), component, plugin

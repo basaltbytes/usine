@@ -17,3 +17,5 @@ v1 meters everything and enforces no dollar budget. Every attempt's usage rides 
 - Pool health is display + warn: the latest snapshot per pool persists (Codex pushes window snapshots during runs; on-demand read exists); the Usage page under Configuration shows the three meters, and the needs-you strip warns past a threshold (default 80% of the Codex window). Scheduling never consults pool health — an exhausted-pool attempt fails typed with the window's reset time visible.
 - UI surface: a per-run cost line (per pool, per child) in the run drawer, plus one Usage page — current-month rollups per loop and per pool, no charts. Trends and per-agent breakdowns stay out of v1.
 - Per-harness native caps (e.g. the Claude SDK's `maxBudgetUsd`) remain adapter-internal defense-in-depth, additive behind the seam — never the operator-facing guard.
+
+[ADR 0022](./0022-item-cycle-budgets-and-comment-reviews.md) extends this decision with durable Item cycle budgets, operator reset Asks, and comment-only reviews under the shared App identity.

@@ -1,4 +1,12 @@
 import { assert, describe, it } from "@effect/vitest";
+import {
+  CycleBudgetAsk,
+  CycleBudgetAskId,
+  CycleCount,
+  CycleLimit,
+  LoopCycleCount,
+} from "@usine/core/cycle-budget";
+import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentName, Agent, AgentPersona } from "@usine/core/agent";
 import { AttemptId, Attempt, AttemptNumber, AttemptTask } from "@usine/core/attempt";
@@ -55,6 +63,7 @@ import { Operator } from "../src/operator/operator.ts";
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { failureView } from "../src/operator/projection.ts";
+import { noCycleBudgets } from "./support/polling.ts";
 
 const now = DateTime.makeUnsafe("2026-08-31T12:00:00.000Z");
 const runId = RunId.make("run-operator-test");
@@ -237,6 +246,7 @@ const testLayer = (
   overviewReads: Ref.Ref<number>,
   projectionRevision: Ref.Ref<Option.Option<ProjectionRevision>>,
   runSnapshot: RunSnapshot = snapshot,
+  budgets: Layer.Layer<CycleBudgets> = noCycleBudgets,
 ) => {
   const readTranscript = (query: TranscriptQuery) =>
     Effect.succeed(
@@ -375,6 +385,7 @@ const testLayer = (
     ),
   });
   const dependencies = Layer.mergeAll(
+    budgets,
     runs,
     reader,
     controls,
@@ -388,6 +399,63 @@ const testLayer = (
 };
 
 describe("Operator", () => {
+  it.effect("projects Item-level exhaustion without a new Run and answers the exact Ask", () =>
+    Effect.gen(function* () {
+      const ask = new CycleBudgetAsk({
+        id: CycleBudgetAskId.make("exhausted-round"),
+        itemKey,
+        repository,
+        loop: loopName,
+        limit: CycleLimit.make(3),
+        counts: [
+          new LoopCycleCount({
+            loop: loopName,
+            admitted: CycleCount.make(3),
+            completed: CycleCount.make(3),
+          }),
+        ],
+      });
+      const asks = yield* Ref.make<ReadonlyArray<CycleBudgetAsk>>([ask]);
+      const answered = yield* Ref.make<
+        ReadonlyArray<{ readonly id: CycleBudgetAskId; readonly event: Event }>
+      >([]);
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const budgets = Layer.succeed(CycleBudgets)({
+        asks: () => Ref.get(asks),
+        pendingResets: () => Effect.succeed([]),
+        acknowledgeReset: () => Effect.die("unused"),
+        reset: (id, event) =>
+          Effect.gen(function* () {
+            yield* Ref.update(answered, (values) => [...values, { id, event }]);
+            yield* Ref.set(asks, []);
+            yield* Ref.set(revision, Option.some(ProjectionRevision.make(2)));
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const operator = yield* Operator;
+        const overview = yield* operator.overview(instance);
+        const need = overview.needsYou.find((need) => need._tag === "CycleBudgetNeed");
+        assert(need?._tag === "CycleBudgetNeed");
+        assert.deepStrictEqual(need.ask, ask);
+        assert.strictEqual(overview.projects[0]?.status, "needs-you");
+        assert(
+          overview.projects[0]?.board.lanes.some((lane) =>
+            lane.items.some((card) => card.itemKey === itemKey && card.needsYou),
+          ),
+        );
+        yield* operator.resetCycleBudget(ask.id);
+        const answers = yield* Ref.get(answered);
+        assert.strictEqual(answers[0]?.id, ask.id);
+        assert.strictEqual(answers[0]?.event.id, `cycle-budget-reset:${ask.id}`);
+        const refreshed = yield* operator.overview(instance);
+        assert(!refreshed.needsYou.some((need) => need._tag === "CycleBudgetNeed"));
+      }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, snapshot, budgets)));
+    }),
+  );
+
   it.effect(
     "rejects approving a Run that already left its gate and keeps it out of needs-you",
     () =>

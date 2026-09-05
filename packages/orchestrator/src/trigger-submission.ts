@@ -115,6 +115,8 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     loop: options.loop.name,
     step: options.loop.step,
     approval: options.loop.approval,
+    cycleLimit:
+      options.loop.trigger.on === "schedule" ? Option.none() : Option.some(options.loop.maxCycles),
     repository: options.repository.name,
     revision: options.revision,
     task: options.task,
@@ -128,6 +130,7 @@ export const submissionLogFields = (submission: SubmissionResult): Record<string
     Claimed: ({ runId }) => ({ runId }),
     Queued: () => ({}),
     Ignored: ({ reason }) => ({ reason }),
+    CycleBlocked: ({ ask }) => ({ askId: ask.id, reason: "cycle-budget-exhausted" }),
   });
 
 /** Log fields for a config failure met while triggering. */
