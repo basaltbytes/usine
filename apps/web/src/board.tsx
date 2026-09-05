@@ -62,7 +62,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { ApiOk, api } from "./api.ts";
+import { api } from "./api.ts";
 import { failureMessage } from "./operator-copy.ts";
 
 export const itemFailure = (item: BoardItemView): string | null => {
@@ -433,14 +433,11 @@ export const ProjectBoard = ({
   const move = useMutation({
     mutationFn: ({ item, lane }: { readonly item: ItemNumber; readonly lane: BoardLaneView }) => {
       const { owner, name } = splitRepositoryName(project.repository);
-      return api(
-        `/api/projects/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/items/${item}/lane`,
-        ApiOk,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({ toLane: lane.id }),
-        },
+      return api((client) =>
+        client.moveBoardItem({
+          params: { owner, repository: name, item },
+          payload: { toLane: lane.id },
+        }),
       );
     },
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["overview"] }),
