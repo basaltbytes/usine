@@ -325,35 +325,94 @@ describe("Board projection", () => {
       }),
   );
 
-  it.effect(
-    "joins observed closing links without Runs and keeps cross-repository URLs separate",
-    () =>
-      Effect.gen(function* () {
-        const config = Schema.decodeUnknownSync(UsineConfig)({
-          version: 1,
-          repos: [{ name: repository }],
-        });
-        const managed = config.repos[0];
-        assert(managed !== undefined);
-        for (const [url, count] of [
-          ["https://github.com/basaltbytes/usine/pull/98", 1],
-          ["https://github.com/another/repository/pull/98", 2],
-        ] as const) {
-          const linked = new ItemProjection({
-            ...closedItem,
-            payload: {
-              ...closedItem.payload,
-              closedByPullRequestsReferences: {
-                totalCount: 1,
-                nodes: [{ number: 98, url, state: "MERGED", isDraft: false }],
-              },
+  it.effect("joins only canonical same-repository closing links without Runs", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository }],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      for (const [url, count] of [
+        ["https://github.com/basaltbytes/usine/pull/98", 1],
+        ["https://github.com/another/repository/pull/98", 2],
+        ["https://github.com/basaltbytes/usine/pull/0x62", 2],
+        ["https://github.com/basaltbytes/usine/pull/9.8e1", 2],
+      ] as const) {
+        const linked = new ItemProjection({
+          ...closedItem,
+          payload: {
+            ...closedItem.payload,
+            closedByPullRequestsReferences: {
+              totalCount: 1,
+              nodes: [{ number: 98, url, state: "MERGED", isDraft: false }],
             },
-          });
-          const board = yield* projectBoard(managed, [], [linked, mergedPullRequest], []);
-          assert.strictEqual(board.failures.length, 0);
-          assert.strictEqual(board.lanes.flatMap(({ items }) => items).length, count);
-        }
-      }),
+          },
+        });
+        const board = yield* projectBoard(managed, [], [linked, mergedPullRequest], []);
+        assert.strictEqual(board.failures.length, 0);
+        assert.strictEqual(board.lanes.flatMap(({ items }) => items).length, count);
+      }
+    }),
+  );
+
+  it.effect("groups several issues sharing a PR once, independently of snapshot order", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [{ name: repository }],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const issue34 = new ItemProjection({
+        ...item,
+        itemKey: ItemKey.make("github:basaltbytes/usine:34"),
+        number: ItemNumber.make(34),
+        payload: {
+          ...item.payload,
+          number: 34,
+          title: "Companion issue",
+          url: "https://github.com/basaltbytes/usine/issues/34",
+        },
+      });
+      const development = new RunView({
+        ...runForBoard("dev-33", "Succeeded"),
+        pullRequestUrl: "https://github.com/basaltbytes/usine/pull/98",
+      });
+      const companion = new RunView({
+        ...development,
+        id: RunId.make("dev-34"),
+        itemKey: issue34.itemKey,
+      });
+      const reviewRun = new RunView({
+        ...runForBoard("review-98", "Running"),
+        itemKey: mergedPullRequest.itemKey,
+      });
+      for (const snapshots of [
+        [item, issue34, mergedPullRequest],
+        [mergedPullRequest, issue34, item],
+      ]) {
+        const board = yield* projectBoard(managed, [], snapshots, [
+          development,
+          companion,
+          reviewRun,
+        ]);
+        const cards = board.lanes.flatMap(({ items }) => items);
+        assert.strictEqual(cards.length, 1);
+        const card = cards[0];
+        assert(card !== undefined);
+        assert.strictEqual(card.title, "Board lanes");
+        assert.deepStrictEqual(
+          card.items.map(({ number }) => number),
+          [33, 34, 98],
+        );
+        assert.strictEqual(card.itemKey, mergedPullRequest.itemKey);
+        assert.deepStrictEqual(
+          card.runs.map(({ id }) => id),
+          [development.id, companion.id, reviewRun.id],
+        );
+      }
+    }),
   );
 
   it("derives an authored lane mutation without trusting truncated card labels", () => {

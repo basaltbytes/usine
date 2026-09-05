@@ -301,7 +301,7 @@ describe("durable run engine", () => {
     ),
   );
 
-  it.live("translates an executor defect into a typed infrastructure failure", () =>
+  it.live("persists executor defects without automatic retry and permits an operator retry", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
@@ -318,22 +318,35 @@ describe("durable run engine", () => {
           assert.strictEqual(accepted._tag, "Claimed");
           if (accepted._tag !== "Claimed") return;
 
-          // Without the translation the defect suspends the workflow and the run
-          // stays Running forever with an open Attempt; with it, the crash is
-          // an InfraFailure that auto-retries.
+          // A defect must neither strand an open Attempt nor repeat agent work automatically.
           const finished = yield* waitFor(
             engine,
             accepted.runId,
-            ({ run }) => run.state._tag === "Succeeded",
+            ({ run }) => run.state._tag === "Failed",
           );
-          assert.strictEqual(finished.attempts.length, 2);
+          assert.strictEqual(finished.attempts.length, 1);
+          assert.strictEqual((yield* Ref.get(plans)).length, 1);
           const crashed = finished.attempts[0]?.outcome;
           assert(crashed !== undefined);
           assert(Option.isSome(crashed));
           assert.strictEqual(crashed.value._tag, "Failed");
           if (crashed.value._tag === "Failed") {
-            assert.strictEqual(crashed.value.failure._tag, "InfraFailure");
+            assert.strictEqual(crashed.value.failure._tag, "DefectFailure");
+            if (crashed.value.failure._tag === "DefectFailure") {
+              assert(crashed.value.failure.cause instanceof Error);
+              assert.strictEqual(
+                crashed.value.failure.cause.message,
+                "the executor adapter crashed",
+              );
+            }
           }
+          yield* engine.retry(accepted.runId);
+          const retried = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(retried.attempts.length, 2);
         }).pipe(Effect.provide(runtime));
       }),
     ),

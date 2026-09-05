@@ -32,6 +32,7 @@ export const brainLine = (brain: BrainSpec): string =>
 export const failureMessage = (failure: FailureView): string =>
   Match.valueTags(failure, {
     InfraFailure: ({ message }) => message,
+    DefectFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,
     RunawayFailure: ({ ceiling }) => `Runaway guard tripped its ${ceiling} ceiling`,
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>

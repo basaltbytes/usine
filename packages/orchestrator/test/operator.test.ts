@@ -32,7 +32,7 @@ import {
   ToolStarted,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { InfraFailure } from "@usine/core/attempt/failure";
+import { DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import * as RunState from "@usine/core/run/state";
 import { RunEngine } from "@usine/engine/engine";
 import {
@@ -670,22 +670,25 @@ describe("Operator", () => {
       }),
   );
 
-  it("removes nested infrastructure defect causes from operator failure schemas", () => {
-    const secret = "token=super-secret";
-    const view = failureView(
-      new InfraFailure({
-        message: "The worker connection failed",
-        cause: new Error(secret),
-      }),
-    );
-    const encoded = Schema.encodeUnknownSync(FailureView)(view);
-    const json = JSON.stringify(encoded);
+  it.each([InfraFailure, DefectFailure])(
+    "removes original causes from operator failure schemas: %s",
+    (Failure) => {
+      const secret = "token=super-secret";
+      const view = failureView(
+        new Failure({
+          message: "The worker connection failed",
+          cause: new Error(secret),
+        }),
+      );
+      const encoded = Schema.encodeUnknownSync(FailureView)(view);
+      const json = JSON.stringify(encoded);
 
-    assert.deepStrictEqual(encoded, {
-      _tag: "InfraFailure",
-      message: "The worker connection failed",
-    });
-    assert.strictEqual(json.includes("cause"), false);
-    assert.strictEqual(json.includes(secret), false);
-  });
+      assert.deepStrictEqual(encoded, {
+        _tag: Failure === InfraFailure ? "InfraFailure" : "DefectFailure",
+        message: "The worker connection failed",
+      });
+      assert.strictEqual(json.includes("cause"), false);
+      assert.strictEqual(json.includes(secret), false);
+    },
+  );
 });

@@ -15,11 +15,11 @@ The default adapter stores usine's Event ledger and Run projections beside Effec
 ## Runtime rules
 
 - Approval-gated Runs wait for an approval Event before their first Attempt.
-- Infrastructure failures retry automatically, with a cap of three Attempts. Agent and runaway failures wait for an operator retry.
+- Infrastructure failures retry automatically, with a cap of three Attempts. Agent, defect, and guard failures wait for an operator retry.
 - A newer Event supersedes a pending, waiting, or queued Run. A running Attempt finishes first, then the engine opens only the newest queued Event for that Item.
 - Revoke stops pending, waiting, and queued Runs. Operator cancellation can also stop a running Attempt.
 - The startup sweep rejoins open workflow executions. If the process stopped during an Attempt, the engine records that Attempt as an infrastructure failure and resumes as N+1.
-- A crash inside the `StepExecutor` adapter is recorded as an infrastructure failure like any other. If the engine itself hits an invariant defect, the workflow suspends for inspection; `RunEngine.reconcile` (or a restart) repairs the projection.
+- A defect escaping `StepExecutor` is saved as `DefectFailure`, preserving its original cause and requiring an operator retry. If the engine itself hits an invariant defect, the workflow suspends for inspection; `RunEngine.reconcile` (or a restart) repairs the projection.
 - Attempt channel envelopes are stored in an append-only transcript. Durable protocol-v3 envelopes remain readable after the live channel upgrades to v4. Normalized parent and child session events retain their session identity. `RunEngine.transcript` accepts distinct `TranscriptAllQuery`, `TranscriptTailQuery`, and `TranscriptPageQuery` variants, so full diagnostics, bounded live tails, and bounded backward pages cannot be confused. Tail and page queries require a positive row limit. A protocol-v4 `Started` frame writes the SDK-selected parent model onto the Attempt.
 - The submitted agent, rendered task, payload snapshot, effective parent model, and per-Attempt child brain survive restarts in the run ledger.
 

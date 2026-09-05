@@ -560,6 +560,7 @@ export {
 export { RunStateTag, RunView, RunDetailView } from "./run.ts";
 export {
   InfraFailureView,
+  DefectFailureView,
   AgentFailureView,
   RunawayFailureView,
   ChildSessionBudgetFailureView,

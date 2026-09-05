@@ -17,6 +17,7 @@ import {
   AttemptView,
   CanceledAttemptView,
   ChildSessionBudgetFailureView,
+  DefectFailureView,
   FailedAttemptView,
   type FailureView,
   InfraFailureView,
@@ -40,6 +41,7 @@ const TAIL_TRANSCRIPT_LIMIT = 500;
 export const failureView = (failure: AttemptFailure): FailureView =>
   Match.valueTags(failure, {
     InfraFailure: ({ message }) => new InfraFailureView({ message }),
+    DefectFailure: ({ message }) => new DefectFailureView({ message }),
     AgentFailure: ({ message }) => new AgentFailureView({ message }),
     RunawayFailure: ({ ceiling }) => new RunawayFailureView({ ceiling }),
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>

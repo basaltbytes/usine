@@ -1,4 +1,9 @@
-import { AgentFailure, AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import {
+  AgentFailure,
+  AttemptFailure,
+  DefectFailure,
+  InfraFailure,
+} from "@usine/core/attempt/failure";
 import { RunId } from "@usine/core/run";
 import type { WorkerName } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
@@ -74,21 +79,23 @@ const executeAttempt = Effect.fn("DurableRun.attempt")(function* (
     return started;
   }
 
-  // The executor's contract is the typed AttemptFailure channel. A defect
-  // escaping the adapter is infrastructure breakage around the agent, so it
-  // is translated before reaching the durable workflow.
+  // Durable workflows need a serializable terminal outcome. Preserve an
+  // executor defect without turning a programming bug into an automatic retry.
   const result = yield* executor
     .execute(started.execution, {
       append: (direction, envelope) =>
         store.appendTranscript(direction, envelope).pipe(asAttemptFailure),
     })
     .pipe(
-      Effect.catchDefect(
-        (defect) =>
-          new InfraFailure({
-            message: "The step executor crashed outside its typed failure channel",
-            cause: defect,
-          }),
+      Effect.catchDefect((defect) =>
+        Effect.logError("Step executor defect; operator intervention required", { runId }).pipe(
+          Effect.andThen(
+            new DefectFailure({
+              message: "The step executor crashed outside its typed failure channel",
+              cause: defect,
+            }),
+          ),
+        ),
       ),
       Effect.result,
     );
@@ -119,13 +126,9 @@ const executeDurableRun = Effect.fn("DurableRun.execute")(function* (
     const attempted = yield* Effect.uninterruptibleMask((restore) =>
       restore(executor.reserve(submission)).pipe(
         Effect.flatMap((lease) =>
-          restore(
-            Effect.acquireUseRelease(
-              admission.enter(runId),
-              (admitted) => (admitted ? executeAttempt(runId, lease.worker) : Effect.never),
-              (admitted) => (admitted ? admission.leave(runId) : Effect.void),
-            ),
-          ).pipe(Effect.ensuring(lease.release)),
+          restore(admission.withAttempt(runId, executeAttempt(runId, lease.worker))).pipe(
+            Effect.ensuring(lease.release),
+          ),
         ),
       ),
     );

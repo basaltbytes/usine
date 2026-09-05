@@ -206,14 +206,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
         .execute()
         .pipe(Effect.flatMap(decodeAttemptRows)),
     )).flat();
-    const attemptsByRun = new Map<RunId, Array<(typeof storedAttempts)[number]>>();
-    for (const attempt of storedAttempts) {
-      const grouped = attemptsByRun.get(attempt.runId) ?? [];
-      grouped.push(attempt);
-      attemptsByRun.set(attempt.runId, grouped);
-    }
+    const attemptsByRun = EffectArray.groupBy(storedAttempts, ({ runId }) => runId);
     return storedRuns.map((row): RunSummary =>
-      runSummaryFromRow(row, attemptsByRun.get(row.runId) ?? []),
+      runSummaryFromRow(row, attemptsByRun[row.runId] ?? []),
     );
   });
 
