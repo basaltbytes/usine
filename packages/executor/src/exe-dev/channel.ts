@@ -1,48 +1,34 @@
-import { InfraFailure } from "@usine/core/attempt/failure";
-import { Effect, Ref, Stream } from "effect";
+import type * as AttemptChannel from "@usine/core/attempt/channel";
+import { Effect, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import type { PreparedAttempt, RunHostCommand } from "../executor.ts";
-import { runHostSessionFor, type RunHostInput, type RunHostSession } from "../run-host-session.ts";
+import type { AttemptWorkspace, RunHostCommand } from "../executor.ts";
+import { runHostSessionFor, type RunHostInput } from "../run-host-session.ts";
 import type { ExeDevCommands } from "./commands.ts";
-import type { PreparedStates } from "./model.ts";
+import type { VmState } from "./model.ts";
 import { runHostShellCommand } from "./shell.ts";
 
-export const attemptChannelFor: (
+export const attemptChannelFor = Effect.fn("ExeDevExecutor.attemptChannelFor")(function* (
   commands: ExeDevCommands,
-  preparedStates: PreparedStates,
-  runHost: RunHostCommand,
-  interruptGrace: Parameters<typeof Effect.timeoutOption>[1],
-) => Effect.Effect<RunHostSession, never, ChildProcessSpawner.ChildProcessSpawner> = Effect.fn(
-  "ExeDevExecutor.attemptChannelFor",
-)(function* (
-  commands: ExeDevCommands,
-  preparedStates: PreparedStates,
   runHost: RunHostCommand,
   interruptGrace: Parameters<typeof Effect.timeoutOption>[1],
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
 
   const spawn = Effect.fn("ExeDevExecutor.spawnRunHost")(function* (
-    prepared: PreparedAttempt,
+    prepared: AttemptWorkspace,
+    vm: VmState,
     input: RunHostInput,
   ) {
     const attemptId = prepared.spec.attemptId;
-    const state = (yield* Ref.get(preparedStates)).get(attemptId);
-    if (state === undefined) {
-      return yield* new InfraFailure({
-        message: `Attempt ${attemptId} has no prepared exe.dev workspace`,
-        cause: new Error("prepared Attempt state missing"),
-      });
-    }
     yield* Effect.annotateCurrentSpan({
       attemptId,
       worker: prepared.worker,
-      host: state.vm.sshDest,
+      host: vm.sshDest,
     });
     yield* Effect.logInfo("Launching the run host over SSH", {
       attemptId,
       worker: prepared.worker,
-      host: state.vm.sshDest,
+      host: vm.sshDest,
       worktree: prepared.worktree,
     });
     const handle = yield* spawner.spawn(
@@ -50,7 +36,7 @@ export const attemptChannelFor: (
         commands.ssh.command,
         [
           ...commands.ssh.args,
-          state.vm.sshDest,
+          vm.sshDest,
           "--",
           runHostShellCommand(prepared.worktree, runHost.command, runHost.args),
         ],
@@ -64,8 +50,13 @@ export const attemptChannelFor: (
     // Nothing to scrub: this process never has a secret the run host could echo,
     // because the exe.dev integration injects credentials on the VM. If a
     // credential ever passes through this process, scrub it here.
-    return { handle, host: state.vm.sshDest, scrub: (text: string): string => text };
+    return { handle, host: vm.sshDest, scrub: (text: string): string => text };
   });
 
-  return yield* runHostSessionFor({ interruptGrace, spawn });
+  const session = yield* runHostSessionFor({ interruptGrace });
+  return {
+    cancel: session.cancel,
+    launch: (prepared: AttemptWorkspace, vm: VmState, io: AttemptChannel.Sink) =>
+      session.launch(prepared, io, (input) => spawn(prepared, vm, input)),
+  };
 });

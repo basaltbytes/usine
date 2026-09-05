@@ -1,6 +1,5 @@
-import { AttemptId } from "@usine/core/attempt";
 import { RepositoryName } from "@usine/core/repository";
-import { Schema, type Effect, type Ref } from "effect";
+import { Schema, type Effect } from "effect";
 import type { RunHostCommand } from "../executor.ts";
 
 /** The name of one exe.dev edge-injected integration. */
@@ -73,11 +72,3 @@ export interface VmState {
   readonly home: HomePath;
   readonly sshDest: SshDestination;
 }
-
-export interface PreparedState {
-  readonly cache: string;
-  readonly integration: IntegrationName;
-  readonly vm: VmState;
-}
-
-export type PreparedStates = Ref.Ref<Map<AttemptId, PreparedState>>;

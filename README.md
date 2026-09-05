@@ -14,7 +14,7 @@ The spec lives in [CONTEXT.md](./CONTEXT.md) (domain glossary) and [docs/adr/](.
 | [`@usine/github`](./packages/github)             | Polling change detection, per-stream GraphQL slice fetchers, GitHub App auth and token minting                                  |
 | [`@usine/engine`](./packages/engine)             | Event ledger, dedup/supersede/revoke, run scheduling, durable-execution seam, SQLite store                                      |
 | [`@usine/agents`](./packages/agents)             | Pi parent adapter, subagents extension, team roster and brain specs                                                             |
-| [`@usine/executor`](./packages/executor)         | The five-operation worker contract, with local and exe.dev executors                                                            |
+| [`@usine/executor`](./packages/executor)         | Scoped Attempt resources, with local and exe.dev executors                                                            |
 | [`@usine/orchestrator`](./packages/orchestrator) | The embeddable composition: the full engine as an Effect layer, startable in-process                                            |
 | [`@usine/run-host`](./packages/run-host)         | The worker-side one-shot process that hosts a single attempt's agent session                                                    |
 | [`@usine/server`](./apps/server)                 | Thin `usine up` CLI that runs the orchestrator in the foreground and serves the local web UI                                   |

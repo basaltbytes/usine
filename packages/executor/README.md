@@ -1,6 +1,34 @@
 # @usine/executor
 
-Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free package root defines five operations: preflight, prepare, launch, cancel, and cleanup. It also owns the credential provider, Worker capability errors, and adapter-neutral request types.
+Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free package root defines Worker preflight, scoped Attempt preparation, and cancellation. Each prepared Attempt launches its own run host and releases its resources at completion or when its scope closes. It also owns the credential provider, Worker capability errors, and adapter-neutral request types.
+
+## Attempt lifetime
+
+Call `Executor.prepare(request)` inside `Effect.scoped`, then call `prepared.launch(io)`
+once. The returned `PreparedAttempt` owns the checkout and repository access. Its
+`workspace` is an `AttemptWorkspace` descriptor containing the Worker, RunSpec, and
+worktree path; it can be serialized without exposing credentials or live handles.
+
+```ts
+const result = yield* Effect.scoped(
+  Effect.gen(function* () {
+    const prepared = yield* executor.prepare(request)
+    return yield* prepared.launch(transcriptSink)
+  }),
+)
+```
+
+Preparation remains interruptible during clone, fetch, credential requests, and lock
+waits. A failed prepare releases partial acquisitions immediately. An unlaunched
+Attempt releases its resources when the surrounding scope closes. Launch finishes
+cleanup before returning on success, failure, or interruption; closing the owner
+scope also stops a launch running in another fiber. Each Attempt launches at most
+once. Cleanup failures are logged without replacing a successful agent result with
+a retryable failure.
+
+This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prepared)`
+methods. Consumers supply a scope instead of coordinating cleanup. The engine's
+`StepExecutor` reservation, execution, and interruption contract remains unchanged.
 
 ## Local Worker
 

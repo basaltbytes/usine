@@ -3,7 +3,7 @@ import { RepositoryName, CommitSha } from "@usine/core/repository";
 import { Effect, Schema } from "effect";
 import {
   ExecutorOperationError,
-  PreparedAttempt,
+  AttemptWorkspace,
   WorktreePath,
   type CheckoutRequest,
 } from "./executor.ts";
@@ -36,11 +36,14 @@ export interface WorkspaceLayout {
 /** The adapter-specific primitives; everything else about provisioning is shared. */
 export interface WorkspaceOps<E> {
   readonly ensureRoots: Effect.Effect<void, E>;
-  readonly removePath: (target: string) => Effect.Effect<void, E>;
+  readonly removePath: (operation: "prepare" | "cleanup", target: string) => Effect.Effect<void, E>;
   readonly cacheExists: Effect.Effect<boolean, E>;
   /** Atomically promote the finished staging clone to the cache path. */
   readonly promoteStaging: Effect.Effect<void, E>;
-  readonly git: (args: ReadonlyArray<string>) => Effect.Effect<string, E>;
+  readonly git: (
+    operation: "prepare" | "cleanup",
+    args: ReadonlyArray<string>,
+  ) => Effect.Effect<string, E>;
 }
 
 export interface ProvisionOptions<E> {
@@ -67,31 +70,99 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     host: options.host,
     repository: request.repository,
   });
-  yield* ops.ensureRoots;
-  yield* ops.removePath(layout.worktree);
-  if (yield* ops.cacheExists) {
-    yield* ops.git(["--git-dir", layout.cache, "remote", "set-url", "origin", options.url]);
-  } else {
-    yield* ops.removePath(layout.staging);
-    yield* ops.git(["clone", "--bare", "--filter=blob:none", options.url, layout.staging]).pipe(
-      Effect.onError(() =>
-        ops.removePath(layout.staging).pipe(
-          Effect.tapError((error) =>
-            Effect.logWarning("Could not remove a partial clone", {
-              attemptId: request.attemptId,
-              worker: request.worker,
-              host: options.host,
-              staging: layout.staging,
-              message: String(error),
-            }),
-          ),
-          Effect.ignore,
-        ),
+  const cleanup = <A>(resource: string, effect: Effect.Effect<A, E>) =>
+    effect.pipe(
+      Effect.tapError((error) =>
+        Effect.logError("Attempt cleanup operation failed", {
+          attemptId: request.attemptId,
+          worker: request.worker,
+          host: options.host,
+          worktree: layout.worktree,
+          resource,
+          message: String(error),
+        }),
       ),
+      Effect.ignore,
     );
-    yield* ops.promoteStaging;
+  // Register before any filesystem mutation. This also covers failed worktree
+  // creation, which can leave both a directory and a bare-cache registration.
+  yield* Effect.addFinalizer(
+    Effect.fn("Executor.releaseWorktree")(function* () {
+      yield* Effect.annotateCurrentSpan({
+        attemptId: request.attemptId,
+        worker: request.worker,
+        repository: request.repository,
+        host: options.host,
+      });
+      yield* Effect.logInfo("Cleaning Attempt workspace", {
+        attemptId: request.attemptId,
+        worker: request.worker,
+        host: options.host,
+        worktree: layout.worktree,
+      });
+      const cacheExists = yield* ops.cacheExists.pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning("Could not inspect cache during cleanup", {
+            attemptId: request.attemptId,
+            message: String(error),
+          }),
+        ),
+        Effect.orElseSucceed(() => false),
+      );
+      if (cacheExists) {
+        yield* cleanup(
+          "git-worktree",
+          ops.git("cleanup", [
+            "--git-dir",
+            layout.cache,
+            "worktree",
+            "remove",
+            "--force",
+            layout.worktree,
+          ]),
+        );
+      }
+      yield* cleanup("worktree-directory", ops.removePath("cleanup", layout.worktree));
+      if (cacheExists) {
+        yield* cleanup(
+          "cache-registration",
+          ops.git("cleanup", ["--git-dir", layout.cache, "worktree", "prune"]),
+        );
+      }
+    }),
+  );
+  yield* ops.ensureRoots;
+  yield* ops.removePath("prepare", layout.worktree);
+  if (yield* ops.cacheExists) {
+    yield* ops.git("prepare", [
+      "--git-dir",
+      layout.cache,
+      "remote",
+      "set-url",
+      "origin",
+      options.url,
+    ]);
+  } else {
+    // Staging belongs to this locked clone only. Release it before unlocking,
+    // including interruption between clone completion and cache promotion.
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* Effect.addFinalizer(() =>
+          cleanup("partial-clone", ops.removePath("cleanup", layout.staging)),
+        );
+        yield* ops.removePath("prepare", layout.staging);
+        yield* ops.git("prepare", [
+          "clone",
+          "--bare",
+          "--filter=blob:none",
+          options.url,
+          layout.staging,
+        ]);
+        yield* ops.promoteStaging;
+      }),
+    );
   }
-  yield* ops.git([
+  yield* ops.git("prepare", [
     "--git-dir",
     layout.cache,
     "fetch",
@@ -100,7 +171,12 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     "origin",
     request.revision,
   ]);
-  const resolved = (yield* ops.git(["--git-dir", layout.cache, "rev-parse", "FETCH_HEAD"])).trim();
+  const resolved = (yield* ops.git("prepare", [
+    "--git-dir",
+    layout.cache,
+    "rev-parse",
+    "FETCH_HEAD",
+  ])).trim();
   const baseCommit = yield* decodeCommit(resolved).pipe(
     Effect.mapError(
       (cause) =>
@@ -111,7 +187,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         }),
     ),
   );
-  yield* ops.git([
+  yield* ops.git("prepare", [
     "--git-dir",
     layout.cache,
     "worktree",
@@ -120,7 +196,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     layout.worktree,
     baseCommit,
   ]);
-  return new PreparedAttempt({
+  return new AttemptWorkspace({
     worker: request.worker,
     spec: new AttemptChannel.RunSpec({
       attemptId: request.attemptId,

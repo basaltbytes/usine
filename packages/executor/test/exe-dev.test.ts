@@ -12,7 +12,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
-import { CheckoutRequest, Executor, type PreparedAttempt } from "../src/executor.ts";
+import { CheckoutRequest, Executor } from "../src/executor.ts";
 import { layer as exeDevLayer } from "../src/exe-dev/exe-dev.ts";
 import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "../src/exe-dev/model.ts";
 import {
@@ -20,14 +20,17 @@ import {
   DateTime,
   Deferred,
   Effect,
+  Exit,
   Fiber,
   Layer,
+  Logger,
   Option,
   Queue,
   Ref,
   Result,
   Schema,
   Sink,
+  Scope,
   Stream,
 } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
@@ -84,8 +87,11 @@ interface FakeSshState {
   kills: number;
   /** When set, the next `rm -rf` on the Attempt worktree exits non-zero. */
   failWorktreeRm: boolean;
-  /** When set, `git clone` parks until killed, so a test can interrupt prepare. */
-  hangClone: boolean;
+  /** The simulated remote operation parks until its SSH client is killed. */
+  hangPreparation: "none" | "clone" | "fetch" | "attach" | "promotion";
+  parked: boolean;
+  failAttach: boolean;
+  cacheExists: boolean;
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -268,7 +274,10 @@ const fakeSsh = (
     inputs: [],
     kills: 0,
     failWorktreeRm: false,
-    hangClone: false,
+    hangPreparation: "none",
+    parked: false,
+    failAttach: false,
+    cacheExists: false,
   };
   const service = ChildProcessSpawner.make(
     Effect.fn("FakeSsh.spawn")(function* (command) {
@@ -276,7 +285,16 @@ const fakeSsh = (
       state.commands.push(command);
       const remote = remoteArgs(command);
       const remoteLine = remote[0] ?? "";
-      if (state.hangClone && remoteLine.includes("'clone'")) {
+      if (state.failAttach && command.args.includes("attach"))
+        return oneShotHandle("", 255, "lost reply after attachment");
+      if (remoteLine.startsWith("exec 'mv' ")) state.cacheExists = true;
+      if (
+        (state.hangPreparation === "clone" && remoteLine.includes("'clone'")) ||
+        (state.hangPreparation === "fetch" && remoteLine.includes("'fetch'")) ||
+        (state.hangPreparation === "attach" && command.args.includes("attach")) ||
+        (state.hangPreparation === "promotion" && remoteLine.startsWith("exec 'mv' "))
+      ) {
+        state.parked = true;
         return yield* hangingHandle(state);
       }
       if (
@@ -325,7 +343,8 @@ const fakeSsh = (
       if (remoteLine.startsWith("exec 'find' ") && remoteLine.includes("/repos'")) {
         return oneShotHandle("/home/exedev/.usine/workers/remote-one/repos/acme_demo.git\0", 0);
       }
-      if (remoteLine.startsWith("exec 'test' ")) return oneShotHandle("", 1);
+      if (remoteLine.startsWith("exec 'test' "))
+        return oneShotHandle("", state.cacheExists ? 0 : 1);
       if (remoteLine.includes("'git' '--git-dir'") && remoteLine.includes("'rev-parse'")) {
         return oneShotHandle(`${COMMIT}\n`, 0);
       }
@@ -390,7 +409,7 @@ describe("exe.dev executor", () => {
           );
         }
       }
-    }).pipe(Effect.provide(runtime(ssh.layer)));
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
   it.effect("contains an invalid sweep boundary without touching it or blocking prepare", () => {
@@ -401,60 +420,122 @@ describe("exe.dev executor", () => {
       // The sweep failure is isolated: prepare proceeds, and the path outside
       // the Worker root is never touched.
       const prepared = yield* executor.prepare(request);
-      assert.strictEqual(prepared.spec.attemptId, ATTEMPT_ID);
-      assert.deepStrictEqual(prepared.spec.payload, request.payload);
-      assert.deepStrictEqual(prepared.spec.agent, request.agent);
-      assert.deepStrictEqual(prepared.spec.parentModel, request.parentModel);
+      assert.strictEqual(prepared.workspace.spec.attemptId, ATTEMPT_ID);
+      assert.deepStrictEqual(prepared.workspace.spec.payload, request.payload);
+      assert.deepStrictEqual(prepared.workspace.spec.agent, request.agent);
+      assert.deepStrictEqual(prepared.workspace.spec.parentModel, request.parentModel);
       const commandLine = ssh.state.commands.map(({ args }) => args.join(" ")).join("\n");
       assert(!commandLine.includes("/tmp/not-a-worker-child"));
       assert(commandLine.includes("integrations attach"));
-    }).pipe(Effect.provide(runtime(ssh.layer)));
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
-  it.effect("drops the prepared state exactly once when cleanup partially fails", () => {
+  it.effect("preserves success and a sibling's credentials when worktree cleanup fails", () => {
     const ssh = fakeSsh(PROTOCOL);
+    const errors: Array<unknown> = [];
+    const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Error") errors.push(message);
+    });
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
-      const prepared = yield* executor.prepare(request);
+      const firstScope = yield* Scope.make();
+      const secondScope = yield* Scope.make();
+      const prepared = yield* executor.prepare(request).pipe(Scope.provide(firstScope));
+      yield* executor
+        .prepare(
+          new CheckoutRequest({
+            ...request,
+            attemptId: AttemptId.make("remote-run/execute/2"),
+          }),
+        )
+        .pipe(Scope.provide(secondScope));
       ssh.state.failWorktreeRm = true;
-      const error = yield* executor.cleanup(prepared).pipe(Effect.flip);
-      assert.strictEqual(error._tag, "ExecutorOperationError");
+      const result = yield* prepared.launch({ append: () => Effect.void });
+      assert.strictEqual(result.message, "done");
+      assert(JSON.stringify(errors).includes("worktree-directory"));
+      assert(
+        ssh.state.commands.some((command) =>
+          (remoteArgs(command)[0] ?? "").includes("'worktree' 'prune'"),
+        ),
+      );
       const detaches = () =>
-        ssh.state.commands.filter(({ args }) => args.join(" ").includes("integrations detach"))
-          .length;
-      // The grant is released once despite the worktree failure.
-      assert.strictEqual(detaches(), 1);
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length;
+      assert.strictEqual(detaches(), 0);
       const issued = ssh.state.commands.length;
-      // The second cleanup is a recorded no-op, not a second release that would
-      // detach a running sibling's credentials.
-      yield* executor.cleanup(prepared);
-      assert.strictEqual(detaches(), 1);
+      yield* Scope.close(firstScope, Exit.void);
+      yield* Scope.close(firstScope, Exit.void);
       assert.strictEqual(ssh.state.commands.length, issued);
-    }).pipe(Effect.provide(runtime(ssh.layer)));
+      yield* Scope.close(secondScope, Exit.void);
+      assert.strictEqual(detaches(), 1);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(runtime(ssh.layer)),
+      Effect.provide(Logger.layer([logger])),
+    );
   });
 
-  it.effect("releases the credential grant when prepare is interrupted mid-clone", () => {
+  for (const phase of ["clone", "fetch", "attach", "promotion"] as const) {
+    it.effect(`releases acquired resources when preparation is interrupted during ${phase}`, () => {
+      const ssh = fakeSsh(PROTOCOL);
+      ssh.state.hangPreparation = phase;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER);
+        const fiber = yield* Effect.forkChild(executor.prepare(request));
+        while (!ssh.state.parked) yield* Effect.yieldNow;
+        yield* Fiber.interrupt(fiber);
+        assert.strictEqual(
+          ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+          1,
+        );
+        if (phase === "clone" || phase === "promotion") {
+          const commands = ssh.state.commands.map((command) => remoteArgs(command)[0] ?? "");
+          const clone = commands.findIndex((line) => line.includes("'clone'"));
+          assert(
+            commands.some(
+              (line, index) =>
+                index > clone && line.startsWith("exec 'rm' '-rf'") && line.includes(".cloning"),
+            ),
+          );
+        }
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+    });
+  }
+
+  it.effect("does not release a sibling's grant when canceled while waiting for its clone", () => {
     const ssh = fakeSsh(PROTOCOL);
-    ssh.state.hangClone = true;
+    ssh.state.hangPreparation = "clone";
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
-      const fiber = yield* Effect.forkChild(executor.prepare(request));
-      let spins = 0;
+      const first = yield* executor.prepare(request).pipe(Effect.scoped, Effect.forkChild);
       while (
-        !ssh.state.commands.some((command) => (remoteArgs(command)[0] ?? "").includes("'clone'")) &&
-        spins < 1_000
+        !ssh.state.commands.some((command) => (remoteArgs(command)[0] ?? "").includes("'clone'"))
       ) {
         yield* Effect.yieldNow;
-        spins += 1;
       }
-      yield* Fiber.interrupt(fiber);
-      const commandLine = ssh.state.commands.map(({ args }) => args.join(" ")).join("\n");
-      assert(commandLine.includes("integrations attach"));
-      // The compensation ran: the half-attached grant is gone.
-      assert(commandLine.includes("integrations detach"));
-    }).pipe(Effect.provide(runtime(ssh.layer)));
+      const waiting = yield* executor
+        .prepare(
+          new CheckoutRequest({
+            ...request,
+            attemptId: AttemptId.make("remote-run/execute/2"),
+          }),
+        )
+        .pipe(Effect.scoped, Effect.forkChild);
+      // Let the second prepare reach the held repository lock.
+      for (let turn = 0; turn < 20; turn += 1) yield* Effect.yieldNow;
+      yield* Fiber.interrupt(waiting);
+      assert.strictEqual(
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+        0,
+      );
+      yield* Fiber.interrupt(first);
+      assert.strictEqual(
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+        1,
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
   it.effect(
@@ -467,7 +548,7 @@ describe("exe.dev executor", () => {
         assert.strictEqual(executor.kind, "exe.dev");
         yield* executor.preflight(WORKER);
         const prepared = yield* executor.prepare(request);
-        const result = yield* executor.launch(prepared, {
+        const result = yield* prepared.launch({
           append: (direction, envelope) =>
             Effect.sync(() => {
               transcript.push([direction, envelope]);
@@ -488,10 +569,7 @@ describe("exe.dev executor", () => {
         );
         const start = ssh.state.inputs[0];
         assert(start?._tag === "Start");
-        assert.deepStrictEqual(start.spec, prepared.spec);
-
-        yield* executor.cleanup(prepared);
-        yield* executor.cleanup(prepared);
+        assert.deepStrictEqual(start.spec, prepared.workspace.spec);
 
         const commandLines = ssh.state.commands.map(({ args }) => args.join(" "));
         assert(commandLines.some((line) => line.includes("integrations test usine-acme-demo")));
@@ -530,7 +608,7 @@ describe("exe.dev executor", () => {
           const separator = command.args.indexOf("--");
           if (separator >= 0) assert.strictEqual(command.args.slice(separator + 1).length, 1);
         }
-      }).pipe(Effect.provide(runtime(ssh.layer)));
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
     },
   );
 
@@ -543,19 +621,92 @@ describe("exe.dev executor", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
-      const first = yield* executor.prepare(request);
-      const second = yield* executor.prepare(secondRequest);
+      const first = yield* Scope.make();
+      const second = yield* Scope.make();
+      yield* executor.prepare(request).pipe(Scope.provide(first));
+      yield* executor.prepare(secondRequest).pipe(Scope.provide(second));
       const matchingCommands = (subcommand: string) =>
         ssh.state.commands.filter(
           ({ args }) => args.includes("integrations") && args.includes(subcommand),
         );
       assert.strictEqual(matchingCommands("attach").length, 2);
-      yield* executor.cleanup(first);
+      yield* Scope.close(first, Exit.void);
       assert.strictEqual(matchingCommands("detach").length, 0);
-      yield* executor.cleanup(second);
+      yield* Scope.close(second, Exit.void);
       assert.strictEqual(matchingCommands("detach").length, 1);
-    }).pipe(Effect.provide(runtime(ssh.layer)));
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
+
+  it.effect("does not detach a live sibling after an ambiguous grant refresh failure", () => {
+    const ssh = fakeSsh(PROTOCOL);
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER);
+      const owner = yield* Scope.make();
+      yield* executor.prepare(request).pipe(Scope.provide(owner));
+      ssh.state.failAttach = true;
+      const error = yield* executor
+        .prepare(
+          new CheckoutRequest({
+            ...request,
+            attemptId: AttemptId.make("remote-run/execute/2"),
+          }),
+        )
+        .pipe(Effect.flip);
+      assert.strictEqual(error._tag, "CredentialUnavailableError");
+      assert.strictEqual(
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+        0,
+      );
+      yield* Scope.close(owner, Exit.void);
+      assert.strictEqual(
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+        1,
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+  });
+
+  it.effect(
+    "closing the prepared scope stops its active channel before remote resource cleanup",
+    () => {
+      const ssh = fakeSsh(PROTOCOL, "wait-for-interrupt");
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER);
+        const owner = yield* Scope.make();
+        const prepared = yield* executor.prepare(request).pipe(Scope.provide(owner));
+        const started = yield* Deferred.make<void>();
+        const launched = yield* prepared
+          .launch({
+            append: (_direction, envelope) =>
+              envelope.payload._tag === "Started"
+                ? Effect.asVoid(Deferred.succeed(started, undefined))
+                : Effect.void,
+          })
+          .pipe(Effect.exit, Effect.forkChild);
+        yield* Deferred.await(started);
+        const beforeCleanup = ssh.state.commands.length;
+        yield* Scope.close(owner, Exit.void);
+        assert(Exit.isFailure(yield* Fiber.join(launched)));
+        assert.strictEqual(ssh.state.kills, 0);
+        assert(
+          ssh.state.inputs.some(
+            (input) => input._tag === "InboundEnvelope" && input.payload._tag === "Interrupt",
+          ),
+        );
+        const cleanup = ssh.state.commands.slice(beforeCleanup).map(({ args }) => args.join(" "));
+        const kill = cleanup.findIndex((line) => line.includes("remote-run_execute_1.pid"));
+        const remove = cleanup.findIndex((line) => line.includes("'worktree' 'remove'"));
+        const detach = cleanup.findIndex((line) => line.includes("integrations detach"));
+        assert(kill >= 0 && remove > kill && detach > remove);
+        const issued = ssh.state.commands.length;
+        yield* Scope.close(owner, Exit.void);
+        const reuse = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.flip);
+        assert.strictEqual(reuse._tag, "InfraFailure");
+        assert.strictEqual(ssh.state.commands.length, issued);
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+    },
+  );
 
   it.effect("surfaces run-host skew as a typed preflight capability error", () => {
     const ssh = fakeSsh("1");
@@ -566,7 +717,7 @@ describe("exe.dev executor", () => {
       if (error._tag !== "WorkerCapabilityError") return;
       assert.strictEqual(error.capability, "run-host");
       assert(error.message.includes(`expected ${PROTOCOL}`));
-    }).pipe(Effect.provide(runtime(ssh.layer)));
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
   it.effect("requires a successful SSH exit after the final envelope", () => {
@@ -575,13 +726,10 @@ describe("exe.dev executor", () => {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
       const prepared = yield* executor.prepare(request);
-      const error = yield* executor
-        .launch(prepared, { append: () => Effect.void })
-        .pipe(Effect.flip);
+      const error = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.flip);
       assert.strictEqual(error._tag, "InfraFailure");
       assert(error.message.includes("exited with code 17"));
-      yield* executor.cleanup(prepared);
-    }).pipe(Effect.provide(runtime(ssh.layer)));
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
   it.effect("cancels once through the SSH channel and confirms the remote interrupt", () => {
@@ -590,9 +738,9 @@ describe("exe.dev executor", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
-      const prepared: PreparedAttempt = yield* executor.prepare(request);
-      const launchFiber = yield* executor
-        .launch(prepared, {
+      const prepared = yield* executor.prepare(request);
+      const launchFiber = yield* prepared
+        .launch({
           append: (direction, envelope) =>
             Effect.sync(() => {
               transcript.push([direction, envelope]);
@@ -621,8 +769,7 @@ describe("exe.dev executor", () => {
         ],
       );
       assert.strictEqual(ssh.state.kills, 0);
-      yield* executor.cleanup(prepared);
-    }).pipe(Effect.provide(runtime(ssh.layer)));
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
   it.effect("kills a stalled SSH session after the interrupt grace", () => {
@@ -632,8 +779,8 @@ describe("exe.dev executor", () => {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
       const prepared = yield* executor.prepare(request);
-      const launchFiber = yield* executor
-        .launch(prepared, {
+      const launchFiber = yield* prepared
+        .launch({
           append: (direction, envelope) =>
             Effect.sync(() => {
               transcript.push([direction, envelope]);
@@ -655,8 +802,7 @@ describe("exe.dev executor", () => {
       assert(Result.isFailure(outcome));
       if (Result.isFailure(outcome)) assert.strictEqual(outcome.failure._tag, "InfraFailure");
       assert.strictEqual(ssh.state.kills, 1);
-      yield* executor.cleanup(prepared);
-    }).pipe(Effect.provide(runtime(ssh.layer)));
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
   it.effect("hard-kills when the persisted interrupt write is parked", () => {
@@ -666,8 +812,8 @@ describe("exe.dev executor", () => {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER);
       const prepared = yield* executor.prepare(request);
-      const launchFiber = yield* executor
-        .launch(prepared, {
+      const launchFiber = yield* prepared
+        .launch({
           append: (direction, envelope) =>
             direction === "inbound"
               ? Effect.never
@@ -693,7 +839,6 @@ describe("exe.dev executor", () => {
       const outcome = yield* Fiber.join(launchFiber);
       assert(Result.isFailure(outcome));
       if (Result.isFailure(outcome)) assert.strictEqual(outcome.failure._tag, "InfraFailure");
-      yield* executor.cleanup(prepared);
-    }).pipe(Effect.provide(runtime(ssh.layer)));
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 });
