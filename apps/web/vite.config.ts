@@ -5,6 +5,10 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 
 export default defineConfig({
+  optimizeDeps: {
+    // Local CommonJS is otherwise served unbundled during development.
+    include: ["ansi-to-react-component"],
+  },
   plugins: [
     tanstackRouter({
       target: "react",
@@ -16,7 +20,12 @@ export default defineConfig({
     tailwindcss(),
   ],
   resolve: {
-    alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+      "ansi-to-react-component": fileURLToPath(
+        new URL("./src/components/ai-elements/ansi.cjs", import.meta.url),
+      ),
+    },
   },
   server: {
     proxy: { "/api": "http://127.0.0.1:7331" },

@@ -13,6 +13,7 @@ import {
   MessageScroller,
   MessageScrollerButton,
   MessageScrollerContent,
+  MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
@@ -85,17 +86,23 @@ export const Conversation = ({
             >
               <MessageScrollerContent className="gap-4 px-4 pt-4 pb-16 sm:px-6">
                 {earlier !== undefined && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="self-center"
-                    disabled={loadingEarlier}
-                    onClick={loadEarlier}
-                  >
-                    {loadingEarlier ? "Loading…" : "Load earlier"}
-                  </Button>
+                  <MessageScrollerItem messageId="history" className="flex justify-center">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="self-center"
+                      disabled={loadingEarlier}
+                      onClick={loadEarlier}
+                    >
+                      {loadingEarlier ? "Loading…" : "Load earlier"}
+                    </Button>
+                  </MessageScrollerItem>
                 )}
-                {earlierError !== null && <ErrorAlert message={earlierError} />}
+                {earlierError !== null && (
+                  <MessageScrollerItem messageId="history-error">
+                    <ErrorAlert message={earlierError} />
+                  </MessageScrollerItem>
+                )}
                 <Transcript events={events} attempts={attempts} filter={filter} />
               </MessageScrollerContent>
             </MessageScrollerViewport>

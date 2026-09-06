@@ -39,6 +39,7 @@ import {
   RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
 } from "./run-transcript/cache.ts";
 import { Conversation } from "./run-transcript/conversation.tsx";
+import { fetchRunDetail } from "./run-transcript/fetch.ts";
 
 const timeAgo = (value: string): string => {
   const elapsed = Math.max(0, Date.now() - Date.parse(value));
@@ -67,14 +68,11 @@ export const RunDrawer = ({
       const key = ["run", runId] as const;
       const previous = queryClient.getQueryData<RunDetailView>(key);
       const cursor = previous?.transcript.at(-1)?.sequence;
-      const next = await api((client) =>
-        client.detail({
-          params: { runId },
-          query:
-            cursor === undefined
-              ? new ColdTranscriptRequest()
-              : new TailTranscriptRequest({ after: cursor }),
-        }),
+      const next = await fetchRunDetail(
+        cursor === undefined
+          ? new ColdTranscriptRequest()
+          : new TailTranscriptRequest({ after: cursor }),
+        (query) => api((client) => client.detail({ params: { runId }, query })),
       );
       const current = queryClient.getQueryData<RunDetailView>(key);
       if (cursor === undefined || current === undefined) return next;

@@ -21,21 +21,24 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepResult } from "@usine/core/step/result";
-import { Option } from "effect";
+import { Option, type Schema } from "effect";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   AgentFailureView,
   AttemptView,
   CanceledAttemptView,
+  ColdTranscriptRequest,
   FailedTranscriptView,
   RunDetailView,
   RunView,
   SucceededAttemptView,
+  TailTranscriptRequest,
   TranscriptEventView,
   TranscriptPageCursor,
 } from "@usine/orchestrator/operator";
 import { QueryClient } from "@tanstack/react-query";
-import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactNode } from "react";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import {
   mergeEarlierTranscript,
@@ -46,6 +49,12 @@ import {
 } from "../src/run-transcript/cache.ts";
 import { projectTranscript, type TranscriptTool } from "../src/run-transcript/model.ts";
 import { SessionActivity, Transcript } from "../src/run-transcript/transcript.tsx";
+import { MessageScrollerProvider } from "../src/components/ui/message-scroller.tsx";
+import { presentTool, type ToolSection } from "../src/run-transcript/tool/presentation.ts";
+import { fetchRunDetail } from "../src/run-transcript/fetch.ts";
+
+const renderToStaticMarkup = (node: ReactNode) =>
+  renderMarkup(<MessageScrollerProvider>{node}</MessageScrollerProvider>);
 
 const attemptId = AttemptId.make("attempt-31");
 const brain = new BrainSpec({
@@ -53,6 +62,7 @@ const brain = new BrainSpec({
   model: ModelId.make("gpt-5"),
   effort: "high",
 });
+
 const liveAttempt = new AttemptView({
   id: attemptId,
   number: AttemptNumber.make(1),
@@ -239,7 +249,7 @@ describe("run transcript", () => {
     const markup = renderToStaticMarkup(
       <Transcript events={[started, finished]} attempts={[liveAttempt]} filter="all" />,
     );
-    assert.include(markup, "shell · Finished");
+    assert.include(markup, "Command: pnpm test · Completed");
     assert.include(markup, "pnpm test");
     assert.notInclude(markup, "Run the suite");
     assert.include(markup, "2.0s");
@@ -258,8 +268,7 @@ describe("run transcript", () => {
     const markup = renderToStaticMarkup(
       <Transcript events={[finished]} attempts={[liveAttempt]} filter="tools" />,
     );
-    assert.include(markup, "read · Error");
-    assert.include(markup, "Earlier input is not loaded");
+    assert.include(markup, "Read file: File details unavailable · Error");
   });
 
   it("scopes repeated session and tool identities to their own Attempt", () => {
@@ -368,8 +377,8 @@ describe("run transcript", () => {
       <Transcript events={events} attempts={[liveAttempt]} filter="tools" />,
     );
     assert.include(messages, "A useful explanation");
-    assert.notInclude(messages, "read · Running");
-    assert.include(toolRows, "read · Running");
+    assert.notInclude(messages, "Read file: README.md · Running");
+    assert.include(toolRows, "Read file: README.md · Running");
     assert.notInclude(toolRows, "A useful explanation");
     for (const markup of [messages, toolRows]) {
       assert.include(markup, "Attempt started");
@@ -515,5 +524,380 @@ describe("run transcript", () => {
     assert.deepStrictEqual(merged.run, current.run);
     assert.deepStrictEqual(merged.transcript, [...stale.transcript, ...current.transcript]);
     assert.deepStrictEqual(merged.earlierTranscript, []);
+  });
+
+  it("drains a completed Run's capped tail through its final event before polling stops", async () => {
+    const transcript = [
+      event(11, "First page"),
+      event(12, "Second page"),
+      record(
+        13,
+        new AttemptChannel.Final({
+          result: new StepResult({ message: "All work complete", facts: [] }),
+        }),
+      ),
+    ];
+    const detail = new RunDetailView({
+      run: new RunView({
+        id: RunId.make("run-31"),
+        itemKey: ItemKey.make("github:basaltbytes/usine:31"),
+        loop: LoopName.make("develop"),
+        repository: RepositoryName.make("basaltbytes/usine"),
+        agent: parent.agent,
+        state: "Succeeded",
+        loopPaused: false,
+        openedAt: liveAttempt.startedAt,
+        task: "Build it",
+        attempts: [new AttemptView({ ...liveAttempt, outcome: new SucceededAttemptView() })],
+        resultMessage: "All work complete",
+        pullRequestUrl: null,
+        canApprove: false,
+        canRetry: false,
+        canCancel: false,
+      }),
+      eventDedupKey: "issue:31",
+      eventPayload: { number: 31 },
+      transcript: [],
+      earlierTranscript: [],
+    });
+    // This operator boundary has a smaller page size than production; readers
+    // must follow cursors rather than infer completion from a particular limit.
+    const read = async (request: ColdTranscriptRequest | TailTranscriptRequest) => {
+      const after = request._tag === "TailTranscriptRequest" ? request.after : 0;
+      return new RunDetailView({
+        ...detail,
+        transcript: transcript.filter(({ sequence }) => sequence > after).slice(0, 1),
+      });
+    };
+    const loaded = await fetchRunDetail(
+      new TailTranscriptRequest({ after: TranscriptSequence.make(10) }),
+      read,
+    );
+    assert.deepStrictEqual(loaded.transcript, transcript);
+    assert.strictEqual(loaded.run.resultMessage, "All work complete");
+
+    const running = new RunDetailView({
+      ...detail,
+      run: new RunView({
+        ...detail.run,
+        state: "Running",
+        attempts: [liveAttempt],
+        resultMessage: null,
+        canCancel: true,
+      }),
+    });
+    const onePoll = await fetchRunDetail(
+      new TailTranscriptRequest({ after: TranscriptSequence.make(10) }),
+      async (request) =>
+        new RunDetailView({ ...running, transcript: (await read(request)).transcript }),
+    );
+    assert.deepStrictEqual(onePoll.transcript, transcript.slice(0, 1));
+    assert.strictEqual(onePoll.run.canCancel, true);
+
+    const cold = new RunDetailView({
+      ...detail,
+      transcript: transcript.slice(-1),
+      earlierTranscript: [
+        new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(13) }),
+      ],
+    });
+    const initial = await fetchRunDetail(new ColdTranscriptRequest(), async (request) =>
+      request._tag === "ColdTranscriptRequest" ? cold : read(request),
+    );
+    assert.deepStrictEqual(initial, cold);
+  });
+});
+
+const completedTool = (name: string, input: Schema.Json, output: Schema.Json) => {
+  const call = tools([
+    sessionEvent(1, new ToolStarted({ session: parent, callId: "presented", tool: name, input })),
+    sessionEvent(
+      2,
+      new ToolFinished({
+        session: parent,
+        callId: "presented",
+        tool: name,
+        output,
+        isError: false,
+      }),
+    ),
+  ])[0];
+  assert(call !== undefined);
+  return call;
+};
+
+const sectionText = (sections: ReadonlyArray<ToolSection>): string =>
+  sections.flatMap((section) => (section._tag === "Fields" ? [] : [section.text])).join("\n");
+
+const sectionFields = (sections: ReadonlyArray<ToolSection>) =>
+  sections.flatMap((section) => (section._tag === "Fields" ? section.fields : []));
+
+describe("tool presentation", () => {
+  it("shows a Codex command and its actual output with exit status instead of protocol envelopes", () => {
+    const input = {
+      type: "commandExecution",
+      id: "cmd-1",
+      command: "pnpm test\npnpm check",
+      cwd: "/workspace/repo",
+      status: "inProgress",
+      aggregatedOutput: null,
+      exitCode: null,
+      durationMs: null,
+    };
+    const output = {
+      ...input,
+      status: "completed",
+      aggregatedOutput: "3 tests passed\nTypes checked\n",
+      exitCode: 0,
+      durationMs: 1250,
+    };
+    const call = completedTool("command", input, output);
+    const view = presentTool(call);
+
+    assert.strictEqual(view.subject, "pnpm test\npnpm check");
+    assert.include(sectionText(view.input), "pnpm test\npnpm check");
+    assert.include(sectionText(view.output), "3 tests passed\nTypes checked\n");
+    assert.deepInclude(sectionFields(view.input), {
+      label: "Working directory",
+      value: "/workspace/repo",
+    });
+    assert.deepInclude(sectionFields(view.output), { label: "Exit code", value: 0 });
+    assert.deepInclude(sectionFields(view.output), { label: "Duration (ms)", value: 1250 });
+    assert(call.state._tag === "Finished");
+    assert.deepStrictEqual(call.state.output, output);
+  });
+
+  it("unwraps Pi text blocks and Claude content without losing line breaks or error text", () => {
+    const command = "pnpm test";
+    const output = "Test failed\nExpected 2, received 1\nCommand exited with code 1";
+    for (const result of [
+      { content: [{ type: "text", text: output }] },
+      [{ type: "text", text: output }],
+      output,
+    ]) {
+      const view = presentTool(completedTool("Bash", { command }, result));
+      assert.strictEqual(view.subject, command);
+      assert.strictEqual(sectionText(view.output), output);
+    }
+  });
+
+  it("shows Pi's returned unified patch once, retaining file metadata", () => {
+    const patch =
+      "--- src/count.ts\n+++ src/count.ts\n@@ -1,1 +1,1 @@\n-export const count = 1;\n+export const count = 2;\n";
+    const view = presentTool(
+      completedTool(
+        "edit",
+        {
+          path: "src/count.ts",
+          edits: [{ oldText: "count = 1", newText: "count = 2" }],
+        },
+        {
+          content: [{ type: "text", text: "Successfully replaced 1 block(s) in src/count.ts." }],
+          details: {
+            diff: "-1 export const count = 1;\n+1 export const count = 2;",
+            patch,
+            firstChangedLine: 1,
+          },
+        },
+      ),
+    );
+
+    assert.strictEqual(view.subject, "src/count.ts");
+    assert.strictEqual(sectionText(view.input), "");
+    assert.include(sectionText(view.output), patch);
+    assert.deepInclude(sectionFields(view.output), { label: "First changed line", value: 1 });
+  });
+
+  it("shows every Codex changed file with its real diff, including changes whose start is unpaged", () => {
+    const changes = [
+      { path: "src/new.ts", kind: { type: "add" }, diff: "+export const ready = true;\n" },
+      { path: "src/old.ts", kind: { type: "delete" }, diff: "-export const old = true;\n" },
+    ];
+    const call = tools([
+      sessionEvent(
+        2,
+        new ToolFinished({
+          session: parent,
+          callId: "changes",
+          tool: "file_change",
+          isError: false,
+          output: { type: "fileChange", id: "changes", status: "completed", changes },
+        }),
+      ),
+    ])[0];
+    assert(call !== undefined);
+    const view = presentTool(call);
+
+    assert.strictEqual(view.subject, "2 files");
+    assert.deepStrictEqual(
+      view.output.map(({ label }) => label),
+      ["src/new.ts · add", "src/old.ts · delete"],
+    );
+    assert.include(sectionText(view.output), "+export const ready = true;\n");
+    assert.include(sectionText(view.output), "-export const old = true;\n");
+  });
+
+  it("keeps a proposed file change separate from a result that has not arrived", () => {
+    const call = tools([
+      sessionEvent(
+        1,
+        new ToolStarted({
+          session: parent,
+          callId: "pending-edit",
+          tool: "file_change",
+          input: {
+            type: "fileChange",
+            id: "pending-edit",
+            status: "inProgress",
+            changes: [
+              { path: "src/new.ts", kind: { type: "add" }, diff: "+export const ready = true;\n" },
+            ],
+          },
+        }),
+      ),
+    ])[0];
+    assert(call !== undefined);
+    const view = presentTool(call);
+    assert.strictEqual(view.subject, "src/new.ts");
+    assert.include(sectionText(view.input), "+export const ready = true;\n");
+    assert.deepStrictEqual(view.output, []);
+  });
+
+  it("presents Claude read, edit, write and search fields by their operator meaning", () => {
+    const read = presentTool(
+      completedTool(
+        "Read",
+        { file_path: "/repo/src/count.ts", offset: 12, limit: 3 },
+        "12→export const count = 1;",
+      ),
+    );
+    assert.strictEqual(read.subject, "/repo/src/count.ts");
+    assert.deepInclude(sectionFields(read.input), { label: "Offset", value: 12 });
+    assert.include(sectionText(read.output), "12→export const count = 1;");
+    assert.include(
+      read.output.map(({ label }) => label),
+      "/repo/src/count.ts",
+    );
+
+    const edit = presentTool(
+      completedTool(
+        "Edit",
+        {
+          file_path: "/repo/src/count.ts",
+          old_string: "count = 1",
+          new_string: "count = 2",
+          replace_all: false,
+        },
+        "The file has been updated.",
+      ),
+    );
+    assert.include(sectionText(edit.input), "count = 1\ncount = 2");
+    const write = presentTool(
+      completedTool(
+        "Write",
+        { file_path: "/repo/src/new.ts", content: "export const ready = true;\n" },
+        "File created successfully.",
+      ),
+    );
+    assert.strictEqual(write.subject, "/repo/src/new.ts");
+    assert.strictEqual(sectionText(write.input), "export const ready = true;\n");
+    const search = presentTool(
+      completedTool(
+        "Grep",
+        { pattern: "RunReader", path: "packages", glob: "*.ts" },
+        "packages/engine/src/run-reader.ts",
+      ),
+    );
+    assert.strictEqual(search.subject, "RunReader");
+    assert.deepInclude(sectionFields(search.input), { label: "Path", value: "packages" });
+    assert.include(sectionText(search.output), "packages/engine/src/run-reader.ts");
+  });
+
+  it("presents delegation as a task and readable child report", () => {
+    const view = presentTool(
+      completedTool(
+        "subagent",
+        { task: "Review the retry behavior.\nReport any stalls." },
+        {
+          content: [{ type: "text", text: "Retry is bounded.\nNo stalls found." }],
+          details: { childSessionId: "parent:child:1" },
+        },
+      ),
+    );
+    assert.include(view.subject, "Review the retry behavior.");
+    assert.strictEqual(sectionText(view.input), "Review the retry behavior.\nReport any stalls.");
+    assert.strictEqual(sectionText(view.output), "Retry is bounded.\nNo stalls found.");
+    assert.deepInclude(sectionFields(view.output), {
+      label: "Details",
+      value: { childSessionId: "parent:child:1" },
+    });
+  });
+
+  it("unwraps Codex MCP and dynamic results while preserving structured result data and errors", () => {
+    const input = {
+      type: "mcpToolCall",
+      id: "mcp-1",
+      server: "github",
+      tool: "get_issue",
+      arguments: { number: 79 },
+      status: "inProgress",
+    };
+    const output = {
+      ...input,
+      status: "completed",
+      result: {
+        content: [{ type: "text", text: "Conversation UX" }],
+        structuredContent: { number: 79, state: "open" },
+        _meta: null,
+      },
+      error: null,
+    };
+    const mcp = presentTool(completedTool("mcp_tool", input, output));
+    assert.strictEqual(mcp.title, "github · get_issue");
+    assert.deepInclude(sectionFields(mcp.input), { label: "Number", value: 79 });
+    assert.strictEqual(sectionText(mcp.output), "Conversation UX");
+    assert.deepInclude(sectionFields(mcp.output), {
+      label: "Structured content",
+      value: { number: 79, state: "open" },
+    });
+
+    const dynamic = presentTool(
+      completedTool(
+        "dynamic_tool",
+        { type: "dynamicToolCall", tool: "validate", arguments: {} },
+        {
+          type: "dynamicToolCall",
+          contentItems: [{ type: "inputText", text: "Validation failed" }],
+          success: false,
+        },
+      ),
+    );
+    assert.strictEqual(dynamic.title, "validate");
+    assert.strictEqual(sectionText(dynamic.output), "Validation failed");
+    const failed = presentTool(
+      completedTool("mcp_tool", input, {
+        ...input,
+        result: null,
+        error: { message: "Permission denied" },
+      }),
+    );
+    assert.include(sectionText(failed.output), "Permission denied");
+  });
+
+  it("keeps unfamiliar tool parameters readable and leaves opaque result content available", () => {
+    const input = { destination: "staging", retries: 0, settings: { region: "eu" } };
+    const output = { receipt: { id: "deploy-12", artifacts: ["app.js"] }, cached: false };
+    const call = completedTool("publish_preview", input, output);
+    const view = presentTool(call);
+    assert.strictEqual(view.title, "publish_preview");
+    assert.strictEqual(view.subject, "3 parameters");
+    assert.deepInclude(sectionFields(view.input), { label: "Retries", value: 0 });
+    assert.deepInclude(sectionFields(view.input), { label: "Settings", value: { region: "eu" } });
+    assert.deepInclude(sectionFields(view.output), { label: "Receipt", value: output.receipt });
+    assert.deepInclude(sectionFields(view.output), { label: "Cached", value: false });
+    assert.deepStrictEqual(
+      Option.map(call.start, ({ input }) => input),
+      Option.some(input),
+    );
   });
 });
