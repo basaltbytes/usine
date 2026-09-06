@@ -23,6 +23,8 @@ import {
 import { Option } from "effect";
 import { assert, describe, it } from "vitest";
 import { projectTranscript } from "../src/run-transcript/model.ts";
+import { locateReadingAnchor, readingRows } from "../src/run-transcript/reader/anchor.ts";
+import { ReadingAnchor } from "../src/run-transcript/reader/memory.ts";
 import {
   acknowledgeUnread,
   advanceUnread,
@@ -202,3 +204,55 @@ describe("unread conversation activity", () => {
     assert.equal(unread.keys.size, 2);
   });
 });
+
+it("rebuilds unread activity across cold pages without losing updates first discovered on an earlier page", () => {
+  const read = initializeUnread(TranscriptSequence.make(10));
+  const cold = [message(30), meter(31)];
+  const tail = advanceUnread(read, index(cold), through(cold));
+  const history = [started(12), finished(14), message(15), ...cold];
+  const recovered = advanceUnread(tail, index(history), through(history));
+  assert.equal(recovered.keys.size, 3);
+  const reopened = advanceUnread(
+    initializeUnread(recovered.readThrough),
+    index(history),
+    through(history),
+  );
+  assert.deepEqual(reopened.keys, recovered.keys);
+  const acknowledged = acknowledgeUnread(reopened);
+  assert.equal(advanceUnread(acknowledged, index(history), through(history)).keys.size, 0);
+});
+
+it.each(["row", "result"] as const)(
+  "recovers the previously visible tool input before restoring its %s across a page boundary",
+  (surface) => {
+    const complete = readingRows(
+      projectTranscript([started(386), finished(387), message(426)], []),
+      "all",
+    );
+    const saved = complete.find((row) => row.surface === surface && row.sequence === 386);
+    assert.isDefined(saved);
+    const anchor = ReadingAnchor.make({
+      _tag: "Anchor",
+      key: saved.key,
+      surface,
+      sequence: saved.sequence,
+      offset: -87,
+    });
+    const partial = readingRows(projectTranscript([finished(387), message(426)], []), "all");
+    assert.deepEqual(locateReadingAnchor(anchor, partial, "available"), { _tag: "Earlier" });
+    assert.deepEqual(locateReadingAnchor(anchor, complete, "available"), {
+      _tag: "Row",
+      row: saved,
+      offset: -87,
+      fallback: false,
+    });
+    const surviving = partial.find((row) => row.key === anchor.key && row.surface === "row");
+    assert.isDefined(surviving);
+    assert.deepEqual(locateReadingAnchor(anchor, partial, "exhausted"), {
+      _tag: "Row",
+      row: surviving,
+      offset: 0,
+      fallback: true,
+    });
+  },
+);

@@ -65,7 +65,7 @@ export const RevealError = ({
   readonly filter: TranscriptFilter;
   readonly onRevealed: () => void;
 }) => {
-  const { state, change } = useTranscriptDisclosure();
+  const { state, reveal } = useTranscriptDisclosure();
   const { scrollToMessage } = useMessageScroller();
   useEffect(() => {
     if (target === null || filter !== "all") return;
@@ -75,7 +75,7 @@ export const RevealError = ({
     ];
     const closed = disclosures.filter((key) => state.get(key)?.open !== true);
     if (closed.length > 0) {
-      for (const key of closed) change({ _tag: "Item", key, open: true });
+      for (const key of closed) reveal({ _tag: "Item", key, open: true });
       return;
     }
     // Base UI mounts newly opened panels before this frame. MessageScroller Items
@@ -92,6 +92,6 @@ export const RevealError = ({
       cancelAnimationFrame(frame);
       if (completionFrame !== undefined) cancelAnimationFrame(completionFrame);
     };
-  }, [target, filter, state, change, scrollToMessage, onRevealed]);
+  }, [target, filter, state, reveal, scrollToMessage, onRevealed]);
   return null;
 };

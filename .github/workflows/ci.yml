@@ -31,4 +31,5 @@ jobs:
       - run: pnpm knip
       - run: pnpm build
       - run: pnpm check
+      - run: pnpm --filter @usine/web exec playwright install --with-deps chromium
       - run: pnpm test

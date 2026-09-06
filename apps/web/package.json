@@ -54,6 +54,8 @@
     "@usine/engine": "workspace:*",
     "@usine/tsconfig": "workspace:*",
     "@vitejs/plugin-react": "^6.1.1",
+    "@vitest/browser-playwright": "4.1.11",
+    "playwright": "1.61.1",
     "typescript": "catalog:",
     "vite": "^8.2.2",
     "vitest": "catalog:"

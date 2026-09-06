@@ -14,6 +14,8 @@ Without GitHub App credentials, it opens the setup screen in the default browser
 
 The local-only UI opens each project as a Board built from its authored or proposed lanes. Proposed lanes are read-only. Configure `repos[].lanes` in `usine.yaml` and restart `usine up` to enable moves; see the [lane configuration example](../../packages/config/README.md). Moving an Item into an authored label-backed lane exchanges only the labels in that map, preserving descriptive labels outside it; normal polling then evaluates label-protocol loops. Board cards show the latest Run and open its existing detail drawer. The UI can also approve, retry, or cancel a Run; pause or unpause a Loop's database runtime state; page backward through older transcript rows; and tail parent and one-level child session activity.
 
+Run conversations remember the reader’s filter, inspected disclosures and reading place when the drawer reopens or the page refreshes. Bookmarks are specific to each Run and browser origin; unread activity remains pending while a saved place is restored. See the [conversation reader behavior](../web/README.md#returning-to-a-conversation) for retention and history-recovery limits.
+
 Direct browser requests for UI routes serve the application shell, so refreshing or sharing a Project or Configuration URL works. Unknown `/api/*` routes, missing `/assets/*` files, and other file-like paths remain 404 responses.
 
 Run conversations summarize adjacent completed tools by their recorded actions, including the files read or changed and recognized test or build invocations. Expand a group to inspect each tool and its result.
