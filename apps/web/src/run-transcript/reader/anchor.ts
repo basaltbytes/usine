@@ -77,7 +77,8 @@ type Restoration =
 
 /**
  * Prefers the same durable member even when its group gains an earlier first call.
- * Missing rows wait for history; once exhausted, use the nearest surviving row.
+ * Waits for history until the matching row reaches its saved sequence.
+ * Exhausted history falls back to the nearest surviving row.
  */
 export const locateReadingAnchor = (
   anchor: ReadingAnchor,
@@ -89,7 +90,8 @@ export const locateReadingAnchor = (
       row.surface === anchor.surface &&
       (row.key === anchor.key || (row.surface === "group" && row.groupKeys.includes(anchor.key))),
   );
-  if (exact !== undefined)
+  // A result can arrive before its earlier input page while retaining the same tool identity.
+  if (exact !== undefined && exact.sequence <= anchor.sequence)
     return { _tag: "Row", row: exact, offset: anchor.offset, fallback: false };
   if (history === "available") return { _tag: "Earlier" };
   const surviving = rows.find((row) => row.key === anchor.key && row.surface === "row");
