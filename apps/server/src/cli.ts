@@ -137,6 +137,15 @@ const exportRunCommand = (args: ReadonlyArray<string>) => {
   }).pipe(Effect.mapError(() => usageError()));
 };
 
+const backupCommand = (args: ReadonlyArray<string>) => {
+  const [output] = args;
+  if (args.length !== 1 || output === undefined || output.startsWith("-"))
+    return Effect.fail(usageError());
+  return Schema.decodeUnknownEffect(BackupCommand)({ _tag: "BackupCommand", output }).pipe(
+    Effect.mapError(() => usageError()),
+  );
+};
+
 const upCommand = (
   args: ReadonlyArray<string>,
   environment: CliEnvironment,
@@ -186,14 +195,7 @@ export const parseCli = Effect.fn("Cli.parse")((
   if (args.length === 1 && (args[0] === "--version" || args[0] === "-v")) {
     return Effect.succeed(new VersionCommand());
   }
-  if (args[0] === "backup") {
-    const output = args[1];
-    if (args.length !== 2 || output === undefined || output.startsWith("-"))
-      return Effect.fail(usageError());
-    return Schema.decodeUnknownEffect(BackupCommand)({ _tag: "BackupCommand", output }).pipe(
-      Effect.mapError(() => usageError()),
-    );
-  }
+  if (args[0] === "backup") return backupCommand(args.slice(1));
   if (args[0] === "export-run") return exportRunCommand(args.slice(1));
   if (args[0] !== "up") return Effect.fail(usageError());
   return upCommand(args.slice(1), environment);

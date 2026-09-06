@@ -30,7 +30,7 @@ From the instance folder, copy the runtime store while the orchestrator runs:
 usine backup /path/to/runtime-backup.sqlite
 ```
 
-The destination must be a new file in an existing directory. The command uses SQLite's online backup API to include committed WAL data and all runtime tables, then publishes the completed file atomically with owner-only permissions. It opens the source read-only and requires no GitHub credentials. Failed backups leave the destination unpublished; existing files are preserved.
+The destination must be a new file in an existing directory. The command uses SQLite's online backup API to include committed WAL data and all runtime tables, then publishes the completed file atomically with owner-only permissions. It opens the source read-only and requires no GitHub credentials. Failed backups leave the destination unpublished and existing files preserved; the error names the phase that failed, the path involved, and the reason, so a missing runtime store reads differently from a destination that already exists.
 
 Keep the backup outside the instance folder to protect it against loss of that folder. Back up the authored instance files and credentials separately. To restore, stop the orchestrator, move the existing `.usine/runtime.sqlite` and any `runtime.sqlite-wal` / `runtime.sqlite-shm` files aside, and copy the backup to `.usine/runtime.sqlite`. Restart with the matching instance configuration and engine version. Restoring an older backup also restores its older deduplication ledger, so work performed after that backup can run again.
 

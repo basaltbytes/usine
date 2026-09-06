@@ -1,5 +1,15 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, symlink, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  realpath,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -25,9 +35,17 @@ const runBackup = (directory: string, output: string) =>
     timeout: 15_000,
   });
 
-test.for(["missing", "corrupt", "directory"])(
-  "refuses a %s source without publishing a backup or initializing the store",
-  async (kind, { directory }) => {
+test.for([
+  { kind: "missing", failure: "open the runtime store at", reason: "NotFound" },
+  { kind: "corrupt", failure: "copy the runtime store at", reason: "file is not a database" },
+  {
+    kind: "directory",
+    failure: "open the runtime store at",
+    reason: "Expected a regular SQLite file, found Directory",
+  },
+])(
+  "refuses a $kind source by naming the store and its reason, without publishing a backup or initializing the store",
+  async ({ kind, failure, reason }, { directory }) => {
     const runtime = join(directory, ".usine");
     const filename = join(runtime, "runtime.sqlite");
     if (kind !== "missing") await mkdir(runtime);
@@ -36,7 +54,10 @@ test.for(["missing", "corrupt", "directory"])(
     const output = join(directory, "backup.sqlite");
     const result = runBackup(directory, output);
     assert.strictEqual(result.status, 1, result.stderr);
-    assert.match(result.stderr, /Could not back up runtime store/);
+    // The CLI names the store under its resolved working directory.
+    const store = join(await realpath(directory), ".usine", "runtime.sqlite");
+    assert.include(result.stderr, `Could not ${failure} ${store} (${reason}).`);
+    assert.notInclude(result.stderr, output);
     await expect(stat(output)).rejects.toMatchObject({ code: "ENOENT" });
     assert.isFalse((await readdir(directory)).some((name) => name.startsWith(".usine-backup-")));
     if (kind === "missing") await expect(stat(runtime)).rejects.toMatchObject({ code: "ENOENT" });
@@ -44,32 +65,41 @@ test.for(["missing", "corrupt", "directory"])(
   },
 );
 
-test.for(["existing", "source", "symlink", "missing-parent"])(
-  "preserves files and cleans staging when the destination is %s",
-  async (kind, { directory }) => {
+test.for([
+  { kind: "existing", failure: "publish the backup at", reason: "AlreadyExists" },
+  { kind: "source", failure: "publish the backup at", reason: "AlreadyExists" },
+  { kind: "symlink", failure: "publish the backup at", reason: "AlreadyExists" },
+  { kind: "missing-parent", failure: "stage the backup in", reason: "NotFound" },
+])(
+  "preserves files, cleans staging, and names the $kind destination that blocked publication",
+  async ({ kind, failure, reason }, { directory }) => {
     await mkdir(join(directory, ".usine"));
     const filename = join(directory, ".usine", "runtime.sqlite");
     const database = new DatabaseSync(filename);
     database.exec("CREATE TABLE evidence (value); INSERT INTO evidence VALUES (74)");
     database.close();
     const original = await readFile(filename);
+    const parent = join(directory, "absent");
     const output =
       kind === "source"
         ? filename
         : kind === "missing-parent"
-          ? join(directory, "absent", "backup.sqlite")
+          ? join(parent, "backup.sqlite")
           : join(directory, "backup.sqlite");
     if (kind === "existing") await writeFile(output, "previous backup");
     if (kind === "symlink") await symlink(filename, output);
     const result = runBackup(directory, output);
     assert.strictEqual(result.status, 1, result.stderr);
-    assert.match(result.stderr, /Could not back up runtime store/);
+    assert.include(
+      result.stderr,
+      `Could not ${failure} ${kind === "missing-parent" ? parent : output} (${reason}).`,
+    );
     assert.deepStrictEqual(await readFile(filename), original);
     if (kind === "existing") assert.strictEqual(await readFile(output, "utf8"), "previous backup");
     if (kind === "missing-parent")
       await expect(stat(output)).rejects.toMatchObject({ code: "ENOENT" });
-    for (const parent of [directory, join(directory, ".usine")]) {
-      assert.isFalse((await readdir(parent)).some((name) => name.startsWith(".usine-backup-")));
+    for (const scanned of [directory, join(directory, ".usine")]) {
+      assert.isFalse((await readdir(scanned)).some((name) => name.startsWith(".usine-backup-")));
     }
   },
 );

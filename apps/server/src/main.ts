@@ -29,12 +29,6 @@ const main = Effect.gen(function* () {
       Effect.flatMap(
         Effect.promise(() => import("./backup.ts")),
         ({ backup }) => backup(output),
-      ).pipe(
-        Effect.catchTag("EnginePersistenceError", ({ operation }) =>
-          exitWith(
-            `Could not back up runtime store to ${output}: ${operation}. Check the instance database and choose a new writable output path.`,
-          ),
-        ),
       ),
     UpCommand: ({ port, allowVolatileInstance }) =>
       Effect.flatMap(
@@ -50,6 +44,32 @@ const main = Effect.gen(function* () {
     RunExportError: ({ runId, operation, path, reason }) =>
       exitWith(
         `Could not ${operation} evidence for Run ${runId} at ${path} (${reason}). Check the instance database and choose a new writable output path.`,
+      ),
+    RuntimeStoreBackupError: ({ operation, path, reason }) =>
+      exitWith(
+        Match.value(operation).pipe(
+          Match.when(
+            "open",
+            () =>
+              `Could not open the runtime store at ${path} (${reason}). Run usine backup from the instance folder that holds .usine/runtime.sqlite.`,
+          ),
+          Match.when(
+            "copy",
+            () =>
+              `Could not copy the runtime store at ${path} (${reason}). Check the instance database before retrying.`,
+          ),
+          Match.when(
+            "stage",
+            () =>
+              `Could not stage the backup in ${path} (${reason}). Choose an output path inside an existing writable directory.`,
+          ),
+          Match.when(
+            "publish",
+            () =>
+              `Could not publish the backup at ${path} (${reason}). Choose a new output path; backups never replace existing files.`,
+          ),
+          Match.exhaustive,
+        ),
       ),
     VolatileInstanceDirectoryError: ({ directory, root }) =>
       exitWith(
