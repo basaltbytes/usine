@@ -12,6 +12,7 @@ interface Props {
 interface ReadingPosition {
   readonly viewport: HTMLDivElement;
   readonly element: HTMLElement;
+  readonly identity: string | null;
   readonly offset: number;
 }
 
@@ -53,7 +54,12 @@ export class PreserveReadingPosition extends Component<
     }
     return element === undefined
       ? null
-      : { viewport, element, offset: element.getBoundingClientRect().top - top };
+      : {
+          viewport,
+          element,
+          identity: element.getAttribute("data-transcript-id"),
+          offset: element.getBoundingClientRect().top - top,
+        };
   }
 
   override componentDidUpdate(
@@ -67,10 +73,17 @@ export class PreserveReadingPosition extends Component<
     if (viewport === null || viewport.clientHeight === 0) return;
     const readingPosition = this.pendingPosition;
     this.pendingPosition = null;
-    if (viewport !== readingPosition.viewport || !viewport.contains(readingPosition.element))
-      return;
+    if (viewport !== readingPosition.viewport) return;
+    // Completing a call can move it into a group. Its durable identity also
+    // identifies the replacement panel after React reparents that tool.
+    const element = viewport.contains(readingPosition.element)
+      ? readingPosition.element
+      : Array.from(viewport.querySelectorAll<HTMLElement>("[data-transcript-id]")).find(
+          (row) => row.getAttribute("data-transcript-id") === readingPosition.identity,
+        );
+    if (element === undefined) return;
     const top = viewport.getBoundingClientRect().top + viewport.clientTop;
-    const offset = readingPosition.element.getBoundingClientRect().top - top;
+    const offset = element.getBoundingClientRect().top - top;
     viewport.scrollTop += offset - readingPosition.offset;
   }
 
