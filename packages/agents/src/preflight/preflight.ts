@@ -8,8 +8,11 @@ import { initializeCodex, verifyCodexAccount } from "../pi/codex/account.ts";
 import { PiSdk, piSdkLive, usePiStart } from "../pi/sdk.ts";
 import { probeCommand } from "./command.ts";
 
-/** Codex CLI version verified by the pinned app-server protocol conformance gate. */
+/** Baseline Codex CLI version used by the pinned app-server protocol conformance gate. */
 export const CODEX_CLI_VERSION = "0.144.0";
+
+// Additional exact builds require generated-type review and the live contracts.
+const supportedCodexVersions = [CODEX_CLI_VERSION, "0.153.4"];
 
 const ClaudeAuthentication = Schema.Struct({
   loggedIn: Schema.Boolean,
@@ -30,11 +33,11 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
     switch (brain.harness) {
       case "codex": {
         const version = yield* probeCommand("codex", "binary", "codex", ["--version"]);
-        if (version !== `codex-cli ${CODEX_CLI_VERSION}`)
+        if (!supportedCodexVersions.some((supported) => version === `codex-cli ${supported}`))
           return yield* new HarnessUnavailableError({
             harness: "codex",
             capability: "version",
-            message: `Worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}; expected codex-cli ${CODEX_CLI_VERSION}`,
+            message: `Worker has ${/^codex-cli [0-9]+\.[0-9]+\.[0-9]+$/u.test(version) ? version : "an unrecognized Codex version"}; supported Codex CLI versions: ${supportedCodexVersions.join(", ")}`,
           });
         yield* Effect.scoped(
           Effect.gen(function* () {

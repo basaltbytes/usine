@@ -33,11 +33,11 @@ Model identifiers stay opaque until the selected harness checks its registry. Ag
 
 Configure Pi with either a provider API key or ChatGPT Plus/Pro OAuth for the parent. Pi children require API keys; Claude and Codex children use their CLI login state. The parent-start log records `apiKeys` or `chatgptPlan` according to the resolved credential. The harness SDK and protocol dependencies use exact versions.
 
-`@usine/agents/preflight` provides the Node `preflight(brain)` operation. Supply a `ChildProcessSpawner` layer to check a worker without running a prompt. It checks `codex --version` against **0.144.0**, verifies the Codex ChatGPT account, checks `claude auth status --json` for a Claude subscription, and checks Pi’s model and API-key authentication through the installed SDK. `HarnessUnavailableError` identifies a binary, version, or login gap; `SessionOperationError` reports an incomplete check, including a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
+`@usine/agents/preflight` provides the Node `preflight(brain)` operation. Supply a `ChildProcessSpawner` layer to check a worker without running a prompt. It accepts Codex CLI **0.144.0 or 0.153.4**, verifies the Codex ChatGPT account, checks `claude auth status --json` for a Claude subscription, and checks Pi’s model and API-key authentication through the installed SDK. `HarnessUnavailableError` identifies a binary, version, or login gap; `SessionOperationError` reports an incomplete check, including a timeout or failed SDK connection. Install and log in as the worker user before starting usine.
 
 A Codex API-key login, absent login, or unsupported account response produces `PoolUnavailableError`, which requires operator action. The verified authentication method and pool appear in structured logs. An authentication change during a running Codex session ends it before further rate windows are recorded.
 
-The opt-in live contracts run in disposable directories. They steer a child during a waiting command, assert the changed response and event framing, and interrupt another active command. The Codex contract also requires a real rate-window snapshot. Use codex-cli 0.144.0 with a ChatGPT login; the Pi contract requires API-key authentication for the specified provider.
+The opt-in live contracts run in disposable directories. They steer a child during a waiting command, assert the changed response and event framing, and interrupt another active command. The Codex contract also requires a real rate-window snapshot. Use a supported Codex CLI with a ChatGPT login; the Pi contract requires API-key authentication for the specified provider.
 
 Run them with explicit models:
 
@@ -45,6 +45,10 @@ Run them with explicit models:
 USINE_CODEX_INTEGRATION_MODEL=gpt-5.6-terra pnpm --filter @usine/agents test:integration:codex
 USINE_PI_INTEGRATION_MODEL=anthropic/claude-sonnet-4-6 pnpm --filter @usine/agents test:integration:pi
 ```
+
+The protocol conformance gate retains 0.144.0 as its baseline. Codex 0.153.4 was also checked against its generated protocol types and the real steering/interruption contracts, including Astra. Other CLI builds require verification before they are accepted.
+
+Each Codex child owns one app-server process. On completion or interruption, usine closes its input and waits for graceful shutdown before publishing the result, so background commands are released. Scope cleanup uses the same bounded shutdown and logs before forcing a stalled process to stop.
 
 Everything here is 0.x, so APIs can change between minor releases. Supply `effect` at the version pinned by the usine workspace.
 

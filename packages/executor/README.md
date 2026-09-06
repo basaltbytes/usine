@@ -35,7 +35,7 @@ methods. Consumers supply a scope instead of coordinating cleanup. The engine's
 
 ## Worker preflight
 
-Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpec` values before scheduling Attempts. Both adapters invoke `usine-run-host --preflight '<brain-json>'` on the Worker. The run host checks each selected harness’s executable and authentication; Codex requires CLI 0.144.0 and a ChatGPT login, Claude requires its CLI and subscription login, and Pi children require API keys for their selected models.
+Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpec` values before scheduling Attempts. Both adapters invoke `usine-run-host --preflight '<brain-json>'` on the Worker. The run host checks each selected harness’s executable and authentication; Codex requires supported CLI 0.144.0 or 0.153.4 and a ChatGPT login, Claude requires its CLI and subscription login, and Pi children require API keys for their selected models.
 
 `prepare` repeats the assigned brain’s probe before acquiring credentials or creating a checkout. This checks roster changes and logouts after startup. A reported capability gap returns `WorkerCapabilityError` and requires operator action. Transport failures and probe timeouts remain infrastructure failures eligible for retry. Custom run hosts must implement the credential-free `HarnessReadiness` response from `@usine/core/agent/capability`.
 

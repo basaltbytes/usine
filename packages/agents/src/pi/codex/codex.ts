@@ -21,6 +21,7 @@ import type {
 } from "../../protocol/codex.ts";
 import {
   AgentResultError,
+  type AgentSessionError,
   CodexChildBackend,
   type RunningSession,
   SessionOperationError,
@@ -303,6 +304,18 @@ const makeCodexChild = Effect.gen(function* () {
       let lastText: string | undefined;
       let finalText: string | undefined;
 
+      const fail = Effect.fn("CodexChildBackend.fail")(function* (error: AgentSessionError) {
+        yield* connection.close.pipe(
+          Effect.tapError((cause) =>
+            Effect.logWarning("Codex child cleanup failed while reporting its original failure", {
+              cause,
+              sessionId: session.id,
+            }),
+          ),
+          Effect.ignore,
+        );
+        yield* channel.fail(error);
+      });
       const consume = connection.notifications.pipe(
         Stream.runForEach(({ method, params }) =>
           Effect.gen(function* () {
@@ -420,6 +433,9 @@ const makeCodexChild = Effect.gen(function* () {
                   turnId: completed.turn.id,
                 });
               }
+              // A completed turn can leave unified-exec commands alive. Release
+              // the owned app server before the result can win a cancellation race.
+              yield* connection.close;
               if (completed.turn.status === "completed") {
                 return yield* channel.finish(
                   session,
@@ -469,7 +485,7 @@ const makeCodexChild = Effect.gen(function* () {
             ),
           ),
         ),
-        Effect.catch((error) => channel.fail(error)),
+        Effect.catch(fail),
       );
       yield* Effect.forkScoped(consume);
 
