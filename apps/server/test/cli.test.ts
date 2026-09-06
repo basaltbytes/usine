@@ -20,6 +20,34 @@ import {
 const noEnvironment = { port: Option.none<string>(), allowVolatileInstance: Option.none<string>() };
 
 describe("usine CLI", () => {
+  it("parses Run export arguments independently of server settings and rejects incomplete commands", async () => {
+    const environment = { ...noEnvironment, port: Option.some("invalid-server-port") };
+    const command = await Effect.runPromise(parseCli(["export-run", "run/1"], environment));
+    assert(command._tag === "ExportRunCommand");
+    assert.strictEqual(command.runId, "run/1");
+    assert.deepStrictEqual(command.output, Option.none());
+    const explicit = await Effect.runPromise(
+      parseCli(["export-run", "run/1", "--output", "evidence.json"], environment),
+    );
+    assert(explicit._tag === "ExportRunCommand");
+    assert.deepStrictEqual(explicit.output, Option.some("evidence.json"));
+    assert.strictEqual(
+      (await Effect.runPromise(parseCli(["export-run", "--help"], environment)))._tag,
+      "HelpCommand",
+    );
+    for (const args of [
+      ["export-run"],
+      ["export-run", ""],
+      ["export-run", "--unknown"],
+      ["export-run", "run/1", "--output"],
+      ["export-run", "run/1", "--output", ""],
+      ["export-run", "run/1", "--port", "7331"],
+    ]) {
+      const error = await Effect.runPromise(parseCli(args, environment).pipe(Effect.flip));
+      assert.instanceOf(error, CliUsageError);
+    }
+  });
+
   it("accepts the volatile-instance override from the flag or the environment", async () => {
     const flag = await Effect.runPromise(
       parseCli(["up", "--allow-volatile-instance", "--port=8125"], noEnvironment),
