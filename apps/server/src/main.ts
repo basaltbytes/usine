@@ -45,28 +45,31 @@ const main = Effect.gen(function* () {
       exitWith(
         `Could not ${operation} evidence for Run ${runId} at ${path} (${reason}). Check the instance database and choose a new writable output path.`,
       ),
-    RuntimeStoreBackupError: ({ operation, path, reason }) =>
+    RuntimeStoreBackupError: ({ operation, source, destination, reason }) =>
       exitWith(
         Match.value(operation).pipe(
           Match.when(
             "open",
             () =>
-              `Could not open the runtime store at ${path} (${reason}). Run usine backup from the instance folder that holds .usine/runtime.sqlite.`,
+              `Could not open the runtime store at ${source} (${reason}). Run usine backup from the instance folder that holds .usine/runtime.sqlite.`,
           ),
           Match.when(
             "copy",
             () =>
-              `Could not copy the runtime store at ${path} (${reason}). Check the instance database before retrying.`,
+              `Could not copy the runtime store at ${source} into ${destination} (${reason}). Check the instance database and the space and permissions of the output directory before retrying.`,
           ),
           Match.when(
             "stage",
             () =>
-              `Could not stage the backup in ${path} (${reason}). Choose an output path inside an existing writable directory.`,
+              `Could not stage the backup beside ${destination} (${reason}). Choose an output path inside an existing writable directory.`,
           ),
-          Match.when(
-            "publish",
-            () =>
-              `Could not publish the backup at ${path} (${reason}). Choose a new output path; backups never replace existing files.`,
+          Match.when("publish", () =>
+            // Without a platform description the reason is its normalized tag, and
+            // AlreadyExists is the deliberate refusal to replace a file. Anything else
+            // means the completed copy could not be linked into place.
+            reason === "AlreadyExists"
+              ? `Could not publish the backup at ${destination} (${reason}). Choose a new output path; backups never replace existing files.`
+              : `Could not publish the backup at ${destination} (${reason}). The completed copy is hard-linked into place; use an output directory on a filesystem that supports hard links, or resolve the reported reason, and retry.`,
           ),
           Match.exhaustive,
         ),
