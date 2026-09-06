@@ -260,8 +260,8 @@ const BoardCard = ({
         !disabled && "cursor-grab touch-none",
         isDragging && "opacity-40",
       )}
-      {...attributes}
-      {...listeners}
+      {...(!disabled && attributes)}
+      {...(!disabled && listeners)}
     >
       <CardBody item={item} catalog={catalog} openRun={openRun} move={move} />
     </Card>

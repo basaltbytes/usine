@@ -266,9 +266,9 @@ describe("Board lane order", () => {
 });
 
 describe("Board drag targets", () => {
-  it("disables proposed card moves and enables them when label lanes are authored", () => {
+  it("offers card moves only when another authored label lane is available", () => {
     const card = itemWithRun("Succeeded", [attempt(1, null)]);
-    const render = (authored: boolean) => {
+    const render = (origin: "authored" | "proposed", names: ReadonlyArray<string>) => {
       const project = new ProjectView({
         repository,
         status: "clear",
@@ -277,15 +277,15 @@ describe("Board drag targets", () => {
         preflightFindings: [],
         board: new BoardView({
           failures: [],
-          lanes: ["ready", "review"].map((name, index) => {
+          lanes: names.map((name, index) => {
             const label = GitHubLabelName.make(name);
             const fields = {
-              id: BoardLaneId.make(`${authored ? "authored" : "proposed"}:${name}`),
+              id: BoardLaneId.make(`${origin}:${name}`),
               name: LaneName.make(name),
               sources: [new LabelLaneSource({ label })],
               items: index === 0 ? [card] : [],
             };
-            return authored
+            return origin === "authored"
               ? new WritableBoardLaneView({ ...fields, origin: "authored", labels: [label] })
               : new ReadOnlyBoardLaneView({ ...fields, origin: "proposed" });
           }),
@@ -297,14 +297,21 @@ describe("Board drag targets", () => {
         </QueryClientProvider>,
       );
     };
-    const proposed = render(false);
-    assert.ok(!proposed.includes("Move issue #33 to a lane"));
-    assert.ok(!proposed.includes("cursor-grab"));
-    assert.ok(proposed.includes('aria-disabled="true"'));
+    const proposed = render("proposed", ["ready", "review"]);
+    const singleAuthored = render("authored", ["ready"]);
+    for (const readOnly of [proposed, singleAuthored]) {
+      assert.ok(!readOnly.includes("Move issue #33 to a lane"));
+      assert.ok(!readOnly.includes("cursor-grab"));
+      assert.ok(!readOnly.includes('role="button"'));
+      assert.ok(!readOnly.includes('aria-roledescription="sortable"'));
+      assert.ok(!readOnly.includes('aria-describedby="DndDescribedBy-'));
+    }
     assert.ok(proposed.includes("usine.yaml"));
-    const authored = render(true);
+    const authored = render("authored", ["ready", "review"]);
     assert.ok(authored.includes("Move issue #33 to a lane"));
     assert.ok(authored.includes("cursor-grab"));
+    assert.ok(authored.includes('aria-roledescription="sortable"'));
+    assert.ok(authored.includes('tabindex="0"'));
     assert.ok(!authored.includes("usine.yaml"));
   });
 
