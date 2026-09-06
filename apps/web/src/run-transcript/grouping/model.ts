@@ -7,7 +7,7 @@ import {
 } from "../model.ts";
 export { groupSummary } from "./summary.ts";
 
-type CompletedTool = TranscriptTool & { readonly state: { readonly _tag: "Finished" } };
+type CompletedTool = TranscriptTool & { readonly state: { readonly _tag: "Finished" | "Error" } };
 
 /** Adjacent completed calls from one session, with each original tool identity intact. */
 export interface ToolGroup {
@@ -26,7 +26,7 @@ export type GroupedSession = Omit<TranscriptSession, "entries"> & {
 export type GroupedItem = TranscriptEntry | GroupedSession | ToolGroup;
 
 const completedTool = (item: TranscriptEntry | TranscriptSession): item is CompletedTool =>
-  item._tag === "Tool" && item.state._tag === "Finished";
+  item._tag === "Tool" && (item.state._tag === "Finished" || item.state._tag === "Error");
 
 const groupEntries = <T extends TranscriptEntry | TranscriptSession>(
   items: ReadonlyArray<T>,
