@@ -7,20 +7,7 @@ import {
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { Commit, PullRequest, StepResult } from "@usine/core/step/result";
-import {
-  Deferred,
-  DateTime,
-  Effect,
-  Fiber,
-  Queue,
-  Path,
-  Ref,
-  Result,
-  Schema,
-  Semaphore,
-  Stdio,
-  Stream,
-} from "effect";
+import { DateTime, Effect, Fiber, Queue, Path, Result, Schema, Stdio, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 /** The run host could not read its instructions, report activity, or collect the Attempt's Git results. */
@@ -52,7 +39,7 @@ const hostError = (stage: RunHostError["stage"], message: string, cause: unknown
   new RunHostError({ stage, message, cause });
 
 /** Hosts one Attempt described by the Start frame on stdin, sending session activity and its final outcome on stdout. */
-export const runHost = () =>
+export const runHost = Effect.fn("RunHost.run")(() =>
   Effect.scoped(
     Effect.gen(function* () {
       const agents = yield* AgentRuntime;
@@ -82,7 +69,7 @@ export const runHost = () =>
         ),
         Effect.catch((error) => Queue.fail(frames, error)),
       );
-      const inputFiber = yield* Effect.forkChild(input);
+      yield* Effect.forkScoped(input);
 
       const first = yield* Queue.take(frames);
       if (first._tag !== "Start") {
@@ -99,26 +86,22 @@ export const runHost = () =>
         repository: spec.repository,
       });
       yield* Effect.logInfo("Run host accepted the Start frame");
-      const sequence = yield* Ref.make(1);
-      const outputLock = yield* Semaphore.make(1);
+      // The lifecycle has one writer at a time: Started, session events, terminal.
+      let nextSequence = 1;
 
       const emit = Effect.fn("RunHost.emit")(
         function* (payload: AttemptChannel.OutboundPayload) {
-          yield* outputLock.withPermit(
-            Effect.gen(function* () {
-              const next = yield* Ref.getAndUpdate(sequence, (value) => value + 1);
-              const envelope = new AttemptChannel.OutboundEnvelope({
-                version: AttemptChannel.PROTOCOL_VERSION,
-                attemptId: spec.attemptId,
-                sequence: AttemptChannel.Sequence.make(next),
-                sentAt: yield* DateTime.now,
-                payload,
-              });
-              yield* Stream.run(
-                Stream.make(`${encodeOutput(envelope)}\n`),
-                stdio.stdout({ endOnDone: false }),
-              );
-            }),
+          yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId });
+          const envelope = new AttemptChannel.OutboundEnvelope({
+            version: AttemptChannel.PROTOCOL_VERSION,
+            attemptId: spec.attemptId,
+            sequence: AttemptChannel.Sequence.make(nextSequence++),
+            sentAt: yield* DateTime.now,
+            payload,
+          });
+          yield* Stream.run(
+            Stream.make(`${encodeOutput(envelope)}\n`),
+            stdio.stdout({ endOnDone: false }),
           );
         },
         Effect.mapError((cause) => hostError("output", "Could not write protocol output", cause)),
@@ -252,19 +235,13 @@ export const runHost = () =>
           message: launched.failure.message,
         });
         yield* emit(new AttemptChannel.Failed({ failure: toAttemptFailure(launched.failure) }));
-        yield* Fiber.interrupt(inputFiber);
         return;
       }
       const session = launched.success;
       yield* emit(new AttemptChannel.Started({ parentModel: session.session.brain.model }));
-      const eventFiber = yield* session.events.pipe(
-        Stream.runForEach((event) => emit(new AttemptChannel.SessionEvent({ event }))),
-        Effect.forkChild,
-      );
-      const interrupted = yield* Deferred.make<void>();
-      const expectedInputSequence = yield* Ref.make(1);
-      const readCommands = Effect.forever(
-        Effect.gen(function* () {
+      const readCommands = Effect.gen(function* () {
+        let expected = 1;
+        while (true) {
           const command = yield* Queue.take(frames);
           if (command._tag === "Start") {
             return yield* hostError(
@@ -280,7 +257,6 @@ export const runHost = () =>
               new Error(String(command.attemptId)),
             );
           }
-          const expected = yield* Ref.get(expectedInputSequence);
           if (command.sequence !== expected) {
             return yield* hostError(
               "input",
@@ -288,25 +264,28 @@ export const runHost = () =>
               new Error(`expected ${expected}, received ${command.sequence}`),
             );
           }
-          yield* Ref.set(expectedInputSequence, expected + 1);
+          expected += 1;
           if (command.payload._tag === "Interrupt") {
             yield* Effect.logInfo("Run host received an Interrupt frame");
-            // Start delivery before waking the terminal race: the SDK's native
-            // promise keeps delivering the interrupt even when terminal cleanup
-            // interrupts this command fiber right after.
-            yield* Effect.forkChild(session.interrupt);
-            yield* Deferred.succeed(interrupted, undefined);
-          } else {
-            yield* Effect.logDebug("Run host received a Steer frame");
-            yield* session.steer(command.payload.message);
+            return new AttemptChannel.Interrupted();
           }
-        }),
-      );
-      const commandFiber = yield* Effect.forkChild(readCommands);
+          yield* Effect.logDebug("Run host received a Steer frame");
+          yield* session.steer(command.payload.message);
+        }
+      });
 
       const completed = Effect.gen(function* () {
-        const sessionResult = yield* session.result;
-        yield* Fiber.join(eventFiber);
+        // Both must finish before harvesting; either failure ends the Attempt
+        // even when the SDK leaves the other channel open.
+        const [sessionResult] = yield* Effect.all(
+          [
+            session.result,
+            session.events.pipe(
+              Stream.runForEach((event) => emit(new AttemptChannel.SessionEvent({ event }))),
+            ),
+          ],
+          { concurrency: "unbounded" },
+        );
         const commits = yield* harvestCommits();
         const pullRequests = yield* harvestPullRequests().pipe(
           Effect.timeout("10 seconds"),
@@ -333,54 +312,53 @@ export const runHost = () =>
               ).pipe(Effect.as([])),
           }),
         );
-        return new StepResult({
-          message: sessionResult.message,
-          facts: [...commits, ...pullRequests],
+        return new AttemptChannel.Final({
+          result: new StepResult({
+            message: sessionResult.message,
+            facts: [...commits, ...pullRequests],
+          }),
         });
       });
-      yield* Effect.gen(function* () {
-        const outcome = yield* Effect.raceFirst(
-          Effect.race(
-            completed.pipe(Effect.map((value) => ({ _tag: "Completed" as const, value }))),
-            Deferred.await(interrupted).pipe(Effect.as({ _tag: "Interrupted" as const })),
-          ),
-          Effect.andThen(Fiber.join(commandFiber), Effect.never),
-        ).pipe(Effect.result);
-        if (Result.isFailure(outcome)) {
-          if (Schema.is(RunHostError)(outcome.failure)) {
-            yield* Effect.logError("Run host protocol failure", {
-              stage: outcome.failure.stage,
-              message: outcome.failure.message,
-            });
-            return yield* outcome.failure;
-          }
-          yield* Effect.logError("Agent session failed", {
-            errorTag: outcome.failure._tag,
+      const outcome = yield* Effect.raceFirst(completed, readCommands).pipe(Effect.result);
+      if (Result.isFailure(outcome)) {
+        if (outcome.failure._tag === "RunHostError") {
+          yield* Effect.logError("Run host protocol failure", {
+            stage: outcome.failure.stage,
             message: outcome.failure.message,
           });
-          yield* emit(new AttemptChannel.Failed({ failure: toAttemptFailure(outcome.failure) }));
-          return;
+          return yield* outcome.failure;
         }
-        if (outcome.success._tag === "Interrupted") {
-          yield* Effect.logInfo("Run host acknowledged the interrupted session");
-          yield* emit(new AttemptChannel.Interrupted());
-          return;
-        }
-        yield* Effect.logInfo("Run host completed the Attempt", {
-          facts: outcome.success.value.facts.length,
+        yield* Effect.logError("Agent session failed", {
+          errorTag: outcome.failure._tag,
+          message: outcome.failure.message,
         });
-        yield* emit(new AttemptChannel.Final({ result: outcome.success.value }));
-      }).pipe(
-        Effect.ensuring(
-          Effect.all(
-            [
-              Fiber.interrupt(commandFiber),
-              Fiber.interrupt(eventFiber),
-              Fiber.interrupt(inputFiber),
-            ],
-            { discard: true },
+        yield* emit(new AttemptChannel.Failed({ failure: toAttemptFailure(outcome.failure) }));
+        return;
+      }
+      if (outcome.success._tag === "Interrupted") {
+        // The race has stopped result collection and event forwarding. An SDK
+        // that fails its result on abort can no longer change this outcome.
+        yield* Effect.forkScoped(
+          session.interrupt.pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning("Session interrupt delivery failed", {
+                attemptId: spec.attemptId,
+                repository: spec.repository,
+                errorTag: error._tag,
+                message: error.message,
+              }),
+            ),
+            Effect.ignore,
           ),
-        ),
-      );
+          { startImmediately: true },
+        );
+        yield* Effect.logInfo("Run host acknowledged the interrupted session");
+      } else {
+        yield* Effect.logInfo("Run host completed the Attempt", {
+          facts: outcome.success.result.facts.length,
+        });
+      }
+      yield* emit(outcome.success);
     }),
-  );
+  ),
+);

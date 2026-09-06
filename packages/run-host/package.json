@@ -31,7 +31,8 @@
   },
   "scripts": {
     "build": "tsc -b",
-    "check": "tsc -p tsconfig.check.json"
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
@@ -39,9 +40,11 @@
     "@usine/core": "workspace:*"
   },
   "devDependencies": {
+    "@effect/vitest": "catalog:",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",
-    "typescript": "catalog:"
+    "typescript": "catalog:",
+    "vitest": "catalog:"
   },
   "peerDependencies": {
     "effect": "catalog:"
