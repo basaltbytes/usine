@@ -23,7 +23,7 @@ const agentLayer = piParentLayer.pipe(
 
 `@usine/agents/children` provides `childDispatcherLayer`, which selects a child backend by harness. Compose its `ClaudeChildBackend`, `CodexChildBackend`, and `PiChildBackend` requirements with the adapter layers from `/claude`, `/codex`, and `/pi`. These Node entry points also provide their SDK service contracts and production SDK layers for caller-controlled composition. `/pi/live` assembles the parent and all three child backends.
 
-The production layer resolves the Pi parent model from the Run spec, installs the subagents extension, and dispatches each child from the rostered `harness` field. The Run spec also defines the per-Attempt child-session budget. Every accepted spawn logs its cumulative count and a 160-character task excerpt; an excess spawn stops the parent with `ChildSessionBudgetExceededError`. The parent accepts API-key-backed Pi models and ChatGPT subscription models from the `openai-codex` provider. Claude Code runs with `bypassPermissions` and reads only worker-user settings. Codex uses app-server JSON-RPC over standard input and output with `approvalPolicy: never`; it uses an ephemeral thread and records ChatGPT plan rate-window updates as `PoolRateLimitsUpdated` session events. Pi children remain API-key-only.
+The production layer resolves the Pi parent model from the Run spec, installs the subagents extension, and dispatches each child from the rostered `harness` field. The Run spec also defines the per-Attempt child-session budget. Every accepted spawn logs its cumulative count and a 160-character task excerpt; an excess spawn stops the parent with `ChildSessionBudgetExceededError`. The parent accepts API-key-backed Pi models and ChatGPT subscription models from the `openai-codex` provider. Claude Code runs the worker’s `claude` executable through the Agent SDK with `bypassPermissions` and reads only worker-user settings. Codex uses app-server JSON-RPC over standard input and output with `approvalPolicy: never`; it verifies ChatGPT authentication with `account/read` before creating an ephemeral thread and records ChatGPT plan rate-window updates as `PoolRateLimitsUpdated` session events. Pi children remain API-key-only.
 
 The Attempt worktree counts as repository-controlled input. Pi ignores project `.pi/` settings, extensions, prompt templates, skills, and themes. Claude omits project setting sources, while Codex marks the worktree untrusted before starting its thread. AGENTS instructions remain available to the coding harnesses. Worker isolation remains the executor's responsibility.
 
@@ -33,7 +33,13 @@ Model identifiers stay opaque until the selected harness checks its registry. Ag
 
 Configure Pi with either a provider API key or ChatGPT Plus/Pro OAuth for the parent. Pi children require API keys; Claude and Codex children use their CLI login state. The parent-start log records `apiKeys` or `chatgptPlan` according to the resolved credential. The harness SDK and protocol dependencies use exact versions.
 
-Run the opt-in live contracts with explicit models:
+`@usine/agents/preflight` provides the Node `preflight(brain)` operation. Supply a `ChildProcessSpawner` layer to check a worker without running a prompt. It checks `codex --version` against **0.144.0**, verifies the Codex ChatGPT account, checks `claude auth status --json` for a Claude subscription, and checks Pi’s model and API-key authentication through the installed SDK. `HarnessUnavailableError` identifies a binary, version, or login gap. Install and log in as the worker user before starting usine.
+
+A Codex API-key login, absent login, or unsupported account response produces `PoolUnavailableError`, which requires operator action. The verified authentication method and pool appear in structured logs. An authentication change during a running Codex session ends it before further rate windows are recorded.
+
+The opt-in live contracts run in disposable directories. They steer a child during a waiting command, assert the changed response and event framing, and interrupt another active command. The Codex contract also requires a real rate-window snapshot. Use codex-cli 0.144.0 with a ChatGPT login; the Pi contract requires API-key authentication for the specified provider.
+
+Run them with explicit models:
 
 ```sh
 USINE_CODEX_INTEGRATION_MODEL=gpt-5.6-terra pnpm --filter @usine/agents test:integration:codex

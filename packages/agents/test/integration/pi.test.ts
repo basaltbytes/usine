@@ -1,55 +1,41 @@
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { assert, describe, it } from "@effect/vitest";
+import { NodeServices } from "@effect/platform-node";
+import { describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
-import { AgentName } from "@usine/core/agent";
-import { Effect, Stream } from "effect";
-import { ChildRequest, PiChildBackend, WorkingDirectory } from "../../src/runtime.ts";
+import { Effect, Schema } from "effect";
+import { PiChildBackend } from "../../src/runtime.ts";
 import { piChildBackendLayer, piSdkLive } from "../../src/pi/pi.ts";
+import { steeringContract, interruptionContract } from "./contract.ts";
 
-const model = process.env.USINE_PI_INTEGRATION_MODEL;
-if (model === undefined || model.trim().length === 0) {
-  throw new Error("USINE_PI_INTEGRATION_MODEL must use Pi's provider/model syntax");
-}
-
-// A full-access headless agent must never run in the developer's checkout.
-const workspace = mkdtempSync(join(tmpdir(), "usine-pi-live-"));
+const brain = new BrainSpec({
+  harness: "pi",
+  model: Schema.decodeUnknownSync(ModelId)(process.env.USINE_PI_INTEGRATION_MODEL),
+  effort: "low",
+});
 
 describe("Pi child live contract", () => {
   it.live(
-    "runs one child through the Pi SDK",
+    "applies guidance during an active command and records the result",
     () =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const backend = yield* PiChildBackend;
-          const running = yield* backend.launch(
-            new ChildRequest({
-              session: new ChildSession({
-                id: AgentSessionId.make("pi-live-child"),
-                parentId: AgentSessionId.make("pi-live-parent"),
-                agent: AgentName.make("contract-tester"),
-                brain: new BrainSpec({
-                  harness: "pi",
-                  model: ModelId.make(model),
-                  effort: "low",
-                }),
-              }),
-              cwd: WorkingDirectory.make(workspace),
-              prompt: "Reply with exactly PI_CONTRACT_OK. Do not call tools.",
-            }),
-          );
-          const [events, result] = yield* Effect.all([
-            Stream.runCollect(running.events),
-            running.result,
-          ]);
-          assert.match(result.message, /PI_CONTRACT_OK/u);
-          assert(events.some((event) => event._tag === "TextOutput"));
-          assert.strictEqual(events.at(0)?._tag, "SessionStarted");
-          assert.strictEqual(events.at(-1)?._tag, "SessionFinished");
-        }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(piSdkLive)),
+      Effect.gen(function* () {
+        return yield* steeringContract(yield* PiChildBackend, brain);
+      }).pipe(
+        Effect.provide(piChildBackendLayer),
+        Effect.provide(piSdkLive),
+        Effect.provide(NodeServices.layer),
       ),
-    180_000,
+    210_000,
+  );
+
+  it.live(
+    "interrupts an active command and settles the session",
+    () =>
+      Effect.gen(function* () {
+        return yield* interruptionContract(yield* PiChildBackend, brain);
+      }).pipe(
+        Effect.provide(piChildBackendLayer),
+        Effect.provide(piSdkLive),
+        Effect.provide(NodeServices.layer),
+      ),
+    150_000,
   );
 });
