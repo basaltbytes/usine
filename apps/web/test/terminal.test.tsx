@@ -49,4 +49,5 @@ it("renders bundled command output containing ANSI colors and literal markup", a
   assert.include(html, "&lt;script&gt;literal output&lt;/script&gt;");
   assert.include(html, 'aria-label="Copy output"');
   assert.notInclude(html, "\u001b[");
-});
+  // The production build shares CI CPUs with the monorepo suites.
+}, 30_000);
