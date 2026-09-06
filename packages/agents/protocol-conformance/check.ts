@@ -5,8 +5,9 @@
  * the generated upstream package only resolves under bundler-style module
  * resolution (its internal imports are extensionless). This file is compiled
  * by `tsconfig.conformance.json` under that resolution and is the one place
- * the exact-pinned package is read, so `pnpm check` fails here when the view
- * drifts from the generated wire types.
+ * the exact-pinned baseline package is read, so `pnpm check` fails here when the
+ * view drifts from its generated wire types. Additional supported CLI builds
+ * require a separate generated-type review and the live adapter contracts.
  */
 import type { InitializeParams } from "@pwrdrvr/codex-app-server-protocol";
 import type {

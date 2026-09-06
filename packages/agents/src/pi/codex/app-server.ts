@@ -3,6 +3,7 @@ import {
   Context,
   Deferred,
   Effect,
+  Fiber,
   Layer,
   Option,
   Queue,
@@ -30,6 +31,8 @@ export interface CodexNotification {
 
 /** One JSON-RPC connection to the app server, scoped to its process. */
 export interface CodexConnection {
+  /** Closes stdin and waits for the app server to release its threads and commands. */
+  readonly close: Effect.Effect<void, SessionOperationError>;
   readonly notifications: Stream.Stream<CodexNotification, SessionOperationError>;
   readonly request: (
     operation: SessionOperationError["operation"],
@@ -259,7 +262,7 @@ const makeCodexAppServer = Effect.gen(function* () {
           });
         });
 
-      yield* handle.stdout.pipe(
+      const stdoutReader = yield* handle.stdout.pipe(
         Stream.decodeText(),
         Stream.splitLines,
         Stream.runForEach(routeLine),
@@ -268,13 +271,22 @@ const makeCodexAppServer = Effect.gen(function* () {
             Effect.flatMap((closed) =>
               closed
                 ? Effect.void
-                : failAll(
-                    operationError(
-                      "stream",
-                      request,
-                      "Codex app-server output closed unexpectedly",
-                      new Error("unexpected end of output"),
-                    ),
+                : handle.exitCode.pipe(
+                    // On process exit, its monitor owns the richer diagnostic.
+                    // A live process that closes stdout still fails promptly.
+                    Effect.timeout("5 seconds"),
+                    Effect.matchEffect({
+                      onSuccess: () => Effect.void,
+                      onFailure: (cause) =>
+                        failAll(
+                          operationError(
+                            "stream",
+                            request,
+                            "Codex app-server output closed unexpectedly",
+                            cause,
+                          ),
+                        ),
+                    }),
                   ),
             ),
           ),
@@ -288,7 +300,7 @@ const makeCodexAppServer = Effect.gen(function* () {
         ),
         Effect.forkScoped,
       );
-      yield* handle.stderr.pipe(
+      const stderrReader = yield* handle.stderr.pipe(
         Stream.decodeText(),
         Stream.splitLines,
         Stream.runForEach((line) =>
@@ -332,24 +344,87 @@ const makeCodexAppServer = Effect.gen(function* () {
         ),
         Effect.forkScoped,
       );
+      // Stdio EOF runs Codex's thread shutdown, including background commands.
+      // SIGTERM bypasses that cleanup in stdio mode. Share one bounded shutdown
+      // across terminal delivery and scope release, even if the caller is canceled.
+      const rejectPending = (cause: unknown) =>
+        Effect.gen(function* () {
+          const waiting = yield* Ref.getAndSet(pending, new Map());
+          for (const entry of waiting.values())
+            yield* Deferred.fail(
+              entry.response,
+              operationError(
+                entry.operation,
+                request,
+                "Codex app-server closed before answering the request",
+                cause,
+              ),
+            );
+        });
+      const close = yield* Effect.cached(
+        Effect.fn("CodexAppServer.close")(function* () {
+          yield* Effect.annotateCurrentSpan({
+            sessionId: Option.getOrUndefined(request.sessionId),
+          });
+          yield* Ref.set(closing, true);
+          yield* Queue.end(input);
+          const [exitCode] = yield* Effect.all(
+            [handle.exitCode, Fiber.join(stdoutReader), Fiber.join(stderrReader)],
+            {
+              concurrency: "unbounded",
+            },
+          ).pipe(
+            Effect.timeout("15 seconds"),
+            Effect.mapError((cause) =>
+              operationError(
+                "interrupt",
+                request,
+                "Codex app-server did not shut down cleanly",
+                cause,
+              ),
+            ),
+            Effect.tapError(rejectPending),
+          );
+          yield* rejectPending({ exitCode });
+          if (exitCode !== 0)
+            return yield* operationError(
+              "interrupt",
+              request,
+              `Codex app-server exited with code ${String(exitCode)} during shutdown`,
+              { exitCode, stderr: yield* Ref.get(stderrTail) },
+            );
+          yield* Queue.end(notifications);
+          yield* Effect.logDebug("Codex app-server shutdown completed", { exitCode });
+        })().pipe(Effect.tapError(failAll), Effect.uninterruptible),
+      );
       yield* Effect.addFinalizer(() =>
-        Effect.logDebug("Closing Codex app-server", {
-          sessionId: Option.getOrUndefined(request.sessionId),
-        }).pipe(
-          Effect.andThen(Ref.set(closing, true)),
-          Effect.andThen(Queue.end(input)),
-          Effect.andThen(handle.kill()),
+        close.pipe(
           Effect.catch((cause) =>
-            Effect.logWarning("Could not stop Codex app-server cleanly", {
+            Effect.logWarning("Forcing Codex app-server to stop after graceful shutdown failed", {
               cause,
               sessionId: Option.getOrUndefined(request.sessionId),
-            }),
+            }).pipe(
+              Effect.andThen(handle.kill({ forceKillAfter: "5 seconds" })),
+              Effect.catch((cause) =>
+                Effect.logWarning("Could not force Codex app-server to stop", {
+                  cause,
+                  sessionId: Option.getOrUndefined(request.sessionId),
+                }),
+              ),
+            ),
           ),
         ),
       );
 
       const requestRpc: CodexConnection["request"] = (operation, method, params) =>
         Effect.gen(function* () {
+          if (yield* Ref.get(closing))
+            return yield* operationError(
+              operation,
+              request,
+              "Codex app-server connection is closing",
+              new Error("connection closed"),
+            );
           const failed = yield* Ref.get(failure);
           if (Option.isSome(failed)) {
             return yield* operationError(
@@ -390,6 +465,7 @@ const makeCodexAppServer = Effect.gen(function* () {
       const notify: CodexConnection["notify"] = (operation, method, params) =>
         write({ method, params }, operation);
       return {
+        close,
         notifications: Stream.fromQueue(notifications),
         request: requestRpc,
         notify,

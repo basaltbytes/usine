@@ -3,6 +3,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import {
+  Cause,
   Deferred,
   Effect,
   Fiber,
@@ -10,6 +11,7 @@ import {
   Option,
   Predicate,
   Queue,
+  Result,
   Schema,
   Sink,
   Stream,
@@ -42,25 +44,37 @@ const encoder = new TextEncoder();
 const line = (value: Schema.Json): Uint8Array => encoder.encode(`${JSON.stringify(value)}\n`);
 
 interface FakeProcess {
-  readonly stdout: Queue.Queue<Uint8Array>;
-  readonly stderr: Queue.Queue<Uint8Array>;
+  readonly stdout: Queue.Queue<Uint8Array, Cause.Done>;
+  readonly stderr: Queue.Queue<Uint8Array, Cause.Done>;
   readonly exit: Deferred.Deferred<ChildProcessSpawner.ExitCode>;
+  readonly stdinClosed: Deferred.Deferred<void>;
+  readonly killed: Deferred.Deferred<void>;
   readonly stdinLines: Array<string>;
 }
 
 const fakeProcess = Effect.gen(function* () {
   return {
-    stdout: yield* Queue.make<Uint8Array>(),
-    stderr: yield* Queue.make<Uint8Array>(),
+    stdout: yield* Queue.make<Uint8Array, Cause.Done>(),
+    stderr: yield* Queue.make<Uint8Array, Cause.Done>(),
     exit: yield* Deferred.make<ChildProcessSpawner.ExitCode>(),
+    stdinClosed: yield* Deferred.make<void>(),
+    killed: yield* Deferred.make<void>(),
     stdinLines: [],
   } satisfies FakeProcess;
 });
 
-const spawnerFor = (process: FakeProcess) =>
+const spawnerFor = (
+  process: FakeProcess,
+  options: { readonly exitOnEof?: boolean; readonly stdout?: Stream.Stream<Uint8Array> } = {},
+) =>
   Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
     ChildProcessSpawner.make((command) =>
       Effect.gen(function* () {
+        yield* Deferred.await(process.exit).pipe(
+          Effect.andThen(Queue.end(process.stdout)),
+          Effect.andThen(Queue.end(process.stderr)),
+          Effect.forkScoped,
+        );
         if (
           command._tag === "StandardCommand" &&
           Predicate.hasProperty(command.options.stdin, "stream") &&
@@ -74,17 +88,26 @@ const spawnerFor = (process: FakeProcess) =>
                 process.stdinLines.push(written);
               }),
             ),
-            Effect.ignore,
+            Effect.andThen(Deferred.succeed(process.stdinClosed, undefined)),
+            Effect.andThen(
+              options.exitOnEof === false
+                ? Effect.void
+                : Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(0)),
+            ),
             Effect.forkScoped,
           );
         }
         return ChildProcessSpawner.makeHandle({
           pid: ChildProcessSpawner.ProcessId(4242),
           exitCode: Deferred.await(process.exit),
-          isRunning: Effect.succeed(true),
-          kill: () => Effect.void,
+          isRunning: Deferred.isDone(process.exit).pipe(Effect.map((exited) => !exited)),
+          kill: () =>
+            Deferred.succeed(process.killed, undefined).pipe(
+              Effect.andThen(Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(137))),
+              Effect.asVoid,
+            ),
           stdin: Sink.drain,
-          stdout: Stream.fromQueue(process.stdout),
+          stdout: options.stdout ?? Stream.fromQueue(process.stdout),
           stderr: Stream.fromQueue(process.stderr),
           all: Stream.empty,
           getInputFd: () => Sink.drain,
@@ -102,6 +125,155 @@ const awaitStdinLines = (process: FakeProcess, count: number) =>
   });
 
 describe("Codex app-server transport", () => {
+  it.effect("sends EOF and keeps every close caller waiting until the process exits", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* CodexAppServer;
+          const connection = yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+          });
+          const first = yield* Effect.forkChild(connection.close);
+          yield* Deferred.await(process.stdinClosed);
+          const concurrent = yield* Effect.forkChild(connection.close);
+          yield* TestClock.adjust(0);
+          assert.strictEqual(first.pollUnsafe(), undefined, "EOF alone is not process exit");
+          assert.strictEqual(concurrent.pollUnsafe(), undefined, "concurrent callers must wait");
+          assert.strictEqual(yield* Deferred.isDone(process.killed), false);
+
+          yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(0));
+          yield* Fiber.join(first);
+          yield* Fiber.join(concurrent);
+          yield* connection.close;
+        }).pipe(Effect.ensuring(Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(0)))),
+      ).pipe(
+        Effect.provide(codexAppServerLive),
+        Effect.provide(spawnerFor(process, { exitOnEof: false })),
+      );
+    }),
+  );
+
+  it.effect("stops a process that ignores EOF so its owning scope can close", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const scoped = yield* Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* CodexAppServer;
+          const connection = yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+          });
+          return yield* Effect.flip(connection.close);
+        }),
+      ).pipe(
+        Effect.provide(codexAppServerLive),
+        Effect.provide(spawnerFor(process, { exitOnEof: false })),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(process.stdinClosed);
+      yield* TestClock.adjust("1 minute");
+      const error = yield* Fiber.join(scoped);
+      assert(error instanceof SessionOperationError);
+      assert.strictEqual(yield* Deferred.isDone(process.killed), true);
+      assert.strictEqual(yield* Deferred.isDone(process.exit), true);
+    }),
+  );
+
+  it.effect("settles unanswered requests when the server closes", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* CodexAppServer;
+          const connection = yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+          });
+          const pending = yield* connection
+            .request("steer", "turn/steer", {})
+            .pipe(Effect.result, Effect.forkChild);
+          yield* awaitStdinLines(process, 1);
+          yield* connection.close;
+          yield* TestClock.adjust(0);
+          assert.notStrictEqual(
+            pending.pollUnsafe(),
+            undefined,
+            "a closed server cannot answer the request",
+          );
+          const outcome = yield* Fiber.join(pending);
+          assert(Result.isFailure(outcome));
+          assert(outcome.failure instanceof SessionOperationError);
+          assert.strictEqual(outcome.failure.operation, "steer");
+        }),
+      ).pipe(Effect.provide(codexAppServerLive), Effect.provide(spawnerFor(process)));
+    }),
+  );
+
+  it.effect("reports an unsuccessful shutdown as a typed close failure", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* CodexAppServer;
+          const connection = yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+          });
+          const closing = yield* connection.close.pipe(Effect.result, Effect.forkChild);
+          yield* Deferred.await(process.stdinClosed);
+          yield* Deferred.succeed(process.exit, ChildProcessSpawner.ExitCode(2));
+          const outcome = yield* Fiber.join(closing);
+          assert(Result.isFailure(outcome));
+          assert(outcome.failure instanceof SessionOperationError);
+        }),
+      ).pipe(
+        Effect.provide(codexAppServerLive),
+        Effect.provide(spawnerFor(process, { exitOnEof: false })),
+      );
+    }),
+  );
+
+  it.effect("delivers buffered replies before rejecting unanswered requests at shutdown", () =>
+    Effect.gen(function* () {
+      const process = yield* fakeProcess;
+      const readOutput = yield* Deferred.make<void>();
+      const stdout = Stream.unwrap(
+        Deferred.await(readOutput).pipe(Effect.as(Stream.fromQueue(process.stdout))),
+      );
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const server = yield* CodexAppServer;
+          const connection = yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+          });
+          const replied = yield* Effect.forkChild(connection.request("steer", "turn/steer", {}));
+          const unanswered = yield* connection
+            .request("interrupt", "turn/interrupt", {})
+            .pipe(Effect.result, Effect.forkChild);
+          yield* awaitStdinLines(process, 2);
+          const sent: unknown = JSON.parse(process.stdinLines[0] ?? "");
+          assert(Schema.is(Schema.Struct({ id: Schema.Int }))(sent));
+          yield* Queue.offer(process.stdout, line({ id: sent.id, result: { accepted: true } }));
+
+          const closing = yield* Effect.forkChild(connection.close);
+          yield* Deferred.await(process.exit);
+          yield* TestClock.adjust(0);
+          assert.strictEqual(closing.pollUnsafe(), undefined, "stdout still holds a reply");
+          yield* Deferred.succeed(readOutput, undefined);
+          yield* Fiber.join(closing);
+          assert.deepStrictEqual(yield* Fiber.join(replied), { accepted: true });
+          const outcome = yield* Fiber.join(unanswered);
+          assert(Result.isFailure(outcome));
+          assert(outcome.failure instanceof SessionOperationError);
+          assert.strictEqual(outcome.failure.operation, "interrupt");
+        }).pipe(Effect.ensuring(Deferred.succeed(readOutput, undefined))),
+      ).pipe(Effect.provide(codexAppServerLive), Effect.provide(spawnerFor(process, { stdout })));
+    }),
+  );
+
   it("starts outside the worktree with repository trust and recursive agents disabled", () => {
     const command = codexAppServerCommand("/workspace/repo");
     assert.strictEqual(command._tag, "StandardCommand");

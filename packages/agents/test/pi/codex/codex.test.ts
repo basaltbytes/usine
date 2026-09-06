@@ -2,7 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
-import { Effect, Layer, Schema, Stream } from "effect";
+import { Deferred, Effect, Fiber, Layer, Result, Schema, Stream } from "effect";
+import { TestClock } from "effect/testing";
 import {
   AgentResultError,
   ChildRequest,
@@ -41,10 +42,12 @@ const connectionLayer = (
   responses: Readonly<Record<string, Schema.Json>>,
   notifications: ReadonlyArray<CodexNotification> = [],
   calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [],
+  close: CodexConnection["close"] = Effect.void,
 ) =>
   Layer.succeed(CodexAppServer)({
     open: () =>
       Effect.succeed({
+        close,
         notifications: Stream.fromIterable(notifications),
         notify: (_operation, method, params) =>
           Effect.sync(() => {
@@ -89,6 +92,73 @@ const successfulResponses = (
   }) satisfies Readonly<Record<string, Schema.Json>>;
 
 describe("Codex child backend", () => {
+  for (const status of ["completed", "interrupted"] as const) {
+    it.effect(`waits for shutdown before publishing ${status} work`, () =>
+      Effect.gen(function* () {
+        const closing = yield* Deferred.make<void>();
+        const closed = yield* Deferred.make<void>();
+        const server = connectionLayer(
+          successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+          [
+            {
+              method: "item/completed",
+              params: {
+                threadId: "thread-1",
+                turnId: "turn-1",
+                item: { type: "agentMessage", id: "message-1", text: "The fix is ready." },
+              },
+            },
+            {
+              method: "turn/completed",
+              params: { turn: { id: "turn-1", status, error: null } },
+            },
+          ],
+          [],
+          Deferred.succeed(closing, undefined).pipe(Effect.andThen(Deferred.await(closed))),
+        );
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const backend = yield* CodexChildBackend;
+            const running = yield* backend.launch(request());
+            const result = yield* running.result.pipe(Effect.result, Effect.forkChild);
+            const events = yield* running.events.pipe(
+              Stream.runCollect,
+              Effect.result,
+              Effect.forkChild,
+            );
+            yield* Effect.raceFirst(
+              Deferred.await(closing),
+              Fiber.join(result).pipe(
+                Effect.andThen(Effect.die(new Error("session settled before shutdown began"))),
+              ),
+            );
+            yield* TestClock.adjust(0);
+            assert.strictEqual(result.pollUnsafe(), undefined, "the session still owns resources");
+            assert.strictEqual(events.pollUnsafe(), undefined, "the transcript is still open");
+
+            yield* Deferred.succeed(closed, undefined);
+            const outcome = yield* Fiber.join(result);
+            const transcript = yield* Fiber.join(events);
+            assert.strictEqual(transcript._tag, outcome._tag);
+            if (status === "completed") {
+              assert(Result.isSuccess(outcome));
+              assert.strictEqual(outcome.success.message, "The fix is ready.");
+              assert(Result.isSuccess(transcript));
+              assert.strictEqual(transcript.success.at(-1)?._tag, "SessionFinished");
+            } else {
+              assert(Result.isFailure(outcome));
+              assert(outcome.failure instanceof AgentResultError);
+            }
+          }).pipe(
+            Effect.ensuring(Deferred.succeed(closed, undefined)),
+            Effect.provide(codexChildBackendLayer),
+            Effect.provide(server),
+          ),
+        );
+      }),
+    );
+  }
+
   it.effect("normalizes completed messages, tools, and ChatGPT rate windows", () => {
     const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
     const notifications: ReadonlyArray<CodexNotification> = [

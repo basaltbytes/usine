@@ -51,6 +51,7 @@ const account = (response: Effect.Effect<Schema.Json>) => {
         Effect.sync(() => {
           opened += 1;
           return {
+            close: Effect.void,
             notifications: Stream.empty,
             notify: (_operation, method) =>
               Effect.sync(() => assert.strictEqual(method, "initialized")),
@@ -85,7 +86,7 @@ describe("worker harness readiness", () => {
 
   for (const result of [
     { stdout: "", exitCode: 127, capability: "binary" },
-    { stdout: "codex-cli 0.153.4", exitCode: 0, capability: "version" },
+    { stdout: "codex-cli 0.153.5", exitCode: 0, capability: "version" },
   ]) {
     it.effect(`refuses a Codex ${result.capability} gap before any account request`, () => {
       const server = account(Effect.succeed(null));
@@ -103,35 +104,37 @@ describe("worker harness readiness", () => {
     });
   }
 
-  for (const auth of [{ type: "apiKey" }, { type: "chatgpt" }]) {
-    it.effect(
-      `checks Codex ${auth.type} authentication and closes its unprompted connection`,
-      () => {
-        const server = account(Effect.succeed({ account: auth, requiresOpenaiAuth: true }));
-        return Effect.gen(function* () {
-          if (auth.type === "chatgpt") {
-            assert.deepStrictEqual(
-              yield* verifyHarness(coder),
-              new HarnessReady({ harness: "codex" }),
-            );
-          } else {
-            const error = yield* verifyHarness(coder).pipe(Effect.flip);
-            assert(error instanceof HarnessUnavailableError);
-            assert.strictEqual(error.capability, "login");
-          }
-          assert.strictEqual(server.opened(), 1);
-          assert.strictEqual(server.closed(), 1);
-        }).pipe(
-          Effect.provide(
-            commands({
-              "codex --version": { stdout: `codex-cli ${CODEX_CLI_VERSION}`, exitCode: 0 },
-            }),
-          ),
-          Effect.provide(server.layer),
-          Effect.provide(unusedPi),
-        );
-      },
-    );
+  for (const version of ["0.144.0", "0.153.4"]) {
+    for (const auth of [{ type: "apiKey" }, { type: "chatgpt" }]) {
+      it.effect(
+        `checks Codex ${version} ${auth.type} authentication and closes its unprompted connection`,
+        () => {
+          const server = account(Effect.succeed({ account: auth, requiresOpenaiAuth: true }));
+          return Effect.gen(function* () {
+            if (auth.type === "chatgpt") {
+              assert.deepStrictEqual(
+                yield* verifyHarness(coder),
+                new HarnessReady({ harness: "codex" }),
+              );
+            } else {
+              const error = yield* verifyHarness(coder).pipe(Effect.flip);
+              assert(error instanceof HarnessUnavailableError);
+              assert.strictEqual(error.capability, "login");
+            }
+            assert.strictEqual(server.opened(), 1);
+            assert.strictEqual(server.closed(), 1);
+          }).pipe(
+            Effect.provide(
+              commands({
+                "codex --version": { stdout: `codex-cli ${version}`, exitCode: 0 },
+              }),
+            ),
+            Effect.provide(server.layer),
+            Effect.provide(unusedPi),
+          );
+        },
+      );
+    }
   }
 
   it.effect("closes a stalled account probe without declaring the login unavailable", () =>

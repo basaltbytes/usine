@@ -4,7 +4,9 @@ import { Schema } from "effect";
  * The request shapes usine sends to the Codex app server, restated from
  * `@pwrdrvr/codex-app-server-protocol@0.144.0` (codex-cli 0.144.0) because
  * that package resolves only under bundler-style resolution.
- * `protocol-conformance/check.ts` compiles against the real package and fails
+ * This is the baseline protocol. Additional supported CLI builds are verified
+ * against their generated types and the live steering/interruption contracts.
+ * `protocol-conformance/check.ts` compiles against the baseline package and fails
  * `pnpm check` when these shapes drift.
  */
 export interface InitializeParams {
