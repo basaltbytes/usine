@@ -22,13 +22,7 @@ const statusIcons = {
 
 /** One expandable invocation, retaining its identity as its status changes. */
 export const Tool = ({ className, ...props }: ComponentProps<typeof Collapsible>) => (
-  <Collapsible
-    className={cn(
-      "group/tool not-prose w-full min-w-0 overflow-hidden rounded-md border bg-card/30",
-      className,
-    )}
-    {...props}
-  />
+  <Collapsible className={cn("group/tool not-prose w-full min-w-0", className)} {...props} />
 );
 
 /** The invocation's name, current status and optional command/path preview. */
@@ -48,7 +42,7 @@ export const ToolHeader = ({
 }) => (
   <CollapsibleTrigger
     className={cn(
-      "group/tool-trigger flex w-full min-w-0 items-center gap-2 p-3 text-left outline-none hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+      "group/tool-trigger -mx-2 flex min-h-11 w-[calc(100%+1rem)] min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left outline-none hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-[panel-open]:bg-muted/30",
       className,
     )}
     {...props}
@@ -58,7 +52,7 @@ export const ToolHeader = ({
     </span>
     <span className="min-w-0 flex-1 space-y-1">
       <span className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium">{title}</span>
+        <span className="text-xs font-medium wrap-anywhere">{title}</span>
         {status !== "Completed" && (
           <Badge variant="secondary" className="gap-1">
             {statusIcons[status]}
@@ -79,7 +73,10 @@ export const ToolHeader = ({
 
 /** The invocation's expanded input and result panels. */
 export const ToolContent = ({ className, ...props }: ComponentProps<typeof CollapsibleContent>) => (
-  <CollapsibleContent className={cn("space-y-3 px-3 pb-3 outline-none", className)} {...props} />
+  <CollapsibleContent
+    className={cn("min-w-0 space-y-3 pt-2 pb-2 pl-5.5 outline-none", className)}
+    {...props}
+  />
 );
 
 /** A named result section; callers supply content appropriate to the tool. */

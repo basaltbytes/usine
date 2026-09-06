@@ -115,7 +115,7 @@ const Child = ({
           <Button
             variant="ghost"
             size="sm"
-            className="h-auto w-full justify-between gap-3 p-2 text-left data-[panel-open]:[&_svg]:rotate-90"
+            className="h-auto w-full flex-wrap justify-between gap-3 p-2 text-left data-[panel-open]:[&_svg]:rotate-90"
           />
         }
       >
@@ -123,7 +123,13 @@ const Child = ({
           <CaretRightIcon aria-hidden="true" className="shrink-0 transition-transform" />
           <span className="truncate">{session.session.agent} activity</span>
         </span>
-        <Badge variant="outline" className={cn(session.status === "Live" && "text-run-active")}>
+        <Badge
+          variant="outline"
+          className={cn(
+            "h-auto max-w-full whitespace-normal wrap-anywhere",
+            session.status === "Live" && "text-run-active",
+          )}
+        >
           {activity}
         </Badge>
       </CollapsibleTrigger>
@@ -139,7 +145,9 @@ const Child = ({
             <MessageScrollerItem
               key={entry.key}
               messageId={entry.key}
-              className={entry._tag === "ToolGroup" ? "-mx-2 px-2" : undefined}
+              className={
+                entry._tag === "ToolGroup" || entry._tag === "Tool" ? "-mx-2 px-2" : undefined
+              }
             >
               <Entry entry={entry} />
             </MessageScrollerItem>
@@ -171,13 +179,13 @@ export const Transcript = ({
     );
   return (
     <>
-      {/* Reserve space for the group hover background outside the text column:
+      {/* Reserve space for tool and group backgrounds outside the text column:
           MessageScrollerItem paint containment would otherwise clip it. */}
       {items.map((item) => (
         <MessageScrollerItem
           messageId={item.key}
           key={item.key}
-          className={item._tag === "ToolGroup" ? "-mx-2 px-2" : undefined}
+          className={item._tag === "ToolGroup" || item._tag === "Tool" ? "-mx-2 px-2" : undefined}
         >
           {item._tag === "Session" ? (
             <Child session={item} filter={filter} />

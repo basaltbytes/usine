@@ -15,6 +15,12 @@ primitives, Phosphor icons, the usine theme, and the statuses the Run transcript
 actually records. Tool content is supplied by the caller; the upstream automatic
 JSON renderers and AI SDK types are omitted.
 
+Tool uses a flat disclosure row with a subtle header background while hovered or
+expanded. The background extends 8px beyond the text column; transcript row wrappers
+reserve that space inside MessageScroller's paint containment. Expanded content
+aligns with the header text through indentation. CodeBlock and Terminal retain their
+own bordered surfaces.
+
 CodeBlock retains source text immediately while Shiki loads the selected grammar.
 Only bash, diff, TypeScript and JSON grammars are imported; plain text needs no
 highlighter. A CSS-variable theme uses the existing theme tokens. Each mounted
