@@ -223,7 +223,11 @@ describe("local worker", () => {
             if (accepted._tag !== "Claimed") return;
             const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
             assert.strictEqual(snapshot.attempts.length, 1);
-            assert.match(JSON.stringify(snapshot.attempts[0]?.outcome), /AgentFailure/u);
+            const attempt = snapshot.attempts[0];
+            assert(attempt !== undefined && Option.isSome(attempt.outcome));
+            const outcome = attempt.outcome.value;
+            assert.strictEqual(outcome._tag, "Failed");
+            if (outcome._tag === "Failed") assert.strictEqual(outcome.failure._tag, "AgentFailure");
             const fs = yield* FileSystem.FileSystem;
             assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
           }),

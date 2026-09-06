@@ -1,9 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import { Effect, Layer, Schema, Sink, Stream } from "effect";
+import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
+import { Deferred, Effect, Fiber, Layer, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { CodexAppServer } from "../src/pi/codex/app-server.ts";
+import { TestClock } from "effect/testing";
+import { CodexAppServer, type CodexConnection } from "../src/pi/codex/app-server.ts";
 import { PiSdk, type PiStartResult } from "../src/pi/sdk.ts";
 import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts";
 import packageJson from "../package.json" with { type: "json" };
@@ -15,7 +16,6 @@ const encoder = new TextEncoder();
 
 const commands = (
   responses: Readonly<Record<string, { readonly stdout: string; readonly exitCode: number }>>,
-  seen: Array<string>,
 ) =>
   Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
     ChildProcessSpawner.make((command) =>
@@ -23,7 +23,6 @@ const commands = (
         assert.strictEqual(command._tag, "StandardCommand");
         if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected pipeline");
         const key = [command.command, ...command.args].join(" ");
-        seen.push(key);
         const response = responses[key];
         assert(response !== undefined, `unexpected command ${key}`);
         return ChildProcessSpawner.makeHandle({
@@ -43,19 +42,33 @@ const commands = (
     ),
   );
 
-const account = (response: Schema.Json, seen: Array<string>) =>
-  Layer.succeed(CodexAppServer)({
+const account = (response: Effect.Effect<Schema.Json>) => {
+  let opened = 0;
+  let closed = 0;
+  const layer = Layer.succeed(CodexAppServer)({
     open: () =>
-      Effect.succeed({
-        notifications: Stream.empty,
-        notify: () => Effect.void,
-        request: (_operation, method) =>
+      Effect.acquireRelease(
+        Effect.sync(() => {
+          opened += 1;
+          return {
+            notifications: Stream.empty,
+            notify: (_operation, method) =>
+              Effect.sync(() => assert.strictEqual(method, "initialized")),
+            request: (_operation, method) => {
+              if (method === "initialize") return Effect.succeed({});
+              assert.strictEqual(method, "account/read", "preflight must not start agent work");
+              return response;
+            },
+          } satisfies CodexConnection;
+        }),
+        () =>
           Effect.sync(() => {
-            seen.push(method);
-            return method === "account/read" ? response : {};
+            closed += 1;
           }),
-      }),
+      ),
   });
+  return { layer, opened: () => opened, closed: () => closed };
+};
 const unusedPi = Layer.succeed(PiSdk)({
   start: async () => {
     throw new Error("Pi must not start for another harness");
@@ -75,40 +88,75 @@ describe("worker harness readiness", () => {
     { stdout: "codex-cli 0.153.4", exitCode: 0, capability: "version" },
   ]) {
     it.effect(`refuses a Codex ${result.capability} gap before any account request`, () => {
-      const seen: Array<string> = [];
+      const server = account(Effect.succeed(null));
       return Effect.gen(function* () {
         const error = yield* verifyHarness(coder).pipe(Effect.flip);
         assert(error instanceof HarnessUnavailableError);
         assert.strictEqual(error.capability, result.capability);
-        assert(!seen.includes("account/read"));
+        assert.strictEqual(server.opened(), 0);
         assert(!JSON.stringify(error).includes("credential-shaped"));
       }).pipe(
-        Effect.provide(commands({ "codex --version": result }, seen)),
-        Effect.provide(account(null, seen)),
+        Effect.provide(commands({ "codex --version": result })),
+        Effect.provide(server.layer),
         Effect.provide(unusedPi),
       );
     });
   }
 
-  for (const auth of [null, { type: "apiKey" }, { type: "chatgpt" }]) {
-    it.effect(`checks Codex ${auth?.type ?? "logged-out"} authentication without a turn`, () => {
-      const seen: Array<string> = [];
-      return Effect.gen(function* () {
-        const result = yield* verifyHarness(coder).pipe(Effect.result);
-        assert.strictEqual(result._tag, auth?.type === "chatgpt" ? "Success" : "Failure");
-        assert.deepStrictEqual(seen, ["codex --version", "initialize", "account/read"]);
-      }).pipe(
-        Effect.provide(
-          commands(
-            { "codex --version": { stdout: `codex-cli ${CODEX_CLI_VERSION}`, exitCode: 0 } },
-            seen,
+  for (const auth of [{ type: "apiKey" }, { type: "chatgpt" }]) {
+    it.effect(
+      `checks Codex ${auth.type} authentication and closes its unprompted connection`,
+      () => {
+        const server = account(Effect.succeed({ account: auth, requiresOpenaiAuth: true }));
+        return Effect.gen(function* () {
+          if (auth.type === "chatgpt") {
+            assert.deepStrictEqual(
+              yield* verifyHarness(coder),
+              new HarnessReady({ harness: "codex" }),
+            );
+          } else {
+            const error = yield* verifyHarness(coder).pipe(Effect.flip);
+            assert(error instanceof HarnessUnavailableError);
+            assert.strictEqual(error.capability, "login");
+          }
+          assert.strictEqual(server.opened(), 1);
+          assert.strictEqual(server.closed(), 1);
+        }).pipe(
+          Effect.provide(
+            commands({
+              "codex --version": { stdout: `codex-cli ${CODEX_CLI_VERSION}`, exitCode: 0 },
+            }),
           ),
-        ),
-        Effect.provide(account({ account: auth, requiresOpenaiAuth: true }, seen)),
-        Effect.provide(unusedPi),
-      );
-    });
+          Effect.provide(server.layer),
+          Effect.provide(unusedPi),
+        );
+      },
+    );
   }
+
+  it.effect("closes a stalled account probe without declaring the login unavailable", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const server = account(
+        Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+      );
+      const pending = yield* verifyHarness(coder).pipe(
+        Effect.flip,
+        Effect.provide(
+          commands({
+            "codex --version": { stdout: `codex-cli ${CODEX_CLI_VERSION}`, exitCode: 0 },
+          }),
+        ),
+        Effect.provide(server.layer),
+        Effect.provide(unusedPi),
+        Effect.forkChild,
+      );
+      yield* Deferred.await(started);
+      yield* TestClock.adjust("60 seconds");
+      assert.strictEqual((yield* Fiber.join(pending))._tag, "SessionOperationError");
+      assert.strictEqual(server.closed(), 1);
+    }),
+  );
 
   for (const auth of [
     { loggedIn: false, authMethod: "none", apiProvider: "firstParty" },
@@ -116,25 +164,30 @@ describe("worker harness readiness", () => {
     { loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" },
   ]) {
     it.effect(`checks Claude ${auth.authMethod} login without probing Codex or Pi`, () => {
-      const seen: Array<string> = [];
+      const server = account(Effect.succeed(null));
       return Effect.gen(function* () {
-        const result = yield* verifyHarness(brain("claude")).pipe(Effect.result);
-        assert.strictEqual(result._tag, auth.authMethod === "claude.ai" ? "Success" : "Failure");
-        assert.deepStrictEqual(seen, ["claude --version", "claude auth status --json"]);
+        if (auth.authMethod === "claude.ai") {
+          assert.deepStrictEqual(
+            yield* verifyHarness(brain("claude")),
+            new HarnessReady({ harness: "claude" }),
+          );
+        } else {
+          const error = yield* verifyHarness(brain("claude")).pipe(Effect.flip);
+          assert(error instanceof HarnessUnavailableError);
+          assert.strictEqual(error.capability, "login");
+        }
+        assert.strictEqual(server.opened(), 0);
       }).pipe(
         Effect.provide(
-          commands(
-            {
-              "claude --version": { stdout: "2.1.263 (Claude Code)", exitCode: 0 },
-              "claude auth status --json": {
-                stdout: JSON.stringify(auth),
-                exitCode: auth.loggedIn ? 0 : 1,
-              },
+          commands({
+            "claude --version": { stdout: "2.1.263 (Claude Code)", exitCode: 0 },
+            "claude auth status --json": {
+              stdout: JSON.stringify(auth),
+              exitCode: auth.loggedIn ? 0 : 1,
             },
-            seen,
-          ),
+          }),
         ),
-        Effect.provide(account(null, seen)),
+        Effect.provide(server.layer),
         Effect.provide(unusedPi),
       );
     });
@@ -142,7 +195,7 @@ describe("worker harness readiness", () => {
 
   for (const pool of ["apiKeys", "chatgptPlan"] as const) {
     it.effect(`checks Pi ${pool} authentication and disposes its unprompted SDK session`, () => {
-      let disposed = false;
+      let disposed = 0;
       const started: PiStartResult = {
         _tag: "Started",
         model: ModelId.make("provider/model"),
@@ -156,17 +209,25 @@ describe("worker harness readiness", () => {
           steer: async () => {},
           abort: async () => {},
           dispose: () => {
-            disposed = true;
+            disposed += 1;
           },
         },
       };
       return Effect.gen(function* () {
-        const result = yield* verifyHarness(brain("pi")).pipe(Effect.result);
-        assert.strictEqual(result._tag, pool === "apiKeys" ? "Success" : "Failure");
-        assert(disposed);
+        if (pool === "apiKeys") {
+          assert.deepStrictEqual(
+            yield* verifyHarness(brain("pi")),
+            new HarnessReady({ harness: "pi" }),
+          );
+        } else {
+          const error = yield* verifyHarness(brain("pi")).pipe(Effect.flip);
+          assert(error instanceof HarnessUnavailableError);
+          assert.strictEqual(error.capability, "login");
+        }
+        assert.strictEqual(disposed, 1);
       }).pipe(
-        Effect.provide(commands({}, [])),
-        Effect.provide(account(null, [])),
+        Effect.provide(commands({})),
+        Effect.provide(account(Effect.succeed(null)).layer),
         Effect.provide(Layer.succeed(PiSdk)({ start: async () => started })),
       );
     });

@@ -1,8 +1,9 @@
 import type { Harness } from "@usine/core/agent/brain";
 import { HarnessUnavailableError, type HarnessCapability } from "@usine/core/agent/capability";
-import { Effect, Stream } from "effect";
+import { Effect, Option, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { homedir } from "node:os";
+import { SessionOperationError } from "../runtime.ts";
 
 /** Runs a bounded readiness command without retaining its potentially sensitive diagnostics. */
 export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
@@ -47,11 +48,12 @@ export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
           capability,
           message: `Worker cannot execute ${command}`,
         }),
-      TimeoutError: () =>
-        new HarnessUnavailableError({
-          harness,
-          capability,
+      TimeoutError: (cause) =>
+        new SessionOperationError({
+          operation: "launch",
+          sessionId: Option.none(),
           message: `${command} readiness check timed out`,
+          cause,
         }),
     }),
   );

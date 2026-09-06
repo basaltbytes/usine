@@ -777,7 +777,7 @@ describe("exe.dev executor", () => {
     const ssh = fakeSsh(PROTOCOL);
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain, TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain, new BrainSpec({ ...TEST_AGENT.brain })]);
       assert.strictEqual(
         ssh.state.commands.filter((command) => remoteArgs(command)[0]?.includes("'--preflight'"))
           .length,

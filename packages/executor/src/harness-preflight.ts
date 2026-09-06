@@ -1,10 +1,10 @@
 import { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessReadiness } from "@usine/core/agent/capability";
 import type { WorkerName } from "@usine/core/worker";
-import { Effect, Schema } from "effect";
+import { Array as Arr, Effect, Schema } from "effect";
 import {
   logPreflightFailure,
-  type ExecutorOperationError,
+  ExecutorOperationError,
   type RunHostCommand,
   WorkerCapabilityError,
 } from "./executor.ts";
@@ -20,20 +20,22 @@ export const verifyHarnesses = Effect.fn("Executor.verifyHarnesses")(function* (
   ) => Effect.Effect<string, ExecutorOperationError>,
 ) {
   yield* Effect.annotateCurrentSpan({ worker });
-  const distinct = new Map(brains.map((brain) => [JSON.stringify(brain), brain]));
-  for (const brain of distinct.values()) {
+  const distinct = Arr.dedupe(brains);
+  for (const brain of distinct) {
+    // Only a worker's readiness report proves a capability gap. Transport
+    // failures and timeouts remain infrastructure failures eligible for retry.
     const response = yield* execute(runHost.command, [
       ...runHost.args,
       "--preflight",
       Schema.encodeSync(Schema.fromJsonString(BrainSpec))(brain),
     ]).pipe(
       Effect.timeout("75 seconds"),
-      Effect.mapError(
+      Effect.catchTag(
+        "TimeoutError",
         (cause) =>
-          new WorkerCapabilityError({
-            worker,
-            capability: "run-host",
-            message: `Worker ${worker} could not probe ${brain.harness} readiness`,
+          new ExecutorOperationError({
+            operation: "preflight",
+            message: `Worker ${worker} did not finish probing ${brain.harness} readiness`,
             cause,
           }),
       ),
@@ -72,5 +74,6 @@ export const verifyHarnesses = Effect.fn("Executor.verifyHarnesses")(function* (
       model: brain.model,
     });
   }
-  if (distinct.size === 0) yield* Effect.logDebug("No rostered harnesses to preflight", { worker });
+  if (distinct.length === 0)
+    yield* Effect.logDebug("No rostered harnesses to preflight", { worker });
 }, logPreflightFailure);

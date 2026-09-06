@@ -2,7 +2,7 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import { Effect, Option, Schema } from "effect";
 import { homedir } from "node:os";
-import { WorkingDirectory } from "../runtime.ts";
+import { SessionOperationError, WorkingDirectory } from "../runtime.ts";
 import { CodexAppServer, codexAppServerLive } from "../pi/codex/app-server.ts";
 import { initializeCodex, verifyCodexAccount } from "../pi/codex/account.ts";
 import { PiSdk, piSdkLive, usePiStart } from "../pi/sdk.ts";
@@ -46,11 +46,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
             yield* initializeCodex(connection);
             yield* verifyCodexAccount(connection, brain.model);
           }),
-        ).pipe(
-          Effect.mapError(() =>
-            loginError("Codex requires a usable ChatGPT login; run codex login on the Worker"),
-          ),
-        );
+        ).pipe(Effect.catchTag("PoolUnavailableError", (error) => loginError(error.message)));
         break;
       }
       case "claude": {
@@ -82,7 +78,13 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
               thinkingLevel: brain.effort,
               toolMode: "repository",
             }),
-          () => loginError(`Pi could not check authentication for ${brain.model}`),
+          (cause) =>
+            new SessionOperationError({
+              operation: "launch",
+              sessionId: Option.none(),
+              message: `Pi could not check authentication for ${brain.model}`,
+              cause,
+            }),
           (acquired) =>
             Effect.gen(function* () {
               const result = acquired.result;
@@ -107,17 +109,19 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
       Effect.timeout("60 seconds"),
       Effect.catchTag(
         "TimeoutError",
-        () =>
-          new HarnessUnavailableError({
-            harness: brain.harness,
-            capability: "login",
+        (cause) =>
+          new SessionOperationError({
+            operation: "launch",
+            sessionId: Option.none(),
             message: `${brain.harness} readiness check timed out`,
+            cause,
           }),
       ),
       Effect.tapError((error) =>
         Effect.logError("Worker harness preflight failed", {
-          harness: error.harness,
-          capability: error.capability,
+          harness: brain.harness,
+          model: brain.model,
+          errorTag: error._tag,
           message: error.message,
         }),
       ),
