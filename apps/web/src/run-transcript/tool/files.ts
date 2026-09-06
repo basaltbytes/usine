@@ -9,6 +9,7 @@ const FileChange = Schema.Struct({
   kind: Schema.Struct({ type: Schema.String }),
 });
 const fileChanges = Schema.decodeUnknownOption(Schema.Array(FileChange));
+const LineCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
 const fileLanguage = (path: string): Extract<ToolSection, { readonly _tag: "Code" }>["language"] =>
   /\.[cm]?tsx?$/iu.test(path) ? "typescript" : /\.json$/iu.test(path) ? "json" : "text";
@@ -28,6 +29,21 @@ export const presentFile = (
   const result = object(output);
   const changes = fileChanges(result.changes ?? request.changes);
   const path = string(request.path) ?? string(request.file_path);
+  const offset = Schema.is(LineCount)(request.offset) ? request.offset : undefined;
+  const limit = Schema.is(LineCount)(request.limit) ? request.limit : undefined;
+  const firstLine = offset ?? (request.offset === undefined ? 1 : undefined);
+  const range =
+    action === "read" && (offset !== undefined || limit !== undefined)
+      ? [
+          firstLine === undefined ? "" : `From line ${firstLine}`,
+          limit === undefined ? "" : `up to ${limit} ${limit === 1 ? "line" : "lines"}`,
+        ]
+          .filter((part) => part !== "")
+          .join(" · ")
+      : "";
+  const readSubject = [path ?? "File details unavailable", range]
+    .filter((part) => part !== "")
+    .join(" · ");
   const patch = string(object(result.details).patch) ?? string(object(result.details).diff);
   const edits = Schema.decodeUnknownOption(Schema.Array(Edit))(request.edits);
   const replacements = Option.getOrElse(edits, () =>
@@ -38,14 +54,16 @@ export const presentFile = (
   return {
     title: { read: "Read file", edit: "Edit file", write: "Write file" }[action],
     subject:
-      path ??
-      Option.match(changes, {
-        onNone: () => "File details unavailable",
-        onSome: (files) =>
-          files.length === 1
-            ? (files[0]?.path ?? "File details unavailable")
-            : `${files.length} files`,
-      }),
+      action === "read"
+        ? readSubject
+        : (path ??
+          Option.match(changes, {
+            onNone: () => "File details unavailable",
+            onSome: (files) =>
+              files.length === 1
+                ? (files[0]?.path ?? "File details unavailable")
+                : `${files.length} files`,
+          })),
     input: [
       ...fields("Options", request, [
         "path",
@@ -58,6 +76,8 @@ export const presentFile = (
         "type",
         "id",
         "status",
+        ...(action === "read" && offset !== undefined ? ["offset"] : []),
+        ...(action === "read" && limit !== undefined ? ["limit"] : []),
       ]),
       ...(patch === undefined ? replacements : []).flatMap(({ oldText, newText }, index) => [
         code(

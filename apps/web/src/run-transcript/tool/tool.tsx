@@ -96,7 +96,7 @@ export const TranscriptToolRow = ({ entry }: { readonly entry: TranscriptTool })
           )}
         </div>
         {patchFirst && input}
-        <Collapsible className="border-t pt-3">
+        <Collapsible>
           <CollapsibleTrigger
             render={
               <Button

@@ -777,8 +777,7 @@ describe("tool presentation", () => {
         "12→export const count = 1;",
       ),
     );
-    assert.strictEqual(read.subject, "/repo/src/count.ts");
-    assert.deepInclude(sectionFields(read.input), { label: "Offset", value: 12 });
+    assert.strictEqual(read.subject, "/repo/src/count.ts · From line 12 · up to 3 lines");
     assert.include(sectionText(read.output), "12→export const count = 1;");
     assert.include(
       read.output.map(({ label }) => label),
