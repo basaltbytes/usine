@@ -7,7 +7,9 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
-import { LaneName } from "@usine/config/board";
+import { LabelLaneSource, LaneName } from "@usine/config/board";
+import { GitHubLabelName } from "@usine/config/label";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   AgentFailureView,
   AttemptView,
@@ -22,12 +24,20 @@ import {
   RunFailureNeed,
   RunView,
   SucceededAttemptView,
+  WritableBoardLaneView,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import { applyMove, itemFailure, laneUnder, orderLanes, runsWithoutCard } from "../src/board.tsx";
+import {
+  applyMove,
+  itemFailure,
+  laneUnder,
+  orderLanes,
+  ProjectBoard,
+  runsWithoutCard,
+} from "../src/board.tsx";
 import { TaskHistory } from "../src/components/task-history.tsx";
 import { RunLinks } from "../src/components/run-links.tsx";
 import { failureMessage, needCopy } from "../src/operator-copy.ts";
@@ -256,6 +266,48 @@ describe("Board lane order", () => {
 });
 
 describe("Board drag targets", () => {
+  it("disables proposed card moves and enables them when label lanes are authored", () => {
+    const card = itemWithRun("Succeeded", [attempt(1, null)]);
+    const render = (authored: boolean) => {
+      const project = new ProjectView({
+        repository,
+        status: "clear",
+        runs: card.runs,
+        labels: [],
+        preflightFindings: [],
+        board: new BoardView({
+          failures: [],
+          lanes: ["ready", "review"].map((name, index) => {
+            const label = GitHubLabelName.make(name);
+            const fields = {
+              id: BoardLaneId.make(`${authored ? "authored" : "proposed"}:${name}`),
+              name: LaneName.make(name),
+              sources: [new LabelLaneSource({ label })],
+              items: index === 0 ? [card] : [],
+            };
+            return authored
+              ? new WritableBoardLaneView({ ...fields, origin: "authored", labels: [label] })
+              : new ReadOnlyBoardLaneView({ ...fields, origin: "proposed" });
+          }),
+        }),
+      });
+      return renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <ProjectBoard project={project} disabled={false} openRun={() => {}} />
+        </QueryClientProvider>,
+      );
+    };
+    const proposed = render(false);
+    assert.ok(!proposed.includes("Move issue #33 to a lane"));
+    assert.ok(!proposed.includes("cursor-grab"));
+    assert.ok(proposed.includes('aria-disabled="true"'));
+    assert.ok(proposed.includes("usine.yaml"));
+    const authored = render(true);
+    assert.ok(authored.includes("Move issue #33 to a lane"));
+    assert.ok(authored.includes("cursor-grab"));
+    assert.ok(!authored.includes("usine.yaml"));
+  });
+
   const lane = (id: string, items: ReadonlyArray<BoardTaskView>) =>
     new ReadOnlyBoardLaneView({
       id: BoardLaneId.make(id),

@@ -470,9 +470,14 @@ describe("Board projection", () => {
     const mutation = labelMutationForBoardMove(board, target);
     assert.deepStrictEqual(mutation.add, [review]);
     assert.deepStrictEqual(mutation.remove, [ready]);
+    const githubLabels = [ready, bug, GitHubLabelName.make("documentation")];
+    assert.deepStrictEqual(
+      [...githubLabels.filter((label) => !mutation.remove.includes(label)), ...mutation.add],
+      [bug, "documentation", review],
+    );
   });
 
-  it.effect("moves a proposed card to the selected Lane after re-projection", () =>
+  it.effect("keeps proposed label lanes read-only and preserves descriptive labels", () =>
     Effect.gen(function* () {
       const config = Schema.decodeUnknownSync(UsineConfig)({
         version: 1,
@@ -480,23 +485,20 @@ describe("Board projection", () => {
       });
       const managed = config.repos[0];
       assert(managed !== undefined);
-      const board = yield* projectBoard(managed, [bug, ready, review], [item], []);
+      const documentation = GitHubLabelName.make("documentation");
+      const labels = [bug, documentation, ready];
+      const board = yield* projectBoard(managed, [...labels, review], [itemWithLabels(labels)], []);
       const target = board.lanes.find(({ name }) => name === reviewLane);
-      assert(target !== undefined && target._tag === "WritableBoardLane");
-
-      const mutation = labelMutationForBoardMove(board, target);
-      assert.deepStrictEqual(mutation.add, [review]);
-      assert.deepStrictEqual(mutation.remove, [bug, ready]);
-
-      const moved = yield* projectBoard(
-        managed,
-        [bug, ready, review],
-        [itemWithLabels([review])],
-        [],
+      assert.strictEqual(target?._tag, "ReadOnlyBoardLane");
+      assert(board.lanes.every((lane) => lane._tag === "ReadOnlyBoardLane"));
+      assert.deepStrictEqual(board.lanes.flatMap(({ items }) => items)[0]?.labels, labels);
+      assert.throws(() =>
+        Schema.decodeUnknownSync(WritableBoardLaneView)({
+          ...target,
+          _tag: "WritableBoardLane",
+          labels: [review],
+        }),
       );
-      const targetAfterMove = moved.lanes.find(({ name }) => name === reviewLane);
-      assert(targetAfterMove !== undefined);
-      assert.strictEqual(targetAfterMove.items[0]?.itemKey, itemKey);
     }),
   );
 });

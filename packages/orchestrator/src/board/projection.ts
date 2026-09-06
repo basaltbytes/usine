@@ -141,8 +141,8 @@ export const projectBoard = Effect.fn("Board.project")(
               origin: definition.origin,
               items: sortItems(grouped.get(laneId(definition)) ?? []),
             } as const;
-            return labels.length > 0
-              ? new WritableBoardLaneView({ ...fields, labels })
+            return definition.origin === "authored" && labels.length > 0
+              ? new WritableBoardLaneView({ ...fields, origin: definition.origin, labels })
               : new ReadOnlyBoardLaneView(fields);
           }),
           new ReadOnlyBoardLaneView({

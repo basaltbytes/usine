@@ -17,6 +17,7 @@ import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   ApprovalNeed,
   BoardLaneId,
+  BoardLaneReadOnlyError,
   type BoardMove,
   BoardView,
   ColdTranscriptRequest,
@@ -233,7 +234,12 @@ describe("operator HTTP API", () => {
       resetCycleBudget: () => Effect.void,
       retry: () => Effect.void,
       cancel: () => Effect.void,
-      moveBoardItem: (move) => Effect.sync(() => void (moved = move)),
+      moveBoardItem: (move) =>
+        move.toLane === "proposed:ready"
+          ? Effect.fail(
+              new BoardLaneReadOnlyError({ repository: move.repository, lane: move.toLane }),
+            )
+          : Effect.sync(() => void (moved = move)),
       pause: () => Effect.void,
       unpause: () => Effect.void,
     });
@@ -278,6 +284,20 @@ describe("operator HTTP API", () => {
       assert.strictEqual(move.status, 200);
       assert.strictEqual(moved?.repository, repositoryName);
       assert.strictEqual(moved?.item, 31);
+      assert.strictEqual(moved?.toLane, "authored:Review");
+      const proposed = await rejectingApp.handler(
+        new Request("http://localhost/api/projects/basaltbytes/usine/items/31/lane", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ toLane: "proposed:ready" }),
+        }),
+      );
+      assert.strictEqual(proposed.status, 409);
+      assert.deepStrictEqual(await proposed.json(), {
+        error: "BoardLaneReadOnlyError",
+        message:
+          "Board Lane proposed:ready is read-only. Configure label-backed lanes in usine.yaml to enable moves.",
+      });
       assert.strictEqual(moved?.toLane, "authored:Review");
 
       // Authored fields are strict even though JSON has always been accepted

@@ -337,7 +337,7 @@ const BoardLane = ({
               key={item.itemKey}
               item={item}
               catalog={catalog}
-              disabled={pending}
+              disabled={pending || move.targets.length === 0}
               openRun={openRun}
               move={move}
             />
@@ -469,6 +469,13 @@ export const ProjectBoard = ({
         <h1 className="font-heading text-xl font-medium wrap-anywhere">{project.repository}</h1>
         {project.status === "needs-you" && <NeedsYouBadge />}
       </header>
+      {project.board.lanes.some(({ origin }) => origin === "proposed") && (
+        <p className="max-w-3xl text-muted-foreground">
+          Proposed lanes are read-only. To enable moves, configure this project’s lanes in{" "}
+          <code>repos[].lanes</code> in <code>usine.yaml</code> with the labels the Board may
+          exchange, then restart <code>usine up</code>.
+        </p>
+      )}
       {project.board.failures.length > 0 && (
         <ErrorAlert
           className="max-w-3xl"

@@ -46,11 +46,12 @@ const BoardLaneViewFields = {
   items: Schema.Array(BoardTaskView),
 } as const;
 
-/** A lane the operator can move Items into by applying its configured GitHub labels. */
+/** An authored lane the operator can move Items into by applying its configured GitHub labels. */
 export class WritableBoardLaneView extends Schema.TaggedClass<WritableBoardLaneView>(
   "@usine/orchestrator/WritableBoardLaneView",
 )("WritableBoardLane", {
   ...BoardLaneViewFields,
+  origin: Schema.Literal("authored"),
   labels: Schema.Array(GitHubLabelName).check(Schema.isNonEmpty()),
 }) {}
 
