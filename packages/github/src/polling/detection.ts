@@ -1,4 +1,4 @@
-import { Option, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 
 /** GitHub's opaque HTTP validator for a conditional repository or label-catalog request. */
 export const EntityTag = Schema.NonEmptyString.pipe(Schema.brand("GitHubEntityTag"));
@@ -42,6 +42,10 @@ export class RepositoryNotModified extends Schema.TaggedClass<RepositoryNotModif
 )("RepositoryNotModified", {
   cursor: PollCursor,
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
+  /** Request backoff from rate pressure or Retry-After; excludes the normal polling interval. */
+  backoffUntil: Schema.Option(Schema.DateTimeUtc).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+  ),
 }) {}
 
 /** Changed Items, the next cursor, and whether the page cap left more Items to fetch. */
@@ -53,6 +57,10 @@ export class RepositoryChanges extends Schema.TaggedClass<RepositoryChanges>(
   /** True when the page cap ended the walk early. The rest arrives next cycle. */
   backlog: Schema.Boolean,
   nextPollAt: Schema.Option(Schema.DateTimeUtc),
+  /** Request backoff from rate pressure or Retry-After; excludes the normal polling interval. */
+  backoffUntil: Schema.Option(Schema.DateTimeUtc).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none())),
+  ),
 }) {}
 
 /** The result of checking repository changes, including the earliest next poll time. */

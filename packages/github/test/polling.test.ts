@@ -1,7 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
-import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
+import { Clock, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../src/github-app.ts";
 import {
@@ -155,6 +155,34 @@ const pullRequestPayload = {
 };
 
 describe("GitHubPolling", () => {
+  for (const status of [200, 304]) {
+    it.effect(`separates normal poll cadence from request backoff on HTTP ${status}`, () => {
+      let requestCount = 0;
+      const client = HttpClient.make((request) =>
+        Effect.sync(() => {
+          requestCount += 1;
+          return response(request, status === 304 ? null : [], {
+            status,
+            headers:
+              requestCount === 1
+                ? { "x-poll-interval": "60" }
+                : { "x-poll-interval": "60", "retry-after": "90" },
+          });
+        }),
+      );
+      return Effect.gen(function* () {
+        const polling = yield* GitHubPolling;
+        const now = yield* Clock.currentTimeMillis;
+        const normal = yield* polling.changes(repository, PollCursor.empty);
+        assert.deepStrictEqual(normal.nextPollAt, Option.some(DateTime.makeUnsafe(now + 60_000)));
+        assert.deepStrictEqual(normal.backoffUntil, Option.none());
+        const limited = yield* polling.changes(repository, PollCursor.empty);
+        assert.deepStrictEqual(limited.nextPollAt, Option.some(DateTime.makeUnsafe(now + 90_000)));
+        assert.deepStrictEqual(limited.backoffUntil, limited.nextPollAt);
+      }).pipe(Effect.provide(pollingLayer(client)));
+    });
+  }
+
   it.live(
     "detects issues and PRs with one conditional REST request and an overlapping cursor",
     () => {
@@ -201,6 +229,7 @@ describe("GitHubPolling", () => {
           "2026-08-30T20:00:02.000Z",
         );
         assert(Option.isSome(first.nextPollAt));
+        assert.deepStrictEqual(first.backoffUntil, first.nextPollAt);
 
         const second = yield* polling.changes(repository, first.cursor);
         assert.strictEqual(second._tag, "RepositoryNotModified");

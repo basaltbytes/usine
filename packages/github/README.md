@@ -93,6 +93,8 @@ Pass a `CoveredProject` to `GitHubApp.workerToken`. GitHub must confirm in the t
 
 - `changes(repository, cursor)` makes one conditional Issues REST request. It returns changed issue and pull-request numbers, the next ETag and watermark, plus any rate-limit delay GitHub requested.
 - `labels(repository)` reads every page of the repository label catalog for Board lane proposals.
+
+Change-detection results distinguish `nextPollAt`, the earliest next conditional poll, from `backoffUntil`, a request delay caused by `Retry-After` or rate-limit pressure. Self-write Hints can fetch an Item snapshot during the normal poll interval while respecting request backoff.
 - `snapshot(repository, item)` fetches the issue or pull-request payload through GraphQL and computes its SHA-256 content hash. The stored payload retains timestamps, while the hash excludes timestamp fields at every nesting level.
 
 The REST cursor overlaps its watermark by five seconds. Repeated items are expected; the engine's permanent Event ledger owns deduplication. Provide `GitHubPollingLayer` with `GitHubApp`, an Effect HTTP client, and `Crypto.Crypto`. The package root remains platform-free.

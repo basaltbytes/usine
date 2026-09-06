@@ -3,7 +3,7 @@ import type { LoadedInstance } from "@usine/config/instance";
 import type { ManagedRepo } from "@usine/config/factory";
 import { ConfigParser } from "@usine/config/parser";
 import { matchesSelector } from "@usine/config/selector";
-import { canonicalRepositoryName } from "@usine/core/repository";
+import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import { CursorKey, CursorStore } from "@usine/engine/cursor";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import {
@@ -18,7 +18,7 @@ import {
   RepositoryLabelProjectionWriter,
 } from "@usine/engine/repository-label-projection";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
-import { EntityTag, PollCursor, GitHubPolling } from "@usine/github/polling";
+import { type ChangedItem, EntityTag, PollCursor, GitHubPolling } from "@usine/github/polling";
 import {
   Clock,
   Context,
@@ -30,6 +30,7 @@ import {
   Ref,
   Result,
   Schema,
+  Semaphore,
 } from "effect";
 import { LabelReconciler, type LabelPreflightFinding } from "../label-reconciler.ts";
 import { type ResolvedLoop, resolveTriggerLoops } from "../trigger-submission.ts";
@@ -43,6 +44,7 @@ import {
 } from "./cycle.ts";
 import { evaluateItem } from "./loop-evaluation.ts";
 import { observeItem, synchronizeLabels } from "./repository-sync.ts";
+import { ItemHints, type ItemHint } from "./hints.ts";
 
 /** GitHub tolerates a handful of parallel REST and GraphQL calls per token. */
 const REPOSITORY_CONCURRENCY = 4;
@@ -114,7 +116,13 @@ export class PollingTriggers extends Context.Service<
      * failure to read Loop runtime state fails the whole cycle.
      */
     readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle, EnginePersistenceError>;
-    /** Repeats cycles at the configured interval, extending the delay for GitHub backoff until interrupted. */
+    /** Nudges an authoritative Item fetch after a self-write, retaining any request backoff from the writer. Pending duplicates coalesce; polling repairs loss. */
+    readonly hint: (
+      repository: RepositoryName,
+      item: ChangedItem,
+      backoffUntil?: Option.Option<DateTime.Utc>,
+    ) => Effect.Effect<void>;
+    /** Repeats cycles at the configured interval and processes self-write Hints, respecting GitHub request backoff. */
     readonly run: (instance: LoadedInstance) => Effect.Effect<never>;
     /** The last completed cycle, including its isolated failures; absent until the first cycle completes. */
     readonly latest: Effect.Effect<Option.Option<PollCycle>>;
@@ -128,6 +136,8 @@ export class PollingTriggers extends Context.Service<
       const github = yield* GitHubPolling;
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
+      const hints = yield* ItemHints;
+      const ownership = yield* Semaphore.make(1);
 
       const emptyCursor = (watches: ReadonlyArray<WatchKey>) =>
         new StoredPollCursor({
@@ -183,10 +193,12 @@ export class PollingTriggers extends Context.Service<
           watched.declaredLabels,
           stored.labelEntityTag,
         );
+        yield* hints.defer(preflight.nextPollAt);
         return yield* Effect.gen(function* () {
           // Label creation finishes before change detection and Item evaluation
           // begin, including on the first cycle after `usine up`.
           const detected = yield* github.changes(watched.repository.name, stored.cursor);
+          yield* hints.defer(detected.backoffUntil);
           const nextCursor = new StoredPollCursor({
             boardVersion: 4,
             cursor: detected.cursor,
@@ -268,81 +280,159 @@ export class PollingTriggers extends Context.Service<
         ),
       );
 
-      const poll = Effect.fn("PollingTriggers.poll")(function* (instance: LoadedInstance) {
-        const paused = new Set(
-          (yield* loops.states).filter((state) => state.paused).map((state) => state.loop),
-        );
-        for (const loop of instance.loops) {
-          if (loop.trigger.on !== "schedule" && paused.has(loop.name)) {
-            yield* Effect.logDebug("Paused Loop skipped during repository polling", {
-              loop: loop.name,
-            });
-          }
-        }
-        const resolved = (yield* resolveTriggerLoops(instance)).filter(
-          ({ loop }) => !paused.has(loop.name),
-        );
-        const watched = watchedRepositories(instance, resolved);
-        const settled = yield* Effect.forEach(
-          watched,
-          (repository) =>
-            Effect.result(pollRepository(repository)).pipe(
-              Effect.map((result) => ({ repository, result }) as const),
-            ),
-          { concurrency: REPOSITORY_CONCURRENCY },
-        );
-
-        const cycles: Array<RepositoryCycle> = [];
-        const failures: Array<RepositoryPollFailure> = [];
-        const backoffs: Array<Option.Option<DateTime.Utc>> = [];
-        const preflightFindings: Array<LabelPreflightFinding> = [];
-        for (const { repository, result } of settled) {
-          if (Result.isSuccess(result)) {
-            cycles.push(result.success);
-            preflightFindings.push(...result.success.preflightFindings);
-            continue;
-          }
-          const interrupted = result.failure._tag === "InterruptedRepositoryCycle";
-          const error: RepositoryPollError = interrupted ? result.failure.error : result.failure;
-          if (interrupted) {
-            failures.push(...result.failure.failures);
-            preflightFindings.push(...result.failure.preflightFindings);
-            backoffs.push(result.failure.nextPollAt);
-          }
-          if (error._tag === "GitHubRateLimitError") {
-            // A rate-limit pause is scheduling input, not a repository failure.
-            yield* Effect.logWarning("GitHub rate limit reached; delaying the next cycle", {
-              repository: repository.repository.name,
-              operation: error.operation,
-              retryAt: DateTime.formatIso(error.retryAt),
-            });
-            backoffs.push(Option.some(error.retryAt));
-            continue;
-          }
-          yield* Effect.logError("Repository poll cycle failed; siblings were unaffected", {
-            repository: repository.repository.name,
-            ...repositoryFailureLogFields(error),
-          });
-          failures.push(
-            new RepositoryPollFailure({
-              repository: repository.repository.name,
-              errorTag: error._tag,
-              message: error.message,
-            }),
+      const poll = Effect.fn("PollingTriggers.poll")(
+        function* (instance: LoadedInstance) {
+          yield* hints.awaitBackoff;
+          const paused = new Set(
+            (yield* loops.states).filter((state) => state.paused).map((state) => state.loop),
           );
-        }
-        const cycle = new PollCycle({
-          repositories: watched.length,
-          changedItems: cycles.reduce((sum, cycle) => sum + cycle.changedItems, 0),
-          submissions: cycles.flatMap(({ submissions }) => submissions),
-          revokedRuns: cycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
-          failures: [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
-          preflightFindings,
-          nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
+          for (const loop of instance.loops) {
+            if (loop.trigger.on !== "schedule" && paused.has(loop.name)) {
+              yield* Effect.logDebug("Paused Loop skipped during repository polling", {
+                loop: loop.name,
+              });
+            }
+          }
+          const resolved = (yield* resolveTriggerLoops(instance)).filter(
+            ({ loop }) => !paused.has(loop.name),
+          );
+          const watched = watchedRepositories(instance, resolved);
+          const settled = yield* Effect.forEach(
+            watched,
+            (repository) =>
+              Effect.result(pollRepository(repository)).pipe(
+                Effect.map((result) => ({ repository, result }) as const),
+              ),
+            { concurrency: REPOSITORY_CONCURRENCY },
+          );
+
+          const cycles: Array<RepositoryCycle> = [];
+          const failures: Array<RepositoryPollFailure> = [];
+          const backoffs: Array<Option.Option<DateTime.Utc>> = [];
+          const preflightFindings: Array<LabelPreflightFinding> = [];
+          for (const { repository, result } of settled) {
+            if (Result.isSuccess(result)) {
+              cycles.push(result.success);
+              preflightFindings.push(...result.success.preflightFindings);
+              continue;
+            }
+            const interrupted = result.failure._tag === "InterruptedRepositoryCycle";
+            const error: RepositoryPollError = interrupted ? result.failure.error : result.failure;
+            if (interrupted) {
+              failures.push(...result.failure.failures);
+              preflightFindings.push(...result.failure.preflightFindings);
+              backoffs.push(result.failure.nextPollAt);
+              yield* hints.defer(result.failure.nextPollAt);
+            }
+            if (error._tag === "GitHubRateLimitError") {
+              // A rate-limit pause is scheduling input, not a repository failure.
+              yield* Effect.logWarning("GitHub rate limit reached; delaying the next cycle", {
+                repository: repository.repository.name,
+                operation: error.operation,
+                retryAt: DateTime.formatIso(error.retryAt),
+              });
+              backoffs.push(Option.some(error.retryAt));
+              yield* hints.defer(Option.some(error.retryAt));
+              continue;
+            }
+            yield* Effect.logError("Repository poll cycle failed; siblings were unaffected", {
+              repository: repository.repository.name,
+              ...repositoryFailureLogFields(error),
+            });
+            failures.push(
+              new RepositoryPollFailure({
+                repository: repository.repository.name,
+                errorTag: error._tag,
+                message: error.message,
+              }),
+            );
+          }
+          const cycle = new PollCycle({
+            repositories: watched.length,
+            changedItems: cycles.reduce((sum, cycle) => sum + cycle.changedItems, 0),
+            submissions: cycles.flatMap(({ submissions }) => submissions),
+            revokedRuns: cycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
+            failures: [...cycles.flatMap(({ failures: isolated }) => isolated), ...failures],
+            preflightFindings,
+            nextPollAt: latestPollAt([...cycles.map(({ nextPollAt }) => nextPollAt), ...backoffs]),
+          });
+          yield* Ref.set(latest, Option.some(cycle));
+          return cycle;
+        },
+        Effect.provideContext(repositoryServices),
+        ownership.withPermits(1),
+      );
+
+      const refreshHint = Effect.fn("PollingTriggers.refreshHint")(
+        function* (instance: LoadedInstance, hint: ItemHint) {
+          yield* Effect.annotateCurrentSpan({
+            repository: hint.repository,
+            item: hint.item.number,
+          });
+          yield* hints.awaitBackoff;
+          const paused = new Set(
+            (yield* loops.states).filter((state) => state.paused).map((state) => state.loop),
+          );
+          const resolved = (yield* resolveTriggerLoops(instance)).filter(
+            ({ loop }) => !paused.has(loop.name),
+          );
+          const watched = watchedRepositories(instance, resolved).find(
+            ({ repository }) =>
+              canonicalRepositoryName(repository.name) === canonicalRepositoryName(hint.repository),
+          );
+          if (watched === undefined) {
+            yield* Effect.logInfo("Self-write Hint ignored for an unmanaged repository", {
+              repository: hint.repository,
+              item: hint.item.number,
+            });
+            return;
+          }
+          // Share the normal snapshot, projection and dedup path. Hints never
+          // advance a REST cursor or replace the latest complete cycle's findings.
+          const observed = yield* observeItem(watched.repository.name, hint.item);
+          const result = yield* evaluateItem(watched.repository, watched.loops, observed);
+          yield* Effect.logInfo("Self-write Hint refreshed the Item", {
+            repository: hint.repository,
+            item: hint.item.number,
+            submissions: result.submissions.length,
+            revokedRuns: result.revokedRuns,
+            failures: result.failures.length,
+          });
+        },
+        Effect.provideContext(repositoryServices),
+        (effect, _instance, hint) =>
+          effect.pipe(
+            Effect.catch((error) =>
+              Effect.gen(function* () {
+                if (error._tag === "GitHubRateLimitError")
+                  yield* hints.defer(Option.some(error.retryAt));
+                yield* Effect.logWarning(
+                  "Self-write Hint refresh failed; the normal poll will retry",
+                  {
+                    repository: hint.repository,
+                    item: hint.item.number,
+                    ...repositoryFailureLogFields(error),
+                  },
+                );
+              }),
+            ),
+            ownership.withPermits(1),
+          ),
+      );
+
+      const waitForNextPoll = (instance: LoadedInstance, target: number) =>
+        Effect.gen(function* () {
+          while (true) {
+            const remaining = target - (yield* Clock.currentTimeMillis);
+            if (remaining <= 0) return;
+            const hint = yield* Effect.raceFirst(
+              hints.take.pipe(Effect.map(Option.some)),
+              Effect.sleep(Duration.millis(remaining)).pipe(Effect.as(Option.none<ItemHint>())),
+            );
+            if (Option.isNone(hint)) return;
+            yield* refreshHint(instance, hint.value);
+          }
         });
-        yield* Ref.set(latest, Option.some(cycle));
-        return cycle;
-      }, Effect.provideContext(repositoryServices));
 
       // `run` never returns, so wrapping it in Effect.fn would open a span that
       // never closes; `poll` opens the span for each cycle.
@@ -378,10 +468,10 @@ export class PollingTriggers extends Context.Service<
             preflightFindings: cycle.preflightFindings.length,
             sleepMs,
           });
-          yield* Effect.sleep(Duration.millis(sleepMs));
+          yield* waitForNextPoll(instance, target);
         }).pipe(Effect.forever);
 
-      return { latest: Ref.get(latest), poll, run };
+      return { latest: Ref.get(latest), poll, run, hint: hints.offer };
     }),
-  );
+  ).pipe(Layer.provide(ItemHints.layer));
 }

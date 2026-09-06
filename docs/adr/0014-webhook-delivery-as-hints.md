@@ -17,3 +17,15 @@ v1 adds push-based delivery as a **Hint**: a droppable `(repo, optional item)` n
 - Bootstrap (issue #23) gains `hook_attributes` in the manifest and secret capture alongside the private key.
 - UI: Configuration shows the mode and last-hint-received; the needs-you strip warns when endpoint mode has never received a delivery (wrong `public_url` or failed `PATCH`) — display + warn only, engine behavior never consults hint health.
 - Facts this leans on (researched 2026-08-20): deliveries are recorded only for an active webhook, including 100%-failing ones; delivery retention 3 days; `PATCH /app/hook/config` changes URL/secret but not `active`; no documented auto-disable, failure throttling, or reachability validation; ~10s JWT polling is trivially within all documented limits.
+
+## Board self-write implementation
+
+Board label writes enqueue bounded, coalesced Item Hints in the poller even when
+a write fails or is interrupted, since GitHub may have applied part of the swap.
+The original outcome is preserved, and writer rate limits extend Hint backoff. Its single
+owner serializes each authoritative snapshot and Loop evaluation with normal
+repository cycles, using the existing projection and content-hash ledger. A Hint
+does not advance a REST cursor or overwrite the last complete cycle's findings.
+The normal conditional-poll cadence remains unchanged; separate request-backoff
+metadata also delays Hint snapshots. Failed or dropped Hints rely on the poll
+backstop. Webhook sources and other GitHub write sources remain separate work.
