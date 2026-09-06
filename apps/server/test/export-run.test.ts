@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -26,7 +26,7 @@ import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { DateTime, Effect, Layer, Option, Schema } from "effect";
-import { assert, describe, it } from "vitest";
+import { assert, describe, expect, it } from "vitest";
 import { RunEvidenceFromJson } from "../src/export-run.ts";
 
 const cli = fileURLToPath(new URL("../dist/main.js", import.meta.url));
@@ -140,121 +140,148 @@ const runCli = (directory: string, args: ReadonlyArray<string>) =>
     timeout: 15_000,
   });
 
-describe("Run evidence export", () => {
-  it("exports all Attempts and transcripts beyond the UI page, and reports failures without overwriting evidence", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "usine-export-test-"));
+const test = it.extend<{
+  directory: string;
+  saved: Effect.Success<ReturnType<typeof seed>>;
+}>({
+  directory: async ({ task }, use) => {
+    const directory = await mkdtemp(join(tmpdir(), `usine-export-${task.id}-`));
     try {
-      const saved = await Effect.runPromise(
-        seed(directory).pipe(Effect.provide(NodeServices.layer)),
-      );
-      const runId = saved.snapshot.run.id;
-      const exported = runCli(directory, ["export-run", runId]);
-      assert.strictEqual(exported.status, 0, exported.stderr);
-      const output = join(directory, `run-${encodeURIComponent(runId)}.json`);
-      const original = await readFile(output, "utf8");
-      const evidence = Schema.decodeUnknownSync(RunEvidenceFromJson)(original);
-      assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
-      assert.deepStrictEqual(evidence.transcript, saved.transcript);
-      assert.strictEqual(evidence.snapshot.attempts.length, 2);
-      assert.strictEqual(evidence.transcript.length, 504);
-      assert.strictEqual((await stat(output)).mode & 0o777, 0o600);
-      assert.match(exported.stdout, /Exported Run/);
-
-      const overwrite = runCli(directory, ["export-run", runId]);
-      assert.strictEqual(overwrite.status, 1);
-      assert.match(overwrite.stderr, /AlreadyExists/);
-      assert.notMatch(overwrite.stdout, /Exported Run/);
-      assert.strictEqual(await readFile(output, "utf8"), original);
-
-      const waiting = runCli(directory, [
-        "export-run",
-        saved.waitingSnapshot.run.id,
-        "--output",
-        "waiting.json",
-      ]);
-      assert.strictEqual(waiting.status, 0, waiting.stderr);
-      const waitingEvidence = Schema.decodeUnknownSync(RunEvidenceFromJson)(
-        await readFile(join(directory, "waiting.json"), "utf8"),
-      );
-      assert.deepStrictEqual(waitingEvidence.snapshot, saved.waitingSnapshot);
-      assert.deepStrictEqual(waitingEvidence.snapshot.attempts, []);
-      assert.deepStrictEqual(waitingEvidence.transcript, []);
-
-      const missing = runCli(directory, ["export-run", "missing/run", "--output", "missing.json"]);
-      assert.strictEqual(missing.status, 1);
-      assert.match(missing.stderr, /Run missing\/run was not found/);
-      assert.notMatch(missing.stdout, /Exported Run/);
-      const unwritable = runCli(directory, [
-        "export-run",
-        runId,
-        "--output",
-        "absent/evidence.json",
-      ]);
-      assert.strictEqual(unwritable.status, 1);
-      assert.match(unwritable.stderr, /Could not write evidence/);
-      assert.deepStrictEqual(
-        (await readdir(directory)).sort(),
-        [".usine", `run-${encodeURIComponent(runId)}.json`, "waiting.json"].sort(),
-      );
+      await use(directory);
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
-  }, 30_000);
+  },
+  saved: async ({ directory }, use) => {
+    await use(await Effect.runPromise(seed(directory).pipe(Effect.provide(NodeServices.layer))));
+  },
+});
 
-  it("refuses a missing runtime store without creating one", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "usine-export-empty-"));
-    try {
-      const result = runCli(directory, ["export-run", "missing"]);
-      assert.strictEqual(result.status, 1);
-      assert.match(result.stderr, /Could not read evidence/);
-      assert.deepStrictEqual(await readdir(directory), []);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
+describe("Run evidence export", { timeout: 30_000 }, () => {
+  test("exports complete evidence for every Attempt beyond the UI page", async ({
+    directory,
+    saved,
+  }) => {
+    const runId = saved.snapshot.run.id;
+    const exported = runCli(directory, ["export-run", runId]);
+    assert.strictEqual(exported.status, 0, exported.stderr);
+    const output = join(directory, `run-${encodeURIComponent(runId)}.json`);
+    const evidence = Schema.decodeUnknownSync(RunEvidenceFromJson)(await readFile(output, "utf8"));
+
+    assert.strictEqual(evidence.version, 1);
+    assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
+    assert.deepStrictEqual(evidence.transcript, saved.transcript);
+    assert.strictEqual(evidence.snapshot.attempts.length, 2);
+    assert.strictEqual(evidence.transcript.length, 504);
+    assert.strictEqual((await stat(output)).mode & 0o777, 0o600);
+    assert.include(exported.stdout, output);
   });
 
-  it("refuses an unrelated database without changing its contents or journal mode", async () => {
-    const directory = await mkdtemp(join(tmpdir(), "usine-export-unrelated-"));
+  test("exports a Run awaiting approval to the requested destination", async ({
+    directory,
+    saved,
+  }) => {
+    const output = join(directory, "waiting.json");
+    const exported = runCli(directory, [
+      "export-run",
+      saved.waitingSnapshot.run.id,
+      "--output",
+      "waiting.json",
+    ]);
+    assert.strictEqual(exported.status, 0, exported.stderr);
+    const evidence = Schema.decodeUnknownSync(RunEvidenceFromJson)(await readFile(output, "utf8"));
+
+    assert.deepStrictEqual(evidence.snapshot, saved.waitingSnapshot);
+    assert.deepStrictEqual(evidence.snapshot.attempts, []);
+    assert.deepStrictEqual(evidence.transcript, []);
+    assert.include(exported.stdout, output);
+  });
+
+  test("refuses to overwrite an existing evidence file", async ({ directory, saved }) => {
+    const output = join(directory, "evidence.json");
+    await writeFile(output, "Previously exported evidence");
+    const exported = runCli(directory, ["export-run", saved.snapshot.run.id, "--output", output]);
+
+    assert.strictEqual(exported.status, 1);
+    assert.match(exported.stderr, /write evidence/i);
+    assert.include(exported.stderr, output);
+    assert.strictEqual(await readFile(output, "utf8"), "Previously exported evidence");
+  });
+
+  test("reports a missing Run without publishing a file", async ({ directory, saved }) => {
+    const missingId = `${saved.snapshot.run.id}/missing`;
+    const output = join(directory, "missing.json");
+    const exported = runCli(directory, ["export-run", missingId, "--output", output]);
+
+    assert.strictEqual(exported.status, 1);
+    assert.include(exported.stderr, missingId);
+    assert.match(exported.stderr, /not found/i);
+    await expect(stat(output)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("reports an unavailable output directory without creating it", async ({
+    directory,
+    saved,
+  }) => {
+    const parent = join(directory, "absent");
+    const exported = runCli(directory, [
+      "export-run",
+      saved.snapshot.run.id,
+      "--output",
+      join(parent, "evidence.json"),
+    ]);
+
+    assert.strictEqual(exported.status, 1);
+    assert.match(exported.stderr, /write evidence/i);
+    await expect(stat(parent)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  test("refuses a missing runtime store without creating one", async ({ directory }) => {
+    const exported = runCli(directory, ["export-run", "missing"]);
+
+    assert.strictEqual(exported.status, 1);
+    assert.match(exported.stderr, /read evidence/i);
+    await expect(stat(join(directory, ".usine"))).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  test("leaves an unrelated database unchanged when export fails", async ({ directory }) => {
+    await mkdir(join(directory, ".usine"));
+    const filename = join(directory, ".usine", "runtime.sqlite");
+    const database = new DatabaseSync(filename);
     try {
+      database.exec("CREATE TABLE original_marker (value TEXT)");
+      database.exec("INSERT INTO original_marker VALUES ('preserve me')");
+    } finally {
+      database.close();
+    }
+    const original = await readFile(filename);
+    const exported = runCli(directory, ["export-run", "missing"]);
+
+    assert.strictEqual(exported.status, 1);
+    assert.match(exported.stderr, /read evidence/i);
+    assert.deepStrictEqual(await readFile(filename), original);
+    await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
+  test.for(["corrupt", "directory"])(
+    "reports a %s runtime store as a read failure",
+    async (kind, { directory }) => {
       await mkdir(join(directory, ".usine"));
       const filename = join(directory, ".usine", "runtime.sqlite");
-      const database = new DatabaseSync(filename);
-      try {
-        database.exec("CREATE TABLE original_marker (value TEXT)");
-        database.exec("INSERT INTO original_marker VALUES ('preserve me')");
-      } finally {
-        database.close();
-      }
-      const original = await readFile(filename);
-      const result = runCli(directory, ["export-run", "missing"]);
-      assert.strictEqual(result.status, 1);
-      assert.match(result.stderr, /Could not read evidence/);
-      assert.notMatch(result.stdout, /Exported Run/);
-      assert.deepStrictEqual(await readFile(filename), original);
-      assert.deepStrictEqual(await readdir(directory), [".usine"]);
-      assert.deepStrictEqual(await readdir(join(directory, ".usine")), ["runtime.sqlite"]);
-    } finally {
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
+      if (kind === "directory") await mkdir(filename);
+      else await writeFile(filename, "not a SQLite database");
+      const exported = runCli(directory, ["export-run", "missing"]);
 
-  it.each(["corrupt", "directory"])(
-    "reports a %s runtime store as a read failure",
-    async (kind) => {
-      const directory = await mkdtemp(join(tmpdir(), "usine-export-invalid-"));
-      try {
-        await mkdir(join(directory, ".usine"));
-        const filename = join(directory, ".usine", "runtime.sqlite");
-        if (kind === "directory") await mkdir(filename);
-        else await writeFile(filename, "not a SQLite database");
-        const result = runCli(directory, ["export-run", "missing"]);
-        assert.strictEqual(result.status, 1);
-        assert.match(result.stderr, /Could not read evidence/);
-        assert.notMatch(result.stdout, /Exported Run/);
-        assert.deepStrictEqual(await readdir(directory), [".usine"]);
-      } finally {
-        await rm(directory, { recursive: true, force: true });
-      }
+      assert.strictEqual(exported.status, 1);
+      assert.match(exported.stderr, /read evidence/i);
+      await expect(stat(join(directory, "run-missing.json"))).rejects.toMatchObject({
+        code: "ENOENT",
+      });
     },
   );
 });

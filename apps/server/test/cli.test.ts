@@ -20,32 +20,40 @@ import {
 const noEnvironment = { port: Option.none<string>(), allowVolatileInstance: Option.none<string>() };
 
 describe("usine CLI", () => {
-  it("parses Run export arguments independently of server settings and rejects incomplete commands", async () => {
-    const environment = { ...noEnvironment, port: Option.some("invalid-server-port") };
-    const command = await Effect.runPromise(parseCli(["export-run", "run/1"], environment));
-    assert(command._tag === "ExportRunCommand");
-    assert.strictEqual(command.runId, "run/1");
-    assert.deepStrictEqual(command.output, Option.none());
-    const explicit = await Effect.runPromise(
-      parseCli(["export-run", "run/1", "--output", "evidence.json"], environment),
-    );
-    assert(explicit._tag === "ExportRunCommand");
-    assert.deepStrictEqual(explicit.output, Option.some("evidence.json"));
+  it.each([
+    { flags: [], output: Option.none<string>() },
+    { flags: ["--output", "evidence.json"], output: Option.some("evidence.json") },
+    { flags: ["-o", "evidence.json"], output: Option.some("evidence.json") },
+  ])(
+    "parses Run export flags $flags independently of server settings",
+    async ({ flags, output }) => {
+      const environment = { ...noEnvironment, port: Option.some("invalid-server-port") };
+      const command = await Effect.runPromise(
+        parseCli(["export-run", "run/1", ...flags], environment),
+      );
+      assert(command._tag === "ExportRunCommand");
+      assert.strictEqual(command.runId, "run/1");
+      assert.deepStrictEqual(command.output, output);
+    },
+  );
+
+  it("shows Run export help without requiring a Run id", async () => {
     assert.strictEqual(
-      (await Effect.runPromise(parseCli(["export-run", "--help"], environment)))._tag,
+      (await Effect.runPromise(parseCli(["export-run", "--help"], noEnvironment)))._tag,
       "HelpCommand",
     );
-    for (const args of [
-      ["export-run"],
-      ["export-run", ""],
-      ["export-run", "--unknown"],
-      ["export-run", "run/1", "--output"],
-      ["export-run", "run/1", "--output", ""],
-      ["export-run", "run/1", "--port", "7331"],
-    ]) {
-      const error = await Effect.runPromise(parseCli(args, environment).pipe(Effect.flip));
-      assert.instanceOf(error, CliUsageError);
-    }
+  });
+
+  it.each([
+    { args: ["export-run"] },
+    { args: ["export-run", ""] },
+    { args: ["export-run", "--unknown"] },
+    { args: ["export-run", "run/1", "--output"] },
+    { args: ["export-run", "run/1", "--output", ""] },
+    { args: ["export-run", "run/1", "--port", "7331"] },
+  ])("rejects incomplete or unsupported Run export arguments: $args", async ({ args }) => {
+    const error = await Effect.runPromise(parseCli(args, noEnvironment).pipe(Effect.flip));
+    assert.instanceOf(error, CliUsageError);
   });
 
   it("accepts the volatile-instance override from the flag or the environment", async () => {

@@ -5,50 +5,59 @@ import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import type { AttemptFailure } from "@usine/core/attempt/failure";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
-import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { EffectLogger } from "drizzle-orm/effect-core";
 import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
-import { DateTime, Effect, FileSystem, Layer, Option, Path, Result } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Path, Queue } from "effect";
 import { RunDatabase } from "../src/database/database.ts";
-import { localSqliteLayer } from "../src/database/local-sqlite.ts";
-import { Submission } from "../src/engine/submission.ts";
+import { layer } from "../src/database/local-sqlite.ts";
+import { RunEngine, Submission } from "../src/engine/engine.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
-import { RunStore } from "../src/store/store.ts";
-import { TranscriptAllQuery } from "../src/transcript.ts";
+import { StepExecutor } from "../src/step-executor.ts";
 
 describe("Run evidence reader", () => {
-  it.live("keeps one snapshot when another connection completes the Attempt during the read", () =>
+  it.live("keeps the Attempt's selected model consistent with its transcript while it starts", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const directory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-evidence-reader-" }),
       );
-      const writer = RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)));
+      const now = DateTime.makeUnsafe("2026-09-06T00:00:00Z");
+      const model = ModelId.make("evidence-model");
+      const starts = yield* Queue.unbounded<Effect.Effect<void, AttemptFailure>>();
+      const executor = Layer.succeed(StepExecutor)({
+        reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+        interrupt: () => Effect.void,
+        execute: (execution, io) =>
+          Queue.offer(
+            starts,
+            io.append(
+              "outbound",
+              new AttemptChannel.OutboundEnvelope({
+                version: AttemptChannel.PROTOCOL_VERSION,
+                attemptId: execution.attempt.id,
+                sequence: AttemptChannel.Sequence.make(1),
+                sentAt: now,
+                payload: new AttemptChannel.Started({ parentModel: model }),
+              }),
+            ),
+          ).pipe(Effect.andThen(Effect.never)),
+      });
+      const writer = layer(directory).pipe(Layer.provide(executor));
       yield* Effect.gen(function* () {
-        const store = yield* RunStore;
-        const now = DateTime.makeUnsafe("2026-09-06T00:00:00Z");
-        const model = ModelId.make("evidence-model");
-        const runId = RunId.make("evidence-run");
-        const submission = new Submission({
-          event: new Event({
-            id: EventId.make("evidence-event"),
-            dedupKey: DedupKey.make("evidence/event/revision"),
-            payload: {},
-            receivedAt: now,
-          }),
-          itemKey: ItemKey.make("evidence-item"),
+        const engine = yield* RunEngine;
+        const submission = {
           loop: LoopName.make("develop"),
           step: StepName.make("run"),
-          approval: "none",
+          approval: "none" as const,
           repository: RepositoryName.make("basaltbytes/usine"),
           revision: RepositoryRevision.make("main"),
           task: AttemptTask.make("Retain a consistent record."),
@@ -60,67 +69,76 @@ describe("Run evidence reader", () => {
             persona: AgentPersona.make("Implement the task."),
           }),
           parentModel: Option.none(),
-        });
-        yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
-        assert(started._tag === "AttemptStarted");
-        const attempt = started.execution.attempt;
-        yield* store.appendTranscript(
-          "outbound",
-          new AttemptChannel.OutboundEnvelope({
-            version: AttemptChannel.PROTOCOL_VERSION,
-            attemptId: attempt.id,
-            sequence: AttemptChannel.Sequence.make(1),
-            sentAt: now,
-            payload: new AttemptChannel.Started({ parentModel: model }),
-          }),
-        );
-        const originalSnapshot = yield* store.snapshot(runId);
-        const transcriptQuery = new TranscriptAllQuery({ attemptId: attempt.id });
-        const originalTranscript = yield* store.transcript(transcriptQuery);
-        const result = new StepResult({ message: "Completed during the evidence read", facts: [] });
-        let completed = false;
-        // Drizzle's logger runs before a query. Commit through the independent WAL
-        // writer after the Run snapshot is read, but before its transcript is read.
-        const logger = Layer.succeed(EffectLogger)({
-          logQuery: (query) =>
-            Effect.gen(function* () {
-              if (completed || !query.includes('"usine_attempt_transcripts"')) return;
-              completed = true;
-              yield* store.appendTranscript(
-                "outbound",
-                new AttemptChannel.OutboundEnvelope({
-                  version: AttemptChannel.PROTOCOL_VERSION,
-                  attemptId: attempt.id,
-                  sequence: AttemptChannel.Sequence.make(2),
-                  sentAt: now,
-                  payload: new AttemptChannel.Final({ result }),
-                }),
-              );
-              yield* store.finishAttempt(attempt, Result.succeed(result));
-            }).pipe(Effect.orDie),
-        });
-        const readConnection = SqliteClient.layer({
-          filename: path.join(directory, ".usine", "runtime.sqlite"),
-          readonly: true,
-          disableWAL: true,
-        });
-        const database = Layer.effect(
-          RunDatabase,
-          SQLiteDrizzle.make().pipe(
-            Effect.provide(logger),
-            Effect.provide(SQLiteDrizzle.DefaultServices),
-          ),
-        ).pipe(Layer.provide(readConnection));
-        const reader = RunReader.layer.pipe(Layer.provide(database));
-        const evidence = yield* Effect.flatMap(RunReader, (reader) => reader.evidence(runId)).pipe(
-          Effect.provide(reader),
-        );
+        };
+        const observedStarts = new Set<boolean>();
+        // Try the Started arrival at every database-operation boundary. The
+        // logger schedules arrivals without inspecting SQL or fixing its shape;
+        // the first unreached boundary ends the sweep as query structure changes.
+        for (let boundary = 1; ; boundary += 1) {
+          const submitted = yield* engine.submit(
+            new Submission({
+              ...submission,
+              itemKey: ItemKey.make(`evidence-item-${boundary}`),
+              event: new Event({
+                id: EventId.make(`evidence-event-${boundary}`),
+                dedupKey: DedupKey.make(`evidence/event/${boundary}`),
+                payload: {},
+                receivedAt: now,
+              }),
+            }),
+          );
+          assert(submitted._tag === "Claimed");
+          const start = yield* Queue.take(starts);
+          let operations = 0;
+          const logger = Layer.succeed(EffectLogger)({
+            logQuery: () =>
+              Effect.gen(function* () {
+                operations += 1;
+                if (operations === boundary) yield* start;
+              }).pipe(Effect.orDie),
+          });
+          const readConnection = SqliteClient.layer({
+            filename: path.join(directory, ".usine", "runtime.sqlite"),
+            readonly: true,
+            disableWAL: true,
+          });
+          const database = Layer.effect(
+            RunDatabase,
+            SQLiteDrizzle.make().pipe(
+              Effect.provide(logger),
+              Effect.provide(SQLiteDrizzle.DefaultServices),
+            ),
+          ).pipe(Layer.provide(readConnection));
+          // The engine already provides RunReader; keep this reader on its own
+          // connection instead of reusing the engine layer's memoized instance.
+          const reader = RunReader.layer.pipe(Layer.provide(database), Layer.fresh);
+          const evidence = yield* Effect.flatMap(RunReader, (reader) =>
+            reader.evidence(submitted.runId),
+          ).pipe(Effect.provide(reader));
 
-        assert.strictEqual((yield* store.snapshot(runId)).run.state._tag, "Succeeded");
-        assert.strictEqual((yield* store.transcript(transcriptQuery)).length, 2);
-        assert.deepStrictEqual(evidence.snapshot, originalSnapshot);
-        assert.deepStrictEqual(evidence.transcript, originalTranscript);
+          const attempt = evidence.snapshot.attempts[0];
+          assert(attempt !== undefined);
+          const includesStarted = evidence.transcript.some(
+            ({ envelope }) => envelope.payload._tag === "Started",
+          );
+          assert.deepStrictEqual(
+            attempt.parentModel,
+            includesStarted ? Option.some(model) : Option.none(),
+          );
+          observedStarts.add(includesStarted);
+          const current = yield* Effect.flatMap(RunReader, (reader) =>
+            reader.evidence(submitted.runId),
+          );
+          observedStarts.add(
+            current.transcript.some(({ envelope }) => envelope.payload._tag === "Started"),
+          );
+          if (operations < boundary) break;
+        }
+        assert.sameMembers(
+          [...observedStarts],
+          [false, true],
+          "The fixture must observe evidence both before and after Started",
+        );
       }).pipe(Effect.provide(writer));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
