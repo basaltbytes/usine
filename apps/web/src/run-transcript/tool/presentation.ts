@@ -5,17 +5,28 @@ import { JsonObject, code, content, fields, object, string, type ToolSection } f
 
 export type { ToolSection } from "./sections.ts";
 
+/** Recorded work for compact summaries, independent of formatted subjects and readable sections. */
+export type ToolActivity =
+  | {
+      readonly _tag: "Files";
+      readonly operation: "read" | "edit" | "write" | "change";
+      readonly paths: ReadonlyArray<string>;
+    }
+  | { readonly _tag: "Command"; readonly command: string | undefined }
+  | { readonly _tag: "Search" | "Delegation" | "Tool" };
+
 /** A tool's purpose, subject, and readable content; its original payload remains on TranscriptTool. */
 export interface ToolPresentation {
   readonly category: "command" | "read" | "edit" | "write" | "search" | "agent" | "tool";
+  readonly activity: ToolActivity;
   readonly title: string;
   readonly subject: string;
   readonly input: ReadonlyArray<ToolSection>;
   readonly output: ReadonlyArray<ToolSection>;
 }
 
-/** Classifies a harness tool name for both its presentation and routine-work summaries. */
-export const toolCategory = (name: string): ToolPresentation["category"] => {
+// Classifies a harness tool name at the presentation boundary.
+const toolCategory = (name: string): ToolPresentation["category"] => {
   switch (name.toLowerCase()) {
     case "bash":
     case "powershell":
@@ -56,6 +67,7 @@ const command = ({ input, output }: Payload): Body => {
   const result = object(output);
   const command = string(request.command) ?? string(result.command);
   return {
+    activity: { _tag: "Command", command },
     title: "Command",
     subject: command ?? "Command details unavailable",
     input: [
@@ -98,6 +110,7 @@ const search = ({ input, output, name }: Payload): Body => {
   const result = object(output);
   const action = object(request.action);
   return {
+    activity: { _tag: "Search" },
     title: name.toLowerCase() === "ls" ? "List files" : "Search",
     subject:
       string(request.pattern) ??
@@ -118,6 +131,7 @@ const agent = ({ input, output }: Payload): Body => {
   const request = object(input);
   const task = string(request.task) ?? string(request.prompt);
   return {
+    activity: { _tag: "Delegation" },
     title: "Delegate",
     subject: string(request.description) ?? task ?? "Delegated task",
     input: [
@@ -153,6 +167,7 @@ const tool = ({ input, output, name }: Payload): Body => {
         .join(" · ")
     : name;
   return {
+    activity: { _tag: "Tool" },
     title: title || name,
     subject: Schema.is(JsonObject)(args)
       ? `${Object.keys(args).length} parameters`

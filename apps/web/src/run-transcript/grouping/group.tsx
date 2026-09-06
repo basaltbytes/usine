@@ -6,7 +6,7 @@ import { TranscriptToolRow } from "../tool/tool.tsx";
 import { isGroupOpen, useTranscriptDisclosure } from "./disclosure.tsx";
 import { groupSummary, type ToolGroup } from "./model.ts";
 
-/** A quiet expandable summary of successful calls, with every original tool available inside. */
+/** A quiet expandable summary of completed calls, with every original tool available inside. */
 export const CompletedTools = ({ group }: { readonly group: ToolGroup }) => {
   const { state, change } = useTranscriptDisclosure();
   const { scrollToMessage } = useMessageScroller();
@@ -31,8 +31,8 @@ export const CompletedTools = ({ group }: { readonly group: ToolGroup }) => {
         }
       >
         <CaretRightIcon aria-hidden="true" className="shrink-0 transition-transform" />
-        <span>{groupSummary(group)}</span>
-        <span className="sr-only"> · Completed tools</span>
+        <span className="min-w-0 break-words">{groupSummary(group)}</span>
+        <span className="sr-only"> · {group.tools.length} completed tools</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-2 pl-3 pt-2">
         {group.tools.map((tool) => (

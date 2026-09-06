@@ -8,6 +8,8 @@ Opening a Run shows its conversation first, with Task, Event, and Attempts in se
 
 The app uses React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, shadcn components on Base UI with Phosphor icons, and shadcn/typeset over react-markdown for prose. Its visual system follows ADR 0015: dark-only, Catppuccin Mocha foreground and accents over the shadcn preset's neutrals, Geist for text and Geist Mono for headings and identifiers, flat ruled sections, and semantic run-state colors.
 
+Adjacent completed tools have expandable action summaries, such as “Edited conversation.tsx · ran tests.” File summaries count distinct recorded paths and distinguish shared basenames with parent directories. Recognized test and build invocations describe what ran; their results remain in the tool details. Long or varied groups use compact counts, and loading earlier inputs fills in missing file and command details.
+
 ## How to add UI
 
 The registry is the component library; the theme is the only place colors and type live.
