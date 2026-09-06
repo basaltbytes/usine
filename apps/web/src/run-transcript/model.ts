@@ -18,6 +18,8 @@ interface NoticeContent {
 interface TranscriptPosition {
   readonly key: string;
   readonly sequence: TranscriptEventView["sequence"];
+  /** Newest durable event represented by this row, independently of its position. */
+  readonly latestSequence: TranscriptEventView["sequence"];
   readonly receivedAt: string;
 }
 
@@ -86,6 +88,7 @@ const position = (
 ): TranscriptPosition => ({
   key: `event:${event.sequence}`,
   sequence: event.sequence,
+  latestSequence: event.sequence,
   receivedAt: event.receivedAt,
 });
 
@@ -247,6 +250,7 @@ export const projectTranscript = (
       _tag: "Session",
       ...position(first),
       key,
+      latestSequence: group.events.at(-1)?.sequence ?? first.sequence,
       attemptId: group.attemptId,
       session: group.session,
       status,

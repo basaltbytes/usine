@@ -1,27 +1,34 @@
-import { ArrowDownIcon } from "@phosphor-icons/react";
 import type {
   AttemptView,
   RunStateTag,
   TranscriptEventView,
   TranscriptPageCursor,
 } from "@usine/orchestrator/operator";
-import { useEffect, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { Button } from "@/components/ui/button";
 import { ButtonGroup } from "@/components/ui/button-group";
 import {
   MessageScroller,
-  MessageScrollerButton,
   MessageScrollerContent,
   MessageScrollerItem,
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-import type { TranscriptFilter } from "./model.ts";
+import { projectTranscript, type TranscriptFilter } from "./model.ts";
 import { PreserveReadingPosition } from "./scroll-position.tsx";
 import { Transcript } from "./transcript.tsx";
 import { SessionActivity } from "./activity.tsx";
 import { TranscriptDisclosureProvider } from "./grouping/disclosure.tsx";
+import {
+  acknowledgeUnread,
+  advanceUnread,
+  indexTranscriptUpdates,
+  initializeUnread,
+  type TranscriptUpdate,
+} from "./navigation/model.ts";
+import { ErrorControls, RevealError } from "./navigation/errors.tsx";
+import { UpdateNavigation } from "./navigation/updates.tsx";
 
 /** A Run's conversation follows incoming activity until the reader scrolls away. */
 export const Conversation = ({
@@ -45,6 +52,40 @@ export const Conversation = ({
 }) => {
   const [filter, setFilter] = useState<TranscriptFilter>("all");
   const viewportRef = useRef<HTMLDivElement>(null);
+  const updates = useMemo(
+    () => indexTranscriptUpdates(projectTranscript(events, attempts)),
+    [events, attempts],
+  );
+  const through = events.reduce<TranscriptEventView["sequence"] | null>(
+    (latest, event) => (latest === null || event.sequence > latest ? event.sequence : latest),
+    null,
+  );
+  const [unread, setUnread] = useState(() => initializeUnread(through));
+  const [selectedErrorKey, setSelectedErrorKey] = useState<string | null>(null);
+  const [pendingError, setPendingError] = useState<TranscriptUpdate | null>(null);
+  const [pendingLatest, setPendingLatest] = useState(false);
+  const observe = useCallback(
+    (atLatest: boolean) => {
+      setUnread((previous) => {
+        const next = advanceUnread(previous, updates, through);
+        return atLatest ? acknowledgeUnread(next) : next;
+      });
+    },
+    [updates, through],
+  );
+  const selectError = (error: TranscriptUpdate) => {
+    setFilter("all");
+    setSelectedErrorKey(error.key);
+    setPendingError(error);
+    setPendingLatest(false);
+  };
+  const jumpLatest = () => {
+    setFilter("all");
+    setPendingLatest(true);
+    setPendingError(null);
+  };
+  const reachedLatest = useCallback(() => setPendingLatest(false), []);
+  const revealedError = useCallback(() => setPendingError(null), []);
   const [, refreshTime] = useReducer((version: number) => version + 1, 0);
   useEffect(() => {
     const timer = setInterval(refreshTime, 60_000);
@@ -60,13 +101,25 @@ export const Conversation = ({
               size="sm"
               variant={filter === value ? "secondary" : "ghost"}
               aria-pressed={filter === value}
-              onClick={() => setFilter(value)}
+              onClick={() => {
+                setFilter(value);
+                setPendingError(null);
+                setPendingLatest(false);
+              }}
             >
               {{ all: "Everything", messages: "Messages", tools: "Tools" }[value]}
             </Button>
           ))}
         </ButtonGroup>
-        <span className="text-muted-foreground">{state === "Running" ? "Live" : state}</span>
+        <div className="flex items-center gap-3">
+          <ErrorControls
+            errors={updates.filter((update) => update.isError)}
+            selectedKey={selectedErrorKey}
+            earlier={earlier !== undefined}
+            onSelect={selectError}
+          />
+          <span className="text-muted-foreground">{state === "Running" ? "Live" : state}</span>
+        </div>
       </div>
       <SessionActivity events={events} attempts={attempts} />
       <TranscriptDisclosureProvider>
@@ -112,13 +165,17 @@ export const Conversation = ({
                 </MessageScrollerContent>
               </MessageScrollerViewport>
             </PreserveReadingPosition>
-            <MessageScrollerButton
-              size="sm"
-              className="gap-1.5 shadow-sm"
-              aria-label="Jump to latest"
-            >
-              <ArrowDownIcon aria-hidden="true" /> Jump to latest
-            </MessageScrollerButton>
+            <RevealError target={pendingError} filter={filter} onRevealed={revealedError} />
+            <UpdateNavigation
+              count={unread.keys.size}
+              active={active}
+              filter={filter}
+              pendingLatest={pendingLatest}
+              revealingError={pendingError !== null}
+              onObserve={observe}
+              onLatest={jumpLatest}
+              onReachedLatest={reachedLatest}
+            />
           </MessageScroller>
         </MessageScrollerProvider>
       </TranscriptDisclosureProvider>
