@@ -9,14 +9,13 @@ import {
 import { SessionFinished, SessionStarted, TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Commit } from "@usine/core/step/result";
-import { Deferred, Effect, Option, Queue } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { Deferred, Effect, Option, Path, Queue } from "effect";
 import { makeCheckout } from "./support/git.ts";
 import { command, controlledSession, spec, start } from "./support/session.ts";
 import { startHost } from "./support/stdio.ts";
 
 describe("run-host results", () => {
-  it.live("acknowledges Interrupt when the SDK immediately fails its result while stopping", () =>
+  it.effect("acknowledges Interrupt when the SDK immediately fails its result while stopping", () =>
     Effect.gen(function* () {
       const session = yield* controlledSession();
       const runtime = AgentRuntime.of({
@@ -38,13 +37,13 @@ describe("run-host results", () => {
       yield* host.send(start());
       yield* host.next;
       yield* host.send(command(new AttemptChannel.Interrupt()));
-      yield* host.result.pipe(Effect.timeout("2 seconds"));
+      yield* host.result;
       expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
       expect(yield* Deferred.isDone(session.released)).toBe(true);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 
-  it.live("emits Failed when the session result fails while its event stream is still open", () =>
+  it.effect("emits Failed when the session result fails while its event stream is still open", () =>
     Effect.gen(function* () {
       const session = yield* controlledSession();
       const host = yield* startHost(session.runtime);
@@ -57,17 +56,17 @@ describe("run-host results", () => {
           message: "The agent could not complete the task.",
         }),
       );
-      yield* host.result.pipe(Effect.timeout("2 seconds"));
+      yield* host.result;
       expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Failed"]);
       const failed = host.frames.at(-1)?.payload;
       assert(failed?._tag === "Failed");
       expect(failed.failure._tag).toBe("AgentFailure");
       expect(failed.failure.message).toBe("The agent could not complete the task.");
       expect(yield* Deferred.isDone(session.released)).toBe(true);
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 
-  it.live(
+  it.effect(
     "emits retryable Failed when the event stream fails while the session result is pending",
     () =>
       Effect.gen(function* () {
@@ -84,14 +83,14 @@ describe("run-host results", () => {
             cause: new Error("Connection closed"),
           }),
         );
-        yield* host.result.pipe(Effect.timeout("2 seconds"));
+        yield* host.result;
         expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Failed"]);
         const failed = host.frames.at(-1)?.payload;
         assert(failed?._tag === "Failed");
         expect(failed.failure._tag).toBe("InfraFailure");
         expect(failed.failure.message).toBe("The SDK event stream disconnected.");
         expect(yield* Deferred.isDone(session.released)).toBe(true);
-      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+      }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 
   it.live(
@@ -100,9 +99,7 @@ describe("run-host results", () => {
       Effect.gen(function* () {
         const checkout = yield* makeCheckout();
         const session = yield* controlledSession();
-        const host = yield* startHost(session.runtime).pipe(
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, checkout.hostSpawner),
-        );
+        const host = yield* startHost(session.runtime, checkout.hostSpawner);
         yield* host.send(
           start(new AttemptChannel.RunSpec({ ...spec, baseCommit: checkout.baseCommit })),
         );
@@ -113,7 +110,7 @@ describe("run-host results", () => {
           session.result,
           new SessionResult({ message: "Committed the change." }),
         );
-        const error = yield* host.result.pipe(Effect.timeout("2 seconds"), Effect.flip);
+        const error = yield* host.result.pipe(Effect.flip);
         assert(error._tag === "RunHostError");
         expect(error.stage).toBe("git");
         expect(error.message).toBe(`Commit ${sha} has no summary`);
@@ -126,9 +123,7 @@ describe("run-host results", () => {
     Effect.gen(function* () {
       const checkout = yield* makeCheckout();
       const session = yield* controlledSession();
-      const host = yield* startHost(session.runtime).pipe(
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, checkout.hostSpawner),
-      );
+      const host = yield* startHost(session.runtime, checkout.hostSpawner);
       yield* host.send(
         start(new AttemptChannel.RunSpec({ ...spec, baseCommit: checkout.baseCommit })),
       );
@@ -168,9 +163,7 @@ describe("run-host results", () => {
     Effect.gen(function* () {
       const checkout = yield* makeCheckout();
       const session = yield* controlledSession();
-      const host = yield* startHost(session.runtime).pipe(
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, checkout.hostSpawner),
-      );
+      const host = yield* startHost(session.runtime, checkout.hostSpawner);
       yield* host.send(
         start(new AttemptChannel.RunSpec({ ...spec, baseCommit: checkout.baseCommit })),
       );

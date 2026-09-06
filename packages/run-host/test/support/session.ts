@@ -16,8 +16,7 @@ import {
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { Cause, DateTime, Deferred, Effect, Option, Queue } from "effect";
-import { Stream } from "effect";
+import { Cause, DateTime, Deferred, Effect, Option, Queue, Stream } from "effect";
 
 export const spec = new AttemptChannel.RunSpec({
   attemptId: AttemptId.make("run/execute/1"),

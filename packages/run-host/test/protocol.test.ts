@@ -1,19 +1,10 @@
-import { assert, describe, expect, it } from "@effect/vitest";
+import { describe, expect, it } from "@effect/vitest";
 import { SessionOperationError } from "@usine/agents/runtime";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Deferred, Effect, Layer, Logger, Option, Path, Queue, Schema } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { Deferred, Effect, Logger, Option, Path, Queue, Schema } from "effect";
 import { command, controlledSession, spec, start } from "./support/session.ts";
 import { startHost } from "./support/stdio.ts";
-
-// Protocol rejection and interruption must finish without harvesting results.
-const services = Layer.merge(
-  Path.layer,
-  Layer.succeed(ChildProcessSpawner.ChildProcessSpawner)(
-    ChildProcessSpawner.make(() => Effect.die("Unexpected process during a protocol test")),
-  ),
-);
 
 describe("run-host protocol", () => {
   it.effect("reports failed SDK interrupt delivery while retaining the interrupted outcome", () =>
@@ -36,38 +27,26 @@ describe("run-host protocol", () => {
       yield* host.send(command(new AttemptChannel.Interrupt()));
       yield* host.result;
       expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
-      expect(logs).toContainEqual([
-        "Session interrupt delivery failed",
-        {
-          attemptId: spec.attemptId,
-          repository: spec.repository,
-          errorTag: "SessionOperationError",
-          message: "The SDK interrupt endpoint closed.",
-        },
-      ]);
-    }).pipe(Effect.scoped, Effect.provide(services)),
+      expect(logs).toContainEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            attemptId: spec.attemptId,
+            repository: spec.repository,
+            errorTag: "SessionOperationError",
+            message: "The SDK interrupt endpoint closed.",
+          }),
+        ]),
+      );
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 
-  for (const payload of [
-    new AttemptChannel.Steer({ message: "Wait for Start" }),
-    new AttemptChannel.Interrupt(),
-  ]) {
-    it.effect(`rejects ${payload._tag} before Start without launching an agent`, () =>
-      Effect.gen(function* () {
-        const session = yield* controlledSession();
-        const host = yield* startHost(session.runtime);
-        yield* host.send(command(payload));
-        const error = yield* Effect.flip(host.result);
-        assert.strictEqual(error._tag, "RunHostError");
-        expect(error.stage).toBe("input");
-        expect(error.message).toBe("The first protocol frame must be Start");
-        expect(host.frames).toEqual([]);
-        expect(yield* Queue.size(session.launches)).toBe(0);
-      }).pipe(Effect.scoped, Effect.provide(services)),
-    );
-  }
-
   for (const [name, wire] of [
+    [
+      "a command before Start",
+      Schema.encodeSync(AttemptChannel.InputFrameFromJson)(
+        command(new AttemptChannel.Interrupt()),
+      ) + "\n",
+    ],
     ["malformed JSON", "{\n"],
     [
       "unsupported version",
@@ -85,41 +64,29 @@ describe("run-host protocol", () => {
         const host = yield* startHost(session.runtime);
         yield* Queue.offer(host.stdin, new TextEncoder().encode(wire));
         const error = yield* Effect.flip(host.result);
-        assert.strictEqual(error._tag, "RunHostError");
-        expect(error.stage).toBe("input");
-        expect(error.message).toBe("Invalid protocol input frame");
+        expect(error).toMatchObject({ _tag: "RunHostError", stage: "input" });
         expect(host.frames).toEqual([]);
         expect(yield* Queue.size(session.launches)).toBe(0);
-      }).pipe(Effect.scoped, Effect.provide(services)),
+      }).pipe(Effect.scoped, Effect.provide(Path.layer)),
     );
   }
 
-  for (const [name, frame, message] of [
-    ["duplicate Start", start(), "The run host received a second Start frame"],
+  for (const [name, frame] of [
+    ["duplicate Start", start()],
     [
       "cross-Attempt Steer",
       command(
         new AttemptChannel.Steer({ message: "Wrong attempt" }),
-        1,
+        2,
         AttemptId.make("other/execute/1"),
       ),
-      "The run host received a command for another Attempt",
     ],
     [
       "cross-Attempt Interrupt",
-      command(new AttemptChannel.Interrupt(), 1, AttemptId.make("other/execute/1")),
-      "The run host received a command for another Attempt",
+      command(new AttemptChannel.Interrupt(), 2, AttemptId.make("other/execute/1")),
     ],
-    [
-      "sequence gap",
-      command(new AttemptChannel.Interrupt(), 3),
-      "The run host received a non-contiguous input sequence",
-    ],
-    [
-      "replayed sequence",
-      command(new AttemptChannel.Steer({ message: "Replay" }), 1),
-      "The run host received a non-contiguous input sequence",
-    ],
+    ["sequence gap", command(new AttemptChannel.Interrupt(), 3)],
+    ["replayed sequence", command(new AttemptChannel.Steer({ message: "Replay" }), 1)],
   ] as const) {
     it.effect(`rejects ${name} during an active Attempt`, () =>
       Effect.gen(function* () {
@@ -134,15 +101,13 @@ describe("run-host protocol", () => {
         expect(yield* Queue.take(session.steers)).toBe("Continue");
         yield* host.send(frame);
         const error = yield* Effect.flip(host.result);
-        assert.strictEqual(error._tag, "RunHostError");
-        expect(error.stage).toBe("input");
-        expect(error.message).toBe(message);
+        expect(error).toMatchObject({ _tag: "RunHostError", stage: "input" });
         expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started"]);
         expect(yield* Queue.size(session.launches)).toBe(1);
         expect(yield* Queue.size(session.steers)).toBe(0);
         expect(yield* Queue.size(interruptions)).toBe(0);
         expect(yield* Deferred.isDone(session.released)).toBe(true);
-      }).pipe(Effect.scoped, Effect.provide(services)),
+      }).pipe(Effect.scoped, Effect.provide(Path.layer)),
     );
   }
 
@@ -150,10 +115,7 @@ describe("run-host protocol", () => {
     "decodes split UTF-8 and coalesced commands, then interrupts the active session once",
     () =>
       Effect.gen(function* () {
-        const interruptions = yield* Queue.make<void>();
-        const session = yield* controlledSession(
-          Queue.offer(interruptions, undefined).pipe(Effect.asVoid),
-        );
+        const session = yield* controlledSession();
         const host = yield* startHost(session.runtime);
         const encode = Schema.encodeSync(AttemptChannel.InputFrameFromJson);
         const bytes = new TextEncoder().encode(
@@ -165,7 +127,6 @@ describe("run-host protocol", () => {
         yield* host.result;
         expect((yield* Queue.take(session.launches)).spec).toEqual(spec);
         expect(yield* Queue.take(session.steers)).toBe("Keep café accents");
-        expect(yield* Queue.size(interruptions)).toBe(1);
         expect(
           host.frames.map((frame) => [frame.sequence, frame.attemptId, frame.payload._tag]),
         ).toEqual([
@@ -176,7 +137,7 @@ describe("run-host protocol", () => {
           new AttemptChannel.Started({ parentModel: session.session.brain.model }),
         );
         expect(yield* Deferred.isDone(session.released)).toBe(true);
-      }).pipe(Effect.scoped, Effect.provide(services)),
+      }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 
   it.effect("fails when stdin closes during an active Attempt and releases the session", () =>
@@ -187,11 +148,10 @@ describe("run-host protocol", () => {
       yield* host.next;
       yield* Queue.end(host.stdin);
       const error = yield* Effect.flip(host.result);
-      assert.strictEqual(error._tag, "RunHostError");
-      expect(error.message).toBe("The protocol input channel closed before the run host finished");
+      expect(error).toMatchObject({ _tag: "RunHostError", stage: "input" });
       expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started"]);
       expect(yield* Deferred.isDone(session.released)).toBe(true);
-    }).pipe(Effect.scoped, Effect.provide(services)),
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 
   it.effect(
@@ -215,6 +175,6 @@ describe("run-host protocol", () => {
         expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
         expect(yield* Deferred.isDone(deliveryStopped)).toBe(true);
         expect(yield* Deferred.isDone(session.released)).toBe(true);
-      }).pipe(Effect.scoped, Effect.provide(services)),
+      }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 });

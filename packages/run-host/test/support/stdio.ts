@@ -1,15 +1,25 @@
 import { AgentRuntime } from "@usine/agents/runtime";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Cause, Effect, Fiber, Queue, Schema, Sink, Stdio, Stream } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { runHost } from "../../src/run-host.ts";
 
 const encodeInput = Schema.encodeSync(AttemptChannel.InputFrameFromJson);
+const noProcesses = ChildProcessSpawner.make(() =>
+  Effect.die("This test does not supply a process spawner"),
+);
 
 /** Runs the production host against byte streams; stdout is decoded independently of its writes. */
-export const startHost = Effect.fn("test.startHost")(function* (runtime: AgentRuntime["Service"]) {
+export const startHost = Effect.fn("test.startHost")(function* (
+  runtime: AgentRuntime["Service"],
+  spawner = noProcesses,
+) {
   const stdin = yield* Queue.make<Uint8Array, Cause.Done>();
   const stdout = yield* Queue.make<Uint8Array, Cause.Done>();
-  const received = yield* Queue.make<AttemptChannel.OutboundEnvelope>();
+  const received = yield* Queue.make<
+    AttemptChannel.OutboundEnvelope,
+    Schema.SchemaError | Cause.Done
+  >();
   const frames: Array<AttemptChannel.OutboundEnvelope> = [];
   const output = yield* Stream.fromQueue(stdout).pipe(
     Stream.decodeText(),
@@ -23,6 +33,8 @@ export const startHost = Effect.fn("test.startHost")(function* (runtime: AgentRu
       frames.push(frame);
       return Queue.offer(received, frame);
     }),
+    Effect.tapError((error) => Queue.fail(received, error)),
+    Effect.ensuring(Queue.end(received)),
     Effect.orDie,
     Effect.forkScoped,
   );
@@ -37,6 +49,7 @@ export const startHost = Effect.fn("test.startHost")(function* (runtime: AgentRu
   });
   const host = yield* runHost().pipe(
     Effect.provideService(AgentRuntime, runtime),
+    Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     Effect.provideService(Stdio.Stdio, io),
     Effect.ensuring(Queue.end(stdout)),
     Effect.forkScoped,
