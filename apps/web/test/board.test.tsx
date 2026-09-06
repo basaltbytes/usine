@@ -7,7 +7,9 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
-import { LaneName } from "@usine/config/board";
+import { LabelLaneSource, LaneName } from "@usine/config/board";
+import { GitHubLabelName } from "@usine/config/label";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   AgentFailureView,
   AttemptView,
@@ -22,12 +24,20 @@ import {
   RunFailureNeed,
   RunView,
   SucceededAttemptView,
+  WritableBoardLaneView,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import { applyMove, itemFailure, laneUnder, orderLanes, runsWithoutCard } from "../src/board.tsx";
+import {
+  applyMove,
+  itemFailure,
+  laneUnder,
+  orderLanes,
+  ProjectBoard,
+  runsWithoutCard,
+} from "../src/board.tsx";
 import { TaskHistory } from "../src/components/task-history.tsx";
 import { RunLinks } from "../src/components/run-links.tsx";
 import { failureMessage, needCopy } from "../src/operator-copy.ts";
@@ -256,6 +266,51 @@ describe("Board lane order", () => {
 });
 
 describe("Board drag targets", () => {
+  it("offers card moves only when another authored label lane is available", () => {
+    const card = itemWithRun("Succeeded", [attempt(1, null)]);
+    const render = (origin: "authored" | "proposed", names: ReadonlyArray<string>) => {
+      const project = new ProjectView({
+        repository,
+        status: "clear",
+        runs: card.runs,
+        labels: [],
+        preflightFindings: [],
+        board: new BoardView({
+          failures: [],
+          lanes: names.map((name, index) => {
+            const label = GitHubLabelName.make(name);
+            const fields = {
+              id: BoardLaneId.make(`${origin}:${name}`),
+              name: LaneName.make(name),
+              sources: [new LabelLaneSource({ label })],
+              items: index === 0 ? [card] : [],
+            };
+            return origin === "authored"
+              ? new WritableBoardLaneView({ ...fields, origin: "authored", labels: [label] })
+              : new ReadOnlyBoardLaneView({ ...fields, origin: "proposed" });
+          }),
+        }),
+      });
+      return renderToStaticMarkup(
+        <QueryClientProvider client={new QueryClient()}>
+          <ProjectBoard project={project} disabled={false} openRun={() => {}} />
+        </QueryClientProvider>,
+      );
+    };
+    const proposed = render("proposed", ["ready", "review"]);
+    const singleAuthored = render("authored", ["ready"]);
+    for (const readOnly of [proposed, singleAuthored]) {
+      assert.ok(!readOnly.includes("Move issue #33 to a lane"));
+      // Read-only cards are content, without an inert interactive control around them.
+      assert.ok(!readOnly.includes('role="button"'));
+    }
+    assert.ok(proposed.includes("repos[].lanes"));
+    assert.ok(proposed.includes("usine.yaml"));
+    const authored = render("authored", ["ready", "review"]);
+    assert.ok(authored.includes("Move issue #33 to a lane"));
+    assert.ok(authored.includes('role="button"'));
+  });
+
   const lane = (id: string, items: ReadonlyArray<BoardTaskView>) =>
     new ReadOnlyBoardLaneView({
       id: BoardLaneId.make(id),
