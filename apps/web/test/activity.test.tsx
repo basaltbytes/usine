@@ -13,6 +13,7 @@ const command: TranscriptTool = {
   _tag: "Tool",
   key: "command",
   sequence: TranscriptSequence.make(1),
+  latestSequence: TranscriptSequence.make(1),
   receivedAt: startedAt,
   name: "bash",
   start: Option.some({ receivedAt: startedAt, input: { command: "pnpm test" } }),
@@ -22,6 +23,7 @@ const session: TranscriptSession = {
   _tag: "Session",
   key: "parent",
   sequence: TranscriptSequence.make(1),
+  latestSequence: TranscriptSequence.make(1),
   receivedAt: startedAt,
   attemptId: AttemptId.make("attempt-1"),
   session: new ParentSession({
