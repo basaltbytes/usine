@@ -95,7 +95,7 @@ export const ToolSections = ({
               }
             >
               <CodeBlockHeader>
-                <CodeBlockTitle>{label}</CodeBlockTitle>
+                <CodeBlockTitle className="wrap-anywhere">{label}</CodeBlockTitle>
                 <CodeBlockActions>
                   <CodeBlockCopyButton />
                 </CodeBlockActions>

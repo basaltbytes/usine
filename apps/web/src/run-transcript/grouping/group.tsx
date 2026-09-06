@@ -36,7 +36,7 @@ export const CompletedTools = ({ group }: { readonly group: ToolGroup }) => {
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-2 pl-3 pt-2">
         {group.tools.map((tool) => (
-          <MessageScrollerItem key={tool.key} messageId={tool.key}>
+          <MessageScrollerItem key={tool.key} messageId={tool.key} className="-mx-2 px-2">
             <TranscriptToolRow entry={tool} />
           </MessageScrollerItem>
         ))}

@@ -80,7 +80,7 @@ export const TranscriptToolRow = ({ entry }: { readonly entry: TranscriptTool })
       </ToolHeader>
       <ToolContent>
         {!patchFirst && input}
-        <div data-transcript-id={`${entry.key}:result`}>
+        <div data-transcript-id={`${entry.key}:result`} className="space-y-3">
           {view.output.length > 0 ? (
             <ToolSections sections={view.output} category={view.category} />
           ) : (
