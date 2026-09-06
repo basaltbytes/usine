@@ -16,6 +16,7 @@ import { useMessageScroller } from "@/components/ui/message-scroller";
 import type { TranscriptTool } from "../model.ts";
 import { ToolSections } from "./content.tsx";
 import { presentTool } from "./presentation.ts";
+import { useTranscriptDisclosure } from "../grouping/disclosure.tsx";
 
 const icons = {
   command: TerminalWindowIcon,
@@ -30,10 +31,22 @@ const icons = {
 /** One durable tool call, displayed by its purpose with full payloads available on request. */
 export const TranscriptToolRow = ({ entry }: { readonly entry: TranscriptTool }) => {
   const { scrollToMessage } = useMessageScroller();
+  const disclosure = useTranscriptDisclosure();
   const view = presentTool(entry);
   const Icon = icons[view.category];
   const state = entry.state;
   const status = state._tag === "Finished" ? "Completed" : state._tag;
+  const patchFirst =
+    view.category === "edit" &&
+    view.output.some((section) => section._tag === "Code" && section.language === "diff");
+  const input = (
+    <>
+      <ToolSections sections={view.input} category={view.category} />
+      {Option.isNone(entry.start) && (
+        <p className="text-muted-foreground">Load earlier history to see this call’s input.</p>
+      )}
+    </>
+  );
   const duration = Option.match(entry.start, {
     onNone: () => "",
     onSome: ({ receivedAt }) => {
@@ -46,10 +59,12 @@ export const TranscriptToolRow = ({ entry }: { readonly entry: TranscriptTool })
   return (
     <Tool
       data-transcript-id={entry.key}
+      open={disclosure.state.get(entry.key)?.open === true}
       className="motion-safe:animate-in motion-safe:fade-in"
       onOpenChange={(open) => {
         // Inspecting a tool suspends following the bottom before its content grows.
         if (open) scrollToMessage(entry.key, { align: "nearest", behavior: "instant" });
+        disclosure.change({ _tag: "Item", key: entry.key, open });
       }}
     >
       <ToolHeader
@@ -64,26 +79,23 @@ export const TranscriptToolRow = ({ entry }: { readonly entry: TranscriptTool })
         )}
       </ToolHeader>
       <ToolContent>
-        <ToolSections sections={view.input} category={view.category} />
-        {Option.isNone(entry.start) && (
-          <p className="text-muted-foreground">Load earlier history to see this call’s input.</p>
-        )}
-        <ToolOutput
-          data-transcript-id={`${entry.key}:result`}
-          title={state._tag === "Error" ? "Error" : "Result"}
-        >
+        {!patchFirst && input}
+        <div data-transcript-id={`${entry.key}:result`}>
           {view.output.length > 0 ? (
             <ToolSections sections={view.output} category={view.category} />
           ) : (
-            <p className="text-muted-foreground">
-              {state._tag === "Running"
-                ? "Waiting for a result…"
-                : state._tag === "Stopped"
-                  ? "The session ended before this tool returned a result."
-                  : "No output was recorded."}
-            </p>
+            <ToolOutput title={state._tag === "Error" ? "Error" : "Result"}>
+              <p className="text-muted-foreground">
+                {state._tag === "Running"
+                  ? "Waiting for a result…"
+                  : state._tag === "Stopped"
+                    ? "The session ended before this tool returned a result."
+                    : "No output was recorded."}
+              </p>
+            </ToolOutput>
           )}
-        </ToolOutput>
+        </div>
+        {patchFirst && input}
         <Collapsible className="border-t pt-3">
           <CollapsibleTrigger
             render={

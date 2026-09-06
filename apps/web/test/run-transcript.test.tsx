@@ -48,13 +48,19 @@ import {
   RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
 } from "../src/run-transcript/cache.ts";
 import { projectTranscript, type TranscriptTool } from "../src/run-transcript/model.ts";
-import { SessionActivity, Transcript } from "../src/run-transcript/transcript.tsx";
+import { Transcript } from "../src/run-transcript/transcript.tsx";
+import { SessionActivity } from "../src/run-transcript/activity.tsx";
+import { TranscriptDisclosureProvider } from "../src/run-transcript/grouping/disclosure.tsx";
 import { MessageScrollerProvider } from "../src/components/ui/message-scroller.tsx";
 import { presentTool, type ToolSection } from "../src/run-transcript/tool/presentation.ts";
 import { fetchRunDetail } from "../src/run-transcript/fetch.ts";
 
 const renderToStaticMarkup = (node: ReactNode) =>
-  renderMarkup(<MessageScrollerProvider>{node}</MessageScrollerProvider>);
+  renderMarkup(
+    <TranscriptDisclosureProvider>
+      <MessageScrollerProvider>{node}</MessageScrollerProvider>
+    </TranscriptDisclosureProvider>,
+  );
 
 const attemptId = AttemptId.make("attempt-31");
 const brain = new BrainSpec({

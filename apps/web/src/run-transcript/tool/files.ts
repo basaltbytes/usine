@@ -13,6 +13,11 @@ const fileChanges = Schema.decodeUnknownOption(Schema.Array(FileChange));
 const fileLanguage = (path: string): Extract<ToolSection, { readonly _tag: "Code" }>["language"] =>
   /\.[cm]?tsx?$/iu.test(path) ? "typescript" : /\.json$/iu.test(path) ? "json" : "text";
 
+const confirmation = (output: Schema.Json | undefined): ReadonlyArray<ToolSection> =>
+  content(output, "Confirmation").map((section) =>
+    section._tag === "Code" ? { _tag: "Text", label: section.label, text: section.text } : section,
+  );
+
 /** Presents file operations using recorded contents and patches, with replacements as the fallback. */
 export const presentFile = (
   input: Schema.Json | undefined,
@@ -77,22 +82,18 @@ export const presentFile = (
         : []),
     ],
     output: Option.match(fileChanges(result.changes), {
-      onNone: () => [
-        ...(patch === undefined
-          ? content(
-              output,
-              action === "read" ? (path ?? "Output") : "Output",
-              action === "read" ? fileLanguage(path ?? "") : "text",
-            )
-          : [
-              ...content(
+      onNone: () =>
+        patch !== undefined
+          ? [
+              code(path ?? "Changes", patch, "diff"),
+              ...confirmation(
                 Object.fromEntries(Object.entries(result).filter(([key]) => key !== "details")),
-                "Output",
               ),
-              ...fields("Details", object(result.details), ["patch", "diff"]),
-            ]),
-        ...(patch === undefined ? [] : [code("Changes", patch, "diff")]),
-      ],
+              ...fields("Metadata", object(result.details), ["patch", "diff"]),
+            ]
+          : action === "read"
+            ? content(output, path ?? "Output", fileLanguage(path ?? ""))
+            : confirmation(output),
       onSome: (files) =>
         files.map(({ path, diff, kind }) => code(`${path} · ${kind.type}`, diff, "diff")),
     }),

@@ -101,14 +101,12 @@ export const ToolSections = ({
             </CodeBlock>
           ),
         Text: ({ label, text }) => (
-          <section className="space-y-2">
-            <h4 className="font-medium text-muted-foreground">{label}</h4>
+          <section aria-label={label}>
             <Markdown>{text}</Markdown>
           </section>
         ),
         Fields: ({ label, fields }) => (
-          <section className="space-y-2">
-            <h4 className="font-medium text-muted-foreground">{label}</h4>
+          <section aria-label={label}>
             <Fields fields={fields} />
           </section>
         ),

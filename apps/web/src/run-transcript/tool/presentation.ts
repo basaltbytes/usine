@@ -14,7 +14,8 @@ export interface ToolPresentation {
   readonly output: ReadonlyArray<ToolSection>;
 }
 
-const category = (name: string): ToolPresentation["category"] => {
+/** Classifies a harness tool name for both its presentation and routine-work summaries. */
+export const toolCategory = (name: string): ToolPresentation["category"] => {
   switch (name.toLowerCase()) {
     case "bash":
     case "powershell":
@@ -180,7 +181,7 @@ export const presentTool = (entry: TranscriptTool): ToolPresentation => {
       Error: ({ output }) => output,
     }),
   };
-  const kind = category(entry.name);
+  const kind = toolCategory(entry.name);
   const presenters = {
     command,
     read: ({ input, output }: Payload) => presentFile(input, output, "read"),

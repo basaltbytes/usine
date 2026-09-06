@@ -19,7 +19,9 @@ import {
 } from "@/components/ui/message-scroller";
 import type { TranscriptFilter } from "./model.ts";
 import { PreserveReadingPosition } from "./scroll-position.tsx";
-import { SessionActivity, Transcript } from "./transcript.tsx";
+import { Transcript } from "./transcript.tsx";
+import { SessionActivity } from "./activity.tsx";
+import { TranscriptDisclosureProvider } from "./grouping/disclosure.tsx";
 
 /** A Run's conversation follows incoming activity until the reader scrolls away. */
 export const Conversation = ({
@@ -67,55 +69,59 @@ export const Conversation = ({
         <span className="text-muted-foreground">{state === "Running" ? "Live" : state}</span>
       </div>
       <SessionActivity events={events} attempts={attempts} />
-      <MessageScrollerProvider
-        key={filter}
-        autoScroll={active}
-        defaultScrollPosition="end"
-        scrollEdgeThreshold={8}
-      >
-        <MessageScroller className="min-h-0 flex-1">
-          <PreserveReadingPosition
-            active={active}
-            viewportRef={viewportRef}
-            revision={events.length + attempts.filter((attempt) => attempt.outcome !== null).length}
-          >
-            <MessageScrollerViewport
-              ref={viewportRef}
-              aria-label="Run conversation"
-              preserveScrollOnPrepend={false}
+      <TranscriptDisclosureProvider>
+        <MessageScrollerProvider
+          key={filter}
+          autoScroll={active}
+          defaultScrollPosition="end"
+          scrollEdgeThreshold={8}
+        >
+          <MessageScroller className="min-h-0 flex-1">
+            <PreserveReadingPosition
+              active={active}
+              viewportRef={viewportRef}
+              revision={
+                events.length + attempts.filter((attempt) => attempt.outcome !== null).length
+              }
             >
-              <MessageScrollerContent className="gap-4 px-4 pt-4 pb-16 sm:px-6">
-                {earlier !== undefined && (
-                  <MessageScrollerItem messageId="history" className="flex justify-center">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="self-center"
-                      disabled={loadingEarlier}
-                      onClick={loadEarlier}
-                    >
-                      {loadingEarlier ? "Loading…" : "Load earlier"}
-                    </Button>
-                  </MessageScrollerItem>
-                )}
-                {earlierError !== null && (
-                  <MessageScrollerItem messageId="history-error">
-                    <ErrorAlert message={earlierError} />
-                  </MessageScrollerItem>
-                )}
-                <Transcript events={events} attempts={attempts} filter={filter} />
-              </MessageScrollerContent>
-            </MessageScrollerViewport>
-          </PreserveReadingPosition>
-          <MessageScrollerButton
-            size="sm"
-            className="gap-1.5 shadow-sm"
-            aria-label="Jump to latest"
-          >
-            <ArrowDownIcon aria-hidden="true" /> Jump to latest
-          </MessageScrollerButton>
-        </MessageScroller>
-      </MessageScrollerProvider>
+              <MessageScrollerViewport
+                ref={viewportRef}
+                aria-label="Run conversation"
+                preserveScrollOnPrepend={false}
+              >
+                <MessageScrollerContent className="gap-4 px-4 pt-4 pb-16 sm:px-6">
+                  {earlier !== undefined && (
+                    <MessageScrollerItem messageId="history" className="flex justify-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="self-center"
+                        disabled={loadingEarlier}
+                        onClick={loadEarlier}
+                      >
+                        {loadingEarlier ? "Loading…" : "Load earlier"}
+                      </Button>
+                    </MessageScrollerItem>
+                  )}
+                  {earlierError !== null && (
+                    <MessageScrollerItem messageId="history-error">
+                      <ErrorAlert message={earlierError} />
+                    </MessageScrollerItem>
+                  )}
+                  <Transcript events={events} attempts={attempts} filter={filter} />
+                </MessageScrollerContent>
+              </MessageScrollerViewport>
+            </PreserveReadingPosition>
+            <MessageScrollerButton
+              size="sm"
+              className="gap-1.5 shadow-sm"
+              aria-label="Jump to latest"
+            >
+              <ArrowDownIcon aria-hidden="true" /> Jump to latest
+            </MessageScrollerButton>
+          </MessageScroller>
+        </MessageScrollerProvider>
+      </TranscriptDisclosureProvider>
     </>
   );
 };
