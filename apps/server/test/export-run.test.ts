@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm, stat } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
 import { NodeServices } from "@effect/platform-node";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
@@ -211,4 +212,49 @@ describe("Run evidence export", () => {
       await rm(directory, { recursive: true, force: true });
     }
   });
+
+  it("refuses an unrelated database without changing its contents or journal mode", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "usine-export-unrelated-"));
+    try {
+      await mkdir(join(directory, ".usine"));
+      const filename = join(directory, ".usine", "runtime.sqlite");
+      const database = new DatabaseSync(filename);
+      try {
+        database.exec("CREATE TABLE original_marker (value TEXT)");
+        database.exec("INSERT INTO original_marker VALUES ('preserve me')");
+      } finally {
+        database.close();
+      }
+      const original = await readFile(filename);
+      const result = runCli(directory, ["export-run", "missing"]);
+      assert.strictEqual(result.status, 1);
+      assert.match(result.stderr, /Could not read evidence/);
+      assert.notMatch(result.stdout, /Exported Run/);
+      assert.deepStrictEqual(await readFile(filename), original);
+      assert.deepStrictEqual(await readdir(directory), [".usine"]);
+      assert.deepStrictEqual(await readdir(join(directory, ".usine")), ["runtime.sqlite"]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it.each(["corrupt", "directory"])(
+    "reports a %s runtime store as a read failure",
+    async (kind) => {
+      const directory = await mkdtemp(join(tmpdir(), "usine-export-invalid-"));
+      try {
+        await mkdir(join(directory, ".usine"));
+        const filename = join(directory, ".usine", "runtime.sqlite");
+        if (kind === "directory") await mkdir(filename);
+        else await writeFile(filename, "not a SQLite database");
+        const result = runCli(directory, ["export-run", "missing"]);
+        assert.strictEqual(result.status, 1);
+        assert.match(result.stderr, /Could not read evidence/);
+        assert.notMatch(result.stdout, /Exported Run/);
+        assert.deepStrictEqual(await readdir(directory), [".usine"]);
+      } finally {
+        await rm(directory, { recursive: true, force: true });
+      }
+    },
+  );
 });

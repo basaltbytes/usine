@@ -7,6 +7,7 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run } from "@usine/core/run";
 import { Step } from "@usine/core/step";
 import { Schema } from "effect";
+import { TranscriptEntry } from "../transcript.ts";
 
 /** The full durable view of one Run. */
 export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSnapshot")({
@@ -20,6 +21,12 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   task: AttemptTask,
   agent: Agent,
   parentModel: Schema.Option(ModelId),
+}) {}
+
+/** A Run snapshot and all its saved transcript entries from the same database transaction. */
+export class RunEvidence extends Schema.Class<RunEvidence>("@usine/engine/RunEvidence")({
+  snapshot: RunSnapshot,
+  transcript: Schema.Array(TranscriptEntry),
 }) {}
 
 /** The lighter view used when listing Runs for operators. */

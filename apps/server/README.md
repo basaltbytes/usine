@@ -29,9 +29,9 @@ usine export-run <runId> --output /path/to/evidence.json
 
 The default destination is `run-<encoded-runId>.json` in the current directory; characters such as `/` in the Run id are percent-encoded. The output directory must already exist. The command writes a complete file with owner-only permissions, preserves existing destinations, and prints its path after success. A missing Run, unreadable runtime store, encoding failure, or write failure returns a nonzero exit status.
 
-The versioned JSON contains `exportedAt`, the full durable Run `snapshot` (Event, effective task and Agent, repository revision, Step result, and all Attempts), and every saved transcript envelope for those Attempts in append order. It includes history beyond the drawer's current page. Active Runs continue accumulating history, so export a settled Run for its final evidence.
+The versioned JSON contains `exportedAt`, the full durable Run `snapshot` (Event, effective task and Agent, repository revision, Step result, and all Attempts), and every saved transcript envelope for those Attempts in append order. The snapshot and transcripts come from one database transaction, including history beyond the drawer's current page. Active Runs continue accumulating history, so export a settled Run for its final evidence.
 
-Exporting requires the instance's `.usine/runtime.sqlite` and starts no Attempts or trigger polling. The command keeps the output local. Transcripts can contain repository content and tool output; inspect the file before sharing it. A Run export preserves selected evidence; a restorable backup still requires stopping the orchestrator and copying the instance folder, as described in [ADR 0010](../../docs/adr/0010-single-sqlite-runtime-store.md).
+Exporting opens the instance's existing `.usine/runtime.sqlite` in read-only mode, without creating tables, running migrations, starting Attempts, or polling triggers. The command keeps the output local. Transcripts can contain repository content and tool output; inspect the file before sharing it. A Run export preserves selected evidence; a restorable backup still requires stopping the orchestrator and copying the instance folder, as described in [ADR 0010](../../docs/adr/0010-single-sqlite-runtime-store.md).
 
 ## Stopping and updating
 

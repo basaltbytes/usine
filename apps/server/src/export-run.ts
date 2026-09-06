@@ -1,22 +1,20 @@
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunId } from "@usine/core/run";
-import { observationLayer } from "@usine/engine/local-sqlite";
-import { RunReader, RunSnapshot } from "@usine/engine/run-reader";
-import { TranscriptAllQuery, TranscriptEntry } from "@usine/engine/transcript";
+import { runReaderLayer } from "@usine/engine/local-sqlite";
+import { RunEvidence, RunReader } from "@usine/engine/run-reader";
 import { Console, DateTime, Effect, FileSystem, Match, Option, Path, Schema } from "effect";
 
-/** One Run's saved execution context, Attempt history, and full channel transcripts. */
-export class RunEvidence extends Schema.Class<RunEvidence>("@usine/server/RunEvidence")({
-  version: Schema.Literal(1),
-  exportedAt: Schema.DateTimeUtc,
-  snapshot: RunSnapshot,
-  transcript: Schema.Array(TranscriptEntry),
-}) {}
-
 /** JSON encoding preserves timestamps, optional values, and typed Attempt outcomes. */
-export const RunEvidenceFromJson = Schema.fromJsonString(Schema.toCodecJson(RunEvidence), {
-  space: 2,
-});
+export const RunEvidenceFromJson = Schema.fromJsonString(
+  Schema.toCodecJson(
+    Schema.Struct({
+      version: Schema.Literal(1),
+      exportedAt: Schema.DateTimeUtc,
+      ...RunEvidence.fields,
+    }),
+  ),
+  { space: 2 },
+);
 
 /** Reading, encoding, or writing Run evidence failed; no successful export was reported. */
 export class RunExportError extends Schema.TaggedError<RunExportError>(
@@ -29,22 +27,6 @@ export class RunExportError extends Schema.TaggedError<RunExportError>(
   cause: Schema.Defect(),
 }) {}
 
-/** Reads every saved transcript row for the Attempts in the Run snapshot, without the UI page limit. */
-const readEvidence = Effect.fn("RunEvidence.read")(function* (runId: RunId) {
-  yield* Effect.annotateCurrentSpan({ runId });
-  const reader = yield* RunReader;
-  const snapshot = yield* reader.inspect(runId);
-  const transcripts = yield* Effect.forEach(snapshot.attempts, ({ id }) =>
-    reader.transcript(new TranscriptAllQuery({ attemptId: id })),
-  );
-  return new RunEvidence({
-    version: 1,
-    exportedAt: yield* DateTime.now,
-    snapshot,
-    transcript: transcripts.flat().sort((left, right) => left.sequence - right.sequence),
-  });
-});
-
 /** Writes a complete evidence file without overwriting an existing destination. */
 const writeRunEvidence = Effect.fn("RunEvidence.write")(function* (
   evidence: RunEvidence,
@@ -52,7 +34,11 @@ const writeRunEvidence = Effect.fn("RunEvidence.write")(function* (
 ) {
   const runId = evidence.snapshot.run.id;
   yield* Effect.annotateCurrentSpan({ runId, output });
-  const json = yield* Schema.encodeEffect(RunEvidenceFromJson)(evidence).pipe(
+  const json = yield* Schema.encodeEffect(RunEvidenceFromJson)({
+    version: 1,
+    exportedAt: yield* DateTime.now,
+    ...evidence,
+  }).pipe(
     Effect.mapError(
       (cause) =>
         new RunExportError({ runId, operation: "encode", path: output, reason: cause._tag, cause }),
@@ -100,11 +86,10 @@ export const exportRun = Effect.fn("Cli.exportRun")(
       Option.getOrElse(output, () => `run-${encodeURIComponent(runId)}.json`),
     );
     yield* Effect.annotateCurrentSpan({ runId, instanceDirectory: directory, output: destination });
-    const fileSystem = yield* FileSystem.FileSystem;
     const databasePath = path.join(directory, ".usine", "runtime.sqlite");
-    // A maintenance command must not create a fresh runtime store in the wrong directory.
-    const evidence = yield* fileSystem.access(databasePath).pipe(
-      Effect.andThen(readEvidence(runId).pipe(Effect.provide(observationLayer(directory)))),
+    const reader = runReaderLayer(directory);
+    const evidence = yield* Effect.flatMap(RunReader, (reader) => reader.evidence(runId)).pipe(
+      Effect.provide(reader),
       Effect.mapError((cause) =>
         cause._tag === "RunNotFoundError"
           ? cause
@@ -112,7 +97,7 @@ export const exportRun = Effect.fn("Cli.exportRun")(
               runId,
               operation: "read",
               path: databasePath,
-              reason: cause._tag === "PlatformError" ? cause.reason._tag : cause._tag,
+              reason: cause._tag,
               cause,
             }),
       ),
@@ -125,12 +110,13 @@ export const exportRun = Effect.fn("Cli.exportRun")(
       "Run evidence export failed",
       Match.valueTags(error, {
         RunNotFoundError: ({ runId, _tag }) => ({ runId, errorTag: _tag }),
-        RunExportError: ({ runId, _tag, operation, path, reason }) => ({
+        RunExportError: ({ runId, _tag, operation, path, reason, cause }) => ({
           runId,
           errorTag: _tag,
           operation,
           path,
           reason,
+          cause,
         }),
       }),
     ),

@@ -277,6 +277,7 @@ const testLayer = (
   });
   const reader = Layer.succeed(RunReader)({
     inspect: () => Effect.succeed(runSnapshot),
+    evidence: () => Effect.die("unused"),
     list: () =>
       Ref.updateAndGet(overviewReads, (reads) => reads + 1).pipe(
         Effect.andThen(Effect.yieldNow),
