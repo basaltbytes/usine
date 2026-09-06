@@ -1,29 +1,14 @@
 import { BrainSpec } from "@usine/core/agent/brain";
-import { AgentSessionEvent, RateLimitWindow } from "@usine/core/agent/session";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import type { FailureView, NeedView, TranscriptEventView } from "@usine/orchestrator/operator";
-import { Match, Option, Schema } from "effect";
+import type { FailureView, NeedView } from "@usine/orchestrator/operator";
+import { Match } from "effect";
 
 export interface NeedCopy {
   readonly title: string;
   readonly detail: string;
   readonly repository: RepositoryName | null;
   readonly runId: RunId | null;
-}
-
-export interface PresentedTranscriptEvent {
-  readonly sequence: number;
-  readonly receivedAt: string;
-  readonly scope: "parent" | "child" | "channel";
-  readonly sessionId: string | null;
-  readonly parentId: string | null;
-  readonly agent: string | null;
-  readonly label: string;
-  readonly detail: string;
-  /** `markdown` is prose written for a reader; `plain` is a protocol payload shown verbatim. */
-  readonly format: "markdown" | "plain";
-  readonly isError: boolean;
 }
 
 export const brainLine = (brain: BrainSpec): string =>
@@ -84,130 +69,3 @@ export const needCopy = (need: NeedView): NeedCopy =>
       runId: null,
     }),
   });
-
-const jsonDetail = (value: Schema.Json): string => JSON.stringify(value, null, 2);
-
-const rateLimitWindow = (
-  name: string,
-  window: Option.Option<RateLimitWindow>,
-): ReadonlyArray<string> =>
-  Option.match(window, {
-    onNone: () => [],
-    onSome: ({ usedPercent }) => [`${name} ${usedPercent}% used`],
-  });
-
-const sessionPresentation = (
-  event: AgentSessionEvent,
-): Omit<PresentedTranscriptEvent, "sequence" | "receivedAt"> => {
-  const session = event.session;
-  const base = {
-    scope: session._tag === "ChildSession" ? ("child" as const) : ("parent" as const),
-    sessionId: session.id,
-    parentId: session._tag === "ChildSession" ? session.parentId : null,
-    agent: session.agent,
-    detail: "",
-    format: "plain" as const,
-    isError: false,
-  };
-  return Match.valueTags(event, {
-    SessionStarted: () => ({
-      ...base,
-      label: `${session.agent} started`,
-      detail: brainLine(session.brain),
-    }),
-    TextOutput: ({ text }) => ({
-      ...base,
-      label: session.agent,
-      detail: text,
-      format: "markdown" as const,
-    }),
-    ToolStarted: ({ tool, input }) => ({
-      ...base,
-      label: `${tool} started`,
-      detail: jsonDetail(input),
-    }),
-    ToolFinished: ({ tool, output, isError }) => ({
-      ...base,
-      label: `${tool} ${isError ? "failed" : "finished"}`,
-      detail: jsonDetail(output),
-      isError,
-    }),
-    PoolRateLimitsUpdated: ({ pool, rateLimits }) => ({
-      ...base,
-      label: `${pool} rate limits updated`,
-      detail: [
-        ...rateLimitWindow("primary", rateLimits.primary),
-        ...rateLimitWindow("secondary", rateLimits.secondary),
-      ].join(" · "),
-    }),
-    SessionFinished: () => ({ ...base, label: `${session.agent} finished` }),
-  });
-};
-
-export const presentTranscriptEvent = (event: TranscriptEventView): PresentedTranscriptEvent => ({
-  sequence: event.sequence,
-  receivedAt: event.receivedAt,
-  ...Match.valueTags(event.payload, {
-    Started: ({ parentModel }) => ({
-      scope: "channel" as const,
-      sessionId: null,
-      parentId: null,
-      agent: null,
-      label: "Attempt started",
-      detail: parentModel,
-      format: "plain" as const,
-      isError: false,
-    }),
-    SessionEvent: ({ event: sessionEvent }) => sessionPresentation(sessionEvent),
-    Final: ({ result }) => ({
-      scope: "channel" as const,
-      sessionId: null,
-      parentId: null,
-      agent: null,
-      label: "Attempt finished",
-      detail: result.message,
-      format: "markdown" as const,
-      isError: false,
-    }),
-    Failed: ({ failure }) => ({
-      scope: "channel" as const,
-      sessionId: null,
-      parentId: null,
-      agent: null,
-      label: failure._tag,
-      detail: failureMessage(failure),
-      format: "plain" as const,
-      isError: true,
-    }),
-    Interrupted: () => ({
-      scope: "channel" as const,
-      sessionId: null,
-      parentId: null,
-      agent: null,
-      label: "Interrupted",
-      detail: "The run host acknowledged the interrupt.",
-      format: "plain" as const,
-      isError: false,
-    }),
-    Steer: ({ message }) => ({
-      scope: "channel" as const,
-      sessionId: null,
-      parentId: null,
-      agent: null,
-      label: "Operator message",
-      detail: message,
-      format: "markdown" as const,
-      isError: false,
-    }),
-    Interrupt: () => ({
-      scope: "channel" as const,
-      sessionId: null,
-      parentId: null,
-      agent: null,
-      label: "Interrupt",
-      detail: "The operator asked the run host to stop.",
-      format: "plain" as const,
-      isError: false,
-    }),
-  }),
-});

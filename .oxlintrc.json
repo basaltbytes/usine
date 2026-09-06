@@ -59,7 +59,7 @@
       }
     },
     {
-      "files": ["apps/web/src/components/ui/**"],
+      "files": ["apps/web/src/components/ui/**", "apps/web/src/components/ai-elements/**"],
       "rules": {
         "usine/no-chained-type-assertions": "off",
         "usine/no-conditional-empty-object-spread": "off",

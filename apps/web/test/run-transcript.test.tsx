@@ -6,24 +6,55 @@ import {
   PoolRateLimitsUpdated,
   RateLimitsSnapshot,
   RateLimitWindow,
+  SessionFinished,
+  ToolStarted,
+  ToolFinished,
   TextOutput,
+  type AgentSessionEvent,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentName } from "@usine/core/agent";
-import { AttemptId } from "@usine/core/attempt";
-import { Option } from "effect";
+import { AttemptId, AttemptNumber } from "@usine/core/attempt";
+import { WorkerName } from "@usine/core/worker";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { StepResult } from "@usine/core/step/result";
+import { Option, type Schema } from "effect";
 import { TranscriptSequence } from "@usine/engine/transcript";
-import { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator/operator";
+import {
+  AgentFailureView,
+  AttemptView,
+  CanceledAttemptView,
+  ColdTranscriptRequest,
+  FailedTranscriptView,
+  RunDetailView,
+  RunView,
+  SucceededAttemptView,
+  TailTranscriptRequest,
+  TranscriptEventView,
+  TranscriptPageCursor,
+} from "@usine/orchestrator/operator";
 import { QueryClient } from "@tanstack/react-query";
-import { renderToStaticMarkup } from "react-dom/server";
+import type { ReactNode } from "react";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import {
+  mergeEarlierTranscript,
   mergeTranscript,
   poolMeters,
   replaceEarlierCursor,
   RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
-  Transcript,
-} from "../src/run-transcript.tsx";
+} from "../src/run-transcript/cache.ts";
+import { projectTranscript, type TranscriptTool } from "../src/run-transcript/model.ts";
+import { SessionActivity, Transcript } from "../src/run-transcript/transcript.tsx";
+import { MessageScrollerProvider } from "../src/components/ui/message-scroller.tsx";
+import { presentTool, type ToolSection } from "../src/run-transcript/tool/presentation.ts";
+import { fetchRunDetail } from "../src/run-transcript/fetch.ts";
+
+const renderToStaticMarkup = (node: ReactNode) =>
+  renderMarkup(<MessageScrollerProvider>{node}</MessageScrollerProvider>);
 
 const attemptId = AttemptId.make("attempt-31");
 const brain = new BrainSpec({
@@ -31,6 +62,46 @@ const brain = new BrainSpec({
   model: ModelId.make("gpt-5"),
   effort: "high",
 });
+
+const liveAttempt = new AttemptView({
+  id: attemptId,
+  number: AttemptNumber.make(1),
+  worker: WorkerName.make("local"),
+  brain,
+  startedAt: "2026-09-01T12:00:00.000Z",
+  outcome: null,
+});
+const parent = new ParentSession({
+  id: AgentSessionId.make("parent-session"),
+  agent: AgentName.make("developer"),
+  brain,
+});
+const child = new ChildSession({
+  id: AgentSessionId.make("child-session"),
+  parentId: parent.id,
+  agent: AgentName.make("reviewer"),
+  brain,
+});
+
+const record = (sequence: number, payload: TranscriptEventView["payload"], attempt = attemptId) =>
+  new TranscriptEventView({
+    sequence: TranscriptSequence.make(sequence),
+    attemptId: attempt,
+    receivedAt: new Date(Date.parse(liveAttempt.startedAt) + sequence * 1000).toISOString(),
+    direction: "outbound",
+    payload,
+  });
+
+const sessionEvent = (sequence: number, event: AgentSessionEvent, attempt = attemptId) =>
+  record(sequence, new AttemptChannel.SessionEvent({ event }), attempt);
+
+const tools = (
+  events: ReadonlyArray<TranscriptEventView>,
+  attempts = [liveAttempt],
+): ReadonlyArray<TranscriptTool> =>
+  projectTranscript(events, attempts).sessions.flatMap(({ entries }) =>
+    entries.filter((entry) => entry._tag === "Tool"),
+  );
 
 const event = (
   sequence: number,
@@ -101,7 +172,9 @@ const rateLimits = (sequence: number, usedPercent: number) =>
 describe("run transcript", () => {
   it("keeps rate-limit updates out of the feed and folds them into one meter per pool", () => {
     const events = [event(1, "Parent update"), rateLimits(2, 25), rateLimits(3, 31)];
-    const markup = renderToStaticMarkup(<Transcript events={events} />);
+    const markup = renderToStaticMarkup(
+      <Transcript events={events} attempts={[liveAttempt]} filter="all" />,
+    );
     assert.ok(!markup.includes("rate limits"));
     assert.deepStrictEqual(poolMeters(events), [
       { pool: "chatgptPlan", primaryUsedPercent: 31, secondaryUsedPercent: null },
@@ -109,19 +182,17 @@ describe("run transcript", () => {
   });
 
   it("renders parent activity inline and groups each child session one level deep", () => {
+    const events = [
+      event(1, "**Parent update**"),
+      event(2, "Child update", "child"),
+      event(3, "Another child update", "child"),
+      event(4, "Channel notice", "channel"),
+    ];
     const markup = renderToStaticMarkup(
-      <Transcript
-        events={[
-          event(1, "Parent update"),
-          event(2, "Child tool started", "child"),
-          event(3, "Child tool finished", "child"),
-          event(4, "Channel notice", "channel"),
-        ]}
-      />,
+      <Transcript events={events} attempts={[liveAttempt]} filter="all" />,
     );
-
-    assert.strictEqual((markup.match(/data-slot="collapsible"/g) ?? []).length, 1);
-    assert.match(markup, /agent-child-session activity.*2 events/);
+    assert.include(markup, "<strong>Parent update</strong>");
+    assert.include(markup, "agent-child-session activity · Working");
     assert.ok(markup.indexOf("Parent update") < markup.indexOf("activity"));
     assert.ok(markup.indexOf("activity") < markup.indexOf("Attempt started"));
   });
@@ -129,6 +200,8 @@ describe("run transcript", () => {
   it("keeps concurrent child sessions distinct, each anchored at its own first event", () => {
     const markup = renderToStaticMarkup(
       <Transcript
+        attempts={[liveAttempt]}
+        filter="all"
         events={[
           event(1, "First child says hello", "child", "child-a"),
           event(2, "Parent update"),
@@ -137,9 +210,181 @@ describe("run transcript", () => {
       />,
     );
 
-    assert.strictEqual((markup.match(/data-slot="collapsible"/g) ?? []).length, 2);
+    assert.include(markup, "agent-child-a activity · Working");
+    assert.include(markup, "agent-child-b activity · Working");
     assert.ok(markup.indexOf("agent-child-a activity") < markup.indexOf("Parent update"));
     assert.ok(markup.indexOf("Parent update") < markup.indexOf("agent-child-b activity"));
+  });
+
+  it("updates a tool call in place while retaining full input, output, and elapsed time", () => {
+    const input = { command: "pnpm test", description: "Run the suite", context: "x".repeat(200) };
+    const output = { text: "All tests passed", details: "y".repeat(200) };
+    const started = sessionEvent(
+      1,
+      new ToolStarted({ session: parent, callId: "call-1", tool: "shell", input }),
+    );
+    const finished = sessionEvent(
+      3,
+      new ToolFinished({
+        session: parent,
+        callId: "call-1",
+        tool: "shell",
+        output,
+        isError: false,
+      }),
+    );
+    const running = tools([started]);
+    const completed = tools([started, finished]);
+    assert.strictEqual(running.length, 1);
+    assert.strictEqual(completed.length, 1);
+    assert.strictEqual(completed[0]?.key, running[0]?.key);
+    assert.strictEqual(running[0]?.state._tag, "Running");
+    const call = completed[0];
+    assert(call !== undefined && call.state._tag === "Finished");
+    assert.deepStrictEqual(
+      Option.map(call.start, ({ input }) => input),
+      Option.some(input),
+    );
+    assert.deepStrictEqual(call.state.output, output);
+    const markup = renderToStaticMarkup(
+      <Transcript events={[started, finished]} attempts={[liveAttempt]} filter="all" />,
+    );
+    assert.include(markup, "Command: pnpm test · Completed");
+    assert.include(markup, "pnpm test");
+    assert.notInclude(markup, "Run the suite");
+    assert.include(markup, "2.0s");
+  });
+
+  it("shows a tool result whose earlier start has not been loaded", () => {
+    const output = { message: "Permission denied" };
+    const finished = sessionEvent(
+      3,
+      new ToolFinished({ session: parent, callId: "call-1", tool: "read", output, isError: true }),
+    );
+    const call = tools([finished])[0];
+    assert(call !== undefined && call.state._tag === "Error");
+    assert.deepStrictEqual(call.start, Option.none());
+    assert.deepStrictEqual(call.state.output, output);
+    const markup = renderToStaticMarkup(
+      <Transcript events={[finished]} attempts={[liveAttempt]} filter="tools" />,
+    );
+    assert.include(markup, "Read file: File details unavailable · Error");
+  });
+
+  it("scopes repeated session and tool identities to their own Attempt", () => {
+    const retried = new AttemptView({
+      ...liveAttempt,
+      id: AttemptId.make("attempt-32"),
+      number: AttemptNumber.make(2),
+    });
+    const failed = new AttemptView({ ...liveAttempt, outcome: new CanceledAttemptView() });
+    const start = new ToolStarted({
+      session: child,
+      callId: "same-call",
+      tool: "read",
+      input: { path: "README.md" },
+    });
+    const events = [sessionEvent(1, start), sessionEvent(2, start, retried.id)];
+    const projection = projectTranscript(events, [failed, retried]);
+    assert.strictEqual(projection.sessions.length, 2);
+    assert.notEqual(projection.sessions[0]?.key, projection.sessions[1]?.key);
+    const calls = tools(events, [failed, retried]);
+    assert.strictEqual(calls.length, 2);
+    assert.notEqual(calls[0]?.key, calls[1]?.key);
+    assert.deepStrictEqual(
+      calls.map(({ state }) => state._tag),
+      ["Stopped", "Running"],
+    );
+    const summary = renderToStaticMarkup(
+      <SessionActivity events={events} attempts={[failed, retried]} />,
+    );
+    assert.include(summary, "Attempt 2");
+    assert.include(summary, "Awaiting parent activity");
+    assert.include(summary, "1 live");
+    assert.notInclude(summary, "stopped");
+  });
+
+  it.each([
+    new AttemptChannel.Final({ result: new StepResult({ message: "Done", facts: [] }) }),
+    new FailedTranscriptView({ failure: new AgentFailureView({ message: "Failed" }) }),
+    new AttemptChannel.Interrupted(),
+  ])(
+    "stops unfinished session activity when $_tag reaches the transcript before Run metadata",
+    (terminal) => {
+      const events = [
+        sessionEvent(
+          1,
+          new ToolStarted({
+            session: child,
+            callId: "call-1",
+            tool: "shell",
+            input: { command: "pnpm test" },
+          }),
+        ),
+        record(2, terminal),
+      ];
+      const projection = projectTranscript(events, [liveAttempt]);
+      assert.strictEqual(projection.sessions[0]?.status, "Stopped");
+      assert.strictEqual(tools(events)[0]?.state._tag, "Stopped");
+      const markup = renderToStaticMarkup(
+        <Transcript events={events} attempts={[liveAttempt]} filter="all" />,
+      );
+      assert.include(markup, "reviewer activity · Stopped");
+      const summary = renderToStaticMarkup(
+        <SessionActivity events={[record(2, terminal)]} attempts={[liveAttempt]} />,
+      );
+      assert.include(summary, "Ended");
+      assert.notInclude(summary, "Awaiting parent activity");
+    },
+  );
+
+  it("reports an explicitly finished child without inferring success and closes unfinished tools", () => {
+    const events = [
+      sessionEvent(
+        1,
+        new ToolStarted({ session: child, callId: "call-1", tool: "read", input: null }),
+      ),
+      sessionEvent(2, new SessionFinished({ session: child })),
+    ];
+    const projection = projectTranscript(events, [liveAttempt]);
+    assert.strictEqual(projection.sessions[0]?.status, "Finished");
+    assert.strictEqual(tools(events)[0]?.state._tag, "Stopped");
+    const markup = renderToStaticMarkup(
+      <Transcript events={events} attempts={[liveAttempt]} filter="all" />,
+    );
+    assert.include(markup, "reviewer activity · Finished");
+  });
+
+  it("filters prose and tools while keeping Attempt notices and child status visible", () => {
+    const events = [
+      record(1, new AttemptChannel.Started({ parentModel: brain.model })),
+      sessionEvent(2, new TextOutput({ session: parent, text: "A useful explanation" })),
+      sessionEvent(
+        3,
+        new ToolStarted({
+          session: parent,
+          callId: "call-1",
+          tool: "read",
+          input: { path: "README.md" },
+        }),
+      ),
+      sessionEvent(4, new TextOutput({ session: child, text: "Child explanation" })),
+    ];
+    const messages = renderToStaticMarkup(
+      <Transcript events={events} attempts={[liveAttempt]} filter="messages" />,
+    );
+    const toolRows = renderToStaticMarkup(
+      <Transcript events={events} attempts={[liveAttempt]} filter="tools" />,
+    );
+    assert.include(messages, "A useful explanation");
+    assert.notInclude(messages, "Read file: README.md · Running");
+    assert.include(toolRows, "Read file: README.md · Running");
+    assert.notInclude(toolRows, "A useful explanation");
+    for (const markup of [messages, toolRows]) {
+      assert.include(markup, "Attempt started");
+      assert.include(markup, brain.model);
+      assert.include(markup, "reviewer activity · Working");
+    }
   });
 
   it("merges transcript tails by sequence without replaying an existing event", () => {
@@ -235,6 +480,424 @@ describe("run transcript", () => {
       queryClient.getQueryData<{ earlierTranscript: ReadonlyArray<TranscriptPageCursor> }>(key)
         ?.earlierTranscript,
       [],
+    );
+  });
+
+  it("adds an earlier page without replacing a newer Run outcome or available actions", () => {
+    const cursor = new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(2) });
+    const stale = new RunDetailView({
+      run: new RunView({
+        id: RunId.make("run-31"),
+        itemKey: ItemKey.make("github:basaltbytes/usine:31"),
+        loop: LoopName.make("develop"),
+        repository: RepositoryName.make("basaltbytes/usine"),
+        agent: parent.agent,
+        state: "Running",
+        loopPaused: false,
+        openedAt: liveAttempt.startedAt,
+        task: "Build it",
+        attempts: [liveAttempt],
+        resultMessage: null,
+        pullRequestUrl: null,
+        canApprove: false,
+        canRetry: false,
+        canCancel: true,
+      }),
+      eventDedupKey: "issue:31",
+      eventPayload: { number: 31 },
+      transcript: [event(1, "Earlier message")],
+      earlierTranscript: [],
+    });
+    const current = new RunDetailView({
+      ...stale,
+      run: new RunView({
+        ...stale.run,
+        state: "Succeeded",
+        attempts: [new AttemptView({ ...liveAttempt, outcome: new SucceededAttemptView() })],
+        resultMessage: "Delivered",
+        canCancel: false,
+      }),
+      transcript: [event(2, "Latest message")],
+      earlierTranscript: [cursor],
+    });
+    const merged = mergeEarlierTranscript(current, stale, cursor);
+    assert.deepStrictEqual(merged.run, current.run);
+    assert.deepStrictEqual(merged.transcript, [...stale.transcript, ...current.transcript]);
+    assert.deepStrictEqual(merged.earlierTranscript, []);
+  });
+
+  it("drains a completed Run's capped tail through its final event before polling stops", async () => {
+    const transcript = [
+      event(11, "First page"),
+      event(12, "Second page"),
+      record(
+        13,
+        new AttemptChannel.Final({
+          result: new StepResult({ message: "All work complete", facts: [] }),
+        }),
+      ),
+    ];
+    const detail = new RunDetailView({
+      run: new RunView({
+        id: RunId.make("run-31"),
+        itemKey: ItemKey.make("github:basaltbytes/usine:31"),
+        loop: LoopName.make("develop"),
+        repository: RepositoryName.make("basaltbytes/usine"),
+        agent: parent.agent,
+        state: "Succeeded",
+        loopPaused: false,
+        openedAt: liveAttempt.startedAt,
+        task: "Build it",
+        attempts: [new AttemptView({ ...liveAttempt, outcome: new SucceededAttemptView() })],
+        resultMessage: "All work complete",
+        pullRequestUrl: null,
+        canApprove: false,
+        canRetry: false,
+        canCancel: false,
+      }),
+      eventDedupKey: "issue:31",
+      eventPayload: { number: 31 },
+      transcript: [],
+      earlierTranscript: [],
+    });
+    // This operator boundary has a smaller page size than production; readers
+    // must follow cursors rather than infer completion from a particular limit.
+    const read = async (request: ColdTranscriptRequest | TailTranscriptRequest) => {
+      const after = request._tag === "TailTranscriptRequest" ? request.after : 0;
+      return new RunDetailView({
+        ...detail,
+        transcript: transcript.filter(({ sequence }) => sequence > after).slice(0, 1),
+      });
+    };
+    const loaded = await fetchRunDetail(
+      new TailTranscriptRequest({ after: TranscriptSequence.make(10) }),
+      read,
+    );
+    assert.deepStrictEqual(loaded.transcript, transcript);
+    assert.strictEqual(loaded.run.resultMessage, "All work complete");
+
+    const running = new RunDetailView({
+      ...detail,
+      run: new RunView({
+        ...detail.run,
+        state: "Running",
+        attempts: [liveAttempt],
+        resultMessage: null,
+        canCancel: true,
+      }),
+    });
+    const onePoll = await fetchRunDetail(
+      new TailTranscriptRequest({ after: TranscriptSequence.make(10) }),
+      async (request) =>
+        new RunDetailView({ ...running, transcript: (await read(request)).transcript }),
+    );
+    assert.deepStrictEqual(onePoll.transcript, transcript.slice(0, 1));
+    assert.strictEqual(onePoll.run.canCancel, true);
+
+    const cold = new RunDetailView({
+      ...detail,
+      transcript: transcript.slice(-1),
+      earlierTranscript: [
+        new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(13) }),
+      ],
+    });
+    const initial = await fetchRunDetail(new ColdTranscriptRequest(), async (request) =>
+      request._tag === "ColdTranscriptRequest" ? cold : read(request),
+    );
+    assert.deepStrictEqual(initial, cold);
+  });
+});
+
+const completedTool = (name: string, input: Schema.Json, output: Schema.Json) => {
+  const call = tools([
+    sessionEvent(1, new ToolStarted({ session: parent, callId: "presented", tool: name, input })),
+    sessionEvent(
+      2,
+      new ToolFinished({
+        session: parent,
+        callId: "presented",
+        tool: name,
+        output,
+        isError: false,
+      }),
+    ),
+  ])[0];
+  assert(call !== undefined);
+  return call;
+};
+
+const sectionText = (sections: ReadonlyArray<ToolSection>): string =>
+  sections.flatMap((section) => (section._tag === "Fields" ? [] : [section.text])).join("\n");
+
+const sectionFields = (sections: ReadonlyArray<ToolSection>) =>
+  sections.flatMap((section) => (section._tag === "Fields" ? section.fields : []));
+
+describe("tool presentation", () => {
+  it("shows a Codex command and its actual output with exit status instead of protocol envelopes", () => {
+    const input = {
+      type: "commandExecution",
+      id: "cmd-1",
+      command: "pnpm test\npnpm check",
+      cwd: "/workspace/repo",
+      status: "inProgress",
+      aggregatedOutput: null,
+      exitCode: null,
+      durationMs: null,
+    };
+    const output = {
+      ...input,
+      status: "completed",
+      aggregatedOutput: "3 tests passed\nTypes checked\n",
+      exitCode: 0,
+      durationMs: 1250,
+    };
+    const call = completedTool("command", input, output);
+    const view = presentTool(call);
+
+    assert.strictEqual(view.subject, "pnpm test\npnpm check");
+    assert.include(sectionText(view.input), "pnpm test\npnpm check");
+    assert.include(sectionText(view.output), "3 tests passed\nTypes checked\n");
+    assert.deepInclude(sectionFields(view.input), {
+      label: "Working directory",
+      value: "/workspace/repo",
+    });
+    assert.deepInclude(sectionFields(view.output), { label: "Exit code", value: 0 });
+    assert.deepInclude(sectionFields(view.output), { label: "Duration (ms)", value: 1250 });
+    assert(call.state._tag === "Finished");
+    assert.deepStrictEqual(call.state.output, output);
+  });
+
+  it("unwraps Pi text blocks and Claude content without losing line breaks or error text", () => {
+    const command = "pnpm test";
+    const output = "Test failed\nExpected 2, received 1\nCommand exited with code 1";
+    for (const result of [
+      { content: [{ type: "text", text: output }] },
+      [{ type: "text", text: output }],
+      output,
+    ]) {
+      const view = presentTool(completedTool("Bash", { command }, result));
+      assert.strictEqual(view.subject, command);
+      assert.strictEqual(sectionText(view.output), output);
+    }
+  });
+
+  it("shows Pi's returned unified patch once, retaining file metadata", () => {
+    const patch =
+      "--- src/count.ts\n+++ src/count.ts\n@@ -1,1 +1,1 @@\n-export const count = 1;\n+export const count = 2;\n";
+    const view = presentTool(
+      completedTool(
+        "edit",
+        {
+          path: "src/count.ts",
+          edits: [{ oldText: "count = 1", newText: "count = 2" }],
+        },
+        {
+          content: [{ type: "text", text: "Successfully replaced 1 block(s) in src/count.ts." }],
+          details: {
+            diff: "-1 export const count = 1;\n+1 export const count = 2;",
+            patch,
+            firstChangedLine: 1,
+          },
+        },
+      ),
+    );
+
+    assert.strictEqual(view.subject, "src/count.ts");
+    assert.strictEqual(sectionText(view.input), "");
+    assert.include(sectionText(view.output), patch);
+    assert.deepInclude(sectionFields(view.output), { label: "First changed line", value: 1 });
+  });
+
+  it("shows every Codex changed file with its real diff, including changes whose start is unpaged", () => {
+    const changes = [
+      { path: "src/new.ts", kind: { type: "add" }, diff: "+export const ready = true;\n" },
+      { path: "src/old.ts", kind: { type: "delete" }, diff: "-export const old = true;\n" },
+    ];
+    const call = tools([
+      sessionEvent(
+        2,
+        new ToolFinished({
+          session: parent,
+          callId: "changes",
+          tool: "file_change",
+          isError: false,
+          output: { type: "fileChange", id: "changes", status: "completed", changes },
+        }),
+      ),
+    ])[0];
+    assert(call !== undefined);
+    const view = presentTool(call);
+
+    assert.strictEqual(view.subject, "2 files");
+    assert.deepStrictEqual(
+      view.output.map(({ label }) => label),
+      ["src/new.ts · add", "src/old.ts · delete"],
+    );
+    assert.include(sectionText(view.output), "+export const ready = true;\n");
+    assert.include(sectionText(view.output), "-export const old = true;\n");
+  });
+
+  it("keeps a proposed file change separate from a result that has not arrived", () => {
+    const call = tools([
+      sessionEvent(
+        1,
+        new ToolStarted({
+          session: parent,
+          callId: "pending-edit",
+          tool: "file_change",
+          input: {
+            type: "fileChange",
+            id: "pending-edit",
+            status: "inProgress",
+            changes: [
+              { path: "src/new.ts", kind: { type: "add" }, diff: "+export const ready = true;\n" },
+            ],
+          },
+        }),
+      ),
+    ])[0];
+    assert(call !== undefined);
+    const view = presentTool(call);
+    assert.strictEqual(view.subject, "src/new.ts");
+    assert.include(sectionText(view.input), "+export const ready = true;\n");
+    assert.deepStrictEqual(view.output, []);
+  });
+
+  it("presents Claude read, edit, write and search fields by their operator meaning", () => {
+    const read = presentTool(
+      completedTool(
+        "Read",
+        { file_path: "/repo/src/count.ts", offset: 12, limit: 3 },
+        "12→export const count = 1;",
+      ),
+    );
+    assert.strictEqual(read.subject, "/repo/src/count.ts");
+    assert.deepInclude(sectionFields(read.input), { label: "Offset", value: 12 });
+    assert.include(sectionText(read.output), "12→export const count = 1;");
+    assert.include(
+      read.output.map(({ label }) => label),
+      "/repo/src/count.ts",
+    );
+
+    const edit = presentTool(
+      completedTool(
+        "Edit",
+        {
+          file_path: "/repo/src/count.ts",
+          old_string: "count = 1",
+          new_string: "count = 2",
+          replace_all: false,
+        },
+        "The file has been updated.",
+      ),
+    );
+    assert.include(sectionText(edit.input), "count = 1\ncount = 2");
+    const write = presentTool(
+      completedTool(
+        "Write",
+        { file_path: "/repo/src/new.ts", content: "export const ready = true;\n" },
+        "File created successfully.",
+      ),
+    );
+    assert.strictEqual(write.subject, "/repo/src/new.ts");
+    assert.strictEqual(sectionText(write.input), "export const ready = true;\n");
+    const search = presentTool(
+      completedTool(
+        "Grep",
+        { pattern: "RunReader", path: "packages", glob: "*.ts" },
+        "packages/engine/src/run-reader.ts",
+      ),
+    );
+    assert.strictEqual(search.subject, "RunReader");
+    assert.deepInclude(sectionFields(search.input), { label: "Path", value: "packages" });
+    assert.include(sectionText(search.output), "packages/engine/src/run-reader.ts");
+  });
+
+  it("presents delegation as a task and readable child report", () => {
+    const view = presentTool(
+      completedTool(
+        "subagent",
+        { task: "Review the retry behavior.\nReport any stalls." },
+        {
+          content: [{ type: "text", text: "Retry is bounded.\nNo stalls found." }],
+          details: { childSessionId: "parent:child:1" },
+        },
+      ),
+    );
+    assert.include(view.subject, "Review the retry behavior.");
+    assert.strictEqual(sectionText(view.input), "Review the retry behavior.\nReport any stalls.");
+    assert.strictEqual(sectionText(view.output), "Retry is bounded.\nNo stalls found.");
+    assert.deepInclude(sectionFields(view.output), {
+      label: "Details",
+      value: { childSessionId: "parent:child:1" },
+    });
+  });
+
+  it("unwraps Codex MCP and dynamic results while preserving structured result data and errors", () => {
+    const input = {
+      type: "mcpToolCall",
+      id: "mcp-1",
+      server: "github",
+      tool: "get_issue",
+      arguments: { number: 79 },
+      status: "inProgress",
+    };
+    const output = {
+      ...input,
+      status: "completed",
+      result: {
+        content: [{ type: "text", text: "Conversation UX" }],
+        structuredContent: { number: 79, state: "open" },
+        _meta: null,
+      },
+      error: null,
+    };
+    const mcp = presentTool(completedTool("mcp_tool", input, output));
+    assert.strictEqual(mcp.title, "github · get_issue");
+    assert.deepInclude(sectionFields(mcp.input), { label: "Number", value: 79 });
+    assert.strictEqual(sectionText(mcp.output), "Conversation UX");
+    assert.deepInclude(sectionFields(mcp.output), {
+      label: "Structured content",
+      value: { number: 79, state: "open" },
+    });
+
+    const dynamic = presentTool(
+      completedTool(
+        "dynamic_tool",
+        { type: "dynamicToolCall", tool: "validate", arguments: {} },
+        {
+          type: "dynamicToolCall",
+          contentItems: [{ type: "inputText", text: "Validation failed" }],
+          success: false,
+        },
+      ),
+    );
+    assert.strictEqual(dynamic.title, "validate");
+    assert.strictEqual(sectionText(dynamic.output), "Validation failed");
+    const failed = presentTool(
+      completedTool("mcp_tool", input, {
+        ...input,
+        result: null,
+        error: { message: "Permission denied" },
+      }),
+    );
+    assert.include(sectionText(failed.output), "Permission denied");
+  });
+
+  it("keeps unfamiliar tool parameters readable and leaves opaque result content available", () => {
+    const input = { destination: "staging", retries: 0, settings: { region: "eu" } };
+    const output = { receipt: { id: "deploy-12", artifacts: ["app.js"] }, cached: false };
+    const call = completedTool("publish_preview", input, output);
+    const view = presentTool(call);
+    assert.strictEqual(view.title, "publish_preview");
+    assert.strictEqual(view.subject, "3 parameters");
+    assert.deepInclude(sectionFields(view.input), { label: "Retries", value: 0 });
+    assert.deepInclude(sectionFields(view.input), { label: "Settings", value: { region: "eu" } });
+    assert.deepInclude(sectionFields(view.output), { label: "Receipt", value: output.receipt });
+    assert.deepInclude(sectionFields(view.output), { label: "Cached", value: false });
+    assert.deepStrictEqual(
+      Option.map(call.start, ({ input }) => input),
+      Option.some(input),
     );
   });
 });

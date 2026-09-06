@@ -7,11 +7,11 @@ import {
   RunDetailView,
   type TranscriptPageCursor,
 } from "@usine/orchestrator/operator";
-import type { Schema } from "effect";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { Markdown } from "@/components/markdown";
 import { RunLinks } from "@/components/run-links";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusBadge } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,11 +34,12 @@ import { api } from "./api.ts";
 import { brainLine, failureMessage } from "./operator-copy.ts";
 import {
   mergeTranscript,
+  mergeEarlierTranscript,
   poolMeters,
-  replaceEarlierCursor,
   RUN_DETAIL_CACHE_STRUCTURAL_SHARING,
-  Transcript,
-} from "./run-transcript.tsx";
+} from "./run-transcript/cache.ts";
+import { Conversation } from "./run-transcript/conversation.tsx";
+import { fetchRunDetail } from "./run-transcript/fetch.ts";
 
 const timeAgo = (value: string): string => {
   const elapsed = Math.max(0, Date.now() - Date.parse(value));
@@ -47,15 +48,6 @@ const timeAgo = (value: string): string => {
   if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
   return `${Math.floor(elapsed / 86_400_000)}d`;
 };
-
-const jsonGist = (value: Schema.Json): string => JSON.stringify(value, null, 2);
-
-const Section = ({ title, children }: { readonly title: string; readonly children: ReactNode }) => (
-  <section className="border-b px-6 py-4">
-    <h3 className="mb-2 font-heading text-[0.625rem] font-medium text-muted-foreground">{title}</h3>
-    {children}
-  </section>
-);
 
 export const RunDrawer = ({
   runId,
@@ -69,20 +61,18 @@ export const RunDrawer = ({
 }) => {
   const queryClient = useQueryClient();
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [activeTab, setActiveTab] = useState("conversation");
   const detail = useQuery<RunDetailView>({
     queryKey: ["run", runId],
     queryFn: async () => {
       const key = ["run", runId] as const;
       const previous = queryClient.getQueryData<RunDetailView>(key);
       const cursor = previous?.transcript.at(-1)?.sequence;
-      const next = await api((client) =>
-        client.detail({
-          params: { runId },
-          query:
-            cursor === undefined
-              ? new ColdTranscriptRequest()
-              : new TailTranscriptRequest({ after: cursor }),
-        }),
+      const next = await fetchRunDetail(
+        cursor === undefined
+          ? new ColdTranscriptRequest()
+          : new TailTranscriptRequest({ after: cursor }),
+        (query) => api((client) => client.detail({ params: { runId }, query })),
       );
       const current = queryClient.getQueryData<RunDetailView>(key);
       if (cursor === undefined || current === undefined) return next;
@@ -115,17 +105,7 @@ export const RunDrawer = ({
     onSuccess: (page, cursor) => {
       const key = ["run", runId] as const;
       queryClient.setQueryData<RunDetailView>(key, (previous) =>
-        previous === undefined
-          ? previous
-          : new RunDetailView({
-              ...page,
-              transcript: mergeTranscript(previous.transcript, page.transcript),
-              earlierTranscript: replaceEarlierCursor(
-                previous.earlierTranscript,
-                cursor.attemptId,
-                page.earlierTranscript,
-              ),
-            }),
+        previous === undefined ? previous : mergeEarlierTranscript(previous, page, cursor),
       );
     },
   });
@@ -142,104 +122,141 @@ export const RunDrawer = ({
       <SheetContent
         side="right"
         aria-label="Run detail"
-        className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-2xl"
+        className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-3xl"
       >
-        <SheetHeader className="border-b pr-14">
-          <SheetTitle className="text-lg">{run?.loop ?? "Loading…"}</SheetTitle>
-          {run !== undefined && (
-            <>
-              <SheetDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono wrap-anywhere">
-                <span>{run.repository}</span>
-                <span>{run.id}</span>
-                {run.loopPaused && <Badge variant="outline">paused</Badge>}
-              </SheetDescription>
-              <RunLinks run={run} />
-            </>
-          )}
+        <SheetHeader className="shrink-0 gap-2 border-b px-4 py-4 pr-12 sm:px-6 sm:pr-14">
+          <div className="flex flex-wrap items-center gap-2">
+            <SheetTitle>{run?.loop ?? "Loading…"}</SheetTitle>
+            {run !== undefined && <StatusBadge state={run.state} />}
+            {run?.loopPaused && <Badge variant="outline">Loop paused</Badge>}
+          </div>
+          <SheetDescription className="font-mono wrap-anywhere">
+            {run?.repository ?? "Loading Run details…"}
+          </SheetDescription>
+          {run !== undefined && <RunLinks run={run} />}
         </SheetHeader>
-        <div className="min-h-0 flex-1 overflow-y-auto scrollbar-thin">
-          {detail.isError && <ErrorAlert className="m-6" message={detail.error.message} />}
-          {run !== undefined && (
-            <>
-              <div className="flex flex-wrap items-center gap-3 border-b px-6 py-3">
-                <StatusBadge state={run.state} />
-                <span className="text-muted-foreground">{run.agent}</span>
-                <span className="text-muted-foreground">
-                  {run.attempts.length} attempt
-                  {run.attempts.length === 1 ? "" : "s"}
+        {detail.isError && <ErrorAlert className="mx-4 my-3" message={detail.error.message} />}
+        {run !== undefined && detail.data !== undefined && (
+          <>
+            {(run.canApprove || run.canRetry || run.canCancel) && (
+              <div className="flex shrink-0 flex-wrap items-center gap-2 border-b px-4 py-2 sm:px-6">
+                <span className="mr-auto text-muted-foreground">
+                  {run.state === "Queued" ? "Waiting for a free worker" : run.agent}
                 </span>
-                {meters.map((meter) => (
-                  <Badge
-                    key={meter.pool}
-                    variant="outline"
-                    className="font-mono"
-                    title="Share of the billing pool's rate-limit windows this session has used: 5-hour window, then weekly"
+                {run.canApprove && (
+                  <Button
+                    size="sm"
+                    disabled={mutation.isPending}
+                    onClick={() => mutation.mutate("approve")}
                   >
-                    {meter.pool}
-                    {meter.primaryUsedPercent !== null && ` ${meter.primaryUsedPercent}%`}
-                    {meter.secondaryUsedPercent !== null && ` · ${meter.secondaryUsedPercent}%`}
-                  </Badge>
-                ))}
+                    Approve
+                  </Button>
+                )}
+                {run.canRetry && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    disabled={mutation.isPending}
+                    onClick={() => mutation.mutate("retry")}
+                  >
+                    Retry
+                  </Button>
+                )}
+                {run.canCancel && (
+                  <Button
+                    size="sm"
+                    variant={confirmCancel ? "destructive" : "outline"}
+                    disabled={mutation.isPending}
+                    onClick={() =>
+                      confirmCancel ? mutation.mutate("cancel") : setConfirmCancel(true)
+                    }
+                  >
+                    {confirmCancel ? "Confirm cancel" : "Cancel Run"}
+                  </Button>
+                )}
+                {confirmCancel && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={mutation.isPending}
+                    onClick={() => setConfirmCancel(false)}
+                  >
+                    Keep running
+                  </Button>
+                )}
               </div>
-              {run.state === "Queued" && (
-                <p className="border-b px-6 py-3 text-muted-foreground">
-                  Approved. Waiting for a free worker slot.
-                </p>
-              )}
-              {(run.canApprove || run.canRetry || run.canCancel) && (
-                <div className="flex flex-wrap items-center gap-2 border-b px-6 py-3">
-                  {run.canApprove && (
-                    <Button
-                      disabled={mutation.isPending}
-                      onClick={() => mutation.mutate("approve")}
-                    >
-                      Approve
-                    </Button>
-                  )}
-                  {run.canRetry && (
-                    <Button
-                      variant="secondary"
-                      disabled={mutation.isPending}
-                      onClick={() => mutation.mutate("retry")}
-                    >
-                      Retry
-                    </Button>
-                  )}
-                  {run.canCancel && !confirmCancel && (
-                    <Button
-                      variant="outline"
-                      disabled={mutation.isPending}
-                      onClick={() => setConfirmCancel(true)}
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  {run.canCancel && confirmCancel && (
-                    <Button
-                      variant="destructive"
-                      disabled={mutation.isPending}
-                      onClick={() => mutation.mutate("cancel")}
-                    >
-                      Confirm cancel
-                    </Button>
-                  )}
-                </div>
-              )}
-              {mutation.isError && (
-                <ErrorAlert className="mx-6 mt-4" message={mutation.error.message} />
-              )}
-              <Section title="Task">
+            )}
+            {mutation.isError && (
+              <ErrorAlert className="mx-4 my-3" message={mutation.error.message} />
+            )}
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="min-h-0 flex-1 gap-0">
+              <TabsList
+                variant="line"
+                className="w-full shrink-0 justify-start gap-2 border-b px-4 sm:px-6"
+                aria-label="Run views"
+              >
+                <TabsTrigger value="conversation" className="flex-none">
+                  Conversation
+                </TabsTrigger>
+                <TabsTrigger value="task" className="flex-none">
+                  Task
+                </TabsTrigger>
+                <TabsTrigger value="event" className="flex-none">
+                  Event
+                </TabsTrigger>
+                <TabsTrigger value="attempts" className="flex-none">
+                  Attempts ({run.attempts.length})
+                </TabsTrigger>
+              </TabsList>
+              <TabsContent
+                value="conversation"
+                keepMounted
+                className="flex min-h-0 flex-col data-[hidden]:hidden"
+              >
+                <Conversation
+                  events={detail.data.transcript}
+                  attempts={run.attempts}
+                  earlier={earlier}
+                  loadEarlier={() => {
+                    if (earlier !== undefined) earlierMutation.mutate(earlier);
+                  }}
+                  loadingEarlier={earlierMutation.isPending}
+                  earlierError={earlierMutation.isError ? earlierMutation.error.message : null}
+                  state={run.state}
+                  active={activeTab === "conversation"}
+                />
+              </TabsContent>
+              <TabsContent value="task" className="min-h-0 overflow-y-auto p-4 sm:p-6">
+                <h3 className="mb-3 font-heading text-sm">Task</h3>
                 <Markdown className="max-w-prose">{run.task}</Markdown>
-              </Section>
-              <Section title="Event">
-                <p className="font-mono text-muted-foreground wrap-anywhere">
-                  {detail.data?.eventDedupKey}
+              </TabsContent>
+              <TabsContent value="event" className="min-h-0 overflow-y-auto p-4 sm:p-6">
+                <h3 className="mb-3 font-heading text-sm">Triggering Event</h3>
+                <p className="mb-3 font-mono text-muted-foreground wrap-anywhere">
+                  {detail.data.eventDedupKey}
                 </p>
-                <pre className="mt-2 max-h-56 overflow-auto rounded-md bg-muted/50 px-2.5 py-2 font-mono text-[0.625rem]/relaxed whitespace-pre-wrap wrap-anywhere">
-                  {jsonGist(detail.data?.eventPayload ?? null)}
+                <pre className="font-mono text-xs/relaxed whitespace-pre-wrap wrap-anywhere">
+                  {JSON.stringify(detail.data.eventPayload, null, 2)}
                 </pre>
-              </Section>
-              <Section title="Attempts">
+              </TabsContent>
+              <TabsContent value="attempts" className="min-h-0 overflow-y-auto p-4 sm:p-6">
+                <p className="mb-4 font-mono text-muted-foreground wrap-anywhere">Run {run.id}</p>
+                {meters.length > 0 && (
+                  <div className="mb-4 space-y-2">
+                    <h3 className="font-heading text-sm">Account rate windows</h3>
+                    <div className="flex flex-wrap gap-2">
+                      {meters.map((meter) => (
+                        <Badge key={meter.pool} variant="outline" className="font-mono">
+                          {meter.pool}
+                          {meter.primaryUsedPercent !== null &&
+                            ` · primary ${meter.primaryUsedPercent}% used`}
+                          {meter.secondaryUsedPercent !== null &&
+                            ` · secondary ${meter.secondaryUsedPercent}% used`}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {run.attempts.length === 0 && (
                   <p className="text-muted-foreground">No attempt has started.</p>
                 )}
@@ -265,32 +282,16 @@ export const RunDrawer = ({
                     </Item>
                   ))}
                 </ItemGroup>
-              </Section>
-              {run.resultMessage !== null && (
-                <Section title="Result">
-                  <Markdown className="max-w-prose">{run.resultMessage}</Markdown>
-                </Section>
-              )}
-              <Section title="Transcript">
-                {earlier !== undefined && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="mb-3"
-                    disabled={earlierMutation.isPending}
-                    onClick={() => earlierMutation.mutate(earlier)}
-                  >
-                    {earlierMutation.isPending ? "Loading…" : "Load earlier"}
-                  </Button>
+                {run.resultMessage !== null && (
+                  <section className="mt-6">
+                    <h3 className="mb-3 font-heading text-sm">Result</h3>
+                    <Markdown className="max-w-prose">{run.resultMessage}</Markdown>
+                  </section>
                 )}
-                {earlierMutation.isError && (
-                  <ErrorAlert className="mb-3" message={earlierMutation.error.message} />
-                )}
-                <Transcript events={detail.data?.transcript ?? []} />
-              </Section>
-            </>
-          )}
-        </div>
+              </TabsContent>
+            </Tabs>
+          </>
+        )}
       </SheetContent>
     </Sheet>
   );

@@ -9,6 +9,7 @@
     "noEmit": true,
     "types": ["vite/client"],
     "paths": {
+      "ansi-to-react-component": ["./src/components/ai-elements/ansi.d.ts"],
       "@/*": ["./src/*"]
     }
   }
