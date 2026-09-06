@@ -52,6 +52,14 @@ export const presentFile = (
       : [],
   );
   return {
+    activity: {
+      _tag: "Files",
+      operation: result.type === "fileChange" || request.type === "fileChange" ? "change" : action,
+      paths: Option.match(changes, {
+        onNone: () => (path === undefined ? [] : [path]),
+        onSome: (files) => files.map(({ path }) => path),
+      }),
+    },
     title: { read: "Read file", edit: "Edit file", write: "Write file" }[action],
     subject:
       action === "read"

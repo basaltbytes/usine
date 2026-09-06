@@ -15,12 +15,17 @@ import { AttemptId } from "@usine/core/attempt";
 import { SessionEvent } from "@usine/core/attempt/channel";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { TranscriptEventView } from "@usine/orchestrator/operator";
+import type { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, it } from "vitest";
 import { MessageScrollerProvider } from "../src/components/ui/message-scroller.tsx";
 import { projectTranscript } from "../src/run-transcript/model.ts";
 import { Transcript } from "../src/run-transcript/transcript.tsx";
-import { groupTranscript, type ToolGroup } from "../src/run-transcript/grouping/model.ts";
+import {
+  groupSummary,
+  groupTranscript,
+  type ToolGroup,
+} from "../src/run-transcript/grouping/model.ts";
 import {
   changeDisclosure,
   isGroupOpen,
@@ -64,14 +69,36 @@ const started = (sequence: number, callId: string) =>
 const groups = (events: ReadonlyArray<TranscriptEventView>): ReadonlyArray<ToolGroup> =>
   groupTranscript(projectTranscript(events, [])).filter((item) => item._tag === "ToolGroup");
 const keys = (group: ToolGroup) => group.tools.map((tool) => tool.key);
+const completed = (
+  sequence: number,
+  tool: string,
+  input: Schema.Json,
+  output: Schema.Json = "Done",
+) => {
+  const callId = `call-${sequence}`;
+  return [
+    record(sequence, new ToolStarted({ session: parent, callId, tool, input })),
+    record(
+      sequence + 1,
+      new ToolFinished({ session: parent, callId, tool, output, isError: false }),
+    ),
+  ];
+};
+const summary = (events: ReadonlyArray<TranscriptEventView>) => {
+  const group = groups(events)[0];
+  assert.isDefined(group);
+  return groupSummary(group);
+};
 
 it("summarizes adjacent completed work while keeping prose and a single call visible", () => {
   const events = [
-    finished(1, "read-a"),
-    finished(2, "read-b"),
-    finished(3, "command", "shell"),
-    record(4, new TextOutput({ session: parent, text: "The checks passed." })),
-    finished(5, "after-message", "shell"),
+    ...completed(1, "edit", {
+      path: "src/conversation.tsx",
+      edits: [{ oldText: "before", newText: "after" }],
+    }),
+    ...completed(3, "Bash", { command: "pnpm test" }, [{ type: "text", text: "One test failed" }]),
+    record(5, new TextOutput({ session: parent, text: "The checks need attention." })),
+    finished(6, "after-message", "shell"),
   ];
   const html = renderToStaticMarkup(
     <TranscriptDisclosureProvider>
@@ -81,10 +108,11 @@ it("summarizes adjacent completed work while keeping prose and a single call vis
     </TranscriptDisclosureProvider>,
   );
 
-  assert.include(html, "2 file reads · 1 command");
-  assert.include(html, "The checks passed.");
+  assert.include(html, "Edited conversation.tsx · ran tests");
+  assert.include(html, "2 completed tools");
+  assert.include(html, "The checks need attention.");
   assert.include(html, 'aria-label="Command: Command details unavailable · Completed"');
-  assert.ok(html.indexOf("2 file reads") < html.indexOf("The checks passed."));
+  assert.ok(html.indexOf("Edited conversation.tsx") < html.indexOf("The checks need attention."));
 });
 
 it("does not join successful calls across prose hidden by the tools filter", () => {
@@ -215,4 +243,174 @@ it("retains group and tool choices when history grows and the group is collapsed
   const reopened = changeDisclosure(closed, { _tag: "Group", keys: keys(expanded), open: true });
   assert.isTrue(isGroupOpen(reopened, keys(expanded)));
   assert.isTrue(reopened.get(cold.tools[0].key)?.open);
+});
+
+it("counts repeated reads as one file and distinguishes colliding basenames", () => {
+  const events = [
+    ...completed(1, "read", { path: "packages/core/src/model.ts", offset: 1, limit: 8 }),
+    ...completed(3, "Read", { file_path: "packages/engine/src/model.ts" }),
+    ...completed(5, "read", { path: "packages/core/src/model.ts", offset: 48, limit: 8 }),
+  ];
+  assert.equal(summary(events), "Read core/src/model.ts, engine/src/model.ts");
+  assert.equal(summary(events.slice(0, 2).concat(events.slice(4))), "Read model.ts");
+
+  const mixed = [
+    ...completed(1, "Read", { file_path: "core/src/model.ts" }),
+    ...completed(3, "Edit", { file_path: "engine/src/model.ts", old_string: "a", new_string: "b" }),
+  ];
+  assert.equal(summary(mixed), "Read core/src/model.ts · edited engine/src/model.ts");
+});
+
+it("uses Codex result evidence for multiple changed files and commands before their starts are loaded", () => {
+  const events = [
+    record(
+      3,
+      new ToolFinished({
+        session: parent,
+        callId: "files",
+        tool: "file_change",
+        isError: false,
+        output: {
+          type: "fileChange",
+          status: "completed",
+          changes: [
+            { path: "src/new.ts", kind: { type: "add" }, diff: "+new" },
+            { path: "src/old.ts", kind: { type: "delete" }, diff: "-old" },
+          ],
+        },
+      }),
+    ),
+    record(
+      4,
+      new ToolFinished({
+        session: parent,
+        callId: "command",
+        tool: "command",
+        isError: false,
+        output: {
+          type: "commandExecution",
+          command: "pnpm build",
+          status: "completed",
+          exitCode: 1,
+          aggregatedOutput: "Build failed",
+        },
+      }),
+    ),
+  ];
+  assert.equal(summary(events), "Changed new.ts, old.ts · ran a build");
+});
+
+it("enriches summaries when older starts arrive without changing tool identities or membership", () => {
+  const recent = [
+    finished(3, "read"),
+    record(
+      4,
+      new ToolFinished({
+        session: parent,
+        callId: "test",
+        tool: "bash",
+        output: "Test failed",
+        isError: false,
+      }),
+    ),
+  ];
+  const cold = groups(recent)[0];
+  assert.isDefined(cold);
+  assert.equal(groupSummary(cold), "1 file read · ran 1 command");
+  const earlier = [
+    record(
+      1,
+      new ToolStarted({
+        session: parent,
+        callId: "read",
+        tool: "read",
+        input: { path: "src/model.ts" },
+      }),
+    ),
+    record(
+      2,
+      new ToolStarted({
+        session: parent,
+        callId: "test",
+        tool: "bash",
+        input: { command: "pnpm test" },
+      }),
+    ),
+  ];
+  const loaded = groups([...earlier, ...recent])[0];
+  assert.isDefined(loaded);
+  assert.equal(groupSummary(loaded), "Read model.ts · ran tests");
+  assert.equal(loaded.key, cold.key);
+  assert.deepEqual(keys(loaded), keys(cold));
+});
+
+it("recognizes complete familiar commands without interpreting arguments or shell programs", () => {
+  assert.equal(
+    summary([
+      ...completed(1, "Bash", { command: "npm run test" }),
+      ...completed(3, "bash", { command: "cargo test" }),
+      ...completed(5, "shell", { command: "pnpm --filter @usine/web test" }),
+    ]),
+    "Ran tests 3 times",
+  );
+
+  const ambiguous = [
+    'echo "pnpm test"',
+    "pnpm test:watch",
+    "pnpm build && pnpm test",
+    "pnpm test --token=private-value",
+    "TEST_TOKEN=private-value pnpm test",
+    "python scripts/test.py",
+    "pnpm test\npnpm build",
+    "pnpm --filter @usine/web test:watch",
+    "pnpm --filter @usine/web test && echo private-value",
+  ];
+  const events = ambiguous.flatMap((command, index) =>
+    completed(index * 2 + 1, "shell", { command }),
+  );
+  const text = summary(events);
+  assert.equal(text, `Ran ${ambiguous.length} commands`);
+  assert.notInclude(text, "private-value");
+});
+
+it("keeps missing inputs honest and bounds long paths and varied operations", () => {
+  assert.equal(
+    summary([...completed(1, "Read", { file_path: "src/known.ts" }), ...completed(3, "Read", {})]),
+    "2 file reads",
+  );
+
+  assert.equal(
+    summary([
+      ...completed(1, "Write", { file_path: "src/a.ts", content: "a" }),
+      ...completed(3, "write", { path: "src/b.ts", content: "b" }),
+      ...completed(5, "write", { path: "src/c.ts", content: "c" }),
+    ]),
+    "Wrote 3 files",
+  );
+
+  assert.equal(
+    summary([
+      ...completed(1, "read", { path: "source.ts\n" }),
+      ...completed(3, "read", { path: '{"token":"private-value"}' }),
+    ]),
+    "Read 2 files",
+  );
+
+  const longName = `${"long".repeat(30)}.ts`;
+  assert.equal(
+    summary([
+      ...completed(1, "edit", { path: `a/${longName}` }),
+      ...completed(3, "edit", { path: `b/${longName}` }),
+    ]),
+    "Edited 2 files",
+  );
+
+  const text = summary([
+    ...completed(1, "edit", { path: "src/conversation.tsx" }),
+    ...completed(3, "command", { command: "pnpm test" }),
+    ...completed(5, "grep", { pattern: "private-query" }),
+    ...completed(7, "subagent", { task: "private-task" }),
+    ...completed(9, "unknown", { token: "private-token" }),
+  ]);
+  assert.equal(text, "Edited conversation.tsx · ran tests · 3 more calls");
 });

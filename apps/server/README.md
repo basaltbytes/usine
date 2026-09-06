@@ -16,6 +16,8 @@ The local-only UI opens each project as a Board built from its authored or propo
 
 Direct browser requests for UI routes serve the application shell, so refreshing or sharing a Project or Configuration URL works. Unknown `/api/*` routes, missing `/assets/*` files, and other file-like paths remain 404 responses.
 
+Run conversations summarize adjacent completed tools by their recorded actions, including the files read or changed and recognized test or build invocations. Expand a group to inspect each tool and its result.
+
 The operator API includes `POST /api/cycle-budgets/reset` with an Ask identity. It uses the same request-origin guard and typed error contract as other interventions; stale Asks return 409 and needs-setup mode rejects resets until the runtime is available.
 
 ## Exporting Run evidence

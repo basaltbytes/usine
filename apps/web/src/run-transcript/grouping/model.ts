@@ -5,7 +5,7 @@ import {
   type TranscriptSession,
   type TranscriptTool,
 } from "../model.ts";
-import { toolCategory } from "../tool/presentation.ts";
+export { groupSummary } from "./summary.ts";
 
 type CompletedTool = TranscriptTool & { readonly state: { readonly _tag: "Finished" } };
 
@@ -78,27 +78,4 @@ export const groupTranscript = (projection: TranscriptProjection): ReadonlyArray
         }
       : item,
   );
-};
-
-/** A compact count of the completed work; counts are calls, including repeated file reads. */
-export const groupSummary = (group: ToolGroup): string => {
-  const counts = new Map<ReturnType<typeof toolCategory>, number>();
-  for (const tool of group.tools) {
-    const category = toolCategory(tool.name);
-    counts.set(category, (counts.get(category) ?? 0) + 1);
-  }
-  return [...counts]
-    .map(([category, count]) => {
-      const plural = count === 1 ? "" : "s";
-      return {
-        command: `${count} command${plural}`,
-        read: `${count} file read${plural}`,
-        edit: `${count} file edit${plural}`,
-        write: `${count} file write${plural}`,
-        search: `${count} search${count === 1 ? "" : "es"}`,
-        agent: `${count} delegation${plural}`,
-        tool: `${count} tool call${plural}`,
-      }[category];
-    })
-    .join(" · ");
 };
