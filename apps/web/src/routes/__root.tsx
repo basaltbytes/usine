@@ -203,7 +203,7 @@ const Shell = () => {
         <Outlet />
         {shownRun !== undefined && (
           <Suspense fallback={null}>
-            <RunDrawer runId={shownRun} open={run !== undefined} close={closeRun} />
+            <RunDrawer key={shownRun} runId={shownRun} open={run !== undefined} close={closeRun} />
           </Suspense>
         )}
       </SidebarInset>
