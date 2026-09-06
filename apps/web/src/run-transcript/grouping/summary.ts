@@ -33,8 +33,11 @@ const activityKey = (activity: ToolActivity): string => {
 // Compare complete recorded paths, even across operations, before shortening them.
 // A shared basename gets enough parent directories to distinguish it. If that
 // cannot fit, the summary uses a distinct-file count instead of ambiguous names.
-const compactPath = (path: string, paths: ReadonlyArray<string>): string => {
-  const parts = path.split("/");
+const FILE_SUBJECT_LIMIT = 56;
+const compactPath = (path: string, paths: ReadonlyArray<string>): string | undefined => {
+  // Only complete suffixes within the display budget can become labels. Keeping
+  // one extra character avoids accepting a directory cut off at the window edge.
+  const parts = path.slice(-(FILE_SUBJECT_LIMIT + 1)).split("/");
   for (let depth = 1; depth < parts.length; depth++) {
     const suffix = parts.slice(-depth).join("/");
     if (
@@ -42,7 +45,7 @@ const compactPath = (path: string, paths: ReadonlyArray<string>): string => {
     )
       return suffix;
   }
-  return path;
+  return path.length <= FILE_SUBJECT_LIMIT ? path : undefined;
 };
 
 const fileSummary = (
@@ -64,14 +67,21 @@ const fileSummary = (
     const noun = activity.operation;
     return `${calls.length} file ${noun}${calls.length === 1 ? "" : "s"}`;
   }
-  const names = paths.map((path) => compactPath(path, allPaths));
+  const counted = `${verb} ${paths.length} ${paths.length === 1 ? "file" : "files"}`;
+  if (paths.length > 2) return counted;
+  const names: Array<string> = [];
+  for (const path of paths) {
+    const name = compactPath(path, allPaths);
+    if (name === undefined) return counted;
+    names.push(name);
+  }
   const subject = names.join(", ");
   // Keep untrusted file text bounded and single-line. Complete paths remain in
   // the tool details; unknown command text and other payload fields never enter summaries.
   const readable = names.every(
     (name) => name.trim() !== "" && !/[^\p{L}\p{N} ._@()+/-]/u.test(name),
   );
-  return `${verb} ${paths.length <= 2 && subject.length <= 56 && readable ? subject : `${paths.length} ${paths.length === 1 ? "file" : "files"}`}`;
+  return subject.length <= FILE_SUBJECT_LIMIT && readable ? `${verb} ${subject}` : counted;
 };
 
 const activitySummary = (

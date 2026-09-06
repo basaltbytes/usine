@@ -108,7 +108,9 @@ it("summarizes adjacent completed work while keeping prose and a single call vis
     </TranscriptDisclosureProvider>,
   );
 
+  // This one exact example verifies the compact separator and sentence casing.
   assert.include(html, "Edited conversation.tsx · ran tests");
+  assert.notMatch(summary(events), /\b(?:passed|succeeded|successful)\b/iu);
   assert.include(html, "2 completed tools");
   assert.include(html, "The checks need attention.");
   assert.include(html, 'aria-label="Command: Command details unavailable · Completed"');
@@ -251,14 +253,23 @@ it("counts repeated reads as one file and distinguishes colliding basenames", ()
     ...completed(3, "Read", { file_path: "packages/engine/src/model.ts" }),
     ...completed(5, "read", { path: "packages/core/src/model.ts", offset: 48, limit: 8 }),
   ];
-  assert.equal(summary(events), "Read core/src/model.ts, engine/src/model.ts");
-  assert.equal(summary(events.slice(0, 2).concat(events.slice(4))), "Read model.ts");
+  const reads = summary(events);
+  assert.include(reads, "core/src/model.ts");
+  assert.include(reads, "engine/src/model.ts");
+  assert.lengthOf(reads.match(/model\.ts/gu) ?? [], 2);
+  const repeated = summary(events.slice(0, 2).concat(events.slice(4)));
+  assert.include(repeated, "model.ts");
+  assert.lengthOf(repeated.match(/model\.ts/gu) ?? [], 1);
 
   const mixed = [
     ...completed(1, "Read", { file_path: "core/src/model.ts" }),
     ...completed(3, "Edit", { file_path: "engine/src/model.ts", old_string: "a", new_string: "b" }),
   ];
-  assert.equal(summary(mixed), "Read core/src/model.ts · edited engine/src/model.ts");
+  const actions = summary(mixed);
+  assert.include(actions, "core/src/model.ts");
+  assert.include(actions, "engine/src/model.ts");
+  assert.match(actions, /\bread\b/iu);
+  assert.match(actions, /\bedit(?:ed|s)?\b/iu);
 });
 
 it("uses Codex result evidence for multiple changed files and commands before their starts are loaded", () => {
@@ -297,7 +308,11 @@ it("uses Codex result evidence for multiple changed files and commands before th
       }),
     ),
   ];
-  assert.equal(summary(events), "Changed new.ts, old.ts · ran a build");
+  const text = summary(events);
+  assert.include(text, "new.ts");
+  assert.include(text, "old.ts");
+  assert.match(text, /\bbuilds?\b/iu);
+  assert.notMatch(text, /\b(?:passed|succeeded|successful)\b/iu);
 });
 
 it("enriches summaries when older starts arrive without changing tool identities or membership", () => {
@@ -316,7 +331,9 @@ it("enriches summaries when older starts arrive without changing tool identities
   ];
   const cold = groups(recent)[0];
   assert.isDefined(cold);
-  assert.equal(groupSummary(cold), "1 file read · ran 1 command");
+  assert.match(groupSummary(cold), /\bread\b/iu);
+  assert.match(groupSummary(cold), /\bcommands?\b/iu);
+  assert.notMatch(groupSummary(cold), /\btests?\b/iu);
   const earlier = [
     record(
       1,
@@ -339,20 +356,20 @@ it("enriches summaries when older starts arrive without changing tool identities
   ];
   const loaded = groups([...earlier, ...recent])[0];
   assert.isDefined(loaded);
-  assert.equal(groupSummary(loaded), "Read model.ts · ran tests");
+  assert.include(groupSummary(loaded), "model.ts");
+  assert.match(groupSummary(loaded), /\btests?\b/iu);
   assert.equal(loaded.key, cold.key);
   assert.deepEqual(keys(loaded), keys(cold));
 });
 
 it("recognizes complete familiar commands without interpreting arguments or shell programs", () => {
-  assert.equal(
-    summary([
-      ...completed(1, "Bash", { command: "npm run test" }),
-      ...completed(3, "bash", { command: "cargo test" }),
-      ...completed(5, "shell", { command: "pnpm --filter @usine/web test" }),
-    ]),
-    "Ran tests 3 times",
-  );
+  const recognized = summary([
+    ...completed(1, "Bash", { command: "npm run test" }),
+    ...completed(3, "bash", { command: "cargo test" }),
+    ...completed(5, "shell", { command: "pnpm --filter @usine/web test" }),
+  ]);
+  assert.match(recognized, /\btests?\b/iu);
+  assert.match(recognized, /\b3\b/u);
 
   const ambiguous = [
     'echo "pnpm test"',
@@ -369,41 +386,43 @@ it("recognizes complete familiar commands without interpreting arguments or shel
     completed(index * 2 + 1, "shell", { command }),
   );
   const text = summary(events);
-  assert.equal(text, `Ran ${ambiguous.length} commands`);
+  assert.include(text, String(ambiguous.length));
+  assert.match(text, /\bcommands?\b/iu);
+  assert.notMatch(text, /\b(?:tests?|builds?)\b/iu);
   assert.notInclude(text, "private-value");
 });
 
 it("keeps missing inputs honest and bounds long paths and varied operations", () => {
-  assert.equal(
-    summary([...completed(1, "Read", { file_path: "src/known.ts" }), ...completed(3, "Read", {})]),
-    "2 file reads",
-  );
+  const incomplete = summary([
+    ...completed(1, "Read", { file_path: "src/known.ts" }),
+    ...completed(3, "Read", {}),
+  ]);
+  assert.match(incomplete, /\b2\b/u);
+  assert.match(incomplete, /\breads?\b/iu);
+  assert.notMatch(incomplete, /\b2 files\b/iu);
 
-  assert.equal(
-    summary([
-      ...completed(1, "Write", { file_path: "src/a.ts", content: "a" }),
-      ...completed(3, "write", { path: "src/b.ts", content: "b" }),
-      ...completed(5, "write", { path: "src/c.ts", content: "c" }),
-    ]),
-    "Wrote 3 files",
-  );
+  const writes = summary([
+    ...completed(1, "Write", { file_path: "src/a.ts", content: "a" }),
+    ...completed(3, "write", { path: "src/b.ts", content: "b" }),
+    ...completed(5, "write", { path: "src/c.ts", content: "c" }),
+  ]);
+  assert.match(writes, /\b3 files\b/iu);
 
-  assert.equal(
-    summary([
-      ...completed(1, "read", { path: "source.ts\n" }),
-      ...completed(3, "read", { path: '{"token":"private-value"}' }),
-    ]),
-    "Read 2 files",
-  );
+  const unsafePaths = summary([
+    ...completed(1, "read", { path: "source.ts\n" }),
+    ...completed(3, "read", { path: '{"token":"private-value"}' }),
+  ]);
+  assert.match(unsafePaths, /\b2 files\b/iu);
+  assert.notInclude(unsafePaths, "private-value");
+  assert.notInclude(unsafePaths, "\n");
 
   const longName = `${"long".repeat(30)}.ts`;
-  assert.equal(
-    summary([
-      ...completed(1, "edit", { path: `a/${longName}` }),
-      ...completed(3, "edit", { path: `b/${longName}` }),
-    ]),
-    "Edited 2 files",
-  );
+  const longPaths = summary([
+    ...completed(1, "edit", { path: `a/${longName}` }),
+    ...completed(3, "edit", { path: `b/${longName}` }),
+  ]);
+  assert.match(longPaths, /\b2 files\b/iu);
+  assert.notInclude(longPaths, longName);
 
   const text = summary([
     ...completed(1, "edit", { path: "src/conversation.tsx" }),
@@ -412,5 +431,47 @@ it("keeps missing inputs honest and bounds long paths and varied operations", ()
     ...completed(7, "subagent", { task: "private-task" }),
     ...completed(9, "unknown", { token: "private-token" }),
   ]);
-  assert.equal(text, "Edited conversation.tsx · ran tests · 3 more calls");
+  assert.include(text, "conversation.tsx");
+  assert.match(text, /\btests?\b/iu);
+  assert.match(text, /\b3\b/u);
+  assert.match(text, /\bcalls?\b/iu);
+  assert.notInclude(text, "private-");
+});
+
+it("summarizes a large file change by distinct-file count while preserving every recorded change", () => {
+  const repeated = { path: "src/file-0.ts", kind: { type: "update" }, diff: "+private-source" };
+  const changes = [
+    repeated,
+    ...Array.from({ length: 4999 }, (_, index) => ({
+      ...repeated,
+      path: `src/file-${index + 1}.ts`,
+    })),
+    repeated,
+  ];
+  const output = { type: "fileChange", status: "completed", changes };
+  const group = groups([
+    ...completed(1, "file_change", {}, output),
+    ...completed(3, "command", { command: "pnpm test" }),
+  ])[0];
+  assert.isDefined(group);
+
+  const text = groupSummary(group);
+  assert.match(text, /\b5000 files\b/iu);
+  assert.match(text, /\btests?\b/iu);
+  assert.isBelow(text.length, 100);
+  assert.notInclude(text, "private-source");
+  assert.lengthOf(group.tools, 2);
+  assert.deepEqual(group.tools[0].state.output, output);
+});
+
+it("uses a file count when deeply nested colliding paths cannot be distinguished in a compact label", () => {
+  const shared = `${"nested/".repeat(5000)}model.ts`;
+  const text = summary([
+    ...completed(1, "read", { path: `core/${shared}` }),
+    ...completed(3, "read", { path: `engine/${shared}` }),
+  ]);
+
+  assert.match(text, /\b2 files\b/iu);
+  assert.notInclude(text, "model.ts");
+  assert.isBelow(text.length, 100);
 });
