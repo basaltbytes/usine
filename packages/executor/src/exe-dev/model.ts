@@ -37,27 +37,16 @@ export class GitHubIntegration extends Schema.Class<GitHubIntegration>(
   name: IntegrationName,
 }) {}
 
-/** A harness-owned command that exits zero only while its operator login remains usable. */
-export class HarnessLoginCheck extends Schema.Class<HarnessLoginCheck>(
-  "@usine/executor/ExeDevHarnessLoginCheck",
-)({
-  harness: Schema.NonEmptyString,
-  command: Schema.NonEmptyString,
-  args: Schema.Array(Schema.String),
-}) {}
-
 /** How long an exe.dev Worker's repository credential attachment may remain active, in minutes. */
 export const CredentialGrantMinutes = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
   Schema.brand("ExeDevCredentialGrantMinutes"),
 );
 export type CredentialGrantMinutes = typeof CredentialGrantMinutes.Type;
 
-/** Repository access, login checks, and run-host settings for the configured exe.dev Workers. */
+/** Repository access and run-host settings for the configured exe.dev Workers. */
 export interface ExeDevExecutorOptions {
   /** Existing native GitHub integrations, one per repository this Worker may receive. */
   readonly githubIntegrations: ReadonlyArray<GitHubIntegration>;
-  /** Every harness used on this Worker must prove that its operator login is still valid. */
-  readonly harnessLoginChecks: readonly [HarnessLoginCheck, ...ReadonlyArray<HarnessLoginCheck>];
   /** Installed in the baked image; defaults to the published worker executable. */
   readonly runHost?: RunHostCommand;
   /** Local SSH executable and its control-plane-only arguments. */

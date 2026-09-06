@@ -4,7 +4,10 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
 const recordPath = ".test-pull-request.json";
-if (process.argv.includes("--protocol-version")) {
+if (process.argv.includes("--preflight")) {
+  const brain = JSON.parse(process.argv[process.argv.indexOf("--preflight") + 1]);
+  process.stdout.write(JSON.stringify({ _tag: "HarnessReady", harness: brain.harness }) + "\n");
+} else if (process.argv.includes("--protocol-version")) {
   process.stdout.write("4\n");
 } else if (process.argv.includes("--github")) {
   const args = process.argv.slice(process.argv.indexOf("--github") + 1);

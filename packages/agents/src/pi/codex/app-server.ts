@@ -13,7 +13,15 @@ import {
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { homedir } from "node:os";
-import { type ChildRequest, SessionOperationError } from "../../runtime.ts";
+import type { AgentSessionId } from "@usine/core/agent/session";
+import { type WorkingDirectory, SessionOperationError } from "../../runtime.ts";
+
+/** Worker directory and optional session identity for a scoped app-server connection. */
+export interface CodexClient {
+  readonly cwd: WorkingDirectory;
+  /** None during preflight, before a child Session exists. */
+  readonly sessionId: Option.Option<AgentSessionId>;
+}
 
 export interface CodexNotification {
   readonly method: string;
@@ -40,7 +48,7 @@ export class CodexAppServer extends Context.Service<
   CodexAppServer,
   {
     readonly open: (
-      request: ChildRequest,
+      request: CodexClient,
     ) => Effect.Effect<CodexConnection, SessionOperationError, Scope.Scope>;
   }
 >()("@usine/agents/pi/CodexAppServer") {}
@@ -72,13 +80,13 @@ const preview = (line: string): string => (line.length > 200 ? `${line.slice(0, 
 
 export const operationError = (
   operation: SessionOperationError["operation"],
-  request: ChildRequest,
+  request: CodexClient,
   message: string,
   cause: unknown,
 ): SessionOperationError =>
   new SessionOperationError({
     operation,
-    sessionId: Option.some(request.session.id),
+    sessionId: request.sessionId,
     message,
     cause,
   });
@@ -125,6 +133,10 @@ const makeCodexAppServer = Effect.gen(function* () {
 
   const open: CodexAppServer["Service"]["open"] = Effect.fn("CodexAppServer.open")(
     function* (request) {
+      yield* Effect.annotateCurrentSpan({
+        harness: "codex",
+        sessionId: Option.getOrUndefined(request.sessionId),
+      });
       const input = yield* Queue.make<Uint8Array, Cause.Done>();
       const notifications = yield* Queue.make<
         CodexNotification,
@@ -190,7 +202,7 @@ const makeCodexAppServer = Effect.gen(function* () {
               Effect.logWarning("Skipping a non-JSON Codex app-server line", {
                 cause,
                 line: preview(line),
-                sessionId: request.session.id,
+                sessionId: Option.getOrUndefined(request.sessionId),
               }).pipe(Effect.as(undefined)),
             ),
           );
@@ -206,7 +218,7 @@ const makeCodexAppServer = Effect.gen(function* () {
             if (Option.isNone(found)) {
               return yield* Effect.logDebug("Ignoring a Codex response with no waiting request", {
                 id: decoded.id,
-                sessionId: request.session.id,
+                sessionId: Option.getOrUndefined(request.sessionId),
               });
             }
             if (Schema.is(RpcErrorResponse)(decoded)) {
@@ -225,13 +237,13 @@ const makeCodexAppServer = Effect.gen(function* () {
           if (!Schema.is(RpcMessage)(decoded)) {
             return yield* Effect.logWarning("Skipping an unknown Codex JSON-RPC shape", {
               line: preview(line),
-              sessionId: request.session.id,
+              sessionId: Option.getOrUndefined(request.sessionId),
             });
           }
           if (decoded.id !== undefined) {
             yield* Effect.logWarning("Codex app-server requested unsupported client input", {
               method: decoded.method,
-              sessionId: request.session.id,
+              sessionId: Option.getOrUndefined(request.sessionId),
             });
             return yield* write(
               {
@@ -284,7 +296,7 @@ const makeCodexAppServer = Effect.gen(function* () {
             ? Effect.void
             : Effect.logDebug("Codex app-server stderr", {
                 line: preview(line),
-                sessionId: request.session.id,
+                sessionId: Option.getOrUndefined(request.sessionId),
               }).pipe(
                 Effect.andThen(
                   Ref.update(stderrTail, (tail) => [...tail, line].slice(-STDERR_TAIL_LINES)),
@@ -321,14 +333,16 @@ const makeCodexAppServer = Effect.gen(function* () {
         Effect.forkScoped,
       );
       yield* Effect.addFinalizer(() =>
-        Effect.logDebug("Closing Codex app-server", { sessionId: request.session.id }).pipe(
+        Effect.logDebug("Closing Codex app-server", {
+          sessionId: Option.getOrUndefined(request.sessionId),
+        }).pipe(
           Effect.andThen(Ref.set(closing, true)),
           Effect.andThen(Queue.end(input)),
           Effect.andThen(handle.kill()),
           Effect.catch((cause) =>
             Effect.logWarning("Could not stop Codex app-server cleanly", {
               cause,
-              sessionId: request.session.id,
+              sessionId: Option.getOrUndefined(request.sessionId),
             }),
           ),
         ),

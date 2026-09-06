@@ -4,6 +4,14 @@ The worker-side process for one [usine](https://github.com/basaltbytes/usine) At
 
 The host uses protocol v4 as newline-delimited JSON. Its first input must be a secret-free `Start` frame containing the repository, payload snapshot, rendered task, named agent, requested parent model, and child-session budget. After launch, `Started` records the SDK-selected parent model. Normalized parent and child `SessionEvent` envelopes follow. A launch error sends `Failed` as the first and terminal frame; a started session closes with one `Final`, `Failed`, or `Interrupted` envelope. Failure in either the session result or its event stream ends the Attempt. The host accepts steer and interrupt envelopes while the session runs and starts SDK interrupt delivery before terminal cleanup. `usine-run-host --protocol-version` prints the supported wire version for worker preflight checks.
 
+For harness readiness, run:
+
+```sh
+usine-run-host --preflight '{"harness":"codex","model":"gpt-5.4-mini","effort":"low"}'
+```
+
+The command prints one `HarnessReadiness` JSON response: `HarnessReady` or `HarnessUnavailableError` with the harness, capability, and corrective message. A reported capability failure still exits zero so executors can decode it; invalid arguments, a broken run host, or an incomplete check such as a timeout exit nonzero. It uses the worker user’s installed tools and login state, runs no agent prompt, and never performs an interactive login or installation. Logs go to stderr. Codex requires CLI 0.144.0 and ChatGPT authentication; Claude uses its worker-provisioned CLI with a subscription login. Pi uses the SDK installed with the host and requires API-key authentication for child models.
+
 The executable runs the production Pi parent with Claude Code, Codex, and Pi child backends. `--stub` and `--stub-delay-ms` select the deterministic adapter used by process tests. Runtime logs and process-console output go to stderr because stdout belongs exclusively to the attempt channel, including logs from libraries with separate Effect runtimes.
 
 After the agent session finishes, the host records commits created after the supplied base commit. For a changed checkout, an agent-created branch, or an Attempt pinned to a commit, it also asks GitHub for PRs whose head matches the final checkout commit. These structured `PullRequest` facts persist with the result and supply the operator's PR link. Discovery uses `gh api` with the worker's existing repository access, including the exe.dev GitHub host; it does not parse the agent's message. A failed lookup or ten-second timeout logs a warning and preserves the completed agent result. Worker images need the GitHub CLI for PR discovery.

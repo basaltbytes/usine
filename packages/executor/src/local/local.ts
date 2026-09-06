@@ -1,3 +1,4 @@
+import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -26,6 +27,7 @@ import {
   WorkerCapabilityError,
   type ExecutorOperation,
 } from "../executor.ts";
+import { verifyHarnesses } from "../harness-preflight.ts";
 import { prepareAttempt } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
@@ -213,6 +215,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
 
     const preflight = Effect.fn("LocalExecutor.preflight")(function* (
       worker: CheckoutRequest["worker"],
+      brains: ReadonlyArray<BrainSpec>,
     ) {
       yield* Effect.annotateCurrentSpan({ worker, host: "local" });
       const gitVersion = (yield* executeCommand("preflight", "git", ["--version"])).trim();
@@ -236,6 +239,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           cause: new Error("run-host protocol mismatch"),
         });
       }
+      yield* verifyHarnesses(worker, brains, runHost, (command, args) =>
+        executeCommand("preflight", command, args),
+      );
       yield* Effect.logInfo("Worker preflight verified", {
         worker,
         host: "local",
@@ -251,6 +257,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         host: "local",
         repository: request.repository,
       });
+      yield* verifyHarnesses(request.worker, [request.agent.brain], runHost, (command, args) =>
+        executeCommand("preflight", command, args),
+      );
       const credential = yield* Effect.acquireRelease(
         credentials.issue(request.repository, request.attemptId),
         (token) =>

@@ -125,7 +125,10 @@ describe("Codex app-server transport", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const server = yield* CodexAppServer;
-          const connection = yield* server.open(request);
+          const connection = yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+          });
           const pending = yield* Effect.forkChild(connection.request("launch", "initialize", {}));
           yield* awaitStdinLines(process, 1);
           yield* Queue.offer(process.stdout, encoder.encode("\n"));
@@ -145,7 +148,10 @@ describe("Codex app-server transport", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const server = yield* CodexAppServer;
-          const connection = yield* server.open(request);
+          const connection = yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+          });
           const notifications = yield* Effect.forkChild(Stream.runHead(connection.notifications));
           yield* Queue.offer(process.stdout, line({ id: 9, method: "item/approval" }));
           yield* Queue.offer(process.stdout, line({ method: "turn/started", params: {} }));
@@ -168,7 +174,10 @@ describe("Codex app-server transport", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const server = yield* CodexAppServer;
-          const connection = yield* server.open(request);
+          const connection = yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+          });
           yield* Queue.offer(process.stderr, encoder.encode("codex: no login found\n"));
           const pending = yield* Effect.forkChild(connection.request("launch", "initialize", {}));
           yield* awaitStdinLines(process, 1);
@@ -195,7 +204,10 @@ describe("Codex app-server transport", () => {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const server = yield* CodexAppServer;
-          const connection = yield* server.open(request);
+          const connection = yield* server.open({
+            cwd: request.cwd,
+            sessionId: Option.some(request.session.id),
+          });
           const pending = yield* Effect.forkChild(connection.request("launch", "initialize", {}));
           yield* awaitStdinLines(process, 1);
           yield* TestClock.adjust("61 seconds");

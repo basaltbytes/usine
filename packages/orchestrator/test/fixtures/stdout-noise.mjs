@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-if (!process.argv.includes("--protocol-version")) {
+if (!process.argv.includes("--protocol-version") && !process.argv.includes("--preflight")) {
   // An independent logger can write before the host configures its Effect context.
   process.stdout.write(
     process.argv.includes("--malformed-frame")
@@ -10,4 +10,5 @@ if (!process.argv.includes("--protocol-version")) {
 }
 await import("../../../run-host/dist/bin.js");
 // Console users outside the host's Effect context must also write to stderr.
-if (!process.argv.includes("--protocol-version")) console.log("session library diagnostic");
+if (!process.argv.includes("--protocol-version") && !process.argv.includes("--preflight"))
+  console.log("session library diagnostic");

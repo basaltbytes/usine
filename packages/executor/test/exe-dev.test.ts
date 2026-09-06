@@ -1,5 +1,10 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
+import {
+  HarnessReadiness,
+  HarnessReady,
+  HarnessUnavailableError,
+} from "@usine/core/agent/capability";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
@@ -14,7 +19,7 @@ import { WorkerName } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
 import { CheckoutRequest, Executor } from "../src/executor.ts";
 import { layer as exeDevLayer } from "../src/exe-dev/exe-dev.ts";
-import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "../src/exe-dev/model.ts";
+import { GitHubIntegration, IntegrationName } from "../src/exe-dev/model.ts";
 import {
   Cause,
   DateTime,
@@ -87,6 +92,7 @@ interface FakeSshState {
   kills: number;
   /** When set, the next `rm -rf` on the Attempt worktree exits non-zero. */
   failWorktreeRm: boolean;
+  readiness: HarnessReadiness;
   /** The simulated remote operation parks until its SSH client is killed. */
   hangPreparation: "none" | "clone" | "fetch" | "attach" | "promotion" | "checkout";
   parked: boolean;
@@ -275,6 +281,7 @@ const fakeSsh = (
     inputs: [],
     kills: 0,
     failWorktreeRm: false,
+    readiness: new HarnessReady({ harness: "claude" }),
     hangPreparation: "none",
     parked: false,
     failAttach: false,
@@ -338,6 +345,12 @@ const fakeSsh = (
       if (remoteLine === "exec 'usine-run-host' '--protocol-version'") {
         return oneShotHandle(`${protocol}\n`, 0);
       }
+      if (remoteLine.startsWith("exec 'usine-run-host' '--preflight'")) {
+        return oneShotHandle(
+          Schema.encodeSync(Schema.fromJsonString(HarnessReadiness))(state.readiness),
+          0,
+        );
+      }
       if (remoteLine.startsWith("exec 'find' ") && remoteLine.includes("/attempts'")) {
         return oneShotHandle(
           sweepMode === "valid"
@@ -364,11 +377,6 @@ const fakeSsh = (
 };
 
 const integration = new GitHubIntegration({ repository: REPOSITORY, name: INTEGRATION });
-const harness = new HarnessLoginCheck({
-  harness: "codex",
-  command: "codex",
-  args: ["login", "status"],
-});
 
 const request = new CheckoutRequest({
   attemptId: ATTEMPT_ID,
@@ -387,7 +395,6 @@ const request = new CheckoutRequest({
 const runtime = (sshLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>) =>
   exeDevLayer({
     githubIntegrations: [integration],
-    harnessLoginChecks: [harness],
     // The cancellation tests advance the TestClock by exactly this much.
     interruptGrace: "2 seconds",
   }).pipe(Layer.provide(sshLayer));
@@ -397,7 +404,7 @@ describe("exe.dev executor", () => {
     const ssh = fakeSsh(PROTOCOL);
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       for (const command of ssh.state.commands) {
         const remoteLine = remoteArgs(command)[0] ?? "";
         for (const mutating of [
@@ -423,7 +430,7 @@ describe("exe.dev executor", () => {
     const ssh = fakeSsh(PROTOCOL, "success", "invalid-path");
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       // The sweep failure is isolated: prepare proceeds, and the path outside
       // the Worker root is never touched.
       const prepared = yield* executor.prepare(request);
@@ -445,7 +452,7 @@ describe("exe.dev executor", () => {
     });
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       const firstScope = yield* Scope.make();
       const secondScope = yield* Scope.make();
       const prepared = yield* executor.prepare(request).pipe(Scope.provide(firstScope));
@@ -492,7 +499,7 @@ describe("exe.dev executor", () => {
       });
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
         const owner = yield* Scope.make();
         const prepared = yield* executor.prepare(request).pipe(Scope.provide(owner));
         ssh.state.failStop = true;
@@ -529,7 +536,7 @@ describe("exe.dev executor", () => {
       ssh.state.failStop = true;
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
         const fiber = yield* Effect.forkChild(executor.prepare(request));
         while (!ssh.state.parked) yield* Effect.yieldNow;
         yield* Fiber.interrupt(fiber);
@@ -566,7 +573,7 @@ describe("exe.dev executor", () => {
     ssh.state.hangPreparation = "clone";
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       const first = yield* executor.prepare(request).pipe(Effect.scoped, Effect.forkChild);
       while (
         !ssh.state.commands.some((command) => (remoteArgs(command)[0] ?? "").includes("'clone'"))
@@ -604,7 +611,7 @@ describe("exe.dev executor", () => {
       return Effect.gen(function* () {
         const executor = yield* Executor;
         assert.strictEqual(executor.kind, "exe.dev");
-        yield* executor.preflight(WORKER);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
         const prepared = yield* executor.prepare(request);
         const result = yield* prepared.launch({
           append: (direction, envelope) =>
@@ -678,7 +685,7 @@ describe("exe.dev executor", () => {
     });
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       const first = yield* Scope.make();
       const second = yield* Scope.make();
       yield* executor.prepare(request).pipe(Scope.provide(first));
@@ -699,7 +706,7 @@ describe("exe.dev executor", () => {
     const ssh = fakeSsh(PROTOCOL);
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       const owner = yield* Scope.make();
       yield* executor.prepare(request).pipe(Scope.provide(owner));
       ssh.state.failAttach = true;
@@ -730,7 +737,7 @@ describe("exe.dev executor", () => {
       const ssh = fakeSsh(PROTOCOL, "wait-for-interrupt");
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
         const owner = yield* Scope.make();
         const prepared = yield* executor.prepare(request).pipe(Scope.provide(owner));
         const started = yield* Deferred.make<void>();
@@ -766,11 +773,33 @@ describe("exe.dev executor", () => {
     },
   );
 
+  it.effect("checks the roster on the VM and refuses login loss before preparation", () => {
+    const ssh = fakeSsh(PROTOCOL);
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain, new BrainSpec({ ...TEST_AGENT.brain })]);
+      assert.strictEqual(
+        ssh.state.commands.filter((command) => remoteArgs(command)[0]?.includes("'--preflight'"))
+          .length,
+        1,
+      );
+      ssh.state.readiness = new HarnessUnavailableError({
+        harness: "claude",
+        capability: "login",
+        message: "Claude login expired",
+      });
+      const error = yield* executor.prepare(request).pipe(Effect.scoped, Effect.flip);
+      assert.strictEqual(error._tag, "WorkerCapabilityError");
+      assert.strictEqual(error.message, "Claude login expired");
+      assert(!ssh.state.commands.some((command) => command.args.includes("attach")));
+    }).pipe(Effect.provide(runtime(ssh.layer)));
+  });
+
   it.effect("surfaces run-host skew as a typed preflight capability error", () => {
     const ssh = fakeSsh("1");
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      const error = yield* executor.preflight(WORKER).pipe(Effect.flip);
+      const error = yield* executor.preflight(WORKER, [TEST_AGENT.brain]).pipe(Effect.flip);
       assert.strictEqual(error._tag, "WorkerCapabilityError");
       if (error._tag !== "WorkerCapabilityError") return;
       assert.strictEqual(error.capability, "run-host");
@@ -782,7 +811,7 @@ describe("exe.dev executor", () => {
     const ssh = fakeSsh(PROTOCOL, "final-nonzero");
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       const prepared = yield* executor.prepare(request);
       const error = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.flip);
       assert.strictEqual(error._tag, "InfraFailure");
@@ -795,7 +824,7 @@ describe("exe.dev executor", () => {
     const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       const prepared = yield* executor.prepare(request);
       const launchFiber = yield* prepared
         .launch({
@@ -836,7 +865,7 @@ describe("exe.dev executor", () => {
       const ssh = fakeSsh(PROTOCOL, "ignore-interrupt");
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
         const prepared = yield* executor.prepare(
           new CheckoutRequest({ ...request, maxAttemptMinutes: 1 }),
         );
@@ -877,7 +906,7 @@ describe("exe.dev executor", () => {
     const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       const prepared = yield* executor.prepare(request);
       const launchFiber = yield* prepared
         .launch({
@@ -910,7 +939,7 @@ describe("exe.dev executor", () => {
     const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       const prepared = yield* executor.prepare(request);
       const launchFiber = yield* prepared
         .launch({

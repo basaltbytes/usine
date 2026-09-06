@@ -11,7 +11,7 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { InstanceDirectory } from "@usine/core/instance";
-import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev";
+import { GitHubIntegration, IntegrationName } from "@usine/executor/exe-dev";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { Config, DateTime, Effect, FileSystem, Option, Schema } from "effect";
@@ -93,18 +93,11 @@ describe("live exe.dev Worker", () => {
       const instanceDirectory = InstanceDirectory.make(
         yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-exe-dev-integration-" }),
       );
-      const runtime = exeDevLayer(instanceDirectory, config, {
+      const runtime = exeDevLayer(instanceDirectory, config, [agent.brain], {
         githubIntegrations: [
           new GitHubIntegration({
             repository,
             name: IntegrationName.make(settings.integration),
-          }),
-        ],
-        harnessLoginChecks: [
-          new HarnessLoginCheck({
-            harness: "codex",
-            command: "codex",
-            args: ["login", "status"],
           }),
         ],
       });

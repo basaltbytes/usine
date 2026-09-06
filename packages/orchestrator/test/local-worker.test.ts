@@ -178,7 +178,7 @@ const withLocalEngine = <A, E, R>(
               args: [runHost ?? RUN_HOST, ...runHostArgs],
             },
           };
-    const runtime = localLayer(instance, config, {
+    const runtime = localLayer(instance, config, [], {
       repositoryUrl: () => remote,
       ...runHostOption,
       interruptGrace: "100 millis",
@@ -190,6 +190,52 @@ const withLocalEngine = <A, E, R>(
   }).pipe(Effect.provide(NodeServices.layer));
 
 describe("local worker", () => {
+  it.live(
+    "checks every supplied roster brain before starting the local scheduler",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const instance = InstanceDirectory.make(
+          yield* fs.makeTempDirectoryScoped({ prefix: "usine-preflight-" }),
+        );
+        const runtime = localLayer(instance, config, [testAgent.brain], {
+          runHost: {
+            command: process.execPath,
+            args: [fileURLToPath(new URL("./fixtures/harness-unavailable.mjs", import.meta.url))],
+          },
+        }).pipe(Layer.provide(credentialLayer));
+        const error = yield* Effect.void.pipe(Effect.provide(runtime), Effect.flip);
+        assert.strictEqual(error._tag, "WorkerCapabilityError");
+        assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "does not spend infrastructure retries or prepare a checkout on a harness gap",
+    () =>
+      withLocalEngine(
+        [],
+        ({ engine, instance }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            assert.strictEqual(snapshot.attempts.length, 1);
+            const attempt = snapshot.attempts[0];
+            assert(attempt !== undefined && Option.isSome(attempt.outcome));
+            const outcome = attempt.outcome.value;
+            assert.strictEqual(outcome._tag, "Failed");
+            if (outcome._tag === "Failed") assert.strictEqual(outcome.failure._tag, "AgentFailure");
+            const fs = yield* FileSystem.FileSystem;
+            assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
+          }),
+        fileURLToPath(new URL("./fixtures/harness-unavailable.mjs", import.meta.url)),
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
+
   it.live(
     "preserves successful agent work when PR discovery fails",
     () =>
@@ -338,7 +384,7 @@ describe("local worker", () => {
           ...config,
           settings: new Settings({ ...config.settings, maxAttemptMinutes: 1 }),
         });
-        const runtime = stepExecutorLayer(budgetConfig).pipe(Layer.provide(executor));
+        const runtime = stepExecutorLayer(budgetConfig, []).pipe(Layer.provide(executor));
         yield* Effect.gen(function* () {
           const scheduler = yield* StepExecutor;
           const selected = submission(7);
@@ -606,7 +652,7 @@ describe("local worker", () => {
             message: Array.isArray(message) ? message.map(String).join(" ") : String(message),
           });
         });
-        const runtime = localLayer(instance, config, { repositoryUrl: () => remote }).pipe(
+        const runtime = localLayer(instance, config, [], { repositoryUrl: () => remote }).pipe(
           Layer.provide(credentialLayer),
         );
         yield* Effect.gen(function* () {

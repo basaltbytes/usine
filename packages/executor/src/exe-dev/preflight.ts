@@ -1,3 +1,4 @@
+import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
@@ -8,6 +9,7 @@ import {
   WorkerCapabilityError,
   type WorkerCapability,
 } from "../executor.ts";
+import { verifyHarnesses } from "../harness-preflight.ts";
 import type { ExeDevCommands } from "./commands.ts";
 import { HomePath, SshDestination, type ExeDevExecutorOptions, type VmState } from "./model.ts";
 
@@ -87,7 +89,10 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   ): Effect.Effect<A, WorkerCapabilityError> =>
     effect.pipe(Effect.mapError((cause) => capabilityError(worker, capability, message, cause)));
 
-  const preflight = Effect.fn("ExeDevExecutor.preflight")(function* (worker: WorkerName) {
+  const preflight = Effect.fn("ExeDevExecutor.preflight")(function* (
+    worker: WorkerName,
+    brains: ReadonlyArray<BrainSpec>,
+  ) {
     const vm = yield* resolveVm(worker).pipe(
       Effect.catchTag("ExecutorOperationError", (cause) =>
         capabilityError(worker, "machine", `Could not reach exe.dev Worker ${worker}`, cause),
@@ -143,14 +148,9 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       );
     }
 
-    for (const check of options.harnessLoginChecks) {
-      yield* asCapability(
-        worker,
-        "harness-login",
-        `${check.harness} is not logged in on Worker ${worker}`,
-        commands.remote("preflight", vm.sshDest, check.command, check.args),
-      );
-    }
+    yield* verifyHarnesses(worker, brains, runHost, (command, args) =>
+      commands.remote("preflight", vm.sshDest, command, args),
+    );
 
     for (const integration of options.githubIntegrations) {
       yield* asCapability(
@@ -172,7 +172,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       gitVersion,
       nodeVersion,
       protocolVersion: AttemptChannel.PROTOCOL_VERSION,
-      harnesses: options.harnessLoginChecks.map(({ harness }) => harness).join(","),
+      harnesses: [...new Set(brains.map(({ harness }) => harness))].join(","),
       integrations: options.githubIntegrations.length,
     });
   }, logPreflightFailure);

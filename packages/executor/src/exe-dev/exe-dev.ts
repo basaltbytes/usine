@@ -10,6 +10,7 @@ import {
   ExecutorError,
   ExecutorOperationError,
 } from "../executor.ts";
+import { verifyHarnesses } from "../harness-preflight.ts";
 import { prepareAttempt } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import { provisionWorktree, safeSegment, type WorkspaceOps } from "../provision.ts";
@@ -70,6 +71,9 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         });
       }
       const vm = yield* machines.vmFor(request.worker);
+      yield* verifyHarnesses(request.worker, [request.agent.brain], runHost, (command, args) =>
+        commands.remote("preflight", vm.sshDest, command, args),
+      );
       const root = `${vm.home}/.usine/workers/${safeSegment(request.worker)}`;
       const cache = `${root}/repos/${safeSegment(request.repository)}.git`;
       const worktree = `${root}/attempts/${safeSegment(request.attemptId)}`;
@@ -227,6 +231,5 @@ export {
   CredentialGrantMinutes,
   type ExeDevExecutorOptions,
   GitHubIntegration,
-  HarnessLoginCheck,
   IntegrationName,
 } from "./model.ts";
