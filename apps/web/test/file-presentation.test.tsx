@@ -5,6 +5,56 @@ import { presentFile } from "../src/run-transcript/tool/files.ts";
 import { ToolSections } from "../src/run-transcript/tool/content.tsx";
 
 describe("file presentation", () => {
+  it("summarizes a read request without claiming its limit was the number of lines returned", () => {
+    const input = Schema.Json.make({ path: "src/count.ts", offset: 48, limit: 8 });
+    const source = "const count = 1;\n\n[12 more lines in file. Use offset=49 to continue.]";
+    const output = Schema.Json.make({ content: [{ type: "text", text: source }] });
+    const view = presentFile(input, output, "read");
+
+    assert.equal(view.subject, "src/count.ts · From line 48 · up to 8 lines");
+    assert.isEmpty(view.input);
+    const text = view.output.find((section) => section._tag === "Code");
+    assert.isDefined(text);
+    assert.equal(text.text, source);
+    assert.deepEqual(input, { path: "src/count.ts", offset: 48, limit: 8 });
+    assert.deepEqual(output, { content: [{ type: "text", text: source }] });
+  });
+
+  it("does not invent a starting line when the recorded offset is invalid", () => {
+    const view = presentFile({ path: "src/count.ts", offset: -1, limit: 8 }, "Result", "read");
+    assert.equal(view.subject, "src/count.ts · up to 8 lines");
+    const options = view.input.find((section) => section._tag === "Fields");
+    assert.isDefined(options);
+    assert.deepInclude(options.fields, { label: "Offset", value: -1 });
+  });
+
+  it("preserves Claude's recorded source numbers without adding relative line numbers", () => {
+    const source = "48:const before = 1;\n49:const after = 2;";
+    const view = presentFile(
+      Schema.Json.make({ file_path: "src/count.ts", offset: 48, limit: 8 }),
+      Schema.Json.make([{ type: "text", text: source }]),
+      "read",
+    );
+    const markup = renderToStaticMarkup(<ToolSections sections={view.output} category="read" />);
+    const visibleText = markup.replace(/<[^>]*>/gu, "");
+
+    assert.equal(view.subject, "src/count.ts · From line 48 · up to 8 lines");
+    assert.equal(visibleText, `src/count.ts${source}`);
+  });
+
+  it.each([undefined, null, { error: "Access denied" }])(
+    "keeps the request cue available when a read has no source output: %s",
+    (output) => {
+      const view = presentFile(
+        Schema.Json.make({ file_path: "src/count.ts", offset: 48, limit: 8 }),
+        output,
+        "read",
+      );
+      assert.equal(view.subject, "src/count.ts · From line 48 · up to 8 lines");
+      assert.isEmpty(view.input);
+    },
+  );
+
   it("shows Pi's recorded patch before its confirmation and metadata", () => {
     const input = Schema.Json.make({
       path: "src/count.ts",

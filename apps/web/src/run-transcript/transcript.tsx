@@ -127,7 +127,7 @@ const Child = ({
           {activity}
         </Badge>
       </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-3 border-t p-3">
+      <CollapsibleContent className="space-y-3 px-3 pb-3">
         <p className="font-mono text-[0.625rem] text-muted-foreground">
           {session.session.brain.harness} · {session.session.brain.model} ·{" "}
           {session.session.brain.effort}
@@ -136,7 +136,11 @@ const Child = ({
           <p className="text-xs text-muted-foreground">No {filter} in this session.</p>
         ) : (
           entries.map((entry) => (
-            <MessageScrollerItem key={entry.key} messageId={entry.key}>
+            <MessageScrollerItem
+              key={entry.key}
+              messageId={entry.key}
+              className={entry._tag === "ToolGroup" ? "-mx-2 px-2" : undefined}
+            >
               <Entry entry={entry} />
             </MessageScrollerItem>
           ))
@@ -167,8 +171,14 @@ export const Transcript = ({
     );
   return (
     <>
+      {/* Reserve space for the group hover background outside the text column:
+          MessageScrollerItem paint containment would otherwise clip it. */}
       {items.map((item) => (
-        <MessageScrollerItem messageId={item.key} key={item.key}>
+        <MessageScrollerItem
+          messageId={item.key}
+          key={item.key}
+          className={item._tag === "ToolGroup" ? "-mx-2 px-2" : undefined}
+        >
           {item._tag === "Session" ? (
             <Child session={item} filter={filter} />
           ) : (

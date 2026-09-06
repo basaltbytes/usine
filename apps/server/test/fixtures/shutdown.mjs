@@ -12,12 +12,18 @@ NodeRuntime.runMain(
   Effect.gen(function* () {
     const requested = yield* Deferred.make();
     const startup = Effect.gen(function* () {
+      const attemptReady = yield* Deferred.make();
       const work = finishes
         ? Effect.sleep("80 millis").pipe(Effect.andThen(Console.log("attempt completed")))
         : Effect.never;
       const attempt = yield* Effect.forkScoped(
-        work.pipe(Effect.onInterrupt(() => Console.log("attempt interrupted"))),
+        Deferred.succeed(attemptReady, undefined).pipe(
+          Effect.andThen(work),
+          Effect.onInterrupt(() => Console.log("attempt interrupted")),
+        ),
       );
+      // The interruption observer must be installed before real signals can arrive.
+      yield* Deferred.await(attemptReady);
       setTimeout(() => process.kill(process.pid, "SIGTERM"), 10);
       if (forced) setTimeout(() => process.kill(process.pid, "SIGINT"), 25);
       if (duringStartup) yield* Effect.sleep("120 millis");

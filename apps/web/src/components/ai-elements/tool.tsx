@@ -1,7 +1,6 @@
 // Adapted from Vercel AI Elements. See README.md and LICENSE in this folder.
 import {
   CaretDownIcon,
-  CheckCircleIcon,
   CircleNotchIcon,
   StopCircleIcon,
   WrenchIcon,
@@ -17,10 +16,9 @@ type ToolStatus = "Running" | "Completed" | "Error" | "Stopped";
 
 const statusIcons = {
   Running: <CircleNotchIcon className="motion-safe:animate-spin text-run-active" />,
-  Completed: <CheckCircleIcon className="text-run-succeeded" />,
   Error: <XCircleIcon className="text-destructive" />,
   Stopped: <StopCircleIcon className="text-muted-foreground" />,
-} satisfies Record<ToolStatus, ReactNode>;
+} satisfies Record<Exclude<ToolStatus, "Completed">, ReactNode>;
 
 /** One expandable invocation, retaining its identity as its status changes. */
 export const Tool = ({ className, ...props }: ComponentProps<typeof Collapsible>) => (
@@ -61,14 +59,16 @@ export const ToolHeader = ({
     <span className="min-w-0 flex-1 space-y-1">
       <span className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium">{title}</span>
-        <Badge variant="secondary" className="gap-1">
-          {statusIcons[status]}
-          {status}
-        </Badge>
+        {status !== "Completed" && (
+          <Badge variant="secondary" className="gap-1">
+            {statusIcons[status]}
+            {status}
+          </Badge>
+        )}
         {children}
       </span>
       {description && (
-        <span className="block truncate font-mono text-xs text-muted-foreground">
+        <span className="block truncate font-mono text-xs text-muted-foreground group-data-[panel-open]/tool-trigger:whitespace-normal group-data-[panel-open]/tool-trigger:wrap-anywhere">
           {description}
         </span>
       )}
@@ -79,7 +79,7 @@ export const ToolHeader = ({
 
 /** The invocation's expanded input and result panels. */
 export const ToolContent = ({ className, ...props }: ComponentProps<typeof CollapsibleContent>) => (
-  <CollapsibleContent className={cn("space-y-3 border-t p-3 outline-none", className)} {...props} />
+  <CollapsibleContent className={cn("space-y-3 px-3 pb-3 outline-none", className)} {...props} />
 );
 
 /** A named result section; callers supply content appropriate to the tool. */

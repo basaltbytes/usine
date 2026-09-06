@@ -72,7 +72,7 @@ const Fields = ({
   </dl>
 );
 
-/** Renders readable tool content using AI Elements code and terminal surfaces. */
+/** Renders tool content; read results retain any source line numbers supplied by the harness. */
 export const ToolSections = ({
   sections,
   category,
@@ -90,7 +90,9 @@ export const ToolSections = ({
             <CodeBlock
               code={text}
               language={language}
-              showLineNumbers={language === "typescript" || language === "diff"}
+              showLineNumbers={
+                category !== "read" && (language === "typescript" || language === "diff")
+              }
             >
               <CodeBlockHeader>
                 <CodeBlockTitle>{label}</CodeBlockTitle>
