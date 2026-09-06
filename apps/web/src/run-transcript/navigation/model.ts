@@ -39,12 +39,15 @@ export const indexTranscriptUpdates = (
 export interface UnreadTranscript {
   /** Newest observed raw transcript event, including events omitted from the conversation. */
   readonly through: TranscriptSequence | null;
+  /** Last explicitly acknowledged tail; retained across drawer closes and refreshes. */
+  readonly readThrough: TranscriptSequence | null;
   readonly keys: ReadonlySet<string>;
 }
 
 /** Treats the initial loaded tail as read; through is its newest raw event, or null for an empty Run. */
 export const initializeUnread = (through: TranscriptSequence | null): UnreadTranscript => ({
   through,
+  readThrough: through,
   keys: new Set(),
 });
 
@@ -59,16 +62,19 @@ export const advanceUnread = (
 ): UnreadTranscript => {
   const keys = new Set(previous.keys);
   for (const row of updates)
-    if (previous.through === null || row.latestSequence > previous.through) keys.add(row.key);
+    if (previous.readThrough === null || row.latestSequence > previous.readThrough)
+      keys.add(row.key);
   const latest =
     through !== null && (previous.through === null || through > previous.through)
       ? through
       : previous.through;
   return latest === previous.through && keys.size === previous.keys.size
     ? previous
-    : { through: latest, keys };
+    : { through: latest, readThrough: previous.readThrough, keys };
 };
 
 /** Clears the count without forgetting how far the transcript has already been observed. */
 export const acknowledgeUnread = (previous: UnreadTranscript): UnreadTranscript =>
-  previous.keys.size === 0 ? previous : initializeUnread(previous.through);
+  previous.keys.size === 0 && previous.readThrough === previous.through
+    ? previous
+    : initializeUnread(previous.through);

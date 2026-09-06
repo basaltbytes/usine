@@ -16,6 +16,20 @@ interface ReadingPosition {
   readonly offset: number;
 }
 
+/** Finds the deepest visible transcript surface, so child and result growth preserve context. */
+export const visibleTranscriptRow = (viewport: HTMLDivElement): HTMLElement | undefined => {
+  const top = viewport.getBoundingClientRect().top + viewport.clientTop;
+  const bottom = top + viewport.clientHeight;
+  let element: HTMLElement | undefined;
+  for (const row of viewport.querySelectorAll<HTMLElement>("[data-transcript-id]")) {
+    const bounds = row.getBoundingClientRect();
+    if (bounds.height === 0 || bounds.bottom <= top || bounds.top >= bottom) continue;
+    if (element !== undefined && !element.contains(row)) break;
+    element = row;
+  }
+  return element;
+};
+
 /**
  * Keeps a visible transcript row in place while the operator reads earlier activity.
  * Rows marked with data-transcript-id provide anchors, including events inside child sessions.
@@ -42,16 +56,7 @@ export class PreserveReadingPosition extends Component<
       return null;
 
     const top = viewport.getBoundingClientRect().top + viewport.clientTop;
-    const bottom = top + viewport.clientHeight;
-    let element: HTMLElement | undefined;
-    for (const row of viewport.querySelectorAll<HTMLElement>("[data-transcript-id]")) {
-      const bounds = row.getBoundingClientRect();
-      if (bounds.height === 0 || bounds.bottom <= top || bounds.top >= bottom) continue;
-      // Prefer the visible event inside a child group, so growth earlier in
-      // that same group cannot move the event the operator is reading.
-      if (element !== undefined && !element.contains(row)) break;
-      element = row;
-    }
+    const element = visibleTranscriptRow(viewport);
     return element === undefined
       ? null
       : {

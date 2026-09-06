@@ -1,3 +1,4 @@
+import type { RunId } from "@usine/core/run";
 import type {
   AttemptView,
   RunStateTag,
@@ -30,8 +31,14 @@ import {
 import { ErrorControls, RevealError } from "./navigation/errors.tsx";
 import { UpdateNavigation } from "./navigation/updates.tsx";
 
+import { readerMemory, type ReadingAnchor } from "./reader/memory.ts";
+import { readingRows } from "./reader/anchor.ts";
+import { RestoreReader } from "./reader/restore.tsx";
+import { RememberReader } from "./reader/remember.tsx";
+
 /** A Run's conversation follows incoming activity until the reader scrolls away. */
 export const Conversation = ({
+  runId,
   events,
   attempts,
   earlier,
@@ -41,6 +48,7 @@ export const Conversation = ({
   state,
   active,
 }: {
+  readonly runId: RunId;
   readonly events: ReadonlyArray<TranscriptEventView>;
   readonly attempts: ReadonlyArray<AttemptView>;
   readonly earlier: TranscriptPageCursor | undefined;
@@ -50,17 +58,35 @@ export const Conversation = ({
   readonly state: RunStateTag;
   readonly active: boolean;
 }) => {
-  const [filter, setFilter] = useState<TranscriptFilter>("all");
-  const viewportRef = useRef<HTMLDivElement>(null);
-  const updates = useMemo(
-    () => indexTranscriptUpdates(projectTranscript(events, attempts)),
-    [events, attempts],
+  const [saved] = useState(() => readerMemory(() => window.localStorage).read(runId, Date.now()));
+  const [pendingRestore, setPendingRestore] = useState<ReadingAnchor | null>(
+    saved?.position._tag === "Anchor" ? saved.position : null,
   );
+  const [allowLatest, setAllowLatest] = useState(pendingRestore === null);
+  const [defaultPosition, setDefaultPosition] = useState<"start" | "end">(
+    pendingRestore === null ? "end" : "start",
+  );
+  const restored = useCallback(() => setPendingRestore(null), []);
+  const inspect = useCallback(() => {
+    setPendingRestore(null);
+    setAllowLatest(false);
+  }, []);
+  const navigate = () => {
+    setPendingRestore(null);
+    setAllowLatest(true);
+  };
+  const [filter, setFilter] = useState<TranscriptFilter>(saved?.filter ?? "all");
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const projection = useMemo(() => projectTranscript(events, attempts), [events, attempts]);
+  const updates = useMemo(() => indexTranscriptUpdates(projection), [projection]);
+  const rows = useMemo(() => readingRows(projection, filter), [projection, filter]);
   const through = events.reduce<TranscriptEventView["sequence"] | null>(
     (latest, event) => (latest === null || event.sequence > latest ? event.sequence : latest),
     null,
   );
-  const [unread, setUnread] = useState(() => initializeUnread(through));
+  const [unread, setUnread] = useState(() =>
+    initializeUnread(saved === null ? through : saved.readThrough),
+  );
   const [selectedErrorKey, setSelectedErrorKey] = useState<string | null>(null);
   const [pendingError, setPendingError] = useState<TranscriptUpdate | null>(null);
   const [pendingLatest, setPendingLatest] = useState(false);
@@ -68,18 +94,22 @@ export const Conversation = ({
     (atLatest: boolean) => {
       setUnread((previous) => {
         const next = advanceUnread(previous, updates, through);
-        return atLatest ? acknowledgeUnread(next) : next;
+        return atLatest && pendingRestore === null && allowLatest ? acknowledgeUnread(next) : next;
       });
     },
-    [updates, through],
+    [updates, through, pendingRestore, allowLatest],
   );
   const selectError = (error: TranscriptUpdate) => {
+    inspect();
+    setDefaultPosition("start");
     setFilter("all");
     setSelectedErrorKey(error.key);
     setPendingError(error);
     setPendingLatest(false);
   };
   const jumpLatest = () => {
+    navigate();
+    setDefaultPosition("end");
     setFilter("all");
     setPendingLatest(true);
     setPendingError(null);
@@ -102,6 +132,8 @@ export const Conversation = ({
               variant={filter === value ? "secondary" : "ghost"}
               aria-pressed={filter === value}
               onClick={() => {
+                navigate();
+                setDefaultPosition("end");
                 setFilter(value);
                 setPendingError(null);
                 setPendingLatest(false);
@@ -122,16 +154,19 @@ export const Conversation = ({
         </div>
       </div>
       <SessionActivity events={events} attempts={attempts} />
-      <TranscriptDisclosureProvider>
+      <TranscriptDisclosureProvider
+        initialState={new Map(saved?.disclosures.map(({ key, ...choice }) => [key, choice]))}
+        onInspect={inspect}
+      >
         <MessageScrollerProvider
           key={filter}
-          autoScroll={active}
-          defaultScrollPosition="end"
+          autoScroll={active && pendingRestore === null && allowLatest}
+          defaultScrollPosition={defaultPosition}
           scrollEdgeThreshold={8}
         >
           <MessageScroller className="min-h-0 flex-1">
             <PreserveReadingPosition
-              active={active}
+              active={active && pendingRestore === null}
               viewportRef={viewportRef}
               revision={
                 events.length + attempts.filter((attempt) => attempt.outcome !== null).length
@@ -141,6 +176,21 @@ export const Conversation = ({
                 ref={viewportRef}
                 aria-label="Run conversation"
                 preserveScrollOnPrepend={false}
+                onWheel={navigate}
+                onTouchMove={navigate}
+                onPointerDown={(event) => {
+                  if (event.target === event.currentTarget) navigate();
+                  else setPendingRestore(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") setPendingRestore(null);
+                  if (
+                    ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "].includes(
+                      event.key,
+                    )
+                  )
+                    navigate();
+                }}
               >
                 <MessageScrollerContent className="gap-4 px-4 pt-4 pb-16 sm:px-6">
                   {earlier !== undefined && (
@@ -165,6 +215,25 @@ export const Conversation = ({
                 </MessageScrollerContent>
               </MessageScrollerViewport>
             </PreserveReadingPosition>
+            <RestoreReader
+              target={pendingRestore}
+              rows={rows}
+              viewportRef={viewportRef}
+              active={active}
+              history={{ earlier, loading: loadingEarlier, error: earlierError, load: loadEarlier }}
+              onRestored={restored}
+            />
+            <RememberReader
+              runId={runId}
+              filter={filter}
+              rows={rows}
+              viewportRef={viewportRef}
+              readThrough={unread.readThrough}
+              active={active}
+              restoring={pendingRestore !== null}
+              allowLatest={allowLatest}
+              initialPosition={saved?.position ?? { _tag: "Latest" }}
+            />
             <RevealError target={pendingError} filter={filter} onRevealed={revealedError} />
             <UpdateNavigation
               count={unread.keys.size}

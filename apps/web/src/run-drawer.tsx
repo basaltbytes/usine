@@ -214,6 +214,8 @@ export const RunDrawer = ({
                 className="flex min-h-0 flex-col data-[hidden]:hidden"
               >
                 <Conversation
+                  key={runId}
+                  runId={runId}
                   events={detail.data.transcript}
                   attempts={run.attempts}
                   earlier={earlier}
@@ -223,7 +225,7 @@ export const RunDrawer = ({
                   loadingEarlier={earlierMutation.isPending}
                   earlierError={earlierMutation.isError ? earlierMutation.error.message : null}
                   state={run.state}
-                  active={activeTab === "conversation"}
+                  active={open && activeTab === "conversation"}
                 />
               </TabsContent>
               <TabsContent value="task" className="min-h-0 overflow-y-auto p-4 sm:p-6">

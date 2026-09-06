@@ -202,3 +202,20 @@ describe("unread conversation activity", () => {
     assert.equal(unread.keys.size, 2);
   });
 });
+
+it("rebuilds unread activity across cold pages without losing updates first discovered on an earlier page", () => {
+  const read = initializeUnread(TranscriptSequence.make(10));
+  const cold = [message(30), meter(31)];
+  const tail = advanceUnread(read, index(cold), through(cold));
+  const history = [started(12), finished(14), message(15), ...cold];
+  const recovered = advanceUnread(tail, index(history), through(history));
+  assert.equal(recovered.keys.size, 3);
+  const reopened = advanceUnread(
+    initializeUnread(recovered.readThrough),
+    index(history),
+    through(history),
+  );
+  assert.deepEqual(reopened.keys, recovered.keys);
+  const acknowledged = acknowledgeUnread(reopened);
+  assert.equal(advanceUnread(acknowledged, index(history), through(history)).keys.size, 0);
+});

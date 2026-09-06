@@ -10,6 +10,18 @@ The app uses React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, s
 
 Adjacent completed tools have expandable action summaries, such as “Edited conversation.tsx · ran tests.” File summaries count distinct recorded paths and distinguish shared basenames with parent directories. Recognized test and build invocations describe what ran; their results remain in the tool details. Long or varied groups use compact counts, and loading earlier inputs fills in missing file and command details.
 
+## Returning to a conversation
+
+Each Run remembers its filter, inspected groups, tools and child sessions, and reading place in this browser. Closing and reopening the drawer, or refreshing the page, returns to the same transcript row and position within it. A reader who leaves at latest continues following incoming activity. Wheel, touch, keyboard scrolling and conversation navigation take precedence over a pending restore.
+
+The drawer loads up to 20 earlier pages automatically to recover a saved row. If the row is unavailable, a request fails, or recovery reaches that limit, a notice explains that the drawer is showing the nearest available activity. Load earlier remains available. Restoring a place, including this nearest-row recovery, preserves unread activity. The update count includes each loaded row changed since the last acknowledged tail once, including a tool result arriving after its start was read. Earlier pages can reveal additional unread rows. Jump to latest, or scrolling to latest in Everything, acknowledges those updates; error navigation and the Messages and Tools views preserve them.
+
+Bookmarks expire after 30 days. This browser origin retains up to 20 Runs, the most recent 200 disclosure choices per Run, and at most 512,000 characters of bookmark data. Stored fields contain identities, preferences, a row-relative position and the acknowledged transcript sequence. Transcript text and tool payloads remain in the transcript store. If browser storage is disabled or full, the conversation remains usable; returning to a saved place requires available storage. See [ADR 0025](../../docs/adr/0025-run-conversation-reader-bookmarks.md).
+
+## Conversation browser tests
+
+Install the pinned Chromium browser once with `pnpm --filter @usine/web exec playwright install chromium`, then run `pnpm --filter @usine/web test`. The suite runs unit tests in Node and conversation interaction tests in Chromium using the real MessageScroller, Base UI disclosures and browser layout. CI installs Chromium and its operating-system dependencies before running the suite.
+
 ## How to add UI
 
 The registry is the component library; the theme is the only place colors and type live.
