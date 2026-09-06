@@ -7,6 +7,8 @@ import {
   AgentResultError,
   ChildRequest,
   CodexChildBackend,
+  PoolUnavailableError,
+  toAttemptFailure,
   SessionOperationError,
   UnknownModelError,
   UnsupportedEffortError,
@@ -74,6 +76,7 @@ const successfulResponses = (
 ) =>
   ({
     initialize: {},
+    "account/read": { account: { type: "chatgpt" }, requiresOpenaiAuth: true },
     "model/list": { data: models, nextCursor: null },
     "thread/start": {
       thread: { id: "thread-1" },
@@ -303,6 +306,71 @@ describe("Codex child backend", () => {
         const finished = events.find((event) => event._tag === "ToolFinished");
         assert(finished !== undefined && finished._tag === "ToolFinished");
         assert.strictEqual(finished.isError, true);
+      }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
+    );
+  });
+
+  for (const account of [
+    null,
+    { type: "apiKey" },
+    { type: "amazonBedrock" },
+    { type: "unknown" },
+  ]) {
+    it.effect(
+      `refuses ${account?.type ?? "logged-out"} authentication before starting a turn`,
+      () => {
+        const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+        const server = connectionLayer(
+          {
+            ...successfulResponses([]),
+            "account/read": { account, requiresOpenaiAuth: true },
+          },
+          [],
+          calls,
+        );
+        return Effect.scoped(
+          Effect.gen(function* () {
+            const backend = yield* CodexChildBackend;
+            const error = yield* Effect.flip(backend.launch(request()));
+            assert(error instanceof PoolUnavailableError);
+            assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
+            assert(
+              !calls.some(({ method }) => method === "thread/start" || method === "turn/start"),
+            );
+          }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
+        );
+      },
+    );
+  }
+
+  it.effect("stops attributing rate windows after a mid-session authentication change", () => {
+    const server = connectionLayer(
+      successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+      [
+        { method: "account/updated", params: { authMode: "apikey" } },
+        {
+          method: "account/rateLimits/updated",
+          params: { rateLimits: { primary: { usedPercent: 42 } } },
+        },
+      ],
+    );
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const backend = yield* CodexChildBackend;
+        const running = yield* backend.launch(request());
+        const error = yield* Effect.flip(running.result);
+        assert(error instanceof PoolUnavailableError);
+        const events: Array<{ readonly _tag: string }> = [];
+        const streamError = yield* running.events.pipe(
+          Stream.runForEach((event) =>
+            Effect.sync(() => {
+              events.push(event);
+            }),
+          ),
+          Effect.flip,
+        );
+        assert(streamError instanceof PoolUnavailableError);
+        assert(!events.some((event) => event._tag === "PoolRateLimitsUpdated"));
       }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
     );
   });

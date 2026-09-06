@@ -10,12 +10,16 @@
  */
 import type { InitializeParams } from "@pwrdrvr/codex-app-server-protocol";
 import type {
+  GetAccountParams,
+  GetAccountResponse,
+  AccountUpdatedNotification,
   ModelListParams,
   ThreadStartParams,
   TurnInterruptParams,
   TurnStartParams,
   TurnSteerParams,
 } from "@pwrdrvr/codex-app-server-protocol/v2";
+import type { AccountResponse, AccountUpdated } from "../src/protocol/codex.ts";
 import type * as Ours from "../src/protocol/codex.ts";
 
 type Mutable<T> =
@@ -44,4 +48,14 @@ export type TurnSteerParamsConform = Assert<
 >;
 export type TurnInterruptParamsConform = Assert<
   Extends<Mutable<Ours.TurnInterruptParams>, TurnInterruptParams>
+>;
+
+export type GetAccountParamsConform = Assert<
+  Extends<Mutable<Ours.GetAccountParams>, GetAccountParams>
+>;
+export type GetAccountResponseConform = Assert<
+  Extends<GetAccountResponse, typeof AccountResponse.Type>
+>;
+export type AccountUpdatedConform = Assert<
+  Extends<AccountUpdatedNotification, typeof AccountUpdated.Type>
 >;

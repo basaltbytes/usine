@@ -11,8 +11,8 @@ import {
   ToolStarted,
 } from "@usine/core/agent/session";
 import { DateTime, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
+import { AccountUpdated } from "../../protocol/codex.ts";
 import type {
-  InitializeParams,
   ModelListParams,
   ThreadStartParams,
   TurnInterruptParams,
@@ -22,19 +22,18 @@ import type {
 import {
   AgentResultError,
   CodexChildBackend,
-  type ChildRequest,
   type RunningSession,
   SessionOperationError,
   UnknownModelError,
   UnsupportedEffortError,
 } from "../../runtime.ts";
 import { sessionChannel } from "../session.ts";
-import { CodexAppServer, operationError } from "./app-server.ts";
+import { CodexAppServer, type CodexClient, operationError } from "./app-server.ts";
+import { codexPoolUnavailable, initializeCodex, verifyCodexAccount } from "./account.ts";
 
 export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
 
 type CodexRequestPayload =
-  | InitializeParams
   | ModelListParams
   | ThreadStartParams
   | TurnStartParams
@@ -120,13 +119,13 @@ const RateLimitsUpdated = Schema.Struct({
 const decodeResponse = <S extends Schema.Top>(
   schema: S,
   operation: SessionOperationError["operation"],
-  request: ChildRequest,
+  client: CodexClient,
   label: string,
   value: Schema.Json,
 ): Effect.Effect<S["Type"], SessionOperationError, S["DecodingServices"]> =>
   Schema.decodeUnknownEffect(schema)(value).pipe(
     Effect.mapError((cause) =>
-      operationError(operation, request, `Codex returned an invalid ${label}`, cause),
+      operationError(operation, client, `Codex returned an invalid ${label}`, cause),
     ),
   );
 
@@ -196,13 +195,10 @@ const makeCodexChild = Effect.gen(function* () {
         sessionId: request.session.id,
       });
       yield* Effect.logInfo("Launching Codex child session");
-      const connection = yield* appServer.open(request);
-      const initialize: InitializeParams = {
-        clientInfo: { name: "usine", title: "usine", version: "0.0.1" },
-        capabilities: null,
-      };
-      yield* connection.request("launch", "initialize", json(initialize));
-      yield* connection.notify("launch", "initialized", {});
+      const client: CodexClient = { cwd: request.cwd, sessionId: Option.some(request.session.id) };
+      const connection = yield* appServer.open(client);
+      yield* initializeCodex(connection);
+      const pool = yield* verifyCodexAccount(connection, request.session.brain.model);
 
       const models: Array<(typeof ModelListResponse.Type.data)[number]> = [];
       let cursor: string | null = null;
@@ -212,7 +208,7 @@ const makeCodexChild = Effect.gen(function* () {
         const page = yield* decodeResponse(
           ModelListResponse,
           "launch",
-          request,
+          client,
           "model list",
           response,
         );
@@ -264,7 +260,7 @@ const makeCodexChild = Effect.gen(function* () {
       const thread = yield* decodeResponse(
         ThreadStartResponse,
         "launch",
-        request,
+        client,
         "thread start response",
         threadJson,
       );
@@ -300,7 +296,7 @@ const makeCodexChild = Effect.gen(function* () {
       const turn = yield* decodeResponse(
         TurnStartResponse,
         "stream",
-        request,
+        client,
         "turn start response",
         turnJson,
       );
@@ -370,6 +366,20 @@ const makeCodexChild = Effect.gen(function* () {
                 }),
               );
             }
+            if (method === "account/updated") {
+              const account = yield* Schema.decodeUnknownEffect(AccountUpdated)(params).pipe(
+                Effect.mapError(() => codexPoolUnavailable(request.session.brain.model)),
+              );
+              if (account.authMode !== "chatgpt" && account.authMode !== "chatgptAuthTokens") {
+                yield* Effect.logError("Codex authentication changed during the session", {
+                  sessionId: session.id,
+                  authentication: account.authMode ?? "logged-out",
+                  requiredPool: pool,
+                });
+                return yield* codexPoolUnavailable(request.session.brain.model);
+              }
+              return;
+            }
             if (method === "account/rateLimits/updated") {
               const notification = yield* decodeNotification(
                 RateLimitsUpdated,
@@ -382,10 +392,7 @@ const makeCodexChild = Effect.gen(function* () {
               return yield* channel.emit(
                 new PoolRateLimitsUpdated({
                   session,
-                  // Workers log Codex children in with a ChatGPT plan (ADR 0005).
-                  // An API-key login would attribute these windows to the
-                  // wrong pool, and nothing checks for that yet.
-                  pool: "chatgptPlan",
+                  pool,
                   rateLimits: new RateLimitsSnapshot({
                     limitId: Option.fromNullishOr(snapshot.limitId),
                     limitName: Option.fromNullishOr(snapshot.limitName),
@@ -403,7 +410,7 @@ const makeCodexChild = Effect.gen(function* () {
               const completed = yield* decodeResponse(
                 TurnCompleted,
                 "stream",
-                request,
+                client,
                 "turn completion",
                 params,
               );
@@ -454,7 +461,7 @@ const makeCodexChild = Effect.gen(function* () {
                 : channel.fail(
                     operationError(
                       "stream",
-                      request,
+                      client,
                       "Codex notification stream closed without a result",
                       new Error("unexpected end of notifications"),
                     ),
