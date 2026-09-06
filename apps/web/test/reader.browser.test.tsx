@@ -473,3 +473,71 @@ it("reveals an error instead of the pending saved place and preserves unread act
     .element(page.getByRole("button", { name: "1 new update", exact: true }))
     .toBeVisible();
 });
+
+it.each(["pointer", "Space"] as const)(
+  "keeps an inspected reader paused after %s collapse and reopening",
+  async (activation) => {
+    const started = record(
+      46,
+      new ToolStarted({
+        session: parent,
+        callId: "paused",
+        tool: "read",
+        input: { path: "paused.ts" },
+      }),
+    );
+    const initial = [...events, started];
+    mount(initial);
+    const tool = page.getByRole("button", { name: /paused.ts.*Running/ });
+    await tool.click();
+    await expect.element(tool).toHaveAttribute("aria-expanded", "true");
+    if (activation === "Space") {
+      tool.element().focus();
+      await userEvent.keyboard(" ");
+    } else await tool.click();
+    await expect.element(tool).toHaveAttribute("aria-expanded", "false");
+    await expect
+      .element(page.getByText("Waiting for a result…", { exact: true }))
+      .not.toBeInTheDocument();
+    window.dispatchEvent(new PageTransitionEvent("pagehide"));
+    expect(bookmark()?.position._tag).toBe("Anchor");
+    const previousOffset = offset(45);
+    mount([...initial, message(47)]);
+    await expect.poll(() => Math.abs(offset(45) - previousOffset)).toBeLessThan(2);
+    close();
+    expect(bookmark()?.position._tag).toBe("Anchor");
+    mount([...initial, message(47), message(48)]);
+    await expect.poll(() => Math.abs(offset(45) - previousOffset)).toBeLessThan(2);
+    await expect
+      .element(page.getByRole("button", { name: "2 new updates", exact: true }))
+      .toBeVisible();
+  },
+);
+
+it("lets Space on the viewport resume following a paused reader at latest", async () => {
+  const started = record(
+    46,
+    new ToolStarted({
+      session: parent,
+      callId: "paused",
+      tool: "read",
+      input: { path: "paused.ts" },
+    }),
+  );
+  const initial = [...events, started];
+  mount(initial);
+  const tool = page.getByRole("button", { name: /paused.ts.*Running/ });
+  await tool.click();
+  await tool.click();
+  await expect
+    .element(page.getByText("Waiting for a result…", { exact: true }))
+    .not.toBeInTheDocument();
+  viewport().focus();
+  await userEvent.keyboard(" ");
+  mount([...initial, message(47)]);
+  await expect
+    .poll(() => viewport().scrollHeight - viewport().clientHeight - viewport().scrollTop)
+    .toBeLessThan(9);
+  close();
+  expect(bookmark()?.position._tag).toBe("Latest");
+});

@@ -183,8 +183,17 @@ export const Conversation = ({
                   else setPendingRestore(null);
                 }}
                 onKeyDown={(event) => {
-                  if (event.key === "Enter") setPendingRestore(null);
+                  // Let focused buttons activate on Space without changing the reader's follow intention.
+                  const activatesButton =
+                    event.key === " " &&
+                    event.target instanceof Element &&
+                    event.target.closest('button, [role="button"]') !== null;
+                  if (event.key === "Enter" || activatesButton) {
+                    setPendingRestore(null);
+                    return;
+                  }
                   if (
+                    !event.defaultPrevented &&
                     ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "].includes(
                       event.key,
                     )
