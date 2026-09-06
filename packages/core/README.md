@@ -14,6 +14,7 @@ Import each domain concept from its owning subpath. Identities, records, and ope
 | `@usine/core/attempt/failure` | `InfraFailure`, `DefectFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
 | `@usine/core/attempt/channel` | The protocol-v4 attempt channel: `RunSpec`, `Start`, the envelopes, and the `admit` reducer. Import it as a namespace (`AttemptChannel.Started`) |
 | `@usine/core/agent`, `@usine/core/agent/brain`, `@usine/core/agent/session` | `Agent`, `AgentName`, `AgentPersona`, parent-model resolution; `BrainSpec`, `ModelId`, `Harness`, `Effort`; `AgentSessionId`, session descriptors, `AgentSessionEvent`, `ChildSessionBudget`, `ChildSessionCount` |
+| `@usine/core/agent/capability` | `HarnessCapability`, `HarnessReady`, `HarnessUnavailableError`, and the credential-free `HarnessReadiness` preflight response |
 | `@usine/core/repository` | `RepositoryName`, `RepositoryRevision`, `CommitSha`, `splitRepositoryName`, `canonicalRepositoryName` |
 | `@usine/core/worker`, `@usine/core/item`, `@usine/core/loop`, `@usine/core/instance` | `WorkerName`, `WorkerKind`; `ItemKey`, `ItemNumber`; `LoopName`, `ApprovalRequirement`; `InstanceDirectory` |
 

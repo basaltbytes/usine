@@ -37,6 +37,7 @@ export type ClaudeQueryOptions = Pick<
   | "cwd"
   | "effort"
   | "model"
+  | "pathToClaudeCodeExecutable"
   | "permissionMode"
   | "persistSession"
   | "settingSources"
@@ -144,6 +145,8 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
     allowDangerouslySkipPermissions: true,
     cwd: request.cwd,
     model: request.session.brain.model,
+    // Use the same worker-provisioned binary that readiness checks inspect.
+    pathToClaudeCodeExecutable: "claude",
     permissionMode: "bypassPermissions",
     persistSession: false,
     // The worktree is repository-controlled input. Its project and local

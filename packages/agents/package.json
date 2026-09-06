@@ -41,6 +41,10 @@
     "./runtime": {
       "types": "./dist/runtime.d.ts",
       "default": "./dist/runtime.js"
+    },
+    "./preflight": {
+      "types": "./dist/preflight/preflight.d.ts",
+      "default": "./dist/preflight/preflight.js"
     }
   },
   "publishConfig": {

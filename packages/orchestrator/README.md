@@ -73,43 +73,37 @@ The Event key covers the loop, canonical repository, and scheduled time. An in-m
 
 ## Worker scheduling
 
-`@usine/orchestrator/scheduler` exports the platform-free `stepExecutorLayer`. At startup it verifies every configured worker, creates one capacity slot per `max_concurrent_attempts`, and assigns slots by Event receipt time. Runs stay pending while every slot is occupied. Each Attempt receives the configured `max_children` child-session budget. The layer rejects worker kinds that its supplied executor cannot run.
+`@usine/orchestrator/scheduler` exports the platform-free `stepExecutorLayer`. `stepExecutorLayer(config, brains)` accepts the roster’s `BrainSpec` values. At startup it verifies every configured worker against that roster, creates one capacity slot per `max_concurrent_attempts`, and assigns slots by Event receipt time. Runs stay pending while every slot is occupied. Each Attempt receives the configured `max_children` child-session budget. The layer rejects worker kinds that its supplied executor cannot run. Worker capability failures during preparation become non-retryable `AgentFailure` outcomes, like unavailable model credentials.
 
 `@usine/orchestrator/local` composes the scheduler with the Node local executor and the engine's local SQLite adapter. It requires a caller-owned `CredentialProvider`; use `gitHubCredentialLayer` with `@usine/github`, or supply another provider that mints one repository credential per Attempt.
 
 ```ts
 import { layer as localLayer } from "@usine/orchestrator/local"
 
-const EngineLive = localLayer(instanceDirectory, config, {
+const EngineLive = localLayer(instanceDirectory, config, brains, {
   repositoryUrl: (repository) => `https://github.com/${repository}.git`,
 })
 ```
 
 Provide `CredentialProvider` to `EngineLive`, then request `RunEngine` from the resulting Effect layer. The local composition caches repositories under `<instance>/.usine/workers/<worker>/repos` and removes Attempt worktrees after completion or cancellation.
 
-For the whole local application, `runtimeLayer(instanceDirectory, instance, options)` additionally composes GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It requires only `GitHubCredentials`; the server or another host owns how those credentials are loaded. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance surfaces: it reads durable Runs and Loop runtime state while trigger execution remains idle.
+For the whole local application, `runtimeLayer(instanceDirectory, instance, options)` additionally composes GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It derives worker preflight requirements from `instance.agents` and requires only `GitHubCredentials`; the server or another host owns how those credentials are loaded. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance surfaces: it reads durable Runs and Loop runtime state while trigger execution remains idle.
 
 For an exe.dev Worker, use the `@usine/orchestrator/exe-dev` composition. It keeps the engine and SQLite runtime local while the unchanged Worker contract runs on the named VM:
 
 ```ts
 import { RepositoryName } from "@usine/core/repository"
-import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev"
+import { GitHubIntegration, IntegrationName } from "@usine/executor/exe-dev"
 import { layer as exeDevLayer } from "@usine/orchestrator/exe-dev"
 
-const EngineLive = exeDevLayer(instanceDirectory, config, {
+const EngineLive = exeDevLayer(instanceDirectory, config, brains, {
   githubIntegrations: [
     new GitHubIntegration({
       repository: RepositoryName.make("acme/widget"),
       name: IntegrationName.make("usine-acme-widget"),
     }),
   ],
-  harnessLoginChecks: [
-    new HarnessLoginCheck({
-      harness: "codex",
-      command: "codex",
-      args: ["login", "status"],
-    }),
-  ],
+
 })
 ```
 

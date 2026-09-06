@@ -85,6 +85,10 @@
     "./worker": {
       "types": "./dist/worker.d.ts",
       "default": "./dist/worker.js"
+    },
+    "./agent/capability": {
+      "types": "./dist/agent/capability.d.ts",
+      "default": "./dist/agent/capability.js"
     }
   },
   "publishConfig": {

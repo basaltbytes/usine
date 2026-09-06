@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
+import { BrainSpec } from "@usine/core/agent/brain";
+import { HarnessReadiness, HarnessReady } from "@usine/core/agent/capability";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Effect, Logger, Stdio, Stream } from "effect";
+import { Effect, Logger, Schema, Stdio, Stream } from "effect";
 import { Console } from "node:console";
 
 // Libraries and independent Effect runtimes may use the process console instead
@@ -25,6 +27,22 @@ const program = Effect.gen(function* () {
     return yield* Effect.die(new Error("--stub-delay-ms must be a non-negative integer"));
   }
   const useStub = args.includes("--stub") || delayFlag >= 0;
+  const preflightFlag = args.indexOf("--preflight");
+  if (preflightFlag >= 0) {
+    const brain = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(BrainSpec))(
+      args[preflightFlag + 1],
+      { onExcessProperty: "error" },
+    );
+    const result = useStub
+      ? new HarnessReady({ harness: brain.harness })
+      : yield* Effect.promise(() => import("@usine/agents/preflight")).pipe(
+          Effect.flatMap(({ preflight }) => preflight(brain)),
+          Effect.catchTag("HarnessUnavailableError", Effect.succeed),
+        );
+    const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(HarnessReadiness))(result);
+    yield* Stream.run(Stream.make(`${encoded}\n`), stdio.stdout());
+    return;
+  }
   const [{ runHost }, agentLayer] = yield* Effect.promise(() =>
     Promise.all([
       import("./run-host.ts"),

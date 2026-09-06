@@ -33,11 +33,19 @@ This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prep
 methods. Consumers supply a scope instead of coordinating cleanup. The engine's
 `StepExecutor` reservation, execution, and interruption contract remains unchanged.
 
+## Worker preflight
+
+Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpec` values before scheduling Attempts. Both adapters invoke `usine-run-host --preflight '<brain-json>'` on the Worker. The run host checks each selected harness’s executable and authentication; Codex requires CLI 0.144.0 and a ChatGPT login, Claude requires its CLI and subscription login, and Pi children require API keys for their selected models.
+
+`prepare` repeats the assigned brain’s probe before acquiring credentials or creating a checkout. This checks roster changes and logouts after startup. A failed probe returns `WorkerCapabilityError`; the orchestrator requires operator action instead of spending infrastructure retries. Custom run hosts must implement the credential-free `HarnessReadiness` response from `@usine/core/agent/capability`.
+
+This replaces exe.dev’s `HarnessLoginCheck` and `harnessLoginChecks` options. Pass the roster to `preflight` so readiness follows the agents the instance actually uses.
+
 ## Local Worker
 
 The Node adapter at `@usine/executor/local` does the following for each Attempt:
 
-- checks Git and the installed run-host protocol without changing worker state;
+- checks Git, the installed run-host protocol, and the assigned harness before accepting work;
 - updates a per-repository bare cache, then creates a detached worktree at the resolved revision;
 - mints one repository credential and passes it only through the child process environment;
 - exchanges protocol-v4 envelopes with `@usine/run-host` over newline-delimited standard input and output, including immutable payload, agent context, child-session budget, and normalized session events;
@@ -53,7 +61,7 @@ The local layer requires Effect `FileSystem`, `Path`, and `ChildProcessSpawner` 
 
 `@usine/executor/exe-dev` runs the same contract on a persistent exe.dev VM. The configured Worker name must match the VM name. The VM image must already contain Git, Node.js 22 or later, the compatible `usine-run-host` executable, and every coding-agent login used by the instance.
 
-Preflight changes no remote state. It reads VM metadata through `ssh exe.dev ls --json`, checks Git and Node.js over SSH, compares the run-host protocol version, runs the configured harness login checks, and asks exe.dev to test each native GitHub integration.
+Preflight creates no checkouts or credential grants. It reads VM metadata through `ssh exe.dev ls --json`, checks Git and Node.js over SSH, compares the run-host protocol version, probes the supplied roster through the remote run host, and asks exe.dev to test each native GitHub integration.
 
 Prepare attaches the repository's integration to the VM with a bounded `--for` grant. It then fetches a bare cached clone from `github.int.exe.xyz` and creates a detached worktree for the Attempt. Launch keeps one SSH process open and exchanges protocol-v4 frames on that process's standard input and output. Cleanup removes the worktree, prunes its cache registration, and detaches the integration after the last concurrent Attempt using it finishes.
 
@@ -64,7 +72,7 @@ Concurrent Attempts against different repositories leave their integrations atta
 ```ts
 import { RepositoryName } from "@usine/core/repository"
 import { layer } from "@usine/executor/exe-dev"
-import { GitHubIntegration, HarnessLoginCheck, IntegrationName } from "@usine/executor/exe-dev"
+import { GitHubIntegration, IntegrationName } from "@usine/executor/exe-dev"
 
 const executorLayer = layer({
   githubIntegrations: [
@@ -73,13 +81,7 @@ const executorLayer = layer({
       name: IntegrationName.make("usine-acme-widget"),
     }),
   ],
-  harnessLoginChecks: [
-    new HarnessLoginCheck({
-      harness: "codex",
-      command: "codex",
-      args: ["login", "status"],
-    }),
-  ],
+
 })
 ```
 

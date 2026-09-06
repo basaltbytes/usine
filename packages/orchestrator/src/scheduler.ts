@@ -1,6 +1,7 @@
 import type { UsineConfig, Worker as ConfigWorker } from "@usine/config/factory";
 import { resolveParentEffort } from "@usine/core/agent";
-import { InfraFailure } from "@usine/core/attempt/failure";
+import type { BrainSpec } from "@usine/core/agent/brain";
+import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { WorkerName } from "@usine/core/worker";
 import {
   CheckoutRequest,
@@ -46,14 +47,16 @@ const reservationOrder = Order.combine(
   Order.mapInput(Order.Number, (reservation: Reservation) => reservation.order),
 );
 
-const asInfrastructureFailure = (error: ExecutorError | ExecutorOperationError) =>
-  new InfraFailure({
-    message:
-      error._tag === "ExecutorOperationError"
-        ? `Executor ${error.operation} failed: ${error.message}`
-        : error.message,
-    cause: error,
-  });
+const asAttemptFailure = (error: ExecutorError | ExecutorOperationError) =>
+  error._tag === "WorkerCapabilityError"
+    ? new AgentFailure({ message: error.message })
+    : new InfraFailure({
+        message:
+          error._tag === "ExecutorOperationError"
+            ? `Executor ${error.operation} failed: ${error.message}`
+            : error.message,
+        cause: error,
+      });
 
 const makeLease = Effect.fn("WorkerScheduler.makeLease")(function* (
   worker: WorkerName,
@@ -82,13 +85,14 @@ const validateWorkers = (
 /** Schedules Attempts FIFO over the configured Workers and adapts the Executor to the engine's StepExecutor port. */
 export const stepExecutorLayer = (
   config: UsineConfig,
+  brains: ReadonlyArray<BrainSpec>,
 ): Layer.Layer<StepExecutor, ExecutorError | UnsupportedWorkerError, Executor> =>
   Layer.effect(
     StepExecutor,
     Effect.gen(function* () {
       const executor = yield* Executor;
       const workers = yield* validateWorkers(executor.kind, config.workers);
-      yield* Effect.forEach(workers, ({ name }) => executor.preflight(name), {
+      yield* Effect.forEach(workers, ({ name }) => executor.preflight(name, brains), {
         concurrency: "unbounded",
         discard: true,
       });
@@ -178,14 +182,14 @@ export const stepExecutorLayer = (
                 parentEffort: resolveParentEffort(execution.agent, config.settings.parentEffort),
               }),
             )
-            .pipe(Effect.mapError(asInfrastructureFailure));
+            .pipe(Effect.mapError(asAttemptFailure));
           return yield* prepared.launch(io);
         },
         Effect.scoped,
       );
 
       const interrupt: StepExecutor["Service"]["interrupt"] = (attemptId) =>
-        executor.cancel(attemptId).pipe(Effect.mapError(asInfrastructureFailure));
+        executor.cancel(attemptId).pipe(Effect.mapError(asAttemptFailure));
 
       return StepExecutor.of({ execute, interrupt, reserve });
     }),

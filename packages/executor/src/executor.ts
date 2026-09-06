@@ -1,5 +1,5 @@
 import { Agent } from "@usine/core/agent";
-import { Effort, ModelId } from "@usine/core/agent/brain";
+import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -153,10 +153,13 @@ export class Executor extends Context.Service<
   Executor,
   {
     readonly kind: WorkerKind;
-    /** Verifies that a configured Worker is ready to accept work; never installs tools or logs in. */
-    readonly preflight: (worker: WorkerName) => Effect.Effect<void, ExecutorError>;
+    /** Verifies Git, the run host, and each rostered brain in the Worker environment; never installs tools or logs in. */
+    readonly preflight: (
+      worker: WorkerName,
+      brains: ReadonlyArray<BrainSpec>,
+    ) => Effect.Effect<void, ExecutorError>;
     /**
-     * Acquires a fresh Attempt in the caller's scope. Clone, fetch, and lock waits
+     * Verifies the assigned brain before acquiring a fresh Attempt in the caller's scope. Clone, fetch, and lock waits
      * remain interruptible; partial preparation releases everything already acquired
      * before reporting failure. Each request must identify a fresh Attempt.
      */

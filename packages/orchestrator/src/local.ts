@@ -1,3 +1,4 @@
+import { BrainSpec } from "@usine/core/agent/brain";
 import { NodeServices } from "@effect/platform-node";
 import type { LoadedInstance } from "@usine/config/instance";
 import type { UsineConfig } from "@usine/config/factory";
@@ -25,10 +26,11 @@ import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
 import { stepExecutorLayer } from "./scheduler.ts";
 
-/** The full engine composition for a local Worker. The caller supplies the credential provider. */
+/** The full engine composition for local Workers. Supply the roster’s brains for startup preflight and provide the credential provider. */
 export const layer = (
   instanceDirectory: InstanceDirectory,
   config: UsineConfig,
+  brains: ReadonlyArray<BrainSpec>,
   options: Omit<LocalExecutorOptions, "instanceDirectory" | "runHost"> &
     Partial<Pick<LocalExecutorOptions, "runHost">>,
 ) => {
@@ -37,7 +39,7 @@ export const layer = (
     ...options,
     instanceDirectory,
   }).pipe(Layer.provide(NodeServices.layer));
-  const stepExecutor = stepExecutorLayer(config).pipe(Layer.provide(executor));
+  const stepExecutor = stepExecutorLayer(config, brains).pipe(Layer.provide(executor));
   return localEngineLayer(instanceDirectory).pipe(Layer.provide(stepExecutor));
 };
 
@@ -63,9 +65,12 @@ export const runtimeLayer = (
     Layer.provide(NodeServices.layer),
   );
   const credentials = gitHubCredentialLayer(instance.config).pipe(Layer.provide(app));
-  const engine = layer(instanceDirectory, instance.config, options).pipe(
-    Layer.provide(credentials),
-  );
+  const engine = layer(
+    instanceDirectory,
+    instance.config,
+    instance.agents.map(({ harness, model, effort }) => new BrainSpec({ harness, model, effort })),
+    options,
+  ).pipe(Layer.provide(credentials));
   const polling = GitHubPolling.layer.pipe(
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),

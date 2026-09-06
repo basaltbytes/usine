@@ -38,6 +38,7 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { gitHubCredentialLayer } from "../../src/credentials.ts";
 import { LabelReconciler } from "../../src/label-reconciler.ts";
 import { PollingTriggers } from "../../src/polling-triggers.ts";
+import { BrainSpec } from "@usine/core/agent/brain";
 import { layer as localWorkerLayer } from "../../src/local.ts";
 
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
@@ -181,9 +182,14 @@ const runtimeLayer = (
     Layer.provide(FetchHttpClient.layer),
   );
   const credentials = gitHubCredentialLayer(instance.config).pipe(Layer.provide(app));
-  const engine = localWorkerLayer(runtimeDirectory, instance.config, {
-    interruptGrace: "10 seconds",
-  }).pipe(Layer.provide(credentials));
+  const engine = localWorkerLayer(
+    runtimeDirectory,
+    instance.config,
+    instance.agents.map(({ harness, model, effort }) => new BrainSpec({ harness, model, effort })),
+    {
+      interruptGrace: "10 seconds",
+    },
+  ).pipe(Layer.provide(credentials));
   const polling = GitHubPolling.layer.pipe(
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),

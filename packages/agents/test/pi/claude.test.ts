@@ -94,6 +94,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(options?.model, "claude-sonnet-4-6");
         assert.strictEqual(options?.effort, "high");
         assert.strictEqual(options?.permissionMode, "bypassPermissions");
+        assert.strictEqual(options?.pathToClaudeCodeExecutable, "claude");
         assert.strictEqual(options?.allowDangerouslySkipPermissions, true);
         assert.strictEqual(options?.persistSession, false);
         assert.deepStrictEqual(options?.settingSources, ["user"]);
