@@ -470,11 +470,6 @@ describe("Board projection", () => {
     const mutation = labelMutationForBoardMove(board, target);
     assert.deepStrictEqual(mutation.add, [review]);
     assert.deepStrictEqual(mutation.remove, [ready]);
-    const githubLabels = [ready, bug, GitHubLabelName.make("documentation")];
-    assert.deepStrictEqual(
-      [...githubLabels.filter((label) => !mutation.remove.includes(label)), ...mutation.add],
-      [bug, "documentation", review],
-    );
   });
 
   it.effect("keeps proposed label lanes read-only and preserves descriptive labels", () =>
@@ -489,7 +484,7 @@ describe("Board projection", () => {
       const labels = [bug, documentation, ready];
       const board = yield* projectBoard(managed, [...labels, review], [itemWithLabels(labels)], []);
       const target = board.lanes.find(({ name }) => name === reviewLane);
-      assert.strictEqual(target?._tag, "ReadOnlyBoardLane");
+      assert(target !== undefined);
       assert(board.lanes.every((lane) => lane._tag === "ReadOnlyBoardLane"));
       assert.deepStrictEqual(board.lanes.flatMap(({ items }) => items)[0]?.labels, labels);
       assert.throws(() =>

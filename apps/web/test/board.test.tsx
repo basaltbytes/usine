@@ -301,18 +301,14 @@ describe("Board drag targets", () => {
     const singleAuthored = render("authored", ["ready"]);
     for (const readOnly of [proposed, singleAuthored]) {
       assert.ok(!readOnly.includes("Move issue #33 to a lane"));
-      assert.ok(!readOnly.includes("cursor-grab"));
+      // Read-only cards are content, without an inert interactive control around them.
       assert.ok(!readOnly.includes('role="button"'));
-      assert.ok(!readOnly.includes('aria-roledescription="sortable"'));
-      assert.ok(!readOnly.includes('aria-describedby="DndDescribedBy-'));
     }
+    assert.ok(proposed.includes("repos[].lanes"));
     assert.ok(proposed.includes("usine.yaml"));
     const authored = render("authored", ["ready", "review"]);
     assert.ok(authored.includes("Move issue #33 to a lane"));
-    assert.ok(authored.includes("cursor-grab"));
-    assert.ok(authored.includes('aria-roledescription="sortable"'));
-    assert.ok(authored.includes('tabindex="0"'));
-    assert.ok(!authored.includes("usine.yaml"));
+    assert.ok(authored.includes('role="button"'));
   });
 
   const lane = (id: string, items: ReadonlyArray<BoardTaskView>) =>

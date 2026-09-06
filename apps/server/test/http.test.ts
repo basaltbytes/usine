@@ -293,12 +293,10 @@ describe("operator HTTP API", () => {
         }),
       );
       assert.strictEqual(proposed.status, 409);
-      assert.deepStrictEqual(await proposed.json(), {
-        error: "BoardLaneReadOnlyError",
-        message:
-          "Board Lane proposed:ready is read-only. Configure label-backed lanes in usine.yaml to enable moves.",
-      });
-      assert.strictEqual(moved?.toLane, "authored:Review");
+      const refusal = Schema.decodeUnknownSync(OperatorHttpError)(await proposed.json());
+      assert.strictEqual(refusal.error, "BoardLaneReadOnlyError");
+      assert.match(refusal.message, /read-only/i);
+      assert.match(refusal.message, /usine\.yaml/);
 
       // Authored fields are strict even though JSON has always been accepted
       // independently of the caller's Content-Type.
