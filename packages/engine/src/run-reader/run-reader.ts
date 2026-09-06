@@ -2,18 +2,43 @@ import { Context, Effect, Layer, Option } from "effect";
 import { RunId } from "@usine/core/run";
 import { ItemKey } from "@usine/core/item";
 import { RunDatabase } from "../database/database.ts";
-import { ProjectionRevision, RunSnapshot, RunSummary } from "./model.ts";
-import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
+import { ProjectionRevision, RunEvidence, RunSnapshot, RunSummary } from "./model.ts";
+import { TranscriptAllQuery, TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import type { RunStoreError } from "../engine/error.ts";
 import { persistence } from "../store/codec.ts";
 import { queriesFor } from "../store/queries.ts";
 
 const makeRunReader = Effect.gen(function* () {
-  const queries = queriesFor(yield* RunDatabase);
+  const database = yield* RunDatabase;
+  const queries = queriesFor(database);
 
   const inspect = Effect.fn("RunReader.inspect")((runId: RunId) =>
     queries.snapshot(runId).pipe(persistence("read run")),
   );
+  const evidence = Effect.fn("RunReader.evidence")(function* (runId: RunId) {
+    yield* Effect.annotateCurrentSpan({ runId });
+    const evidence = yield* database
+      .transaction((transaction) =>
+        Effect.gen(function* () {
+          const queries = queriesFor(transaction);
+          const snapshot = yield* queries.snapshot(runId);
+          const transcripts = yield* Effect.forEach(snapshot.attempts, ({ id }) =>
+            queries.transcript(new TranscriptAllQuery({ attemptId: id })),
+          );
+          return new RunEvidence({
+            snapshot,
+            transcript: transcripts.flat().sort((left, right) => left.sequence - right.sequence),
+          });
+        }),
+      )
+      .pipe(persistence("read Run evidence"));
+    yield* Effect.logDebug("Run evidence read", {
+      runId,
+      attempts: evidence.snapshot.attempts.length,
+      transcriptRows: evidence.transcript.length,
+    });
+    return evidence;
+  });
   const list = Effect.fn("RunReader.list")((options: { readonly closedLimit: number }) =>
     queries.runSummaries(options.closedLimit).pipe(persistence("list runs")),
   );
@@ -27,7 +52,7 @@ const makeRunReader = Effect.gen(function* () {
     queries.transcript(query).pipe(persistence("read Attempt transcript")),
   );
 
-  return { inspect, list, forItems, revision, transcript } as const;
+  return { inspect, evidence, list, forItems, revision, transcript } as const;
 });
 
 /** Reads saved Run state and transcripts without starting or recovering execution. */
@@ -36,6 +61,8 @@ export class RunReader extends Context.Service<
   {
     /** Reads a Run's current state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
+    /** Reads one consistent Run snapshot and every saved transcript entry, in append order without a page limit. */
+    readonly evidence: (runId: RunId) => Effect.Effect<RunEvidence, RunStoreError>;
     /** Every open Run plus the newest `closedLimit` settled ones, newest first. */
     readonly list: (options: {
       readonly closedLimit: number;
@@ -55,4 +82,4 @@ export class RunReader extends Context.Service<
   static readonly layer = Layer.effect(RunReader, makeRunReader);
 }
 
-export { RunSnapshot, RunSummary, ProjectionRevision } from "./model.ts";
+export { RunEvidence, RunSnapshot, RunSummary, ProjectionRevision } from "./model.ts";

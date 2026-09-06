@@ -20,6 +20,11 @@ const main = Effect.gen(function* () {
   return yield* Match.valueTags(command, {
     HelpCommand: () => Console.log(CLI_USAGE),
     VersionCommand: () => Effect.flatMap(packageVersion(), Console.log),
+    ExportRunCommand: ({ runId, output }) =>
+      Effect.flatMap(
+        Effect.promise(() => import("./export-run.ts")),
+        ({ exportRun }) => exportRun(runId, output),
+      ),
     UpCommand: ({ port, allowVolatileInstance }) =>
       Effect.flatMap(
         Effect.promise(() => import("./up.ts")),
@@ -30,6 +35,11 @@ const main = Effect.gen(function* () {
   Effect.provide(NodeServices.layer),
   Effect.catchTags({
     CliUsageError: ({ message }) => exitWith(message),
+    RunNotFoundError: ({ runId }) => exitWith(`Run ${runId} was not found.`),
+    RunExportError: ({ runId, operation, path, reason }) =>
+      exitWith(
+        `Could not ${operation} evidence for Run ${runId} at ${path} (${reason}). Check the instance database and choose a new writable output path.`,
+      ),
     VolatileInstanceDirectoryError: ({ directory, root }) =>
       exitWith(
         `Refusing to start: ${directory} sits under ${root}, which the OS clears. The runtime store there is the only copy of every Run and transcript. Move the instance folder, or pass --allow-volatile-instance (or USINE_ALLOW_VOLATILE_INSTANCE=1) to proceed anyway.`,

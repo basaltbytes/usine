@@ -1,6 +1,7 @@
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { RunId } from "@usine/core/run";
 import { Console, Duration, Effect, FileSystem, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { ServeError } from "effect/unstable/http/HttpServerError";
@@ -17,12 +18,14 @@ const PortFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Port));
 
 export const CLI_USAGE = `Usage:
   usine up [--port <port>] [--allow-volatile-instance]
+  usine export-run <runId> [--output <path>]
   usine --help
   usine --version
 
 Options:
   -p, --port <port>            Listen on this port (default: 7331)
   --allow-volatile-instance    Start even when the instance folder sits under a temp path
+  -o, --output <path>          Write Run evidence here (default: run-<encoded-runId>.json)
   -h, --help                   Print this usage
   -v, --version                Print the pinned @usine/server version
 
@@ -76,12 +79,20 @@ export class UpCommand extends Schema.TaggedClass<UpCommand>("@usine/server/UpCo
   { port: Port, allowVolatileInstance: Schema.Boolean },
 ) {}
 
+/** Exports one Run from the current instance into a new local JSON file. */
+export class ExportRunCommand extends Schema.TaggedClass<ExportRunCommand>(
+  "@usine/server/ExportRunCommand",
+)("ExportRunCommand", {
+  runId: RunId,
+  output: Schema.Option(Schema.NonEmptyString),
+}) {}
+
 export interface CliEnvironment {
   readonly port: Option.Option<string>;
   readonly allowVolatileInstance: Option.Option<string>;
 }
 
-export const CliCommand = Schema.Union([HelpCommand, VersionCommand, UpCommand]);
+export const CliCommand = Schema.Union([HelpCommand, VersionCommand, UpCommand, ExportRunCommand]);
 export type CliCommand = typeof CliCommand.Type;
 
 const usageError = (message = CLI_USAGE) => new CliUsageError({ message });
@@ -97,6 +108,21 @@ const decodePort = (
   );
 
 const ALLOW_VOLATILE_FLAG = "--allow-volatile-instance";
+
+const exportRunCommand = (args: ReadonlyArray<string>) => {
+  const [runId, flag, output] = args;
+  if (
+    runId === undefined ||
+    runId.startsWith("-") ||
+    !(args.length === 1 || (args.length === 3 && (flag === "--output" || flag === "-o")))
+  )
+    return Effect.fail(usageError());
+  return Schema.decodeUnknownEffect(ExportRunCommand)({
+    _tag: "ExportRunCommand",
+    runId,
+    output: Option.fromUndefinedOr(output),
+  }).pipe(Effect.mapError(() => usageError()));
+};
 
 const upCommand = (
   args: ReadonlyArray<string>,
@@ -138,13 +164,16 @@ export const parseCli = Effect.fn("Cli.parse")((
 ): Effect.Effect<CliCommand, CliUsageError> => {
   if (
     (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) ||
-    (args.length === 2 && args[0] === "up" && (args[1] === "--help" || args[1] === "-h"))
+    (args.length === 2 &&
+      (args[0] === "up" || args[0] === "export-run") &&
+      (args[1] === "--help" || args[1] === "-h"))
   ) {
     return Effect.succeed(new HelpCommand());
   }
   if (args.length === 1 && (args[0] === "--version" || args[0] === "-v")) {
     return Effect.succeed(new VersionCommand());
   }
+  if (args[0] === "export-run") return exportRunCommand(args.slice(1));
   if (args[0] !== "up") return Effect.fail(usageError());
   return upCommand(args.slice(1), environment);
 });

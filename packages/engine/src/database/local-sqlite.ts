@@ -73,7 +73,7 @@ export const layer = (
   StepExecutor
 > => layerWithDatabase(localSqliteLayer(instanceDirectory)).pipe(Layer.provide(NodeServices.layer));
 
-/** Read-only access to the local runtime. It never reconciles workflows or starts Attempts. */
+/** Observation services initialize the local database but never reconcile workflows or start Attempts. */
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<
@@ -88,4 +88,32 @@ export const observationLayer = (
     RepositoryLabelProjectionReader.layer,
     RunReader.layer,
   ).pipe(Layer.provide(database));
+};
+
+/** Opens an existing `.usine/runtime.sqlite` in SQLite read-only mode, without initializing or migrating the database. */
+export const runReaderLayer = (
+  instanceDirectory: InstanceDirectory,
+): Layer.Layer<RunReader, EnginePersistenceError> => {
+  const sqlClient = Layer.unwrap(
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const filename = path.join(instanceDirectory, ".usine", "runtime.sqlite");
+      const info = yield* fileSystem.access(filename, { readable: true }).pipe(
+        Effect.andThen(fileSystem.stat(filename)),
+        Effect.mapError((cause) => startupError("open existing local database", cause)),
+      );
+      if (info.type !== "File")
+        return yield* startupError("open existing local database", {
+          path: filename,
+          reason: "Expected a regular SQLite file",
+          type: info.type,
+        });
+      return SqliteClient.layer({ filename, readonly: true, disableWAL: true });
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+  const database = Layer.effect(RunDatabase, SQLiteDrizzle.makeWithDefaults()).pipe(
+    Layer.provide(sqlClient),
+  );
+  return RunReader.layer.pipe(Layer.provide(database));
 };

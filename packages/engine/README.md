@@ -65,7 +65,11 @@ const program = Effect.gen(function* () {
 })
 ```
 
-`@usine/engine/engine` provides `RunEngine`, `Submission`, submission results, and typed engine errors. `@usine/engine/run-reader` provides `RunReader` and its snapshot and summary types; `/transcript` provides transcript entries, sequence values, and query variants. Import projection contracts from `/item-projection` and `/repository-label-projection`, and loop pause state with `LoopControl` from `/loop-control`.
+`@usine/engine/engine` provides `RunEngine`, `Submission`, submission results, and typed engine errors. `@usine/engine/run-reader` provides `RunReader` and its snapshot, summary, and evidence types; `/transcript` provides transcript entries, sequence values, and query variants. Import projection contracts from `/item-projection` and `/repository-label-projection`, and loop pause state with `LoopControl` from `/loop-control`.
+
+`RunReader.evidence(runId)` reads the Run snapshot and every transcript entry for its Attempts in one database transaction. The returned `RunEvidence` stays consistent when an Attempt completes or appends output during the read. Transcript entries use append order with no page limit.
+
+For local maintenance commands, `runReaderLayer(instanceDirectory)` from `@usine/engine/local-sqlite` provides only `RunReader` using a read-only SQLite connection. It requires an existing runtime database and does not initialize tables, migrate the schema, or change the journal mode. A missing, unreadable, or incompatible database fails through `EnginePersistenceError`.
 
 `layerWithDatabase` from `@usine/engine/engine` accepts another SQLite-compatible database layer. That layer must provide both `RunDatabase` from `@usine/engine/database` and the matching Effect `SqlClient`, preserving atomic transactions and keeping the run projections beside Effect's cluster tables; the deployment also supplies its platform `Crypto` layer, which the cluster uses to hash over-length deduplication keys. Cloudflare D1 is not supported by Drizzle RC.4 for this use yet because its Effect driver cannot execute the store's transactions.
 
