@@ -18,7 +18,8 @@ import { type ProjectionRevision, RunReader } from "@usine/engine/run-reader";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import type { GitHubAppError } from "@usine/github/github-app";
-import { Context, DateTime, Effect, Layer, Option, Schema, SynchronizedRef } from "effect";
+import { ChangedIssue, ChangedPullRequest } from "@usine/github/polling";
+import { Context, DateTime, Effect, Exit, Layer, Option, Schema, SynchronizedRef } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
 import { GitHubItemKey, PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
@@ -383,6 +384,7 @@ const makeOperator = Effect.gen(function* () {
   const items = yield* ItemProjectionReader;
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const github = yield* GitHubItemWriter;
+  const polling = yield* PollingTriggers;
 
   const approve = Effect.fn("Operator.approve")(function* (runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
@@ -463,7 +465,8 @@ const makeOperator = Effect.gen(function* () {
       const source = board.lanes.find(({ items: laneItems }) =>
         laneItems.some(({ items }) => items.some(({ number }) => number === move.item)),
       );
-      if (source === undefined) {
+      const movedItem = storedItems.find(({ number }) => number === move.item);
+      if (source === undefined || movedItem === undefined) {
         return yield* new BoardItemNotFound({ repository: move.repository, item: move.item });
       }
       const target = board.lanes.find(({ id }) => id === move.toLane);
@@ -474,8 +477,23 @@ const makeOperator = Effect.gen(function* () {
         return yield* new BoardLaneReadOnly({ repository: move.repository, lane: move.toLane });
       }
       const mutation = labelMutationForBoardMove(board, target);
-      const applied = yield* github.updateLabels(move.repository, move.item, mutation);
-      yield* Effect.logInfo("Operator moved a Board card; the next poll projects the new lane", {
+      const changed = { number: move.item, updatedAt: yield* DateTime.now };
+      const item =
+        movedItem.source === "pr" ? new ChangedPullRequest(changed) : new ChangedIssue(changed);
+      const applied = yield* github.updateLabels(move.repository, move.item, mutation).pipe(
+        // A failed or interrupted request may have applied part of the label
+        // swap. Reconcile it without replacing the writer's original outcome.
+        Effect.onExit((exit) =>
+          polling.hint(
+            move.repository,
+            item,
+            Option.flatMap(Exit.findErrorOption(exit), (error) =>
+              error._tag === "GitHubRateLimitError" ? Option.some(error.retryAt) : Option.none(),
+            ),
+          ),
+        ),
+      );
+      yield* Effect.logInfo("Operator moved a Board card and queued its authoritative refresh", {
         repository: move.repository,
         item: move.item,
         fromLane: source.id,
@@ -533,7 +551,7 @@ export class Operator extends Context.Service<
     readonly retry: (runId: RunId) => Effect.Effect<void, OperatorError>;
     /** Cancels an open Run and interrupts its current Attempt; an already closed Run is unchanged. */
     readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
-    /** Swaps lane labels on GitHub; the next poll refreshes the Board's observed position. */
+    /** Swaps lane labels on GitHub and hints an authoritative refresh of its Board position and Loop matches. */
     readonly moveBoardItem: (
       instance: LoadedInstance,
       move: BoardMove,

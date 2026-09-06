@@ -357,6 +357,14 @@ const testLayer = (
       Ref.set(movedLabels, mutation).pipe(Effect.as(mutation.add)),
   });
   const polling = Layer.succeed(PollingTriggers)({
+    hint: () =>
+      Ref.get(movedLabels).pipe(
+        Effect.flatMap((mutation) =>
+          mutation === null
+            ? Effect.die("A rejected Board destination must not fetch GitHub")
+            : Effect.void,
+        ),
+      ),
     poll: () => Effect.die("unused"),
     run: () => Effect.never,
     latest: Effect.succeed(
