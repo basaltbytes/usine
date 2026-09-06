@@ -48,7 +48,10 @@ import {
   type TranscriptQuery,
   TranscriptSequence,
 } from "@usine/engine/transcript";
-import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
+import {
+  RepositoryLabelProjection,
+  RepositoryLabelProjectionReader,
+} from "@usine/engine/repository-label-projection";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { Source } from "@usine/expression/expression-engine";
 import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
@@ -316,8 +319,8 @@ const testLayer = (
             issueType: null,
             milestone: null,
             labels: {
-              totalCount: 2,
-              nodes: [{ name: "ready" }, { name: "bug" }],
+              totalCount: 3,
+              nodes: [{ name: "ready" }, { name: "bug" }, { name: "documentation" }],
             },
             assignees: { totalCount: 0, nodes: [] },
             comments: { totalCount: 0, nodes: [] },
@@ -335,7 +338,19 @@ const testLayer = (
       ]),
   });
   const repositoryLabelReader = Layer.succeed(RepositoryLabelProjectionReader)({
-    get: () => Effect.succeed(Option.none()),
+    get: () =>
+      Effect.succeed(
+        Option.some(
+          Schema.decodeUnknownSync(RepositoryLabelProjection)({
+            repository,
+            labels: ["ready", "ready-for-review", "bug", "documentation"].map((name) => ({
+              name,
+              color: null,
+              description: null,
+            })),
+          }),
+        ),
+      ),
   });
   const github = Layer.succeed(GitHubItemWriter)({
     updateLabels: (_repository, _item, mutation) =>
@@ -632,7 +647,7 @@ describe("Operator", () => {
   );
 
   it.effect(
-    "rejects Board moves onto unknown projects, Items, Lanes, and state-derived Lanes",
+    "rejects Board moves onto unknown destinations and read-only lanes before writing labels",
     () =>
       Effect.gen(function* () {
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
@@ -664,6 +679,24 @@ describe("Operator", () => {
           assert.strictEqual(unknownLane._tag, "BoardLaneNotFoundError");
           const stateLane = yield* rejected(repository, 31, "fallback:unmapped");
           assert.strictEqual(stateLane._tag, "BoardLaneReadOnlyError");
+          const proposed = new LoadedInstance({
+            ...instance,
+            config: Schema.decodeUnknownSync(UsineConfig)({
+              version: 1,
+              repos: [{ name: repository }],
+            }),
+          });
+          const proposedLane = yield* operator
+            .moveBoardItem(
+              proposed,
+              new BoardMove({
+                repository,
+                item: CoreItemNumber.make(31),
+                toLane: BoardLaneId.make("proposed:ready-for-review"),
+              }),
+            )
+            .pipe(Effect.flip);
+          assert.strictEqual(proposedLane._tag, "BoardLaneReadOnlyError");
           assert.strictEqual(yield* Ref.get(movedLabels), null);
         }).pipe(
           Effect.provide(testLayer(approved, movedLabels, overviewReads, projectionRevision)),

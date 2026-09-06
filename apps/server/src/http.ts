@@ -33,7 +33,7 @@ const operatorFailure = (error: BackendError) => {
       case "BoardLaneNotFoundError":
         return `Board Lane ${error.lane} was not found.`;
       case "BoardLaneReadOnlyError":
-        return `Board Lane ${error.lane} is derived from Item state and cannot accept label moves.`;
+        return `Board Lane ${error.lane} is read-only. Configure label-backed lanes in usine.yaml to enable moves.`;
       case "InstallationDiscoveryError":
       case "AppPermissionError":
         return error.message;
