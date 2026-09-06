@@ -11,6 +11,7 @@ export const CompletedTools = ({ group }: { readonly group: ToolGroup }) => {
   const { state, change } = useTranscriptDisclosure();
   const { scrollToMessage } = useMessageScroller();
   const keys = group.tools.map((tool) => tool.key);
+  const errors = group.tools.filter((tool) => tool.state._tag === "Error").length;
   return (
     <Collapsible
       data-transcript-id={group.key}
@@ -32,6 +33,11 @@ export const CompletedTools = ({ group }: { readonly group: ToolGroup }) => {
       >
         <CaretRightIcon aria-hidden="true" className="shrink-0 transition-transform" />
         <span className="min-w-0 break-words">{groupSummary(group)}</span>
+        {errors > 0 && (
+          <span className="shrink-0 text-destructive">
+            · {errors} {errors === 1 ? "error" : "errors"}
+          </span>
+        )}
         <span className="sr-only"> · {group.tools.length} completed tools</span>
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-2 pl-3 pt-2">
