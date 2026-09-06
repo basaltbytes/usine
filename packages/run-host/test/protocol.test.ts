@@ -1,7 +1,8 @@
 import { assert, describe, expect, it } from "@effect/vitest";
+import { SessionOperationError } from "@usine/agents/runtime";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Deferred, Effect, Layer, Path, Queue, Schema } from "effect";
+import { Deferred, Effect, Layer, Logger, Option, Path, Queue, Schema } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { command, controlledSession, spec, start } from "./support/session.ts";
 import { startHost } from "./support/stdio.ts";
@@ -15,6 +16,38 @@ const services = Layer.merge(
 );
 
 describe("run-host protocol", () => {
+  it.effect("reports failed SDK interrupt delivery while retaining the interrupted outcome", () =>
+    Effect.gen(function* () {
+      const logs: Array<unknown> = [];
+      const logger = Logger.make<unknown, void>(({ message }) => {
+        logs.push(message);
+      });
+      const session = yield* controlledSession(
+        new SessionOperationError({
+          operation: "interrupt",
+          sessionId: Option.none(),
+          message: "The SDK interrupt endpoint closed.",
+          cause: new Error("Connection closed"),
+        }),
+      );
+      const host = yield* startHost(session.runtime).pipe(Effect.withLogger(logger));
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(command(new AttemptChannel.Interrupt()));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+      expect(logs).toContainEqual([
+        "Session interrupt delivery failed",
+        {
+          attemptId: spec.attemptId,
+          repository: spec.repository,
+          errorTag: "SessionOperationError",
+          message: "The SDK interrupt endpoint closed.",
+        },
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(services)),
+  );
+
   for (const payload of [
     new AttemptChannel.Steer({ message: "Wait for Start" }),
     new AttemptChannel.Interrupt(),

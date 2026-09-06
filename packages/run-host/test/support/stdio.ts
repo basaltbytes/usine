@@ -47,6 +47,10 @@ export const startHost = Effect.fn("test.startHost")(function* (runtime: AgentRu
     send: (frame: AttemptChannel.InputFrame) =>
       Queue.offer(stdin, new TextEncoder().encode(`${encodeInput(frame)}\n`)),
     next: Queue.take(received),
-    result: Fiber.join(host).pipe(Effect.ensuring(Fiber.join(output))),
+    result: Effect.gen(function* () {
+      const outcome = yield* Fiber.await(host);
+      yield* Fiber.join(output);
+      return yield* outcome;
+    }),
   };
 });

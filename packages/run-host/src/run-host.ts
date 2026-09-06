@@ -291,11 +291,28 @@ export const runHost = () =>
           yield* Ref.set(expectedInputSequence, expected + 1);
           if (command.payload._tag === "Interrupt") {
             yield* Effect.logInfo("Run host received an Interrupt frame");
-            // Start delivery before waking the terminal race: the SDK's native
-            // promise keeps delivering the interrupt even when terminal cleanup
-            // interrupts this command fiber right after.
-            yield* Effect.forkChild(session.interrupt, { startImmediately: true });
-            yield* Deferred.succeed(interrupted, undefined);
+            // Decide interruption before an SDK can fail its result on abort.
+            // Mask cancellation until delivery starts, so terminal cleanup
+            // cannot skip the interrupt. The SDK promise may finish later.
+            yield* Effect.uninterruptible(
+              Effect.gen(function* () {
+                yield* Deferred.succeed(interrupted, undefined);
+                yield* Effect.forkChild(
+                  session.interrupt.pipe(
+                    Effect.tapError((error) =>
+                      Effect.logWarning("Session interrupt delivery failed", {
+                        attemptId: spec.attemptId,
+                        repository: spec.repository,
+                        errorTag: error._tag,
+                        message: error.message,
+                      }),
+                    ),
+                    Effect.ignore,
+                  ),
+                  { startImmediately: true },
+                );
+              }),
+            );
           } else {
             yield* Effect.logDebug("Run host received a Steer frame");
             yield* session.steer(command.payload.message);
@@ -305,8 +322,11 @@ export const runHost = () =>
       const commandFiber = yield* Effect.forkChild(readCommands);
 
       const completed = Effect.gen(function* () {
-        const sessionResult = yield* session.result;
-        yield* Fiber.join(eventFiber);
+        // Both must finish before harvesting; either failure ends the Attempt
+        // even when the SDK leaves the other channel open.
+        const [sessionResult] = yield* Effect.all([session.result, Fiber.join(eventFiber)], {
+          concurrency: "unbounded",
+        });
         const commits = yield* harvestCommits();
         const pullRequests = yield* harvestPullRequests().pipe(
           Effect.timeout("10 seconds"),
@@ -340,7 +360,7 @@ export const runHost = () =>
       });
       yield* Effect.gen(function* () {
         const outcome = yield* Effect.raceFirst(
-          Effect.race(
+          Effect.raceFirst(
             completed.pipe(Effect.map((value) => ({ _tag: "Completed" as const, value }))),
             Deferred.await(interrupted).pipe(Effect.as({ _tag: "Interrupted" as const })),
           ),
