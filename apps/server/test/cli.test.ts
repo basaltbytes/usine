@@ -20,6 +20,33 @@ import {
 const noEnvironment = { port: Option.none<string>(), allowVolatileInstance: Option.none<string>() };
 
 describe("usine CLI", () => {
+  it("parses backup independently of server settings and provides help", async () => {
+    const command = await Effect.runPromise(
+      parseCli(["backup", "evidence.sqlite"], {
+        ...noEnvironment,
+        port: Option.some("invalid"),
+      }),
+    );
+    assert(command._tag === "BackupCommand");
+    assert.strictEqual(command.output, "evidence.sqlite");
+    assert.strictEqual(
+      (await Effect.runPromise(parseCli(["backup", "--help"], noEnvironment)))._tag,
+      "HelpCommand",
+    );
+  });
+
+  it.each([
+    { args: ["backup"] },
+    { args: ["backup", ""] },
+    { args: ["backup", "--unknown"] },
+    { args: ["backup", "copy.sqlite", "extra"] },
+  ])("rejects incomplete or unsupported backup arguments: $args", async ({ args }) => {
+    assert.instanceOf(
+      await Effect.runPromise(parseCli(args, noEnvironment).pipe(Effect.flip)),
+      CliUsageError,
+    );
+  });
+
   it.each([
     { flags: [], output: Option.none<string>() },
     { flags: ["--output", "evidence.json"], output: Option.some("evidence.json") },

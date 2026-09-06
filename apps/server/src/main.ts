@@ -25,6 +25,17 @@ const main = Effect.gen(function* () {
         Effect.promise(() => import("./export-run.ts")),
         ({ exportRun }) => exportRun(runId, output),
       ),
+    BackupCommand: ({ output }) =>
+      Effect.flatMap(
+        Effect.promise(() => import("./backup.ts")),
+        ({ backup }) => backup(output),
+      ).pipe(
+        Effect.catchTag("EnginePersistenceError", ({ operation }) =>
+          exitWith(
+            `Could not back up runtime store to ${output}: ${operation}. Check the instance database and choose a new writable output path.`,
+          ),
+        ),
+      ),
     UpCommand: ({ port, allowVolatileInstance }) =>
       Effect.flatMap(
         Effect.promise(() => import("./up.ts")),

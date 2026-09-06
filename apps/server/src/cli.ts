@@ -18,6 +18,7 @@ const PortFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Port));
 
 export const CLI_USAGE = `Usage:
   usine up [--port <port>] [--allow-volatile-instance]
+  usine backup <path>
   usine export-run <runId> [--output <path>]
   usine --help
   usine --version
@@ -87,12 +88,24 @@ export class ExportRunCommand extends Schema.TaggedClass<ExportRunCommand>(
   output: Schema.Option(Schema.NonEmptyString),
 }) {}
 
+/** Copies the current instance's runtime store into a new SQLite file. */
+export class BackupCommand extends Schema.TaggedClass<BackupCommand>("@usine/server/BackupCommand")(
+  "BackupCommand",
+  { output: Schema.NonEmptyString },
+) {}
+
 export interface CliEnvironment {
   readonly port: Option.Option<string>;
   readonly allowVolatileInstance: Option.Option<string>;
 }
 
-export const CliCommand = Schema.Union([HelpCommand, VersionCommand, UpCommand, ExportRunCommand]);
+export const CliCommand = Schema.Union([
+  HelpCommand,
+  VersionCommand,
+  UpCommand,
+  ExportRunCommand,
+  BackupCommand,
+]);
 export type CliCommand = typeof CliCommand.Type;
 
 const usageError = (message = CLI_USAGE) => new CliUsageError({ message });
@@ -165,13 +178,21 @@ export const parseCli = Effect.fn("Cli.parse")((
   if (
     (args.length === 1 && (args[0] === "--help" || args[0] === "-h")) ||
     (args.length === 2 &&
-      (args[0] === "up" || args[0] === "export-run") &&
+      (args[0] === "up" || args[0] === "export-run" || args[0] === "backup") &&
       (args[1] === "--help" || args[1] === "-h"))
   ) {
     return Effect.succeed(new HelpCommand());
   }
   if (args.length === 1 && (args[0] === "--version" || args[0] === "-v")) {
     return Effect.succeed(new VersionCommand());
+  }
+  if (args[0] === "backup") {
+    const output = args[1];
+    if (args.length !== 2 || output === undefined || output.startsWith("-"))
+      return Effect.fail(usageError());
+    return Schema.decodeUnknownEffect(BackupCommand)({ _tag: "BackupCommand", output }).pipe(
+      Effect.mapError(() => usageError()),
+    );
   }
   if (args[0] === "export-run") return exportRunCommand(args.slice(1));
   if (args[0] !== "up") return Effect.fail(usageError());

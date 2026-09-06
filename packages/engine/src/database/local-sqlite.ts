@@ -90,11 +90,8 @@ export const observationLayer = (
   ).pipe(Layer.provide(database));
 };
 
-/** Opens an existing `.usine/runtime.sqlite` in SQLite read-only mode, without initializing or migrating the database. */
-export const runReaderLayer = (
-  instanceDirectory: InstanceDirectory,
-): Layer.Layer<RunReader, EnginePersistenceError> => {
-  const sqlClient = Layer.unwrap(
+const existingSqliteLayer = (instanceDirectory: InstanceDirectory) =>
+  Layer.unwrap(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
@@ -112,8 +109,48 @@ export const runReaderLayer = (
       return SqliteClient.layer({ filename, readonly: true, disableWAL: true });
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+/** Opens an existing `.usine/runtime.sqlite` in SQLite read-only mode, without initializing or migrating the database. */
+export const runReaderLayer = (
+  instanceDirectory: InstanceDirectory,
+): Layer.Layer<RunReader, EnginePersistenceError> => {
+  const sqlClient = existingSqliteLayer(instanceDirectory);
   const database = Layer.effect(RunDatabase, SQLiteDrizzle.makeWithDefaults()).pipe(
     Layer.provide(sqlClient),
   );
   return RunReader.layer.pipe(Layer.provide(database));
 };
+
+/** Copies the existing runtime database through SQLite's online backup API.
+ * The destination's parent must exist. Publication is atomic and refuses an existing
+ * destination; the source is opened read-only without migrations or workflow recovery.
+ */
+export const backup = Effect.fn("LocalSqlite.backup")(
+  function* (instanceDirectory: InstanceDirectory, destination: string) {
+    yield* Effect.annotateCurrentSpan({ instanceDirectory, destination });
+    yield* Effect.logInfo("Runtime store backup started", { instanceDirectory, destination });
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const temporary = yield* fileSystem.makeTempDirectoryScoped({
+          directory: path.dirname(destination),
+          prefix: ".usine-backup-",
+        });
+        const staged = path.join(temporary, "runtime.sqlite");
+        yield* fileSystem.writeFile(staged, new Uint8Array(), { mode: 0o600 });
+        yield* Effect.flatMap(SqliteClient.SqliteClient, (client) =>
+          // The native backup Promise cannot be canceled. Keep its connection and
+          // staging directory alive until it settles, including on interruption.
+          client.backup(staged).pipe(Effect.uninterruptible),
+        ).pipe(Effect.provide(existingSqliteLayer(instanceDirectory)));
+        // A hard link publishes only the completed file and refuses existing paths,
+        // including the source database and aliases to it.
+        yield* fileSystem.link(staged, destination);
+      }),
+    ).pipe(Effect.mapError((cause) => startupError("back up local database", cause)));
+    yield* Effect.logInfo("Runtime store backup completed", { instanceDirectory, destination });
+  },
+  Effect.tapError((error) => Effect.logWarning("Runtime store backup failed", { error })),
+  Effect.provide(NodeServices.layer),
+);

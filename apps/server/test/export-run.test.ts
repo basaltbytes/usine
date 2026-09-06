@@ -177,6 +177,54 @@ describe("Run evidence export", { timeout: 30_000 }, () => {
     assert.include(exported.stdout, output);
   });
 
+  test("backs up live WAL state and exports the restored Run with all Attempts and transcripts", async ({
+    directory,
+    saved,
+  }) => {
+    const restored = join(directory, "restored");
+    await mkdir(join(restored, ".usine"), { recursive: true });
+    const output = join(restored, ".usine", "runtime.sqlite");
+    const writer = new DatabaseSync(join(directory, ".usine", "runtime.sqlite"));
+    try {
+      writer.exec("PRAGMA journal_mode=WAL; PRAGMA wal_autocheckpoint=0");
+      writer.exec("CREATE TABLE backup_marker (value TEXT)");
+      writer.exec("INSERT INTO backup_marker VALUES ('committed WAL evidence')");
+      writer.exec("BEGIN IMMEDIATE; INSERT INTO backup_marker VALUES ('uncommitted')");
+      const backedUp = runCli(directory, ["backup", output]);
+      assert.strictEqual(backedUp.status, 0, backedUp.stderr);
+      assert.include(backedUp.stdout, output);
+      assert.strictEqual((await stat(output)).mode & 0o777, 0o600);
+      const copy = new DatabaseSync(output, { readOnly: true });
+      try {
+        assert.deepStrictEqual(
+          copy
+            .prepare("SELECT value FROM backup_marker")
+            .all()
+            .map((row) => row.value),
+          ["committed WAL evidence"],
+        );
+        assert.strictEqual(copy.prepare("PRAGMA integrity_check").get()?.integrity_check, "ok");
+      } finally {
+        copy.close();
+      }
+      writer.exec("COMMIT; INSERT INTO backup_marker VALUES ('after backup')");
+      assert.strictEqual(writer.prepare("SELECT count(*) AS n FROM backup_marker").get()?.n, 3);
+    } finally {
+      writer.close();
+    }
+    const exported = runCli(restored, ["export-run", saved.snapshot.run.id]);
+    assert.strictEqual(exported.status, 0, exported.stderr);
+    const evidence = Schema.decodeUnknownSync(RunEvidenceFromJson)(
+      await readFile(
+        join(restored, `run-${encodeURIComponent(saved.snapshot.run.id)}.json`),
+        "utf8",
+      ),
+    );
+    assert.deepStrictEqual(evidence.snapshot, saved.snapshot);
+    assert.deepStrictEqual(evidence.transcript, saved.transcript);
+    assert.strictEqual(evidence.transcript.length, 504);
+  });
+
   test("exports a Run awaiting approval to the requested destination", async ({
     directory,
     saved,
