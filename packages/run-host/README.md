@@ -8,4 +8,6 @@ The executable runs the production Pi parent with Claude Code, Codex, and Pi chi
 
 After the agent session finishes, the host records commits created after the supplied base commit. For a changed checkout, an agent-created branch, or an Attempt pinned to a commit, it also asks GitHub for PRs whose head matches the final checkout commit. These structured `PullRequest` facts persist with the result and supply the operator's PR link. Discovery uses `gh api` with the worker's existing repository access, including the exe.dev GitHub host; it does not parse the agent's message. A failed lookup or ten-second timeout logs a warning and preserves the completed agent result. Worker images need the GitHub CLI for PR discovery.
 
+Run `pnpm --filter @usine/run-host test` from the workspace to exercise the production host through an in-memory stdio harness. The suite covers protocol validation, session interruption and cleanup, and commit harvesting from temporary Git repositories. Agent sessions and GitHub responses are controlled test adapters; tests require Git and Node.js and run without agent or GitHub credentials.
+
 Everything is 0.x, so APIs may change. Supply `effect` at the version pinned by the usine workspace.

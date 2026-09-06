@@ -294,7 +294,7 @@ export const runHost = () =>
             // Start delivery before waking the terminal race: the SDK's native
             // promise keeps delivering the interrupt even when terminal cleanup
             // interrupts this command fiber right after.
-            yield* Effect.forkChild(session.interrupt);
+            yield* Effect.forkChild(session.interrupt, { startImmediately: true });
             yield* Deferred.succeed(interrupted, undefined);
           } else {
             yield* Effect.logDebug("Run host received a Steer frame");
