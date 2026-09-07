@@ -51,25 +51,22 @@ const main = Effect.gen(function* () {
           Match.when(
             "open",
             () =>
-              `Could not open the runtime store at ${source} (${reason}). Run usine backup from the instance folder that holds .usine/runtime.sqlite.`,
+              `Could not open ${source} (${reason}). Run usine backup from the instance folder containing .usine/runtime.sqlite.`,
           ),
           Match.when(
             "copy",
             () =>
-              `Could not copy the runtime store at ${source} into ${destination} (${reason}). Check the instance database and the space and permissions of the output directory before retrying.`,
+              `Could not copy ${source} to ${destination} (${reason}). Check the source database and the output directory's free space and permissions.`,
           ),
           Match.when(
             "stage",
             () =>
-              `Could not stage the backup beside ${destination} (${reason}). Choose an output path inside an existing writable directory.`,
+              `Could not create a backup at ${destination} (${reason}). Choose an existing writable output directory.`,
           ),
           Match.when("publish", () =>
-            // Without a platform description the reason is its normalized tag, and
-            // AlreadyExists is the deliberate refusal to replace a file. Anything else
-            // means the completed copy could not be linked into place.
             reason === "AlreadyExists"
-              ? `Could not publish the backup at ${destination} (${reason}). Choose a new output path; backups never replace existing files.`
-              : `Could not publish the backup at ${destination} (${reason}). The completed copy is hard-linked into place; use an output directory on a filesystem that supports hard links, or resolve the reported reason, and retry.`,
+              ? `Could not save the backup to ${destination} (${reason}). Choose a different filename; the destination already exists.`
+              : `Could not save the backup to ${destination} (${reason}). Check the destination path and permissions; its filesystem must support hard links.`,
           ),
           Match.exhaustive,
         ),

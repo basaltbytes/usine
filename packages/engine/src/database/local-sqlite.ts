@@ -93,7 +93,6 @@ export const observationLayer = (
   ).pipe(Layer.provide(database));
 };
 
-/** Confirms the runtime store is a readable regular file; the platform reason names what is wrong otherwise. */
 const readableRuntimeStore = Effect.fn("LocalSqlite.readableRuntimeStore")(function* (
   filename: string,
 ) {
@@ -136,14 +135,7 @@ export const runReaderLayer = (
   return RunReader.layer.pipe(Layer.provide(database));
 };
 
-/** The online backup stopped before publishing a complete file.
- * `operation` names the phase that failed. `source` is the runtime store, which `open` and
- * `copy` read; `destination` is the requested backup path, beside which `stage` and `copy`
- * write and at which `publish` links. Both paths are always reported because a copy failure
- * can come from either side. `reason` is the platform description or normalized reason, the
- * native errno code (`EPERM`, `ENOTSUP`, ...) when the platform normalizes it to `Unknown`,
- * or SQLite's own message.
- */
+/** A failed backup operation, with both paths because SQLite copy errors can come from either file. */
 export class RuntimeStoreBackupError extends Schema.TaggedError<RuntimeStoreBackupError>(
   "@usine/engine/RuntimeStoreBackupError",
 )("RuntimeStoreBackupError", {
@@ -157,47 +149,23 @@ export class RuntimeStoreBackupError extends Schema.TaggedError<RuntimeStoreBack
 const vendorMessage = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.NonEmptyString }));
 const errnoCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.NonEmptyString }));
 
-/** Names a failure from safe fields: the platform description or normalized reason, or SQLite's
- * message behind a generic SqlError. The platform only normalizes a handful of errno values;
- * the rest arrive as `Unknown`, so their native code is the only thing that tells a filesystem
- * without hard links (`EPERM`, `ENOTSUP`) from a genuinely unknown failure.
- */
-const failureReason = (cause: PlatformError.PlatformError | SqlError): string =>
-  cause._tag === "PlatformError"
-    ? (cause.reason.description ??
-      (cause.reason._tag === "Unknown"
-        ? Option.match(errnoCode(cause.reason.cause), {
-            onNone: () => cause.reason._tag,
-            onSome: ({ code }) => code,
-          })
-        : cause.reason._tag))
-    : Option.match(vendorMessage(cause.reason.cause), {
-        onNone: () => cause.reason._tag,
-        onSome: ({ message }) => message,
-      });
+const failureReason = (cause: PlatformError.PlatformError | SqlError): string => {
+  if (cause._tag === "SqlError")
+    return Option.match(vendorMessage(cause.reason.cause), {
+      onNone: () => cause.reason._tag,
+      onSome: ({ message }) => message,
+    });
+  if (cause.reason.description !== undefined) return cause.reason.description;
+  if (cause.reason._tag !== "Unknown") return cause.reason._tag;
+  return Option.match(errnoCode(cause.reason.cause), {
+    onNone: () => cause.reason._tag,
+    onSome: ({ code }) => code,
+  });
+};
 
-const backupFailure =
-  (source: string, destination: string) =>
-  (operation: RuntimeStoreBackupError["operation"]) =>
-  <A, R>(
-    effect: Effect.Effect<A, PlatformError.PlatformError | SqlError, R>,
-  ): Effect.Effect<A, RuntimeStoreBackupError, R> =>
-    Effect.mapError(
-      effect,
-      (cause) =>
-        new RuntimeStoreBackupError({
-          operation,
-          source,
-          destination,
-          reason: failureReason(cause),
-          cause,
-        }),
-    );
-
-/** Copies the existing runtime database through SQLite's online backup API.
- * The destination's parent must exist on a filesystem that supports hard links: publication
- * links the completed copy into place, which is atomic and refuses an existing destination.
- * The source is opened read-only without migrations or workflow recovery.
+/** Copies `.usine/runtime.sqlite` to a new file while the orchestrator runs.
+ * The destination directory must exist and support hard links. Opens the source
+ * read-only and saves a complete backup without overwriting an existing file.
  */
 export const backup = Effect.fn("LocalSqlite.backup")(
   function* (instanceDirectory: InstanceDirectory, destination: string) {
@@ -206,7 +174,17 @@ export const backup = Effect.fn("LocalSqlite.backup")(
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const source = runtimeStorePath(path, instanceDirectory);
-    const failed = backupFailure(source, destination);
+    const failed = (operation: RuntimeStoreBackupError["operation"]) =>
+      Effect.mapError(
+        (cause: PlatformError.PlatformError | SqlError) =>
+          new RuntimeStoreBackupError({
+            operation,
+            source,
+            destination,
+            reason: failureReason(cause),
+            cause,
+          }),
+      );
     yield* readableRuntimeStore(source).pipe(failed("open"));
     const { totalPages } = yield* Effect.scoped(
       Effect.gen(function* () {
@@ -219,13 +197,10 @@ export const backup = Effect.fn("LocalSqlite.backup")(
           .writeFile(staged, new Uint8Array(), { mode: 0o600 })
           .pipe(failed("stage"));
         const metadata = yield* Effect.flatMap(SqliteClient.SqliteClient, (client) =>
-          // The native backup Promise cannot be canceled. Keep its connection and
-          // staging directory alive until it settles, including on interruption.
+          // Node's backup can't be canceled; wait before closing the database or deleting staging.
           client.backup(staged).pipe(failed("copy"), Effect.uninterruptible),
         ).pipe(Effect.provide(readOnlySqliteLayer(source)));
-        // A hard link publishes only the completed file and refuses existing paths,
-        // including the source database and aliases to it. Filesystems without hard
-        // links fail here with an errno the platform does not normalize.
+        // A hard link atomically creates the destination without overwriting it.
         yield* fileSystem.link(staged, destination).pipe(failed("publish"));
         return metadata;
       }),

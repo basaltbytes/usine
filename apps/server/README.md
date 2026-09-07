@@ -30,7 +30,9 @@ From the instance folder, copy the runtime store while the orchestrator runs:
 usine backup /path/to/runtime-backup.sqlite
 ```
 
-The destination must be a new file in an existing directory on a filesystem that supports hard links: the command stages the copy beside the destination and hard-links the completed file into place, which is what makes publication atomic and keeps it from replacing an existing file. FAT and exFAT volumes and some network shares refuse hard links; choose a destination on a local POSIX or NTFS filesystem instead. The command uses SQLite's online backup API to include committed WAL data and all runtime tables, then publishes the completed file with owner-only permissions. It opens the source read-only and requires no GitHub credentials. Failed backups leave the destination unpublished and existing files preserved; the error names the phase that failed, the paths involved, and the reason (the native errno code when the platform has no description), so a missing runtime store, a destination that already exists, and a destination that cannot be hard-linked each read differently.
+`usine backup` copies all runtime tables, including committed WAL data, while the orchestrator runs. It opens the source read-only and doesn't need GitHub credentials.
+
+Use a new filename in an existing writable directory on a filesystem that supports hard links. The command writes a complete backup with owner-only permissions and won't overwrite existing files. Errors identify the affected path and cause.
 
 Keep the backup outside the instance folder to protect it against loss of that folder. Back up the authored instance files and credentials separately. To restore, stop the orchestrator, move the existing `.usine/runtime.sqlite` and any `runtime.sqlite-wal` / `runtime.sqlite-shm` files aside, and copy the backup to `.usine/runtime.sqlite`. Restart with the matching instance configuration and engine version. Restoring an older backup also restores its older deduplication ledger, so work performed after that backup can run again.
 
