@@ -31,13 +31,12 @@ import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import {
-  applyMove,
   itemFailure,
   laneUnder,
   orderLanes,
   ProjectBoard,
   runsWithoutCard,
-} from "../src/board.tsx";
+} from "../src/board/board.tsx";
 import { TaskHistory } from "../src/components/task-history.tsx";
 import { RunLinks } from "../src/components/run-links.tsx";
 import { failureMessage, needCopy } from "../src/operator-copy.ts";
@@ -326,21 +325,6 @@ describe("Board drag targets", () => {
     assert.strictEqual(laneUnder(carded.itemKey, lanes)?.id, "review");
     assert.strictEqual(laneUnder(BoardLaneId.make("ready"), lanes)?.id, "ready");
     assert.strictEqual(laneUnder(BoardLaneId.make("elsewhere"), lanes), undefined);
-  });
-
-  it("shows a pending move in its target lane until the poll catches up", () => {
-    const carded = itemWithRun("Succeeded", [attempt(1, null)]);
-    const moved = applyMove([lane("ready", []), lane("review", [carded])], {
-      itemKey: carded.itemKey,
-      toLane: BoardLaneId.make("ready"),
-    });
-    assert.deepStrictEqual(
-      moved.map(({ id, items }) => [id, items.length]),
-      [
-        ["ready", 1],
-        ["review", 0],
-      ],
-    );
   });
 });
 

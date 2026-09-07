@@ -474,6 +474,51 @@ it("reveals an error instead of the pending saved place and preserves unread act
     .toBeVisible();
 });
 
+it("keeps failed commands inside their group and reopens inspected errors through collapsed child activity", async () => {
+  const child = new ChildSession({
+    id: AgentSessionId.make("child"),
+    parentId: parent.id,
+    agent: AgentName.make("reviewer"),
+    brain: parent.brain,
+  });
+  const tools = ["git status", "node check.js", "git diff"].flatMap((command, index) => [
+    record(
+      16 + index * 2,
+      new ToolStarted({ session: child, callId: command, tool: "Bash", input: { command } }),
+    ),
+    record(
+      17 + index * 2,
+      new ToolFinished({
+        session: child,
+        callId: command,
+        tool: "Bash",
+        output: index === 1 ? "Validation failed" : "Done",
+        isError: index === 1,
+      }),
+    ),
+  ]);
+  mount([...events.slice(0, 15), ...tools, ...events.slice(21)]);
+  const activity = page.getByRole("button", { name: /reviewer activity/ });
+  await activity.click();
+  const group = page.getByRole("button", { name: /Ran 3 commands.*1 error/ });
+  await expect.element(group).toHaveAttribute("aria-expanded", "false");
+  const failed = page.getByRole("button", { name: /node check.js.*Error/ });
+  await expect.element(failed).not.toBeInTheDocument();
+
+  await page.getByRole("button", { name: "Next error", exact: true }).click();
+  await expect.element(group).toHaveAttribute("aria-expanded", "true");
+  await expect.element(failed).toHaveAttribute("aria-expanded", "true");
+  await expect.element(page.getByText("Validation failed", { exact: true })).toBeVisible();
+
+  await group.click();
+  await expect.element(failed).not.toBeInTheDocument();
+  await activity.click();
+  await page.getByRole("button", { name: "Next error", exact: true }).click();
+  await expect.element(group).toHaveAttribute("aria-expanded", "true");
+  await expect.element(failed).toHaveAttribute("aria-expanded", "true");
+  await expect.element(page.getByText("Validation failed", { exact: true })).toBeVisible();
+});
+
 it.each(["pointer", "Space"] as const)(
   "keeps an inspected reader paused after %s collapse and reopening",
   async (activation) => {

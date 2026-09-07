@@ -73,7 +73,13 @@ export const RevealError = ({
       ...(target.childKey === null ? [] : [target.childKey]),
       ...(target.isTool ? [target.key] : []),
     ];
-    const closed = disclosures.filter((key) => state.get(key)?.open !== true);
+    // A tool can remain inspected after its surrounding group is collapsed.
+    // Revealing its durable identity must reopen both disclosure levels.
+    const closed = disclosures.filter(
+      (key) =>
+        state.get(key)?.open !== true ||
+        (target.isTool && key === target.key && state.get(key)?.groupOpen !== true),
+    );
     if (closed.length > 0) {
       for (const key of closed) reveal({ _tag: "Item", key, open: true });
       return;

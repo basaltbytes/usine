@@ -3,7 +3,7 @@ import { createFileRoute, Link, notFound } from "@tanstack/react-router";
 import { RepositoryName } from "@usine/core/repository";
 import { BootScreen } from "@/components/boot-screen";
 import { Button } from "@/components/ui/button";
-import { ProjectBoard } from "../../../board.tsx";
+import { ProjectBoard } from "../../../board/board.tsx";
 import { overviewQuery } from "../../../overview.ts";
 import { useOpenRun } from "../../../open-run.ts";
 

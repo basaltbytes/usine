@@ -115,6 +115,12 @@ const latestDateTime = (candidates: ReadonlyArray<Option.Option<number>>) => {
   return dateTimeAt(Math.max(...epochs));
 };
 
+const requestBackoff = (headers: Headers, now: number) =>
+  latestDateTime([
+    retryAfterMillis(headers["retry-after"], now),
+    rateLimitResetMillis(headers, RATE_LIMIT_PRESSURE_THRESHOLD),
+  ]);
+
 const nextPollAt = (headers: Headers, now: number) =>
   latestDateTime([
     pollIntervalMillis(headers, now),
@@ -339,7 +345,11 @@ export class GitHubPolling extends Context.Service<
         const now = yield* Clock.currentTimeMillis;
         const recommended = nextPollAt(response.headers, now);
         if (response.status === 304) {
-          return new RepositoryNotModified({ cursor, nextPollAt: recommended });
+          return new RepositoryNotModified({
+            cursor,
+            nextPollAt: recommended,
+            backoffUntil: requestBackoff(response.headers, now),
+          });
         }
         if (response.status !== 200) {
           return yield* statusError("poll-repository-changes", response, now);
@@ -380,6 +390,7 @@ export class GitHubPolling extends Context.Service<
           items: allItems,
           backlog,
           nextPollAt: recommended,
+          backoffUntil: requestBackoff(response.headers, now),
         });
       });
 

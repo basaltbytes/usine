@@ -1,0 +1,275 @@
+import { QueryClient, QueryClientProvider, useSuspenseQuery } from "@tanstack/react-query";
+import { LabelLaneSource, LaneName } from "@usine/config/board";
+import { GitHubLabelName } from "@usine/config/label";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { RepositoryName } from "@usine/core/repository";
+import {
+  BoardItemLink,
+  BoardLaneId,
+  BoardTaskView,
+  BoardView,
+  FactoryOverview,
+  ProjectView,
+  ReadOnlyBoardLaneView,
+  ReadyOverview,
+  WritableBoardLaneView,
+} from "@usine/orchestrator/operator";
+import { Schema } from "effect";
+import { flushSync } from "react-dom";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, expect, it } from "vitest";
+import { commands, page } from "vitest/browser";
+import { ProjectBoard } from "../src/board/board.tsx";
+import { overviewQuery } from "../src/overview.ts";
+import "../src/index.css";
+
+declare module "vitest/browser" {
+  interface BrowserCommands {
+    boardResponses: (overview: string, moveStatus: 200 | 503) => Promise<void>;
+    delayBoardMove: () => Promise<void>;
+    releaseBoardMove: () => Promise<void>;
+  }
+}
+
+const repository = RepositoryName.make("board-test/repo");
+const overview = (
+  locations: ReadonlyArray<string> = ["Backlog", "Backlog"],
+  revision = "",
+  additionalLabels: ReadonlyArray<string> = [],
+  projectRepository = repository,
+) =>
+  new ReadyOverview({
+    loops: [],
+    needsYou: [],
+    projects: [
+      new ProjectView({
+        repository: projectRepository,
+        status: "clear",
+        runs: [],
+        labels: [],
+        preflightFindings: [],
+        board: new BoardView({
+          failures: [],
+          lanes: ["Backlog", "Ready", "In progress"].map((name) => {
+            const label = GitHubLabelName.make(name);
+            return new WritableBoardLaneView({
+              id: BoardLaneId.make(name),
+              name: LaneName.make(name),
+              sources: [new LabelLaneSource({ label })],
+              labels: [label],
+              origin: "authored",
+              items: locations.flatMap((location, index) => {
+                if (location !== name) return [];
+                const link = new BoardItemLink({
+                  itemKey: ItemKey.make(`${projectRepository}:${index + 1}`),
+                  kind: "issue",
+                  number: ItemNumber.make(index + 1),
+                  title: `Task ${index + 1}${index === 1 ? revision : ""}`,
+                  url: `https://github.com/${projectRepository}/issues/${index + 1}`,
+                });
+                return [
+                  new BoardTaskView({
+                    ...link,
+                    state: "issue-open",
+                    labels: [label, ...additionalLabels.map((name) => GitHubLabelName.make(name))],
+                    items: [link],
+                    runs: [],
+                    run: null,
+                    needsYou: false,
+                  }),
+                ];
+              }),
+            });
+          }),
+        }),
+      }),
+    ],
+  });
+
+let host: HTMLDivElement;
+let root: Root;
+let queryClient: QueryClient;
+const Board = ({ selected = repository }: { readonly selected?: RepositoryName }) => {
+  const { data } = useSuspenseQuery(overviewQuery());
+  const project = data.projects.find(({ repository }) => repository === selected);
+  if (!project) return null;
+  return <ProjectBoard project={project} disabled={false} openRun={() => {}} />;
+};
+const respond = (data = overview(), status: 200 | 503 = 200) =>
+  commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(data)), status);
+const lane = (name: string) => page.getByLabelText(`${name} lane`);
+const taskIn = (name: string, number = 1) =>
+  lane(name).getByRole("button", { name: `Task ${number}`, exact: true });
+const moveControl = (number: number) =>
+  page.getByRole("button", { name: `Move issue #${number} to a lane`, exact: true });
+const move = async (number: number, destination: string) => {
+  await moveControl(number).click();
+  await page.getByRole("menuitem", { name: destination, exact: true }).click();
+};
+
+beforeEach(async () => {
+  await page.viewport(1100, 800);
+  await respond();
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  queryClient.setQueryData(["overview"], overview());
+  host = document.createElement("div");
+  document.body.append(host);
+  root = createRoot(host);
+  flushSync(() =>
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <Board />
+      </QueryClientProvider>,
+    ),
+  );
+  await expect.element(taskIn("Backlog")).toBeVisible();
+});
+
+afterEach(() => {
+  flushSync(() => root.unmount());
+  queryClient.clear();
+  host.remove();
+});
+
+it("keeps a saved move in its destination through stale refreshes, then follows newer GitHub state", async () => {
+  await move(1, "Ready");
+  await expect.element(moveControl(2)).toBeEnabled();
+  await respond(overview(["Backlog", "Backlog"], " after refresh"));
+  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await expect
+    .element(page.getByRole("button", { name: "Task 2 after refresh", exact: true }))
+    .toBeVisible();
+  await expect.element(page.getByRole("alert")).not.toBeInTheDocument();
+  await expect.element(taskIn("Ready")).toBeVisible();
+  await expect.element(taskIn("Backlog")).not.toBeInTheDocument();
+  await expect.element(lane("Ready").getByText("Backlog", { exact: true })).not.toBeInTheDocument();
+
+  await respond(overview(["Backlog", "Backlog"], " after label change", ["bug"]));
+  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await expect
+    .element(page.getByRole("button", { name: "Task 2 after label change", exact: true }))
+    .toBeVisible();
+  await expect.element(lane("Ready").getByText("bug", { exact: true })).toBeVisible();
+
+  await respond(overview(["Ready", "Backlog"]));
+  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await expect.element(moveControl(1)).toBeEnabled();
+  await expect.element(taskIn("Ready")).toBeVisible();
+
+  await respond(overview(["In progress", "Backlog"]));
+  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await expect.element(taskIn("In progress")).toBeVisible();
+});
+
+it("keeps separate saved moves while another card can move, and accepts work that advances past Ready", async () => {
+  await move(1, "Ready");
+  await expect.element(moveControl(2)).toBeEnabled();
+  await move(2, "Ready");
+  await expect.poll(async () => (await lane("Ready").getByRole("status").all()).length).toBe(2);
+  await expect.poll(() => queryClient.isMutating()).toBe(0);
+  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await expect.poll(() => queryClient.isFetching({ queryKey: ["overview"] })).toBe(0);
+  await expect.element(taskIn("Ready", 1)).toBeVisible();
+  await expect.element(taskIn("Ready", 2)).toBeVisible();
+
+  await respond(overview(["In progress", "Ready"]));
+  await expect.element(moveControl(1), { timeout: 5_000 }).toBeEnabled();
+  await expect.element(taskIn("In progress", 1)).toBeVisible();
+  await expect.element(taskIn("Ready", 2)).toBeVisible();
+  await expect.element(moveControl(1)).toBeEnabled();
+  await expect.element(moveControl(2)).toBeEnabled();
+});
+
+it("finishes an in-flight move in its original project after navigating to another project", async () => {
+  const other = RepositoryName.make("board-test/other");
+  const data = new ReadyOverview({
+    projects: [...overview().projects, ...overview(undefined, "", [], other).projects],
+    loops: [],
+    needsYou: [],
+  });
+  await respond(data);
+  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await commands.delayBoardMove();
+  await move(1, "Ready");
+  await expect.element(moveControl(2)).toBeDisabled();
+  flushSync(() =>
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <Board selected={other} />
+      </QueryClientProvider>,
+    ),
+  );
+  await expect.element(page.getByRole("heading", { name: other })).toBeVisible();
+  await expect.element(moveControl(2)).toBeEnabled();
+  await commands.releaseBoardMove();
+  await expect.poll(() => queryClient.isMutating()).toBe(0);
+  flushSync(() =>
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <Board />
+      </QueryClientProvider>,
+    ),
+  );
+  await expect.element(taskIn("Ready")).toBeVisible();
+  await expect.element(lane("Ready").getByRole("status")).toHaveTextContent("Saved on GitHub");
+});
+
+it("shows move progress even when the destination has no labels or Run details to display yet", async () => {
+  const data = overview();
+  const singleDestination = new ReadyOverview({
+    ...data,
+    projects: data.projects.map(
+      (project) =>
+        new ProjectView({
+          ...project,
+          board: new BoardView({
+            failures: [],
+            lanes: project.board.lanes.flatMap((lane) => {
+              if (lane.name === "In progress") return [];
+              return lane.name === "Backlog"
+                ? [
+                    new ReadOnlyBoardLaneView({
+                      id: lane.id,
+                      name: lane.name,
+                      origin: "fallback",
+                      sources: [],
+                      items: lane.items.map((item) => new BoardTaskView({ ...item, labels: [] })),
+                    }),
+                  ]
+                : [lane];
+            }),
+          }),
+        }),
+    ),
+  });
+  await respond(singleDestination);
+  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await expect.element(lane("In progress")).not.toBeInTheDocument();
+  await move(1, "Ready");
+  await expect.element(moveControl(2)).toBeEnabled();
+  await expect.element(lane("Ready").getByRole("status")).toHaveTextContent("Saved on GitHub");
+});
+
+it("keeps a saved destination when the project is reopened before GitHub is observed", async () => {
+  await move(1, "Ready");
+  await expect.element(moveControl(2)).toBeEnabled();
+  flushSync(() => root.render(null));
+  flushSync(() =>
+    root.render(
+      <QueryClientProvider client={queryClient}>
+        <Board />
+      </QueryClientProvider>,
+    ),
+  );
+  await expect.element(taskIn("Ready")).toBeVisible();
+  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await expect.element(taskIn("Ready")).toBeVisible();
+});
+
+it("restores the original lane and explains a failed GitHub write", async () => {
+  await respond(overview(), 503);
+  await move(1, "Ready");
+  await expect.element(page.getByText("GitHub is unavailable")).toBeVisible();
+  await expect.element(taskIn("Backlog")).toBeVisible();
+  await expect.element(taskIn("Ready")).not.toBeInTheDocument();
+});

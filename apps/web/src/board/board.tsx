@@ -21,10 +21,7 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { ArrowUpRightIcon, CaretDownIcon } from "@phosphor-icons/react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ItemKey, ItemNumber } from "@usine/core/item";
 import { RunId } from "@usine/core/run";
-import { splitRepositoryName } from "@usine/core/repository";
 import type {
   BoardTaskView,
   BoardLaneView,
@@ -62,8 +59,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
-import { api } from "./api.ts";
-import { failureMessage } from "./operator-copy.ts";
+import { type BoardMoveProgress, useBoardMoves } from "./moves.ts";
+import { failureMessage } from "../operator-copy.ts";
 
 export const itemFailure = (item: BoardTaskView): string | null => {
   const failedRun =
@@ -94,9 +91,6 @@ export const laneUnder = (
   lanes.find((lane) => lane.id === over) ??
   lanes.find((lane) => lane.items.some(({ itemKey }) => itemKey === over));
 
-const laneOf = (itemKey: ItemKey, lanes: ReadonlyArray<BoardLaneView>): BoardLaneView | undefined =>
-  lanes.find((lane) => lane.items.some((item) => item.itemKey === itemKey));
-
 /** The lane under the pointer wins; corner distance would hand a tall empty lane's drop to the
  * cards of the lane next to it. Intersection is the fallback for keyboard moves. */
 const dropCollision: CollisionDetection = (args) => {
@@ -104,22 +98,22 @@ const dropCollision: CollisionDetection = (args) => {
   return within.length > 0 ? within : rectIntersection(args);
 };
 
-export interface PendingMove {
-  readonly itemKey: ItemKey;
-  readonly toLane: BoardLaneView["id"];
-}
-
 /** Shows a move in its target lane while the label write and the next poll are in flight. */
-export const applyMove = (
+const applyMove = (
   lanes: ReadonlyArray<BoardLaneView>,
-  move: PendingMove | null,
+  move: BoardMoveProgress,
 ): ReadonlyArray<BoardLaneView> => {
-  if (move === null) return lanes;
   const moved = lanes.flatMap(({ items }) => items).find(({ itemKey }) => itemKey === move.itemKey);
   if (moved === undefined) return lanes;
+  const laneLabels = new Set(
+    lanes.flatMap((lane) => (lane._tag === "WritableBoardLane" ? lane.labels : [])),
+  );
+  // Placement and progress explain the pending destination; stale source-lane
+  // chips would contradict it. Other labels still come from the live snapshot.
+  const card = { ...moved, labels: moved.labels.filter((label) => !laneLabels.has(label)) };
   return lanes.map((lane) => {
     const items = lane.items.filter(({ itemKey }) => itemKey !== move.itemKey);
-    return lane.id === move.toLane ? { ...lane, items: [moved, ...items] } : { ...lane, items };
+    return lane.id === move.toLane ? { ...lane, items: [card, ...items] } : { ...lane, items };
   });
 };
 
@@ -130,6 +124,7 @@ interface MoveMenu {
   readonly targets: ReadonlyArray<BoardLaneView>;
   readonly disabled: boolean;
   readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
+  readonly phase?: BoardMoveProgress["phase"] | undefined;
 }
 
 const CardBody = ({
@@ -188,6 +183,7 @@ const CardBody = ({
         item.runs.length > 0 ||
         item.needsYou ||
         failure !== null ||
+        move?.phase !== undefined ||
         moveTargets.length > 0) && (
         <CardContent className="flex flex-col items-start gap-2">
           {item.labels.length > 0 && (
@@ -198,6 +194,11 @@ const CardBody = ({
             </div>
           )}
           <TaskHistory runs={item.runs} openRun={openRun} />
+          {move?.phase !== undefined && (
+            <p role="status" className="text-muted-foreground">
+              {move.phase === "saving" ? "Moving…" : "Saved on GitHub · syncing…"}
+            </p>
+          )}
           {item.needsYou && <NeedsYouBadge />}
           {failure !== null && <p className="text-destructive wrap-anywhere">{failure}</p>}
           {visibleRuns.some(({ state }) => state === "Waiting") && (
@@ -274,6 +275,7 @@ const BoardLane = ({
   catalog,
   dragging,
   pending,
+  moves,
   openRun,
   onMove,
 }: {
@@ -282,6 +284,7 @@ const BoardLane = ({
   readonly catalog: LabelCatalog;
   readonly dragging: boolean;
   readonly pending: boolean;
+  readonly moves: ReadonlyArray<BoardMoveProgress>;
   readonly openRun: (runId: RunId) => void;
   readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
 }) => {
@@ -332,16 +335,19 @@ const BoardLane = ({
           strategy={verticalListSortingStrategy}
         >
           {lane.items.length === 0 && <p className="text-muted-foreground">No tasks.</p>}
-          {lane.items.map((item) => (
-            <BoardCard
-              key={item.itemKey}
-              item={item}
-              catalog={catalog}
-              disabled={pending || move.targets.length === 0}
-              openRun={openRun}
-              move={move}
-            />
-          ))}
+          {lane.items.map((item) => {
+            const phase = moves.find(({ itemKey }) => itemKey === item.itemKey)?.phase;
+            return (
+              <BoardCard
+                key={item.itemKey}
+                item={item}
+                catalog={catalog}
+                disabled={pending || phase !== undefined || move.targets.length === 0}
+                openRun={openRun}
+                move={{ ...move, disabled: pending || phase !== undefined, phase }}
+              />
+            );
+          })}
         </SortableContext>
       </CardContent>
     </Card>
@@ -422,40 +428,19 @@ export const ProjectBoard = ({
   readonly disabled: boolean;
   readonly openRun: (runId: RunId) => void;
 }) => {
-  const queryClient = useQueryClient();
   const [active, setActive] = useState<BoardTaskView | null>(null);
-  const [pendingMove, setPendingMove] = useState<PendingMove | null>(null);
+  const { moves, moveItem, isPending, error } = useBoardMoves(project);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const uncarded = runsWithoutCard(project);
-  const move = useMutation({
-    mutationFn: ({ item, lane }: { readonly item: ItemNumber; readonly lane: BoardLaneView }) => {
-      const { owner, name } = splitRepositoryName(project.repository);
-      return api((client) =>
-        client.moveBoardItem({
-          params: { owner, repository: name, item },
-          payload: { toLane: lane.id },
-        }),
-      );
-    },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["overview"] }),
-    onSettled: () => setPendingMove(null),
-  });
-  const lanes = applyMove(orderLanes(project.board.lanes), pendingMove);
+  const lanes = moves.reduce(applyMove, orderLanes(project.board.lanes));
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
-  const pending = disabled || move.isPending;
+  const pending = disabled || isPending;
   const onDragStart = ({ active: dragged }: DragStartEvent) => {
     const item = lanes.flatMap(({ items }) => items).find(({ itemKey }) => itemKey === dragged.id);
     setActive(item ?? null);
-  };
-  const moveItem = (item: BoardTaskView, target: BoardLaneView) => {
-    if (target._tag !== "WritableBoardLane" || target.id === laneOf(item.itemKey, lanes)?.id) {
-      return;
-    }
-    setPendingMove({ itemKey: item.itemKey, toLane: target.id });
-    move.mutate({ item: item.number, lane: target });
   };
   const onDragEnd = ({ over }: DragEndEvent) => {
     setActive(null);
@@ -502,6 +487,7 @@ export const ProjectBoard = ({
               catalog={catalog}
               dragging={active !== null}
               pending={pending}
+              moves={moves}
               openRun={openRun}
               onMove={moveItem}
             />
@@ -515,7 +501,7 @@ export const ProjectBoard = ({
           )}
         </DragOverlay>
       </DndContext>
-      {move.isError && <ErrorAlert className="max-w-3xl" message={move.error.message} />}
+      {error !== null && <ErrorAlert className="max-w-3xl" message={error.message} />}
       {uncarded.length > 0 && <UncardedRuns runs={uncarded} openRun={openRun} />}
     </main>
   );

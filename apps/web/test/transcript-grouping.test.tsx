@@ -178,7 +178,39 @@ it("keeps completed calls within their parent session, child session and Attempt
   assert.equal(childGroup.entries[0]?._tag, "ToolGroup");
 });
 
-it.each(["Running", "Error", "Stopped"] as const)(
+it("groups failed commands with the adjacent completed commands and preserves their errors", () => {
+  const projection = groupTranscript(
+    projectTranscript(
+      [
+        finished(1, "before", "shell"),
+        record(
+          2,
+          new ToolFinished({
+            session: parent,
+            callId: "failed",
+            tool: "shell",
+            output: "Access denied",
+            isError: true,
+          }),
+        ),
+        finished(3, "after", "shell"),
+      ],
+      [],
+    ),
+  );
+  assert.lengthOf(projection, 1);
+  const group = projection[0];
+  assert.equal(group?._tag, "ToolGroup");
+  if (group?._tag !== "ToolGroup") return;
+  assert.equal(groupSummary(group), "Ran 3 commands");
+  assert.deepEqual(
+    group.tools.map(({ state }) => state._tag),
+    ["Finished", "Error", "Finished"],
+  );
+  assert.equal(group.tools[1].state.output, "Access denied");
+});
+
+it.each(["Running", "Stopped"] as const)(
   "keeps %s calls exposed between completed groups",
   (state) => {
     const events = [
@@ -188,19 +220,6 @@ it.each(["Running", "Error", "Stopped"] as const)(
       finished(4, "c"),
       finished(5, "d"),
     ];
-    if (state === "Error")
-      events.push(
-        record(
-          6,
-          new ToolFinished({
-            session: parent,
-            callId: "inspect-me",
-            tool: "read",
-            output: "Access denied",
-            isError: true,
-          }),
-        ),
-      );
     if (state === "Stopped") events.push(record(6, new SessionFinished({ session: parent })));
     const projection = groupTranscript(projectTranscript(events, []));
     const standalone = projection.filter((item) => item._tag === "Tool");
