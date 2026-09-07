@@ -4,7 +4,8 @@ import { fileURLToPath } from "node:url";
 import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
 import { migrate } from "drizzle-orm/effect-sqlite-node/migrator";
 import { sql } from "drizzle-orm";
-import { Effect, FileSystem, Layer, Path } from "effect";
+import { Effect, FileSystem, Layer, Option, Path, PlatformError, Schema } from "effect";
+import type { SqlError } from "effect/unstable/sql/SqlError";
 import { CursorStore } from "../cursor/cursor.ts";
 import { ItemProjectionReader, ItemProjectionWriter } from "../item-projection/item-projection.ts";
 import {
@@ -25,14 +26,16 @@ const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url)
 const startupError = (operation: string, cause: unknown) =>
   new EnginePersistenceError({ operation, cause });
 
+const runtimeStorePath = (path: Path.Path, instanceDirectory: InstanceDirectory) =>
+  path.join(instanceDirectory, ".usine", "runtime.sqlite");
+
 const sqliteClientLayer = (instanceDirectory: InstanceDirectory) =>
   Layer.unwrap(
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
-      const runtimeDirectory = path.join(instanceDirectory, ".usine");
-      yield* fileSystem.makeDirectory(runtimeDirectory, { recursive: true });
-      return SqliteClient.layer({ filename: path.join(runtimeDirectory, "runtime.sqlite") });
+      yield* fileSystem.makeDirectory(path.join(instanceDirectory, ".usine"), { recursive: true });
+      return SqliteClient.layer({ filename: runtimeStorePath(path, instanceDirectory) });
     }).pipe(
       Effect.mapError((cause) => startupError("prepare local database directory", cause)),
       Effect.provide(NodeServices.layer),
@@ -90,30 +93,133 @@ export const observationLayer = (
   ).pipe(Layer.provide(database));
 };
 
+const readableRuntimeStore = Effect.fn("LocalSqlite.readableRuntimeStore")(function* (
+  filename: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  yield* fileSystem.access(filename, { readable: true });
+  const info = yield* fileSystem.stat(filename);
+  if (info.type !== "File")
+    return yield* PlatformError.systemError({
+      _tag: "BadResource",
+      module: "FileSystem",
+      method: "stat",
+      pathOrDescriptor: filename,
+      description: `Expected a regular SQLite file, found ${info.type}`,
+    });
+});
+
+const readOnlySqliteLayer = (filename: string) =>
+  SqliteClient.layer({ filename, readonly: true, disableWAL: true });
+
+const existingSqliteLayer = (instanceDirectory: InstanceDirectory) =>
+  Layer.unwrap(
+    Effect.gen(function* () {
+      const filename = runtimeStorePath(yield* Path.Path, instanceDirectory);
+      yield* readableRuntimeStore(filename);
+      return readOnlySqliteLayer(filename);
+    }).pipe(
+      Effect.mapError((cause) => startupError("open existing local database", cause)),
+      Effect.provide(NodeServices.layer),
+    ),
+  );
+
 /** Opens an existing `.usine/runtime.sqlite` in SQLite read-only mode, without initializing or migrating the database. */
 export const runReaderLayer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<RunReader, EnginePersistenceError> => {
-  const sqlClient = Layer.unwrap(
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const path = yield* Path.Path;
-      const filename = path.join(instanceDirectory, ".usine", "runtime.sqlite");
-      const info = yield* fileSystem.access(filename, { readable: true }).pipe(
-        Effect.andThen(fileSystem.stat(filename)),
-        Effect.mapError((cause) => startupError("open existing local database", cause)),
-      );
-      if (info.type !== "File")
-        return yield* startupError("open existing local database", {
-          path: filename,
-          reason: "Expected a regular SQLite file",
-          type: info.type,
-        });
-      return SqliteClient.layer({ filename, readonly: true, disableWAL: true });
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
+  const sqlClient = existingSqliteLayer(instanceDirectory);
   const database = Layer.effect(RunDatabase, SQLiteDrizzle.makeWithDefaults()).pipe(
     Layer.provide(sqlClient),
   );
   return RunReader.layer.pipe(Layer.provide(database));
 };
+
+/** A failed backup operation, with both paths because SQLite copy errors can come from either file. */
+export class RuntimeStoreBackupError extends Schema.TaggedError<RuntimeStoreBackupError>(
+  "@usine/engine/RuntimeStoreBackupError",
+)("RuntimeStoreBackupError", {
+  operation: Schema.Literals(["open", "stage", "copy", "publish"]),
+  source: Schema.String,
+  destination: Schema.String,
+  reason: Schema.String,
+  cause: Schema.Defect(),
+}) {}
+
+const vendorMessage = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.NonEmptyString }));
+const errnoCode = Schema.decodeUnknownOption(Schema.Struct({ code: Schema.NonEmptyString }));
+
+const failureReason = (cause: PlatformError.PlatformError | SqlError): string => {
+  if (cause._tag === "SqlError")
+    return Option.match(vendorMessage(cause.reason.cause), {
+      onNone: () => cause.reason._tag,
+      onSome: ({ message }) => message,
+    });
+  if (cause.reason.description !== undefined) return cause.reason.description;
+  if (cause.reason._tag !== "Unknown") return cause.reason._tag;
+  return Option.match(errnoCode(cause.reason.cause), {
+    onNone: () => cause.reason._tag,
+    onSome: ({ code }) => code,
+  });
+};
+
+/** Copies `.usine/runtime.sqlite` to a new file while the orchestrator runs.
+ * The destination directory must exist and support hard links. Opens the source
+ * read-only and saves a complete backup without overwriting an existing file.
+ */
+export const backup = Effect.fn("LocalSqlite.backup")(
+  function* (instanceDirectory: InstanceDirectory, destination: string) {
+    yield* Effect.annotateCurrentSpan({ instanceDirectory, destination });
+    yield* Effect.logInfo("Runtime store backup started", { instanceDirectory, destination });
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const source = runtimeStorePath(path, instanceDirectory);
+    const failed = (operation: RuntimeStoreBackupError["operation"]) =>
+      Effect.mapError(
+        (cause: PlatformError.PlatformError | SqlError) =>
+          new RuntimeStoreBackupError({
+            operation,
+            source,
+            destination,
+            reason: failureReason(cause),
+            cause,
+          }),
+      );
+    yield* readableRuntimeStore(source).pipe(failed("open"));
+    const { totalPages } = yield* Effect.scoped(
+      Effect.gen(function* () {
+        const directory = path.dirname(destination);
+        const temporary = yield* fileSystem
+          .makeTempDirectoryScoped({ directory, prefix: ".usine-backup-" })
+          .pipe(failed("stage"));
+        const staged = path.join(temporary, "runtime.sqlite");
+        yield* fileSystem
+          .writeFile(staged, new Uint8Array(), { mode: 0o600 })
+          .pipe(failed("stage"));
+        const metadata = yield* Effect.flatMap(SqliteClient.SqliteClient, (client) =>
+          // Node's backup can't be canceled; wait before closing the database or deleting staging.
+          client.backup(staged).pipe(failed("copy"), Effect.uninterruptible),
+        ).pipe(Effect.provide(readOnlySqliteLayer(source)));
+        // A hard link atomically creates the destination without overwriting it.
+        yield* fileSystem.link(staged, destination).pipe(failed("publish"));
+        return metadata;
+      }),
+    );
+    yield* Effect.annotateCurrentSpan({ totalPages });
+    yield* Effect.logInfo("Runtime store backup completed", {
+      instanceDirectory,
+      destination,
+      totalPages,
+    });
+  },
+  Effect.tapError((error) =>
+    Effect.logWarning("Runtime store backup failed", {
+      errorTag: error._tag,
+      operation: error.operation,
+      source: error.source,
+      destination: error.destination,
+      reason: error.reason,
+    }),
+  ),
+  Effect.provide(NodeServices.layer),
+);

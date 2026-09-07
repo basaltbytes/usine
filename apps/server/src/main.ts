@@ -25,6 +25,11 @@ const main = Effect.gen(function* () {
         Effect.promise(() => import("./export-run.ts")),
         ({ exportRun }) => exportRun(runId, output),
       ),
+    BackupCommand: ({ output }) =>
+      Effect.flatMap(
+        Effect.promise(() => import("./backup.ts")),
+        ({ backup }) => backup(output),
+      ),
     UpCommand: ({ port, allowVolatileInstance }) =>
       Effect.flatMap(
         Effect.promise(() => import("./up.ts")),
@@ -39,6 +44,32 @@ const main = Effect.gen(function* () {
     RunExportError: ({ runId, operation, path, reason }) =>
       exitWith(
         `Could not ${operation} evidence for Run ${runId} at ${path} (${reason}). Check the instance database and choose a new writable output path.`,
+      ),
+    RuntimeStoreBackupError: ({ operation, source, destination, reason }) =>
+      exitWith(
+        Match.value(operation).pipe(
+          Match.when(
+            "open",
+            () =>
+              `Could not open ${source} (${reason}). Run usine backup from the instance folder containing .usine/runtime.sqlite.`,
+          ),
+          Match.when(
+            "copy",
+            () =>
+              `Could not copy ${source} to ${destination} (${reason}). Check the source database and the output directory's free space and permissions.`,
+          ),
+          Match.when(
+            "stage",
+            () =>
+              `Could not create a backup at ${destination} (${reason}). Choose an existing writable output directory.`,
+          ),
+          Match.when("publish", () =>
+            reason === "AlreadyExists"
+              ? `Could not save the backup to ${destination} (${reason}). Choose a different filename; the destination already exists.`
+              : `Could not save the backup to ${destination} (${reason}). Check the destination path and permissions; its filesystem must support hard links.`,
+          ),
+          Match.exhaustive,
+        ),
       ),
     VolatileInstanceDirectoryError: ({ directory, root }) =>
       exitWith(

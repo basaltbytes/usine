@@ -22,7 +22,19 @@ Run conversations summarize adjacent completed tools by their recorded actions, 
 
 The operator API includes `POST /api/cycle-budgets/reset` with an Ask identity. It uses the same request-origin guard and typed error contract as other interventions; stale Asks return 409 and needs-setup mode rejects resets until the runtime is available.
 
-## Exporting Run evidence
+## Runtime backup and Run evidence
+
+From the instance folder, copy the runtime store while the orchestrator runs:
+
+```sh
+usine backup /path/to/runtime-backup.sqlite
+```
+
+`usine backup` copies all runtime tables, including committed WAL data, while the orchestrator runs. It opens the source read-only and doesn't need GitHub credentials.
+
+Use a new filename in an existing writable directory on a filesystem that supports hard links. The command writes a complete backup with owner-only permissions and won't overwrite existing files. Errors identify the affected path and cause.
+
+Keep the backup outside the instance folder to protect it against loss of that folder. Back up the authored instance files and credentials separately. To restore, stop the orchestrator, move the existing `.usine/runtime.sqlite` and any `runtime.sqlite-wal` / `runtime.sqlite-shm` files aside, and copy the backup to `.usine/runtime.sqlite`. Restart with the matching instance configuration and engine version. Restoring an older backup also restores its older deduplication ledger, so work performed after that backup can run again.
 
 From the instance folder, export one Run into a local JSON file:
 
@@ -35,7 +47,7 @@ The default destination is `run-<encoded-runId>.json` in the current directory; 
 
 The versioned JSON contains `exportedAt`, the full durable Run `snapshot` (Event, effective task and Agent, repository revision, Step result, and all Attempts), and every saved transcript envelope for those Attempts in append order. The snapshot and transcripts come from one database transaction, including history beyond the drawer's current page. Active Runs continue accumulating history, so export a settled Run for its final evidence.
 
-Exporting opens the instance's existing `.usine/runtime.sqlite` in read-only mode, without creating tables, running migrations, starting Attempts, or polling triggers. The command keeps the output local. Transcripts can contain repository content and tool output; inspect the file before sharing it. A Run export preserves selected evidence; a restorable backup still requires stopping the orchestrator and copying the instance folder, as described in [ADR 0010](../../docs/adr/0010-single-sqlite-runtime-store.md).
+Exporting opens the instance's existing `.usine/runtime.sqlite` in read-only mode, without creating tables, running migrations, starting Attempts, or polling triggers. The command keeps the output local. Transcripts can contain repository content and tool output; inspect the file before sharing it. A Run export preserves selected evidence; use `usine backup <path>` for a restorable runtime database, as described in [ADR 0010](../../docs/adr/0010-single-sqlite-runtime-store.md).
 
 ## Stopping and updating
 

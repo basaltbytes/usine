@@ -71,6 +71,10 @@ const program = Effect.gen(function* () {
 
 For local maintenance commands, `runReaderLayer(instanceDirectory)` from `@usine/engine/local-sqlite` provides only `RunReader` using a read-only SQLite connection. It requires an existing runtime database and does not initialize tables, migrate the schema, or change the journal mode. A missing, unreadable, or incompatible database fails through `EnginePersistenceError`.
 
+`backup(instanceDirectory, destination)` from `@usine/engine/local-sqlite` copies every runtime table and committed WAL data while other connections remain active. It opens the source read-only, without migrations. The destination must be a new file in an existing directory that supports hard links; the adapter saves a complete owner-only copy without overwriting existing files.
+
+`RuntimeStoreBackupError` includes the failed operation (`open`, `stage`, `copy`, or `publish`), both paths, and the underlying error message or code. Structured logs report failures and the number of pages copied on success. If interrupted, the adapter waits for Node's backup to finish before closing its connection and deleting temporary files.
+
 `layerWithDatabase` from `@usine/engine/engine` accepts another SQLite-compatible database layer. That layer must provide both `RunDatabase` from `@usine/engine/database` and the matching Effect `SqlClient`, preserving atomic transactions and keeping the run projections beside Effect's cluster tables; the deployment also supplies its platform `Crypto` layer, which the cluster uses to hash over-length deduplication keys. Cloudflare D1 is not supported by Drizzle RC.4 for this use yet because its Effect driver cannot execute the store's transactions.
 
 The Drizzle schema is the source of truth for usine tables. After changing it, generate and review a migration with:
