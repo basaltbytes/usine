@@ -1,8 +1,9 @@
-import type { AgentSession, AgentSessionEvent } from "@usine/core/agent/session";
+import type { AgentSession } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { Match, Option, type Schema } from "effect";
 import { brainLine, failureMessage } from "../operator-copy.ts";
+import { indexSessions, type SessionEvents, type InterventionRecord } from "./sessions.ts";
 
 /** Conversation filters hide prose or tool calls while preserving lifecycle notices. */
 export type TranscriptFilter = "all" | "messages" | "tools";
@@ -61,6 +62,9 @@ export interface TranscriptSession extends TranscriptPosition {
   readonly attemptId: AttemptId;
   readonly session: AgentSession;
   readonly status: SessionStatus;
+  readonly held: boolean;
+  readonly paused: boolean;
+  readonly idle: boolean;
   readonly entries: ReadonlyArray<TranscriptEntry>;
 }
 
@@ -69,18 +73,6 @@ export interface TranscriptProjection {
   readonly items: ReadonlyArray<TranscriptEntry | TranscriptSession>;
   readonly sessions: ReadonlyArray<TranscriptSession>;
   readonly terminalAttempts: ReadonlySet<AttemptId>;
-}
-
-interface RecordedSessionEvent {
-  readonly sequence: TranscriptEventView["sequence"];
-  readonly receivedAt: string;
-  readonly event: Exclude<AgentSessionEvent, { readonly _tag: "PoolRateLimitsUpdated" }>;
-}
-
-interface SessionEvents {
-  readonly attemptId: AttemptId;
-  readonly session: AgentSession;
-  readonly events: [RecordedSessionEvent, ...Array<RecordedSessionEvent>];
 }
 
 const position = (
@@ -146,6 +138,20 @@ const sessionEntries = (
         format: "plain" as const,
         isError: false,
       }),
+      SessionIdle: () => ({
+        kind: "status" as const,
+        label: `${group.session.agent} is waiting`,
+        detail: "The session remains open for operator input.",
+        format: "plain" as const,
+        isError: false,
+      }),
+      SessionResumed: () => ({
+        kind: "status" as const,
+        label: `${group.session.agent} resumed`,
+        detail: "",
+        format: "plain" as const,
+        isError: false,
+      }),
       SessionFinished: () => ({
         kind: "status" as const,
         label: `${group.session.agent} finished`,
@@ -159,35 +165,58 @@ const sessionEntries = (
   return [...entries, ...tools.values()].sort((left, right) => left.sequence - right.sequence);
 };
 
+const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
+  const { action, operator } = record.payload.intervention;
+  const rejected = record.payload._tag === "InterventionRejected";
+  const message = action._tag === "OperatorMessage" || action._tag === "Steer";
+  return notice(record, {
+    kind: message ? "message" : "status",
+    label: rejected
+      ? `${operator} · not delivered`
+      : message
+        ? operator
+        : action._tag === "Release"
+          ? `${operator} released the child`
+          : `${operator} paused the session`,
+    detail: rejected
+      ? `${message ? `${action.message}\n\n` : ""}${record.payload.message}`
+      : message
+        ? action.message
+        : "",
+    format: message ? "markdown" : "plain",
+    isError: rejected,
+  });
+};
+
 /** Folds durable transcript events into conversation rows without reading time or changing stored data. */
 export const projectTranscript = (
   events: ReadonlyArray<TranscriptEventView>,
   attempts: ReadonlyArray<AttemptView>,
+  sessionState: ReadonlyArray<TranscriptEventView> = [],
 ): TranscriptProjection => {
   const terminalAttempts = new Set(
     attempts.filter(({ outcome }) => outcome !== null).map(({ id }) => id),
   );
-  const groups = new Map<string, SessionEvents>();
+  // Terminal state can be supplied by either the Attempt row or its final frame.
+  for (const { attemptId, payload } of events) {
+    if (payload._tag === "Final" || payload._tag === "Failed" || payload._tag === "Interrupted")
+      terminalAttempts.add(attemptId);
+  }
+  const { groups, unmatched } = indexSessions(events, sessionState, terminalAttempts);
   const entries: Array<TranscriptEntry> = [];
   for (const record of [...events].sort((left, right) => left.sequence - right.sequence)) {
     const payload = record.payload;
-    if (payload._tag === "Final" || payload._tag === "Failed" || payload._tag === "Interrupted")
-      terminalAttempts.add(record.attemptId);
-    if (payload._tag === "SessionEvent") {
-      if (payload.event._tag === "PoolRateLimitsUpdated") continue;
-      const session = payload.event.session;
-      const key = JSON.stringify([record.attemptId, session.id]);
-      const sessionEvent: RecordedSessionEvent = {
-        sequence: record.sequence,
-        receivedAt: record.receivedAt,
-        event: payload.event,
-      };
-      const group = groups.get(key);
-      if (group === undefined)
-        groups.set(key, { attemptId: record.attemptId, session, events: [sessionEvent] });
-      else group.events.push(sessionEvent);
+    if (payload._tag === "InterventionApplied" || payload._tag === "InterventionRejected") {
       continue;
     }
+    // New inputs are rendered from their delivery receipt, including the correct session and attribution.
+    if (
+      record.direction === "inbound" &&
+      record.operator !== undefined &&
+      payload._tag !== "Cancel"
+    )
+      continue;
+    if (payload._tag === "SessionEvent") continue;
     entries.push(
       notice(
         record,
@@ -213,6 +242,13 @@ export const projectTranscript = (
             format: "plain",
             isError: true,
           }),
+          Cancel: (): NoticeContent => ({
+            kind: "status",
+            label: "Cancel requested",
+            detail: "The Attempt is stopping.",
+            format: "plain",
+            isError: false,
+          }),
           Interrupted: (): NoticeContent => ({
             kind: "status",
             label: "Interrupted",
@@ -234,29 +270,53 @@ export const projectTranscript = (
             format: "plain",
             isError: false,
           }),
+          OperatorMessage: ({ message }): NoticeContent => ({
+            kind: "message",
+            label: "Operator",
+            detail: message,
+            format: "markdown",
+            isError: false,
+          }),
+          Release: (): NoticeContent => ({
+            kind: "status",
+            label: "Released",
+            detail: "The operator released the held child.",
+            format: "plain",
+            isError: false,
+          }),
         }),
       ),
     );
   }
   const sessions: Array<TranscriptSession> = [];
   for (const [key, group] of groups) {
-    const first = group.events[0];
-    const status: SessionStatus = group.events.some(({ event }) => event._tag === "SessionFinished")
-      ? "Finished"
-      : terminalAttempts.has(group.attemptId)
-        ? "Stopped"
-        : "Live";
     sessions.push({
       _tag: "Session",
-      ...position(first),
+      ...position(group.first),
       key,
-      latestSequence: group.events.at(-1)?.sequence ?? first.sequence,
+      latestSequence: group.latestSequence,
       attemptId: group.attemptId,
       session: group.session,
-      status,
-      entries: sessionEntries(group, status),
+      status: group.status,
+      held: group.status === "Live" && group.held,
+      paused: group.status === "Live" && group.paused,
+      idle: group.status === "Live" && group.idle,
+      entries: [
+        ...sessionEntries(group, group.status),
+        ...group.interventions.map((record) => interventionNotice(record)),
+      ].sort((a, b) => a.sequence - b.sequence),
     });
   }
+  entries.push(
+    ...unmatched.map((record) => {
+      const entry = interventionNotice(record);
+      const target = record.payload.intervention.target;
+      return {
+        ...entry,
+        label: `${entry.label} · ${target._tag === "Parent" ? "parent" : target.sessionId}`,
+      };
+    }),
+  );
   return {
     sessions,
     terminalAttempts,
@@ -276,6 +336,9 @@ export const matchesFilter = (entry: TranscriptEntry, filter: TranscriptFilter):
 /** Describes observed session activity without assuming unrecorded thinking or success. */
 export const sessionActivityLabel = (session: TranscriptSession): string => {
   if (session.status !== "Live") return session.status;
+  if (session.paused) return "Paused · send a message to resume";
+  if (session.held) return session.idle ? "Held · waiting for you" : "Held · working";
+  if (session.idle) return "Waiting for operator input";
   const tool = [...session.entries]
     .reverse()
     .find((entry) => entry._tag === "Tool" && entry.state._tag === "Running");

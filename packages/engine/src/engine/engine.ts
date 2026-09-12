@@ -1,4 +1,6 @@
 import { Event } from "@usine/core/event";
+import { AttemptContext, AttemptId } from "@usine/core/attempt";
+import { Intervention } from "@usine/core/attempt/channel";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
@@ -7,7 +9,11 @@ import { ClusterWorkflowEngine, SingleRunner } from "effect/unstable/cluster";
 import { SqlClient } from "effect/unstable/sql";
 import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
 import { RunDatabase } from "../database/database.ts";
-import { AttemptCancellationError, type RunEngineError } from "./error.ts";
+import {
+  AttemptCancellationError,
+  RunInterventionRejectedError,
+  type RunEngineError,
+} from "./error.ts";
 import type { RunSnapshot } from "../run-reader/model.ts";
 import type { Submission, SubmissionResult } from "./submission.ts";
 import type { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
@@ -118,8 +124,11 @@ const makeRunEngine = Effect.gen(function* () {
     yield* deliverApproval(runId);
   });
 
-  const retry = Effect.fn("RunEngine.retry")(function* (runId: RunId) {
-    yield* store.retry(runId);
+  const retry = Effect.fn("RunEngine.retry")(function* (
+    runId: RunId,
+    amendment: Option.Option<AttemptContext> = Option.none(),
+  ) {
+    yield* store.retry(runId, amendment);
     yield* deliverResume(runId);
   });
 
@@ -146,6 +155,53 @@ const makeRunEngine = Effect.gen(function* () {
         cause: handshake.failure,
       });
     }
+  });
+
+  const intervene = Effect.fn("RunEngine.intervene")(function* (
+    runId: RunId,
+    attemptId: AttemptId,
+    intervention: Intervention,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, attemptId, action: intervention.action._tag });
+    const current = yield* store.snapshot(runId);
+    const active = current.attempts.at(-1);
+    if (
+      current.run.state._tag !== "Running" ||
+      active?.id !== attemptId ||
+      Option.isSome(active.outcome)
+    ) {
+      yield* Effect.logInfo("Operator input rejected for an inactive Attempt", {
+        runId,
+        attemptId,
+      });
+      return yield* new RunInterventionRejectedError({
+        runId,
+        attemptId,
+        message: "This Attempt is no longer running",
+      });
+    }
+    yield* stepExecutor.intervene(attemptId, intervention).pipe(
+      Effect.mapError(
+        (error) =>
+          new RunInterventionRejectedError({
+            runId,
+            attemptId,
+            message:
+              error._tag === "RunawayFailure"
+                ? "The Attempt reached its runaway limit"
+                : error._tag === "ChildSessionBudgetFailure"
+                  ? "The Attempt reached its child-session budget"
+                  : error.message,
+          }),
+      ),
+      Effect.tapError((error) =>
+        Effect.logWarning("Operator input delivery failed", {
+          runId,
+          attemptId,
+          message: error.message,
+        }),
+      ),
+    );
   });
 
   const revoke = Effect.fn("RunEngine.revoke")(function* (loop: LoopName, itemKey: ItemKey) {
@@ -201,6 +257,7 @@ const makeRunEngine = Effect.gen(function* () {
     cancel,
     drain: admission.drain,
     inspect,
+    intervene,
     reconcile,
     retry,
     revoke,
@@ -221,10 +278,19 @@ export class RunEngine extends Context.Service<
     readonly cancel: (runId: RunId) => Effect.Effect<void, RunEngineError>;
     /** Reads the Run's current state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
+    /** Addresses one current Attempt explicitly so an old drawer cannot steer its replacement. */
+    readonly intervene: (
+      runId: RunId,
+      attemptId: AttemptId,
+      intervention: Intervention,
+    ) => Effect.Effect<void, RunEngineError>;
     /** Recovers unfinished Runs and outstanding actions from stored state; also runs when the engine starts. */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     /** Requests another Attempt for a failed Run using its existing Event and effective task and Agent. */
-    readonly retry: (runId: RunId) => Effect.Effect<void, RunEngineError>;
+    readonly retry: (
+      runId: RunId,
+      amendment?: Option.Option<AttemptContext>,
+    ) => Effect.Effect<void, RunEngineError>;
     /** Cancels unstarted Runs and discards queued Events for a Loop's Item when it stops matching; running Attempts continue. */
     readonly revoke: (
       loop: LoopName,
@@ -308,6 +374,7 @@ export {
   RunOperationRejectedError,
   EnginePersistenceError,
   AttemptCancellationError,
+  RunInterventionRejectedError,
   RunStoreError,
   RunEngineError,
 } from "./error.ts";

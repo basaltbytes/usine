@@ -1,7 +1,7 @@
 import type { Agent } from "@usine/core/agent";
 import type { ModelId } from "@usine/core/agent/brain";
-import { Attempt, AttemptId } from "@usine/core/attempt";
-import * as AttemptChannel from "@usine/core/attempt/channel";
+import { Attempt, AttemptId, AttemptContext } from "@usine/core/attempt";
+
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
@@ -10,13 +10,12 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
-import { and, asc, desc, eq, gt, inArray, isNull, lt, ne, notInArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import { Array as EffectArray, DateTime, Effect, Match, Option, Schema } from "effect";
+import { Array as EffectArray, DateTime, Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import {
   approvals,
-  attemptTranscripts,
   attempts,
   events,
   ignoredEvents,
@@ -29,7 +28,7 @@ import {
 import { RunNotFoundError } from "../engine/error.ts";
 import { RunSnapshot, RunSummary } from "../run-reader/model.ts";
 import { Submission } from "../engine/submission.ts";
-import { TranscriptQuery } from "../transcript.ts";
+
 import { WORKFLOW_COMMAND_PRIORITY, type WorkflowCommand } from "../workflow/command.ts";
 import { cycleQueries } from "../cycle-budget/queries.ts";
 import {
@@ -43,11 +42,9 @@ import {
   decodeRunIds,
   decodeRunRows,
   decodeWorkflowCommands,
-  decodeTranscriptRows,
   encodeAgent,
   encodeBrainSpec,
   encodeDateTime,
-  encodeEnvelope,
   encodeOutcome,
   encodePayload,
   encodeRunState,
@@ -57,8 +54,9 @@ import {
   runSummaryFromRow,
   stepFromRow,
   submissionFromRow,
-  transcriptEntryFromRow,
 } from "./codec.ts";
+
+import { transcriptQueries } from "./transcript.ts";
 
 const newestRunFirst = (left: RunRow, right: RunRow) =>
   DateTime.toEpochMillis(right.openedAt) - DateTime.toEpochMillis(left.openedAt) ||
@@ -105,6 +103,9 @@ const attemptSelection = {
   worker: attempts.workerName,
   number: attempts.attemptNumber,
   brain: attempts.brainJson,
+  task: attempts.task,
+  agent: attempts.agent,
+  operatorIntervened: attempts.operatorIntervened,
   parentModel: attempts.parentModel,
   startedAt: attempts.startedAt,
   outcome: attempts.outcomeJson,
@@ -298,6 +299,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
         workerName: attempt.worker,
         attemptNumber: attempt.number,
         brainJson: encodeBrainSpec(attempt.brain),
+        task: attempt.task,
+        agent: attempt.agent,
+        operatorIntervened: attempt.operatorIntervened,
         parentModel: Option.getOrNull(attempt.parentModel),
         startedAt: encodeDateTime(attempt.startedAt),
         outcomeJson: null,
@@ -313,6 +317,33 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .update(attempts)
       .set({ outcomeJson: encodeOutcome(outcome) })
       .where(and(eq(attempts.attemptId, attemptId), isNull(attempts.outcomeJson)))
+      .execute();
+  });
+
+  const amend = Effect.fn("RunStoreQueries.amend")(function* (
+    runId: RunId,
+    context: AttemptContext,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, agent: context.agent.name });
+    yield* database
+      .update(runs)
+      .set({
+        task: context.task,
+        agentJson: storedAgent(context.agent),
+        parentModel: Option.getOrNull(context.parentModel),
+      })
+      .where(eq(runs.runId, runId))
+      .execute();
+  });
+
+  const markIntervened = Effect.fn("RunStoreQueries.markIntervened")(function* (
+    attemptId: AttemptId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    yield* database
+      .update(attempts)
+      .set({ operatorIntervened: true })
+      .where(eq(attempts.attemptId, attemptId))
       .execute();
   });
 
@@ -550,69 +581,6 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return Option.fromNullishOr(queued[0]).pipe(Option.map(submissionFromRow));
   });
 
-  const appendTranscript = Effect.fn("RunStoreQueries.appendTranscript")(function* (
-    direction: AttemptChannel.Direction,
-    envelope: AttemptChannel.Envelope,
-    receivedAt: DateTime.Utc,
-  ) {
-    yield* database
-      .insert(attemptTranscripts)
-      .values({
-        attemptId: envelope.attemptId,
-        direction,
-        channelSequence: envelope.sequence,
-        envelope: encodeEnvelope(envelope),
-        receivedAt: encodeDateTime(receivedAt),
-      })
-      .onConflictDoNothing()
-      .execute();
-  });
-
-  const transcript = Effect.fn("RunStoreQueries.transcript")(function* (query: TranscriptQuery) {
-    yield* Effect.annotateCurrentSpan({
-      attemptId: query.attemptId,
-      query: query._tag,
-    });
-
-    const cursor = Match.valueTags(query, {
-      TranscriptAllQuery: ({ attemptId }) => eq(attemptTranscripts.attemptId, attemptId),
-      TranscriptTailQuery: ({ attemptId, after }) =>
-        and(eq(attemptTranscripts.attemptId, attemptId), gt(attemptTranscripts.sequence, after)),
-      TranscriptPageQuery: ({ attemptId, before }) =>
-        Option.match(before, {
-          onNone: () => eq(attemptTranscripts.attemptId, attemptId),
-          onSome: (sequence) =>
-            and(
-              eq(attemptTranscripts.attemptId, attemptId),
-              lt(attemptTranscripts.sequence, sequence),
-            ),
-        }),
-    });
-    const selection = database
-      .select({
-        sequence: attemptTranscripts.sequence,
-        attemptId: attemptTranscripts.attemptId,
-        direction: attemptTranscripts.direction,
-        envelope: attemptTranscripts.envelope,
-        receivedAt: attemptTranscripts.receivedAt,
-      })
-      .from(attemptTranscripts)
-      .where(cursor);
-    // A limited read walks the tail index backwards for the newest N rows and
-    // re-sorts ascending, so callers always receive append order.
-    const rows = yield* Match.valueTags(query, {
-      TranscriptAllQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
-      TranscriptTailQuery: ({ limit }) =>
-        selection.orderBy(asc(attemptTranscripts.sequence)).limit(limit).execute(),
-      TranscriptPageQuery: ({ limit }) =>
-        selection.orderBy(desc(attemptTranscripts.sequence)).limit(limit).execute(),
-    });
-    // Transcript rows are usine-owned, so an unknown key is corruption.
-    return (yield* decodeTranscriptRows(rows, { onExcessProperty: "error" }))
-      .map(transcriptEntryFromRow)
-      .sort((left, right) => left.sequence - right.sequence);
-  });
-
   const recoverable = Effect.fn("RunStoreQueries.recoverable")(function* () {
     const rows = yield* database
       .select({
@@ -698,8 +666,10 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   return {
     cycles: cycleQueries(database),
+    ...transcriptQueries(database),
     addAttempt,
-    appendTranscript,
+    amend,
+    markIntervened,
     approvalExists,
     blockingRun,
     closeAttempt,
@@ -721,7 +691,6 @@ export const queriesFor = (database: RunDatabaseClient) => {
     itemRunSummaries,
     runForEvent,
     snapshot,
-    transcript,
     updateStepResult,
     updateAttemptParentModel,
     updateState,

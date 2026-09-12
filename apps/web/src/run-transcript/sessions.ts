@@ -1,0 +1,109 @@
+import type { AgentSession, AgentSessionEvent } from "@usine/core/agent/session";
+import type { AttemptId } from "@usine/core/attempt";
+import type { TranscriptEventView } from "@usine/orchestrator/operator";
+
+/** Attributed delivery receipt, including refusal details when the session rejected the input. */
+export type InterventionRecord = TranscriptEventView & {
+  readonly payload: Extract<
+    TranscriptEventView["payload"],
+    {
+      readonly _tag: "InterventionApplied" | "InterventionRejected";
+    }
+  >;
+};
+
+interface RecordedSessionEvent {
+  readonly sequence: TranscriptEventView["sequence"];
+  readonly receivedAt: string;
+  readonly event: Exclude<
+    AgentSessionEvent,
+    {
+      readonly _tag: "PoolRateLimitsUpdated" | "SessionTokensUpdated";
+    }
+  >;
+}
+
+/** Session state observes all lifecycle records; conversation contents observe only the loaded page. */
+export interface SessionEvents {
+  readonly attemptId: AttemptId;
+  readonly session: AgentSession;
+  readonly first: TranscriptEventView;
+  latestSequence: TranscriptEventView["sequence"];
+  status: "Live" | "Finished" | "Stopped";
+  held: boolean;
+  paused: boolean;
+  idle: boolean;
+  readonly events: Array<RecordedSessionEvent>;
+  readonly interventions: Array<InterventionRecord>;
+}
+
+/** Joins paged activity and current supervision once, without rendering metadata as historical rows. */
+export const indexSessions = (
+  events: ReadonlyArray<TranscriptEventView>,
+  sessionState: ReadonlyArray<TranscriptEventView>,
+  terminalAttempts: ReadonlySet<AttemptId>,
+) => {
+  const loaded = new Set(events.map(({ sequence }) => sequence));
+  const records = [
+    ...new Map([...sessionState, ...events].map((record) => [record.sequence, record])).values(),
+  ].sort((a, b) => a.sequence - b.sequence);
+  const groups = new Map<string, SessionEvents>();
+  const parents = new Map<AttemptId, SessionEvents>();
+  const key = (attemptId: AttemptId, sessionId: AgentSession["id"]) =>
+    JSON.stringify([attemptId, sessionId]);
+  for (const record of records) {
+    const payload = record.payload;
+    if (payload._tag !== "SessionEvent") continue;
+    const event = payload.event;
+    if (event._tag === "PoolRateLimitsUpdated" || event._tag === "SessionTokensUpdated") continue;
+    const id = key(record.attemptId, event.session.id);
+    let group = groups.get(id);
+    if (group === undefined) {
+      group = {
+        attemptId: record.attemptId,
+        session: event.session,
+        first: record,
+        latestSequence: record.sequence,
+        status: terminalAttempts.has(record.attemptId) ? "Stopped" : "Live",
+        held: false,
+        paused: false,
+        idle: false,
+        events: [],
+        interventions: [],
+      };
+      groups.set(id, group);
+      if (event.session._tag === "ParentSession") parents.set(record.attemptId, group);
+    }
+    group.latestSequence = record.sequence;
+    if (event._tag === "SessionFinished") group.status = "Finished";
+    if (event._tag === "SessionIdle") group.idle = true;
+    if (event._tag === "SessionResumed") group.idle = false;
+    if (loaded.has(record.sequence))
+      group.events.push({
+        sequence: record.sequence,
+        receivedAt: record.receivedAt,
+        event,
+      });
+  }
+  const unmatched: Array<InterventionRecord> = [];
+  for (const record of records) {
+    const payload = record.payload;
+    if (payload._tag !== "InterventionApplied" && payload._tag !== "InterventionRejected") continue;
+    const target = payload.intervention.target;
+    const group =
+      target._tag === "Parent"
+        ? parents.get(record.attemptId)
+        : groups.get(key(record.attemptId, target.sessionId));
+    if (group === undefined) {
+      if (loaded.has(record.sequence)) unmatched.push({ ...record, payload });
+      continue;
+    }
+    if (record.sequence > group.latestSequence) group.latestSequence = record.sequence;
+    if (payload._tag === "InterventionApplied") {
+      group.held = payload.state.held;
+      group.paused = payload.state.paused;
+    }
+    if (loaded.has(record.sequence)) group.interventions.push({ ...record, payload });
+  }
+  return { groups, unmatched };
+};

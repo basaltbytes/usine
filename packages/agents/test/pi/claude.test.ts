@@ -2,7 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
-import { Effect, Layer, Schema, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer, Queue, Schema, Scope, Stream } from "effect";
+import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
 import {
   AgentResultError,
   ChildBackend,
@@ -54,6 +55,117 @@ const scripted = (
 });
 
 describe("Claude child backend", () => {
+  it.effect("keeps streaming input open for a held Claude conversation until release", () =>
+    Effect.gen(function* () {
+      const messages = yield* Queue.make<Schema.Json, Cause.Done>();
+      const idle = yield* Queue.make<void>();
+      const context = yield* Effect.context<never>();
+      const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
+      let input: AsyncIterator<ClaudeUserMessage> | undefined;
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (stream) => {
+          input = stream[Symbol.asyncIterator]();
+          return {
+            close: () => {
+              Effect.runForkWith(context)(Queue.end(messages));
+            },
+            interrupt: () => Promise.resolve(),
+            supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
+            [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
+          };
+        },
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(request());
+        const result = yield* Effect.forkScoped(running.result);
+        yield* Effect.forkScoped(
+          running.events.pipe(
+            Stream.runForEach((event) =>
+              event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+            ),
+          ),
+        );
+        assert(input !== undefined);
+        const entered = input;
+        yield* Effect.promise(() => entered.next());
+        yield* running.intervene(new OperatorMessage({ message: "Review with me" }));
+        assert.strictEqual(
+          (yield* Effect.promise(() => entered.next())).value?.message.content,
+          "Review with me",
+        );
+        yield* Queue.offer(messages, {
+          type: "result",
+          subtype: "success",
+          result: "First answer",
+        });
+        yield* Queue.take(idle);
+        assert.strictEqual(result.pollUnsafe(), undefined);
+        yield* running.intervene(new OperatorMessage({ message: "One more adjustment" }));
+        assert.strictEqual(
+          (yield* Effect.promise(() => entered.next())).value?.message.content,
+          "One more adjustment",
+        );
+        yield* Queue.offer(messages, {
+          type: "result",
+          subtype: "success",
+          result: "Adjusted answer",
+        });
+        yield* Queue.take(idle);
+        yield* running.intervene(new Release());
+        assert.strictEqual((yield* Fiber.join(result)).message, "Adjusted answer");
+        assert.strictEqual((yield* Effect.promise(() => entered.next())).done, true);
+      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk));
+    }).pipe(Effect.scoped),
+  );
+  it.effect("closes a paused tool hook with its child scope even without a vendor abort", () =>
+    Effect.gen(function* () {
+      const messages = yield* Queue.make<Schema.Json, Cause.Done>();
+      const context = yield* Effect.context<never>();
+      const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
+      let options: ClaudeQueryOptions | undefined;
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (_input, supplied) => {
+          options = supplied;
+          return {
+            close: () => {
+              Effect.runForkWith(context)(Queue.end(messages));
+            },
+            interrupt: () => Promise.resolve(),
+            supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
+            [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
+          };
+        },
+      });
+      const owner = yield* Scope.make();
+      yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void));
+      const running = yield* Effect.gen(function* () {
+        return yield* (yield* ChildBackend).launch(request());
+      }).pipe(Scope.provide(owner), Effect.provide(claudeChildLayer), Effect.provide(sdk));
+      yield* running.intervene(new Interrupt());
+      const hook = options?.hooks?.PreToolUse?.[0]?.hooks[0];
+      assert(hook !== undefined);
+      const settled = hook(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "child-1",
+          transcript_path: "/tmp/claude-transcript",
+          cwd: "/workspace/repo",
+          tool_name: "Read",
+          tool_input: { file_path: "README.md" },
+          tool_use_id: "read-1",
+        },
+        "read-1",
+        { signal: new AbortController().signal },
+      ).then(
+        () => "resumed",
+        () => "interrupted",
+      );
+      yield* Effect.yieldNow;
+      yield* Scope.close(owner, Exit.void);
+      assert.strictEqual(yield* Effect.promise(() => settled), "interrupted");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("streams normalized session events and runs headlessly with the declared model", () => {
     let input: AsyncIterable<ClaudeUserMessage> | undefined;
     let options: ClaudeQueryOptions | undefined;

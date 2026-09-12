@@ -14,7 +14,7 @@ import {
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentName } from "@usine/core/agent";
-import { AttemptId, AttemptNumber } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { WorkerName } from "@usine/core/worker";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -70,6 +70,9 @@ const brain = new BrainSpec({
 });
 
 const liveAttempt = new AttemptView({
+  task: AttemptTask.make("Review the task"),
+  agent: AgentName.make("developer"),
+  operatorIntervened: false,
   id: attemptId,
   number: AttemptNumber.make(1),
   worker: WorkerName.make("local"),
@@ -179,7 +182,11 @@ describe("run transcript", () => {
   it("keeps rate-limit updates out of the feed and folds them into one meter per pool", () => {
     const events = [event(1, "Parent update"), rateLimits(2, 25), rateLimits(3, 31)];
     const markup = renderToStaticMarkup(
-      <Transcript events={events} attempts={[liveAttempt]} filter="all" />,
+      <Transcript
+        runId={RunId.make("run-31")}
+        projection={projectTranscript(events, [liveAttempt])}
+        filter="all"
+      />,
     );
     assert.ok(!markup.includes("rate limits"));
     assert.deepStrictEqual(poolMeters(events), [
@@ -195,7 +202,11 @@ describe("run transcript", () => {
       event(4, "Channel notice", "channel"),
     ];
     const markup = renderToStaticMarkup(
-      <Transcript events={events} attempts={[liveAttempt]} filter="all" />,
+      <Transcript
+        runId={RunId.make("run-31")}
+        projection={projectTranscript(events, [liveAttempt])}
+        filter="all"
+      />,
     );
     assert.include(markup, "<strong>Parent update</strong>");
     assert.include(markup, "agent-child-session activity · Working");
@@ -206,13 +217,16 @@ describe("run transcript", () => {
   it("keeps concurrent child sessions distinct, each anchored at its own first event", () => {
     const markup = renderToStaticMarkup(
       <Transcript
-        attempts={[liveAttempt]}
+        runId={RunId.make("run-31")}
         filter="all"
-        events={[
-          event(1, "First child says hello", "child", "child-a"),
-          event(2, "Parent update"),
-          event(3, "Second child says hello", "child", "child-b"),
-        ]}
+        projection={projectTranscript(
+          [
+            event(1, "First child says hello", "child", "child-a"),
+            event(2, "Parent update"),
+            event(3, "Second child says hello", "child", "child-b"),
+          ],
+          [liveAttempt],
+        )}
       />,
     );
 
@@ -253,7 +267,11 @@ describe("run transcript", () => {
     );
     assert.deepStrictEqual(call.state.output, output);
     const markup = renderToStaticMarkup(
-      <Transcript events={[started, finished]} attempts={[liveAttempt]} filter="all" />,
+      <Transcript
+        runId={RunId.make("run-31")}
+        projection={projectTranscript([started, finished], [liveAttempt])}
+        filter="all"
+      />,
     );
     assert.include(markup, "Command: pnpm test · Completed");
     assert.include(markup, "pnpm test");
@@ -272,7 +290,11 @@ describe("run transcript", () => {
     assert.deepStrictEqual(call.start, Option.none());
     assert.deepStrictEqual(call.state.output, output);
     const markup = renderToStaticMarkup(
-      <Transcript events={[finished]} attempts={[liveAttempt]} filter="tools" />,
+      <Transcript
+        runId={RunId.make("run-31")}
+        projection={projectTranscript([finished], [liveAttempt])}
+        filter="tools"
+      />,
     );
     assert.include(markup, "Read file: File details unavailable · Error");
   });
@@ -333,7 +355,11 @@ describe("run transcript", () => {
       assert.strictEqual(projection.sessions[0]?.status, "Stopped");
       assert.strictEqual(tools(events)[0]?.state._tag, "Stopped");
       const markup = renderToStaticMarkup(
-        <Transcript events={events} attempts={[liveAttempt]} filter="all" />,
+        <Transcript
+          runId={RunId.make("run-31")}
+          projection={projectTranscript(events, [liveAttempt])}
+          filter="all"
+        />,
       );
       assert.include(markup, "reviewer activity · Stopped");
       const summary = renderToStaticMarkup(
@@ -356,7 +382,11 @@ describe("run transcript", () => {
     assert.strictEqual(projection.sessions[0]?.status, "Finished");
     assert.strictEqual(tools(events)[0]?.state._tag, "Stopped");
     const markup = renderToStaticMarkup(
-      <Transcript events={events} attempts={[liveAttempt]} filter="all" />,
+      <Transcript
+        runId={RunId.make("run-31")}
+        projection={projectTranscript(events, [liveAttempt])}
+        filter="all"
+      />,
     );
     assert.include(markup, "reviewer activity · Finished");
   });
@@ -377,10 +407,18 @@ describe("run transcript", () => {
       sessionEvent(4, new TextOutput({ session: child, text: "Child explanation" })),
     ];
     const messages = renderToStaticMarkup(
-      <Transcript events={events} attempts={[liveAttempt]} filter="messages" />,
+      <Transcript
+        runId={RunId.make("run-31")}
+        projection={projectTranscript(events, [liveAttempt])}
+        filter="messages"
+      />,
     );
     const toolRows = renderToStaticMarkup(
-      <Transcript events={events} attempts={[liveAttempt]} filter="tools" />,
+      <Transcript
+        runId={RunId.make("run-31")}
+        projection={projectTranscript(events, [liveAttempt])}
+        filter="tools"
+      />,
     );
     assert.include(messages, "A useful explanation");
     assert.notInclude(messages, "Read file: README.md · Running");
@@ -492,6 +530,7 @@ describe("run transcript", () => {
   it("adds an earlier page without replacing a newer Run outcome or available actions", () => {
     const cursor = new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(2) });
     const stale = new RunDetailView({
+      sessionState: [],
       run: new RunView({
         id: RunId.make("run-31"),
         itemKey: ItemKey.make("github:basaltbytes/usine:31"),
@@ -544,6 +583,7 @@ describe("run transcript", () => {
       ),
     ];
     const detail = new RunDetailView({
+      sessionState: [],
       run: new RunView({
         id: RunId.make("run-31"),
         itemKey: ItemKey.make("github:basaltbytes/usine:31"),
@@ -595,7 +635,10 @@ describe("run transcript", () => {
     const onePoll = await fetchRunDetail(
       new TailTranscriptRequest({ after: TranscriptSequence.make(10) }),
       async (request) =>
-        new RunDetailView({ ...running, transcript: (await read(request)).transcript }),
+        new RunDetailView({
+          ...running,
+          transcript: (await read(request)).transcript,
+        }),
     );
     assert.deepStrictEqual(onePoll.transcript, transcript.slice(0, 1));
     assert.strictEqual(onePoll.run.canCancel, true);

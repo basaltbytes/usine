@@ -1,6 +1,7 @@
 import { BrainSpec } from "@usine/core/agent/brain";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
-import { AttemptNumber, AttemptId } from "@usine/core/attempt";
+import { AttemptNumber, AttemptId, AttemptTask } from "@usine/core/attempt";
+import { AgentName } from "@usine/core/agent";
 import { RunawayCeiling } from "@usine/core/attempt/failure";
 import { WorkerName } from "@usine/core/worker";
 import { Schema } from "effect";
@@ -72,6 +73,9 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
   number: AttemptNumber,
   worker: WorkerName,
   brain: BrainSpec,
+  task: AttemptTask,
+  agent: AgentName,
+  operatorIntervened: Schema.Boolean,
   startedAt: Schema.String,
   outcome: Schema.NullOr(AttemptOutcomeView),
 }) {}

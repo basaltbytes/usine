@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
@@ -48,6 +49,7 @@ const message = (sequence: number) =>
 const events = Array.from({ length: 45 }, (_, index) => message(index + 1));
 let host: HTMLDivElement;
 let root: Root;
+let queryClient: QueryClient;
 const mount = (
   transcript = events,
   id = runId,
@@ -59,18 +61,21 @@ const mount = (
 ) => {
   flushSync(() =>
     root.render(
-      <Conversation
-        key={id}
-        runId={id}
-        events={transcript}
-        attempts={[]}
-        earlier={history.earlier}
-        loadingEarlier={history.loading}
-        earlierError={null}
-        loadEarlier={history.load}
-        state="Running"
-        active
-      />,
+      <QueryClientProvider client={queryClient}>
+        <Conversation
+          key={id}
+          runId={id}
+          events={transcript}
+          sessionState={[]}
+          attempts={[]}
+          earlier={history.earlier}
+          loadingEarlier={history.loading}
+          earlierError={null}
+          loadEarlier={history.load}
+          state="Running"
+          active
+        />
+      </QueryClientProvider>,
     ),
   );
 };
@@ -94,6 +99,7 @@ const bookmark = () => readerMemory(() => localStorage).read(runId, Date.now());
 
 beforeEach(() => {
   localStorage.clear();
+  queryClient = new QueryClient();
   host = document.createElement("div");
   host.style.cssText = "height:600px;width:760px;display:flex;flex-direction:column";
   document.body.append(host);
@@ -102,6 +108,7 @@ beforeEach(() => {
 afterEach(() => {
   flushSync(() => root.unmount());
   host.remove();
+  queryClient.clear();
 });
 
 it("reopens and cold-loads the same row offset without consuming activity received while closed", async () => {

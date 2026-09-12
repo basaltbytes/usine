@@ -4,6 +4,7 @@ import type { Page, Route } from "playwright";
 import vite from "./vite.config.ts";
 
 const delayedMoves = new WeakMap<Page, Promise<Route>>();
+const interventionRequests = new WeakMap<Page, Array<{ url: string; body: unknown }>>();
 
 export default mergeConfig(
   vite,
@@ -28,6 +29,32 @@ export default mergeConfig(
               screenshotDirectory: "./node_modules/.cache/vitest/screenshots",
               provider: playwright(),
               commands: {
+                interventionResponses: async ({ page }, status: 200 | 503) => {
+                  interventionRequests.set(page, []);
+                  await page.unroute("**/api/agents");
+                  await page.unroute("**/api/runs/intervention-test/*");
+                  await page.route("**/api/agents", (route) =>
+                    route.fulfill({
+                      contentType: "application/json",
+                      body: '["developer","reviewer"]',
+                    }),
+                  );
+                  await page.route("**/api/runs/intervention-test/*", async (route) => {
+                    interventionRequests
+                      .get(page)
+                      ?.push({ url: route.request().url(), body: route.request().postDataJSON() });
+                    await route.fulfill({
+                      status,
+                      contentType: "application/json",
+                      body: JSON.stringify(
+                        status === 200
+                          ? { ok: true }
+                          : { error: "BackendUnavailableError", message: "Worker is disconnected" },
+                      ),
+                    });
+                  });
+                },
+                recordedInterventions: async ({ page }) => interventionRequests.get(page) ?? [],
                 delayBoardMove: async ({ page }) => {
                   let receive: (route: Route) => void;
                   const request = new Promise<Route>((resolve) => {

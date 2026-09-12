@@ -8,7 +8,7 @@ if (process.argv.includes("--preflight")) {
   const brain = JSON.parse(process.argv[process.argv.indexOf("--preflight") + 1]);
   process.stdout.write(JSON.stringify({ _tag: "HarnessReady", harness: brain.harness }) + "\n");
 } else if (process.argv.includes("--protocol-version")) {
-  process.stdout.write("4\n");
+  process.stdout.write("5\n");
 } else if (process.argv.includes("--github")) {
   const args = process.argv.slice(process.argv.indexOf("--github") + 1);
   if (args[0] !== "api") throw new Error("Expected structured GitHub API access");

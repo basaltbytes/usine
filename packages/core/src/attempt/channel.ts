@@ -1,13 +1,13 @@
-import { Result, Schema, type Effect } from "effect";
+import { Effect, Result, Schema } from "effect";
 import { Agent } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
-import { AgentSessionEvent, ChildSessionBudget } from "../agent/session.ts";
+import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
 import { AttemptId, AttemptTask } from "./attempt.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
 import { StepResult } from "../step/result.ts";
 import { AttemptFailure } from "./failure.ts";
 
-export const PROTOCOL_VERSION = 4 as const;
+export const PROTOCOL_VERSION = 5 as const;
 
 /**
  * Per-Attempt, per-direction message sequence, starting at 1. Distinct from the
@@ -20,7 +20,7 @@ export type Sequence = typeof Sequence.Type;
 
 /**
  * Relative to the run host: `inbound` frames go from the orchestrator to the run
- * host (Start, Steer, Interrupt) and `outbound` frames go the other way.
+ * host (Start, operator input, Cancel) and `outbound` frames go the other way.
  */
 export const DIRECTIONS = ["inbound", "outbound"] as const;
 export const Direction = Schema.Literals(DIRECTIONS);
@@ -62,14 +62,11 @@ export class Failed extends Schema.TaggedClass<Failed>("AttemptChannel/Failed")(
   failure: AttemptFailure,
 }) {}
 
-/** The run host stopped on an Interrupt frame. Terminal. */
+/** The run host acknowledged Attempt cancellation. Terminal. */
 export class Interrupted extends Schema.TaggedClass<Interrupted>("AttemptChannel/Interrupted")(
   "Interrupted",
   {},
 ) {}
-
-export const OutboundPayload = Schema.Union([Started, SessionEvent, Final, Failed, Interrupted]);
-export type OutboundPayload = typeof OutboundPayload.Type;
 
 export class Steer extends Schema.TaggedClass<Steer>("AttemptChannel/Steer")("Steer", {
   message: Schema.NonEmptyString,
@@ -80,8 +77,84 @@ export class Interrupt extends Schema.TaggedClass<Interrupt>("AttemptChannel/Int
   {},
 ) {}
 
-export const InboundPayload = Schema.Union([Steer, Interrupt]);
+/** Stops the entire Attempt, including every held or paused session. Used by cancellation and guardrails. */
+export class Cancel extends Schema.TaggedClass<Cancel>("AttemptChannel/Cancel")("Cancel", {}) {}
+
+/** An operator turn joined to the target session, distinct from a Steer so a takeover can record and hold it (ADR 0018). */
+export class OperatorMessage extends Schema.TaggedClass<OperatorMessage>(
+  "AttemptChannel/OperatorMessage",
+)("OperatorMessage", {
+  message: Schema.NonEmptyString,
+}) {}
+
+/** Ends a held child's takeover, letting its idle result return to the awaiting parent (ADR 0018). */
+export class Release extends Schema.TaggedClass<Release>("AttemptChannel/Release")("Release", {}) {}
+
+/** Nonterminal operator controls; cancellation is an Attempt operation. */
+export const OperatorAction = Schema.Union([Steer, Interrupt, OperatorMessage, Release]);
+export type OperatorAction = typeof OperatorAction.Type;
+export const InboundPayload = Schema.Union([OperatorAction, Cancel]);
 export type InboundPayload = typeof InboundPayload.Type;
+
+/** The Pi parent, the default recipient of operator input for an Attempt. */
+export class ParentTarget extends Schema.TaggedClass<ParentTarget>("AttemptChannel/ParentTarget")(
+  "Parent",
+  {},
+) {}
+
+/** A harness child of the Attempt's parent, addressed by the id it reports in the normalized event stream. */
+export class ChildTarget extends Schema.TaggedClass<ChildTarget>("AttemptChannel/ChildTarget")(
+  "Child",
+  { sessionId: AgentSessionId },
+) {}
+
+/** Which session inside an Attempt an inbound frame addresses: the Pi parent, or one of its children. */
+export const SessionTarget = Schema.Union([ParentTarget, ChildTarget]);
+export type SessionTarget = typeof SessionTarget.Type;
+
+/** Attributed operator input addressed to one live session, never an Event. */
+export class Intervention extends Schema.Class<Intervention>("AttemptChannel/Intervention")({
+  operator: Schema.NonEmptyString,
+  target: SessionTarget,
+  action: OperatorAction,
+}) {}
+
+/** The session's supervision state after an accepted operator action. */
+export class InterventionState extends Schema.Class<InterventionState>(
+  "AttemptChannel/InterventionState",
+)({
+  held: Schema.Boolean,
+  paused: Schema.Boolean,
+}) {}
+
+/** Acknowledges delivery and records the resulting Hold or pause in the transcript. */
+export class InterventionApplied extends Schema.TaggedClass<InterventionApplied>(
+  "AttemptChannel/InterventionApplied",
+)("InterventionApplied", {
+  inputSequence: Sequence,
+  intervention: Intervention,
+  state: InterventionState,
+}) {}
+
+/** A session closed or refused an operator action; the Attempt itself continues. */
+export class InterventionRejected extends Schema.TaggedClass<InterventionRejected>(
+  "AttemptChannel/InterventionRejected",
+)("InterventionRejected", {
+  inputSequence: Sequence,
+  intervention: Intervention,
+  message: Schema.NonEmptyString,
+}) {}
+
+export const OutboundPayload = Schema.Union([
+  Started,
+  SessionEvent,
+  Final,
+  Failed,
+  Interrupted,
+  InterventionApplied,
+  InterventionRejected,
+]);
+export type OutboundPayload = typeof OutboundPayload.Type;
 
 const EnvelopeFields = {
   version: Schema.Literal(PROTOCOL_VERSION),
@@ -101,6 +174,9 @@ export class InboundEnvelope extends Schema.TaggedClass<InboundEnvelope>(
   "AttemptChannel/InboundEnvelope",
 )("InboundEnvelope", {
   ...EnvelopeFields,
+  /** The session this frame addresses; the Pi parent unless a child is named. */
+  target: SessionTarget.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ _tag: "Parent" }))),
+  operator: Schema.NonEmptyString,
   payload: InboundPayload,
 }) {}
 

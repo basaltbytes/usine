@@ -138,6 +138,21 @@ export interface RunningSession {
   readonly steer: (message: string) => Effect.Effect<void, AgentSessionError>;
   /** Requests that this session stop its current work. */
   readonly interrupt: Effect.Effect<void, AgentSessionError>;
+  /** Applies a nonterminal operator action; child messages hold completion until release. */
+  readonly intervene: (
+    action: AttemptChannel.OperatorAction,
+  ) => Effect.Effect<AttemptChannel.InterventionState, AgentSessionError>;
+}
+
+/**
+ * Records each live child session so the run host can route operator input
+ * (steer, interrupt, or a takeover message) to one by the id it reports in the
+ * normalized event stream. The parent registers no child; it is addressed
+ * directly. Registration is scoped: the entry is removed when the child's scope
+ * closes, so a returned child is no longer addressable (ADR 0018).
+ */
+export interface ChildSessions {
+  readonly register: (session: RunningSession) => Effect.Effect<void, never, Scope.Scope>;
 }
 
 /** Launches coding sessions for tasks delegated by an Attempt's parent. */
@@ -172,9 +187,14 @@ export class PiChildBackend extends Context.Service<PiChildBackend, ChildBackend
 export class AgentRuntime extends Context.Service<
   AgentRuntime,
   {
-    /** Starts work in the prepared checkout and returns controls for observing and guiding the parent. */
+    /**
+     * Starts work in the prepared checkout and returns controls for observing and
+     * guiding the parent. Each child it spawns registers with `children` so the
+     * run host can address a takeover to it by id.
+     */
     readonly launch: (
       request: LaunchRequest,
+      children: ChildSessions,
     ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;
   }
 >()("@usine/agents/AgentRuntime") {}

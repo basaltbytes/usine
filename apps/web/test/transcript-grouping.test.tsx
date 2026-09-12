@@ -5,14 +5,25 @@ import {
   ChildSession,
   ParentSession,
   SessionFinished,
+  SessionIdle,
   TextOutput,
   ToolFinished,
   ToolStarted,
   type AgentSession,
   type AgentSessionEvent,
 } from "@usine/core/agent/session";
+import { RunId } from "@usine/core/run";
 import { AttemptId } from "@usine/core/attempt";
-import { SessionEvent } from "@usine/core/attempt/channel";
+import {
+  Sequence,
+  SessionEvent,
+  Intervention,
+  InterventionApplied,
+  InterventionRejected,
+  InterventionState,
+  ChildTarget,
+  OperatorMessage,
+} from "@usine/core/attempt/channel";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { TranscriptEventView } from "@usine/orchestrator/operator";
 import type { Schema } from "effect";
@@ -103,7 +114,11 @@ it("summarizes adjacent completed work while keeping prose and a single call vis
   const html = renderToStaticMarkup(
     <TranscriptDisclosureProvider>
       <MessageScrollerProvider>
-        <Transcript events={events} attempts={[]} filter="all" />
+        <Transcript
+          runId={RunId.make("run-31")}
+          projection={projectTranscript(events, [])}
+          filter="all"
+        />
       </MessageScrollerProvider>
     </TranscriptDisclosureProvider>,
   );
@@ -128,7 +143,11 @@ it("does not join successful calls across prose hidden by the tools filter", () 
   const html = renderToStaticMarkup(
     <TranscriptDisclosureProvider>
       <MessageScrollerProvider>
-        <Transcript events={events} attempts={[]} filter="tools" />
+        <Transcript
+          runId={RunId.make("run-31")}
+          projection={projectTranscript(events, [])}
+          filter="tools"
+        />
       </MessageScrollerProvider>
     </TranscriptDisclosureProvider>,
   );
@@ -493,4 +512,100 @@ it("uses a file count when deeply nested colliding paths cannot be distinguished
   assert.match(text, /\b2 files\b/iu);
   assert.notInclude(text, "model.ts");
   assert.isBelow(text.length, 100);
+});
+
+it("attaches paged input to its child using unpaged session identity without replaying history", () => {
+  const child = new ChildSession({
+    id: AgentSessionId.make("held-child"),
+    parentId: parent.id,
+    agent: parent.agent,
+    brain,
+  });
+  const intervention = new Intervention({
+    operator: "Philippe",
+    target: new ChildTarget({ sessionId: child.id }),
+    action: new OperatorMessage({ message: "Keep this correction" }),
+  });
+  const receipt = new TranscriptEventView({
+    sequence: TranscriptSequence.make(9),
+    attemptId: attempt,
+    receivedAt: "2026-09-12",
+    direction: "outbound",
+    payload: new InterventionRejected({
+      inputSequence: Sequence.make(2),
+      intervention,
+      message: "Harness unavailable",
+    }),
+  });
+  const held = new TranscriptEventView({
+    ...receipt,
+    sequence: TranscriptSequence.make(7),
+    payload: new InterventionApplied({
+      inputSequence: Sequence.make(1),
+      intervention,
+      state: new InterventionState({ held: true, paused: false }),
+    }),
+  });
+  const projection = projectTranscript(
+    [receipt],
+    [],
+    [held, record(8, new SessionIdle({ session: child }))],
+  );
+  assert.strictEqual(projection.items.length, 1);
+  const session = projection.sessions[0];
+  assert(session !== undefined);
+  assert.strictEqual(session.held, true);
+  assert.strictEqual(session.idle, true);
+  assert.strictEqual(session.entries.length, 1);
+  const entry = session.entries[0];
+  assert(entry?._tag === "Notice");
+  assert.strictEqual(entry.detail, "Keep this correction\n\nHarness unavailable");
+  assert.strictEqual(entry.isError, true);
+  const unmatched = projectTranscript([receipt], []).items[0];
+  assert(unmatched?._tag === "Notice");
+  assert.include(unmatched.label, child.id);
+  assert.strictEqual(unmatched.detail, entry.detail);
+});
+
+it("renders a held child from session state when its activity is outside the loaded page", () => {
+  const child = new ChildSession({
+    id: AgentSessionId.make("off-page-child"),
+    parentId: parent.id,
+    agent: parent.agent,
+    brain,
+  });
+  const held = new TranscriptEventView({
+    sequence: TranscriptSequence.make(3),
+    attemptId: attempt,
+    receivedAt: "2026-09-12",
+    direction: "outbound",
+    payload: new InterventionApplied({
+      inputSequence: Sequence.make(1),
+      intervention: new Intervention({
+        operator: "Philippe",
+        target: new ChildTarget({ sessionId: child.id }),
+        action: new OperatorMessage({ message: "Review this with me" }),
+      }),
+      state: new InterventionState({ held: true, paused: false }),
+    }),
+  });
+  const page = [record(20, new TextOutput({ session: parent, text: "Waiting on the child." }))];
+  const render = (sessionState: ReadonlyArray<TranscriptEventView>) =>
+    renderToStaticMarkup(
+      <TranscriptDisclosureProvider>
+        <MessageScrollerProvider>
+          <Transcript
+            runId={RunId.make("run-31")}
+            projection={projectTranscript(page, [], sessionState)}
+            filter="all"
+          />
+        </MessageScrollerProvider>
+      </TranscriptDisclosureProvider>,
+    );
+
+  assert.include(
+    render([held, record(4, new SessionIdle({ session: child }))]),
+    "developer activity · Held · waiting for you",
+  );
+  assert.notInclude(render([]), "developer activity");
 });

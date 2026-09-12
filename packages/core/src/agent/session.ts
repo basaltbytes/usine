@@ -6,6 +6,12 @@ import { BrainSpec } from "./brain.ts";
 export const AgentSessionId = Schema.NonEmptyString.pipe(Schema.brand("AgentSessionId"));
 export type AgentSessionId = typeof AgentSessionId.Type;
 
+/** A provider-reported count of input, output, and cached tokens. */
+export const TokenCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+  Schema.brand("TokenCount"),
+);
+export type TokenCount = typeof TokenCount.Type;
+
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
 /** Maximum child sessions one Attempt may spawn over its lifetime, including sequential spawns. */
@@ -82,6 +88,23 @@ export class SessionFinished extends Schema.TaggedClass<SessionFinished>("Agent/
   { session: AgentSession },
 ) {}
 
+/** A supervised session finished a turn and remains available for further operator messages. */
+export class SessionIdle extends Schema.TaggedClass<SessionIdle>("Agent/SessionIdle")(
+  "SessionIdle",
+  { session: AgentSession },
+) {}
+
+/** A live session is processing another user turn in the same conversation. */
+export class SessionResumed extends Schema.TaggedClass<SessionResumed>("Agent/SessionResumed")(
+  "SessionResumed",
+  { session: AgentSession },
+) {}
+
+/** Cumulative tokens consumed by this session, including its later operator turns. */
+export class SessionTokensUpdated extends Schema.TaggedClass<SessionTokensUpdated>(
+  "Agent/SessionTokensUpdated",
+)("SessionTokensUpdated", { session: AgentSession, totalTokens: TokenCount }) {}
+
 /** The billing source whose meter produced a usage or rate-limit observation. */
 export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPlan"] as const);
 export type BillingPool = typeof BillingPool.Type;
@@ -123,5 +146,8 @@ export const AgentSessionEvent = Schema.Union([
   ToolFinished,
   PoolRateLimitsUpdated,
   SessionFinished,
+  SessionIdle,
+  SessionResumed,
+  SessionTokensUpdated,
 ]);
 export type AgentSessionEvent = typeof AgentSessionEvent.Type;

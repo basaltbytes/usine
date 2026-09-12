@@ -1,4 +1,5 @@
 import { ModelId } from "@usine/core/agent/brain";
+import { AgentName } from "@usine/core/agent";
 import { AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { DedupKey, EventId } from "@usine/core/event";
@@ -174,6 +175,9 @@ export const attempts = snakeCase.table(
     workerName: text().$type<WorkerName>().notNull(),
     attemptNumber: integer({ mode: "number" }).$type<AttemptNumber>().notNull(),
     brainJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    task: text().$type<AttemptTask>().notNull(),
+    agent: text().$type<AgentName>().notNull(),
+    operatorIntervened: integer({ mode: "boolean" }).notNull().default(false),
     parentModel: text().$type<ModelId>(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),

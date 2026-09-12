@@ -10,6 +10,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionEvent,
   AgentSessionId,
+  ChildSession,
   ChildSessionBudget,
   ParentSession,
 } from "@usine/core/agent/session";
@@ -44,12 +45,15 @@ export const command = (
   payload: AttemptChannel.InboundPayload,
   sequence = 1,
   attemptId = spec.attemptId,
+  target: AttemptChannel.SessionTarget = new AttemptChannel.ParentTarget(),
 ) =>
   new AttemptChannel.InboundEnvelope({
+    operator: "operator",
     version: AttemptChannel.PROTOCOL_VERSION,
     attemptId,
     sequence: AttemptChannel.Sequence.make(sequence),
     sentAt: DateTime.makeUnsafe("2026-09-06T12:00:00Z"),
+    target,
     payload,
   });
 
@@ -62,6 +66,9 @@ export const controlledSession = Effect.fn("test.controlledSession")(function* (
   const launches = yield* Queue.make<LaunchRequest>();
   const steers = yield* Queue.make<string>();
   const released = yield* Deferred.make<void>();
+  // A fake child registered on launch so takeover routing to a child id is testable.
+  const childSteers = yield* Queue.make<string>();
+  const childInterrupted = yield* Deferred.make<void>();
   const session = new ParentSession({
     id: AgentSessionId.make("parent:run/execute/1"),
     agent: spec.agent.name,
@@ -71,18 +78,62 @@ export const controlledSession = Effect.fn("test.controlledSession")(function* (
       effort: "medium",
     }),
   });
+  const child = new ChildSession({
+    id: AgentSessionId.make("parent:run/execute/1:child:1"),
+    parentId: session.id,
+    agent: spec.agent.name,
+    brain: spec.agent.brain,
+  });
+  const childSession: RunningSession = {
+    session: child,
+    events: Stream.empty,
+    result: Effect.never,
+    steer: (message) => Queue.offer(childSteers, message).pipe(Effect.asVoid),
+    interrupt: Deferred.succeed(childInterrupted, undefined).pipe(Effect.asVoid),
+    intervene: (action) =>
+      Effect.gen(function* () {
+        if (action._tag === "OperatorMessage" || action._tag === "Steer")
+          yield* Queue.offer(childSteers, action.message);
+        if (action._tag === "Interrupt") yield* Deferred.succeed(childInterrupted, undefined);
+        return new AttemptChannel.InterventionState({
+          held: action._tag !== "Release",
+          paused: action._tag === "Interrupt",
+        });
+      }),
+  };
   const runtime = AgentRuntime.of({
-    launch: Effect.fn("test.AgentRuntime.launch")(function* (request) {
+    launch: Effect.fn("test.AgentRuntime.launch")(function* (request, children) {
       yield* Queue.offer(launches, request);
       yield* Effect.addFinalizer(() => Deferred.succeed(released, undefined));
+      yield* children.register(childSession);
       return {
         session,
         events: Stream.fromQueue(events),
         result: Deferred.await(result),
         steer: (message) => Queue.offer(steers, message).pipe(Effect.asVoid),
         interrupt,
+        intervene: (action) =>
+          Effect.gen(function* () {
+            if (action._tag === "OperatorMessage" || action._tag === "Steer")
+              yield* Queue.offer(steers, action.message);
+            return new AttemptChannel.InterventionState({
+              held: false,
+              paused: action._tag === "Interrupt",
+            });
+          }),
       } satisfies RunningSession;
     }),
   });
-  return { runtime, session, events, result, launches, steers, released };
+  return {
+    runtime,
+    session,
+    child,
+    events,
+    result,
+    launches,
+    steers,
+    childSteers,
+    childInterrupted,
+    released,
+  };
 });

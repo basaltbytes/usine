@@ -385,6 +385,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     return Executor.of({
       kind: "local",
       cancel: session.cancel,
+      intervene: session.intervene,
       preflight,
       prepare,
     });

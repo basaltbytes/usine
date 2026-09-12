@@ -179,6 +179,7 @@ export const stepExecutorLayer = (
                 parentModel: execution.parentModel,
                 maxChildren: config.settings.maxChildren,
                 maxAttemptMinutes: config.settings.maxAttemptMinutes,
+                maxAttemptTokens: config.settings.maxAttemptTokens,
                 parentEffort: resolveParentEffort(execution.agent, config.settings.parentEffort),
               }),
             )
@@ -191,6 +192,6 @@ export const stepExecutorLayer = (
       const interrupt: StepExecutor["Service"]["interrupt"] = (attemptId) =>
         executor.cancel(attemptId).pipe(Effect.mapError(asAttemptFailure));
 
-      return StepExecutor.of({ execute, interrupt, reserve });
+      return StepExecutor.of({ execute, interrupt, reserve, intervene: executor.intervene });
     }),
   );

@@ -117,6 +117,7 @@ const makeInstance = (repository: RepositoryName, label: string): LoadedInstance
 
 const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) => {
   const executor = Layer.succeed(StepExecutor)({
+    intervene: () => Effect.void,
     interrupt: () => Effect.void,
     reserve: () => Effect.die("the approval-gated integration run must not reserve a worker"),
     execute: () => Effect.die("the approval-gated integration run must not execute"),

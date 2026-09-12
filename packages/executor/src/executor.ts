@@ -104,6 +104,8 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   maxChildren: ChildSessionBudget,
   /** Maximum minutes of live run-host execution; preparation and resource cleanup are outside this budget. */
   maxAttemptMinutes: Schema.Int.check(Schema.isGreaterThan(0)),
+  /** Maximum reported tokens across the parent and every child; operator Holds never pause this ceiling. */
+  maxAttemptTokens: Schema.Int.check(Schema.isGreaterThan(0)),
   parentEffort: Effort,
 }) {}
 
@@ -168,5 +170,10 @@ export class Executor extends Context.Service<
     ) => Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope>;
     /** Requests an active Attempt to stop, allowing a grace period before forcing termination. */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
+    /** Delivers an attributed operator action through the active Attempt's channel. */
+    readonly intervene: (
+      attemptId: AttemptId,
+      intervention: AttemptChannel.Intervention,
+    ) => Effect.Effect<void, AttemptFailure>;
   }
 >()("@usine/executor/Executor") {}

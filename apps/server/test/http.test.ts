@@ -1,3 +1,4 @@
+import { OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -5,7 +6,7 @@ import { NodeHttpPlatform, NodeHttpServer } from "@effect/platform-node";
 import { LoadedInstance } from "@usine/config/instance";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
-import { AttemptId } from "@usine/core/attempt";
+import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -16,6 +17,8 @@ import { CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   ApprovalNeed,
+  EditAndRetry,
+  SessionIntervention,
   BoardLaneId,
   BoardLaneReadOnlyError,
   type BoardMove,
@@ -79,6 +82,7 @@ const run = new RunView({
   canCancel: false,
 });
 const detail = new RunDetailView({
+  sessionState: [],
   run,
   eventDedupKey: "issue:31",
   eventPayload: { number: 31 },
@@ -220,6 +224,9 @@ describe("operator HTTP API", () => {
   it("maps typed engine errors onto operator-readable statuses", async () => {
     let moved: BoardMove | undefined;
     const rejecting = Layer.succeed(FactoryBackend)({
+      agents: Effect.succeed([]),
+      editAndRetry: () => Effect.void,
+      intervene: () => Effect.void,
       overview: Effect.succeed(overview),
       detail: (id, request) =>
         request._tag === "EarlierTranscriptRequest"
@@ -327,7 +334,18 @@ describe("operator HTTP API", () => {
     const observed: Array<TranscriptRequest> = [];
     const interventions: Array<string> = [];
     const record = (operation: string) => Effect.sync(() => void interventions.push(operation));
+    const edits: Array<EditAndRetry> = [];
+    const inputs: Array<SessionIntervention> = [];
     const live = Layer.succeed(FactoryBackend)({
+      agents: Effect.succeed([agentName]),
+      editAndRetry: (_id, edit) =>
+        Effect.sync(() => {
+          edits.push(edit);
+        }),
+      intervene: (_id, input) =>
+        Effect.sync(() => {
+          inputs.push(input);
+        }),
       overview: Effect.succeed(overview),
       detail: (id, request) => {
         if (id !== runId) return Effect.fail(new RunNotFoundError({ runId: id }));
@@ -367,6 +385,20 @@ describe("operator HTTP API", () => {
       Effect.gen(function* () {
         const { operator: client } = yield* HttpApiClient.make(OperatorApi);
         assert.deepStrictEqual(yield* client.overview(), overview);
+        assert.deepStrictEqual(yield* client.agents(), [agentName]);
+        const edit = new EditAndRetry({
+          task: AttemptTask.make("Fix the reviewed behavior"),
+          agent: agentName,
+        });
+        yield* client.editAndRetry({ params: { runId }, payload: edit });
+        const input = new SessionIntervention({
+          attemptId: AttemptId.make("attempt/1"),
+          target: new ParentTarget(),
+          action: new OperatorMessage({ message: "Continue carefully" }),
+        });
+        yield* client.intervene({ params: { runId }, payload: input });
+        assert.deepStrictEqual(edits, [edit]);
+        assert.deepStrictEqual(inputs, [input]);
         const requests = [
           new ColdTranscriptRequest(),
           new TailTranscriptRequest({ after: TranscriptSequence.make(7) }),

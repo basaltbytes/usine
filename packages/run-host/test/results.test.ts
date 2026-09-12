@@ -19,8 +19,8 @@ describe("run-host results", () => {
     Effect.gen(function* () {
       const session = yield* controlledSession();
       const runtime = AgentRuntime.of({
-        launch: (request) =>
-          session.runtime.launch(request).pipe(
+        launch: (request, children) =>
+          session.runtime.launch(request, children).pipe(
             Effect.map((running) => ({
               ...running,
               interrupt: Deferred.fail(
@@ -36,7 +36,7 @@ describe("run-host results", () => {
       const host = yield* startHost(runtime);
       yield* host.send(start());
       yield* host.next;
-      yield* host.send(command(new AttemptChannel.Interrupt()));
+      yield* host.send(command(new AttemptChannel.Cancel()));
       yield* host.result;
       expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
       expect(yield* Deferred.isDone(session.released)).toBe(true);

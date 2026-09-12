@@ -204,6 +204,7 @@ it.live(
           ),
       };
       const executor = Layer.succeed(StepExecutor)({
+        intervene: () => Effect.void,
         reserve: () => Effect.succeed({ worker: WorkerName.make("test"), release: Effect.void }),
         interrupt: () => Effect.void,
         execute: () => Effect.succeed(new StepResult({ message: "Reviewed", facts: [] })),

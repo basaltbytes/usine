@@ -391,6 +391,9 @@ describe("local worker", () => {
           const runId = RunId.make("cleanup-budget-run");
           const execution = new StepExecution({
             attempt: new Attempt({
+              task: selected.task,
+              agent: selected.agent.name,
+              operatorIntervened: false,
               id: AttemptId.make("cleanup-budget-run/execute/1"),
               runId,
               stepName: selected.step,
@@ -500,6 +503,7 @@ describe("local worker", () => {
                 parentModel: Option.none(),
                 maxChildren: ChildSessionBudget.make(4),
                 maxAttemptMinutes: 60,
+                maxAttemptTokens: 10_000_000,
                 parentEffort: "high",
               }),
             );
@@ -563,6 +567,7 @@ describe("local worker", () => {
             parentModel: Option.none(),
             maxChildren: ChildSessionBudget.make(4),
             maxAttemptMinutes: 60,
+            maxAttemptTokens: 10_000_000,
             parentEffort: "high",
           });
           const prepared = yield* Effect.scoped(
@@ -801,7 +806,7 @@ describe("local worker", () => {
           assert(
             transcript.some(
               ({ direction, envelope }) =>
-                direction === "inbound" && envelope.payload._tag === "Interrupt",
+                direction === "inbound" && envelope.payload._tag === "Cancel",
             ),
           );
           const path = yield* Path.Path;

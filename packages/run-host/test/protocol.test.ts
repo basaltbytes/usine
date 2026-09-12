@@ -1,10 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
 import { SessionOperationError } from "@usine/agents/runtime";
+import { AgentSessionId } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Deferred, Effect, Logger, Option, Path, Queue, Schema } from "effect";
 import { command, controlledSession, spec, start } from "./support/session.ts";
 import { startHost } from "./support/stdio.ts";
+
+const childTarget = (sessionId: AgentSessionId) => new AttemptChannel.ChildTarget({ sessionId });
 
 describe("run-host protocol", () => {
   it.effect("reports failed SDK interrupt delivery while retaining the interrupted outcome", () =>
@@ -24,7 +27,7 @@ describe("run-host protocol", () => {
       const host = yield* startHost(session.runtime).pipe(Effect.withLogger(logger));
       yield* host.send(start());
       yield* host.next;
-      yield* host.send(command(new AttemptChannel.Interrupt()));
+      yield* host.send(command(new AttemptChannel.Cancel()));
       yield* host.result;
       expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
       expect(logs).toContainEqual(
@@ -43,9 +46,8 @@ describe("run-host protocol", () => {
   for (const [name, wire] of [
     [
       "a command before Start",
-      Schema.encodeSync(AttemptChannel.InputFrameFromJson)(
-        command(new AttemptChannel.Interrupt()),
-      ) + "\n",
+      Schema.encodeSync(AttemptChannel.InputFrameFromJson)(command(new AttemptChannel.Cancel())) +
+        "\n",
     ],
     ["malformed JSON", "{\n"],
     [
@@ -83,9 +85,9 @@ describe("run-host protocol", () => {
     ],
     [
       "cross-Attempt Interrupt",
-      command(new AttemptChannel.Interrupt(), 2, AttemptId.make("other/execute/1")),
+      command(new AttemptChannel.Cancel(), 2, AttemptId.make("other/execute/1")),
     ],
-    ["sequence gap", command(new AttemptChannel.Interrupt(), 3)],
+    ["sequence gap", command(new AttemptChannel.Cancel(), 3)],
     ["replayed sequence", command(new AttemptChannel.Steer({ message: "Replay" }), 1)],
   ] as const) {
     it.effect(`rejects ${name} during an active Attempt`, () =>
@@ -102,7 +104,10 @@ describe("run-host protocol", () => {
         yield* host.send(frame);
         const error = yield* Effect.flip(host.result);
         expect(error).toMatchObject({ _tag: "RunHostError", stage: "input" });
-        expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started"]);
+        expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+          "Started",
+          "InterventionApplied",
+        ]);
         expect(yield* Queue.size(session.launches)).toBe(1);
         expect(yield* Queue.size(session.steers)).toBe(0);
         expect(yield* Queue.size(interruptions)).toBe(0);
@@ -119,7 +124,7 @@ describe("run-host protocol", () => {
         const host = yield* startHost(session.runtime);
         const encode = Schema.encodeSync(AttemptChannel.InputFrameFromJson);
         const bytes = new TextEncoder().encode(
-          `${encode(start())}\n${encode(command(new AttemptChannel.Steer({ message: "Keep café accents" })))}\n${encode(command(new AttemptChannel.Interrupt(), 2))}\n`,
+          `${encode(start())}\n${encode(command(new AttemptChannel.Steer({ message: "Keep café accents" })))}\n${encode(command(new AttemptChannel.Cancel(), 2))}\n`,
         );
         const split = bytes.indexOf(0xc3) + 1;
         yield* Queue.offer(host.stdin, bytes.slice(0, split));
@@ -131,7 +136,8 @@ describe("run-host protocol", () => {
           host.frames.map((frame) => [frame.sequence, frame.attemptId, frame.payload._tag]),
         ).toEqual([
           [1, spec.attemptId, "Started"],
-          [2, spec.attemptId, "Interrupted"],
+          [2, spec.attemptId, "InterventionApplied"],
+          [3, spec.attemptId, "Interrupted"],
         ]);
         expect(host.frames[0]?.payload).toEqual(
           new AttemptChannel.Started({ parentModel: session.session.brain.model }),
@@ -169,12 +175,145 @@ describe("run-host protocol", () => {
         const host = yield* startHost(session.runtime);
         yield* host.send(start());
         yield* host.next;
-        yield* host.send(command(new AttemptChannel.Interrupt()));
+        yield* host.send(command(new AttemptChannel.Cancel()));
         yield* host.result;
         expect(deliveries).toBe(1);
         expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
         expect(yield* Deferred.isDone(deliveryStopped)).toBe(true);
         expect(yield* Deferred.isDone(session.released)).toBe(true);
       }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect("routes a parent-targeted Steer to the parent session", () =>
+    Effect.gen(function* () {
+      const session = yield* controlledSession();
+      const host = yield* startHost(session.runtime);
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(command(new AttemptChannel.Steer({ message: "keep going" })));
+      expect(yield* Queue.take(session.steers)).toBe("keep going");
+      expect(yield* Queue.size(session.childSteers)).toBe(0);
+      yield* host.send(command(new AttemptChannel.Cancel(), 2));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+        "Started",
+        "InterventionApplied",
+        "Interrupted",
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect("delivers a parent-targeted operator message as a user turn", () =>
+    Effect.gen(function* () {
+      const session = yield* controlledSession();
+      const host = yield* startHost(session.runtime);
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(command(new AttemptChannel.OperatorMessage({ message: "take over here" })));
+      expect(yield* Queue.take(session.steers)).toBe("take over here");
+      yield* host.send(command(new AttemptChannel.Cancel(), 2));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+        "Started",
+        "InterventionApplied",
+        "Interrupted",
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect(
+    "routes a child-targeted Steer to the addressed child, leaving the parent unsteered",
+    () =>
+      Effect.gen(function* () {
+        const session = yield* controlledSession();
+        const host = yield* startHost(session.runtime);
+        yield* host.send(start());
+        yield* host.next;
+        yield* host.send(
+          command(
+            new AttemptChannel.Steer({ message: "child guidance" }),
+            1,
+            spec.attemptId,
+            childTarget(session.child.id),
+          ),
+        );
+        expect(yield* Queue.take(session.childSteers)).toBe("child guidance");
+        expect(yield* Queue.size(session.steers)).toBe(0);
+        yield* host.send(command(new AttemptChannel.Cancel(), 2));
+        yield* host.result;
+        expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+          "Started",
+          "InterventionApplied",
+          "Interrupted",
+        ]);
+      }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect("interrupts an addressed child without ending the Attempt", () =>
+    Effect.gen(function* () {
+      const session = yield* controlledSession();
+      const host = yield* startHost(session.runtime);
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(
+        command(new AttemptChannel.Interrupt(), 1, spec.attemptId, childTarget(session.child.id)),
+      );
+      yield* Deferred.await(session.childInterrupted);
+      // A session pause is nonterminal; cancellation ends the Attempt.
+      yield* host.send(command(new AttemptChannel.Cancel(), 2));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+        "Started",
+        "InterventionApplied",
+        "Interrupted",
+      ]);
+      expect(yield* Deferred.isDone(session.childInterrupted)).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect("accepts a Release frame as a no-op while no child is held", () =>
+    Effect.gen(function* () {
+      const session = yield* controlledSession();
+      const host = yield* startHost(session.runtime);
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(
+        command(new AttemptChannel.Release(), 1, spec.attemptId, childTarget(session.child.id)),
+      );
+      yield* host.send(command(new AttemptChannel.Cancel(), 2));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+        "Started",
+        "InterventionApplied",
+        "Interrupted",
+      ]);
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect("records rejected input addressed to a child that is not live", () =>
+    Effect.gen(function* () {
+      const session = yield* controlledSession();
+      const host = yield* startHost(session.runtime);
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(
+        command(
+          new AttemptChannel.Steer({ message: "gone" }),
+          1,
+          spec.attemptId,
+          childTarget(AgentSessionId.make("parent:run/execute/1:child:99")),
+        ),
+      );
+      // The receipt explains why no session received the message.
+      yield* host.send(command(new AttemptChannel.Cancel(), 2));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+        "Started",
+        "InterventionRejected",
+        "Interrupted",
+      ]);
+      expect(yield* Queue.size(session.childSteers)).toBe(0);
+      expect(yield* Queue.size(session.steers)).toBe(0);
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 });

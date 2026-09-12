@@ -1,9 +1,10 @@
+import { Intervention, OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { assert, describe, it } from "@effect/vitest";
 import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AttemptTask } from "@usine/core/attempt";
+import { AttemptContext, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure, AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
@@ -55,6 +56,7 @@ type AttemptPlan = Effect.Effect<StepResult, AttemptFailure>;
 
 const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
   Layer.succeed(StepExecutor)({
+    intervene: () => Effect.void,
     interrupt: () => Effect.void,
     reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
     execute: () =>
@@ -129,6 +131,132 @@ const withInstance = <A, E, R>(use: (directory: InstanceDirectory) => Effect.Eff
   }).pipe(Effect.provide(NodeServices.layer));
 
 describe("durable run engine", () => {
+  it.live(
+    "keeps amended task and Agent through an infrastructure retry and records each Attempt's actual context",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const executed: Array<{
+            readonly task: string;
+            readonly agent: Agent;
+            readonly parentModel: Option.Option<ModelId>;
+          }> = [];
+          const amended = new AttemptContext({
+            task: AttemptTask.make("Fix the reviewed edge case"),
+            agent: new Agent({
+              ...testAgent,
+              name: AgentName.make("reviewer"),
+              persona: AgentPersona.make("Review the amended task"),
+              brain: new BrainSpec({
+                harness: "codex",
+                model: ModelId.make("gpt-5.6-terra"),
+                effort: "medium",
+              }),
+            }),
+            parentModel: Option.some(ModelId.make("openai/changed-parent")),
+          });
+          const executor = Layer.succeed(StepExecutor)({
+            intervene: () => Effect.void,
+            interrupt: () => Effect.void,
+            reserve: () =>
+              Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+            execute: (execution) =>
+              Effect.gen(function* () {
+                executed.push({
+                  task: execution.task,
+                  agent: execution.agent,
+                  parentModel: execution.parentModel,
+                });
+                if (executed.length === 1)
+                  return yield* new AgentFailure({ message: "Needs a correction" });
+                if (executed.length === 2)
+                  return yield* new InfraFailure({
+                    message: "Link lost",
+                    cause: new Error("offline"),
+                  });
+                return stepResult("Amended work completed");
+              }),
+          });
+          const runtime = layer(directory).pipe(Layer.provide(executor));
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const original = submission({ number: 1 });
+            const accepted = yield* engine.submit(original);
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Failed");
+            yield* engine.retry(accepted.runId, Option.some(amended));
+            const finished = yield* waitFor(
+              engine,
+              accepted.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.strictEqual(executed.length, 3);
+            assert.deepStrictEqual(
+              executed.slice(1),
+              [amended, amended].map(({ task, agent, parentModel }) => ({
+                task,
+                agent,
+                parentModel,
+              })),
+            );
+            assert.deepStrictEqual(
+              finished.attempts.map(({ task, agent }) => ({ task, agent })),
+              [
+                { task: original.task, agent: original.agent.name },
+                { task: amended.task, agent: amended.agent.name },
+                { task: amended.task, agent: amended.agent.name },
+              ],
+            );
+            assert.deepStrictEqual(finished.event, original.event);
+            assert.strictEqual(finished.task, amended.task);
+          }).pipe(Effect.provide(runtime));
+        }),
+      ),
+  );
+  it.live("rejects stale session input without delivering it to a later or canceled Attempt", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const delivered: Array<AttemptId> = [];
+        const started = yield* Deferred.make<void>();
+        const executor = Layer.succeed(StepExecutor)({
+          reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+          execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
+          interrupt: () => Effect.void,
+          intervene: (id) =>
+            Effect.sync(() => {
+              delivered.push(id);
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(submission({ number: 34 }));
+          assert(accepted._tag === "Claimed");
+          yield* Deferred.await(started);
+          const current = yield* engine.inspect(accepted.runId);
+          const attempt = current.attempts[0];
+          assert(attempt !== undefined);
+          const input = new Intervention({
+            operator: "Philippe",
+            target: new ParentTarget(),
+            action: new OperatorMessage({ message: "Continue" }),
+          });
+          const stale = yield* Effect.flip(
+            engine.intervene(accepted.runId, AttemptId.make("old-attempt"), input),
+          );
+          assert.strictEqual(stale._tag, "RunInterventionRejectedError");
+          assert.deepStrictEqual(delivered, []);
+          yield* engine.intervene(accepted.runId, attempt.id, input);
+          assert.deepStrictEqual(delivered, [attempt.id]);
+          yield* engine.cancel(accepted.runId);
+          const canceled = yield* Effect.flip(engine.intervene(accepted.runId, attempt.id, input));
+          assert.strictEqual(canceled._tag, "RunInterventionRejectedError");
+          assert.deepStrictEqual(delivered, [attempt.id]);
+        }).pipe(Effect.provide(layer(directory).pipe(Layer.provide(executor))));
+      }),
+    ),
+  );
+
   it.live("projects an Event through a successful Attempt", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
@@ -834,6 +962,7 @@ describe("durable run engine", () => {
         // A 0-capacity scheduler parks the run in `reserve` forever; only a
         // cancel that reaches the parked reservation ends it.
         const executor = Layer.succeed(StepExecutor)({
+          intervene: () => Effect.void,
           interrupt: () => Effect.void,
           reserve: () =>
             Deferred.succeed(reserveEntered, undefined).pipe(Effect.andThen(Effect.never)),

@@ -40,6 +40,8 @@ import {
 } from "./run-transcript/cache.ts";
 import { Conversation } from "./run-transcript/conversation.tsx";
 import { fetchRunDetail } from "./run-transcript/fetch.ts";
+import { EditAndRetry } from "./run-intervention/edit-and-retry.tsx";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 const timeAgo = (value: string): string => {
   const elapsed = Math.max(0, Date.now() - Date.parse(value));
@@ -62,6 +64,7 @@ export const RunDrawer = ({
   const queryClient = useQueryClient();
   const [confirmCancel, setConfirmCancel] = useState(false);
   const [activeTab, setActiveTab] = useState("conversation");
+  const [editing, setEditing] = useState(false);
   const detail = useQuery<RunDetailView>({
     queryKey: ["run", runId],
     queryFn: async () => {
@@ -174,6 +177,11 @@ export const RunDrawer = ({
                     {confirmCancel ? "Confirm cancel" : "Cancel Run"}
                   </Button>
                 )}
+                {run.canRetry && (
+                  <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+                    Edit and retry
+                  </Button>
+                )}
                 {confirmCancel && (
                   <Button
                     size="sm"
@@ -188,6 +196,9 @@ export const RunDrawer = ({
             )}
             {mutation.isError && (
               <ErrorAlert className="mx-4 my-3" message={mutation.error.message} />
+            )}
+            {editing && run.canRetry && (
+              <EditAndRetry key={run.id} run={run} close={() => setEditing(false)} />
             )}
             <Tabs value={activeTab} onValueChange={setActiveTab} className="min-h-0 flex-1 gap-0">
               <TabsList
@@ -217,6 +228,7 @@ export const RunDrawer = ({
                   key={runId}
                   runId={runId}
                   events={detail.data.transcript}
+                  sessionState={detail.data.sessionState}
                   attempts={run.attempts}
                   earlier={earlier}
                   loadEarlier={() => {
@@ -271,9 +283,20 @@ export const RunDrawer = ({
                       </ItemHeader>
                       <ItemContent>
                         <ItemDescription className="font-mono">
-                          {attempt.worker} · {brainLine(attempt.brain)} ·{" "}
+                          {attempt.agent} · {attempt.worker} · {brainLine(attempt.brain)} ·{" "}
                           {timeAgo(attempt.startedAt)}
                         </ItemDescription>
+                        {attempt.operatorIntervened && (
+                          <Badge variant="outline">Operator intervened</Badge>
+                        )}
+                        <Collapsible>
+                          <CollapsibleTrigger render={<Button size="sm" variant="ghost" />}>
+                            Task used by this attempt
+                          </CollapsibleTrigger>
+                          <CollapsibleContent>
+                            <Markdown>{attempt.task}</Markdown>
+                          </CollapsibleContent>
+                        </Collapsible>
                         {attempt.outcome?._tag === "Failed" && (
                           <p className="text-destructive wrap-anywhere">
                             <strong>{attempt.outcome.failure._tag}</strong>

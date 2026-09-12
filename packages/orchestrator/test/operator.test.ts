@@ -10,7 +10,13 @@ import {
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentName, Agent, AgentPersona } from "@usine/core/agent";
-import { AttemptId, Attempt, AttemptNumber, AttemptTask } from "@usine/core/attempt";
+import {
+  AttemptId,
+  Attempt,
+  AttemptNumber,
+  AttemptContext,
+  AttemptTask,
+} from "@usine/core/attempt";
 import { DedupKey, EventId, Event } from "@usine/core/event";
 import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
@@ -23,7 +29,7 @@ import { IssueTrigger } from "@usine/config/trigger";
 import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate } from "@usine/config/loop";
 import { LoopName } from "@usine/core/loop";
-import { UsineConfig } from "@usine/config/factory";
+import { OperatorLogin, UsineConfig } from "@usine/config/factory";
 import {
   AgentSessionId,
   ChildSession,
@@ -64,6 +70,7 @@ import {
 } from "../src/operator/transcript.ts";
 import { FailureView } from "../src/operator/attempt.ts";
 import { Operator } from "../src/operator/operator.ts";
+import { EditAndRetry, SessionIntervention } from "../src/operator/run.ts";
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { failureView } from "../src/operator/projection.ts";
@@ -145,6 +152,9 @@ const snapshot = new RunSnapshot({
   }),
   attempts: [
     new Attempt({
+      task: AttemptTask.make("Review issue 31."),
+      agent: agentFile.name,
+      operatorIntervened: false,
       id: attemptId,
       runId,
       stepName: StepName.make("run"),
@@ -251,11 +261,16 @@ const testLayer = (
   projectionRevision: Ref.Ref<Option.Option<ProjectionRevision>>,
   runSnapshot: RunSnapshot = snapshot,
   budgets: Layer.Layer<CycleBudgets> = noCycleBudgets,
+  commands: Pick<RunEngine["Service"], "retry" | "intervene"> = {
+    retry: () => Effect.void,
+    intervene: () => Effect.void,
+  },
 ) => {
   const readTranscript = (query: TranscriptQuery) =>
     Effect.succeed(
       Match.valueTags(query, {
         TranscriptAllQuery: () => transcript,
+        TranscriptSessionsQuery: () => [],
         TranscriptTailQuery: ({ after, limit }) =>
           transcript.filter((entry) => entry.sequence > after).slice(0, limit),
         TranscriptPageQuery: ({ before, limit }) => {
@@ -268,12 +283,13 @@ const testLayer = (
       }),
     );
   const runs = Layer.succeed(RunEngine)({
+    intervene: commands.intervene,
     approve: (id, event) => Ref.update(approved, (entries) => [...entries, { runId: id, event }]),
     cancel: () => Effect.void,
     inspect: () => Effect.succeed(runSnapshot),
     reconcile: () => Effect.void,
     drain: () => Effect.void,
-    retry: () => Effect.void,
+    retry: commands.retry,
     revoke: () => Effect.succeed([]),
     submit: () => Effect.die("unused"),
     transcript: readTranscript,
@@ -426,6 +442,92 @@ const testLayer = (
 };
 
 describe("Operator", () => {
+  it.effect(
+    "derives retry context from the selected roster agent and attributes input to the configured operator",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const edits: Array<AttemptContext> = [];
+        const inputs: Array<AttemptChannel.Intervention> = [];
+        const replacement = new AgentFile({
+          ...agentFile,
+          name: AgentName.make("reviewer"),
+          harness: "codex",
+          model: ModelId.make("new-model"),
+          persona: AgentPersona.make("Review the implementation"),
+          parentModel: Option.some(ModelId.make("openai/new-parent")),
+          parentEffort: Option.some("medium"),
+        });
+        const configured = new LoadedInstance({
+          ...instance,
+          config: new UsineConfig({
+            ...instance.config,
+            operator: Option.some(OperatorLogin.make("Philippe")),
+          }),
+          agents: [agentFile, replacement],
+        });
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          yield* operator.editAndRetry(
+            configured,
+            runId,
+            new EditAndRetry({
+              task: AttemptTask.make("Correct the failed approach"),
+              agent: replacement.name,
+            }),
+          );
+          assert.deepStrictEqual(edits, [
+            new AttemptContext({
+              task: AttemptTask.make("Correct the failed approach"),
+              agent: replacement.agent,
+              parentModel: replacement.parentModel,
+            }),
+          ]);
+          const refused = yield* Effect.flip(
+            operator.editAndRetry(
+              configured,
+              runId,
+              new EditAndRetry({
+                task: AttemptTask.make("Task"),
+                agent: AgentName.make("missing"),
+              }),
+            ),
+          );
+          assert.strictEqual(refused._tag, "RosterAgentNotFoundError");
+          assert.strictEqual(edits.length, 1);
+          const input = Schema.decodeUnknownSync(SessionIntervention)({
+            attemptId,
+            action: { _tag: "Steer", message: "Continue" },
+          });
+          assert.strictEqual(input.target._tag, "Parent");
+          yield* operator.intervene(configured, runId, input);
+          assert.deepStrictEqual(inputs, [
+            new AttemptChannel.Intervention({
+              operator: "Philippe",
+              target: new AttemptChannel.ParentTarget(),
+              action: input.action,
+            }),
+          ]);
+        }).pipe(
+          Effect.provide(
+            testLayer(approved, moved, reads, revision, snapshot, noCycleBudgets, {
+              retry: (_runId, edit) =>
+                Effect.sync(() => {
+                  if (edit !== undefined && Option.isSome(edit)) edits.push(edit.value);
+                }),
+              intervene: (_runId, _attemptId, input) =>
+                Effect.sync(() => {
+                  inputs.push(input);
+                }),
+            }),
+          ),
+        );
+      }),
+  );
+
   it.effect("projects Item-level exhaustion without a new Run and answers the exact Ask", () =>
     Effect.gen(function* () {
       const ask = new CycleBudgetAsk({

@@ -25,6 +25,8 @@ const operatorFailure = (error: BackendError) => {
       case "TranscriptAttemptNotFoundError":
         return `Attempt ${error.attemptId} does not belong to Run ${error.runId}.`;
       case "BackendUnavailableError":
+      case "RunInterventionRejectedError":
+      case "RosterAgentNotFoundError":
         return error.message;
       case "BoardProjectNotFoundError":
         return `Project ${error.repository} was not found.`;
@@ -127,6 +129,13 @@ const fromBackend = <A>(
 const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
   routes
     .handle("overview", () => fromBackend((backend) => backend.overview))
+    .handle("agents", () => fromBackend((backend) => backend.agents))
+    .handle("editAndRetry", ({ params, payload }) =>
+      fromBackend((backend) => backend.editAndRetry(params.runId, payload)).pipe(acknowledge),
+    )
+    .handle("intervene", ({ params, payload }) =>
+      fromBackend((backend) => backend.intervene(params.runId, payload)).pipe(acknowledge),
+    )
     .handle("resetCycleBudget", ({ payload }) =>
       fromBackend((backend) => backend.resetCycleBudget(payload.askId)).pipe(acknowledge),
     )

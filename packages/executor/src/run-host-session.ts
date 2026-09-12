@@ -12,6 +12,7 @@ import {
   Ref,
   Result,
   Schema,
+  Semaphore,
   Scope,
   Stream,
   type PlatformError,
@@ -38,6 +39,10 @@ type SpawnRunHost = (
 ) => Effect.Effect<SpawnedRunHost, AttemptFailure | PlatformError.PlatformError, Scope.Scope>;
 
 export interface RunHostSession {
+  readonly intervene: (
+    attemptId: AttemptId,
+    intervention: AttemptChannel.Intervention,
+  ) => Effect.Effect<void, AttemptFailure>;
   readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
   readonly launch: (
     prepared: AttemptWorkspace,
@@ -47,6 +52,8 @@ export interface RunHostSession {
 }
 
 interface ActiveAttempt {
+  readonly scope: Scope.Scope;
+  readonly writeLock: Semaphore.Semaphore;
   readonly cancelStarted: Ref.Ref<boolean>;
   readonly handle: ChildProcessHandle;
   readonly host: string;
@@ -151,22 +158,32 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
             worker: active.worker,
             host: active.host,
           });
-          const sequence = yield* Ref.getAndUpdate(active.sequence, (value) => value + 1);
-          const envelope = new AttemptChannel.InboundEnvelope({
-            version: AttemptChannel.PROTOCOL_VERSION,
-            attemptId,
-            sequence: AttemptChannel.Sequence.make(sequence),
-            sentAt: yield* DateTime.now,
-            payload: new AttemptChannel.Interrupt(),
-          });
-          const delivered = yield* active.io.append("inbound", envelope).pipe(
-            Effect.andThen(Queue.offer(active.input, frame(envelope))),
-            // The transcript store sits outside the process adapter and may be
-            // parked; the bound keeps the uninterruptible cancellation handshake
-            // moving on to the hard kill.
-            Effect.timeoutOption(options.interruptGrace),
-            Effect.result,
-          );
+          const delivered = yield* active.writeLock
+            .withPermits(1)(
+              Effect.gen(function* () {
+                const sequence = yield* Ref.get(active.sequence);
+                const envelope = new AttemptChannel.InboundEnvelope({
+                  version: AttemptChannel.PROTOCOL_VERSION,
+                  attemptId,
+                  sequence: AttemptChannel.Sequence.make(sequence),
+                  sentAt: yield* DateTime.now,
+                  // Cancellation stops the whole Attempt, so it addresses the parent.
+                  target: new AttemptChannel.ParentTarget(),
+                  operator: "engine",
+                  payload: new AttemptChannel.Cancel(),
+                });
+                yield* active.io.append("inbound", envelope);
+                yield* Ref.update(active.sequence, (value) => value + 1);
+                return yield* Queue.offer(active.input, frame(envelope));
+              }),
+            )
+            .pipe(
+              // The transcript store sits outside the process adapter and may be
+              // parked; the bound keeps the uninterruptible cancellation handshake
+              // moving on to the hard kill.
+              Effect.timeoutOption(options.interruptGrace),
+              Effect.result,
+            );
           if (Result.isFailure(delivered)) {
             yield* Effect.logWarning("Interrupt could not be delivered", {
               attemptId,
@@ -235,6 +252,8 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
           const { handle, host, scrub } = yield* spawn(input);
           yield* Effect.annotateCurrentSpan({ host });
           const active: ActiveAttempt = {
+            scope: yield* Effect.scope,
+            writeLock: yield* Semaphore.make(1),
             cancelStarted: yield* Ref.make(false),
             handle,
             host,
@@ -243,11 +262,6 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
             sequence: yield* Ref.make(1),
             worker: prepared.worker,
           };
-          yield* Ref.update(activeAttempts, (current) => {
-            const next = new Map(current);
-            next.set(attemptId, active);
-            return next;
-          });
           yield* Queue.offer(
             input,
             frame(
@@ -257,6 +271,13 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
               }),
             ),
           );
+
+          // Publish the live channel only after its mandatory Start frame is queued.
+          yield* Ref.update(activeAttempts, (current) => {
+            const next = new Map(current);
+            next.set(attemptId, active);
+            return next;
+          });
 
           const stderr = yield* Ref.make("");
           const stderrFiber = yield* handle.stderr.pipe(
@@ -371,16 +392,23 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
           }
           return ended.value.result;
         }).pipe(
-          Effect.onInterrupt(() =>
-            cancel(attemptId).pipe(
-              Effect.tapError((error) =>
-                Effect.logWarning("Cancel-on-interrupt failed", {
-                  attemptId,
-                  message: String(error),
-                }),
-              ),
-              Effect.ignore,
-            ),
+          Effect.onError((cause) =>
+            // A ceiling reported by the transcript sink needs the same bounded
+            // shutdown as external cancellation, before process scope cleanup.
+            Cause.hasInterrupts(cause) ||
+            Cause.findErrorOption(cause).pipe(
+              Option.exists((error) => error._tag === "RunawayFailure"),
+            )
+              ? cancel(attemptId).pipe(
+                  Effect.tapError((error) =>
+                    Effect.logWarning("Run-host shutdown failed", {
+                      attemptId,
+                      message: String(error),
+                    }),
+                  ),
+                  Effect.ignore,
+                )
+              : Effect.void,
           ),
         ),
       );
@@ -401,5 +429,56 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
       );
     });
 
-    return { cancel, launch } satisfies RunHostSession;
+    const intervene = Effect.fn("RunHostSession.intervene")(function* (
+      attemptId: AttemptId,
+      intervention: AttemptChannel.Intervention,
+    ) {
+      yield* Effect.annotateCurrentSpan({
+        attemptId,
+        target: intervention.target._tag,
+        action: intervention.action._tag,
+      });
+      const active = (yield* Ref.get(activeAttempts)).get(attemptId);
+      const unavailable = new AgentFailure({
+        message: "This Attempt no longer has a live channel",
+      });
+      if (active === undefined) return yield* unavailable;
+      yield* active.writeLock
+        .withPermits(1)(
+          Effect.gen(function* () {
+            if (yield* Ref.get(active.cancelStarted)) return yield* unavailable;
+            const envelope = new AttemptChannel.InboundEnvelope({
+              version: AttemptChannel.PROTOCOL_VERSION,
+              attemptId,
+              sequence: AttemptChannel.Sequence.make(yield* Ref.get(active.sequence)),
+              sentAt: yield* DateTime.now,
+              operator: intervention.operator,
+              target: intervention.target,
+              payload: intervention.action,
+            });
+            yield* active.io.append("inbound", envelope);
+            yield* Ref.update(active.sequence, (value) => value + 1);
+            if (!(yield* Queue.offer(active.input, frame(envelope)))) return yield* unavailable;
+            yield* Effect.logInfo("Operator input queued on the live Attempt channel", {
+              attemptId,
+              sequence: envelope.sequence,
+              action: intervention.action._tag,
+            });
+          }),
+        )
+        .pipe(
+          Effect.tapError((error) =>
+            Effect.logWarning("Operator input delivery failed", {
+              attemptId,
+              action: intervention.action._tag,
+              errorTag: error._tag,
+            }),
+          ),
+          // Delivery belongs to the Attempt. A disconnected HTTP caller must not
+          // strand a persisted input before its sequence and queue are advanced.
+          Effect.forkIn(active.scope),
+          Effect.flatMap(Fiber.join),
+        );
+    });
+    return { cancel, launch, intervene } satisfies RunHostSession;
   });

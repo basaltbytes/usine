@@ -1,4 +1,9 @@
+import { transcriptEvent } from "./projection.ts";
+import { TranscriptSessionsQuery } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/config/label";
+import { resolveParentModel } from "@usine/core/agent";
+import { AttemptContext } from "@usine/core/attempt";
+import { Intervention } from "@usine/core/attempt/channel";
 import type { LoadedInstance } from "@usine/config/instance";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
@@ -52,7 +57,12 @@ import {
   type TranscriptRequest,
 } from "./transcript.ts";
 import { LoopView, ProjectView, ReadyOverview, type ProjectStatus } from "./overview.ts";
-import { RunDetailView } from "./run.ts";
+import {
+  RunDetailView,
+  EditAndRetry,
+  SessionIntervention,
+  RosterAgentNotFoundError,
+} from "./run.ts";
 import { readTranscript, runView } from "./projection.ts";
 
 export type BoardMoveError =
@@ -63,6 +73,7 @@ export type BoardMoveError =
   | EnginePersistenceError
   | GitHubAppError;
 export type OperatorError =
+  | RosterAgentNotFoundError
   | RunEngineError
   | TranscriptAttemptNotFoundError
   | BoardMoveError
@@ -345,12 +356,23 @@ const makeOperatorObservation = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const transcript = yield* readTranscript(reader, snapshot, request);
+    const [transcript, sessionState] = yield* Effect.all(
+      [
+        readTranscript(reader, snapshot, request),
+        Effect.forEach(
+          snapshot.attempts.filter((attempt) => Option.isNone(attempt.outcome)),
+          (attempt) => reader.transcript(new TranscriptSessionsQuery({ attemptId: attempt.id })),
+          { concurrency: "unbounded" },
+        ),
+      ],
+      { concurrency: "unbounded" },
+    );
     return new RunDetailView({
       run: runView(snapshot, paused),
       eventDedupKey: snapshot.event.dedupKey,
       eventPayload: snapshot.event.payload,
       transcript: transcript.events,
+      sessionState: sessionState.flat().map(transcriptEvent),
       earlierTranscript: transcript.earlier,
     });
   });
@@ -418,6 +440,53 @@ const makeOperator = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ runId });
     yield* runs.retry(runId);
     yield* Effect.logInfo("Operator retried Run", { runId });
+  });
+
+  const editAndRetry = Effect.fn("Operator.editAndRetry")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+    edit: EditAndRetry,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, agent: edit.agent });
+    const file = instance.agents.find(({ name }) => name === edit.agent);
+    if (file === undefined)
+      return yield* new RosterAgentNotFoundError({
+        agent: edit.agent,
+        message: `Agent ${edit.agent} is not in the roster`,
+      });
+    const agent = file.agent;
+    yield* runs.retry(
+      runId,
+      Option.some(
+        new AttemptContext({
+          task: edit.task,
+          agent,
+          parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
+        }),
+      ),
+    );
+    yield* Effect.logInfo("Operator amended and retried Run", { runId, agent: agent.name });
+  });
+
+  const intervene = Effect.fn("Operator.intervene")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+    input: SessionIntervention,
+  ) {
+    yield* Effect.annotateCurrentSpan({
+      runId,
+      attemptId: input.attemptId,
+      action: input.action._tag,
+    });
+    yield* runs.intervene(
+      runId,
+      input.attemptId,
+      new Intervention({
+        operator: Option.getOrElse(instance.config.operator, () => "local operator"),
+        target: input.target,
+        action: input.action,
+      }),
+    );
   });
 
   const cancel = Effect.fn("Operator.cancel")(function* (runId: RunId) {
@@ -534,6 +603,8 @@ const makeOperator = Effect.gen(function* () {
     moveBoardItem,
     pause,
     retry,
+    editAndRetry,
+    intervene,
     unpause,
     resetCycleBudget,
   } as const;
@@ -549,6 +620,18 @@ export class Operator extends Context.Service<
     readonly approve: (runId: RunId) => Effect.Effect<void, OperatorError>;
     /** Requests a new Attempt for a failed Run using its effective task and Agent. */
     readonly retry: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Atomically amends a failed Run before requesting its next Attempt. */
+    readonly editAndRetry: (
+      instance: LoadedInstance,
+      runId: RunId,
+      edit: EditAndRetry,
+    ) => Effect.Effect<void, OperatorError>;
+    /** Delivers an attributed action through a live session's Attempt channel. */
+    readonly intervene: (
+      instance: LoadedInstance,
+      runId: RunId,
+      input: SessionIntervention,
+    ) => Effect.Effect<void, OperatorError>;
     /** Cancels an open Run and interrupts its current Attempt; an already closed Run is unchanged. */
     readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
     /** Swaps lane labels on GitHub and hints an authoritative refresh of its Board position and Loop matches. */
@@ -575,7 +658,14 @@ export {
   NeedsSetupOverview,
   FactoryOverview,
 } from "./overview.ts";
-export { RunStateTag, RunView, RunDetailView } from "./run.ts";
+export {
+  RunStateTag,
+  RunView,
+  RunDetailView,
+  EditAndRetry,
+  SessionIntervention,
+  RosterAgentNotFoundError,
+} from "./run.ts";
 export {
   InfraFailureView,
   DefectFailureView,

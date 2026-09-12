@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import { Agent, AgentName } from "../agent/agent.ts";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
 import { RunId } from "../run/run.ts";
 import { StepName } from "../step/step.ts";
@@ -26,6 +27,13 @@ export const AttemptTask = Schema.String.check(
 ).pipe(Schema.brand("AttemptTask"));
 export type AttemptTask = typeof AttemptTask.Type;
 
+/** The effective task and roster Agent an operator assigns to a Run's later Attempts. */
+export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext")({
+  task: AttemptTask,
+  agent: Agent,
+  parentModel: Schema.OptionFromNullOr(ModelId),
+}) {}
+
 /** One try of a step on a worker. `outcome` is none while the attempt is in flight. */
 export class Attempt extends Schema.Class<Attempt>("Attempt")({
   id: AttemptId,
@@ -34,6 +42,9 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
   worker: WorkerName,
   number: AttemptNumber,
   brain: BrainSpec,
+  task: AttemptTask,
+  agent: AgentName,
+  operatorIntervened: Schema.Boolean,
   parentModel: Schema.OptionFromNullOr(ModelId),
   startedAt: Schema.DateTimeUtc,
   outcome: Schema.Option(AttemptOutcome),

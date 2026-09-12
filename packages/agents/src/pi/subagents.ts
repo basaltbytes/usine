@@ -12,8 +12,9 @@ import {
   ChildSession,
   ChildSessionBudget,
   ChildSessionCount,
+  SessionFinished,
 } from "@usine/core/agent/session";
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, Exit, Fiber, Stream } from "effect";
 import { Type } from "typebox";
 import { assembleChildPrompt } from "../prompt.ts";
 import {
@@ -21,6 +22,7 @@ import {
   type ChildBackend,
   ChildRequest,
   ChildSessionBudgetExceededError,
+  type ChildSessions,
   type WorkingDirectory,
 } from "../runtime.ts";
 
@@ -33,6 +35,8 @@ export interface SubagentsExtensionOptions {
   /** Called on every rejected spawn; the parent decides what a repeat means. */
   readonly onBudgetExceeded: (error: ChildSessionBudgetExceededError) => Effect.Effect<void>;
   readonly parentId: AgentSessionId;
+  /** Records a launched child so the run host can address operator input to it by id. */
+  readonly register: ChildSessions["register"];
   /**
    * Runs one child program on the parent launch's services and scope. Pi
    * calls the tool outside any usine fiber, so the default runtime would lose
@@ -125,6 +129,15 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
       taskExcerpt: excerpt,
     });
     const child = yield* options.backend.launch(request);
+    // Registered on the spawn scope, so the child stops being addressable when it returns.
+    yield* options.register(child);
+    yield* Effect.addFinalizer((exit) =>
+      Exit.isFailure(exit)
+        ? Effect.logWarning("Child session ended before returning a result", {
+            sessionId: session.id,
+          }).pipe(Effect.andThen(options.emit(new SessionFinished({ session: child.session }))))
+        : Effect.void,
+    );
     const forward = yield* child.events.pipe(Stream.runForEach(options.emit), Effect.forkScoped);
     const result = yield* Effect.raceFirst(
       child.result,
