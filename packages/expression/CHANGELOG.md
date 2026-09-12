@@ -1,5 +1,20 @@
 # @usine/expression
 
+## 0.2.0
+
+### Minor Changes
+
+- b9e38a7: Import expression schemas, environment descriptors, and typed errors from
+  `@usine/expression/expression-engine`. This replaces the `/model` entry point;
+  update existing `/model` imports to `/expression-engine`.
+  
+  Organize GitHub authentication, access, polling, and operator view contracts by
+  responsibility while preserving their existing public entry points and schemas.
+
+### Patch Changes
+
+- 354e598: Provision factory-wide GitHub label declarations before polling, report non-blocking preflight failures, and warn when Board lanes or Loop triggers use undeclared labels. Label names follow GitHub's contract (at most 50 characters, no surrounding whitespace), and provisioning waits for a confirmed catalog instead of creating labels blindly after a failed catalog request.
+
 ## 0.1.0
 
 ### Minor Changes

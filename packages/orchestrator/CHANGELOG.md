@@ -1,5 +1,62 @@
 # @usine/orchestrator
 
+## 0.2.0
+
+### Minor Changes
+
+- 3f80f88: Apply `settings.max_children` as a per-Attempt child-session budget. Protocol v4 sends the budget to the Pi parent, records each accepted spawn with its cumulative count and task excerpt, and reports an excess spawn as a typed non-retryable failure with the configured and attempted counts. Durable protocol-v3 transcript envelopes remain readable after the live channel upgrade.
+- a36f46e: Bound issue and pull-request feedback cycles across Runs with `max_cycles` (default three per Loop). Persist Item-level exhaustion Asks, expose explicit resets in the operator UI and HTTP API, and require fresh trigger evaluation after a reset. Upgrade existing Run history and queued Events into the budget.
+  
+  Use comment reviews and Loop-defined outcome labels for agents sharing a GitHub App identity. Required independent approvals and merging remain operator actions.
+- f42d393: Publish the operator HTTP contract at `@usine/orchestrator/operator/http` and derive server handlers and browser requests from it. Preserve existing URLs, response envelopes, transcript query conventions, and operator actions while validating transport failures for typed clients.
+- 333eacd: Author the Pi parent's reasoning effort: `settings.parent_effort` in `usine.yaml` sets the instance default and `parent_effort` in an agent file overrides it; unset keeps the parent at its child's effort. A parent model that cannot run the resolved effort fails the Attempt with `UnsupportedEffortError` before the session starts.
+- 57a374f: Verify rostered harness executables and login state on local and exe.dev Workers before scheduling and preparation. Require codex-cli 0.144.0 and verify ChatGPT authentication before starting Codex turns. Capability gaps require operator action; incomplete checks and transport failures retain infrastructure retries.
+  
+  Executor preflight and orchestrator engine layers now accept the roster’s brain specs. The run host provides a credential-free harness readiness command, replacing exe.dev’s manually configured login checks. Claude’s Agent SDK uses the Worker’s preflight-checked `claude` executable.
+
+### Patch Changes
+
+- 162b323: Record executor defects as non-retryable Attempt failures with safe operator messages. Keep Attempt admission and cleanup in one service operation, and match Task relationships by canonical PR paths.
+- b9e38a7: Import expression schemas, environment descriptors, and typed errors from
+  `@usine/expression/expression-engine`. This replaces the `/model` entry point;
+  update existing `/model` imports to `/expression-engine`.
+  
+  Organize GitHub authentication, access, polling, and operator view contracts by
+  responsibility while preserving their existing public entry points and schemas.
+- 485f244: Start PR-triggered Attempts at the Event's exact pull request head commit.
+- 354e598: Provision factory-wide GitHub label declarations before polling, report non-blocking preflight failures, and warn when Board lanes or Loop triggers use undeclared labels. Label names follow GitHub's contract (at most 50 characters, no surrounding whitespace), and provisioning waits for a confirmed catalog instead of creating labels blindly after a failed catalog request.
+- 7cf4887: Refresh Board moves from GitHub promptly and evaluate their Loops without waiting for the next periodic poll. Coalesce self-write Hints, preserve normal polling and Event deduplication, and honor GitHub request backoff.
+  
+  Keep moved cards in their destination through stale refreshes and project navigation, show saving and synchronization progress, and keep every Board lane reachable beside the sidebar.
+- dd81b60: Make proposed Board lanes read-only to preserve descriptive GitHub labels. Configure an authored lane map in usine.yaml to enable moves; authored moves exchange only labels in that map.
+- e7adbd8: Derive operator action availability from the shared Run lifecycle rules.
+- b628897: Join linked issue and PR Items into Board tasks with complete saved Run histories, per-task Run and Attempt counts, and explicit current-Item lane moves.
+- Updated dependencies [3f80f88]
+- Updated dependencies [162b323]
+- Updated dependencies [388e59d]
+- Updated dependencies [3db806c]
+- Updated dependencies [5c47dc2]
+- Updated dependencies [a36f46e]
+- Updated dependencies [410607d]
+- Updated dependencies [b9e38a7]
+- Updated dependencies [83edd04]
+- Updated dependencies [333eacd]
+- Updated dependencies [354e598]
+- Updated dependencies [bd45cf4]
+- Updated dependencies [7cf4887]
+- Updated dependencies [7dc019e]
+- Updated dependencies [e7adbd8]
+- Updated dependencies [b628897]
+- Updated dependencies [4c97cae]
+- Updated dependencies [57a374f]
+  - @usine/config@0.2.0
+  - @usine/core@0.2.0
+  - @usine/engine@0.2.0
+  - @usine/executor@0.2.0
+  - @usine/run-host@0.2.0
+  - @usine/expression@0.2.0
+  - @usine/github@0.1.1
+
 ## 0.1.0
 
 ### Minor Changes

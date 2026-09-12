@@ -1,5 +1,32 @@
 # @usine/engine
 
+## 0.2.0
+
+### Minor Changes
+
+- 3f80f88: Apply `settings.max_children` as a per-Attempt child-session budget. Protocol v4 sends the budget to the Pi parent, records each accepted spawn with its cumulative count and task excerpt, and reports an excess spawn as a typed non-retryable failure with the configured and attempted counts. Durable protocol-v3 transcript envelopes remain readable after the live channel upgrade.
+- 388e59d: Add `usine export-run <runId>` to save one Run's detail, Attempt history, and complete transcripts as a local JSON file. Use `--output <path>` to choose the destination. Existing files are preserved, and missing Runs or export failures return a nonzero exit status.
+  
+  Add `RunReader.evidence(runId)` for a consistent snapshot and complete transcripts from one transaction, and `runReaderLayer(instanceDirectory)` for read-only access to an existing local runtime database without migrations.
+- a36f46e: Bound issue and pull-request feedback cycles across Runs with `max_cycles` (default three per Loop). Persist Item-level exhaustion Asks, expose explicit resets in the operator UI and HTTP API, and require fresh trigger evaluation after a reset. Upgrade existing Run history and queued Events into the budget.
+  
+  Use comment reviews and Loop-defined outcome labels for agents sharing a GitHub App identity. Required independent approvals and merging remain operator actions.
+- 83edd04: Add `usine backup <path>` to copy the runtime database while the orchestrator runs. Backups include all tables and committed WAL data, preserve existing destination files, and support restoring Run evidence. Document backup and restore requirements.
+
+### Patch Changes
+
+- 162b323: Record executor defects as non-retryable Attempt failures with safe operator messages. Keep Attempt admission and cleanup in one service operation, and match Task relationships by canonical PR paths.
+- 5c47dc2: Drain admitted Attempts on SIGINT or SIGTERM before closing the runtime. Defer queued work and automatic retries until restart, with a bounded shutdown wait and a second-signal force stop.
+- b628897: Join linked issue and PR Items into Board tasks with complete saved Run histories, per-task Run and Attempt counts, and explicit current-Item lane moves.
+- Updated dependencies [3f80f88]
+- Updated dependencies [162b323]
+- Updated dependencies [a36f46e]
+- Updated dependencies [333eacd]
+- Updated dependencies [bd45cf4]
+- Updated dependencies [e7adbd8]
+- Updated dependencies [57a374f]
+  - @usine/core@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

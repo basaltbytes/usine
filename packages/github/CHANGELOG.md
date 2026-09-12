@@ -1,5 +1,29 @@
 # @usine/github
 
+## 0.1.1
+
+### Patch Changes
+
+- b9e38a7: Import expression schemas, environment descriptors, and typed errors from
+  `@usine/expression/expression-engine`. This replaces the `/model` entry point;
+  update existing `/model` imports to `/expression-engine`.
+  
+  Organize GitHub authentication, access, polling, and operator view contracts by
+  responsibility while preserving their existing public entry points and schemas.
+- 354e598: Provision factory-wide GitHub label declarations before polling, report non-blocking preflight failures, and warn when Board lanes or Loop triggers use undeclared labels. Label names follow GitHub's contract (at most 50 characters, no surrounding whitespace), and provisioning waits for a confirmed catalog instead of creating labels blindly after a failed catalog request.
+- 7cf4887: Refresh Board moves from GitHub promptly and evaluate their Loops without waiting for the next periodic poll. Coalesce self-write Hints, preserve normal polling and Event deduplication, and honor GitHub request backoff.
+  
+  Keep moved cards in their destination through stale refreshes and project navigation, show saving and synchronization progress, and keep every Board lane reachable beside the sidebar.
+- 4c97cae: Accept valid installation tokens when GitHub's clock is slightly ahead, without extending the local lease beyond one hour.
+- Updated dependencies [3f80f88]
+- Updated dependencies [162b323]
+- Updated dependencies [a36f46e]
+- Updated dependencies [333eacd]
+- Updated dependencies [bd45cf4]
+- Updated dependencies [e7adbd8]
+- Updated dependencies [57a374f]
+  - @usine/core@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes
