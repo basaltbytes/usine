@@ -19,8 +19,8 @@ describe("run-host results", () => {
     Effect.gen(function* () {
       const session = yield* controlledSession();
       const runtime = AgentRuntime.of({
-        launch: (request) =>
-          session.runtime.launch(request).pipe(
+        launch: (request, children) =>
+          session.runtime.launch(request, children).pipe(
             Effect.map((running) => ({
               ...running,
               interrupt: Deferred.fail(

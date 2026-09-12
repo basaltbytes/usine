@@ -81,6 +81,7 @@ describe("owned Pi subagents extension", () => {
       maxChildren: ChildSessionBudget.make(4),
       onBudgetExceeded: () => Effect.void,
       parentId: parent.id,
+      register: () => Effect.void,
       run: (program) => Effect.runPromise(program.pipe(Effect.withLogger(logger))),
     });
     // SAFETY: this extension only calls registerTool; all other ExtensionAPI members are unused.
@@ -145,6 +146,7 @@ describe("owned Pi subagents extension", () => {
       maxChildren: ChildSessionBudget.make(1),
       onBudgetExceeded: (error) => Effect.sync(() => reported.push(error)),
       parentId: parent.id,
+      register: () => Effect.void,
       run: (program) =>
         Effect.runPromise(
           program.pipe(

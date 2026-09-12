@@ -157,6 +157,8 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
             attemptId,
             sequence: AttemptChannel.Sequence.make(sequence),
             sentAt: yield* DateTime.now,
+            // Cancellation stops the whole Attempt, so it addresses the parent.
+            target: new AttemptChannel.ParentTarget(),
             payload: new AttemptChannel.Interrupt(),
           });
           const delivered = yield* active.io.append("inbound", envelope).pipe(

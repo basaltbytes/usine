@@ -21,6 +21,7 @@ import {
   type ChildBackend,
   ChildRequest,
   ChildSessionBudgetExceededError,
+  type ChildSessions,
   type WorkingDirectory,
 } from "../runtime.ts";
 
@@ -33,6 +34,8 @@ export interface SubagentsExtensionOptions {
   /** Called on every rejected spawn; the parent decides what a repeat means. */
   readonly onBudgetExceeded: (error: ChildSessionBudgetExceededError) => Effect.Effect<void>;
   readonly parentId: AgentSessionId;
+  /** Records a launched child so the run host can address operator input to it by id. */
+  readonly register: ChildSessions["register"];
   /**
    * Runs one child program on the parent launch's services and scope. Pi
    * calls the tool outside any usine fiber, so the default runtime would lose
@@ -125,6 +128,8 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
       taskExcerpt: excerpt,
     });
     const child = yield* options.backend.launch(request);
+    // Registered on the spawn scope, so the child stops being addressable when it returns.
+    yield* options.register(child);
     const forward = yield* child.events.pipe(Stream.runForEach(options.emit), Effect.forkScoped);
     const result = yield* Effect.raceFirst(
       child.result,

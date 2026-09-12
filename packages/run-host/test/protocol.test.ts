@@ -1,10 +1,13 @@
 import { describe, expect, it } from "@effect/vitest";
 import { SessionOperationError } from "@usine/agents/runtime";
+import { AgentSessionId } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Deferred, Effect, Logger, Option, Path, Queue, Schema } from "effect";
 import { command, controlledSession, spec, start } from "./support/session.ts";
 import { startHost } from "./support/stdio.ts";
+
+const childTarget = (sessionId: AgentSessionId) => new AttemptChannel.ChildTarget({ sessionId });
 
 describe("run-host protocol", () => {
   it.effect("reports failed SDK interrupt delivery while retaining the interrupted outcome", () =>
@@ -176,5 +179,114 @@ describe("run-host protocol", () => {
         expect(yield* Deferred.isDone(deliveryStopped)).toBe(true);
         expect(yield* Deferred.isDone(session.released)).toBe(true);
       }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect("routes a parent-targeted Steer to the parent session", () =>
+    Effect.gen(function* () {
+      const session = yield* controlledSession();
+      const host = yield* startHost(session.runtime);
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(command(new AttemptChannel.Steer({ message: "keep going" })));
+      expect(yield* Queue.take(session.steers)).toBe("keep going");
+      expect(yield* Queue.size(session.childSteers)).toBe(0);
+      yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect("delivers a parent-targeted operator message as a user turn", () =>
+    Effect.gen(function* () {
+      const session = yield* controlledSession();
+      const host = yield* startHost(session.runtime);
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(command(new AttemptChannel.OperatorMessage({ message: "take over here" })));
+      expect(yield* Queue.take(session.steers)).toBe("take over here");
+      yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect(
+    "routes a child-targeted Steer to the addressed child, leaving the parent unsteered",
+    () =>
+      Effect.gen(function* () {
+        const session = yield* controlledSession();
+        const host = yield* startHost(session.runtime);
+        yield* host.send(start());
+        yield* host.next;
+        yield* host.send(
+          command(
+            new AttemptChannel.Steer({ message: "child guidance" }),
+            1,
+            spec.attemptId,
+            childTarget(session.child.id),
+          ),
+        );
+        expect(yield* Queue.take(session.childSteers)).toBe("child guidance");
+        expect(yield* Queue.size(session.steers)).toBe(0);
+        yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+        yield* host.result;
+        expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+      }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect("interrupts an addressed child without ending the Attempt", () =>
+    Effect.gen(function* () {
+      const session = yield* controlledSession();
+      const host = yield* startHost(session.runtime);
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(
+        command(new AttemptChannel.Interrupt(), 1, spec.attemptId, childTarget(session.child.id)),
+      );
+      yield* Deferred.await(session.childInterrupted);
+      // The child interrupt did not terminate the Attempt; a parent Interrupt does.
+      yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+      expect(yield* Deferred.isDone(session.childInterrupted)).toBe(true);
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect("accepts a Release frame as a no-op while no child is held", () =>
+    Effect.gen(function* () {
+      const session = yield* controlledSession();
+      const host = yield* startHost(session.runtime);
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(
+        command(new AttemptChannel.Release(), 1, spec.attemptId, childTarget(session.child.id)),
+      );
+      yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
+  );
+
+  it.effect("ignores operator input addressed to a child that is not live", () =>
+    Effect.gen(function* () {
+      const session = yield* controlledSession();
+      const host = yield* startHost(session.runtime);
+      yield* host.send(start());
+      yield* host.next;
+      yield* host.send(
+        command(
+          new AttemptChannel.Steer({ message: "gone" }),
+          1,
+          spec.attemptId,
+          childTarget(AgentSessionId.make("parent:run/execute/1:child:99")),
+        ),
+      );
+      // The frame reached an unknown session and was dropped, not delivered anywhere.
+      yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+      yield* host.result;
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+      expect(yield* Queue.size(session.childSteers)).toBe(0);
+      expect(yield* Queue.size(session.steers)).toBe(0);
+    }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 });

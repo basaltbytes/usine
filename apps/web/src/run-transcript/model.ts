@@ -234,6 +234,20 @@ export const projectTranscript = (
             format: "plain",
             isError: false,
           }),
+          OperatorMessage: ({ message }): NoticeContent => ({
+            kind: "message",
+            label: "Operator",
+            detail: message,
+            format: "markdown",
+            isError: false,
+          }),
+          Release: (): NoticeContent => ({
+            kind: "status",
+            label: "Released",
+            detail: "The operator released the held child.",
+            format: "plain",
+            isError: false,
+          }),
         }),
       ),
     );

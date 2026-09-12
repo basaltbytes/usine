@@ -24,6 +24,7 @@ import {
   AgentRuntime,
   ChildBackend,
   ChildRequest,
+  type ChildSessions,
   ChildSessionBudgetExceededError,
   LaunchRequest,
   PiChildBackend,
@@ -324,6 +325,9 @@ const request = new LaunchRequest({
   cwd: WorkingDirectory.make("/workspace/usine"),
 });
 
+/** The run host's child registry is exercised in the run-host tests; the parent tests ignore it. */
+const noChildSessions: ChildSessions = { register: () => Effect.void };
+
 const childLayer = Layer.succeed(ChildBackend)({
   launch: () => Effect.die("parent test never invokes the subagent tool"),
 });
@@ -441,7 +445,7 @@ describe("Pi parent runtime", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const running = yield* runtime.launch(request);
+        const running = yield* runtime.launch(request, noChildSessions);
         yield* running.steer("Check the failing test.");
         yield* running.interrupt;
         const [events, result] = yield* Effect.all([
@@ -552,7 +556,7 @@ describe("Pi parent runtime", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const running = yield* runtime.launch(limitedRequest);
+        const running = yield* runtime.launch(limitedRequest, noChildSessions);
         const error = yield* running.result.pipe(Effect.flip);
         assert(error instanceof ChildSessionBudgetExceededError);
         assert.strictEqual(error.maxChildren, 1);
@@ -571,7 +575,7 @@ describe("Pi parent runtime", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const error = yield* Effect.flip(runtime.launch(request));
+        const error = yield* Effect.flip(runtime.launch(request, noChildSessions));
         assert(error instanceof UnknownModelError);
         assert.strictEqual(error.model, parentModel);
       }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(childLayer)),
@@ -593,7 +597,7 @@ describe("Pi parent runtime", () => {
       return Effect.scoped(
         Effect.gen(function* () {
           const runtime = yield* AgentRuntime;
-          const error = yield* Effect.flip(runtime.launch(request));
+          const error = yield* Effect.flip(runtime.launch(request, noChildSessions));
           assert(error instanceof UnsupportedEffortError);
           assert.strictEqual(error.harness, "pi");
           assert.strictEqual(error.model, parentModel);
@@ -635,7 +639,7 @@ describe("Pi parent runtime", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const running = yield* runtime.launch(request);
+        const running = yield* runtime.launch(request, noChildSessions);
         const result = yield* running.result;
         assert.strictEqual(running.session.brain.model, model);
         assert.strictEqual(result.message, "subscription parent done");
@@ -657,7 +661,7 @@ describe("Pi parent runtime", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const error = yield* Effect.flip(runtime.launch(request));
+        const error = yield* Effect.flip(runtime.launch(request, noChildSessions));
         assert(error instanceof PoolUnavailableError);
         assert.strictEqual(error.pool, "apiKeys");
         assert.strictEqual(error.model, model);
@@ -678,7 +682,7 @@ describe("Pi parent runtime", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const error = yield* Effect.flip(runtime.launch(request));
+        const error = yield* Effect.flip(runtime.launch(request, noChildSessions));
         assert(error instanceof PoolUnavailableError);
         assert.strictEqual(error.pool, "chatgptPlan");
         assert.strictEqual(error.model, model);
@@ -695,7 +699,7 @@ describe("Pi parent runtime", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        const launchFiber = yield* Effect.forkChild(runtime.launch(request));
+        const launchFiber = yield* Effect.forkChild(runtime.launch(request, noChildSessions));
         yield* Effect.promise(() => delayed.startCalled);
         const interruptFiber = yield* Effect.forkChild(Fiber.interrupt(launchFiber));
         yield* Effect.yieldNow;
@@ -754,7 +758,7 @@ describe("Pi parent runtime", () => {
     return Effect.scoped(
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
-        yield* runtime.launch(request);
+        yield* runtime.launch(request, noChildSessions);
         const extension = options?.extensions[0];
         assert(extension !== undefined);
         let registered: ToolDefinition | undefined;

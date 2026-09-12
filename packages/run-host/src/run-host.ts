@@ -1,13 +1,16 @@
 import {
   AgentRuntime,
+  type ChildSessions,
   LaunchRequest,
+  type RunningSession,
   toAttemptFailure,
   WorkingDirectory,
 } from "@usine/agents/runtime";
+import { AgentSessionId } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { Commit, PullRequest, StepResult } from "@usine/core/step/result";
-import { DateTime, Effect, Fiber, Queue, Path, Result, Schema, Stdio, Stream } from "effect";
+import { DateTime, Effect, Fiber, Queue, Path, Ref, Result, Schema, Stdio, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 /** The run host could not read its instructions, report activity, or collect the Attempt's Git results. */
@@ -221,12 +224,33 @@ export const runHost = Effect.fn("RunHost.run")(() =>
         return [...facts.values()];
       });
 
+      // The parent and each live child are addressable by the id they report in
+      // the event stream, so an inbound frame can steer or interrupt one directly.
+      const sessions = yield* Ref.make(new Map<AgentSessionId, RunningSession>());
+      const record = (target: RunningSession) =>
+        Ref.update(sessions, (current) => new Map(current).set(target.session.id, target));
+      const childSessions: ChildSessions = {
+        register: (child) =>
+          record(child).pipe(
+            Effect.andThen(
+              Effect.addFinalizer(() =>
+                Ref.update(sessions, (current) => {
+                  const next = new Map(current);
+                  next.delete(child.session.id);
+                  return next;
+                }),
+              ),
+            ),
+          ),
+      };
+
       const launched = yield* Effect.result(
         agents.launch(
           new LaunchRequest({
             spec,
             cwd: WorkingDirectory.make(path.resolve(".")),
           }),
+          childSessions,
         ),
       );
       if (Result.isFailure(launched)) {
@@ -238,7 +262,46 @@ export const runHost = Effect.fn("RunHost.run")(() =>
         return;
       }
       const session = launched.success;
+      yield* record(session);
       yield* emit(new AttemptChannel.Started({ parentModel: session.session.brain.model }));
+
+      // Delivers one inbound frame to its target session. A parent Interrupt stays
+      // the terminal cancel signal; a child Interrupt only stops that child.
+      const route = Effect.fn("RunHost.route")(function* (
+        envelope: AttemptChannel.InboundEnvelope,
+      ) {
+        const targetId =
+          envelope.target._tag === "Parent" ? session.session.id : envelope.target.sessionId;
+        yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, target: targetId });
+        const controls = (yield* Ref.get(sessions)).get(targetId);
+        if (controls === undefined) {
+          yield* Effect.logWarning("Operator input addressed a session that is no longer live", {
+            target: targetId,
+            payload: envelope.payload._tag,
+          });
+          return;
+        }
+        const payload = envelope.payload;
+        switch (payload._tag) {
+          case "Steer":
+            yield* Effect.logDebug("Routing a Steer frame", { target: targetId });
+            return yield* controls.steer(payload.message);
+          case "OperatorMessage":
+            // Joined to the session as a user turn through the streaming-input bridge;
+            // a takeover Hold on the first child message lands in a later change (ADR 0018).
+            yield* Effect.logInfo("Routing an operator message", { target: targetId });
+            return yield* controls.steer(payload.message);
+          case "Interrupt":
+            yield* Effect.logInfo("Routing a child Interrupt frame", { target: targetId });
+            return yield* controls.interrupt;
+          case "Release":
+            // A Release ends a Hold, which does not exist yet, so nothing is held.
+            yield* Effect.logInfo("Received a Release frame with no open hold", {
+              target: targetId,
+            });
+            return;
+        }
+      });
       const readCommands = Effect.gen(function* () {
         let expected = 1;
         while (true) {
@@ -265,12 +328,11 @@ export const runHost = Effect.fn("RunHost.run")(() =>
             );
           }
           expected += 1;
-          if (command.payload._tag === "Interrupt") {
-            yield* Effect.logInfo("Run host received an Interrupt frame");
+          if (command.payload._tag === "Interrupt" && command.target._tag === "Parent") {
+            yield* Effect.logInfo("Run host received a parent Interrupt frame");
             return new AttemptChannel.Interrupted();
           }
-          yield* Effect.logDebug("Run host received a Steer frame");
-          yield* session.steer(command.payload.message);
+          yield* route(command);
         }
       });
 

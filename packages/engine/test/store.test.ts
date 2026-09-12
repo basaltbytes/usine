@@ -607,6 +607,68 @@ describe("run store", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.live("reads target-less inbound envelopes persisted under protocol v4", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-protocol-v4-" }),
+      );
+      const submission = new Submission({
+        event: new Event({
+          id: EventId.make("protocol-v4-event"),
+          dedupKey: DedupKey.make("protocol-v4/event/revision"),
+          payload: {},
+          receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
+        }),
+        itemKey: ItemKey.make("protocol-v4-item"),
+        loop: LoopName.make("protocol-v4-loop"),
+        step: StepName.make("protocol-v4-step"),
+        approval: "none",
+        repository: RepositoryName.make("basaltbytes/usine"),
+        revision: RepositoryRevision.make("protocol-v4-revision"),
+        task: AttemptTask.make("Read a durable protocol-v4 transcript"),
+        agent: testAgent,
+        parentModel: Option.none(),
+      });
+      const runId = RunId.make("protocol-v4-run");
+
+      yield* Effect.gen(function* () {
+        const database = yield* RunDatabase;
+        const store = yield* RunStore;
+        yield* store.recordAndClaim(submission, runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+        assert.strictEqual(started._tag, "AttemptStarted");
+        if (started._tag !== "AttemptStarted") return;
+        const attemptId = started.execution.attempt.id;
+        const currentEnvelope = new AttemptChannel.InboundEnvelope({
+          version: AttemptChannel.PROTOCOL_VERSION,
+          attemptId,
+          sequence: AttemptChannel.Sequence.make(1),
+          sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
+          target: new AttemptChannel.ParentTarget(),
+          payload: new AttemptChannel.Steer({ message: "Keep going" }),
+        });
+        yield* store.appendTranscript("inbound", currentEnvelope);
+
+        // A v4 row predates session targets, so drop the field the wire added.
+        const { target: _target, ...withoutTarget } = Schema.encodeSync(
+          AttemptChannel.InboundEnvelope,
+        )(currentEnvelope);
+        yield* database
+          .update(attemptTranscripts)
+          .set({ envelope: { ...withoutTarget, version: 4 } })
+          .where(eq(attemptTranscripts.attemptId, attemptId))
+          .execute();
+
+        const transcript = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
+        const entry = transcript[0];
+        assert(entry !== undefined);
+        assert.strictEqual(entry.envelope.version, 4);
+        assert.strictEqual(entry.envelope.payload._tag, "Steer");
+      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.live("reports a run closed while queued instead of starting an attempt", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;

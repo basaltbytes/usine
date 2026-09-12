@@ -44,7 +44,7 @@ const spec = new AttemptChannel.RunSpec({
   parentEffort: "high",
 });
 
-describe("attempt channel v4", () => {
+describe("attempt channel v5", () => {
   it("round-trips a final envelope through its framed JSON schema", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,
@@ -95,7 +95,45 @@ describe("attempt channel v4", () => {
     assert.deepStrictEqual(decoded, envelope);
   });
 
-  it("rejects protocol-v3 frames on the live channel", () => {
+  it("round-trips a child-addressed operator message through its framed JSON schema", () => {
+    const envelope = new AttemptChannel.InboundEnvelope({
+      version: AttemptChannel.PROTOCOL_VERSION,
+      attemptId: spec.attemptId,
+      sequence: AttemptChannel.Sequence.make(3),
+      sentAt: DateTime.makeUnsafe("2026-08-30T12:00:02Z"),
+      target: new AttemptChannel.ChildTarget({
+        sessionId: AgentSessionId.make("parent-1:child:1"),
+      }),
+      payload: new AttemptChannel.OperatorMessage({ message: "Rebase onto main before you push." }),
+    });
+
+    const encoded = Schema.encodeSync(AttemptChannel.EnvelopeFromJson)(envelope);
+    const decoded = Schema.decodeUnknownSync(AttemptChannel.EnvelopeFromJson)(encoded, {
+      onExcessProperty: "error",
+    });
+
+    assert.deepStrictEqual(decoded, envelope);
+  });
+
+  it("defaults an inbound frame to the parent target and round-trips a Release", () => {
+    const envelope = new AttemptChannel.InboundEnvelope({
+      version: AttemptChannel.PROTOCOL_VERSION,
+      attemptId: spec.attemptId,
+      sequence: AttemptChannel.Sequence.make(4),
+      sentAt: DateTime.makeUnsafe("2026-08-30T12:00:03Z"),
+      target: new AttemptChannel.ParentTarget(),
+      payload: new AttemptChannel.Release(),
+    });
+
+    const encoded = Schema.encodeSync(AttemptChannel.InputFrameFromJson)(envelope);
+    const decoded = Schema.decodeUnknownSync(AttemptChannel.InputFrameFromJson)(encoded, {
+      onExcessProperty: "error",
+    });
+
+    assert.deepStrictEqual(decoded, envelope);
+  });
+
+  it("rejects superseded protocol versions on the live channel", () => {
     const start = Schema.encodeSync(AttemptChannel.InputFrame)(
       new AttemptChannel.Start({ version: AttemptChannel.PROTOCOL_VERSION, spec }),
     );
@@ -109,18 +147,20 @@ describe("attempt channel v4", () => {
       }),
     );
 
-    assert.throws(() =>
-      Schema.decodeUnknownSync(AttemptChannel.InputFrame)(
-        { ...start, version: 3 },
-        { onExcessProperty: "error" },
-      ),
-    );
-    assert.throws(() =>
-      Schema.decodeUnknownSync(AttemptChannel.Envelope)(
-        { ...outbound, version: 3 },
-        { onExcessProperty: "error" },
-      ),
-    );
+    for (const version of [3, 4] as const) {
+      assert.throws(() =>
+        Schema.decodeUnknownSync(AttemptChannel.InputFrame)(
+          { ...start, version },
+          { onExcessProperty: "error" },
+        ),
+      );
+      assert.throws(() =>
+        Schema.decodeUnknownSync(AttemptChannel.Envelope)(
+          { ...outbound, version },
+          { onExcessProperty: "error" },
+        ),
+      );
+    }
   });
 
   it("round-trips rate-limit reset dates through its framed JSON schema", () => {

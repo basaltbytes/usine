@@ -1,13 +1,13 @@
 import { Result, Schema, type Effect } from "effect";
 import { Agent } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
-import { AgentSessionEvent, ChildSessionBudget } from "../agent/session.ts";
+import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
 import { AttemptId, AttemptTask } from "./attempt.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
 import { StepResult } from "../step/result.ts";
 import { AttemptFailure } from "./failure.ts";
 
-export const PROTOCOL_VERSION = 4 as const;
+export const PROTOCOL_VERSION = 5 as const;
 
 /**
  * Per-Attempt, per-direction message sequence, starting at 1. Distinct from the
@@ -80,8 +80,34 @@ export class Interrupt extends Schema.TaggedClass<Interrupt>("AttemptChannel/Int
   {},
 ) {}
 
-export const InboundPayload = Schema.Union([Steer, Interrupt]);
+/** An operator turn joined to the target session, distinct from a Steer so a takeover can record and hold it (ADR 0018). */
+export class OperatorMessage extends Schema.TaggedClass<OperatorMessage>(
+  "AttemptChannel/OperatorMessage",
+)("OperatorMessage", {
+  message: Schema.NonEmptyString,
+}) {}
+
+/** Ends a held child's takeover, letting its idle result return to the awaiting parent (ADR 0018). */
+export class Release extends Schema.TaggedClass<Release>("AttemptChannel/Release")("Release", {}) {}
+
+export const InboundPayload = Schema.Union([Steer, Interrupt, OperatorMessage, Release]);
 export type InboundPayload = typeof InboundPayload.Type;
+
+/** The Pi parent, the default recipient of operator input for an Attempt. */
+export class ParentTarget extends Schema.TaggedClass<ParentTarget>("AttemptChannel/ParentTarget")(
+  "Parent",
+  {},
+) {}
+
+/** A harness child of the Attempt's parent, addressed by the id it reports in the normalized event stream. */
+export class ChildTarget extends Schema.TaggedClass<ChildTarget>("AttemptChannel/ChildTarget")(
+  "Child",
+  { sessionId: AgentSessionId },
+) {}
+
+/** Which session inside an Attempt an inbound frame addresses: the Pi parent, or one of its children. */
+export const SessionTarget = Schema.Union([ParentTarget, ChildTarget]);
+export type SessionTarget = typeof SessionTarget.Type;
 
 const EnvelopeFields = {
   version: Schema.Literal(PROTOCOL_VERSION),
@@ -101,6 +127,8 @@ export class InboundEnvelope extends Schema.TaggedClass<InboundEnvelope>(
   "AttemptChannel/InboundEnvelope",
 )("InboundEnvelope", {
   ...EnvelopeFields,
+  /** The session this frame addresses; the Pi parent unless a child is named. */
+  target: SessionTarget,
   payload: InboundPayload,
 }) {}
 

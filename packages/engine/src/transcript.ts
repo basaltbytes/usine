@@ -13,21 +13,34 @@ export const TranscriptSequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo
 
 export type TranscriptSequence = typeof TranscriptSequence.Type;
 
-const LEGACY_TRANSCRIPT_PROTOCOL_VERSION = 3 as const;
+/**
+ * Protocol versions whose envelopes predate the current wire schema but remain in
+ * stored transcripts: v3 and v4 inbound frames carry no session target and only
+ * Steer or Interrupt payloads, so they decode against a narrowed shape.
+ */
+const LEGACY_TRANSCRIPT_PROTOCOL_VERSIONS = [3, 4] as const;
+const LegacyVersion = Schema.Literals(LEGACY_TRANSCRIPT_PROTOCOL_VERSIONS);
 
-const LegacyTranscriptEnvelope = Schema.Union([
-  Schema.Struct({
-    ...AttemptChannel.OutboundEnvelope.fields,
-    version: Schema.Literal(LEGACY_TRANSCRIPT_PROTOCOL_VERSION),
-  }),
-  Schema.Struct({
-    ...AttemptChannel.InboundEnvelope.fields,
-    version: Schema.Literal(LEGACY_TRANSCRIPT_PROTOCOL_VERSION),
-  }),
+const LegacyOutboundEnvelope = Schema.Struct({
+  ...AttemptChannel.OutboundEnvelope.fields,
+  version: LegacyVersion,
+});
+
+const LegacyInboundEnvelope = Schema.Struct({
+  _tag: Schema.Literal("InboundEnvelope"),
+  version: LegacyVersion,
+  attemptId: AttemptId,
+  sequence: AttemptChannel.Sequence,
+  sentAt: Schema.DateTimeUtcFromString,
+  payload: Schema.Union([AttemptChannel.Steer, AttemptChannel.Interrupt]),
+});
+
+/** Stored v3 and v4 envelopes stay readable; the live channel is v5 only. */
+const TranscriptEnvelope = Schema.Union([
+  AttemptChannel.Envelope,
+  LegacyOutboundEnvelope,
+  LegacyInboundEnvelope,
 ]);
-
-/** Stored v3 envelopes stay readable; the live channel is v4 only. */
-const TranscriptEnvelope = Schema.Union([AttemptChannel.Envelope, LegacyTranscriptEnvelope]);
 
 /** One append-only row of an Attempt transcript. */
 export class TranscriptEntry extends Schema.Class<TranscriptEntry>("@usine/engine/TranscriptEntry")(

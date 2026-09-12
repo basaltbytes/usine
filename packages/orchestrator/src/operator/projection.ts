@@ -102,6 +102,8 @@ const transcriptPayload = (
     Interrupted: (value) => value,
     Steer: (value) => value,
     Interrupt: (value) => value,
+    OperatorMessage: (value) => value,
+    Release: (value) => value,
   });
 
 const transcriptEvent = (entry: TranscriptEntry): TranscriptEventView =>

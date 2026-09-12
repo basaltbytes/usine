@@ -233,11 +233,11 @@ const makePiChild = Effect.gen(function* () {
 });
 
 const makePiParent = Effect.gen(function* () {
-  const children = yield* ChildBackend;
+  const childBackend = yield* ChildBackend;
   const sdk = yield* PiSdk;
 
   const launch: AgentRuntime["Service"]["launch"] = Effect.fn("PiParentRuntime.launch")(
-    function* (request) {
+    function* (request, children) {
       const parentId = AgentSessionId.make(`parent:${request.spec.attemptId}`);
       yield* Effect.annotateCurrentSpan({
         agent: request.spec.agent.name,
@@ -275,13 +275,14 @@ const makePiParent = Effect.gen(function* () {
             extensions: [
               subagentsExtension({
                 agent: request.spec.agent,
-                backend: children,
+                backend: childBackend,
                 cwd: request.cwd,
                 emit: channel.emit,
                 maxChildren: request.spec.maxChildren,
                 onBudgetExceeded: (error) =>
                   Deferred.succeed(childBudgetExceeded, error).pipe(Effect.asVoid),
                 parentId,
+                register: children.register,
                 run: runChild,
               }),
             ],
