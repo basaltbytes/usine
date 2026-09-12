@@ -151,7 +151,7 @@ describe("Attempt transcripts", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.live("reads transcript envelopes persisted under protocol v3", () =>
+  it.live.each([3, 5] as const)("reads stored v%s outbound envelopes", (version) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
@@ -196,20 +196,20 @@ describe("Attempt transcripts", () => {
         const encoded = Schema.encodeSync(AttemptChannel.Envelope)(currentEnvelope);
         yield* database
           .update(attemptTranscripts)
-          .set({ envelope: { ...encoded, version: 3 } })
+          .set({ envelope: { ...encoded, version } })
           .where(eq(attemptTranscripts.attemptId, attemptId))
           .execute();
 
         const transcript = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
         const entry = transcript[0];
         assert(entry !== undefined);
-        assert.strictEqual(entry.envelope.version, 3);
+        assert.strictEqual(entry.envelope.version, version);
         assert.strictEqual(entry.envelope.payload._tag, "Interrupted");
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.live("reads target-less inbound envelopes persisted under protocol v4", () =>
+  it.live.each([4, 5] as const)("reads stored v%s inbound envelopes", (version) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
@@ -261,14 +261,26 @@ describe("Attempt transcripts", () => {
         } = Schema.encodeSync(AttemptChannel.InboundEnvelope)(currentEnvelope);
         yield* database
           .update(attemptTranscripts)
-          .set({ envelope: { ...withoutTarget, version: 4 } })
+          .set({
+            envelope:
+              version === 4
+                ? { ...withoutTarget, version }
+                : {
+                    ...Schema.encodeSync(AttemptChannel.InboundEnvelope)(currentEnvelope),
+                    version,
+                  },
+          })
           .where(eq(attemptTranscripts.attemptId, attemptId))
           .execute();
 
         const transcript = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
         const entry = transcript[0];
         assert(entry !== undefined);
-        assert.strictEqual(entry.envelope.version, 4);
+        assert.strictEqual(entry.envelope.version, version);
+        if (entry.envelope._tag === "InboundEnvelope" && entry.envelope.version === 5) {
+          assert.strictEqual(entry.envelope.operator, "operator");
+          assert.strictEqual(entry.envelope.target._tag, "Parent");
+        }
         assert.strictEqual(entry.envelope.payload._tag, "Steer");
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
     }).pipe(Effect.provide(NodeServices.layer)),

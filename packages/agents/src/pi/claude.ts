@@ -9,6 +9,8 @@ import { ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionEvent,
   ChildSession,
+  HarnessSession,
+  HarnessSessionId,
   SessionStarted,
   SessionTokensUpdated,
   TextOutput,
@@ -153,7 +155,7 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
     // Use the same worker-provisioned binary that readiness checks inspect.
     pathToClaudeCodeExecutable: "claude",
     permissionMode: "bypassPermissions",
-    persistSession: false,
+    persistSession: true,
     // The worktree is repository-controlled input. Its project and local
     // settings (hooks, env) must not load into a child that runs with the App
     // credential, so only the worker user's settings apply.
@@ -170,6 +172,14 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
 
 const modelExists = (models: ReadonlyArray<ClaudeModelInfo>, model: ModelId): boolean =>
   models.some((candidate) => candidate.value === model || candidate.resolvedModel === model);
+
+const decodeClaudeInit = Schema.decodeUnknownOption(
+  Schema.Struct({
+    type: Schema.Literal("system"),
+    subtype: Schema.Literal("init"),
+    session_id: HarnessSessionId,
+  }),
+);
 
 const ClaudeTextBlock = Schema.Struct({
   type: Schema.Literal("text"),
@@ -316,7 +326,6 @@ const makeClaudeChild = Effect.gen(function* () {
       boundary = conversation.awaitUnpaused;
       const tools = new Map<string, string>();
       const tokens = claudeTokenMeter();
-      yield* channel.emit(new SessionStarted({ session: request.session }));
       input.offer(userMessage(request.prompt));
 
       const consume = Stream.fromAsyncIterable(query, (cause) =>
@@ -324,6 +333,25 @@ const makeClaudeChild = Effect.gen(function* () {
       ).pipe(
         Stream.runForEach((message) =>
           Effect.gen(function* () {
+            const init = decodeClaudeInit(message);
+            if (Option.isSome(init)) {
+              const harnessSession = new HarnessSession({
+                id: init.value.session_id,
+                cwd: request.cwd,
+              });
+              yield* channel.emit(
+                new SessionStarted({
+                  session: request.session,
+                  harnessSession: Option.some(harnessSession),
+                }),
+              );
+              yield* Effect.logInfo("Claude child session saved", {
+                sessionId: request.session.id,
+                parentSessionId: request.session.parentId,
+                harnessSessionId: harnessSession.id,
+                cwd: harnessSession.cwd,
+              });
+            }
             const totalTokens = tokens(message);
             if (Option.isSome(totalTokens))
               yield* channel.emit(

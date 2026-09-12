@@ -33,3 +33,7 @@ Everything is 0.x: APIs change without notice while the engine grows. `effect` i
 Import `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, and `CycleBudgetAsk` from `@usine/core/cycle-budget`. An Item-level Ask records the exhausted Loop, its limit, and participating Loops’ admitted and completed Runs; it can exist before another Run is opened.
 
 `DefectFailure` records a programmer defect captured at a boundary that needs a serializable Attempt outcome. It retains the original cause and never qualifies for automatic retry.
+
+`SessionStarted.harnessSession` optionally records a `HarnessSession`: the harness-native `HarnessSessionId` and worker working directory (`cwd`). Missing metadata in older transcripts decodes to `Option.none()`; usine's session identity remains separate.
+
+Attempt channel protocol v6 adds saved harness session metadata. Upgrade the orchestrator and run host together; worker preflight rejects mismatched protocol versions.

@@ -147,3 +147,5 @@ Everything here is 0.x, so APIs can change between minor releases. Supply `effec
 Item cycle exhaustion appears as a `CycleBudgetNeed` in the overview and marks the Item’s Board card as needing attention. `Operator.resetCycleBudget` records an answer to the exact Ask; polling restarts the repository cursor, fetches current Items, and evaluates active Loops before opening further Runs. A failed refresh is retried. Each Item fetch captures its budget generation; resets supersede in-flight observations and fresh Events use the current Loop configuration. GitHub delivery of these Asks is tracked separately in [#36](https://github.com/basaltbytes/usine/issues/36).
 
 The operator HTTP API exposes `POST /api/cycle-budgets/reset` with `{ "askId": "…" }`. A stale or differently answered Ask returns HTTP 409.
+
+The orchestrator requires run-host Attempt channel protocol v6 for saved harness session metadata. Upgrade both together; worker preflight rejects a version mismatch. Stored v3–v5 transcripts remain readable.

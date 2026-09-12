@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { AgentName } from "./agent.ts";
 import { BrainSpec } from "./brain.ts";
 
@@ -47,10 +47,26 @@ export class ChildSession extends Schema.TaggedClass<ChildSession>("Agent/ChildS
 export const AgentSession = Schema.Union([ParentSession, ChildSession]);
 export type AgentSession = typeof AgentSession.Type;
 
+/** The identity assigned by a harness to its saved conversation, distinct from usine's session id. */
+export const HarnessSessionId = Schema.NonEmptyString.pipe(Schema.brand("HarnessSessionId"));
+export type HarnessSessionId = typeof HarnessSessionId.Type;
+
+/** A saved harness conversation and the worker checkout from which it can be resumed. */
+export class HarnessSession extends Schema.Class<HarnessSession>("Agent/HarnessSession")({
+  id: HarnessSessionId,
+  cwd: Schema.NonEmptyString,
+}) {}
+
 /** Records the session identity and brain actually selected at launch. */
 export class SessionStarted extends Schema.TaggedClass<SessionStarted>("Agent/SessionStarted")(
   "SessionStarted",
-  { session: AgentSession },
+  {
+    session: AgentSession,
+    /** Absent for older transcripts and harnesses without a saved conversation. */
+    harnessSession: Schema.OptionFromOptionalKey(HarnessSession).pipe(
+      Schema.withConstructorDefault(Effect.succeed(Option.none())),
+    ),
+  },
 ) {}
 
 /** Completed assistant text emitted during the session, which may precede its final result. */

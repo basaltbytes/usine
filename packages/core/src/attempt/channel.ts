@@ -7,7 +7,7 @@ import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts"
 import { StepResult } from "../step/result.ts";
 import { AttemptFailure } from "./failure.ts";
 
-export const PROTOCOL_VERSION = 5 as const;
+export const PROTOCOL_VERSION = 6 as const;
 
 /**
  * Per-Attempt, per-direction message sequence, starting at 1. Distinct from the

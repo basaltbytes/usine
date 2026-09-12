@@ -61,6 +61,8 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
             .groupBy(
               sql`coalesce(json_extract(${attemptTranscripts.envelope}, '$.payload.event.session.id'), json_extract(${attemptTranscripts.envelope}, '$.payload.intervention.target.sessionId'), '@parent')`,
               sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag')`,
+              // Keep launch metadata alongside the latest lifecycle state, even after completion.
+              sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') = 'SessionStarted'`,
             ),
         ),
       TranscriptAllQuery: ({ attemptId }) => eq(attemptTranscripts.attemptId, attemptId),

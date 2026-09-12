@@ -335,6 +335,12 @@ describe("Codex child backend", () => {
         assert.strictEqual(thread.approvalPolicy, "never");
         assert.strictEqual(thread.sandbox, "danger-full-access");
         assert.strictEqual(thread.allowProviderModelFallback, false);
+        assert.strictEqual(thread.ephemeral, false);
+        const started = events[0];
+        assert(started?._tag === "SessionStarted");
+        assert(Option.isSome(started.harnessSession));
+        assert.strictEqual(started.harnessSession.value.id, "thread-1");
+        assert.strictEqual(started.harnessSession.value.cwd, request().cwd);
         const turn = calls.find(({ method }) => method === "turn/start")?.params;
         assert(Schema.is(Schema.Struct({ effort: Schema.String }))(turn));
         assert.strictEqual(turn.effort, "none");

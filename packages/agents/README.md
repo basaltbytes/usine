@@ -53,3 +53,5 @@ Each Codex child owns one app-server process. On completion or interruption, usi
 Everything here is 0.x, so APIs can change between minor releases. Supply `effect` at the version pinned by the usine workspace.
 
 Agents share the installation’s GitHub App identity. Runtime instructions require comment reviews at the reviewed head commit and the outcome labels defined by the Loop. An agent success label does not satisfy GitHub’s required-review rule; an independent reviewer supplies required approval and the operator merges. See the [review/fix guide](../../docs/guides/review-fix-loops.md).
+
+Claude children persist their sessions; Codex children start non-ephemeral threads. Their `SessionStarted.harnessSession` records the native session id and worker working directory, and structured launch logs include `harnessSessionId`, `sessionId`, and `cwd`. Resume with `claude --resume <id>` or `codex resume <id>` from that directory on the same worker and account, while its worktree and saved session files still exist. Attempt cleanup removes the worktree.

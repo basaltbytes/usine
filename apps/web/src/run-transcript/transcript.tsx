@@ -1,3 +1,4 @@
+import { SessionHandoff } from "./handoff.tsx";
 import { CaretRightIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
 import { ChildTarget } from "@usine/core/attempt/channel";
@@ -137,6 +138,7 @@ const Child = ({
           {session.session.brain.harness} · {session.session.brain.model} ·{" "}
           {session.session.brain.effort}
         </p>
+        <SessionHandoff session={session} />
         {entries.length === 0 ? (
           <p className="text-xs text-muted-foreground">No {filter} in this session.</p>
         ) : (

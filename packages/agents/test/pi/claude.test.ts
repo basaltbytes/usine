@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
-import { Cause, Effect, Exit, Fiber, Layer, Queue, Schema, Scope, Stream } from "effect";
+import { Cause, Effect, Exit, Fiber, Layer, Option, Queue, Schema, Scope, Stream } from "effect";
 import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
 import {
   AgentResultError,
@@ -50,6 +50,7 @@ const scripted = (
   interrupt: () => Promise.resolve(),
   supportedModels: () => Promise.resolve(models),
   async *[Symbol.asyncIterator]() {
+    yield { type: "system", subtype: "init", session_id: "claude-session-1" };
     for (const message of messages) yield message;
   },
 });
@@ -203,12 +204,17 @@ describe("Claude child backend", () => {
           events.map((event) => event._tag),
           ["SessionStarted", "TextOutput", "SessionFinished"],
         );
+        const started = events[0];
+        assert(started?._tag === "SessionStarted");
+        assert(Option.isSome(started.harnessSession));
+        assert.strictEqual(started.harnessSession.value.id, "claude-session-1");
+        assert.strictEqual(started.harnessSession.value.cwd, "/workspace/repo");
         assert.strictEqual(options?.model, "claude-sonnet-4-6");
         assert.strictEqual(options?.effort, "high");
         assert.strictEqual(options?.permissionMode, "bypassPermissions");
         assert.strictEqual(options?.pathToClaudeCodeExecutable, "claude");
         assert.strictEqual(options?.allowDangerouslySkipPermissions, true);
-        assert.strictEqual(options?.persistSession, false);
+        assert.strictEqual(options?.persistSession, true);
         assert.deepStrictEqual(options?.settingSources, ["user"]);
         const first = yield* Effect.promise(() => input![Symbol.asyncIterator]().next());
         assert.strictEqual(first.value?.message.content, "Implement the focused task.");
