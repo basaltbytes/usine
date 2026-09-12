@@ -1,6 +1,6 @@
 {
   "name": "@usine/github",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "GitHub App authentication, installation discovery, project coverage, and scoped token minting for usine.",
   "license": "MIT",
   "repository": {

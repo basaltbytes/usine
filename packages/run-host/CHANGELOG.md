@@ -1,5 +1,32 @@
 # @usine/run-host
 
+## 0.2.0
+
+### Minor Changes
+
+- 3f80f88: Apply `settings.max_children` as a per-Attempt child-session budget. Protocol v4 sends the budget to the Pi parent, records each accepted spawn with its cumulative count and task excerpt, and reports an excess spawn as a typed non-retryable failure with the configured and attempted counts. Durable protocol-v3 transcript envelopes remain readable after the live channel upgrade.
+- 57a374f: Verify rostered harness executables and login state on local and exe.dev Workers before scheduling and preparation. Require codex-cli 0.144.0 and verify ChatGPT authentication before starting Codex turns. Capability gaps require operator action; incomplete checks and transport failures retain infrastructure retries.
+  
+  Executor preflight and orchestrator engine layers now accept the roster’s brain specs. The run host provides a credential-free harness readiness command, replacing exe.dev’s manually configured login checks. Claude’s Agent SDK uses the Worker’s preflight-checked `claude` executable.
+
+### Patch Changes
+
+- 3db806c: Deliver session interrupts before terminal cleanup, preserving the interrupted outcome when an SDK abort immediately fails its result. End Attempts promptly when their session result, event stream, or Git result harvesting fails.
+- 333eacd: Author the Pi parent's reasoning effort: `settings.parent_effort` in `usine.yaml` sets the instance default and `parent_effort` in an agent file overrides it; unset keeps the parent at its child's effort. A parent model that cannot run the resolved effort fails the Attempt with `UnsupportedEffortError` before the session starts.
+- bd45cf4: Collect pull request facts from GitHub using the Attempt's final commit and existing worker credentials. Encode PR and comment URLs as strings so facts survive the Attempt channel and durable storage.
+- 7dc019e: Route process-console logging to stderr and tolerate stray Effect diagnostics on the Attempt channel while preserving strict protocol validation.
+- Updated dependencies [3f80f88]
+- Updated dependencies [34aeb4a]
+- Updated dependencies [162b323]
+- Updated dependencies [a36f46e]
+- Updated dependencies [333eacd]
+- Updated dependencies [bd45cf4]
+- Updated dependencies [28ec315]
+- Updated dependencies [e7adbd8]
+- Updated dependencies [57a374f]
+  - @usine/agents@0.2.0
+  - @usine/core@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes

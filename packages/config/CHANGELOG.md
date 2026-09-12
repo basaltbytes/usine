@@ -1,5 +1,36 @@
 # @usine/config
 
+## 0.2.0
+
+### Minor Changes
+
+- 3f80f88: Apply `settings.max_children` as a per-Attempt child-session budget. Protocol v4 sends the budget to the Pi parent, records each accepted spawn with its cumulative count and task excerpt, and reports an excess spawn as a typed non-retryable failure with the configured and attempted counts. Durable protocol-v3 transcript envelopes remain readable after the live channel upgrade.
+- a36f46e: Bound issue and pull-request feedback cycles across Runs with `max_cycles` (default three per Loop). Persist Item-level exhaustion Asks, expose explicit resets in the operator UI and HTTP API, and require fresh trigger evaluation after a reset. Upgrade existing Run history and queued Events into the budget.
+  
+  Use comment reviews and Loop-defined outcome labels for agents sharing a GitHub App identity. Required independent approvals and merging remain operator actions.
+- 333eacd: Author the Pi parent's reasoning effort: `settings.parent_effort` in `usine.yaml` sets the instance default and `parent_effort` in an agent file overrides it; unset keeps the parent at its child's effort. A parent model that cannot run the resolved effort fails the Attempt with `UnsupportedEffortError` before the session starts.
+
+### Patch Changes
+
+- b9e38a7: Import expression schemas, environment descriptors, and typed errors from
+  `@usine/expression/expression-engine`. This replaces the `/model` entry point;
+  update existing `/model` imports to `/expression-engine`.
+  
+  Organize GitHub authentication, access, polling, and operator view contracts by
+  responsibility while preserving their existing public entry points and schemas.
+- 354e598: Provision factory-wide GitHub label declarations before polling, report non-blocking preflight failures, and warn when Board lanes or Loop triggers use undeclared labels. Label names follow GitHub's contract (at most 50 characters, no surrounding whitespace), and provisioning waits for a confirmed catalog instead of creating labels blindly after a failed catalog request.
+- Updated dependencies [3f80f88]
+- Updated dependencies [162b323]
+- Updated dependencies [a36f46e]
+- Updated dependencies [b9e38a7]
+- Updated dependencies [333eacd]
+- Updated dependencies [354e598]
+- Updated dependencies [bd45cf4]
+- Updated dependencies [e7adbd8]
+- Updated dependencies [57a374f]
+  - @usine/core@0.2.0
+  - @usine/expression@0.2.0
+
 ## 0.1.0
 
 ### Minor Changes
