@@ -1,6 +1,6 @@
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
-import { AttemptNumber, AttemptId } from "@usine/core/attempt";
+import { AttemptNumber, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -49,6 +49,9 @@ const brain = new BrainSpec({
 
 const attempt = (number: number, message: string | null) =>
   new AttemptView({
+    task: AttemptTask.make("Review the task"),
+    agent: AgentName.make("developer"),
+    operatorIntervened: false,
     id: AttemptId.make(`attempt-${number}`),
     number: AttemptNumber.make(number),
     worker: WorkerName.make("local"),

@@ -27,7 +27,7 @@ describe("run-host protocol", () => {
       const host = yield* startHost(session.runtime).pipe(Effect.withLogger(logger));
       yield* host.send(start());
       yield* host.next;
-      yield* host.send(command(new AttemptChannel.Interrupt()));
+      yield* host.send(command(new AttemptChannel.Cancel()));
       yield* host.result;
       expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
       expect(logs).toContainEqual(
@@ -46,9 +46,8 @@ describe("run-host protocol", () => {
   for (const [name, wire] of [
     [
       "a command before Start",
-      Schema.encodeSync(AttemptChannel.InputFrameFromJson)(
-        command(new AttemptChannel.Interrupt()),
-      ) + "\n",
+      Schema.encodeSync(AttemptChannel.InputFrameFromJson)(command(new AttemptChannel.Cancel())) +
+        "\n",
     ],
     ["malformed JSON", "{\n"],
     [
@@ -86,9 +85,9 @@ describe("run-host protocol", () => {
     ],
     [
       "cross-Attempt Interrupt",
-      command(new AttemptChannel.Interrupt(), 2, AttemptId.make("other/execute/1")),
+      command(new AttemptChannel.Cancel(), 2, AttemptId.make("other/execute/1")),
     ],
-    ["sequence gap", command(new AttemptChannel.Interrupt(), 3)],
+    ["sequence gap", command(new AttemptChannel.Cancel(), 3)],
     ["replayed sequence", command(new AttemptChannel.Steer({ message: "Replay" }), 1)],
   ] as const) {
     it.effect(`rejects ${name} during an active Attempt`, () =>
@@ -105,7 +104,10 @@ describe("run-host protocol", () => {
         yield* host.send(frame);
         const error = yield* Effect.flip(host.result);
         expect(error).toMatchObject({ _tag: "RunHostError", stage: "input" });
-        expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started"]);
+        expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+          "Started",
+          "InterventionApplied",
+        ]);
         expect(yield* Queue.size(session.launches)).toBe(1);
         expect(yield* Queue.size(session.steers)).toBe(0);
         expect(yield* Queue.size(interruptions)).toBe(0);
@@ -122,7 +124,7 @@ describe("run-host protocol", () => {
         const host = yield* startHost(session.runtime);
         const encode = Schema.encodeSync(AttemptChannel.InputFrameFromJson);
         const bytes = new TextEncoder().encode(
-          `${encode(start())}\n${encode(command(new AttemptChannel.Steer({ message: "Keep café accents" })))}\n${encode(command(new AttemptChannel.Interrupt(), 2))}\n`,
+          `${encode(start())}\n${encode(command(new AttemptChannel.Steer({ message: "Keep café accents" })))}\n${encode(command(new AttemptChannel.Cancel(), 2))}\n`,
         );
         const split = bytes.indexOf(0xc3) + 1;
         yield* Queue.offer(host.stdin, bytes.slice(0, split));
@@ -134,7 +136,8 @@ describe("run-host protocol", () => {
           host.frames.map((frame) => [frame.sequence, frame.attemptId, frame.payload._tag]),
         ).toEqual([
           [1, spec.attemptId, "Started"],
-          [2, spec.attemptId, "Interrupted"],
+          [2, spec.attemptId, "InterventionApplied"],
+          [3, spec.attemptId, "Interrupted"],
         ]);
         expect(host.frames[0]?.payload).toEqual(
           new AttemptChannel.Started({ parentModel: session.session.brain.model }),
@@ -172,7 +175,7 @@ describe("run-host protocol", () => {
         const host = yield* startHost(session.runtime);
         yield* host.send(start());
         yield* host.next;
-        yield* host.send(command(new AttemptChannel.Interrupt()));
+        yield* host.send(command(new AttemptChannel.Cancel()));
         yield* host.result;
         expect(deliveries).toBe(1);
         expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
@@ -190,9 +193,13 @@ describe("run-host protocol", () => {
       yield* host.send(command(new AttemptChannel.Steer({ message: "keep going" })));
       expect(yield* Queue.take(session.steers)).toBe("keep going");
       expect(yield* Queue.size(session.childSteers)).toBe(0);
-      yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+      yield* host.send(command(new AttemptChannel.Cancel(), 2));
       yield* host.result;
-      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+        "Started",
+        "InterventionApplied",
+        "Interrupted",
+      ]);
     }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 
@@ -204,9 +211,13 @@ describe("run-host protocol", () => {
       yield* host.next;
       yield* host.send(command(new AttemptChannel.OperatorMessage({ message: "take over here" })));
       expect(yield* Queue.take(session.steers)).toBe("take over here");
-      yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+      yield* host.send(command(new AttemptChannel.Cancel(), 2));
       yield* host.result;
-      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+        "Started",
+        "InterventionApplied",
+        "Interrupted",
+      ]);
     }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 
@@ -228,9 +239,13 @@ describe("run-host protocol", () => {
         );
         expect(yield* Queue.take(session.childSteers)).toBe("child guidance");
         expect(yield* Queue.size(session.steers)).toBe(0);
-        yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+        yield* host.send(command(new AttemptChannel.Cancel(), 2));
         yield* host.result;
-        expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+        expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+          "Started",
+          "InterventionApplied",
+          "Interrupted",
+        ]);
       }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 
@@ -244,10 +259,14 @@ describe("run-host protocol", () => {
         command(new AttemptChannel.Interrupt(), 1, spec.attemptId, childTarget(session.child.id)),
       );
       yield* Deferred.await(session.childInterrupted);
-      // The child interrupt did not terminate the Attempt; a parent Interrupt does.
-      yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+      // A session pause is nonterminal; cancellation ends the Attempt.
+      yield* host.send(command(new AttemptChannel.Cancel(), 2));
       yield* host.result;
-      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+        "Started",
+        "InterventionApplied",
+        "Interrupted",
+      ]);
       expect(yield* Deferred.isDone(session.childInterrupted)).toBe(true);
     }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
@@ -261,13 +280,17 @@ describe("run-host protocol", () => {
       yield* host.send(
         command(new AttemptChannel.Release(), 1, spec.attemptId, childTarget(session.child.id)),
       );
-      yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+      yield* host.send(command(new AttemptChannel.Cancel(), 2));
       yield* host.result;
-      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+        "Started",
+        "InterventionApplied",
+        "Interrupted",
+      ]);
     }).pipe(Effect.scoped, Effect.provide(Path.layer)),
   );
 
-  it.effect("ignores operator input addressed to a child that is not live", () =>
+  it.effect("records rejected input addressed to a child that is not live", () =>
     Effect.gen(function* () {
       const session = yield* controlledSession();
       const host = yield* startHost(session.runtime);
@@ -281,10 +304,14 @@ describe("run-host protocol", () => {
           childTarget(AgentSessionId.make("parent:run/execute/1:child:99")),
         ),
       );
-      // The frame reached an unknown session and was dropped, not delivered anywhere.
-      yield* host.send(command(new AttemptChannel.Interrupt(), 2));
+      // The receipt explains why no session received the message.
+      yield* host.send(command(new AttemptChannel.Cancel(), 2));
       yield* host.result;
-      expect(host.frames.map((frame) => frame.payload._tag)).toEqual(["Started", "Interrupted"]);
+      expect(host.frames.map((frame) => frame.payload._tag)).toEqual([
+        "Started",
+        "InterventionRejected",
+        "Interrupted",
+      ]);
       expect(yield* Queue.size(session.childSteers)).toBe(0);
       expect(yield* Queue.size(session.steers)).toBe(0);
     }).pipe(Effect.scoped, Effect.provide(Path.layer)),

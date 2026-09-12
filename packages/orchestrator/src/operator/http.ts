@@ -1,4 +1,5 @@
 import { AttemptId } from "@usine/core/attempt";
+import { AgentName } from "@usine/core/agent";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -13,7 +14,7 @@ import {
   TailTranscriptRequest,
 } from "./transcript.ts";
 import { FactoryOverview } from "./overview.ts";
-import { RunDetailView } from "./run.ts";
+import { RunDetailView, EditAndRetry, SessionIntervention } from "./run.ts";
 
 const errorStatuses = {
   SchemaError: 400,
@@ -25,6 +26,8 @@ const errorStatuses = {
   BoardItemNotFoundError: 404,
   BoardLaneNotFoundError: 404,
   RunOperationRejectedError: 409,
+  RunInterventionRejectedError: 409,
+  RosterAgentNotFoundError: 404,
   CycleBudgetResetRejectedError: 409,
   BoardLaneReadOnlyError: 409,
   EnginePersistenceError: 500,
@@ -147,6 +150,17 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
   HttpApiGroup.make("operator")
     .add(
       HttpApiEndpoint.get("overview", "/api/overview", { success: FactoryOverview }),
+      HttpApiEndpoint.get("agents", "/api/agents", { success: Schema.Array(AgentName) }),
+      HttpApiEndpoint.post("editAndRetry", "/api/runs/:runId/edit-and-retry", {
+        params: runParams,
+        payload: EditAndRetry.annotate({ parseOptions: { onExcessProperty: "error" } }),
+        success: acknowledged,
+      }),
+      HttpApiEndpoint.post("intervene", "/api/runs/:runId/intervene", {
+        params: runParams,
+        payload: SessionIntervention.annotate({ parseOptions: { onExcessProperty: "error" } }),
+        success: acknowledged,
+      }),
       HttpApiEndpoint.post("resetCycleBudget", "/api/cycle-budgets/reset", {
         payload: Schema.Struct({ askId: CycleBudgetAskId }).annotate({
           parseOptions: { onExcessProperty: "error" },

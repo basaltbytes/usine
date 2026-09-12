@@ -1,3 +1,4 @@
+import { InfraFailure } from "@usine/core/attempt/failure";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import {
@@ -232,7 +233,7 @@ const interactiveHandle = (command: StandardCommand, state: FakeSshState, mode: 
             }
             return;
           }
-          if (input.payload._tag === "Interrupt" && mode === "wait-for-interrupt") {
+          if (input.payload._tag === "Cancel" && mode === "wait-for-interrupt") {
             yield* emit(
               new AttemptChannel.OutboundEnvelope({
                 version: AttemptChannel.PROTOCOL_VERSION,
@@ -389,6 +390,7 @@ const request = new CheckoutRequest({
   parentModel: Option.none(),
   maxChildren: ChildSessionBudget.make(4),
   maxAttemptMinutes: 60,
+  maxAttemptTokens: 10_000_000,
   parentEffort: "high",
 });
 
@@ -731,6 +733,53 @@ describe("exe.dev executor", () => {
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
+  it.effect("keeps input sequences contiguous when persistence rejects an intervention", () => {
+    const ssh = fakeSsh(PROTOCOL, "wait-for-interrupt");
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      const prepared = yield* executor.prepare(request);
+      const started = yield* Deferred.make<void>();
+      let reject = true;
+      const launch = yield* prepared
+        .launch({
+          append: (direction, envelope) => {
+            if (envelope.payload._tag === "Started")
+              return Effect.asVoid(Deferred.succeed(started, undefined));
+            if (direction === "inbound" && reject) {
+              reject = false;
+              return new InfraFailure({
+                message: "Store temporarily unavailable",
+                cause: new Error("unavailable"),
+              });
+            }
+            return Effect.void;
+          },
+        })
+        .pipe(Effect.result, Effect.forkChild);
+      yield* Deferred.await(started);
+      const intervention = new AttemptChannel.Intervention({
+        operator: "Philippe",
+        target: new AttemptChannel.ParentTarget(),
+        action: new AttemptChannel.Steer({ message: "Continue" }),
+      });
+      const failure = yield* Effect.flip(executor.intervene(ATTEMPT_ID, intervention));
+      assert.strictEqual(failure._tag, "InfraFailure");
+      yield* executor.intervene(ATTEMPT_ID, intervention);
+      yield* executor.cancel(ATTEMPT_ID);
+      yield* Fiber.join(launch);
+      const inputs = ssh.state.inputs.filter((input) => input._tag === "InboundEnvelope");
+      assert.deepStrictEqual(
+        inputs.map(({ sequence, payload }) => [sequence, payload._tag]),
+        [
+          [1, "Steer"],
+          [2, "Cancel"],
+        ],
+      );
+      assert.strictEqual(inputs[0]?.operator, "Philippe");
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+  });
+
   it.effect(
     "closing the prepared scope stops its active channel before remote resource cleanup",
     () => {
@@ -756,7 +805,7 @@ describe("exe.dev executor", () => {
         assert.strictEqual(ssh.state.kills, 0);
         assert(
           ssh.state.inputs.some(
-            (input) => input._tag === "InboundEnvelope" && input.payload._tag === "Interrupt",
+            (input) => input._tag === "InboundEnvelope" && input.payload._tag === "Cancel",
           ),
         );
         const cleanup = ssh.state.commands.slice(beforeCleanup).map(({ args }) => args.join(" "));
@@ -851,7 +900,7 @@ describe("exe.dev executor", () => {
         transcript.map(([direction, envelope]) => [direction, envelope.payload._tag]),
         [
           ["outbound", "Started"],
-          ["inbound", "Interrupt"],
+          ["inbound", "Cancel"],
           ["outbound", "Interrupted"],
         ],
       );
@@ -876,7 +925,7 @@ describe("exe.dev executor", () => {
             append: (_direction, envelope) => {
               if (envelope.payload._tag === "Started")
                 return Effect.asVoid(Deferred.succeed(started, undefined));
-              if (envelope.payload._tag === "Interrupt")
+              if (envelope.payload._tag === "Cancel")
                 return Effect.asVoid(Deferred.succeed(stopping, undefined));
               return Effect.void;
             },
@@ -888,8 +937,8 @@ describe("exe.dev executor", () => {
         yield* TestClock.adjust("2 seconds");
         const outcome = yield* Fiber.join(running);
         assert(Result.isFailure(outcome));
-        assert.strictEqual(outcome.failure._tag, "InfraFailure");
-        assert.strictEqual(outcome.failure.message, "Attempt exceeded the 1-minute budget");
+        assert(outcome.failure._tag === "RunawayFailure");
+        assert.strictEqual(outcome.failure.ceiling, "wall-clock");
         assert.strictEqual(ssh.state.kills, 1);
         assert.strictEqual(
           ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
@@ -921,7 +970,7 @@ describe("exe.dev executor", () => {
       }
 
       const cancelFiber = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.forkChild);
-      while (!transcript.some(([, envelope]) => envelope.payload._tag === "Interrupt")) {
+      while (!transcript.some(([, envelope]) => envelope.payload._tag === "Cancel")) {
         yield* Effect.yieldNow;
       }
       yield* TestClock.adjust("2 seconds");

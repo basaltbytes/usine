@@ -120,6 +120,7 @@ const fakeLayer = (
   states: ReadonlyArray<LoopRuntimeState> = [],
 ) => {
   const runs = Layer.succeed(RunEngine)({
+    intervene: () => Effect.void,
     approve: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
@@ -169,6 +170,7 @@ const waitForWaiting = Effect.fn("test.waitForWaiting")(function* (
 
 const runtimeLayer = (directory: InstanceDirectory) => {
   const executor = Layer.succeed(StepExecutor)({
+    intervene: () => Effect.void,
     interrupt: () => Effect.void,
     reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
     execute: () => Effect.die("an approval-gated test run must not start an Attempt"),

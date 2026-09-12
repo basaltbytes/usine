@@ -138,6 +138,10 @@ export interface RunningSession {
   readonly steer: (message: string) => Effect.Effect<void, AgentSessionError>;
   /** Requests that this session stop its current work. */
   readonly interrupt: Effect.Effect<void, AgentSessionError>;
+  /** Applies a nonterminal operator action; child messages hold completion until release. */
+  readonly intervene: (
+    action: AttemptChannel.OperatorAction,
+  ) => Effect.Effect<AttemptChannel.InterventionState, AgentSessionError>;
 }
 
 /**

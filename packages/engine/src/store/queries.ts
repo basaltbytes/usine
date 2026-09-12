@@ -1,6 +1,6 @@
 import type { Agent } from "@usine/core/agent";
 import type { ModelId } from "@usine/core/agent/brain";
-import { Attempt, AttemptId } from "@usine/core/attempt";
+import { Attempt, AttemptId, AttemptContext } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { Event, DedupKey, EventId } from "@usine/core/event";
@@ -105,6 +105,9 @@ const attemptSelection = {
   worker: attempts.workerName,
   number: attempts.attemptNumber,
   brain: attempts.brainJson,
+  task: attempts.task,
+  agent: attempts.agent,
+  operatorIntervened: attempts.operatorIntervened,
   parentModel: attempts.parentModel,
   startedAt: attempts.startedAt,
   outcome: attempts.outcomeJson,
@@ -298,6 +301,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
         workerName: attempt.worker,
         attemptNumber: attempt.number,
         brainJson: encodeBrainSpec(attempt.brain),
+        task: attempt.task,
+        agent: attempt.agent,
+        operatorIntervened: attempt.operatorIntervened,
         parentModel: Option.getOrNull(attempt.parentModel),
         startedAt: encodeDateTime(attempt.startedAt),
         outcomeJson: null,
@@ -313,6 +319,33 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .update(attempts)
       .set({ outcomeJson: encodeOutcome(outcome) })
       .where(and(eq(attempts.attemptId, attemptId), isNull(attempts.outcomeJson)))
+      .execute();
+  });
+
+  const amend = Effect.fn("RunStoreQueries.amend")(function* (
+    runId: RunId,
+    context: AttemptContext,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, agent: context.agent.name });
+    yield* database
+      .update(runs)
+      .set({
+        task: context.task,
+        agentJson: storedAgent(context.agent),
+        parentModel: Option.getOrNull(context.parentModel),
+      })
+      .where(eq(runs.runId, runId))
+      .execute();
+  });
+
+  const markIntervened = Effect.fn("RunStoreQueries.markIntervened")(function* (
+    attemptId: AttemptId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    yield* database
+      .update(attempts)
+      .set({ operatorIntervened: true })
+      .where(eq(attempts.attemptId, attemptId))
       .execute();
   });
 
@@ -575,6 +608,27 @@ export const queriesFor = (database: RunDatabaseClient) => {
     });
 
     const cursor = Match.valueTags(query, {
+      TranscriptSessionsQuery: ({ attemptId }) =>
+        inArray(
+          attemptTranscripts.sequence,
+          database
+            .select({ sequence: sql<number>`max(${attemptTranscripts.sequence})` })
+            .from(attemptTranscripts)
+            .where(
+              and(
+                eq(attemptTranscripts.attemptId, attemptId),
+                sql`(
+            json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'InterventionApplied'
+            OR (json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'SessionEvent'
+              AND json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') IN ('SessionStarted', 'SessionIdle', 'SessionResumed', 'SessionFinished'))
+          )`,
+              ),
+            )
+            .groupBy(
+              sql`coalesce(json_extract(${attemptTranscripts.envelope}, '$.payload.event.session.id'), json_extract(${attemptTranscripts.envelope}, '$.payload.intervention.target.sessionId'), '@parent')`,
+              sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag')`,
+            ),
+        ),
       TranscriptAllQuery: ({ attemptId }) => eq(attemptTranscripts.attemptId, attemptId),
       TranscriptTailQuery: ({ attemptId, after }) =>
         and(eq(attemptTranscripts.attemptId, attemptId), gt(attemptTranscripts.sequence, after)),
@@ -601,6 +655,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     // A limited read walks the tail index backwards for the newest N rows and
     // re-sorts ascending, so callers always receive append order.
     const rows = yield* Match.valueTags(query, {
+      TranscriptSessionsQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
       TranscriptAllQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
       TranscriptTailQuery: ({ limit }) =>
         selection.orderBy(asc(attemptTranscripts.sequence)).limit(limit).execute(),
@@ -700,6 +755,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
     cycles: cycleQueries(database),
     addAttempt,
     appendTranscript,
+    amend,
+    markIntervened,
     approvalExists,
     blockingRun,
     closeAttempt,

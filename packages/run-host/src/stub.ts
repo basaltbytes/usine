@@ -8,6 +8,7 @@ import {
   SessionStarted,
   TextOutput,
 } from "@usine/core/agent/session";
+import { InterventionState } from "@usine/core/attempt/channel";
 import { Cause, Deferred, Effect, Layer, Option, Queue, Stream } from "effect";
 
 /** A deterministic agent runtime for process-level executor tests. */
@@ -32,6 +33,8 @@ export const stubLayer = (delayMillis = 0) =>
             });
             const events = yield* Queue.make<AgentSessionEvent, Cause.Done>();
             const result = yield* Deferred.make<SessionResult>();
+            let paused = false;
+            let resume = yield* Deferred.make<void>();
             yield* Queue.offer(events, new SessionStarted({ session }));
             yield* Queue.offer(
               events,
@@ -39,6 +42,7 @@ export const stubLayer = (delayMillis = 0) =>
             );
             yield* Effect.gen(function* () {
               if (delayMillis > 0) yield* Effect.sleep(`${delayMillis} millis`);
+              if (paused) yield* Deferred.await(resume);
               yield* Queue.offer(events, new SessionFinished({ session }));
               yield* Deferred.succeed(
                 result,
@@ -57,6 +61,17 @@ export const stubLayer = (delayMillis = 0) =>
               interrupt: Effect.void,
               result: Deferred.await(result),
               steer,
+              intervene: (action) =>
+                Effect.gen(function* () {
+                  if (action._tag === "Interrupt") paused = true;
+                  if (action._tag === "OperatorMessage" || action._tag === "Steer") {
+                    yield* steer(action.message);
+                    paused = false;
+                    yield* Deferred.succeed(resume, undefined);
+                    resume = yield* Deferred.make<void>();
+                  }
+                  return new InterventionState({ held: false, paused });
+                }),
             } satisfies RunningSession;
           }),
       }),

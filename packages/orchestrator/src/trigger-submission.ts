@@ -3,7 +3,7 @@ import type { LoadedInstance } from "@usine/config/instance";
 import type { LoopFile } from "@usine/config/loop";
 import type { ManagedRepo } from "@usine/config/factory";
 import { Agent, resolveParentModel, AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { CycleGeneration } from "@usine/core/cycle-budget";
@@ -46,17 +46,7 @@ export const resolveTriggerLoop = Effect.fn("TriggerRouting.resolveLoop")(functi
       message: `Loop ${loop.name} references missing Agent ${loop.agent}`,
     });
   }
-  const agent = new Agent({
-    name: loaded.name,
-    brain: new BrainSpec({
-      harness: loaded.harness,
-      model: loaded.model,
-      effort: loaded.effort,
-    }),
-    parentModel: loaded.parentModel,
-    parentEffort: loaded.parentEffort,
-    persona: loaded.persona,
-  });
+  const agent = loaded.agent;
   return {
     agent,
     loop,

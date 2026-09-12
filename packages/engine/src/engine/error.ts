@@ -43,12 +43,22 @@ export const RunStoreError = Schema.Union([
 
 export type RunStoreError = typeof RunStoreError.Type;
 
+/** The requested Attempt is no longer live, or its channel could not accept operator input. */
+export class RunInterventionRejectedError extends Schema.TaggedError<RunInterventionRejectedError>(
+  "@usine/engine/RunInterventionRejectedError",
+)("RunInterventionRejectedError", {
+  runId: RunId,
+  attemptId: AttemptId,
+  message: Schema.NonEmptyString,
+}) {}
+
 /** The store's failures plus the cancellation handshake failure only the engine raises. */
 export const RunEngineError = Schema.Union([
   RunNotFoundError,
   RunOperationRejectedError,
   EnginePersistenceError,
   AttemptCancellationError,
+  RunInterventionRejectedError,
 ]);
 
 export type RunEngineError = typeof RunEngineError.Type;

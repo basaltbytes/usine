@@ -35,11 +35,14 @@ import { readerMemory, type ReadingAnchor } from "./reader/memory.ts";
 import { readingRows } from "./reader/anchor.ts";
 import { RestoreReader } from "./reader/restore.tsx";
 import { RememberReader } from "./reader/remember.tsx";
+import { ParentTarget } from "@usine/core/attempt/channel";
+import { SessionComposer } from "../run-intervention/session-composer.tsx";
 
 /** A Run's conversation follows incoming activity until the reader scrolls away. */
 export const Conversation = ({
   runId,
   events,
+  sessionState = [],
   attempts,
   earlier,
   loadEarlier,
@@ -50,6 +53,7 @@ export const Conversation = ({
 }: {
   readonly runId: RunId;
   readonly events: ReadonlyArray<TranscriptEventView>;
+  readonly sessionState?: ReadonlyArray<TranscriptEventView>;
   readonly attempts: ReadonlyArray<AttemptView>;
   readonly earlier: TranscriptPageCursor | undefined;
   readonly loadEarlier: () => void;
@@ -77,7 +81,13 @@ export const Conversation = ({
   };
   const [filter, setFilter] = useState<TranscriptFilter>(saved?.filter ?? "all");
   const viewportRef = useRef<HTMLDivElement>(null);
-  const projection = useMemo(() => projectTranscript(events, attempts), [events, attempts]);
+  const projection = useMemo(
+    () => projectTranscript(events, attempts, sessionState),
+    [events, attempts, sessionState],
+  );
+  const parent = projection.sessions.find(
+    (session) => session.session._tag === "ParentSession" && session.status === "Live",
+  );
   const updates = useMemo(() => indexTranscriptUpdates(projection), [projection]);
   const rows = useMemo(() => readingRows(projection, filter), [projection, filter]);
   const through = events.reduce<TranscriptEventView["sequence"] | null>(
@@ -220,7 +230,7 @@ export const Conversation = ({
                       <ErrorAlert message={earlierError} />
                     </MessageScrollerItem>
                   )}
-                  <Transcript events={events} attempts={attempts} filter={filter} />
+                  <Transcript events={events} attempts={attempts} filter={filter} runId={runId} />
                 </MessageScrollerContent>
               </MessageScrollerViewport>
             </PreserveReadingPosition>
@@ -257,6 +267,17 @@ export const Conversation = ({
           </MessageScroller>
         </MessageScrollerProvider>
       </TranscriptDisclosureProvider>
+      {state === "Running" && parent !== undefined && (
+        <div className="shrink-0 px-4 pb-4 sm:px-6">
+          <SessionComposer
+            key={parent.attemptId}
+            runId={runId}
+            attemptId={parent.attemptId}
+            target={new ParentTarget()}
+            paused={parent.paused}
+          />
+        </div>
+      )}
     </>
   );
 };

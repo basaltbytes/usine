@@ -61,6 +61,9 @@ const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
     number: attempt.number,
     worker: attempt.worker,
     brain: attempt.brain,
+    task: attempt.task,
+    agent: attempt.agent,
+    operatorIntervened: attempt.operatorIntervened,
     startedAt: DateTime.formatIso(attempt.startedAt),
     outcome: Option.match(attempt.outcome, {
       onNone: () => null,
@@ -104,16 +107,29 @@ const transcriptPayload = (
     Interrupt: (value) => value,
     OperatorMessage: (value) => value,
     Release: (value) => value,
+    Cancel: (value) => value,
+    InterventionApplied: (value) => value,
+    InterventionRejected: (value) => value,
   });
 
-const transcriptEvent = (entry: TranscriptEntry): TranscriptEventView =>
-  new TranscriptEventView({
+/** Projects one transcript row, preserving attribution and excluding private failure causes. */
+export const transcriptEvent = (entry: TranscriptEntry): TranscriptEventView => {
+  const fields = {
     sequence: entry.sequence,
     attemptId: entry.attemptId,
     receivedAt: DateTime.formatIso(entry.receivedAt),
     direction: entry.direction,
     payload: transcriptPayload(entry.envelope.payload),
-  });
+  };
+  if (entry.envelope._tag === "InboundEnvelope" && "target" in entry.envelope) {
+    return new TranscriptEventView({
+      ...fields,
+      target: entry.envelope.target,
+      operator: entry.envelope.operator,
+    });
+  }
+  return new TranscriptEventView(fields);
+};
 
 interface TranscriptRead {
   readonly events: ReadonlyArray<TranscriptEventView>;

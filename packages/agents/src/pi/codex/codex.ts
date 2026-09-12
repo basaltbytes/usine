@@ -6,6 +6,7 @@ import {
   RateLimitsSnapshot,
   RateLimitWindow as CoreRateLimitWindow,
   SessionStarted,
+  SessionTokensUpdated,
   TextOutput,
   ToolFinished,
   ToolStarted,
@@ -29,6 +30,8 @@ import {
   UnsupportedEffortError,
 } from "../../runtime.ts";
 import { sessionChannel } from "../session.ts";
+import { sessionConversation } from "../conversation.ts";
+import { CodexTokenUsage } from "../usage.ts";
 import { CodexAppServer, type CodexClient, operationError } from "./app-server.ts";
 import { codexPoolUnavailable, initializeCodex, verifyCodexAccount } from "./account.ts";
 
@@ -293,16 +296,67 @@ const makeCodexChild = Effect.gen(function* () {
         sandboxPolicy: { type: "dangerFullAccess" },
         effort,
       };
-      const turnJson = yield* connection.request("stream", "turn/start", json(turnParams));
-      const turn = yield* decodeResponse(
-        TurnStartResponse,
-        "stream",
-        client,
-        "turn start response",
-        turnJson,
-      );
+      let turnId = "";
+      let turnActive = false;
+      let interrupting = false;
+      const toolsInFlight = new Set<string>();
+      const pendingMessages: string[] = [];
       let lastText: string | undefined;
       let finalText: string | undefined;
+      const startTurn = Effect.fn("CodexChildBackend.startTurn")(function* (message: string) {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+        const response = yield* connection.request(
+          "stream",
+          "turn/start",
+          json({ ...turnParams, input: [{ type: "text", text: message, text_elements: [] }] }),
+        );
+        const started = yield* decodeResponse(
+          TurnStartResponse,
+          "stream",
+          client,
+          "turn start response",
+          response,
+        );
+        turnId = started.turn.id;
+        turnActive = true;
+        lastText = undefined;
+        finalText = undefined;
+      });
+      const interruptTurn = Effect.fn("CodexChildBackend.interruptTurn")(function* () {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+        if (!turnActive || interrupting) return;
+        interrupting = true;
+        yield* connection.request(
+          "interrupt",
+          "turn/interrupt",
+          json({ threadId: thread.thread.id, turnId }),
+        );
+      });
+      const steer = Effect.fn("CodexChildBackend.steer")(function* (message: string) {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+        if (interrupting) {
+          pendingMessages.push(message);
+          return;
+        }
+        if (!turnActive) return yield* startTurn(message);
+        yield* connection.request(
+          "steer",
+          "turn/steer",
+          json({
+            threadId: thread.thread.id,
+            expectedTurnId: turnId,
+            input: [{ type: "text", text: message, text_elements: [] }],
+          }),
+        );
+      });
+      const conversation = yield* sessionConversation({
+        session,
+        channel,
+        send: steer,
+        pause: Effect.suspend(() => (toolsInFlight.size === 0 ? interruptTurn() : Effect.void)),
+        beforeFinish: connection.close,
+      });
+      yield* startTurn(request.prompt);
 
       const fail = Effect.fn("CodexChildBackend.fail")(function* (error: AgentSessionError) {
         yield* connection.close.pipe(
@@ -319,6 +373,23 @@ const makeCodexChild = Effect.gen(function* () {
       const consume = connection.notifications.pipe(
         Stream.runForEach(({ method, params }) =>
           Effect.gen(function* () {
+            if (method === "thread/tokenUsage/updated") {
+              const usage = yield* decodeNotification(
+                CodexTokenUsage,
+                "token usage",
+                session.id,
+                params,
+              );
+              if (Option.isSome(usage) && usage.value.threadId === thread.thread.id) {
+                yield* channel.emit(
+                  new SessionTokensUpdated({
+                    session,
+                    totalTokens: usage.value.tokenUsage.total.totalTokens,
+                  }),
+                );
+              }
+              return;
+            }
             if (method === "item/started") {
               const notification = yield* decodeNotification(
                 ItemNotification,
@@ -327,13 +398,14 @@ const makeCodexChild = Effect.gen(function* () {
                 params,
               );
               if (Option.isNone(notification)) return;
-              if (notification.value.turnId !== turn.turn.id) {
+              if (notification.value.turnId !== turnId) {
                 return yield* Effect.logDebug("Skipping a Codex item from another turn", {
                   sessionId: session.id,
                   turnId: notification.value.turnId,
                 });
               }
               if (!Schema.is(ToolItem)(notification.value.item)) return;
+              toolsInFlight.add(notification.value.item.id);
               return yield* channel.emit(
                 new ToolStarted({
                   session,
@@ -351,7 +423,7 @@ const makeCodexChild = Effect.gen(function* () {
                 params,
               );
               if (Option.isNone(notification)) return;
-              if (notification.value.turnId !== turn.turn.id) {
+              if (notification.value.turnId !== turnId) {
                 return yield* Effect.logDebug("Skipping a Codex item from another turn", {
                   sessionId: session.id,
                   turnId: notification.value.turnId,
@@ -366,7 +438,8 @@ const makeCodexChild = Effect.gen(function* () {
                 return yield* channel.emit(new TextOutput({ session, text }));
               }
               if (!Schema.is(ToolItem)(item)) return;
-              return yield* channel.emit(
+              toolsInFlight.delete(item.id);
+              yield* channel.emit(
                 new ToolFinished({
                   session,
                   callId: item.id,
@@ -378,6 +451,9 @@ const makeCodexChild = Effect.gen(function* () {
                     item.success === false,
                 }),
               );
+              if (toolsInFlight.size === 0 && (yield* conversation.isPaused))
+                yield* interruptTurn();
+              return;
             }
             if (method === "account/updated") {
               const account = yield* Schema.decodeUnknownEffect(AccountUpdated)(params).pipe(
@@ -427,27 +503,36 @@ const makeCodexChild = Effect.gen(function* () {
                 "turn completion",
                 params,
               );
-              if (completed.turn.id !== turn.turn.id) {
+              if (completed.turn.id !== turnId) {
                 return yield* Effect.logDebug("Skipping another turn's completion", {
                   sessionId: session.id,
                   turnId: completed.turn.id,
                 });
               }
-              // A completed turn can leave unified-exec commands alive. Release
-              // the owned app server before the result can win a cancellation race.
-              yield* connection.close;
-              if (completed.turn.status === "completed") {
-                return yield* channel.finish(
-                  session,
-                  finalText ?? lastText ?? "Codex child session completed",
-                );
+              turnActive = false;
+              const wasInterrupted = interrupting;
+              interrupting = false;
+              toolsInFlight.clear();
+              if (
+                completed.turn.status === "completed" ||
+                (completed.turn.status === "interrupted" &&
+                  wasInterrupted &&
+                  ((yield* conversation.isPaused) || pendingMessages.length > 0))
+              ) {
+                const nextMessage = pendingMessages.shift();
+                if (nextMessage !== undefined) {
+                  yield* startTurn(nextMessage);
+                  for (const message of pendingMessages.splice(0)) yield* steer(message);
+                  return;
+                }
+                return yield* conversation.finish(finalText ?? lastText ?? "Codex turn paused");
               }
               const detail =
                 completed.turn.error?.message ??
                 (completed.turn.status === "interrupted"
                   ? "Codex child session was interrupted"
                   : "Codex child session failed");
-              return yield* channel.fail(
+              return yield* fail(
                 new AgentResultError({
                   sessionId: Option.some(session.id),
                   message: detail,
@@ -470,9 +555,9 @@ const makeCodexChild = Effect.gen(function* () {
           }),
         ),
         Effect.flatMap(() =>
-          channel.isTerminal.pipe(
-            Effect.flatMap((terminal) =>
-              terminal
+          Effect.all([channel.isTerminal, conversation.isClosing]).pipe(
+            Effect.flatMap(([terminal, closing]) =>
+              terminal || closing
                 ? Effect.void
                 : channel.fail(
                     operationError(
@@ -489,33 +574,14 @@ const makeCodexChild = Effect.gen(function* () {
       );
       yield* Effect.forkScoped(consume);
 
-      const steer = Effect.fn("CodexChildBackend.steer")((message: string) => {
-        const params: TurnSteerParams = {
-          threadId: thread.thread.id,
-          expectedTurnId: turn.turn.id,
-          input: [{ type: "text", text: message, text_elements: [] }],
-        };
-        return Effect.logDebug("Steering Codex child session", { sessionId: session.id }).pipe(
-          Effect.andThen(connection.request("steer", "turn/steer", json(params))),
-          Effect.asVoid,
-        );
-      });
-      const interruptParams: TurnInterruptParams = {
-        threadId: thread.thread.id,
-        turnId: turn.turn.id,
-      };
-      const interrupt = Effect.logInfo("Interrupting Codex child session", {
-        sessionId: session.id,
-      }).pipe(
-        Effect.andThen(connection.request("interrupt", "turn/interrupt", json(interruptParams))),
-        Effect.asVoid,
-      );
+      const interrupt = interruptTurn();
       return {
         session,
         events: Stream.fromQueue(channel.events),
         interrupt,
         result: Deferred.await(channel.result),
         steer,
+        intervene: conversation.intervene,
       } satisfies RunningSession;
     },
   );

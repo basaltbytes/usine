@@ -216,6 +216,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     return Executor.of({
       kind: "exe.dev",
       cancel: attemptChannel.cancel,
+      intervene: attemptChannel.intervene,
       preflight: machines.preflight,
       prepare,
     });

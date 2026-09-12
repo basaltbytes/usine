@@ -1,4 +1,4 @@
-import { Attempt, AttemptId } from "@usine/core/attempt";
+import { Attempt, AttemptId, AttemptContext } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { Event } from "@usine/core/event";
@@ -290,6 +290,9 @@ const makeRunStore = Effect.gen(function* () {
           worker,
           number: decision.number,
           brain: current.agent.brain,
+          task: current.task,
+          agent: current.agent.name,
+          operatorIntervened: false,
           parentModel: current.parentModel,
           startedAt,
           outcome: Option.none(),
@@ -360,7 +363,10 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("approve run"));
 
-  const retry = Effect.fn("RunStore.retry")(function* (runId: RunId) {
+  const retry = Effect.fn("RunStore.retry")(function* (
+    runId: RunId,
+    amendment: Option.Option<AttemptContext> = Option.none(),
+  ) {
     yield* Effect.annotateCurrentSpan({ runId });
     yield* database.transaction((transaction) =>
       Effect.gen(function* () {
@@ -373,11 +379,18 @@ const makeRunStore = Effect.gen(function* () {
           decision: decision._tag,
         });
         if (decision._tag === "Resume") {
+          if (Option.isSome(amendment)) {
+            yield* tx.amend(runId, amendment.value);
+            yield* Effect.logInfo("Run effective task and Agent amended", {
+              runId,
+              agent: amendment.value.agent.name,
+            });
+          }
           yield* tx.updateState(runId, decision.state);
           yield* tx.requestWorkflowCommand(runId, "Resume");
           return;
         }
-        if (decision._tag === "ResumePending") return;
+        if (decision._tag === "ResumePending" && Option.isNone(amendment)) return;
         return yield* new RunOperationRejectedError({
           runId,
           operation: "retry",
@@ -479,6 +492,9 @@ const makeRunStore = Effect.gen(function* () {
         const tx = queriesFor(transaction);
         if (direction === "outbound" && envelope.payload._tag === "Started") {
           yield* tx.updateAttemptParentModel(envelope.attemptId, envelope.payload.parentModel);
+        }
+        if (direction === "outbound" && envelope.payload._tag === "InterventionApplied") {
+          yield* tx.markIntervened(envelope.attemptId);
         }
         yield* tx.appendTranscript(direction, envelope, receivedAt);
       }),
@@ -597,7 +613,10 @@ export class RunStore extends Context.Service<
       result: Workflow.Result<StepResult, AttemptFailure>,
     ) => Effect.Effect<void, RunStoreError>;
     readonly recoverable: Effect.Effect<ReadonlyArray<RecoverableRun>, RunStoreError>;
-    readonly retry: (runId: RunId) => Effect.Effect<void, RunStoreError>;
+    readonly retry: (
+      runId: RunId,
+      amendment?: Option.Option<AttemptContext>,
+    ) => Effect.Effect<void, RunStoreError>;
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,

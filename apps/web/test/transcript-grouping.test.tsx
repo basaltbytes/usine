@@ -11,6 +11,7 @@ import {
   type AgentSession,
   type AgentSessionEvent,
 } from "@usine/core/agent/session";
+import { RunId } from "@usine/core/run";
 import { AttemptId } from "@usine/core/attempt";
 import { SessionEvent } from "@usine/core/attempt/channel";
 import { TranscriptSequence } from "@usine/engine/transcript";
@@ -103,7 +104,7 @@ it("summarizes adjacent completed work while keeping prose and a single call vis
   const html = renderToStaticMarkup(
     <TranscriptDisclosureProvider>
       <MessageScrollerProvider>
-        <Transcript events={events} attempts={[]} filter="all" />
+        <Transcript runId={RunId.make("run-31")} events={events} attempts={[]} filter="all" />
       </MessageScrollerProvider>
     </TranscriptDisclosureProvider>,
   );
@@ -128,7 +129,7 @@ it("does not join successful calls across prose hidden by the tools filter", () 
   const html = renderToStaticMarkup(
     <TranscriptDisclosureProvider>
       <MessageScrollerProvider>
-        <Transcript events={events} attempts={[]} filter="tools" />
+        <Transcript runId={RunId.make("run-31")} events={events} attempts={[]} filter="tools" />
       </MessageScrollerProvider>
     </TranscriptDisclosureProvider>,
   );

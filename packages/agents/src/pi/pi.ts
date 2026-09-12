@@ -21,9 +21,10 @@ import {
   UnknownModelError,
   UnsupportedEffortError,
 } from "../runtime.ts";
-import { lastPiMessageText, sessionChannel, subscribePiSession } from "./session.ts";
+import { sessionChannel, subscribePiSession } from "./session.ts";
 import { PiSdk, type PiStartResult, usePiStart } from "./sdk.ts";
 import { subagentsExtension } from "./subagents.ts";
+import { piPauseGate, piTurns } from "./turns.ts";
 
 export {
   PiSdk,
@@ -91,11 +92,12 @@ const makePiChild = Effect.gen(function* () {
         sessionId: request.session.id,
       });
       yield* Effect.logInfo("Launching Pi child session");
+      const gate = yield* piPauseGate;
       return yield* usePiStart(
         (signal) =>
           sdk.start({
             cwd: request.cwd,
-            extensions: [],
+            extensions: [gate.extension],
             model: Option.some(request.session.brain.model),
             signal,
             thinkingLevel: request.session.brain.effort,
@@ -178,52 +180,21 @@ const makePiChild = Effect.gen(function* () {
                 Effect.andThen(Effect.sync(acquired.dispose)),
               ),
             );
-            yield* Effect.tryPromise({
-              try: () => started.session.prompt(request.prompt),
-              catch: (cause) => childError("stream", request, "Pi child session failed", cause),
-            }).pipe(
-              Effect.flatMap(() =>
-                channel.finish(
-                  session,
-                  subscription.lastText() ??
-                    lastPiMessageText(started.session.messages) ??
-                    "Pi child session completed",
-                ),
-              ),
-              Effect.catch((error) => channel.fail(error)),
-              Effect.forkScoped,
-            );
-
-            const steer = Effect.fn("PiChildBackend.steer")((message: string) =>
-              Effect.logDebug("Steering Pi child session", {
-                sessionId: session.id,
-              }).pipe(
-                Effect.andThen(
-                  Effect.tryPromise({
-                    try: () => started.session.steer(message),
-                    catch: (cause) =>
-                      childError("steer", request, "Could not steer Pi child", cause),
-                  }),
-                ),
-              ),
-            );
-            const interrupt = Effect.logInfo("Interrupting Pi child session", {
-              sessionId: session.id,
-            }).pipe(
-              Effect.andThen(
-                Effect.tryPromise({
-                  try: () => started.session.abort(),
-                  catch: (cause) =>
-                    childError("interrupt", request, "Could not interrupt Pi child", cause),
-                }),
-              ),
-            );
+            const controls = yield* piTurns({
+              session,
+              sdk: started.session,
+              channel,
+              gate,
+              prompt: request.prompt,
+              lastText: subscription.lastText,
+              error: (operation, cause) =>
+                childError(operation, request, `Pi child ${operation} failed`, cause),
+            });
             return {
               session,
               events: Stream.fromQueue(channel.events),
-              interrupt,
+              ...controls,
               result: Deferred.await(channel.result),
-              steer,
             } satisfies RunningSession;
           }),
       );
@@ -249,6 +220,7 @@ const makePiParent = Effect.gen(function* () {
         sessionId: parentId,
       });
       yield* Effect.logInfo("Launching Pi parent session");
+      const gate = yield* piPauseGate;
       const channel = yield* sessionChannel({
         label: "Pi parent session",
         sessionId: parentId,
@@ -273,6 +245,7 @@ const makePiParent = Effect.gen(function* () {
           sdk.start({
             cwd: request.cwd,
             extensions: [
+              gate.extension,
               subagentsExtension({
                 agent: request.spec.agent,
                 backend: childBackend,
@@ -396,45 +369,22 @@ const makePiParent = Effect.gen(function* () {
                 ),
               ),
             );
-            const run = Effect.raceFirst(
-              Effect.tryPromise({
-                try: () => started.session.prompt(prompt),
-                catch: (cause) => parentError("stream", request, "Pi parent session failed", cause),
-              }).pipe(
-                Effect.flatMap(() =>
-                  channel.finish(
-                    parent,
-                    subscription.lastText() ??
-                      lastPiMessageText(started.session.messages) ??
-                      "Pi parent session completed",
-                  ),
-                ),
-              ),
-              budgetFailure,
-            ).pipe(Effect.catch((error) => channel.fail(error)));
-            yield* Effect.forkScoped(run);
-
-            const steer = Effect.fn("PiParentRuntime.steer")((message: string) =>
-              Effect.logDebug("Steering Pi parent session", {
-                sessionId: parentId,
-              }).pipe(
-                Effect.andThen(
-                  Effect.tryPromise({
-                    try: () => started.session.steer(message),
-                    catch: (cause) => parentError("steer", request, "Could not steer Pi", cause),
-                  }),
-                ),
-              ),
-            );
-            const interrupt = Effect.logInfo("Interrupting Pi parent session", {
-              sessionId: parentId,
-            }).pipe(Effect.andThen(abort));
+            yield* Effect.forkScoped(budgetFailure);
+            const controls = yield* piTurns({
+              session: parent,
+              sdk: started.session,
+              channel,
+              gate,
+              prompt,
+              lastText: subscription.lastText,
+              error: (operation, cause) =>
+                parentError(operation, request, `Pi parent ${operation} failed`, cause),
+            });
             return {
               session: parent,
               events: Stream.fromQueue(channel.events),
-              interrupt,
+              ...controls,
               result: Deferred.await(channel.result),
-              steer,
             } satisfies RunningSession;
           }),
       );

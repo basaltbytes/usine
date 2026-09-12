@@ -1,6 +1,7 @@
 import {
   query as openClaudeQuery,
   type Options,
+  type HookCallback,
   type SDKMessage,
   type SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
@@ -9,6 +10,7 @@ import {
   AgentSessionEvent,
   ChildSession,
   SessionStarted,
+  SessionTokensUpdated,
   TextOutput,
   ToolFinished,
   ToolStarted,
@@ -24,6 +26,8 @@ import {
   UnknownModelError,
 } from "../runtime.ts";
 import { sessionChannel } from "./session.ts";
+import { sessionConversation } from "./conversation.ts";
+import { claudeTokenMeter } from "./usage.ts";
 
 export interface ClaudeUserMessage {
   readonly type: "user";
@@ -42,6 +46,7 @@ export type ClaudeQueryOptions = Pick<
   | "persistSession"
   | "settingSources"
   | "thinking"
+  | "hooks"
 >;
 
 export interface ClaudeModelInfo {
@@ -246,7 +251,22 @@ const makeClaudeChild = Effect.gen(function* () {
       });
       yield* Effect.logInfo("Launching Claude child session");
       const input = new AsyncInput();
-      const query = sdk.open(input, optionsFor(request));
+      const context = yield* Effect.context<never>();
+      let boundary = Effect.void;
+      const pauseAtBoundary: HookCallback = async (_input, _id, options) => {
+        await Effect.runPromiseWith(context)(
+          Effect.suspend(() => boundary),
+          { signal: options.signal },
+        );
+        return {};
+      };
+      const query = sdk.open(input, {
+        ...optionsFor(request),
+        hooks: {
+          PreToolUse: [{ hooks: [pauseAtBoundary], timeout: 86_400 }],
+          PostToolUse: [{ hooks: [pauseAtBoundary], timeout: 86_400 }],
+        },
+      });
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           input.end();
@@ -273,7 +293,21 @@ const makeClaudeChild = Effect.gen(function* () {
       channel.onTerminal(() => {
         input.end();
       });
+      const conversation = yield* sessionConversation({
+        session: request.session,
+        channel,
+        send: (message) =>
+          Effect.try({
+            try: () => input.offer(userMessage(message)),
+            catch: (cause) =>
+              operationError("steer", request, "Could not send a message to Claude", cause),
+          }),
+        pause: Effect.void,
+        beforeFinish: Effect.void,
+      });
+      boundary = conversation.awaitUnpaused;
       const tools = new Map<string, string>();
+      const tokens = claudeTokenMeter();
       yield* channel.emit(new SessionStarted({ session: request.session }));
       input.offer(userMessage(request.prompt));
 
@@ -282,6 +316,14 @@ const makeClaudeChild = Effect.gen(function* () {
       ).pipe(
         Stream.runForEach((message) =>
           Effect.gen(function* () {
+            const totalTokens = tokens(message);
+            if (Option.isSome(totalTokens))
+              yield* channel.emit(
+                new SessionTokensUpdated({
+                  session: request.session,
+                  totalTokens: totalTokens.value,
+                }),
+              );
             for (const event of sessionEventsFrom(message, request.session, tools)) {
               yield* channel.emit(event);
             }
@@ -299,10 +341,7 @@ const makeClaudeChild = Effect.gen(function* () {
             if (message.queued_turn_count !== undefined && message.queued_turn_count > 0) {
               return;
             }
-            yield* channel.finish(
-              request.session,
-              message.result.trim() || "Claude child session completed",
-            );
+            yield* conversation.finish(message.result.trim() || "Claude child session completed");
           }),
         ),
         Effect.flatMap(() =>
@@ -356,6 +395,7 @@ const makeClaudeChild = Effect.gen(function* () {
         interrupt,
         result: Deferred.await(channel.result),
         steer,
+        intervene: conversation.intervene,
       } satisfies RunningSession;
     },
   );

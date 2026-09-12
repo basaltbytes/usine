@@ -12,6 +12,14 @@ The app uses React, TypeScript, TanStack Query, TanStack Router, Tailwind CSS, s
 
 Adjacent completed tools, including failed calls, have expandable action summaries, such as “Edited conversation.tsx · ran tests.” Groups show an error count when needed; error navigation opens the group and the failed call together. File summaries count distinct recorded paths and distinguish shared basenames with parent directories. Recognized test and build invocations describe what ran; their results remain in the tool details. Long or varied groups use compact counts, and loading earlier inputs fills in missing file and command details.
 
+## Intervening in a Run
+
+Send guidance from the parent conversation or a child's expanded activity. **Pause session** waits at the next tool boundary; sending a message resumes it. **Cancel Run** stops the entire Attempt.
+
+Messaging a child places a Hold. The child can answer and accept more turns in the same conversation, while the parent continues waiting for its result. **Release child** lets the result return when the child is idle. Each child has its own Hold, and a paused parent does not prevent messaging its children. Held children remain reachable even when their last activity is outside the loaded transcript page. Holds pause the Attempt's elapsed-time budget; reported tokens continue counting toward `settings.max_attempt_tokens`.
+
+Failed Runs offer **Edit and retry** with a task editor and roster agent picker. The selected agent supplies its persona and model settings. The new task and agent apply to later Attempts, including automatic infrastructure retries. Attempts show the task and agent they actually used and whether they received an operator intervention. Messages and delivery receipts identify the configured operator in the transcript; the triggering Event remains unchanged.
+
 ## Returning to a conversation
 
 Each Run remembers its filter, inspected groups, tools and child sessions, and reading place in this browser. Closing and reopening the drawer, or refreshing the page, returns to the same transcript row and position within it. A reader who leaves at latest continues following incoming activity. Wheel, touch, keyboard scrolling and conversation navigation take precedence over a pending restore.

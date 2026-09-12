@@ -12,8 +12,9 @@ import {
   ChildSession,
   ChildSessionBudget,
   ChildSessionCount,
+  SessionFinished,
 } from "@usine/core/agent/session";
-import { Effect, Fiber, Stream } from "effect";
+import { Effect, Exit, Fiber, Stream } from "effect";
 import { Type } from "typebox";
 import { assembleChildPrompt } from "../prompt.ts";
 import {
@@ -130,6 +131,13 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
     const child = yield* options.backend.launch(request);
     // Registered on the spawn scope, so the child stops being addressable when it returns.
     yield* options.register(child);
+    yield* Effect.addFinalizer((exit) =>
+      Exit.isFailure(exit)
+        ? Effect.logWarning("Child session ended before returning a result", {
+            sessionId: session.id,
+          }).pipe(Effect.andThen(options.emit(new SessionFinished({ session }))))
+        : Effect.void,
+    );
     const forward = yield* child.events.pipe(Stream.runForEach(options.emit), Effect.forkScoped);
     const result = yield* Effect.raceFirst(
       child.result,

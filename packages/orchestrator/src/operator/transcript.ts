@@ -21,6 +21,9 @@ export const TranscriptPayload = Schema.Union([
   AttemptChannel.Interrupt,
   AttemptChannel.OperatorMessage,
   AttemptChannel.Release,
+  AttemptChannel.Cancel,
+  AttemptChannel.InterventionApplied,
+  AttemptChannel.InterventionRejected,
 ]);
 export type TranscriptPayload = typeof TranscriptPayload.Type;
 
@@ -32,6 +35,8 @@ export class TranscriptEventView extends Schema.Class<TranscriptEventView>(
   attemptId: AttemptId,
   receivedAt: Schema.String,
   direction: AttemptChannel.Direction,
+  target: Schema.optionalKey(AttemptChannel.SessionTarget),
+  operator: Schema.optionalKey(Schema.NonEmptyString),
   payload: TranscriptPayload,
 }) {}
 

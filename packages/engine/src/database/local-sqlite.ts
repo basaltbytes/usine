@@ -48,11 +48,21 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
     RunDatabase,
     Effect.gen(function* () {
       const drizzle = yield* SQLiteDrizzle.makeWithDefaults();
-      yield* drizzle.run(sql`PRAGMA foreign_keys = ON`).execute();
+      // SQLite ignores foreign_keys changes inside a transaction. Drizzle
+      // rebuilds referenced tables while migrating, so disable before its
+      // transaction and restore enforcement even when a migration fails.
+      yield* drizzle.run(sql`PRAGMA foreign_keys = OFF`).execute();
       yield* migrate(drizzle, {
         migrationsFolder,
         migrationsTable: "usine_migrations",
-      });
+      }).pipe(
+        Effect.ensuring(
+          drizzle
+            .run(sql`PRAGMA foreign_keys = ON`)
+            .execute()
+            .pipe(Effect.orDie),
+        ),
+      );
       return drizzle;
     }).pipe(Effect.mapError((cause) => startupError("initialize local database", cause))),
   );

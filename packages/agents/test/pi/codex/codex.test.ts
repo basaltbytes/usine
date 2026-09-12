@@ -2,7 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
-import { Deferred, Effect, Fiber, Layer, Result, Schema, Stream } from "effect";
+import { Cause, Deferred, Effect, Fiber, Layer, Queue, Result, Schema, Stream } from "effect";
+import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
 import { TestClock } from "effect/testing";
 import {
   AgentResultError,
@@ -92,6 +93,76 @@ const successfulResponses = (
   }) satisfies Readonly<Record<string, Schema.Json>>;
 
 describe("Codex child backend", () => {
+  it.effect(
+    "pauses without closing Codex and resumes a held conversation on its existing thread",
+    () =>
+      Effect.gen(function* () {
+        const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+        const idle = yield* Queue.make<void>();
+        const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+        const responses = successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]);
+        let turns = 0;
+        let closes = 0;
+        const server = Layer.succeed(CodexAppServer)({
+          open: () =>
+            Effect.succeed({
+              notifications: Stream.fromQueue(notifications),
+              notify: () => Effect.void,
+              close: Effect.sync(() => {
+                closes += 1;
+              }).pipe(Effect.andThen(Queue.end(notifications))),
+              request: (_operation, method, params) =>
+                Effect.sync(() => {
+                  calls.push({ method, params });
+                  if (method === "turn/start") {
+                    turns += 1;
+                    return { turn: { id: `turn-${turns}` } };
+                  }
+                  return responses[method] ?? {};
+                }),
+            }),
+        });
+        yield* Effect.gen(function* () {
+          const running = yield* (yield* CodexChildBackend).launch(request());
+          const result = yield* Effect.forkScoped(running.result);
+          yield* Effect.forkScoped(
+            running.events.pipe(
+              Stream.runForEach((event) =>
+                event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+              ),
+            ),
+          );
+          yield* running.intervene(new Interrupt());
+          yield* Queue.offer(notifications, {
+            method: "turn/completed",
+            params: { turn: { id: "turn-1", status: "interrupted", error: null } },
+          });
+          yield* Queue.take(idle);
+          assert.strictEqual(result.pollUnsafe(), undefined);
+          assert.strictEqual(closes, 0);
+          yield* running.intervene(new OperatorMessage({ message: "Continue with my correction" }));
+          assert.strictEqual(turns, 2);
+          yield* Queue.offer(notifications, {
+            method: "item/completed",
+            params: {
+              threadId: "thread-1",
+              turnId: "turn-2",
+              item: { type: "agentMessage", id: "second-answer", text: "Corrected result" },
+            },
+          });
+          yield* Queue.offer(notifications, {
+            method: "turn/completed",
+            params: { turn: { id: "turn-2", status: "completed", error: null } },
+          });
+          yield* Queue.take(idle);
+          assert.strictEqual(result.pollUnsafe(), undefined);
+          yield* running.intervene(new Release());
+          assert.strictEqual((yield* Fiber.join(result)).message, "Corrected result");
+          assert.strictEqual(closes, 1);
+          assert.strictEqual(calls.filter(({ method }) => method === "thread/start").length, 1);
+        }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
+      }).pipe(Effect.scoped),
+  );
   for (const status of ["completed", "interrupted"] as const) {
     it.effect(`waits for shutdown before publishing ${status} work`, () =>
       Effect.gen(function* () {

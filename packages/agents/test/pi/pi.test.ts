@@ -18,7 +18,7 @@ import { AgentSessionId, ChildSession, ChildSessionBudget } from "@usine/core/ag
 import { AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
-import { Effect, Fiber, Layer, Option, Stream } from "effect";
+import { Effect, Fiber, Layer, Option, Queue, Stream } from "effect";
 import { Type } from "typebox";
 import {
   AgentRuntime,
@@ -139,6 +139,67 @@ describe("Pi child backend", () => {
     prompt: "Implement the focused task.",
   });
 
+  it.effect("keeps a held Pi child open across idle turns and returns only after release", () =>
+    Effect.gen(function* () {
+      const turns = yield* Queue.make<{ readonly text: string; readonly complete: () => void }>();
+      const idle = yield* Queue.make<void>();
+      const context = yield* Effect.context<never>();
+      const fork = Effect.runForkWith(context);
+      let opens = 0;
+      const sdk = Layer.succeed(PiSdk)({
+        start: () => {
+          opens += 1;
+          return Promise.resolve({
+            _tag: "Started",
+            model: childRequest.session.brain.model,
+            pool: "apiKeys",
+            session: {
+              messages: [],
+              dispose: () => {},
+              abort: () => Promise.resolve(),
+              subscribe: () => () => {},
+              steer: () => Promise.resolve(),
+              prompt: (text) =>
+                new Promise<void>((complete) => {
+                  fork(Queue.offer(turns, { text, complete }));
+                }),
+            },
+          });
+        },
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* PiChildBackend).launch(childRequest);
+        const result = yield* Effect.forkScoped(running.result);
+        yield* Effect.forkScoped(
+          running.events.pipe(
+            Stream.runForEach((event) =>
+              event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
+            ),
+          ),
+        );
+        const first = yield* Queue.take(turns);
+        const state = yield* running.intervene(
+          new AttemptChannel.OperatorMessage({ message: "Wait for my review" }),
+        );
+        assert.strictEqual(state.held, true);
+        first.complete();
+        yield* Queue.take(idle);
+        assert.strictEqual(result.pollUnsafe(), undefined);
+        yield* running.intervene(
+          new AttemptChannel.OperatorMessage({ message: "Now fix the edge case" }),
+        );
+        const second = yield* Queue.take(turns);
+        assert.strictEqual(second.text, "Now fix the edge case");
+        second.complete();
+        yield* Queue.take(idle);
+        assert.strictEqual(result.pollUnsafe(), undefined);
+        yield* running.intervene(new AttemptChannel.Release());
+        assert.strictEqual((yield* Fiber.join(result)).message, "Pi session completed");
+        assert.strictEqual(opens, 1);
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk));
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("normalizes session events and forwards input and controls", () => {
     let options: PiStartOptions | undefined;
     let listener: ((event: PiSessionEvent) => void) | undefined;
@@ -210,7 +271,10 @@ describe("Pi child backend", () => {
         assert.strictEqual(prompt, childRequest.prompt);
         assert.strictEqual(steer, "Check the test output.");
         assert.strictEqual(interrupted, true);
-        assert.deepStrictEqual(options?.extensions, []);
+        assert.deepStrictEqual(
+          options?.extensions.map(({ name }) => name),
+          ["usine-session-intervention"],
+        );
         assert.deepStrictEqual(options?.model, Option.some(childRequest.session.brain.model));
         assert.strictEqual(options?.toolMode, "repository");
         assert.deepStrictEqual(
@@ -459,7 +523,7 @@ describe("Pi parent runtime", () => {
         assert.match(prompt, /— usine agent: developer/u);
         assert.strictEqual(steer, "Check the failing test.");
         assert.strictEqual(interrupted, true);
-        assert.strictEqual(options?.extensions.length, 1);
+        assert.strictEqual(options?.extensions.length, 2);
         assert.strictEqual(options?.toolMode, "orchestration");
         assert.strictEqual(options?.thinkingLevel, "medium");
         const started = [...events][0];
@@ -488,7 +552,7 @@ describe("Pi parent runtime", () => {
       dispose: () => undefined,
       messages: [],
       prompt: async () => {
-        const extension = options?.extensions[0];
+        const extension = options?.extensions.find(({ name }) => name === "usine-subagents");
         assert(extension !== undefined);
         let registered: ToolDefinition | undefined;
         // SAFETY: this extension only calls registerTool; other members are unused.
@@ -759,7 +823,7 @@ describe("Pi parent runtime", () => {
       Effect.gen(function* () {
         const runtime = yield* AgentRuntime;
         yield* runtime.launch(request, noChildSessions);
-        const extension = options?.extensions[0];
+        const extension = options?.extensions.find(({ name }) => name === "usine-subagents");
         assert(extension !== undefined);
         let registered: ToolDefinition | undefined;
         yield* Effect.promise(async () => {

@@ -61,6 +61,9 @@ export interface TranscriptSession extends TranscriptPosition {
   readonly attemptId: AttemptId;
   readonly session: AgentSession;
   readonly status: SessionStatus;
+  readonly held: boolean;
+  readonly paused: boolean;
+  readonly idle: boolean;
   readonly entries: ReadonlyArray<TranscriptEntry>;
 }
 
@@ -74,7 +77,10 @@ export interface TranscriptProjection {
 interface RecordedSessionEvent {
   readonly sequence: TranscriptEventView["sequence"];
   readonly receivedAt: string;
-  readonly event: Exclude<AgentSessionEvent, { readonly _tag: "PoolRateLimitsUpdated" }>;
+  readonly event: Exclude<
+    AgentSessionEvent,
+    { readonly _tag: "PoolRateLimitsUpdated" | "SessionTokensUpdated" }
+  >;
 }
 
 interface SessionEvents {
@@ -146,6 +152,20 @@ const sessionEntries = (
         format: "plain" as const,
         isError: false,
       }),
+      SessionIdle: () => ({
+        kind: "status" as const,
+        label: `${group.session.agent} is waiting`,
+        detail: "The session remains open for operator input.",
+        format: "plain" as const,
+        isError: false,
+      }),
+      SessionResumed: () => ({
+        kind: "status" as const,
+        label: `${group.session.agent} resumed`,
+        detail: "",
+        format: "plain" as const,
+        isError: false,
+      }),
       SessionFinished: () => ({
         kind: "status" as const,
         label: `${group.session.agent} finished`,
@@ -163,18 +183,42 @@ const sessionEntries = (
 export const projectTranscript = (
   events: ReadonlyArray<TranscriptEventView>,
   attempts: ReadonlyArray<AttemptView>,
+  sessionState: ReadonlyArray<TranscriptEventView> = [],
 ): TranscriptProjection => {
   const terminalAttempts = new Set(
     attempts.filter(({ outcome }) => outcome !== null).map(({ id }) => id),
   );
   const groups = new Map<string, SessionEvents>();
+  const interventions: Array<
+    TranscriptEventView & {
+      readonly payload: Extract<
+        TranscriptEventView["payload"],
+        { readonly _tag: "InterventionApplied" | "InterventionRejected" }
+      >;
+    }
+  > = [];
   const entries: Array<TranscriptEntry> = [];
   for (const record of [...events].sort((left, right) => left.sequence - right.sequence)) {
     const payload = record.payload;
+    if (payload._tag === "InterventionApplied" || payload._tag === "InterventionRejected") {
+      interventions.push({ ...record, payload });
+      continue;
+    }
+    // New inputs are rendered from their delivery receipt, including the correct session and attribution.
+    if (
+      record.direction === "inbound" &&
+      record.operator !== undefined &&
+      payload._tag !== "Cancel"
+    )
+      continue;
     if (payload._tag === "Final" || payload._tag === "Failed" || payload._tag === "Interrupted")
       terminalAttempts.add(record.attemptId);
     if (payload._tag === "SessionEvent") {
-      if (payload.event._tag === "PoolRateLimitsUpdated") continue;
+      if (
+        payload.event._tag === "PoolRateLimitsUpdated" ||
+        payload.event._tag === "SessionTokensUpdated"
+      )
+        continue;
       const session = payload.event.session;
       const key = JSON.stringify([record.attemptId, session.id]);
       const sessionEvent: RecordedSessionEvent = {
@@ -212,6 +256,13 @@ export const projectTranscript = (
             detail: failureMessage(failure),
             format: "plain",
             isError: true,
+          }),
+          Cancel: (): NoticeContent => ({
+            kind: "status",
+            label: "Cancel requested",
+            detail: "The Attempt is stopping.",
+            format: "plain",
+            isError: false,
           }),
           Interrupted: (): NoticeContent => ({
             kind: "status",
@@ -252,6 +303,7 @@ export const projectTranscript = (
       ),
     );
   }
+  const matchedInterventions = new Set<TranscriptEventView["sequence"]>();
   const sessions: Array<TranscriptSession> = [];
   for (const [key, group] of groups) {
     const first = group.events[0];
@@ -260,16 +312,95 @@ export const projectTranscript = (
       : terminalAttempts.has(group.attemptId)
         ? "Stopped"
         : "Live";
+    const addressed = interventions.filter(
+      ({ attemptId, payload }) =>
+        attemptId === group.attemptId &&
+        (payload.intervention.target._tag === "Parent"
+          ? group.session._tag === "ParentSession"
+          : payload.intervention.target.sessionId === group.session.id),
+    );
+    const lastApplied = addressed
+      .filter(({ payload }) => payload._tag === "InterventionApplied")
+      .at(-1)?.payload;
+    const interventionEntries = addressed.map((record) => {
+      matchedInterventions.add(record.sequence);
+      const { action, operator } = record.payload.intervention;
+      const rejected = record.payload._tag === "InterventionRejected";
+      const message = action._tag === "OperatorMessage" || action._tag === "Steer";
+      return notice(record, {
+        kind: message ? "message" : "status",
+        label: rejected
+          ? `${operator} · not delivered`
+          : message
+            ? operator
+            : action._tag === "Release"
+              ? `${operator} released the child`
+              : `${operator} paused the session`,
+        detail: rejected
+          ? `${message ? `${action.message}\n\n` : ""}${record.payload.message}`
+          : message
+            ? action.message
+            : "",
+        format: message ? "markdown" : "plain",
+        isError: rejected,
+      });
+    });
     sessions.push({
       _tag: "Session",
       ...position(first),
       key,
-      latestSequence: group.events.at(-1)?.sequence ?? first.sequence,
+      latestSequence: [...group.events, ...addressed].reduce(
+        (latest, record) => (record.sequence > latest ? record.sequence : latest),
+        first.sequence,
+      ),
       attemptId: group.attemptId,
       session: group.session,
       status,
-      entries: sessionEntries(group, status),
+      held: lastApplied?._tag === "InterventionApplied" && lastApplied.state.held,
+      paused: lastApplied?._tag === "InterventionApplied" && lastApplied.state.paused,
+      idle:
+        group.events
+          .filter(({ event }) => event._tag === "SessionIdle" || event._tag === "SessionResumed")
+          .at(-1)?.event._tag === "SessionIdle",
+      entries: [...sessionEntries(group, status), ...interventionEntries].sort(
+        (a, b) => a.sequence - b.sequence,
+      ),
     });
+  }
+  if (sessionState.length > 0) {
+    for (const observed of projectTranscript(sessionState, attempts).sessions) {
+      const index = sessions.findIndex((session) => session.key === observed.key);
+      const current = sessions[index];
+      if (current === undefined) sessions.push({ ...observed, entries: [] });
+      else
+        sessions[index] = {
+          ...current,
+          status: observed.status,
+          held: observed.held,
+          paused: observed.paused,
+          idle: observed.idle,
+        };
+    }
+  }
+  for (const record of interventions) {
+    if (matchedInterventions.has(record.sequence)) continue;
+    const { target, operator, action } = record.payload.intervention;
+    entries.push(
+      notice(record, {
+        kind: action._tag === "Steer" || action._tag === "OperatorMessage" ? "message" : "status",
+        label: `${operator} · ${target._tag === "Parent" ? "parent" : target.sessionId}`,
+        detail:
+          record.payload._tag === "InterventionRejected"
+            ? record.payload.message
+            : action._tag === "Steer" || action._tag === "OperatorMessage"
+              ? action.message
+              : action._tag === "Release"
+                ? "Released the child"
+                : "Paused the session",
+        format: "plain",
+        isError: record.payload._tag === "InterventionRejected",
+      }),
+    );
   }
   return {
     sessions,
@@ -290,6 +421,9 @@ export const matchesFilter = (entry: TranscriptEntry, filter: TranscriptFilter):
 /** Describes observed session activity without assuming unrecorded thinking or success. */
 export const sessionActivityLabel = (session: TranscriptSession): string => {
   if (session.status !== "Live") return session.status;
+  if (session.paused) return "Paused · send a message to resume";
+  if (session.held) return session.idle ? "Held · waiting for you" : "Held · working";
+  if (session.idle) return "Waiting for operator input";
   const tool = [...session.entries]
     .reverse()
     .find((entry) => entry._tag === "Tool" && entry.state._tag === "Running");

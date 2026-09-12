@@ -2,6 +2,7 @@ import type { LoadedInstance } from "@usine/config/instance";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { RunId } from "@usine/core/run";
+import { AgentName } from "@usine/core/agent";
 import {
   type BoardMove,
   type FactoryOverview,
@@ -11,6 +12,8 @@ import {
   type Operator,
   type OperatorError,
   type OperatorObservation,
+  type EditAndRetry,
+  type SessionIntervention,
 } from "@usine/orchestrator/operator";
 import { Context, Effect, Layer, Schema } from "effect";
 
@@ -33,6 +36,12 @@ export class FactoryBackend extends Context.Service<
     readonly approve: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, BackendError>;
     readonly retry: (runId: RunId) => Effect.Effect<void, BackendError>;
+    readonly agents: Effect.Effect<ReadonlyArray<AgentName>, BackendError>;
+    readonly editAndRetry: (runId: RunId, edit: EditAndRetry) => Effect.Effect<void, BackendError>;
+    readonly intervene: (
+      runId: RunId,
+      input: SessionIntervention,
+    ) => Effect.Effect<void, BackendError>;
     readonly cancel: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly moveBoardItem: (move: BoardMove) => Effect.Effect<void, BackendError>;
     readonly pause: (loop: LoopName) => Effect.Effect<void, BackendError>;
@@ -50,6 +59,9 @@ export const liveBackendLayer = (
     approve: operator.approve,
     resetCycleBudget: operator.resetCycleBudget,
     retry: operator.retry,
+    agents: Effect.succeed(instance.agents.map(({ name }) => name)),
+    editAndRetry: (runId, edit) => operator.editAndRetry(instance, runId, edit),
+    intervene: (runId, input) => operator.intervene(instance, runId, input),
     cancel: operator.cancel,
     moveBoardItem: (move) => operator.moveBoardItem(instance, move),
     pause: (loop) => operator.pause(loop).pipe(Effect.asVoid),
@@ -79,6 +91,9 @@ export const needsSetupBackendLayer = (
     approve: fail,
     resetCycleBudget: fail,
     retry: fail,
+    agents: Effect.succeed(instance.agents.map(({ name }) => name)),
+    editAndRetry: fail,
+    intervene: fail,
     cancel: fail,
     moveBoardItem: fail,
     pause: fail,

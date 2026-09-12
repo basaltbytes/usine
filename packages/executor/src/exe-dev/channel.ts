@@ -56,6 +56,7 @@ export const attemptChannelFor = Effect.fn("ExeDevExecutor.attemptChannelFor")(f
   const session = yield* runHostSessionFor({ interruptGrace });
   return {
     cancel: session.cancel,
+    intervene: session.intervene,
     launch: (prepared: AttemptWorkspace, vm: VmState, io: AttemptChannel.Sink) =>
       session.launch(prepared, io, (input) => spawn(prepared, vm, input)),
   };

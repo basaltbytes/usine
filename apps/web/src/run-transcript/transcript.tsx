@@ -1,4 +1,7 @@
 import { CaretRightIcon } from "@phosphor-icons/react";
+import type { RunId } from "@usine/core/run";
+import { ChildTarget } from "@usine/core/attempt/channel";
+import { SessionComposer } from "../run-intervention/session-composer.tsx";
 import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { useMemo } from "react";
 import { Markdown } from "@/components/markdown";
@@ -91,7 +94,9 @@ const visible = (item: GroupedItem, filter: TranscriptFilter) =>
 const Child = ({
   session,
   filter,
+  runId,
 }: {
+  readonly runId: RunId;
   readonly session: GroupedSession;
   readonly filter: TranscriptFilter;
 }) => {
@@ -153,6 +158,14 @@ const Child = ({
             </MessageScrollerItem>
           ))
         )}
+        {session.status === "Live" && (
+          <SessionComposer
+            runId={runId}
+            attemptId={session.attemptId}
+            target={new ChildTarget({ sessionId: session.session.id })}
+            paused={session.paused}
+          />
+        )}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -163,7 +176,8 @@ export const Transcript = ({
   events,
   attempts,
   filter,
-}: TranscriptSource & { readonly filter: TranscriptFilter }) => {
+  runId,
+}: TranscriptSource & { readonly filter: TranscriptFilter; readonly runId: RunId }) => {
   const projection = useMemo(() => projectTranscript(events, attempts), [events, attempts]);
   const grouped = useMemo(() => groupTranscript(projection), [projection]);
   const items = grouped.filter((item) => visible(item, filter));
@@ -188,7 +202,7 @@ export const Transcript = ({
           className={item._tag === "ToolGroup" || item._tag === "Tool" ? "-mx-2 px-2" : undefined}
         >
           {item._tag === "Session" ? (
-            <Child session={item} filter={filter} />
+            <Child session={item} filter={filter} runId={runId} />
           ) : (
             <Entry entry={item} />
           )}

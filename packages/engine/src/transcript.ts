@@ -58,6 +58,11 @@ export class TranscriptAllQuery extends Schema.TaggedClass<TranscriptAllQuery>(
   "@usine/engine/TranscriptAllQuery",
 )("TranscriptAllQuery", { attemptId: AttemptId }) {}
 
+/** Latest lifecycle and supervision receipt per session, independent of the visible transcript page. */
+export class TranscriptSessionsQuery extends Schema.TaggedClass<TranscriptSessionsQuery>(
+  "@usine/engine/TranscriptSessionsQuery",
+)("TranscriptSessionsQuery", { attemptId: AttemptId }) {}
+
 /** The next bounded set of rows after a cursor, in append order, for following an Attempt's activity. */
 export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>(
   "@usine/engine/TranscriptTailQuery",
@@ -83,6 +88,7 @@ export class TranscriptPageQuery extends Schema.TaggedClass<TranscriptPageQuery>
 /** Selects a complete Attempt transcript, newer activity, or an earlier page. */
 export const TranscriptQuery = Schema.Union([
   TranscriptAllQuery,
+  TranscriptSessionsQuery,
   TranscriptTailQuery,
   TranscriptPageQuery,
 ]);

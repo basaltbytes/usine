@@ -37,6 +37,11 @@ export class StepExecutor extends Context.Service<
   {
     /** Requests that the identified Attempt stop its current work. */
     readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
+    /** Sends a nonterminal operator action to a live session in the identified Attempt. */
+    readonly intervene: (
+      attemptId: AttemptId,
+      intervention: AttemptChannel.Intervention,
+    ) => Effect.Effect<void, AttemptFailure>;
     /** Waits for Worker capacity; the returned lease must be released after execution or cancellation. */
     readonly reserve: (submission: Submission) => Effect.Effect<WorkerLease, AttemptFailure>;
     /** Runs the reserved Attempt, recording channel activity through `io`, and waits for its result. */

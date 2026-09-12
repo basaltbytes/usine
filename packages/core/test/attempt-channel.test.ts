@@ -97,6 +97,7 @@ describe("attempt channel v5", () => {
 
   it("round-trips a child-addressed operator message through its framed JSON schema", () => {
     const envelope = new AttemptChannel.InboundEnvelope({
+      operator: "operator",
       version: AttemptChannel.PROTOCOL_VERSION,
       attemptId: spec.attemptId,
       sequence: AttemptChannel.Sequence.make(3),
@@ -117,6 +118,7 @@ describe("attempt channel v5", () => {
 
   it("defaults an inbound frame to the parent target and round-trips a Release", () => {
     const envelope = new AttemptChannel.InboundEnvelope({
+      operator: "operator",
       version: AttemptChannel.PROTOCOL_VERSION,
       attemptId: spec.attemptId,
       sequence: AttemptChannel.Sequence.make(4),

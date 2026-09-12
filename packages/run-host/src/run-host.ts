@@ -10,7 +10,19 @@ import { AgentSessionId } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { Commit, PullRequest, StepResult } from "@usine/core/step/result";
-import { DateTime, Effect, Fiber, Queue, Path, Ref, Result, Schema, Stdio, Stream } from "effect";
+import {
+  DateTime,
+  Effect,
+  Fiber,
+  Queue,
+  Path,
+  Ref,
+  Result,
+  Schema,
+  Semaphore,
+  Stdio,
+  Stream,
+} from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
 /** The run host could not read its instructions, report activity, or collect the Attempt's Git results. */
@@ -92,6 +104,8 @@ export const runHost = Effect.fn("RunHost.run")(() =>
       // The lifecycle has one writer at a time: Started, session events, terminal.
       let nextSequence = 1;
 
+      const outputLock = yield* Semaphore.make(1);
+      const routing = yield* Semaphore.make(1);
       const emit = Effect.fn("RunHost.emit")(
         function* (payload: AttemptChannel.OutboundPayload) {
           yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId });
@@ -108,6 +122,7 @@ export const runHost = Effect.fn("RunHost.run")(() =>
           );
         },
         Effect.mapError((cause) => hostError("output", "Could not write protocol output", cause)),
+        outputLock.withPermits(1),
       );
 
       const commandLines = Effect.fn("RunHost.commandLines")(function* (
@@ -265,43 +280,58 @@ export const runHost = Effect.fn("RunHost.run")(() =>
       yield* record(session);
       yield* emit(new AttemptChannel.Started({ parentModel: session.session.brain.model }));
 
-      // Delivers one inbound frame to its target session. A parent Interrupt stays
-      // the terminal cancel signal; a child Interrupt only stops that child.
       const route = Effect.fn("RunHost.route")(function* (
         envelope: AttemptChannel.InboundEnvelope,
       ) {
         const targetId =
           envelope.target._tag === "Parent" ? session.session.id : envelope.target.sessionId;
         yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, target: targetId });
+        if (envelope.payload._tag === "Cancel") return;
+        const intervention = new AttemptChannel.Intervention({
+          operator: envelope.operator,
+          target: envelope.target,
+          action: envelope.payload,
+        });
         const controls = (yield* Ref.get(sessions)).get(targetId);
-        if (controls === undefined) {
+        if (
+          controls === undefined ||
+          (envelope.target._tag === "Child" && controls.session._tag !== "ChildSession")
+        ) {
           yield* Effect.logWarning("Operator input addressed a session that is no longer live", {
             target: targetId,
-            payload: envelope.payload._tag,
+            action: envelope.payload._tag,
           });
-          return;
+          return yield* emit(
+            new AttemptChannel.InterventionRejected({
+              inputSequence: envelope.sequence,
+              intervention,
+              message: "This session is no longer live",
+            }),
+          );
         }
-        const payload = envelope.payload;
-        switch (payload._tag) {
-          case "Steer":
-            yield* Effect.logDebug("Routing a Steer frame", { target: targetId });
-            return yield* controls.steer(payload.message);
-          case "OperatorMessage":
-            // Joined to the session as a user turn through the streaming-input bridge;
-            // a takeover Hold on the first child message lands in a later change (ADR 0018).
-            yield* Effect.logInfo("Routing an operator message", { target: targetId });
-            return yield* controls.steer(payload.message);
-          case "Interrupt":
-            yield* Effect.logInfo("Routing a child Interrupt frame", { target: targetId });
-            return yield* controls.interrupt;
-          case "Release":
-            // A Release ends a Hold, which does not exist yet, so nothing is held.
-            yield* Effect.logInfo("Received a Release frame with no open hold", {
-              target: targetId,
-            });
-            return;
+        const delivered = yield* Effect.result(controls.intervene(envelope.payload));
+        if (Result.isFailure(delivered)) {
+          yield* Effect.logWarning("Session refused operator input", {
+            target: targetId,
+            errorTag: delivered.failure._tag,
+            message: delivered.failure.message,
+          });
+          return yield* emit(
+            new AttemptChannel.InterventionRejected({
+              inputSequence: envelope.sequence,
+              intervention,
+              message: delivered.failure.message,
+            }),
+          );
         }
-      });
+        yield* emit(
+          new AttemptChannel.InterventionApplied({
+            inputSequence: envelope.sequence,
+            intervention,
+            state: delivered.success,
+          }),
+        );
+      }, routing.withPermits(1));
       const readCommands = Effect.gen(function* () {
         let expected = 1;
         while (true) {
@@ -328,8 +358,8 @@ export const runHost = Effect.fn("RunHost.run")(() =>
             );
           }
           expected += 1;
-          if (command.payload._tag === "Interrupt" && command.target._tag === "Parent") {
-            yield* Effect.logInfo("Run host received a parent Interrupt frame");
+          if (command.payload._tag === "Cancel") {
+            yield* Effect.logInfo("Run host received a Cancel frame");
             return new AttemptChannel.Interrupted();
           }
           yield* route(command);
@@ -347,7 +377,8 @@ export const runHost = Effect.fn("RunHost.run")(() =>
             ),
           ],
           { concurrency: "unbounded" },
-        );
+        ).pipe(Effect.onExit(() => routing.withPermits(1)(Effect.void)));
+        // Successful and failed completions both wait for an in-flight receipt.
         const commits = yield* harvestCommits();
         const pullRequests = yield* harvestPullRequests().pipe(
           Effect.timeout("10 seconds"),
@@ -382,6 +413,7 @@ export const runHost = Effect.fn("RunHost.run")(() =>
         });
       });
       const outcome = yield* Effect.raceFirst(completed, readCommands).pipe(Effect.result);
+      yield* routing.withPermits(1)(Effect.void);
       if (Result.isFailure(outcome)) {
         if (outcome.failure._tag === "RunHostError") {
           yield* Effect.logError("Run host protocol failure", {

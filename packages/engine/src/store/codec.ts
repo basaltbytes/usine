@@ -1,4 +1,4 @@
-import { Agent } from "@usine/core/agent";
+import { Agent, AgentName } from "@usine/core/agent";
 import { CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
@@ -63,6 +63,9 @@ export const AttemptRow = Schema.Struct({
   worker: WorkerName,
   number: AttemptNumber,
   brain: BrainSpec,
+  task: AttemptTask,
+  agent: AgentName,
+  operatorIntervened: Schema.Boolean,
   parentModel: Schema.NullOr(ModelId),
   startedAt: Schema.DateTimeUtcFromString,
   outcome: Schema.NullOr(AttemptOutcome),
@@ -172,6 +175,9 @@ export const attemptFromRow = (row: AttemptRow): Attempt =>
     worker: row.worker,
     number: row.number,
     brain: row.brain,
+    task: row.task,
+    agent: row.agent,
+    operatorIntervened: row.operatorIntervened,
     parentModel: Option.fromNullishOr(row.parentModel),
     startedAt: row.startedAt,
     outcome: Option.fromNullishOr(row.outcome),
