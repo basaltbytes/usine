@@ -114,7 +114,11 @@ it("summarizes adjacent completed work while keeping prose and a single call vis
   const html = renderToStaticMarkup(
     <TranscriptDisclosureProvider>
       <MessageScrollerProvider>
-        <Transcript runId={RunId.make("run-31")} events={events} attempts={[]} filter="all" />
+        <Transcript
+          runId={RunId.make("run-31")}
+          projection={projectTranscript(events, [])}
+          filter="all"
+        />
       </MessageScrollerProvider>
     </TranscriptDisclosureProvider>,
   );
@@ -139,7 +143,11 @@ it("does not join successful calls across prose hidden by the tools filter", () 
   const html = renderToStaticMarkup(
     <TranscriptDisclosureProvider>
       <MessageScrollerProvider>
-        <Transcript runId={RunId.make("run-31")} events={events} attempts={[]} filter="tools" />
+        <Transcript
+          runId={RunId.make("run-31")}
+          projection={projectTranscript(events, [])}
+          filter="tools"
+        />
       </MessageScrollerProvider>
     </TranscriptDisclosureProvider>,
   );
@@ -557,4 +565,47 @@ it("attaches paged input to its child using unpaged session identity without rep
   assert(unmatched?._tag === "Notice");
   assert.include(unmatched.label, child.id);
   assert.strictEqual(unmatched.detail, entry.detail);
+});
+
+it("renders a held child from session state when its activity is outside the loaded page", () => {
+  const child = new ChildSession({
+    id: AgentSessionId.make("off-page-child"),
+    parentId: parent.id,
+    agent: parent.agent,
+    brain,
+  });
+  const held = new TranscriptEventView({
+    sequence: TranscriptSequence.make(3),
+    attemptId: attempt,
+    receivedAt: "2026-09-12",
+    direction: "outbound",
+    payload: new InterventionApplied({
+      inputSequence: Sequence.make(1),
+      intervention: new Intervention({
+        operator: "Philippe",
+        target: new ChildTarget({ sessionId: child.id }),
+        action: new OperatorMessage({ message: "Review this with me" }),
+      }),
+      state: new InterventionState({ held: true, paused: false }),
+    }),
+  });
+  const page = [record(20, new TextOutput({ session: parent, text: "Waiting on the child." }))];
+  const render = (sessionState: ReadonlyArray<TranscriptEventView>) =>
+    renderToStaticMarkup(
+      <TranscriptDisclosureProvider>
+        <MessageScrollerProvider>
+          <Transcript
+            runId={RunId.make("run-31")}
+            projection={projectTranscript(page, [], sessionState)}
+            filter="all"
+          />
+        </MessageScrollerProvider>
+      </TranscriptDisclosureProvider>,
+    );
+
+  assert.include(
+    render([held, record(4, new SessionIdle({ session: child }))]),
+    "developer activity · Held · waiting for you",
+  );
+  assert.notInclude(render([]), "developer activity");
 });

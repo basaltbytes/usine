@@ -66,6 +66,7 @@ const mount = (
           key={id}
           runId={id}
           events={transcript}
+          sessionState={[]}
           attempts={[]}
           earlier={history.earlier}
           loadingEarlier={history.loading}

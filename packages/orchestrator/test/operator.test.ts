@@ -1,4 +1,3 @@
-import { EditAndRetry, SessionIntervention } from "@usine/orchestrator/operator";
 import { CycleGeneration } from "@usine/core/cycle-budget";
 import { assert, describe, it } from "@effect/vitest";
 import {
@@ -71,6 +70,7 @@ import {
 } from "../src/operator/transcript.ts";
 import { FailureView } from "../src/operator/attempt.ts";
 import { Operator } from "../src/operator/operator.ts";
+import { EditAndRetry, SessionIntervention } from "../src/operator/run.ts";
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { failureView } from "../src/operator/projection.ts";

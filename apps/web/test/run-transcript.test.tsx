@@ -184,8 +184,7 @@ describe("run transcript", () => {
     const markup = renderToStaticMarkup(
       <Transcript
         runId={RunId.make("run-31")}
-        events={events}
-        attempts={[liveAttempt]}
+        projection={projectTranscript(events, [liveAttempt])}
         filter="all"
       />,
     );
@@ -205,8 +204,7 @@ describe("run transcript", () => {
     const markup = renderToStaticMarkup(
       <Transcript
         runId={RunId.make("run-31")}
-        events={events}
-        attempts={[liveAttempt]}
+        projection={projectTranscript(events, [liveAttempt])}
         filter="all"
       />,
     );
@@ -220,13 +218,15 @@ describe("run transcript", () => {
     const markup = renderToStaticMarkup(
       <Transcript
         runId={RunId.make("run-31")}
-        attempts={[liveAttempt]}
         filter="all"
-        events={[
-          event(1, "First child says hello", "child", "child-a"),
-          event(2, "Parent update"),
-          event(3, "Second child says hello", "child", "child-b"),
-        ]}
+        projection={projectTranscript(
+          [
+            event(1, "First child says hello", "child", "child-a"),
+            event(2, "Parent update"),
+            event(3, "Second child says hello", "child", "child-b"),
+          ],
+          [liveAttempt],
+        )}
       />,
     );
 
@@ -269,8 +269,7 @@ describe("run transcript", () => {
     const markup = renderToStaticMarkup(
       <Transcript
         runId={RunId.make("run-31")}
-        events={[started, finished]}
-        attempts={[liveAttempt]}
+        projection={projectTranscript([started, finished], [liveAttempt])}
         filter="all"
       />,
     );
@@ -293,8 +292,7 @@ describe("run transcript", () => {
     const markup = renderToStaticMarkup(
       <Transcript
         runId={RunId.make("run-31")}
-        events={[finished]}
-        attempts={[liveAttempt]}
+        projection={projectTranscript([finished], [liveAttempt])}
         filter="tools"
       />,
     );
@@ -359,8 +357,7 @@ describe("run transcript", () => {
       const markup = renderToStaticMarkup(
         <Transcript
           runId={RunId.make("run-31")}
-          events={events}
-          attempts={[liveAttempt]}
+          projection={projectTranscript(events, [liveAttempt])}
           filter="all"
         />,
       );
@@ -387,8 +384,7 @@ describe("run transcript", () => {
     const markup = renderToStaticMarkup(
       <Transcript
         runId={RunId.make("run-31")}
-        events={events}
-        attempts={[liveAttempt]}
+        projection={projectTranscript(events, [liveAttempt])}
         filter="all"
       />,
     );
@@ -413,16 +409,14 @@ describe("run transcript", () => {
     const messages = renderToStaticMarkup(
       <Transcript
         runId={RunId.make("run-31")}
-        events={events}
-        attempts={[liveAttempt]}
+        projection={projectTranscript(events, [liveAttempt])}
         filter="messages"
       />,
     );
     const toolRows = renderToStaticMarkup(
       <Transcript
         runId={RunId.make("run-31")}
-        events={events}
-        attempts={[liveAttempt]}
+        projection={projectTranscript(events, [liveAttempt])}
         filter="tools"
       />,
     );

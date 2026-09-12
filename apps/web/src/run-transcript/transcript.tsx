@@ -2,7 +2,6 @@ import { CaretRightIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
 import { ChildTarget } from "@usine/core/attempt/channel";
 import { SessionComposer } from "../run-intervention/session-composer.tsx";
-import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { useMemo } from "react";
 import { Markdown } from "@/components/markdown";
 import { Badge } from "@/components/ui/badge";
@@ -17,15 +16,10 @@ import { useTranscriptDisclosure } from "./grouping/disclosure.tsx";
 import { cn } from "@/lib/utils";
 import {
   matchesFilter,
-  projectTranscript,
   type TranscriptFilter,
   type TranscriptNotice,
+  type TranscriptProjection,
 } from "./model.ts";
-
-interface TranscriptSource {
-  readonly events: ReadonlyArray<TranscriptEventView>;
-  readonly attempts: ReadonlyArray<AttemptView>;
-}
 
 const Timestamp = ({ receivedAt }: { readonly receivedAt: string }) => {
   const age = Math.max(0, Date.now() - Date.parse(receivedAt));
@@ -173,19 +167,21 @@ const Child = ({
 
 /** Parent prose and paired tool calls, with one child section per Attempt-scoped session. */
 export const Transcript = ({
-  events,
-  attempts,
+  projection,
   filter,
   runId,
-}: TranscriptSource & { readonly filter: TranscriptFilter; readonly runId: RunId }) => {
-  const projection = useMemo(() => projectTranscript(events, attempts), [events, attempts]);
+}: {
+  readonly projection: TranscriptProjection;
+  readonly filter: TranscriptFilter;
+  readonly runId: RunId;
+}) => {
   const grouped = useMemo(() => groupTranscript(projection), [projection]);
   const items = grouped.filter((item) => visible(item, filter));
   if (items.length === 0)
     return (
       <MessageScrollerItem messageId="empty">
         <p className="text-xs text-muted-foreground">
-          {events.length === 0
+          {projection.items.length === 0
             ? "No transcript events yet."
             : `No ${filter} in the loaded transcript.`}
         </p>

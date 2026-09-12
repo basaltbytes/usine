@@ -42,7 +42,7 @@ import { SessionComposer } from "../run-intervention/session-composer.tsx";
 export const Conversation = ({
   runId,
   events,
-  sessionState = [],
+  sessionState,
   attempts,
   earlier,
   loadEarlier,
@@ -53,7 +53,8 @@ export const Conversation = ({
 }: {
   readonly runId: RunId;
   readonly events: ReadonlyArray<TranscriptEventView>;
-  readonly sessionState?: ReadonlyArray<TranscriptEventView>;
+  /** Latest lifecycle and receipt rows per session, so held children stay addressable off the loaded page. */
+  readonly sessionState: ReadonlyArray<TranscriptEventView>;
   readonly attempts: ReadonlyArray<AttemptView>;
   readonly earlier: TranscriptPageCursor | undefined;
   readonly loadEarlier: () => void;
@@ -230,7 +231,7 @@ export const Conversation = ({
                       <ErrorAlert message={earlierError} />
                     </MessageScrollerItem>
                   )}
-                  <Transcript events={events} attempts={attempts} filter={filter} runId={runId} />
+                  <Transcript projection={projection} filter={filter} runId={runId} />
                 </MessageScrollerContent>
               </MessageScrollerViewport>
             </PreserveReadingPosition>

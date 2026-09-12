@@ -282,15 +282,15 @@ export const runHost = Effect.fn("RunHost.run")(() =>
 
       const route = Effect.fn("RunHost.route")(function* (
         envelope: AttemptChannel.InboundEnvelope,
+        action: AttemptChannel.OperatorAction,
       ) {
         const targetId =
           envelope.target._tag === "Parent" ? session.session.id : envelope.target.sessionId;
         yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, target: targetId });
-        if (envelope.payload._tag === "Cancel") return;
         const intervention = new AttemptChannel.Intervention({
           operator: envelope.operator,
           target: envelope.target,
-          action: envelope.payload,
+          action,
         });
         const controls = (yield* Ref.get(sessions)).get(targetId);
         if (
@@ -299,7 +299,7 @@ export const runHost = Effect.fn("RunHost.run")(() =>
         ) {
           yield* Effect.logWarning("Operator input addressed a session that is no longer live", {
             target: targetId,
-            action: envelope.payload._tag,
+            action: action._tag,
           });
           return yield* emit(
             new AttemptChannel.InterventionRejected({
@@ -309,7 +309,7 @@ export const runHost = Effect.fn("RunHost.run")(() =>
             }),
           );
         }
-        const delivered = yield* Effect.result(controls.intervene(envelope.payload));
+        const delivered = yield* Effect.result(controls.intervene(action));
         if (Result.isFailure(delivered)) {
           yield* Effect.logWarning("Session refused operator input", {
             target: targetId,
@@ -362,7 +362,7 @@ export const runHost = Effect.fn("RunHost.run")(() =>
             yield* Effect.logInfo("Run host received a Cancel frame");
             return new AttemptChannel.Interrupted();
           }
-          yield* route(command);
+          yield* route(command, command.payload);
         }
       });
 
