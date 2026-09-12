@@ -628,3 +628,19 @@ it.each(["claude", "codex"] as const)(
       .toBeVisible();
   },
 );
+
+it("shows that a Pi child has no saved harness session to resume", async () => {
+  const child = new ChildSession({
+    id: AgentSessionId.make("pi-child"),
+    parentId: parent.id,
+    agent: AgentName.make("reviewer"),
+    brain: new BrainSpec({ harness: "pi", model: ModelId.make("test-model"), effort: "high" }),
+  });
+  mount([
+    record(1, new SessionStarted({ session: child })),
+    record(2, new SessionFinished({ session: child })),
+  ]);
+  await page.getByRole("button", { name: "reviewer activity · Finished" }).click();
+  await expect.element(page.getByText("No saved harness session recorded.")).toBeVisible();
+  expect(host.textContent).not.toContain("Resume on worker");
+});

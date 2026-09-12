@@ -1,4 +1,3 @@
-import { SessionHandoff } from "./handoff.tsx";
 import { CaretRightIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
 import { ChildTarget } from "@usine/core/attempt/channel";
@@ -14,6 +13,7 @@ import { TranscriptToolRow } from "./tool/tool.tsx";
 import { CompletedTools } from "./grouping/group.tsx";
 import { groupTranscript, type GroupedItem, type GroupedSession } from "./grouping/model.ts";
 import { useTranscriptDisclosure } from "./grouping/disclosure.tsx";
+import { SessionHandoff } from "./handoff.tsx";
 import { cn } from "@/lib/utils";
 import {
   matchesFilter,

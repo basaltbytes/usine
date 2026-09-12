@@ -56,7 +56,7 @@ const scripted = (
 });
 
 describe("Claude child backend", () => {
-  it.effect("keeps streaming input open for a held Claude conversation until release", () =>
+  it.effect("keeps a held Claude conversation open until release and records one launch", () =>
     Effect.gen(function* () {
       const messages = yield* Queue.make<Schema.Json, Cause.Done>();
       const idle = yield* Queue.make<void>();
@@ -79,11 +79,13 @@ describe("Claude child backend", () => {
       yield* Effect.gen(function* () {
         const running = yield* (yield* ChildBackend).launch(request());
         const result = yield* Effect.forkScoped(running.result);
+        const seen: Array<string> = [];
         yield* Effect.forkScoped(
           running.events.pipe(
-            Stream.runForEach((event) =>
-              event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void,
-            ),
+            Stream.runForEach((event) => {
+              seen.push(event._tag);
+              return event._tag === "SessionIdle" ? Queue.offer(idle, undefined) : Effect.void;
+            }),
           ),
         );
         assert(input !== undefined);
@@ -94,6 +96,9 @@ describe("Claude child backend", () => {
           (yield* Effect.promise(() => entered.next())).value?.message.content,
           "Review with me",
         );
+        // The CLI repeats `init` ahead of every turn with the same session id.
+        const init = { type: "system", subtype: "init", session_id: "claude-session-1" };
+        yield* Queue.offer(messages, init);
         yield* Queue.offer(messages, {
           type: "result",
           subtype: "success",
@@ -106,6 +111,7 @@ describe("Claude child backend", () => {
           (yield* Effect.promise(() => entered.next())).value?.message.content,
           "One more adjustment",
         );
+        yield* Queue.offer(messages, init);
         yield* Queue.offer(messages, {
           type: "result",
           subtype: "success",
@@ -115,6 +121,10 @@ describe("Claude child backend", () => {
         yield* running.intervene(new Release());
         assert.strictEqual((yield* Fiber.join(result)).message, "Adjusted answer");
         assert.strictEqual((yield* Effect.promise(() => entered.next())).done, true);
+        assert.deepStrictEqual(
+          seen.filter((tag) => tag === "SessionStarted"),
+          ["SessionStarted"],
+        );
       }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk));
     }).pipe(Effect.scoped),
   );

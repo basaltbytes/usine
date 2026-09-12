@@ -1,10 +1,10 @@
 ---
 "@usine/core": minor
-"@usine/agents": patch
+"@usine/agents": minor
 "@usine/engine": patch
 "@usine/server": patch
 "@usine/executor": patch
-"@usine/run-host": patch
+"@usine/run-host": minor
 "@usine/orchestrator": patch
 ---
 

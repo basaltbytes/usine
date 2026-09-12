@@ -17,7 +17,7 @@ import {
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Context, Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, Fiber, Layer, Option, Ref, Schema, Stream } from "effect";
 import {
   AgentResultError,
   ClaudeChildBackend,
@@ -326,6 +326,9 @@ const makeClaudeChild = Effect.gen(function* () {
       boundary = conversation.awaitUnpaused;
       const tools = new Map<string, string>();
       const tokens = claudeTokenMeter();
+      // Claude repeats its `init` message ahead of every turn; only the first
+      // one is the launch record, and its session id stays constant.
+      const launched = yield* Ref.make(false);
       input.offer(userMessage(request.prompt));
 
       const consume = Stream.fromAsyncIterable(query, (cause) =>
@@ -334,7 +337,7 @@ const makeClaudeChild = Effect.gen(function* () {
         Stream.runForEach((message) =>
           Effect.gen(function* () {
             const init = decodeClaudeInit(message);
-            if (Option.isSome(init)) {
+            if (Option.isSome(init) && !(yield* Ref.getAndSet(launched, true))) {
               const harnessSession = new HarnessSession({
                 id: init.value.session_id,
                 cwd: request.cwd,
