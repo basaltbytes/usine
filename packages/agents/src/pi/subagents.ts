@@ -135,7 +135,7 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
       Exit.isFailure(exit)
         ? Effect.logWarning("Child session ended before returning a result", {
             sessionId: session.id,
-          }).pipe(Effect.andThen(options.emit(new SessionFinished({ session }))))
+          }).pipe(Effect.andThen(options.emit(new SessionFinished({ session: child.session }))))
         : Effect.void,
     );
     const forward = yield* child.events.pipe(Stream.runForEach(options.emit), Effect.forkScoped);

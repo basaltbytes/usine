@@ -1,31 +1,37 @@
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
-  AgentSessionId,
   ChildSession,
   PoolRateLimitsUpdated,
   RateLimitsSnapshot,
-  RateLimitWindow as CoreRateLimitWindow,
   SessionStarted,
   SessionTokensUpdated,
   TextOutput,
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { DateTime, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
 import { AccountUpdated } from "../../protocol/codex.ts";
-import type {
-  ModelListParams,
-  ThreadStartParams,
-  TurnInterruptParams,
-  TurnStartParams,
-  TurnSteerParams,
-} from "../../protocol/codex.ts";
+import type { ModelListParams, ThreadStartParams, TurnStartParams } from "../../protocol/codex.ts";
+import {
+  json,
+  ModelListResponse,
+  ThreadStartResponse,
+  TurnStartResponse,
+  ItemNotification,
+  AgentMessageItem,
+  ToolItem,
+  TurnCompleted,
+  RateLimitsUpdated,
+  decodeResponse,
+  decodeNotification,
+  toolName,
+  rateLimitWindow,
+} from "./codec.ts";
 import {
   AgentResultError,
   type AgentSessionError,
   CodexChildBackend,
   type RunningSession,
-  SessionOperationError,
   UnknownModelError,
   UnsupportedEffortError,
 } from "../../runtime.ts";
@@ -36,144 +42,6 @@ import { CodexAppServer, type CodexClient, operationError } from "./app-server.t
 import { codexPoolUnavailable, initializeCodex, verifyCodexAccount } from "./account.ts";
 
 export { CodexAppServer, codexAppServerLive, type CodexConnection } from "./app-server.ts";
-
-type CodexRequestPayload =
-  | ModelListParams
-  | ThreadStartParams
-  | TurnStartParams
-  | TurnSteerParams
-  | TurnInterruptParams;
-
-const json = (value: CodexRequestPayload): Schema.Json =>
-  Schema.decodeUnknownSync(Schema.Json)(JSON.parse(JSON.stringify(value)));
-
-const ModelListResponse = Schema.Struct({
-  data: Schema.Array(
-    Schema.Struct({
-      id: Schema.String,
-      model: Schema.String,
-      supportedReasoningEfforts: Schema.optionalKey(
-        Schema.Array(Schema.Struct({ reasoningEffort: Schema.String })),
-      ),
-    }),
-  ),
-  nextCursor: Schema.NullOr(Schema.String),
-});
-const ThreadStartResponse = Schema.Struct({
-  thread: Schema.Struct({ id: Schema.NonEmptyString }),
-  model: Schema.NonEmptyString,
-  instructionSources: Schema.Array(Schema.String),
-});
-const TurnStartResponse = Schema.Struct({
-  turn: Schema.Struct({ id: Schema.NonEmptyString }),
-});
-const ItemNotification = Schema.Struct({
-  item: Schema.Json,
-  threadId: Schema.String,
-  turnId: Schema.String,
-});
-const AgentMessageItem = Schema.Struct({
-  type: Schema.Literal("agentMessage"),
-  id: Schema.NonEmptyString,
-  text: Schema.String,
-  phase: Schema.optionalKey(Schema.NullOr(Schema.String)),
-});
-const ToolItem = Schema.Struct({
-  type: Schema.Literals([
-    "commandExecution",
-    "fileChange",
-    "mcpToolCall",
-    "dynamicToolCall",
-    "webSearch",
-    "imageView",
-    "imageGeneration",
-  ] as const),
-  id: Schema.NonEmptyString,
-  status: Schema.optionalKey(Schema.String),
-  success: Schema.optionalKey(Schema.NullOr(Schema.Boolean)),
-});
-const TurnCompleted = Schema.Struct({
-  turn: Schema.Struct({
-    id: Schema.String,
-    status: Schema.Literals(["completed", "interrupted", "failed", "inProgress"] as const),
-    error: Schema.NullOr(
-      Schema.Struct({
-        message: Schema.String,
-        additionalDetails: Schema.NullOr(Schema.String),
-      }),
-    ),
-  }),
-});
-// Upstream sends this notification as a sparse rolling update: any account
-// field may be absent, so only the load figure is required.
-const RateLimitWindow = Schema.Struct({
-  usedPercent: Schema.Number,
-  windowDurationMins: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-  resetsAt: Schema.optionalKey(Schema.NullOr(Schema.Number)),
-});
-const RateLimitsUpdated = Schema.Struct({
-  rateLimits: Schema.Struct({
-    limitId: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    limitName: Schema.optionalKey(Schema.NullOr(Schema.String)),
-    primary: Schema.optionalKey(Schema.NullOr(RateLimitWindow)),
-    secondary: Schema.optionalKey(Schema.NullOr(RateLimitWindow)),
-  }),
-});
-
-const decodeResponse = <S extends Schema.Top>(
-  schema: S,
-  operation: SessionOperationError["operation"],
-  client: CodexClient,
-  label: string,
-  value: Schema.Json,
-): Effect.Effect<S["Type"], SessionOperationError, S["DecodingServices"]> =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(
-    Effect.mapError((cause) =>
-      operationError(operation, client, `Codex returned an invalid ${label}`, cause),
-    ),
-  );
-
-/** Decodes one notification payload; an undecodable payload is logged and skipped, never fatal. */
-const decodeNotification = <S extends Schema.Top>(
-  schema: S,
-  label: string,
-  sessionId: AgentSessionId,
-  value: Schema.Json,
-): Effect.Effect<Option.Option<S["Type"]>, never, S["DecodingServices"]> =>
-  Schema.decodeUnknownEffect(schema)(value).pipe(
-    Effect.map(Option.some),
-    Effect.catch((cause) =>
-      Effect.logWarning(`Skipping an undecodable Codex ${label}`, { cause, sessionId }).pipe(
-        Effect.as(Option.none()),
-      ),
-    ),
-  );
-
-const toolName = (item: typeof ToolItem.Type): string => {
-  switch (item.type) {
-    case "commandExecution":
-      return "command";
-    case "fileChange":
-      return "file_change";
-    case "mcpToolCall":
-      return "mcp_tool";
-    case "dynamicToolCall":
-      return "dynamic_tool";
-    case "webSearch":
-      return "web_search";
-    case "imageView":
-      return "image_view";
-    case "imageGeneration":
-      return "image_generation";
-  }
-};
-
-const rateLimitWindow = (window: typeof RateLimitWindow.Type): CoreRateLimitWindow =>
-  new CoreRateLimitWindow({
-    usedPercent: window.usedPercent,
-    windowDurationMinutes: Option.fromNullishOr(window.windowDurationMins),
-    resetsAt: Option.fromNullishOr(window.resetsAt).pipe(Option.map(DateTime.fromEpochSeconds)),
-  });
 
 /** Server pushes with no session event shape; they still reach the operator's logs. */
 const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([
@@ -326,11 +194,15 @@ const makeCodexChild = Effect.gen(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         if (!turnActive || interrupting) return;
         interrupting = true;
-        yield* connection.request(
-          "interrupt",
-          "turn/interrupt",
-          json({ threadId: thread.thread.id, turnId }),
-        );
+        yield* connection
+          .request("interrupt", "turn/interrupt", json({ threadId: thread.thread.id, turnId }))
+          .pipe(
+            Effect.onError(() =>
+              Effect.sync(() => {
+                interrupting = false;
+              }),
+            ),
+          );
       });
       const steer = Effect.fn("CodexChildBackend.steer")(function* (message: string) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });

@@ -2,7 +2,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import { AgentSessionId } from "@usine/core/agent/session";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
-import { Clock, Deferred, Effect, Option, Queue } from "effect";
+import { Clock, Effect, Option, Queue } from "effect";
 
 /** Enforces Attempt ceilings: Holds pause elapsed execution time; reported tokens continue accumulating. */
 export const withAttemptGuard = <A>(
@@ -17,7 +17,6 @@ export const withAttemptGuard = <A>(
   Effect.gen(function* () {
     const ended = new Set<AgentSessionId>();
     const tokens = new Map<AgentSessionId, number>();
-    const exhausted = yield* Deferred.make<never, RunawayFailure>();
     const holds = new Set<AgentSessionId>();
     const changes = yield* Queue.make<boolean>();
     const append: AttemptChannel.Sink["append"] = Effect.fn("AttemptGuard.append")(
@@ -37,10 +36,7 @@ export const withAttemptGuard = <A>(
               consumed,
               maxAttemptTokens: limits.maxAttemptTokens,
             });
-            yield* Deferred.fail(exhausted, new RunawayFailure({ ceiling: "tokens" }));
-            // Let the guard interrupt the run host through its cancellation handshake
-            // before a following terminal frame can win the race.
-            yield* Effect.never;
+            return yield* new RunawayFailure({ ceiling: "tokens" });
           }
         }
         const wasHeld = holds.size > 0;
@@ -57,12 +53,13 @@ export const withAttemptGuard = <A>(
           ended.add(payload.event.session.id);
           holds.delete(payload.event.session.id);
         }
-        if (wasHeld !== holds.size > 0) {
+        const isHeld = holds.size > 0;
+        if (wasHeld !== isHeld) {
           yield* Effect.logInfo("Attempt wall-clock supervision changed", {
             attemptId: envelope.attemptId,
             heldChildren: holds.size,
           });
-          yield* Queue.offer(changes, holds.size > 0);
+          yield* Queue.offer(changes, isHeld);
         }
       },
     );
@@ -87,8 +84,5 @@ export const withAttemptGuard = <A>(
       });
       return yield* new RunawayFailure({ ceiling: "wall-clock" });
     });
-    return yield* Effect.raceFirst(
-      run({ append }),
-      Effect.raceFirst(guard(), Deferred.await(exhausted)),
-    );
+    return yield* Effect.raceFirst(run({ append }), guard());
   });

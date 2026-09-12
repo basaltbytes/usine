@@ -356,10 +356,15 @@ const makeOperatorObservation = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const transcript = yield* readTranscript(reader, snapshot, request);
-    const sessionState = yield* Effect.forEach(
-      snapshot.attempts.filter((attempt) => Option.isNone(attempt.outcome)),
-      (attempt) => reader.transcript(new TranscriptSessionsQuery({ attemptId: attempt.id })),
+    const [transcript, sessionState] = yield* Effect.all(
+      [
+        readTranscript(reader, snapshot, request),
+        Effect.forEach(
+          snapshot.attempts.filter((attempt) => Option.isNone(attempt.outcome)),
+          (attempt) => reader.transcript(new TranscriptSessionsQuery({ attemptId: attempt.id })),
+          { concurrency: "unbounded" },
+        ),
+      ],
       { concurrency: "unbounded" },
     );
     return new RunDetailView({

@@ -15,7 +15,7 @@ import {
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Context, Deferred, Effect, Layer, Option, Schema, Stream } from "effect";
+import { Context, Deferred, Effect, Fiber, Layer, Option, Schema, Stream } from "effect";
 import {
   AgentResultError,
   ClaudeChildBackend,
@@ -252,10 +252,18 @@ const makeClaudeChild = Effect.gen(function* () {
       yield* Effect.logInfo("Launching Claude child session");
       const input = new AsyncInput();
       const context = yield* Effect.context<never>();
+      const scope = yield* Effect.scope;
       let boundary = Effect.void;
       const pauseAtBoundary: HookCallback = async (_input, _id, options) => {
         await Effect.runPromiseWith(context)(
-          Effect.suspend(() => boundary),
+          Effect.acquireUseRelease(
+            Effect.forkIn(
+              Effect.suspend(() => boundary),
+              scope,
+            ),
+            Fiber.join,
+            Fiber.interrupt,
+          ),
           { signal: options.signal },
         );
         return {};

@@ -1,11 +1,6 @@
-import { fileURLToPath } from "node:url";
-import { SqliteClient } from "@effect/sql-sqlite-node";
-import * as SQLiteDrizzle from "drizzle-orm/effect-sqlite-node";
-import { migrate } from "drizzle-orm/effect-sqlite-node/migrator";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
-import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+
 import {
   AgentSessionId,
   ChildSession,
@@ -25,86 +20,39 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
-import { eq } from "drizzle-orm";
+
 import { DateTime, Effect, Exit, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { Workflow } from "effect/unstable/workflow";
-import { RunDatabase } from "../src/database/database.ts";
-import { localSqliteLayer } from "../src/database/local-sqlite.ts";
-import { attemptTranscripts } from "../src/database/schema.ts";
-import { CursorKey, CursorStore } from "../src/cursor/cursor.ts";
-import { LoopControl } from "../src/loop-control/loop-control.ts";
+
+import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
+
+import { CursorKey, CursorStore } from "../../src/cursor/cursor.ts";
+import { LoopControl } from "../../src/loop-control/loop-control.ts";
 import {
   ItemContentHash,
   ItemProjection,
   ItemProjectionSource,
-} from "../src/item-projection/model.ts";
+} from "../../src/item-projection/model.ts";
 import {
   ItemProjectionReader,
   ItemProjectionWriter,
-} from "../src/item-projection/item-projection.ts";
+} from "../../src/item-projection/item-projection.ts";
 import {
   RepositoryLabel,
   RepositoryLabelProjection,
-} from "../src/repository-label-projection/model.ts";
+} from "../../src/repository-label-projection/model.ts";
 import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
-} from "../src/repository-label-projection/repository-label-projection.ts";
-import { Submission } from "../src/engine/submission.ts";
-import {
-  TranscriptAllQuery,
-  TranscriptSessionsQuery,
-  TranscriptPageQuery,
-  TranscriptSequence,
-  TranscriptTailQuery,
-} from "../src/transcript.ts";
+} from "../../src/repository-label-projection/repository-label-projection.ts";
+import { Submission } from "../../src/engine/submission.ts";
+import { TranscriptSessionsQuery, TranscriptPageQuery } from "../../src/transcript.ts";
 import { InstanceDirectory } from "@usine/core/instance";
-import { RunReader } from "../src/run-reader/run-reader.ts";
-import { RunStore } from "../src/store/store.ts";
+import { RunReader } from "../../src/run-reader/run-reader.ts";
+import { RunStore } from "../../src/store/store.ts";
 
-const testAgent = new Agent({
-  name: AgentName.make("developer"),
-  brain: new BrainSpec({
-    harness: "claude",
-    model: ModelId.make("claude-sonnet-4-6"),
-    effort: "high",
-  }),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
-  persona: AgentPersona.make("Implement the task."),
-});
-
-const lifecycleSubmission = new Submission({
-  event: new Event({
-    id: EventId.make("lifecycle-event"),
-    dedupKey: DedupKey.make("lifecycle/event/revision"),
-    payload: {},
-    receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
-  }),
-  itemKey: ItemKey.make("lifecycle-item"),
-  loop: LoopName.make("lifecycle-loop"),
-  step: StepName.make("lifecycle-step"),
-  approval: "none",
-  repository: RepositoryName.make("basaltbytes/usine"),
-  revision: RepositoryRevision.make("lifecycle-revision"),
-  task: AttemptTask.make("Exercise the Run lifecycle"),
-  agent: testAgent,
-  parentModel: Option.none(),
-});
-
-const withRunStore = <A, E>(effect: Effect.Effect<A, E, RunStore | SqlClient.SqlClient>) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const directory = InstanceDirectory.make(
-      yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-lifecycle-" }),
-    );
-    return yield* effect.pipe(
-      Effect.provide(RunStore.layer),
-      Effect.provide(localSqliteLayer(directory)),
-    );
-  }).pipe(Effect.provide(NodeServices.layer));
-
+import { testAgent, lifecycleSubmission, withRunStore } from "./support.ts";
 describe("run store", () => {
   it.live(
     "attributes interventions without adding Events and reads held sessions beyond the visible page",
@@ -202,78 +150,6 @@ describe("run store", () => {
           assert.strictEqual((yield* sql`SELECT count(*) as count FROM usine_events`)[0]?.count, 1);
         }),
       ),
-  );
-
-  it.live("upgrades populated Attempts without losing transcripts or disabling foreign keys", () =>
-    Effect.gen(function* () {
-      const fs = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fs.makeTempDirectoryScoped({ prefix: "usine-intervention-upgrade-" }),
-      );
-      const historical = yield* fs.makeTempDirectoryScoped({
-        prefix: "usine-historical-migrations-",
-      });
-      const source = fileURLToPath(new URL("../drizzle", import.meta.url));
-      for (const name of yield* fs.readDirectory(source)) {
-        if (name === "20260912111855_operator_intervention") continue;
-        yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
-      }
-      yield* fs.makeDirectory(`${directory}/.usine`);
-      const oldDatabase = Layer.effect(
-        RunDatabase,
-        Effect.gen(function* () {
-          const database = yield* SQLiteDrizzle.makeWithDefaults();
-          yield* migrate(database, {
-            migrationsFolder: historical,
-            migrationsTable: "usine_migrations",
-          });
-          return database;
-        }),
-      ).pipe(
-        Layer.provideMerge(SqliteClient.layer({ filename: `${directory}/.usine/runtime.sqlite` })),
-      );
-      const runId = RunId.make("upgrade-run");
-      const id = "upgrade-attempt";
-      yield* Effect.scoped(
-        Effect.gen(function* () {
-          const store = yield* RunStore;
-          yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const sql = yield* SqlClient.SqlClient;
-          yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, started_at)
-        VALUES (${id}, ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain))}, '2026-09-12T00:00:00.000Z')`;
-          const envelope = JSON.stringify({
-            _tag: "OutboundEnvelope",
-            version: 4,
-            attemptId: id,
-            sequence: 1,
-            sentAt: "2026-09-12T00:00:00.000Z",
-            payload: { _tag: "Started", parentModel: "openai/model" },
-          });
-          yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 1, ${envelope}, '2026-09-12T00:00:00.000Z')`;
-        }).pipe(Effect.provide(RunStore.layer), Effect.provide(oldDatabase)),
-      );
-      yield* Effect.gen(function* () {
-        const store = yield* RunStore;
-        const snapshot = yield* store.snapshot(runId);
-        assert.strictEqual(snapshot.attempts[0]?.task, lifecycleSubmission.task);
-        assert.strictEqual(snapshot.attempts[0]?.agent, testAgent.name);
-        assert.strictEqual(snapshot.attempts[0]?.operatorIntervened, false);
-        const attempt = snapshot.attempts[0];
-        assert(attempt !== undefined);
-        assert.strictEqual(
-          (yield* store.transcript(new TranscriptAllQuery({ attemptId: attempt.id }))).length,
-          1,
-        );
-        const sql = yield* SqlClient.SqlClient;
-        assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
-        assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
-        const before = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
-        yield* sql`UPDATE usine_attempts SET operator_intervened = 1 WHERE attempt_id = ${id}`;
-        const after = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
-        assert(Schema.is(Schema.Int)(before));
-        assert.strictEqual(after, before + 1);
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
-    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 
   it.live("ignores a late completion from an Attempt replaced during recovery", () =>
@@ -610,246 +486,6 @@ describe("run store", () => {
         const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
         assert.strictEqual(started._tag, "AttemptStarted");
         assert.strictEqual(yield* state(), "Running");
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.live("writes the effective parent model back onto the Attempt", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-started-" }),
-      );
-      const submission = new Submission({
-        event: new Event({
-          id: EventId.make("started-event"),
-          dedupKey: DedupKey.make("started/event/revision"),
-          payload: {},
-          receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
-        }),
-        itemKey: ItemKey.make("started-item"),
-        loop: LoopName.make("started-loop"),
-        step: StepName.make("started-step"),
-        approval: "none",
-        repository: RepositoryName.make("basaltbytes/usine"),
-        revision: RepositoryRevision.make("started-revision"),
-        task: AttemptTask.make("Record the selected models"),
-        agent: testAgent,
-        parentModel: Option.none(),
-      });
-      const runId = RunId.make("started-run");
-      const effectiveParentModel = ModelId.make("openai/gpt-5.6-sol");
-
-      yield* Effect.gen(function* () {
-        const store = yield* RunStore;
-        yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
-        assert.strictEqual(started._tag, "AttemptStarted");
-        if (started._tag !== "AttemptStarted") return;
-        const attemptId = started.execution.attempt.id;
-        yield* store.appendTranscript(
-          "outbound",
-          new AttemptChannel.OutboundEnvelope({
-            version: AttemptChannel.PROTOCOL_VERSION,
-            attemptId,
-            sequence: AttemptChannel.Sequence.make(1),
-            sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
-            payload: new AttemptChannel.Started({ parentModel: effectiveParentModel }),
-          }),
-        );
-        const parent = new ParentSession({
-          id: AgentSessionId.make("store-parent"),
-          agent: testAgent.name,
-          brain: testAgent.brain,
-        });
-        for (const sequence of [2, 3] as const) {
-          yield* store.appendTranscript(
-            "outbound",
-            new AttemptChannel.OutboundEnvelope({
-              version: AttemptChannel.PROTOCOL_VERSION,
-              attemptId,
-              sequence: AttemptChannel.Sequence.make(sequence),
-              sentAt: DateTime.makeUnsafe(`2026-08-25T00:00:0${sequence}Z`),
-              payload: new AttemptChannel.SessionEvent({
-                event: new TextOutput({ session: parent, text: `update ${sequence}` }),
-              }),
-            }),
-          );
-        }
-
-        const snapshot = yield* store.snapshot(runId);
-        assert.deepStrictEqual(snapshot.attempts[0]?.brain, testAgent.brain);
-        assert.deepStrictEqual(
-          snapshot.attempts[0]?.parentModel,
-          Option.some(effectiveParentModel),
-        );
-        const all = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
-        const first = all[0];
-        const last = all[2];
-        assert(first !== undefined && last !== undefined);
-        assert.deepStrictEqual(
-          all.map(({ sequence }) => sequence),
-          [1, 2, 3],
-        );
-        assert.deepStrictEqual(
-          (yield* store.transcript(
-            new TranscriptTailQuery({ attemptId, after: first.sequence, limit: 1 }),
-          )).map(({ sequence }) => sequence),
-          [2],
-        );
-        assert.deepStrictEqual(
-          (yield* store.transcript(
-            new TranscriptTailQuery({
-              attemptId,
-              after: TranscriptSequence.make(2),
-              limit: 1,
-            }),
-          )).map(({ sequence }) => sequence),
-          [3],
-        );
-        assert.deepStrictEqual(
-          (yield* store.transcript(
-            new TranscriptPageQuery({
-              attemptId,
-              before: Option.none(),
-              limit: 2,
-            }),
-          )).map(({ sequence }) => sequence),
-          [2, 3],
-        );
-        assert.deepStrictEqual(
-          (yield* store.transcript(
-            new TranscriptPageQuery({
-              attemptId,
-              before: Option.some(last.sequence),
-              limit: 2,
-            }),
-          )).map(({ sequence }) => sequence),
-          [1, 2],
-        );
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.live("reads transcript envelopes persisted under protocol v3", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-protocol-v3-" }),
-      );
-      const submission = new Submission({
-        event: new Event({
-          id: EventId.make("protocol-v3-event"),
-          dedupKey: DedupKey.make("protocol-v3/event/revision"),
-          payload: {},
-          receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
-        }),
-        itemKey: ItemKey.make("protocol-v3-item"),
-        loop: LoopName.make("protocol-v3-loop"),
-        step: StepName.make("protocol-v3-step"),
-        approval: "none",
-        repository: RepositoryName.make("basaltbytes/usine"),
-        revision: RepositoryRevision.make("protocol-v3-revision"),
-        task: AttemptTask.make("Read a durable protocol-v3 transcript"),
-        agent: testAgent,
-        parentModel: Option.none(),
-      });
-      const runId = RunId.make("protocol-v3-run");
-
-      yield* Effect.gen(function* () {
-        const database = yield* RunDatabase;
-        const store = yield* RunStore;
-        yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
-        assert.strictEqual(started._tag, "AttemptStarted");
-        if (started._tag !== "AttemptStarted") return;
-        const attemptId = started.execution.attempt.id;
-        const currentEnvelope = new AttemptChannel.OutboundEnvelope({
-          version: AttemptChannel.PROTOCOL_VERSION,
-          attemptId,
-          sequence: AttemptChannel.Sequence.make(1),
-          sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
-          payload: new AttemptChannel.Interrupted(),
-        });
-        yield* store.appendTranscript("outbound", currentEnvelope);
-
-        const encoded = Schema.encodeSync(AttemptChannel.Envelope)(currentEnvelope);
-        yield* database
-          .update(attemptTranscripts)
-          .set({ envelope: { ...encoded, version: 3 } })
-          .where(eq(attemptTranscripts.attemptId, attemptId))
-          .execute();
-
-        const transcript = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
-        const entry = transcript[0];
-        assert(entry !== undefined);
-        assert.strictEqual(entry.envelope.version, 3);
-        assert.strictEqual(entry.envelope.payload._tag, "Interrupted");
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
-    }).pipe(Effect.provide(NodeServices.layer)),
-  );
-
-  it.live("reads target-less inbound envelopes persisted under protocol v4", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-protocol-v4-" }),
-      );
-      const submission = new Submission({
-        event: new Event({
-          id: EventId.make("protocol-v4-event"),
-          dedupKey: DedupKey.make("protocol-v4/event/revision"),
-          payload: {},
-          receivedAt: DateTime.makeUnsafe("2026-08-25T00:00:00Z"),
-        }),
-        itemKey: ItemKey.make("protocol-v4-item"),
-        loop: LoopName.make("protocol-v4-loop"),
-        step: StepName.make("protocol-v4-step"),
-        approval: "none",
-        repository: RepositoryName.make("basaltbytes/usine"),
-        revision: RepositoryRevision.make("protocol-v4-revision"),
-        task: AttemptTask.make("Read a durable protocol-v4 transcript"),
-        agent: testAgent,
-        parentModel: Option.none(),
-      });
-      const runId = RunId.make("protocol-v4-run");
-
-      yield* Effect.gen(function* () {
-        const database = yield* RunDatabase;
-        const store = yield* RunStore;
-        yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
-        assert.strictEqual(started._tag, "AttemptStarted");
-        if (started._tag !== "AttemptStarted") return;
-        const attemptId = started.execution.attempt.id;
-        const currentEnvelope = new AttemptChannel.InboundEnvelope({
-          operator: "operator",
-          version: AttemptChannel.PROTOCOL_VERSION,
-          attemptId,
-          sequence: AttemptChannel.Sequence.make(1),
-          sentAt: DateTime.makeUnsafe("2026-08-25T00:00:01Z"),
-          target: new AttemptChannel.ParentTarget(),
-          payload: new AttemptChannel.Steer({ message: "Keep going" }),
-        });
-        yield* store.appendTranscript("inbound", currentEnvelope);
-
-        // A v4 row predates session targets, so drop the field the wire added.
-        const {
-          target: _target,
-          operator: _operator,
-          ...withoutTarget
-        } = Schema.encodeSync(AttemptChannel.InboundEnvelope)(currentEnvelope);
-        yield* database
-          .update(attemptTranscripts)
-          .set({ envelope: { ...withoutTarget, version: 4 } })
-          .where(eq(attemptTranscripts.attemptId, attemptId))
-          .execute();
-
-        const transcript = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
-        const entry = transcript[0];
-        assert(entry !== undefined);
-        assert.strictEqual(entry.envelope.version, 4);
-        assert.strictEqual(entry.envelope.payload._tag, "Steer");
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
     }).pipe(Effect.provide(NodeServices.layer)),
   );

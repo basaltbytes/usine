@@ -2,8 +2,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
-import { Cause, Effect, Fiber, Layer, Queue, Schema, Stream } from "effect";
-import { OperatorMessage, Release } from "@usine/core/attempt/channel";
+import { Cause, Effect, Exit, Fiber, Layer, Queue, Schema, Scope, Stream } from "effect";
+import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
 import {
   AgentResultError,
   ChildBackend,
@@ -117,6 +117,55 @@ describe("Claude child backend", () => {
       }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk));
     }).pipe(Effect.scoped),
   );
+  it.effect("closes a paused tool hook with its child scope even without a vendor abort", () =>
+    Effect.gen(function* () {
+      const messages = yield* Queue.make<Schema.Json, Cause.Done>();
+      const context = yield* Effect.context<never>();
+      const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
+      let options: ClaudeQueryOptions | undefined;
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: (_input, supplied) => {
+          options = supplied;
+          return {
+            close: () => {
+              Effect.runForkWith(context)(Queue.end(messages));
+            },
+            interrupt: () => Promise.resolve(),
+            supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
+            [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
+          };
+        },
+      });
+      const owner = yield* Scope.make();
+      yield* Effect.addFinalizer(() => Scope.close(owner, Exit.void));
+      const running = yield* Effect.gen(function* () {
+        return yield* (yield* ChildBackend).launch(request());
+      }).pipe(Scope.provide(owner), Effect.provide(claudeChildLayer), Effect.provide(sdk));
+      yield* running.intervene(new Interrupt());
+      const hook = options?.hooks?.PreToolUse?.[0]?.hooks[0];
+      assert(hook !== undefined);
+      const settled = hook(
+        {
+          hook_event_name: "PreToolUse",
+          session_id: "child-1",
+          transcript_path: "/tmp/claude-transcript",
+          cwd: "/workspace/repo",
+          tool_name: "Read",
+          tool_input: { file_path: "README.md" },
+          tool_use_id: "read-1",
+        },
+        "read-1",
+        { signal: new AbortController().signal },
+      ).then(
+        () => "resumed",
+        () => "interrupted",
+      );
+      yield* Effect.yieldNow;
+      yield* Scope.close(owner, Exit.void);
+      assert.strictEqual(yield* Effect.promise(() => settled), "interrupted");
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("streams normalized session events and runs headlessly with the declared model", () => {
     let input: AsyncIterable<ClaudeUserMessage> | undefined;
     let options: ClaudeQueryOptions | undefined;

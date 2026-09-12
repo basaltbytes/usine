@@ -7,6 +7,8 @@
 "@usine/orchestrator": patch
 ---
 
-Add session-addressed inbound attempt-channel envelopes (protocol v5).
+Add operator takeover, session pause and resume, and edit-and-retry.
 
-Inbound frames now carry a session target (the Pi parent by default, or a harness child by its id) and two new payloads, `OperatorMessage` and `Release`. The run host keeps a directory of the parent and each live child and routes a frame to the addressed session: a parent interrupt still ends the attempt, a child interrupt stops only that child, and steer or operator-message frames reach the target as user turns. Stored v3 and v4 transcripts remain readable.
+Protocol v5 addresses guidance to the Pi parent or a live child. Pause waits at a tool boundary; a message resumes the same session. Messaging a child holds its result until release. Cancel stops the whole Attempt. Messages and delivery receipts identify the operator in the transcript, and stored v3 and v4 transcripts remain readable.
+
+Failed Runs can retry with an amended task and roster agent. Later Attempts retain those amendments and record their effective task, agent, and intervention flag. The Run drawer exposes these controls for parent and child conversations, including held children outside the loaded history page. Holds pause the elapsed-time budget while the token ceiling remains active.

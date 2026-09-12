@@ -2,7 +2,18 @@ import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
-import { Cause, Deferred, Effect, Fiber, Layer, Queue, Result, Schema, Stream } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Fiber,
+  Layer,
+  Option,
+  Queue,
+  Result,
+  Schema,
+  Stream,
+} from "effect";
 import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
 import { TestClock } from "effect/testing";
 import {
@@ -61,7 +72,7 @@ const connectionLayer = (
             if (response === undefined) {
               return yield* new SessionOperationError({
                 operation: "stream",
-                sessionId: null,
+                sessionId: Option.none(),
                 message: `Unexpected ${method}`,
                 cause: new Error(method),
               });
@@ -103,6 +114,7 @@ describe("Codex child backend", () => {
         const responses = successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]);
         let turns = 0;
         let closes = 0;
+        let pauseRefused = false;
         const server = Layer.succeed(CodexAppServer)({
           open: () =>
             Effect.succeed({
@@ -112,8 +124,17 @@ describe("Codex child backend", () => {
                 closes += 1;
               }).pipe(Effect.andThen(Queue.end(notifications))),
               request: (_operation, method, params) =>
-                Effect.sync(() => {
+                Effect.gen(function* () {
                   calls.push({ method, params });
+                  if (method === "turn/interrupt" && !pauseRefused) {
+                    pauseRefused = true;
+                    return yield* new SessionOperationError({
+                      operation: "interrupt",
+                      sessionId: Option.none(),
+                      message: "Temporary interrupt refusal",
+                      cause: new Error("retry"),
+                    });
+                  }
                   if (method === "turn/start") {
                     turns += 1;
                     return { turn: { id: `turn-${turns}` } };
@@ -132,7 +153,10 @@ describe("Codex child backend", () => {
               ),
             ),
           );
+          const refused = yield* Effect.flip(running.intervene(new Interrupt()));
+          assert.strictEqual(refused._tag, "SessionOperationError");
           yield* running.intervene(new Interrupt());
+          assert.strictEqual(calls.filter(({ method }) => method === "turn/interrupt").length, 2);
           yield* Queue.offer(notifications, {
             method: "turn/completed",
             params: { turn: { id: "turn-1", status: "interrupted", error: null } },

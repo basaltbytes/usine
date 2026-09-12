@@ -10,7 +10,8 @@ import {
 } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { DateTime, Deferred, Effect, Fiber, Result } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Queue, Result } from "effect";
+import type { AttemptFailure } from "@usine/core/attempt/failure";
 import { TestClock } from "effect/testing";
 import { withAttemptGuard } from "../src/guard.ts";
 
@@ -24,25 +25,39 @@ const child = (id: string) =>
 const first = child("first");
 const second = child("second");
 const setup = Effect.gen(function* () {
-  const opened = yield* Deferred.make<AttemptChannel.Sink>();
+  const inputs = yield* Queue.make<{
+    readonly envelope: AttemptChannel.OutboundEnvelope;
+    readonly written: Deferred.Deferred<void, AttemptFailure>;
+  }>();
   const result = yield* withAttemptGuard(
     { attemptId: AttemptId.make("guarded"), maxAttemptMinutes: 1, maxAttemptTokens: 100 },
     { append: () => Effect.void },
-    (sink) => Deferred.succeed(opened, sink).pipe(Effect.andThen(Effect.never)),
+    (sink) =>
+      Effect.forever(
+        Effect.gen(function* () {
+          const { envelope, written } = yield* Queue.take(inputs);
+          yield* sink
+            .append("outbound", envelope)
+            .pipe(Effect.onExit((exit) => Deferred.done(written, exit)));
+        }),
+      ),
   ).pipe(Effect.result, Effect.forkChild);
-  const sink = yield* Deferred.await(opened);
   let sequence = 0;
   const emit = (payload: AttemptChannel.OutboundPayload) =>
-    sink.append(
-      "outbound",
-      new AttemptChannel.OutboundEnvelope({
-        version: AttemptChannel.PROTOCOL_VERSION,
-        attemptId: AttemptId.make("guarded"),
-        sequence: AttemptChannel.Sequence.make(++sequence),
-        sentAt: DateTime.makeUnsafe("2026-09-12"),
-        payload,
-      }),
-    );
+    Effect.gen(function* () {
+      const written = yield* Deferred.make<void, AttemptFailure>();
+      yield* Queue.offer(inputs, {
+        written,
+        envelope: new AttemptChannel.OutboundEnvelope({
+          version: AttemptChannel.PROTOCOL_VERSION,
+          attemptId: AttemptId.make("guarded"),
+          sequence: AttemptChannel.Sequence.make(++sequence),
+          sentAt: DateTime.makeUnsafe("2026-09-12"),
+          payload,
+        }),
+      });
+      yield* Deferred.await(written);
+    });
   const hold = (session: ChildSession, held: boolean) =>
     emit(
       new AttemptChannel.InterventionApplied({
@@ -106,7 +121,8 @@ describe("Attempt guard", () => {
         yield* usage(second, 39);
         yield* TestClock.adjust("2 hours");
         assert.strictEqual(result.pollUnsafe(), undefined);
-        yield* usage(second, 40).pipe(Effect.forkChild);
+        const rejected = yield* usage(second, 40).pipe(Effect.result);
+        assert(Result.isFailure(rejected) && rejected.failure._tag === "RunawayFailure");
         const outcome = yield* Fiber.join(result);
         assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
         assert.strictEqual(outcome.failure.ceiling, "tokens");
