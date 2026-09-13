@@ -1,5 +1,20 @@
 # @usine/server
 
+## 0.2.1
+
+### Patch Changes
+
+- 5828a95: Persist Claude and Codex child sessions and record their native ids and worker paths in transcripts. Show copyable resume commands in the Run drawer, including for completed sessions outside the loaded history page.
+  
+  Upgrade the orchestrator and run host together for Attempt channel protocol v6. Existing protocol-v3 through v5 transcripts remain readable.
+- Updated dependencies [5828a95]
+- Updated dependencies [8b9d544]
+  - @usine/core@0.3.0
+  - @usine/engine@0.3.0
+  - @usine/orchestrator@0.2.1
+  - @usine/config@0.2.1
+  - @usine/github@0.1.2
+
 ## 0.2.0
 
 ### Minor Changes

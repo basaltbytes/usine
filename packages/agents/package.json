@@ -1,6 +1,6 @@
 {
   "name": "@usine/agents",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The usine agent layer: Pi parent adapter, subagents extension, team roster and brain specs.",
   "license": "MIT",
   "repository": {
