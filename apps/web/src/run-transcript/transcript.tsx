@@ -13,6 +13,7 @@ import { TranscriptToolRow } from "./tool/tool.tsx";
 import { CompletedTools } from "./grouping/group.tsx";
 import { groupTranscript, type GroupedItem, type GroupedSession } from "./grouping/model.ts";
 import { useTranscriptDisclosure } from "./grouping/disclosure.tsx";
+import { SessionHandoff } from "./handoff.tsx";
 import { cn } from "@/lib/utils";
 import {
   matchesFilter,
@@ -137,6 +138,7 @@ const Child = ({
           {session.session.brain.harness} · {session.session.brain.model} ·{" "}
           {session.session.brain.effort}
         </p>
+        <SessionHandoff session={session} />
         {entries.length === 0 ? (
           <p className="text-xs text-muted-foreground">No {filter} in this session.</p>
         ) : (

@@ -4,6 +4,7 @@ import {
   PoolRateLimitsUpdated,
   RateLimitsSnapshot,
   SessionStarted,
+  HarnessSession,
   SessionTokensUpdated,
   TextOutput,
   ToolFinished,
@@ -125,7 +126,7 @@ const makeCodexChild = Effect.gen(function* () {
         cwd: request.cwd,
         approvalPolicy: "never",
         sandbox: "danger-full-access",
-        ephemeral: true,
+        ephemeral: false,
         serviceName: "usine",
       };
       const threadJson = yield* connection.request("launch", "thread/start", json(threadParams));
@@ -155,7 +156,16 @@ const makeCodexChild = Effect.gen(function* () {
         label: "Codex child session",
         sessionId: session.id,
       });
-      yield* channel.emit(new SessionStarted({ session }));
+      const harnessSession = new HarnessSession({ id: thread.thread.id, cwd: request.cwd });
+      yield* channel.emit(
+        new SessionStarted({ session, harnessSession: Option.some(harnessSession) }),
+      );
+      yield* Effect.logInfo("Codex child session saved", {
+        sessionId: session.id,
+        parentSessionId: session.parentId,
+        harnessSessionId: harnessSession.id,
+        cwd: harnessSession.cwd,
+      });
       const turnParams: TurnStartParams = {
         threadId: thread.thread.id,
         input: [{ type: "text", text: request.prompt, text_elements: [] }],

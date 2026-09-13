@@ -6,6 +6,8 @@ import {
   ChildSession,
   ParentSession,
   SessionStarted,
+  HarnessSession,
+  HarnessSessionId,
   SessionIdle,
   TextOutput,
 } from "@usine/core/agent/session";
@@ -92,7 +94,17 @@ describe("run store", () => {
             new AttemptChannel.SessionEvent({ event: new SessionStarted({ session: parent }) }),
           );
           yield* emit(
-            new AttemptChannel.SessionEvent({ event: new SessionStarted({ session: child }) }),
+            new AttemptChannel.SessionEvent({
+              event: new SessionStarted({
+                session: child,
+                harnessSession: Option.some(
+                  new HarnessSession({
+                    id: HarnessSessionId.make("vendor-1"),
+                    cwd: "/worker/repo",
+                  }),
+                ),
+              }),
+            }),
           );
           const intervention = new AttemptChannel.Intervention({
             operator: "Philippe",
@@ -130,9 +142,14 @@ describe("run store", () => {
                 ? envelope.payload.event._tag
                 : envelope.payload._tag,
             ),
-            ["SessionStarted", "InterventionApplied", "SessionIdle"],
+            ["SessionStarted", "SessionStarted", "InterventionApplied", "SessionIdle"],
           );
-          const held = state[1]?.envelope.payload;
+          const launch = state[1]?.envelope.payload;
+          assert(launch?._tag === "SessionEvent" && launch.event._tag === "SessionStarted");
+          assert(Option.isSome(launch.event.harnessSession));
+          assert.strictEqual(launch.event.harnessSession.value.id, "vendor-1");
+          assert.strictEqual(launch.event.harnessSession.value.cwd, "/worker/repo");
+          const held = state[2]?.envelope.payload;
           assert(held?._tag === "InterventionApplied");
           assert.strictEqual(held.intervention.operator, "Philippe");
           const page = yield* store.transcript(

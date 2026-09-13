@@ -11,6 +11,8 @@ import {
   RateLimitsSnapshot,
   RateLimitWindow,
   SessionStarted,
+  HarnessSession,
+  HarnessSessionId,
 } from "../src/agent/session.ts";
 import { AttemptTask, AttemptId } from "../src/attempt/attempt.ts";
 import * as AttemptChannel from "../src/attempt/channel.ts";
@@ -44,7 +46,7 @@ const spec = new AttemptChannel.RunSpec({
   parentEffort: "high",
 });
 
-describe("attempt channel v5", () => {
+describe("attempt channel v6", () => {
   it("round-trips a final envelope through its framed JSON schema", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,
@@ -149,7 +151,7 @@ describe("attempt channel v5", () => {
       }),
     );
 
-    for (const version of [3, 4] as const) {
+    for (const version of [3, 4, 5] as const) {
       assert.throws(() =>
         Schema.decodeUnknownSync(AttemptChannel.InputFrame)(
           { ...start, version },
@@ -222,6 +224,28 @@ describe("attempt channel v5", () => {
         onExcessProperty: "error",
       }),
     );
+  });
+
+  it("reads older launch records and round-trips saved harness session metadata", () => {
+    const session = new ParentSession({
+      id: AgentSessionId.make("parent"),
+      agent: agent.name,
+      brain: agent.brain,
+    });
+    const legacy = Schema.encodeSync(SessionStarted)(new SessionStarted({ session }));
+    assert(Option.isNone(Schema.decodeUnknownSync(SessionStarted)(legacy).harnessSession));
+    const started = new SessionStarted({
+      session,
+      harnessSession: Option.some(
+        new HarnessSession({ id: HarnessSessionId.make("native-1"), cwd: "/worker/repo" }),
+      ),
+    });
+    assert.deepStrictEqual(
+      Schema.decodeUnknownSync(SessionStarted)(Schema.encodeSync(SessionStarted)(started)),
+      started,
+    );
+    assert.throws(() => HarnessSessionId.make(""));
+    assert.throws(() => new HarnessSession({ id: HarnessSessionId.make("native-1"), cwd: "" }));
   });
 
   describe("outbound protocol reducer", () => {

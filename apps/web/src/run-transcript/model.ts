@@ -1,4 +1,4 @@
-import type { AgentSession } from "@usine/core/agent/session";
+import type { AgentSession, HarnessSession } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { Match, Option, type Schema } from "effect";
@@ -61,6 +61,7 @@ export interface TranscriptSession extends TranscriptPosition {
   readonly _tag: "Session";
   readonly attemptId: AttemptId;
   readonly session: AgentSession;
+  readonly harnessSession: Option.Option<HarnessSession>;
   readonly status: SessionStatus;
   readonly held: boolean;
   readonly paused: boolean;
@@ -297,6 +298,7 @@ export const projectTranscript = (
       latestSequence: group.latestSequence,
       attemptId: group.attemptId,
       session: group.session,
+      harnessSession: group.harnessSession,
       status: group.status,
       held: group.status === "Live" && group.held,
       paused: group.status === "Live" && group.paused,

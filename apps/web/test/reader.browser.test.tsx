@@ -1,9 +1,14 @@
+import { Option } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionId,
   ChildSession,
+  SessionStarted,
+  SessionFinished,
+  HarnessSession,
+  HarnessSessionId,
   ParentSession,
   TextOutput,
   ToolStarted,
@@ -592,4 +597,50 @@ it("lets Space on the viewport resume following a paused reader at latest", asyn
     .toBeLessThan(9);
   close();
   expect(bookmark()?.position._tag).toBe("Latest");
+});
+
+it.each(["claude", "codex"] as const)(
+  "shows a finished %s child's saved session and copyable worker command",
+  async (harness) => {
+    const child = new ChildSession({
+      id: AgentSessionId.make("saved-child"),
+      parentId: parent.id,
+      agent: AgentName.make("reviewer"),
+      brain: new BrainSpec({ harness, model: ModelId.make("test-model"), effort: "high" }),
+    });
+    const saved = new HarnessSession({
+      id: HarnessSessionId.make("native-session"),
+      cwd: "/worker/Philippe's repo",
+    });
+    mount([
+      record(1, new SessionStarted({ session: child, harnessSession: Option.some(saved) })),
+      record(2, new SessionFinished({ session: child })),
+    ]);
+    await page.getByRole("button", { name: "reviewer activity · Finished" }).click();
+    await expect.element(page.getByText("Harness session: native-session")).toBeVisible();
+    await expect.element(page.getByText("Worker worktree: /worker/Philippe's repo")).toBeVisible();
+    const command = harness === "claude" ? "claude --resume" : "codex resume --";
+    expect(host.textContent).toContain(`${command} 'native-session'`);
+    expect(host.textContent).toContain("cd -- '/worker/Philippe'\\''s repo'");
+    await expect.element(page.getByRole("button", { name: "Copy resume command" })).toBeEnabled();
+    await expect
+      .element(page.getByText(/Requires its worktree and saved session files/))
+      .toBeVisible();
+  },
+);
+
+it("shows that a Pi child has no saved harness session to resume", async () => {
+  const child = new ChildSession({
+    id: AgentSessionId.make("pi-child"),
+    parentId: parent.id,
+    agent: AgentName.make("reviewer"),
+    brain: new BrainSpec({ harness: "pi", model: ModelId.make("test-model"), effort: "high" }),
+  });
+  mount([
+    record(1, new SessionStarted({ session: child })),
+    record(2, new SessionFinished({ session: child })),
+  ]);
+  await page.getByRole("button", { name: "reviewer activity · Finished" }).click();
+  await expect.element(page.getByText("No saved harness session recorded.")).toBeVisible();
+  expect(host.textContent).not.toContain("Resume on worker");
 });

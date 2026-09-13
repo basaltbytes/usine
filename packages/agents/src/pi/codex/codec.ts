@@ -1,4 +1,8 @@
-import { AgentSessionId, RateLimitWindow as CoreRateLimitWindow } from "@usine/core/agent/session";
+import {
+  HarnessSessionId,
+  AgentSessionId,
+  RateLimitWindow as CoreRateLimitWindow,
+} from "@usine/core/agent/session";
 import { DateTime, Effect, Option, Schema } from "effect";
 import type {
   ModelListParams,
@@ -36,7 +40,7 @@ export const ModelListResponse = Schema.Struct({
 });
 /** Thread identity and effective model returned when a child conversation opens. */
 export const ThreadStartResponse = Schema.Struct({
-  thread: Schema.Struct({ id: Schema.NonEmptyString }),
+  thread: Schema.Struct({ id: HarnessSessionId }),
   model: Schema.NonEmptyString,
   instructionSources: Schema.Array(Schema.String),
 });

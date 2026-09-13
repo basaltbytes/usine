@@ -35,9 +35,11 @@ const LegacyInboundEnvelope = Schema.Struct({
   payload: Schema.Union([AttemptChannel.Steer, AttemptChannel.Interrupt]),
 });
 
-/** Stored v3 and v4 envelopes stay readable; the live channel is v5 only. */
+/** Stored v3–v5 envelopes stay readable; the live channel is v6 only. */
 const TranscriptEnvelope = Schema.Union([
   AttemptChannel.Envelope,
+  Schema.Struct({ ...AttemptChannel.OutboundEnvelope.fields, version: Schema.Literal(5) }),
+  Schema.Struct({ ...AttemptChannel.InboundEnvelope.fields, version: Schema.Literal(5) }),
   LegacyOutboundEnvelope,
   LegacyInboundEnvelope,
 ]);
@@ -58,7 +60,7 @@ export class TranscriptAllQuery extends Schema.TaggedClass<TranscriptAllQuery>(
   "@usine/engine/TranscriptAllQuery",
 )("TranscriptAllQuery", { attemptId: AttemptId }) {}
 
-/** Latest lifecycle and supervision receipt per session, independent of the visible transcript page. */
+/** Launch metadata, latest lifecycle, and supervision receipt per session, independent of the visible page. */
 export class TranscriptSessionsQuery extends Schema.TaggedClass<TranscriptSessionsQuery>(
   "@usine/engine/TranscriptSessionsQuery",
 )("TranscriptSessionsQuery", { attemptId: AttemptId }) {}

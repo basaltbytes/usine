@@ -7,6 +7,9 @@ import {
   RateLimitsSnapshot,
   RateLimitWindow,
   SessionFinished,
+  SessionStarted,
+  HarnessSession,
+  HarnessSessionId,
   ToolStarted,
   ToolFinished,
   TextOutput,
@@ -192,6 +195,31 @@ describe("run transcript", () => {
     assert.deepStrictEqual(poolMeters(events), [
       { pool: "chatgptPlan", primaryUsedPercent: 31, secondaryUsedPercent: null },
     ]);
+  });
+
+  it("keeps a finished child's handoff when its launch is outside the loaded page", () => {
+    const saved = new HarnessSession({
+      id: HarnessSessionId.make("vendor-thread"),
+      cwd: "/worker/repo",
+    });
+    const started = sessionEvent(
+      1,
+      new SessionStarted({ session: child, harnessSession: Option.some(saved) }),
+    );
+    const finished = sessionEvent(2, new SessionFinished({ session: child }));
+    const projection = projectTranscript([finished], [liveAttempt], [started, finished]);
+    const session = projection.sessions[0];
+    assert(session !== undefined);
+    assert.strictEqual(session.status, "Finished");
+    assert.deepStrictEqual(session.harnessSession, Option.some(saved));
+    assert.strictEqual(session.entries.length, 1);
+    const legacy = projectTranscript(
+      [sessionEvent(1, new SessionStarted({ session: child }))],
+      [liveAttempt],
+    );
+    const legacySession = legacy.sessions[0];
+    assert(legacySession !== undefined);
+    assert(Option.isNone(legacySession.harnessSession));
   });
 
   it("renders parent activity inline and groups each child session one level deep", () => {
