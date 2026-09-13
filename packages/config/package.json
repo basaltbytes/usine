@@ -1,6 +1,6 @@
 {
   "name": "@usine/config",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Config file machinery for usine: parse, validate, and surgically rewrite the instance repo's files — usine.yaml, loop files, agent files.",
   "license": "MIT",
   "repository": {

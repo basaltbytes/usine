@@ -1,6 +1,6 @@
 {
   "name": "@usine/run-host",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "The worker-side one-shot process that hosts a single usine attempt's agent session.",
   "license": "MIT",
   "repository": {

@@ -1,6 +1,6 @@
 {
   "name": "@usine/executor",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "The usine scoped Worker contract with local and exe.dev adapters.",
   "license": "MIT",
   "repository": {

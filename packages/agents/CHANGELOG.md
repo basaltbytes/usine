@@ -1,5 +1,24 @@
 # @usine/agents
 
+## 0.3.0
+
+### Minor Changes
+
+- 5828a95: Persist Claude and Codex child sessions and record their native ids and worker paths in transcripts. Show copyable resume commands in the Run drawer, including for completed sessions outside the loaded history page.
+  
+  Upgrade the orchestrator and run host together for Attempt channel protocol v6. Existing protocol-v3 through v5 transcripts remain readable.
+- 8b9d544: Add operator takeover, session pause and resume, and edit-and-retry.
+  
+  Protocol v5 addresses guidance to the Pi parent or a live child. Pause waits at a tool boundary; a message resumes the same session. Messaging a child holds its result until release. Cancel stops the whole Attempt. Messages and delivery receipts identify the operator in the transcript, and stored v3 and v4 transcripts remain readable.
+  
+  Failed Runs can retry with an amended task and roster agent. Later Attempts retain those amendments and record their effective task, agent, and intervention flag. The Run drawer exposes these controls for parent and child conversations, including held children outside the loaded history page. Holds pause the elapsed-time budget while the token ceiling remains active.
+
+### Patch Changes
+
+- Updated dependencies [5828a95]
+- Updated dependencies [8b9d544]
+  - @usine/core@0.3.0
+
 ## 0.2.0
 
 ### Minor Changes
