@@ -74,6 +74,16 @@ describe("session supervision", () => {
     }),
   );
 
+  it.effect("fails a blocker whose details share the marker's line", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(parent);
+      yield* session.finish("[usine:blocked] Repository permission denied.");
+      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
+      assert(error instanceof AgentResultError);
+      assert.strictEqual(error.message, "Repository permission denied.");
+    }),
+  );
+
   it.effect("fails a blocker marker even when the agent omits its details", () =>
     Effect.gen(function* () {
       const session = yield* conversation(parent);

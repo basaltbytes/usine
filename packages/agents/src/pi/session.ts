@@ -11,7 +11,12 @@ import {
 } from "@usine/core/agent/session";
 import { Cause, Deferred, Effect, Option, Queue, Ref, Schema } from "effect";
 import { piMessageTokens } from "./usage.ts";
-import { type AgentSessionError, AgentResultError, SessionResult } from "../runtime.ts";
+import {
+  type AgentSessionError,
+  AgentResultError,
+  BLOCKED_MARKER,
+  SessionResult,
+} from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
 
 export interface SessionChannelOptions {
@@ -77,14 +82,17 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     message: string,
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-    // Only the reserved first line is an outcome signal; ordinary prose is unchanged.
-    const [outcome, ...details] = message.trim().split(/\r?\n/u);
-    if (outcome === "[usine:blocked]") {
+    // Only an answer that opens with the reserved marker is an outcome signal,
+    // whether its details follow on the same line or the next; ordinary prose
+    // and later mentions are unchanged.
+    const answer = message.trim();
+    if (answer.startsWith(BLOCKED_MARKER)) {
       return yield* fail(
         new AgentResultError({
           sessionId: Option.some(session.id),
           message:
-            details.join("\n").trim() || "Agent reported an unresolved blocker without details.",
+            answer.slice(BLOCKED_MARKER.length).trim() ||
+            "Agent reported an unresolved blocker without details.",
         }),
       );
     }

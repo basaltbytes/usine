@@ -33,7 +33,7 @@ Claude children use the CLI's background-task snapshots and session-idle signal 
 
 Runtime prompts instruct parents and children to run gates, tests, and CI watches in the foreground, wait for any background results, and finish dependent steps before returning. A pending command or CI check is unfinished work; genuine blockers must be recorded on the issue or pull request. Push commits before returning because Attempt cleanup removes the worktree. Keep this foreground discipline on older worker CLIs that do not emit background-task or session-state messages.
 
-An unresolved blocker must use the reserved first line `[usine:blocked]`, followed by its details and incomplete work:
+An unresolved blocker must open its final answer with the reserved marker `[usine:blocked]`, followed by its details and incomplete work on the same or the next line:
 
 ```text
 [usine:blocked]
