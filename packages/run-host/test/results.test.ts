@@ -1,20 +1,98 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, expect, it } from "@effect/vitest";
+import { PiSdk, piParentLayer, type PiSessionEvent } from "@usine/agents/pi";
 import {
+  ChildBackend,
   AgentResultError,
   AgentRuntime,
   SessionOperationError,
   SessionResult,
 } from "@usine/agents/runtime";
+import { ModelId } from "@usine/core/agent/brain";
 import { SessionFinished, SessionStarted, TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Commit } from "@usine/core/step/result";
-import { Deferred, Effect, Option, Path, Queue } from "effect";
+import { Deferred, Effect, Layer, Option, Path, Queue } from "effect";
 import { makeCheckout } from "./support/git.ts";
 import { command, controlledSession, spec, start } from "./support/session.ts";
 import { startHost } from "./support/stdio.ts";
 
 describe("run-host results", () => {
+  it.live("reports an explicit parent blocker as a failed Attempt instead of Final", () => {
+    let listener: ((event: PiSessionEvent) => void) | undefined;
+    const sdk = Layer.succeed(PiSdk)({
+      start: () =>
+        Promise.resolve({
+          _tag: "Started",
+          model: ModelId.make("test/parent"),
+          pool: "apiKeys",
+          session: {
+            abort: () => Promise.resolve(),
+            dispose: () => undefined,
+            messages: [],
+            prompt: () => {
+              listener?.({
+                type: "message_end",
+                message: {
+                  role: "assistant",
+                  content: [
+                    {
+                      type: "text",
+                      text: "[usine:blocked]\nRepository permission denied; publishing remains incomplete.",
+                    },
+                  ],
+                  api: "anthropic-messages",
+                  provider: "anthropic",
+                  model: "test/parent",
+                  usage: {
+                    input: 0,
+                    output: 0,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                    totalTokens: 0,
+                    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+                  },
+                  stopReason: "stop",
+                  timestamp: 0,
+                },
+              });
+              return Promise.resolve();
+            },
+            steer: () => Promise.resolve(),
+            subscribe: (found) => {
+              listener = found;
+              return () => undefined;
+            },
+          },
+        }),
+    });
+    const children = Layer.succeed(ChildBackend)({
+      launch: () => Effect.die("This parent reports its own blocker"),
+    });
+    return Effect.gen(function* () {
+      const checkout = yield* makeCheckout();
+      const runtime = yield* AgentRuntime;
+      const host = yield* startHost(runtime, checkout.hostSpawner);
+      yield* host.send(
+        start(new AttemptChannel.RunSpec({ ...spec, baseCommit: checkout.baseCommit })),
+      );
+      yield* host.result;
+      const terminal = host.frames.at(-1)?.payload;
+      assert(terminal?._tag === "Failed");
+      expect(terminal.failure._tag).toBe("AgentFailure");
+      expect(terminal.failure.message).toBe(
+        "Repository permission denied; publishing remains incomplete.",
+      );
+      expect(host.frames.some(({ payload }) => payload._tag === "Final")).toBe(false);
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(piParentLayer),
+      Effect.provide(sdk),
+      Effect.provide(children),
+      Effect.provide(NodeServices.layer),
+    );
+  });
+
   it.effect("acknowledges Interrupt when the SDK immediately fails its result while stopping", () =>
     Effect.gen(function* () {
       const session = yield* controlledSession();

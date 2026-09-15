@@ -56,6 +56,141 @@ const scripted = (
 });
 
 describe("Claude child backend", () => {
+  it.effect(
+    "rejects malformed background snapshots instead of treating them as no pending work",
+    () => {
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: () =>
+          scripted([
+            { type: "system", subtype: "background_tasks_changed", tasks: "invalid" },
+            { type: "result", subtype: "success", result: "Waiting for gate" },
+          ]),
+      });
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const session = yield* (yield* ChildBackend).launch(request());
+          const error = yield* Effect.flip(session.result);
+          assert(error instanceof SessionOperationError);
+          assert.strictEqual(error.operation, "stream");
+          assert.match(error.message, /invalid completion update/u);
+        }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+      );
+    },
+  );
+
+  it.effect("waits for queued user turns while ambient watchers do not prevent completion", () => {
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: () =>
+        scripted([
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          {
+            type: "system",
+            subtype: "background_tasks_changed",
+            tasks: [{ task_id: "watcher", ambient: true }],
+          },
+          { type: "result", subtype: "success", result: "First answer", queued_turn_count: 1 },
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          { type: "result", subtype: "success", result: "Updated answer", queued_turn_count: 0 },
+          { type: "system", subtype: "session_state_changed", state: "idle" },
+        ]),
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const session = yield* (yield* ChildBackend).launch(request());
+        assert.strictEqual((yield* session.result).message, "Updated answer");
+      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect(
+    "waits through background work and its notification turn without an operator Hold",
+    () => {
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: () =>
+          scripted([
+            { type: "system", subtype: "session_state_changed", state: "running" },
+            {
+              type: "system",
+              subtype: "background_tasks_changed",
+              tasks: [{ task_id: "gate", task_type: "local_bash", description: "Run gate" }],
+            },
+            {
+              type: "result",
+              subtype: "success",
+              result: "Waiting for gate",
+              queued_turn_count: 0,
+            },
+            { type: "system", subtype: "session_state_changed", state: "idle" },
+            // An empty snapshot is not a final answer: the notification still needs a turn.
+            { type: "system", subtype: "background_tasks_changed", tasks: [] },
+            { type: "system", subtype: "task_notification", task_id: "gate", status: "completed" },
+            { type: "system", subtype: "session_state_changed", state: "running" },
+            { type: "system", subtype: "init", session_id: "claude-session-1" },
+            {
+              type: "assistant",
+              message: { content: [{ type: "text", text: "Gate passed; PR published" }] },
+            },
+            {
+              type: "result",
+              subtype: "success",
+              result: "Gate passed; PR published",
+              queued_turn_count: 0,
+            },
+            { type: "system", subtype: "session_state_changed", state: "idle" },
+          ]),
+      });
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const session = yield* (yield* ChildBackend).launch(request());
+          const [events, result] = yield* Effect.all([
+            Stream.runCollect(session.events),
+            session.result,
+          ]);
+          assert.strictEqual(result.message, "Gate passed; PR published");
+          assert.deepStrictEqual(
+            events.map((event) => event._tag),
+            ["SessionStarted", "TextOutput", "SessionFinished"],
+          );
+        }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+      );
+    },
+  );
+
+  it.effect(
+    "does not return a saved waiting answer when background work ends without another result",
+    () => {
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: () =>
+          scripted([
+            { type: "system", subtype: "session_state_changed", state: "running" },
+            {
+              type: "system",
+              subtype: "background_tasks_changed",
+              tasks: [{ task_id: "gate", task_type: "local_bash", description: "Run gate" }],
+            },
+            {
+              type: "result",
+              subtype: "success",
+              result: "Waiting for gate",
+              queued_turn_count: 0,
+            },
+            { type: "system", subtype: "session_state_changed", state: "idle" },
+            { type: "system", subtype: "background_tasks_changed", tasks: [] },
+            { type: "system", subtype: "session_state_changed", state: "idle" },
+          ]),
+      });
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const session = yield* (yield* ChildBackend).launch(request());
+          const error = yield* Effect.flip(session.result);
+          assert(error instanceof SessionOperationError);
+          assert.strictEqual(error.operation, "stream");
+        }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+      );
+    },
+  );
+
   it.effect("keeps a held Claude conversation open until release and records one launch", () =>
     Effect.gen(function* () {
       const messages = yield* Queue.make<Schema.Json, Cause.Done>();
@@ -100,9 +235,19 @@ describe("Claude child backend", () => {
         const init = { type: "system", subtype: "init", session_id: "claude-session-1" };
         yield* Queue.offer(messages, init);
         yield* Queue.offer(messages, {
+          type: "system",
+          subtype: "session_state_changed",
+          state: "running",
+        });
+        yield* Queue.offer(messages, {
           type: "result",
           subtype: "success",
           result: "First answer",
+        });
+        yield* Queue.offer(messages, {
+          type: "system",
+          subtype: "session_state_changed",
+          state: "idle",
         });
         yield* Queue.take(idle);
         assert.strictEqual(result.pollUnsafe(), undefined);
@@ -113,9 +258,19 @@ describe("Claude child backend", () => {
         );
         yield* Queue.offer(messages, init);
         yield* Queue.offer(messages, {
+          type: "system",
+          subtype: "session_state_changed",
+          state: "running",
+        });
+        yield* Queue.offer(messages, {
           type: "result",
           subtype: "success",
           result: "Adjusted answer",
+        });
+        yield* Queue.offer(messages, {
+          type: "system",
+          subtype: "session_state_changed",
+          state: "idle",
         });
         yield* Queue.take(idle);
         yield* running.intervene(new Release());
@@ -280,7 +435,15 @@ describe("Claude child backend", () => {
   it.effect("fails the session as agent work when Claude reports an unsuccessful result", () => {
     const sdk = Layer.succeed(ClaudeSdk)({
       open: () =>
-        scripted([{ type: "result", subtype: "error_max_turns", errors: ["ran out of turns"] }]),
+        scripted([
+          { type: "system", subtype: "session_state_changed", state: "running" },
+          {
+            type: "system",
+            subtype: "background_tasks_changed",
+            tasks: [{ task_id: "gate", task_type: "local_bash", description: "Run gate" }],
+          },
+          { type: "result", subtype: "error_max_turns", errors: ["ran out of turns"] },
+        ]),
     });
     return Effect.scoped(
       Effect.gen(function* () {

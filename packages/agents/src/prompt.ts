@@ -2,6 +2,7 @@ import type { AgentPersona, AgentName } from "@usine/core/agent";
 import type { AttemptTask } from "@usine/core/attempt";
 import type { RepositoryName } from "@usine/core/repository";
 import type { Schema } from "effect";
+import { BLOCKED_MARKER } from "./runtime.ts";
 
 /** The recorded trigger context, Agent instructions, and effective task presented to the parent. */
 export interface PromptParts {
@@ -22,6 +23,15 @@ export interface ChildPromptParts {
 
 /** The attribution line every GitHub comment or review written by an Agent ends with. */
 export const githubSignature = (agent: AgentName): string => `— usine agent: ${agent}`;
+
+const completionInstructions: ReadonlyArray<string> = [
+  "# Task completion",
+  "",
+  "Run gates, tests, and CI watches in the foreground. If a tool starts background work, wait for its result and finish every dependent step before returning your final answer.",
+  "Do not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.",
+  "A running command or pending CI check is unfinished work, not a blocker. Keep waiting and complete the task. For a genuine blocker, record the exact blocker on the issue or pull request and report which work remains incomplete.",
+  `For an unresolved blocker, start your final answer with exactly ${BLOCKED_MARKER} on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. If a child fails and you cannot resolve its blocker, use this marker in your own final answer too. Use an ordinary final answer only after completing the task.`,
+];
 
 const githubInstructions = (agent: AgentName): ReadonlyArray<string> => [
   "# GitHub identity",
@@ -53,6 +63,8 @@ export const assemblePrompt = (parts: PromptParts): string =>
     "",
     parts.task,
     "",
+    ...completionInstructions,
+    "",
     ...githubInstructions(parts.agent),
   ].join("\n");
 
@@ -66,6 +78,8 @@ export const assembleChildPrompt = (parts: ChildPromptParts): string =>
     "# Delegated task",
     "",
     parts.task,
+    "",
+    ...completionInstructions,
     "",
     ...githubInstructions(parts.agent),
   ].join("\n");

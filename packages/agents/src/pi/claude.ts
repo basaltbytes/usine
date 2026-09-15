@@ -208,6 +208,29 @@ const ClaudeResultMessage = Schema.Struct({
   errors: Schema.optionalKey(Schema.Array(Schema.String)),
   queued_turn_count: Schema.optionalKey(Schema.Number),
 });
+const ClaudeBackgroundTasks = Schema.Struct({
+  type: Schema.Literal("system"),
+  subtype: Schema.Literal("background_tasks_changed"),
+  tasks: Schema.Array(
+    Schema.Struct({
+      task_id: Schema.NonEmptyString,
+      ambient: Schema.optionalKey(Schema.Boolean),
+    }),
+  ),
+});
+const ClaudeSessionState = Schema.Struct({
+  type: Schema.Literal("system"),
+  subtype: Schema.Literal("session_state_changed"),
+  state: Schema.Literals(["idle", "running", "requires_action"]),
+});
+
+const ClaudeCompletionHeader = Schema.Struct({
+  type: Schema.Literal("system"),
+  subtype: Schema.Literals(["background_tasks_changed", "session_state_changed"]),
+});
+const decodeCompletionUpdate = Schema.decodeUnknownEffect(
+  Schema.Union([ClaudeBackgroundTasks, ClaudeSessionState]),
+);
 
 const sessionEventsFrom = (
   message: Schema.Json,
@@ -326,6 +349,9 @@ const makeClaudeChild = Effect.gen(function* () {
       boundary = conversation.awaitUnpaused;
       const tools = new Map<string, string>();
       const tokens = claudeTokenMeter();
+      let backgroundTasks: ReadonlyArray<string> = [];
+      let reportsSessionState = false;
+      let completedTurn = Option.none<string>();
       // Claude repeats its `init` message ahead of every turn; only the first
       // one is the launch record, and its session id stays constant.
       const launched = yield* Ref.make(false);
@@ -336,6 +362,45 @@ const makeClaudeChild = Effect.gen(function* () {
       ).pipe(
         Stream.runForEach((message) =>
           Effect.gen(function* () {
+            if (Schema.is(ClaudeCompletionHeader)(message)) {
+              const update = yield* decodeCompletionUpdate(message).pipe(
+                Effect.mapError((cause) =>
+                  operationError(
+                    "stream",
+                    request,
+                    "Claude returned an invalid completion update",
+                    cause,
+                  ),
+                ),
+              );
+              if (update.subtype === "background_tasks_changed") {
+                // The SDK defines replacement snapshots, not start/stop counters.
+                // Ambient watchers are not work the child owes its parent.
+                backgroundTasks = update.tasks
+                  .filter((task) => task.ambient !== true)
+                  .map((task) => task.task_id);
+                yield* Effect.logInfo("Claude background work changed", {
+                  sessionId: request.session.id,
+                  backgroundTaskIds: backgroundTasks,
+                });
+              } else {
+                reportsSessionState = true;
+                const candidate = completedTurn;
+                completedTurn = Option.none();
+                // SDK idle follows the result flush and background-notification
+                // loop. Never finish on an empty task snapshot by itself, or reuse
+                // a waiting turn's answer when the notification has not run yet.
+                if (update.state === "idle" && Option.isSome(candidate)) {
+                  if (backgroundTasks.length === 0) yield* conversation.finish(candidate.value);
+                  else
+                    yield* Effect.logInfo("Claude child is waiting for background work", {
+                      sessionId: request.session.id,
+                      backgroundTaskIds: backgroundTasks,
+                    });
+                }
+              }
+              return;
+            }
             const init = decodeClaudeInit(message);
             if (Option.isSome(init) && !(yield* Ref.getAndSet(launched, true))) {
               const harnessSession = new HarnessSession({
@@ -367,6 +432,7 @@ const makeClaudeChild = Effect.gen(function* () {
               yield* channel.emit(event);
             }
             if (!Schema.is(ClaudeResultMessage)(message)) return;
+            completedTurn = Option.none();
             if (message.subtype !== "success" || message.result === undefined) {
               const detail = message.errors?.join("; ") ?? "Claude returned an unsuccessful result";
               yield* channel.fail(
@@ -378,9 +444,24 @@ const makeClaudeChild = Effect.gen(function* () {
               return;
             }
             if (message.queued_turn_count !== undefined && message.queued_turn_count > 0) {
+              yield* Effect.logInfo("Claude child has queued user turns", {
+                sessionId: request.session.id,
+                queuedTurns: message.queued_turn_count,
+              });
               return;
             }
-            yield* conversation.finish(message.result.trim() || "Claude child session completed");
+            const answer = message.result.trim() || "Claude child session completed";
+            if (reportsSessionState) {
+              completedTurn = Option.some(answer);
+            } else if (backgroundTasks.length > 0) {
+              yield* Effect.logInfo("Claude child is waiting for background work", {
+                sessionId: request.session.id,
+                backgroundTaskIds: backgroundTasks,
+              });
+            } else {
+              // Older worker CLIs do not emit session-state messages.
+              yield* conversation.finish(answer);
+            }
           }),
         ),
         Effect.flatMap(() =>

@@ -68,6 +68,12 @@ export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffort
   message: Schema.NonEmptyString,
 }) {}
 
+/**
+ * The reserved opening of a final answer that reports an unresolved blocker.
+ * Text after the marker is the blocker; the session fails with `AgentResultError`.
+ */
+export const BLOCKED_MARKER = "[usine:blocked]";
+
 /** The session finished and reported that the work itself failed. */
 export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   "@usine/agents/AgentResultError",
