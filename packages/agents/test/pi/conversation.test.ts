@@ -9,6 +9,7 @@ import {
 } from "@usine/core/agent/session";
 import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
 import { Deferred, Effect, Fiber } from "effect";
+import { AgentResultError } from "../../src/runtime.ts";
 import { sessionChannel } from "../../src/pi/session.ts";
 import { sessionConversation } from "../../src/pi/conversation.ts";
 
@@ -43,6 +44,46 @@ const conversation = (session: AgentSession) =>
   });
 
 describe("session supervision", () => {
+  it.effect("fails a held child's unresolved blocker only when the operator releases it", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("blocked"));
+      yield* session.intervene(new OperatorMessage({ message: "Investigate permissions" }));
+      yield* session.finish("[usine:blocked]\r\nPublishing permission denied.");
+      assert.strictEqual(session.result.pollUnsafe(), undefined);
+      yield* session.intervene(new Release());
+      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
+      assert(error instanceof AgentResultError);
+      assert.strictEqual(error.message, "Publishing permission denied.");
+    }),
+  );
+
+  it.effect("allows an operator to resolve a held blocker before completion", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("resolved"));
+      yield* session.intervene(new OperatorMessage({ message: "Investigate permissions" }));
+      yield* session.finish("[usine:blocked]\nPermission denied.");
+      yield* session.intervene(
+        new OperatorMessage({ message: "Permission granted; finish publishing" }),
+      );
+      yield* session.finish("Published. The earlier [usine:blocked] outcome is resolved.");
+      yield* session.intervene(new Release());
+      assert.strictEqual(
+        (yield* Fiber.join(session.result)).message,
+        "Published. The earlier [usine:blocked] outcome is resolved.",
+      );
+    }),
+  );
+
+  it.effect("fails a blocker marker even when the agent omits its details", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(parent);
+      yield* session.finish("[usine:blocked]");
+      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
+      assert(error instanceof AgentResultError);
+      assert.match(error.message, /without details/u);
+    }),
+  );
+
   it.effect(
     "keeps independent child Holds addressable while the parent is parked at a boundary",
     () =>

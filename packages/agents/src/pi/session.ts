@@ -11,7 +11,7 @@ import {
 } from "@usine/core/agent/session";
 import { Cause, Deferred, Effect, Option, Queue, Ref, Schema } from "effect";
 import { piMessageTokens } from "./usage.ts";
-import { type AgentSessionError, SessionResult } from "../runtime.ts";
+import { type AgentSessionError, AgentResultError, SessionResult } from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
 
 export interface SessionChannelOptions {
@@ -60,6 +60,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     );
 
   const fail = Effect.fn("SessionChannel.fail")(function* (error: AgentSessionError) {
+    yield* Effect.annotateCurrentSpan({ sessionId: options.sessionId });
     if (yield* Ref.getAndSet(terminal, true)) return;
     yield* Effect.logError(`${options.label} failed`, {
       errorTag: error._tag,
@@ -75,6 +76,18 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     session: AgentSession,
     message: string,
   ) {
+    yield* Effect.annotateCurrentSpan({ sessionId: session.id });
+    // Only the reserved first line is an outcome signal; ordinary prose is unchanged.
+    const [outcome, ...details] = message.trim().split(/\r?\n/u);
+    if (outcome === "[usine:blocked]") {
+      return yield* fail(
+        new AgentResultError({
+          sessionId: Option.some(session.id),
+          message:
+            details.join("\n").trim() || "Agent reported an unresolved blocker without details.",
+        }),
+      );
+    }
     if (yield* Ref.getAndSet(terminal, true)) return;
     yield* Queue.offer(events, new SessionFinished({ session }));
     yield* Deferred.succeed(result, new SessionResult({ message }));
