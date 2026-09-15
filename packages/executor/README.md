@@ -41,6 +41,13 @@ Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpe
 
 This replaces exe.dev’s `HarnessLoginCheck` and `harnessLoginChecks` options. Pass the roster to `preflight` so readiness follows the agents the instance actually uses.
 
+`cancel(attemptId)` applies from the start of preparation, including harness probes,
+credential acquisition, repository lock waits, and checkout creation. Cancellation
+stops preparation before releasing acquired resources and prevents a prepared
+Attempt from launching later. Once the channel is live, cancellation sends the
+Cancel envelope and uses the configured grace period before forced termination.
+Repeated cancellation after release is a no-op.
+
 ## Local Worker
 
 The Node adapter at `@usine/executor/local` does the following for each Attempt:

@@ -168,7 +168,11 @@ export class Executor extends Context.Service<
     readonly prepare: (
       request: CheckoutRequest,
     ) => Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope>;
-    /** Requests an active Attempt to stop, allowing a grace period before forcing termination. */
+    /**
+     * Stops preparation and releases partial resources, or sends Cancel through a live
+     * channel with a grace period before forced termination. A canceled prepared
+     * Attempt cannot launch. Repeated cancellation after release is a no-op.
+     */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
     /** Delivers an attributed operator action through the active Attempt's channel. */
     readonly intervene: (

@@ -11,7 +11,7 @@ import {
   ExecutorOperationError,
 } from "../executor.ts";
 import { verifyHarnesses } from "../harness-preflight.ts";
-import { prepareAttempt } from "../prepared-attempt.ts";
+import { preparedAttemptsFor } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import { provisionWorktree, safeSegment, type WorkspaceOps } from "../provision.ts";
 import { attemptChannelFor } from "./channel.ts";
@@ -55,6 +55,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     const credentialGrants = yield* credentialGrantsFor(options, commands);
     const sweepAbandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
     const attemptChannel = yield* attemptChannelFor(commands, runHost, interruptGrace);
+
+    const attempts = yield* preparedAttemptsFor(attemptChannel.cancel);
 
     const prepare = Effect.fn("ExeDevExecutor.prepare")(function* (request: CheckoutRequest) {
       yield* Effect.annotateCurrentSpan({
@@ -211,11 +213,11 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         workspace: prepared,
         launch: (io: AttemptChannel.Sink) => attemptChannel.launch(prepared, vm, io),
       };
-    }, prepareAttempt);
+    }, attempts.prepare);
 
     return Executor.of({
       kind: "exe.dev",
-      cancel: attemptChannel.cancel,
+      cancel: attempts.cancel,
       intervene: attemptChannel.intervene,
       preflight: machines.preflight,
       prepare,

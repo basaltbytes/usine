@@ -21,6 +21,8 @@ import { TestClock } from "effect/testing";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery, TranscriptTailQuery } from "@usine/engine/transcript";
 import {
+  Cause,
+  Exit,
   DateTime,
   Deferred,
   Fiber,
@@ -163,6 +165,7 @@ const withLocalEngine = <A, E, R>(
     readonly remote: string;
   }) => Effect.Effect<A, E, R>,
   runHost?: string,
+  credentials = credentialLayer,
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -182,7 +185,7 @@ const withLocalEngine = <A, E, R>(
       repositoryUrl: () => remote,
       ...runHostOption,
       interruptGrace: "100 millis",
-    }).pipe(Layer.provide(credentialLayer));
+    }).pipe(Layer.provide(credentials));
     return yield* Effect.gen(function* () {
       const engine = yield* RunEngine;
       return yield* use({ engine, instance, remote });
@@ -439,7 +442,7 @@ describe("local worker", () => {
   );
 
   it.live(
-    "interrupts local clone and fetch waits and redacts Git diagnostics before releasing tokens",
+    "cancels local preparation and redacts Git diagnostics before releasing tokens",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -447,11 +450,19 @@ describe("local worker", () => {
         const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-prepare-" });
         const remote = yield* makeRemote(root);
         const staging = `${root}/.usine/workers/local/repos/acme_demo.git.cloning`;
-        for (const phase of ["clone", "fetch", "diagnostic"] as const) {
+        for (const phase of ["preflight", "credential", "clone", "fetch", "diagnostic"] as const) {
           const started = yield* Deferred.make<void>();
           const credential = Redacted.make(TOKEN);
           const controlledSpawner = ChildProcessSpawner.make(
             Effect.fn("test.controlGit")(function* (command) {
+              if (
+                phase === "preflight" &&
+                command._tag === "StandardCommand" &&
+                command.args.includes("--preflight")
+              ) {
+                yield* Deferred.succeed(started, undefined);
+                return yield* Effect.never;
+              }
               if (
                 command._tag === "StandardCommand" &&
                 command.command === "git" &&
@@ -484,7 +495,12 @@ describe("local worker", () => {
           }).pipe(
             Layer.provide(
               Layer.merge(
-                Layer.succeed(CredentialProvider)({ issue: () => Effect.succeed(credential) }),
+                Layer.succeed(CredentialProvider)({
+                  issue: () =>
+                    phase === "credential"
+                      ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+                      : Effect.succeed(credential),
+                }),
                 Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, controlledSpawner),
               ),
             ),
@@ -515,7 +531,13 @@ describe("local worker", () => {
             } else {
               const fiber = yield* preparing.pipe(Effect.forkChild);
               yield* Deferred.await(started);
-              yield* Fiber.interrupt(fiber);
+              yield* executor.cancel(AttemptId.make(`prepare-${phase}/run/1`));
+              const exit = yield* Fiber.await(fiber);
+              assert(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause));
+            }
+            if (phase === "preflight" || phase === "credential") {
+              assert(!(yield* fileSystem.exists(`${root}/.usine/workers/local/attempts`)));
+              return;
             }
             assert.throws(() => Redacted.value(credential));
             assert(!(yield* fileSystem.exists(staging)));
@@ -774,6 +796,52 @@ describe("local worker", () => {
           assert(!storedConfig.includes(TOKEN));
         }),
       ),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "cancel during credential minting skips launch and releases capacity for the next Run",
+    () =>
+      Effect.gen(function* () {
+        const minting = yield* Deferred.make<void>();
+        const release = yield* Deferred.make<void>();
+        let first = true;
+        const credentials = Layer.succeed(CredentialProvider)({
+          issue: () =>
+            Effect.gen(function* () {
+              if (first) {
+                first = false;
+                yield* Deferred.succeed(minting, undefined);
+                yield* Deferred.await(release);
+              }
+              return Redacted.make(TOKEN);
+            }),
+        });
+        yield* withLocalEngine(
+          ["--stub"],
+          ({ engine }) =>
+            Effect.gen(function* () {
+              const accepted = yield* engine.submit(submission(1));
+              assert(accepted._tag === "Claimed");
+              yield* Deferred.await(minting);
+              yield* engine.cancel(accepted.runId);
+              yield* Deferred.succeed(release, undefined);
+              const canceled = yield* waitFor(engine, accepted.runId, "Canceled");
+              const attempt = canceled.attempts[0];
+              assert(attempt !== undefined);
+              assert(Option.isSome(attempt.outcome) && attempt.outcome.value._tag === "Canceled");
+              const next = yield* engine.submit(submission(2));
+              assert(next._tag === "Claimed");
+              yield* waitFor(engine, next.runId, "Succeeded");
+              assert.deepStrictEqual(
+                yield* engine.transcript(new TranscriptAllQuery({ attemptId: attempt.id })),
+                [],
+              );
+            }),
+          undefined,
+          credentials,
+        );
+      }),
     LIVE_TEST_TIMEOUT,
   );
 
