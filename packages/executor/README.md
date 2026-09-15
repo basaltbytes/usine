@@ -27,6 +27,13 @@ once. Cleanup failures are logged without replacing a successful agent result wi
 a retryable failure. Set `CheckoutRequest.maxAttemptMinutes` to bound live run-host
 execution; preparation and resource cleanup are outside that time budget.
 
+`cancel(attemptId)` applies from the start of preparation: harness probes, credential
+acquisition, repository lock waits, and checkout creation. Cancellation stops
+preparation before releasing acquired resources and prevents a prepared Attempt from
+launching later. Once the channel is live, cancellation sends the Cancel envelope and
+uses the configured grace period before forced termination. Repeated cancellation
+after release is a no-op.
+
 Recognizable Effect log lines on run-host stdout are dropped with a warning that records safe shape metadata. Invalid JSON, schema-invalid frames, and protocol sequence violations still fail the Attempt.
 
 This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prepared)`
@@ -40,13 +47,6 @@ Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpe
 `prepare` repeats the assigned brain’s probe before acquiring credentials or creating a checkout. This checks roster changes and logouts after startup. A reported capability gap returns `WorkerCapabilityError` and requires operator action. Transport failures and probe timeouts remain infrastructure failures eligible for retry. Custom run hosts must implement the credential-free `HarnessReadiness` response from `@usine/core/agent/capability`.
 
 This replaces exe.dev’s `HarnessLoginCheck` and `harnessLoginChecks` options. Pass the roster to `preflight` so readiness follows the agents the instance actually uses.
-
-`cancel(attemptId)` applies from the start of preparation, including harness probes,
-credential acquisition, repository lock waits, and checkout creation. Cancellation
-stops preparation before releasing acquired resources and prevents a prepared
-Attempt from launching later. Once the channel is live, cancellation sends the
-Cancel envelope and uses the configured grace period before forced termination.
-Repeated cancellation after release is a no-op.
 
 ## Local Worker
 
