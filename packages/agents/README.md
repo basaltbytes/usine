@@ -29,6 +29,10 @@ The Attempt worktree counts as repository-controlled input. Pi ignores project `
 
 Parent and child output becomes typed session events: `SessionStarted`, `TextOutput`, tool calls, pool observations, and `SessionFinished`. Completed assistant text produces `TextOutput` events; streaming deltas don't enter the Attempt transcript. Parent and child controls support steer and interrupt. A child session always names one parent session, so recursive child events cannot enter the public model.
 
+Claude children use the CLI's background-task snapshots and session-idle signal to wait for background work and its follow-up answer before returning to the parent. Background waits do not require an operator Hold. Ambient watchers do not delay completion; queued user turns do. A closed output stream without a completed answer fails through `SessionOperationError`.
+
+Runtime prompts instruct parents and children to run gates, tests, and CI watches in the foreground, wait for any background results, and finish dependent steps before returning. A pending command or CI check is unfinished work; genuine blockers must be recorded on the issue or pull request. Push commits before returning because Attempt cleanup removes the worktree. Keep this foreground discipline on older worker CLIs that do not emit background-task or session-state messages.
+
 Model identifiers stay opaque until the selected harness checks its registry. Agent-reported failures use `AgentResultError`; SDK, process, and protocol failures use `SessionOperationError`. `toAttemptFailure` maps only `SessionOperationError` to retryable infrastructure failure, while `ChildSessionBudgetExceededError` becomes a non-retryable `ChildSessionBudgetFailure`.
 
 Configure Pi with either a provider API key or ChatGPT Plus/Pro OAuth for the parent. Pi children require API keys; Claude and Codex children use their CLI login state. The parent-start log records `apiKeys` or `chatgptPlan` according to the resolved credential. The harness SDK and protocol dependencies use exact versions.
