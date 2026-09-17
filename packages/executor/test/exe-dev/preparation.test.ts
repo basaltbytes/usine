@@ -231,6 +231,31 @@ describe("exe.dev preparation", () => {
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
+  for (const stage of ["checkout", "spawn"] as const) {
+    it.effect(`a cancel during ${stage} holds the Attempt until its resources are released`, () => {
+      const ssh = fakeSsh(PROTOCOL);
+      const detaches = () =>
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        ssh.state.hangPreparation = stage;
+        const attempt = Effect.gen(function* () {
+          const prepared = yield* executor.prepare(request);
+          return yield* prepared.launch({ append: () => Effect.void });
+        }).pipe(Effect.scoped);
+        // The grant detaches last, so its count at the owner's exit shows whether
+        // the owner returned while the canceling fiber was still cleaning up.
+        const released = yield* attempt.pipe(Effect.exit, Effect.map(detaches), Effect.forkChild);
+        while (!ssh.state.parked) yield* Effect.yieldNow;
+        const canceling = yield* Effect.forkChild(executor.cancel(ATTEMPT_ID));
+        assert.strictEqual(yield* Fiber.join(released), 1);
+        yield* Fiber.join(canceling);
+        assert.strictEqual(detaches(), 1);
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+    });
+  }
+
   it.effect("does not release a sibling's grant when canceled while waiting for its clone", () => {
     const ssh = fakeSsh(PROTOCOL);
     ssh.state.hangPreparation = "clone";

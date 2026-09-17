@@ -1,18 +1,27 @@
 import type { AttemptId } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
-import { Effect, Exit, Fiber, Ref, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect";
 import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor.ts";
 import { withAttemptGuard } from "./guard.ts";
 
-/** Tracks cancellation from preparation through release for one Executor instance. */
+interface OwnedAttempt {
+  readonly unavailable: Ref.Ref<boolean>;
+  /** Closes the Attempt's scope and returns once every resource is released. */
+  readonly release: (exit: Exit.Exit<unknown, unknown>) => Effect.Effect<void>;
+}
+
+/**
+ * Tracks each Attempt of one Executor instance from the start of preparation until
+ * its resources are released, so `cancel` reaches it at any stage. `cancelLive`
+ * delivers Cancel through the Attempt's live channel and reports whether one existed;
+ * without one, cancellation releases the Attempt directly. `cancel`, a failed
+ * `prepare`, and `launch` each return only after the Attempt's resources are released.
+ */
 export const preparedAttemptsFor = (
   cancelLive: (attemptId: AttemptId) => Effect.Effect<boolean, ExecutorError>,
 ) =>
   Effect.sync(() => {
-    const attempts = new Map<
-      AttemptId,
-      { readonly scope: Scope.Scope; readonly unavailable: Ref.Ref<boolean> }
-    >();
+    const attempts = new Map<AttemptId, OwnedAttempt>();
     const cancel = Effect.fn("PreparedAttempt.cancel")(function* (attemptId: AttemptId) {
       yield* Effect.annotateCurrentSpan({ attemptId });
       const active = attempts.get(attemptId);
@@ -25,7 +34,7 @@ export const preparedAttemptsFor = (
       // Before registration, scope closure interrupts preparation or process spawn.
       if (!(yield* cancelLive(attemptId))) {
         yield* Effect.logInfo("Canceling Attempt before its channel is ready", { attemptId });
-        yield* Scope.close(active.scope, Exit.void);
+        yield* active.release(Exit.void);
       }
     }, Effect.uninterruptible);
 
@@ -38,11 +47,18 @@ export const preparedAttemptsFor = (
         Effect.gen(function* () {
           const scope = yield* Scope.fork(yield* Effect.scope);
           const unavailable = yield* Ref.make(false);
-          attempts.set(request.attemptId, { scope, unavailable });
+          const released = yield* Deferred.make<void>();
+          // Closing a scope that another fiber is already closing returns at once.
+          // The owner and a concurrent cancel both wait for the first-registered,
+          // last-run finalizer, so neither returns while resources are still held.
+          const release: OwnedAttempt["release"] = (exit) =>
+            Scope.close(scope, exit).pipe(Effect.andThen(Deferred.await(released)));
+          attempts.set(request.attemptId, { unavailable, release });
           yield* Scope.addFinalizer(
             scope,
-            Effect.sync(() => {
+            Effect.suspend(() => {
               attempts.delete(request.attemptId);
+              return Deferred.succeed(released, undefined);
             }),
           );
           yield* Scope.addFinalizer(scope, Ref.set(unavailable, true));
@@ -51,7 +67,7 @@ export const preparedAttemptsFor = (
           const resources = yield* Scope.fork(scope);
           const acquiring = yield* Effect.forkIn(Scope.provide(acquire, resources), scope);
           const prepared = yield* restore(Fiber.join(acquiring)).pipe(
-            Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
+            Effect.onError((cause) => release(Exit.failCause(cause))),
           );
 
           return {
@@ -73,7 +89,7 @@ export const preparedAttemptsFor = (
                 Effect.forkIn(withAttemptGuard(request, io, prepared.launch), scope),
                 Fiber.join,
                 Fiber.interrupt,
-              ).pipe(Effect.onExit((exit) => Scope.close(scope, exit)));
+              ).pipe(Effect.onExit((exit) => release(exit)));
             }),
           } satisfies PreparedAttempt;
         }),
