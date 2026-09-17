@@ -27,6 +27,14 @@ once. Cleanup failures are logged without replacing a successful agent result wi
 a retryable failure. Set `CheckoutRequest.maxAttemptMinutes` to bound live run-host
 execution; preparation and resource cleanup are outside that time budget.
 
+`cancel(attemptId)` applies from the start of preparation: harness probes, credential
+acquisition, repository lock waits, and checkout creation. Cancellation stops
+preparation before releasing acquired resources and prevents a prepared Attempt from
+launching later. Both `cancel` and the canceled `prepare` or `launch` return only after
+those resources are released. Once the channel is live, cancellation sends the Cancel
+envelope and uses the configured grace period before forced termination. Repeated
+cancellation after release is a no-op.
+
 Recognizable Effect log lines on run-host stdout are dropped with a warning that records safe shape metadata. Invalid JSON, schema-invalid frames, and protocol sequence violations still fail the Attempt.
 
 This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prepared)`

@@ -90,7 +90,15 @@ interface FakeSshState {
   failWorktreeRm: boolean;
   readiness: HarnessReadiness;
   /** The simulated remote operation parks until its SSH client is killed. */
-  hangPreparation: "none" | "clone" | "fetch" | "attach" | "promotion" | "checkout";
+  hangPreparation:
+    | "none"
+    | "preflight"
+    | "spawn"
+    | "clone"
+    | "fetch"
+    | "attach"
+    | "promotion"
+    | "checkout";
   parked: boolean;
   failAttach: boolean;
   failStop: boolean;
@@ -315,6 +323,7 @@ export const fakeSsh = (
         return oneShotHandle("", 255, "lost reply after attachment");
       if (remoteLine.startsWith("exec 'mv' ")) state.cacheExists = true;
       if (
+        (state.hangPreparation === "preflight" && remoteLine.includes("--preflight")) ||
         (state.hangPreparation === "clone" && remoteLine.includes("'clone'")) ||
         (state.hangPreparation === "fetch" && remoteLine.includes("'fetch'")) ||
         (state.hangPreparation === "attach" && command.args.includes("attach")) ||
@@ -332,6 +341,10 @@ export const fakeSsh = (
         return oneShotHandle("", 1, "rm: cannot remove: device or resource busy");
       }
       if (remoteLine.includes("&& export GH_HOST=github.int.exe.xyz &&")) {
+        if (state.hangPreparation === "spawn") {
+          state.parked = true;
+          return yield* Effect.never;
+        }
         return yield* interactiveHandle(command, state, mode);
       }
       if (command.args.includes("exe.dev") && command.args.includes("ls")) {

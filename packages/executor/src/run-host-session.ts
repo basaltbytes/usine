@@ -43,7 +43,8 @@ export interface RunHostSession {
     attemptId: AttemptId,
     intervention: AttemptChannel.Intervention,
   ) => Effect.Effect<void, AttemptFailure>;
-  readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
+  /** Returns whether a live channel handled the cancellation. */
+  readonly cancel: (attemptId: AttemptId) => Effect.Effect<boolean, ExecutorError>;
   readonly launch: (
     prepared: AttemptWorkspace,
     io: AttemptChannel.Sink,
@@ -228,14 +229,14 @@ export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effec
     const cancel = Effect.fn("RunHostSession.cancel")(function* (attemptId: AttemptId) {
       const active = (yield* Ref.get(activeAttempts)).get(attemptId);
       if (active === undefined) {
-        yield* Effect.logDebug("Attempt cancellation was a no-op", { attemptId });
-        return;
+        return false;
       }
       yield* cancelActive(attemptId, active).pipe(
         Effect.mapError((cause) =>
           isExecutorError(cause) ? cause : cancelError(attemptId, cause),
         ),
       );
+      return true;
     });
 
     const launch = Effect.fn("RunHostSession.launch")(function* (

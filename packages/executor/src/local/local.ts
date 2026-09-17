@@ -28,7 +28,7 @@ import {
   type ExecutorOperation,
 } from "../executor.ts";
 import { verifyHarnesses } from "../harness-preflight.ts";
-import { prepareAttempt } from "../prepared-attempt.ts";
+import { preparedAttemptsFor } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
   cacheDirectoryName,
@@ -250,6 +250,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       });
     }, logPreflightFailure);
 
+    const session = yield* runHostSessionFor({ interruptGrace });
+    const attempts = yield* preparedAttemptsFor(session.cancel);
+
     const prepare = Effect.fn("LocalExecutor.prepare")(function* (request: CheckoutRequest) {
       yield* Effect.annotateCurrentSpan({
         attemptId: request.attemptId,
@@ -335,7 +338,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         launch: (io: AttemptChannel.Sink) =>
           session.launch(prepared, io, (input) => spawn(prepared, credential, input)),
       };
-    }, prepareAttempt);
+    }, attempts.prepare);
 
     const spawn = Effect.fn("LocalExecutor.spawnRunHost")(function* (
       prepared: AttemptWorkspace,
@@ -380,11 +383,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       };
     });
 
-    const session = yield* runHostSessionFor({ interruptGrace });
-
     return Executor.of({
       kind: "local",
-      cancel: session.cancel,
+      cancel: attempts.cancel,
       intervene: session.intervene,
       preflight,
       prepare,

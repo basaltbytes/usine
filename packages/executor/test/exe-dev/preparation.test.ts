@@ -5,7 +5,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
-import { Effect, Exit, Fiber, Logger, Scope } from "effect";
+import { Cause, Effect, Exit, Fiber, Logger, Scope } from "effect";
 
 import {
   ATTEMPT_ID,
@@ -147,43 +147,111 @@ describe("exe.dev preparation", () => {
     },
   );
 
-  for (const phase of ["clone", "fetch", "attach", "promotion", "checkout"] as const) {
-    it.effect(`releases acquired resources when preparation is interrupted during ${phase}`, () => {
+  for (const phase of ["preflight", "clone", "fetch", "attach", "promotion", "checkout"] as const) {
+    it.effect(
+      `cancels preparation during ${phase} before launching and releases acquired resources`,
+      () => {
+        const ssh = fakeSsh(PROTOCOL);
+        // Partial preparation has never launched a run host and must roll back
+        // without requiring a working remote-stop channel.
+        ssh.state.failStop = true;
+        return Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+          ssh.state.hangPreparation = phase;
+          const fiber = yield* Effect.forkChild(executor.prepare(request));
+          while (!ssh.state.parked) yield* Effect.yieldNow;
+          yield* executor.cancel(ATTEMPT_ID);
+          const exit = yield* Fiber.await(fiber);
+          assert(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause));
+          yield* executor.cancel(ATTEMPT_ID);
+          assert.deepStrictEqual(ssh.state.inputs, []);
+          assert.strictEqual(
+            ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+            phase === "preflight" ? 0 : 1,
+          );
+          if (phase === "checkout") {
+            const commands = ssh.state.commands.map((command) => remoteArgs(command)[0] ?? "");
+            const add = commands.findIndex((line) => line.includes("'worktree' 'add'"));
+            assert(
+              commands.some((line, index) => index > add && line.includes("'worktree' 'remove'")),
+            );
+            assert(
+              commands.some((line, index) => index > add && line.includes("'worktree' 'prune'")),
+            );
+          }
+          if (phase === "clone" || phase === "promotion") {
+            const commands = ssh.state.commands.map((command) => remoteArgs(command)[0] ?? "");
+            const clone = commands.findIndex((line) => line.includes("'clone'"));
+            assert(
+              commands.some(
+                (line, index) =>
+                  index > clone && line.startsWith("exec 'rm' '-rf'") && line.includes(".cloning"),
+              ),
+            );
+          }
+        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+      },
+    );
+  }
+
+  it.effect("canceling a prepared Attempt prevents a later launch and releases its grant", () => {
+    const ssh = fakeSsh(PROTOCOL);
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const prepared = yield* executor.prepare(request);
+      yield* executor.cancel(ATTEMPT_ID);
+      yield* executor.cancel(ATTEMPT_ID);
+      const error = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.flip);
+      assert.strictEqual(error._tag, "InfraFailure");
+      assert.deepStrictEqual(ssh.state.inputs, []);
+      assert.strictEqual(
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+        1,
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+  });
+
+  it.effect("canceling a pending process spawn prevents the Start frame", () => {
+    const ssh = fakeSsh(PROTOCOL);
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const prepared = yield* executor.prepare(request);
+      ssh.state.hangPreparation = "spawn";
+      const launched = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.forkChild);
+      while (!ssh.state.parked) yield* Effect.yieldNow;
+      yield* executor.cancel(ATTEMPT_ID);
+      const exit = yield* Fiber.await(launched);
+      assert(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause));
+      assert.deepStrictEqual(ssh.state.inputs, []);
+      assert.strictEqual(
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+        1,
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+  });
+
+  for (const stage of ["checkout", "spawn"] as const) {
+    it.effect(`a cancel during ${stage} holds the Attempt until its resources are released`, () => {
       const ssh = fakeSsh(PROTOCOL);
-      ssh.state.hangPreparation = phase;
-      // Partial preparation has never launched a run host and must roll back
-      // without requiring a working remote-stop channel.
-      ssh.state.failStop = true;
+      const detaches = () =>
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length;
       return Effect.gen(function* () {
         const executor = yield* Executor;
         yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
-        const fiber = yield* Effect.forkChild(executor.prepare(request));
+        ssh.state.hangPreparation = stage;
+        const attempt = Effect.gen(function* () {
+          const prepared = yield* executor.prepare(request);
+          return yield* prepared.launch({ append: () => Effect.void });
+        }).pipe(Effect.scoped);
+        // The grant detaches last, so its count at the owner's exit shows whether
+        // the owner returned while the canceling fiber was still cleaning up.
+        const released = yield* attempt.pipe(Effect.exit, Effect.map(detaches), Effect.forkChild);
         while (!ssh.state.parked) yield* Effect.yieldNow;
-        yield* Fiber.interrupt(fiber);
-        assert.strictEqual(
-          ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
-          1,
-        );
-        if (phase === "checkout") {
-          const commands = ssh.state.commands.map((command) => remoteArgs(command)[0] ?? "");
-          const add = commands.findIndex((line) => line.includes("'worktree' 'add'"));
-          assert(
-            commands.some((line, index) => index > add && line.includes("'worktree' 'remove'")),
-          );
-          assert(
-            commands.some((line, index) => index > add && line.includes("'worktree' 'prune'")),
-          );
-        }
-        if (phase === "clone" || phase === "promotion") {
-          const commands = ssh.state.commands.map((command) => remoteArgs(command)[0] ?? "");
-          const clone = commands.findIndex((line) => line.includes("'clone'"));
-          assert(
-            commands.some(
-              (line, index) =>
-                index > clone && line.startsWith("exec 'rm' '-rf'") && line.includes(".cloning"),
-            ),
-          );
-        }
+        const canceling = yield* Effect.forkChild(executor.cancel(ATTEMPT_ID));
+        assert.strictEqual(yield* Fiber.join(released), 1);
+        yield* Fiber.join(canceling);
+        assert.strictEqual(detaches(), 1);
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
     });
   }
@@ -210,7 +278,9 @@ describe("exe.dev preparation", () => {
         .pipe(Effect.scoped, Effect.forkChild);
       // Let the second prepare reach the held repository lock.
       for (let turn = 0; turn < 20; turn += 1) yield* Effect.yieldNow;
-      yield* Fiber.interrupt(waiting);
+      yield* executor.cancel(AttemptId.make("remote-run/execute/2"));
+      const exit = yield* Fiber.await(waiting);
+      assert(Exit.isFailure(exit) && Cause.hasInterrupts(exit.cause));
       assert.strictEqual(
         ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
         0,
