@@ -292,6 +292,8 @@ describe("Board projection", () => {
             state: "OPEN",
             merged: false,
             mergedAt: null,
+            mergeable: "CONFLICTING",
+            mergeStateStatus: "DIRTY",
             labels: { totalCount: 1, nodes: [{ name: review }] },
           },
         });
@@ -324,6 +326,7 @@ describe("Board projection", () => {
           [development.id, reviewRun.id],
         );
         assert.strictEqual(card.needsYou, true);
+        assert.strictEqual(card.conflicting, true);
         assert.strictEqual(board.lanes.at(-1)?.items.length, 0);
       }),
   );
@@ -439,6 +442,7 @@ describe("Board projection", () => {
       runs: [],
       run: null,
       needsYou: false,
+      conflicting: false,
     });
     const source = new WritableBoardLaneView({
       id: BoardLaneId.make("authored:Ready"),

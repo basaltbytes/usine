@@ -35,6 +35,8 @@ export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestra
     runs: Schema.Array(RunView),
     run: Schema.NullOr(RunView),
     needsYou: Schema.Boolean,
+    /** The current Item is an open pull request whose branch conflicts with its base. */
+    conflicting: Schema.Boolean,
   },
 ) {}
 

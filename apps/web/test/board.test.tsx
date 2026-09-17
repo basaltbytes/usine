@@ -108,6 +108,7 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
     runs: [run],
     run,
     needsYou: state === "Failed",
+    conflicting: false,
   });
 };
 

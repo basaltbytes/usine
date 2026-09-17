@@ -1,4 +1,4 @@
-import { Schema, SchemaGetter } from "effect";
+import { Effect, Schema, SchemaGetter } from "effect";
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 
@@ -114,9 +114,10 @@ export const PullRequestPayload = Schema.Struct({
   changedFiles: NonNegativeInt,
   reviewDecision: Schema.NullOr(Schema.String),
   // GitHub computes mergeability lazily: the first fetch after the base moves
-  // answers UNKNOWN and the next poll sees the settled value.
-  mergeable: Schema.String,
-  mergeStateStatus: Schema.String,
+  // answers UNKNOWN and the next poll sees the settled value. Projections stored
+  // before these fields existed decode as UNKNOWN until the Item changes.
+  mergeable: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
+  mergeStateStatus: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
   statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),
   labels: orEmpty(Labels, emptyConnection),
   reviewRequests: orEmpty(
