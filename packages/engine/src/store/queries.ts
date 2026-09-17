@@ -86,6 +86,7 @@ const runSelection = {
   eventId: runs.eventId,
   loop: runs.loopName,
   state: runs.stateJson,
+  resolvedFailureAttemptId: runs.resolvedFailureAttemptId,
   openedAt: runs.openedAt,
   repository: runs.repository,
   revision: runs.revision,
@@ -184,6 +185,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       run: runFromRow(storedRun),
       step: stepFromRow(storedRun),
       attempts: storedAttempts.map(attemptFromRow),
+      resolvedFailureAttemptId: Option.fromNullishOr(storedRun.resolvedFailureAttemptId),
       repository: storedRun.repository,
       revision: storedRun.revision,
       task: storedRun.task,
@@ -287,6 +289,18 @@ export const queriesFor = (database: RunDatabaseClient) => {
     if (updated.length === 0) {
       return yield* new RunNotFoundError({ runId });
     }
+  });
+
+  const resolveFailure = Effect.fn("RunStoreQueries.resolveFailure")(function* (
+    runId: RunId,
+    attemptId: AttemptId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, attemptId });
+    yield* database
+      .update(runs)
+      .set({ resolvedFailureAttemptId: attemptId })
+      .where(eq(runs.runId, runId))
+      .execute();
   });
 
   const addAttempt = Effect.fn("RunStoreQueries.addAttempt")(function* (attempt: Attempt) {
@@ -694,5 +708,6 @@ export const queriesFor = (database: RunDatabaseClient) => {
     updateStepResult,
     updateAttemptParentModel,
     updateState,
+    resolveFailure,
   } as const;
 };

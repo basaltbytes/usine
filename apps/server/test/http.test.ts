@@ -79,6 +79,7 @@ const run = new RunView({
   pullRequestUrl: null,
   canApprove: true,
   canRetry: false,
+  canResolveFailure: false,
   canCancel: false,
 });
 const detail = new RunDetailView({
@@ -224,6 +225,7 @@ describe("operator HTTP API", () => {
   it("maps typed engine errors onto operator-readable statuses", async () => {
     let moved: BoardMove | undefined;
     const rejecting = Layer.succeed(FactoryBackend)({
+      resolveFailure: () => Effect.void,
       agents: Effect.succeed([]),
       editAndRetry: () => Effect.void,
       intervene: () => Effect.void,
@@ -337,6 +339,16 @@ describe("operator HTTP API", () => {
     const edits: Array<EditAndRetry> = [];
     const inputs: Array<SessionIntervention> = [];
     const live = Layer.succeed(FactoryBackend)({
+      resolveFailure: (id, attemptId) =>
+        attemptId === "attempt/1"
+          ? record(`resolve:${id}:${attemptId}`)
+          : Effect.fail(
+              new RunOperationRejectedError({
+                runId: id,
+                operation: "resolveFailure",
+                state: "Failed",
+              }),
+            ),
       agents: Effect.succeed([agentName]),
       editAndRetry: (_id, edit) =>
         Effect.sync(() => {
@@ -417,6 +429,21 @@ describe("operator HTTP API", () => {
           }),
           { ok: true },
         );
+        assert.deepStrictEqual(
+          yield* client.resolveFailure({
+            params: { runId },
+            payload: { attemptId: AttemptId.make("attempt/1") },
+          }),
+          { ok: true },
+        );
+        const staleResolution = yield* Effect.flip(
+          client.resolveFailure({
+            params: { runId },
+            payload: { attemptId: AttemptId.make("older-attempt") },
+          }),
+        );
+        assert.instanceOf(staleResolution, OperatorHttpError);
+        assert.strictEqual(staleResolution.status, 409);
         for (const action of ["approve", "retry", "cancel"] as const) {
           assert.deepStrictEqual(yield* client[action]({ params: { runId } }), { ok: true });
         }
@@ -434,6 +461,7 @@ describe("operator HTTP API", () => {
         );
         assert.deepStrictEqual(interventions, [
           "reset:current-ask",
+          `resolve:${runId}:attempt/1`,
           `approve:${runId}`,
           `retry:${runId}`,
           `cancel:${runId}`,

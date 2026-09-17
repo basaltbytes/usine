@@ -2,7 +2,7 @@ import { transcriptEvent } from "./projection.ts";
 import { TranscriptSessionsQuery } from "@usine/engine/transcript";
 import { GitHubLabelName } from "@usine/config/label";
 import { resolveParentModel } from "@usine/core/agent";
-import { AttemptContext } from "@usine/core/attempt";
+import { AttemptContext, AttemptId } from "@usine/core/attempt";
 import { Intervention } from "@usine/core/attempt/channel";
 import type { LoadedInstance } from "@usine/config/instance";
 import { Event, DedupKey, EventId } from "@usine/core/event";
@@ -163,7 +163,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             cycleAsks.some((ask) => ask.repository === name) ||
             board.failures.length > 0 ||
             projectFindings.length > 0 ||
-            projectRuns.some((run) => run.state === "Waiting" || run.state === "Failed")
+            projectRuns.some((run) => run.canApprove || run.canResolveFailure)
               ? "needs-you"
               : projectRuns.some((run) => run.canCancel)
                 ? "active"
@@ -225,7 +225,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             loop: run.loop,
           }),
         );
-      } else if (run.state === "Failed") {
+      } else if (run.canResolveFailure) {
         const attempt = run.attempts.at(-1);
         if (attempt?.outcome?._tag !== "Failed") {
           return yield* Effect.die(new Error(`Failed Run ${run.id} has no failed Attempt`));
@@ -603,6 +603,7 @@ const makeOperator = Effect.gen(function* () {
     moveBoardItem,
     pause,
     retry,
+    resolveFailure: runs.resolveFailure,
     editAndRetry,
     intervene,
     unpause,
@@ -618,6 +619,11 @@ export class Operator extends Context.Service<
     readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, OperatorError>;
     /** Records approval for a waiting Run; execution still waits for Worker capacity. */
     readonly approve: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Resolves attention for the failed Attempt displayed to the operator; stale requests are rejected. */
+    readonly resolveFailure: (
+      runId: RunId,
+      attemptId: AttemptId,
+    ) => Effect.Effect<void, OperatorError>;
     /** Requests a new Attempt for a failed Run using its effective task and Agent. */
     readonly retry: (runId: RunId) => Effect.Effect<void, OperatorError>;
     /** Atomically amends a failed Run before requesting its next Attempt. */

@@ -5,11 +5,12 @@ import { migrate } from "drizzle-orm/effect-sqlite-node/migrator";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 
+import { Agent } from "@usine/core/agent";
 import { BrainSpec } from "@usine/core/agent/brain";
 
 import { RunId } from "@usine/core/run";
 
-import { Effect, FileSystem, Layer, Schema } from "effect";
+import { Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
 import { RunDatabase } from "../../src/database/database.ts";
@@ -33,7 +34,7 @@ describe("Attempt migrations", () => {
       });
       const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
       for (const name of yield* fs.readDirectory(source)) {
-        if (name === "20260912111855_operator_intervention") continue;
+        if (name >= "20260912111855_operator_intervention") continue;
         yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
       }
       yield* fs.makeDirectory(`${directory}/.usine`);
@@ -54,9 +55,17 @@ describe("Attempt migrations", () => {
       const id = "upgrade-attempt";
       yield* Effect.scoped(
         Effect.gen(function* () {
-          const store = yield* RunStore;
-          yield* store.recordAndClaim(lifecycleSubmission, runId);
           const sql = yield* SqlClient.SqlClient;
+          // Seed the historical schema directly: today's store writes columns added by later migrations.
+          const agent = JSON.stringify(Schema.encodeSync(Agent)(testAgent));
+          const eventId = lifecycleSubmission.event.id;
+          yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
+            VALUES (${eventId}, 'upgrade-event', '{}', '2026-09-12T00:00:00.000Z')`;
+          yield* sql`INSERT INTO usine_trigger_events (event_id, item_key, loop_name, step_name, approval, repository, revision, task, agent_json)
+            VALUES (${eventId}, ${lifecycleSubmission.itemKey}, ${lifecycleSubmission.loop}, ${lifecycleSubmission.step}, 'none', ${lifecycleSubmission.repository}, ${lifecycleSubmission.revision}, ${lifecycleSubmission.task}, ${agent})`;
+          yield* sql`INSERT INTO usine_runs (run_id, event_id, loop_name, state_json, opened_at, repository, revision, task, agent_json)
+            VALUES (${runId}, ${eventId}, ${lifecycleSubmission.loop}, '{"_tag":"Pending"}', '2026-09-12T00:00:00.000Z', ${lifecycleSubmission.repository}, ${lifecycleSubmission.revision}, ${lifecycleSubmission.task}, ${agent})`;
+          yield* sql`INSERT INTO usine_steps (run_id, step_name) VALUES (${runId}, ${lifecycleSubmission.step})`;
           yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, started_at)
         VALUES (${id}, ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain))}, '2026-09-12T00:00:00.000Z')`;
           const envelope = JSON.stringify({
@@ -68,11 +77,12 @@ describe("Attempt migrations", () => {
             payload: { _tag: "Started", parentModel: "openai/model" },
           });
           yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 1, ${envelope}, '2026-09-12T00:00:00.000Z')`;
-        }).pipe(Effect.provide(RunStore.layer), Effect.provide(oldDatabase)),
+        }).pipe(Effect.provide(oldDatabase)),
       );
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
         const snapshot = yield* store.snapshot(runId);
+        assert(Option.isNone(snapshot.resolvedFailureAttemptId));
         assert.strictEqual(snapshot.attempts[0]?.task, lifecycleSubmission.task);
         assert.strictEqual(snapshot.attempts[0]?.agent, testAgent.name);
         assert.strictEqual(snapshot.attempts[0]?.operatorIntervened, false);

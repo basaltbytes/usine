@@ -29,6 +29,34 @@ export default mergeConfig(
               screenshotDirectory: "./node_modules/.cache/vitest/screenshots",
               provider: playwright(),
               commands: {
+                failureResolutionResponses: async (
+                  { page },
+                  before: string,
+                  after: string,
+                  detailBefore: string,
+                  detailAfter: string,
+                  attemptId: string,
+                ) => {
+                  let resolved = false;
+                  await page.route("**/api/overview", (route) =>
+                    route.fulfill({
+                      contentType: "application/json",
+                      body: resolved ? after : before,
+                    }),
+                  );
+                  await page.route("**/api/runs/resolution-run", (route) =>
+                    route.fulfill({
+                      contentType: "application/json",
+                      body: resolved ? detailAfter : detailBefore,
+                    }),
+                  );
+                  await page.route("**/api/runs/resolution-run/resolve-failure", (route) => {
+                    if (route.request().postDataJSON().attemptId !== attemptId)
+                      return route.fulfill({ status: 409 });
+                    resolved = true;
+                    return route.fulfill({ contentType: "application/json", body: '{"ok":true}' });
+                  });
+                },
                 interventionResponses: async ({ page }, status: 200 | 503) => {
                   interventionRequests.set(page, []);
                   await page.unroute("**/api/agents");

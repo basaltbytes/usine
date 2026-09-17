@@ -64,8 +64,8 @@ import { failureMessage } from "../operator-copy.ts";
 
 export const itemFailure = (item: BoardTaskView): string | null => {
   const failedRun =
-    [...item.runs].reverse().find(({ state }) => state === "Failed") ??
-    (item.run?.state === "Failed" ? item.run : null);
+    [...item.runs].reverse().find(({ canResolveFailure }) => canResolveFailure) ??
+    (item.run?.canResolveFailure ? item.run : null);
   if (failedRun === null) return null;
   const attempts = failedRun.attempts;
   for (let index = attempts.length - 1; index >= 0; index -= 1) {
@@ -140,7 +140,7 @@ const CardBody = ({
 }) => {
   const failure = itemFailure(item);
   const run = item.run;
-  const visibleRuns = item.runs.filter(({ state }) => state === "Waiting" || state === "Failed");
+  const visibleRuns = item.runs.filter((run) => run.canApprove || run.canResolveFailure);
   const moveTargets = move?.targets ?? [];
   const titleClass =
     "h-auto justify-start p-0 text-left text-xs/relaxed font-medium whitespace-normal text-card-foreground hover:text-primary";

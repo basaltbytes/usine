@@ -1,6 +1,6 @@
 import { Agent } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
-import { Attempt, AttemptTask } from "@usine/core/attempt";
+import { Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { Event } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
@@ -16,6 +16,8 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   run: Run,
   step: Step,
   attempts: Schema.Array(Attempt),
+  /** The failed Attempt whose attention the operator resolved; outcomes and history stay intact. */
+  resolvedFailureAttemptId: Schema.Option(AttemptId),
   repository: RepositoryName,
   revision: RepositoryRevision,
   task: AttemptTask,
@@ -35,6 +37,8 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
   run: Run,
   step: Step,
   attempts: Schema.Array(Attempt),
+  /** The failed Attempt whose attention the operator resolved; outcomes and history stay intact. */
+  resolvedFailureAttemptId: Schema.Option(AttemptId),
   repository: RepositoryName,
   task: AttemptTask,
   agent: Agent,

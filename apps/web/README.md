@@ -50,3 +50,5 @@ The registry is the component library; the theme is the only place colors and ty
 An exhausted Item cycle budget appears in Needs you with the participating Loops and counts. **Reset cycle budget** records an explicit answer and refreshes the overview. The runtime fetches current trigger input before opening further work.
 
 Expand a Claude or Codex child's activity to see its saved harness session id, worker worktree path, and copyable resume command. Run the command on the same worker under the same harness account. Resuming requires both the saved session files and the worktree; Attempt cleanup removes the worktree after completion. Older transcripts and Pi children show that no saved harness session was recorded.
+
+Choose **Mark resolved** in a failed Run’s drawer to clear its Needs you warning and related Project and Board attention. Open the drawer from Needs you or Run history. Resolution persists across reloads and restarts; the failed outcome, Attempt details, transcript, and retry controls remain available. A later failed Attempt requests attention again.

@@ -176,6 +176,13 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         params: runParams,
         success: acknowledged,
       }),
+      HttpApiEndpoint.post("resolveFailure", "/api/runs/:runId/resolve-failure", {
+        params: runParams,
+        payload: Schema.Struct({ attemptId: AttemptId }).annotate({
+          parseOptions: { onExcessProperty: "error" },
+        }),
+        success: acknowledged,
+      }),
       HttpApiEndpoint.post("retry", "/api/runs/:runId/retry", {
         params: runParams,
         success: acknowledged,
