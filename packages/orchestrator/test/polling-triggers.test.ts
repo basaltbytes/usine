@@ -298,6 +298,8 @@ describe("PollingTriggers", () => {
         );
         const unchanged = yield* polling.poll(instance);
         assert.strictEqual(claimedRun(unchanged), run);
+        // A refresh is not a detected change: idle polls must not look busy.
+        assert.strictEqual(unchanged.changedItems, 0);
         mergeable = "MERGEABLE";
         const fixed = yield* polling.poll(instance);
         assert.strictEqual(fixed.submissions.length, 0);

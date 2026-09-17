@@ -123,9 +123,12 @@ export class PollingTriggers extends Context.Service<
     /**
      * Polls every managed repository, including those without active Loops.
      * Label preflight precedes change detection; each changed Item is projected
-     * before its Run decisions. A repository commits its cursor only after all
-     * Items finish. Repository failures are reported while siblings continue;
-     * failure to read Loop runtime state fails the whole cycle.
+     * before its Run decisions. Known open pull requests are fetched again every
+     * cycle, changed or not, so mergeability that moves without an Item update
+     * still reaches the Board and Loops; `changedItems` counts detection only.
+     * A repository commits its cursor only after all Items finish. Repository
+     * failures are reported while siblings continue; failure to read Loop
+     * runtime state fails the whole cycle.
      */
     readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle, EnginePersistenceError>;
     /** Nudges an authoritative Item fetch after a self-write, retaining any request backoff from the writer. Pending duplicates coalesce; polling repairs loss. */
@@ -268,7 +271,9 @@ export class PollingTriggers extends Context.Service<
           }
           yield* Effect.forEach(resets, budgets.acknowledgeReset, { discard: true });
           return {
-            changedItems: items.size,
+            // Refreshed open PRs are observed, not reported as changed by
+            // GitHub; counting them would make every idle poll look busy.
+            changedItems: detected._tag === "RepositoryChanges" ? detected.items.length : 0,
             submissions: itemCycles.flatMap(({ submissions }) => submissions),
             revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
             failures: [...preflight.failures, ...itemCycles.flatMap(({ failures }) => failures)],
