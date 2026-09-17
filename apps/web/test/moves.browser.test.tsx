@@ -76,6 +76,7 @@ const overview = (
                     runs: [],
                     run: null,
                     needsYou: false,
+                    conflicting: false,
                   }),
                 ];
               }),

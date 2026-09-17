@@ -15,6 +15,8 @@ export interface ProjectedItem {
   readonly state: LaneItemState;
   readonly linkedPullRequests: ReadonlyArray<string>;
   readonly labels: ReadonlyArray<GitHubLabelName>;
+  /** True when GitHub reports the pull request branch as conflicting with its base. */
+  readonly conflicting: boolean;
 }
 
 const labelsFrom = Schema.decodeUnknownEffect(Schema.Array(GitHubLabelName));
@@ -45,6 +47,7 @@ export const projectedItem = (
         labels: yield* labelsFrom(payload.labels.nodes.map(({ name }) => name)).pipe(
           Effect.mapError((error) => projectionError(item, error.message)),
         ),
+        conflicting: false,
       };
     }
     if (item.source === "pr") {
@@ -67,6 +70,7 @@ export const projectedItem = (
         labels: yield* labelsFrom(payload.labels.nodes.map(({ name }) => name)).pipe(
           Effect.mapError((error) => projectionError(item, error.message)),
         ),
+        conflicting: state === "pr-open" && payload.mergeable === "CONFLICTING",
       };
     }
     return yield* projectionError(item, `Unsupported Item projection source: ${item.source}`);

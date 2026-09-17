@@ -182,6 +182,7 @@ const CardBody = ({
       {(item.labels.length > 0 ||
         item.runs.length > 0 ||
         item.needsYou ||
+        item.conflicting ||
         failure !== null ||
         move?.phase !== undefined ||
         moveTargets.length > 0) && (
@@ -200,6 +201,11 @@ const CardBody = ({
             </p>
           )}
           {item.needsYou && <NeedsYouBadge />}
+          {item.conflicting && (
+            <Badge variant="outline" className="border-destructive/40 font-mono text-destructive">
+              Conflicts with base
+            </Badge>
+          )}
           {failure !== null && <p className="text-destructive wrap-anywhere">{failure}</p>}
           {visibleRuns.some(({ state }) => state === "Waiting") && (
             <p className="text-needs-you">A Run in this task is waiting for approval.</p>

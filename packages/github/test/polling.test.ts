@@ -117,6 +117,8 @@ const pullRequestPayload = {
   deletions: 2,
   changedFiles: 3,
   reviewDecision: "REVIEW_REQUIRED",
+  mergeable: "MERGEABLE",
+  mergeStateStatus: "CLEAN",
   statusCheckRollup: { state: "PENDING" },
   labels: { totalCount: 0, nodes: [] },
   reviewRequests: {

@@ -113,6 +113,7 @@ export const taskCards = (
         needsYou:
           history.some(({ run }) => run.canApprove || run.canResolveFailure) ||
           members.some(({ item }) => blocked.has(item.itemKey)),
+        conflicting: current.conflicting,
       }),
     );
   }

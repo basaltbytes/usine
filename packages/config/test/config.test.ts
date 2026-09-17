@@ -320,6 +320,28 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("exposes pull request mergeability to pr trigger expressions", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const source = (condition: string) =>
+        `---\ntrigger:\n  on: pr\n  if: ${condition}\nagent: finisher\n---\nRebase the branch.`;
+      const parse = (condition: string) =>
+        parser.parseLoopFile(InstancePath.make("loops/rebase-pr.md"), source(condition));
+      const loop = yield* parse(
+        '\'item.mergeable == "CONFLICTING" && item.mergeStateStatus != "UNKNOWN"\'',
+      );
+      expect(loop.trigger.on).toBe("pr");
+      const issueFailure = yield* parser
+        .parseLoopFile(
+          InstancePath.make("loops/rebase-issue.md"),
+          "---\ntrigger:\n  on: issue\n  if: 'item.mergeable == \"CONFLICTING\"'\nagent: finisher\n---\nNo.",
+        )
+        .pipe(Effect.flip);
+      expect(issueFailure.stage).toBe("expression");
+      expect(issueFailure.message).toContain("No such key: mergeable");
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("rejects enabled in loop frontmatter instead of silently accepting it", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;
