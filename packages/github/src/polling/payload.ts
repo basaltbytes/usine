@@ -114,8 +114,9 @@ export const PullRequestPayload = Schema.Struct({
   changedFiles: NonNegativeInt,
   reviewDecision: Schema.NullOr(Schema.String),
   // GitHub computes mergeability lazily: the first fetch after the base moves
-  // answers UNKNOWN and the next poll sees the settled value. Projections stored
-  // before these fields existed decode as UNKNOWN until the Item changes.
+  // may answer UNKNOWN. Polling refreshes open PRs even when the REST issue
+  // feed is unchanged, retrying on each poll until computation settles. Older
+  // projections decode as UNKNOWN until that refresh.
   mergeable: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
   mergeStateStatus: Schema.String.pipe(Schema.withDecodingDefaultKey(Effect.succeed("UNKNOWN"))),
   statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),

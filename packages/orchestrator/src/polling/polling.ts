@@ -18,7 +18,13 @@ import {
   RepositoryLabelProjectionWriter,
 } from "@usine/engine/repository-label-projection";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
-import { type ChangedItem, EntityTag, PollCursor, GitHubPolling } from "@usine/github/polling";
+import {
+  ChangedPullRequest,
+  type ChangedItem,
+  EntityTag,
+  PollCursor,
+  GitHubPolling,
+} from "@usine/github/polling";
 import {
   Clock,
   Context,
@@ -57,7 +63,13 @@ type WatchKey = typeof WatchKey.Type;
 class StoredPollCursor extends Schema.Class<StoredPollCursor>(
   "@usine/orchestrator/StoredPollCursor",
 )({
-  boardVersion: Schema.Literal(4),
+  boardVersion: Schema.Literal(5),
+  openPullRequests: Schema.Array(
+    Schema.Struct({
+      number: ChangedPullRequest.fields.number,
+      updatedAt: Schema.DateTimeUtcFromString,
+    }),
+  ),
   cursor: PollCursor,
   labelEntityTag: Schema.OptionFromNullOr(EntityTag),
   watches: Schema.Array(WatchKey).check(Schema.isUnique()),
@@ -141,7 +153,8 @@ export class PollingTriggers extends Context.Service<
 
       const emptyCursor = (watches: ReadonlyArray<WatchKey>) =>
         new StoredPollCursor({
-          boardVersion: 4,
+          boardVersion: 5,
+          openPullRequests: [],
           cursor: PollCursor.empty,
           labelEntityTag: Option.none(),
           watches,
@@ -199,52 +212,63 @@ export class PollingTriggers extends Context.Service<
           // begin, including on the first cycle after `usine up`.
           const detected = yield* github.changes(watched.repository.name, stored.cursor);
           yield* hints.defer(detected.backoffUntil);
+          // Mergeability can change without an issue updated_at/ETag change
+          // (base moves and lazy UNKNOWN computation). Keep all observed open
+          // PRs in the durable cursor and refresh them on every poll, even 304s.
+          // Version 5 rebuilds this set by replaying detection on upgrade.
+          const items = new Map<number, ChangedItem>(
+            stored.openPullRequests.map((item) => [item.number, new ChangedPullRequest(item)]),
+          );
+          if (detected._tag === "RepositoryChanges") {
+            for (const item of detected.items) items.set(item.number, item);
+            yield* Effect.logInfo("Repository changed", {
+              repository: watched.repository.name,
+              changedItems: detected.items.length,
+              backlog: detected.backlog,
+            });
+          }
+          const nextPollAt = latestPollAt([detected.nextPollAt, preflight.nextPollAt]);
+          yield* Effect.logDebug("Refreshing detected Items and open pull requests", {
+            repository: watched.repository.name,
+            detection: detected._tag,
+            openPullRequests: stored.openPullRequests.length,
+            items: items.size,
+          });
+          const observed = yield* Effect.forEach(
+            items.values(),
+            (item) =>
+              Effect.gen(function* () {
+                const observation = yield* observeItem(watched.repository.name, item);
+                const cycle = yield* evaluateItem(watched.repository, watched.loops, observation);
+                return { item, observation, cycle };
+              }),
+            { concurrency: ITEM_CONCURRENCY },
+          );
+          const itemCycles = observed.map(({ cycle }) => cycle);
           const nextCursor = new StoredPollCursor({
-            boardVersion: 4,
+            boardVersion: 5,
             cursor: detected.cursor,
             labelEntityTag: preflight.labelEntityTag,
             watches: watched.watches,
+            openPullRequests: observed.flatMap(({ item, observation }) =>
+              item._tag === "ChangedPullRequest" && observation.projection.payload.state === "OPEN"
+                ? [{ number: item.number, updatedAt: item.updatedAt }]
+                : [],
+            ),
           });
-          const nextPollAt = latestPollAt([detected.nextPollAt, preflight.nextPollAt]);
-          if (detected._tag === "RepositoryNotModified") {
-            if (preflight.entityTagChanged) {
-              yield* writeCursor(watched, nextCursor);
-            }
-            yield* Effect.logDebug("Repository unchanged (304)", {
-              repository: watched.repository.name,
-            });
-            return {
-              changedItems: 0,
-              submissions: [],
-              revokedRuns: 0,
-              failures: preflight.failures,
-              preflightFindings: preflight.preflightFindings,
-              nextPollAt,
-            } satisfies RepositoryCycle;
-          }
-
-          yield* Effect.logInfo("Repository changed", {
-            repository: watched.repository.name,
-            changedItems: detected.items.length,
-            backlog: detected.backlog,
-          });
-          const itemCycles = yield* Effect.forEach(
-            detected.items,
-            (item) =>
-              observeItem(watched.repository.name, item).pipe(
-                Effect.flatMap((projection) =>
-                  evaluateItem(watched.repository, watched.loops, projection),
-                ),
-              ),
-            { concurrency: ITEM_CONCURRENCY },
-          );
           // Advancing the cursor is the commit point: every changed item was
           // fetched, evaluated, and submitted or revoked. After a failure the
           // old cursor stays so the next cycle re-polls.
-          yield* writeCursor(watched, nextCursor);
+          if (
+            detected._tag === "RepositoryChanges" ||
+            items.size > 0 ||
+            preflight.entityTagChanged
+          ) {
+            yield* writeCursor(watched, nextCursor);
+          }
           yield* Effect.forEach(resets, budgets.acknowledgeReset, { discard: true });
           return {
-            changedItems: detected.items.length,
+            changedItems: items.size,
             submissions: itemCycles.flatMap(({ submissions }) => submissions),
             revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
             failures: [...preflight.failures, ...itemCycles.flatMap(({ failures }) => failures)],

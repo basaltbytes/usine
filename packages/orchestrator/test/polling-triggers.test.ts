@@ -8,7 +8,7 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { AgentFile } from "@usine/config/agent";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
-import { IssueTrigger } from "@usine/config/trigger";
+import { IssueTrigger, PullRequestTrigger } from "@usine/config/trigger";
 import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate } from "@usine/config/loop";
 import { LoopName } from "@usine/core/loop";
@@ -32,6 +32,9 @@ import { Source } from "@usine/expression/expression-engine";
 import { GitHubApiError, GitHubRateLimitError } from "@usine/github/github-app";
 import {
   ChangedIssue,
+  ChangedPullRequest,
+  PullRequestPayload,
+  PullRequestSnapshot,
   ContentHash,
   EntityTag,
   type IssuePayload,
@@ -194,6 +197,125 @@ const runtimeLayer = (directory: InstanceDirectory, github: GitHubPolling["Servi
 };
 
 describe("PollingTriggers", () => {
+  it.live("refreshes open PR mergeability after restart despite unchanged issue detection", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-mergeability-" }),
+      );
+      const loop = new LoopFile({
+        ...issueLoop("rebase-pr"),
+        trigger: new PullRequestTrigger({
+          on: "pr",
+          if: Source.make('item.state == "OPEN" && item.mergeable == "CONFLICTING"'),
+        }),
+      });
+      const instance = instanceWith([loop]);
+      let mergeable = "UNKNOWN";
+      let state = "OPEN";
+      let snapshots = 0;
+      const github: GitHubPolling["Service"] = {
+        labels: () => Effect.succeed(emptyLabelCatalog),
+        changes: (repository, cursor) =>
+          Effect.succeed(
+            repository === watchedRepository && Option.isNone(cursor.entityTag)
+              ? new RepositoryChanges({
+                  cursor: new PollCursor({
+                    entityTag: Option.some(EntityTag.make('W/"unchanged"')),
+                    watermark: Option.some(DateTime.makeUnsafe("2026-08-30T20:00:00Z")),
+                  }),
+                  items: [
+                    new ChangedPullRequest({
+                      number: 28,
+                      updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+                    }),
+                  ],
+                  backlog: false,
+                  nextPollAt: Option.none(),
+                })
+              : new RepositoryNotModified({ cursor, nextPollAt: Option.none() }),
+          ),
+        snapshot: () =>
+          Effect.sync(() => {
+            snapshots += 1;
+            return new PullRequestSnapshot({
+              contentHash: ContentHash.make(
+                (state === "CLOSED"
+                  ? "d"
+                  : mergeable === "UNKNOWN"
+                    ? "a"
+                    : mergeable === "CONFLICTING"
+                      ? "b"
+                      : "c"
+                ).repeat(64),
+              ),
+              payload: Schema.decodeUnknownSync(PullRequestPayload)({
+                ...issuePayload([]),
+                state,
+                mergeable,
+                mergeStateStatus: "UNKNOWN",
+                isDraft: false,
+                merged: false,
+                mergedAt: null,
+                baseRefName: "main",
+                headRefName: "feature",
+                headRefOid: "a".repeat(40),
+                additions: 1,
+                deletions: 0,
+                changedFiles: 1,
+                reviewDecision: null,
+                statusCheckRollup: null,
+                reviewThreads: { totalCount: 0, nodes: [] },
+                reviewRequests: { totalCount: 0, nodes: [] },
+                reviews: { totalCount: 0, nodes: [] },
+                closingIssuesReferences: { totalCount: 0, nodes: [] },
+              }),
+            });
+          }),
+      };
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const initial = yield* polling.poll(instance);
+        assert.deepStrictEqual(initial.failures, []);
+        assert.strictEqual(initial.submissions.length, 0);
+        assert.strictEqual(snapshots, 1);
+      }).pipe(Effect.provide(runtimeLayer(directory, github)));
+
+      // Rebuild the entire runtime: the open PR set must be durable.
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const engine = yield* RunEngine;
+        const items = yield* ItemProjectionReader;
+        mergeable = "CONFLICTING";
+        const conflict = yield* polling.poll(instance);
+        assert.deepStrictEqual(conflict.failures, []);
+        assert.strictEqual(conflict.submissions.length, 1);
+        const run = claimedRun(conflict);
+        yield* waitForState(engine, run, "Waiting");
+        assert.strictEqual(
+          (yield* items.list(watchedRepository, { limit: 10 }))[0]?.payload.mergeable,
+          "CONFLICTING",
+        );
+        const unchanged = yield* polling.poll(instance);
+        assert.strictEqual(claimedRun(unchanged), run);
+        mergeable = "MERGEABLE";
+        const fixed = yield* polling.poll(instance);
+        assert.strictEqual(fixed.submissions.length, 0);
+        assert.strictEqual(fixed.revokedRuns, 1);
+        yield* waitForState(engine, run, "Canceled");
+        assert.strictEqual(
+          (yield* items.list(watchedRepository, { limit: 10 }))[0]?.payload.mergeable,
+          "MERGEABLE",
+        );
+        state = "CLOSED";
+        yield* polling.poll(instance);
+        assert.strictEqual(snapshots, 5);
+        yield* polling.poll(instance);
+        assert.strictEqual(snapshots, 5);
+      }).pipe(Effect.provide(runtimeLayer(directory, github)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.effect("waits past poll_interval when GitHub recommends a longer delay", () => {
     let changeRequests = 0;
     const github: GitHubPolling["Service"] = {
