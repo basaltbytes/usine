@@ -66,6 +66,8 @@ export const PULL_REQUEST_PAYLOAD_QUERY = `
         deletions
         changedFiles
         reviewDecision
+        mergeable
+        mergeStateStatus
         statusCheckRollup { state }
         labels(first: 50) {
           totalCount

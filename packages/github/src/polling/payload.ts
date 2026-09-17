@@ -113,6 +113,10 @@ export const PullRequestPayload = Schema.Struct({
   deletions: NonNegativeInt,
   changedFiles: NonNegativeInt,
   reviewDecision: Schema.NullOr(Schema.String),
+  // GitHub computes mergeability lazily: the first fetch after the base moves
+  // answers UNKNOWN and the next poll sees the settled value.
+  mergeable: Schema.String,
+  mergeStateStatus: Schema.String,
   statusCheckRollup: Schema.NullOr(Schema.Struct({ state: Schema.String })),
   labels: orEmpty(Labels, emptyConnection),
   reviewRequests: orEmpty(

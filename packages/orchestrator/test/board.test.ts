@@ -98,6 +98,8 @@ const mergedPullRequest = new ItemProjection({
     deletions: 12,
     changedFiles: 3,
     reviewDecision: "APPROVED",
+    mergeable: "MERGEABLE",
+    mergeStateStatus: "CLEAN",
     statusCheckRollup: { state: "SUCCESS" },
     labels: { totalCount: 1, nodes: [{ name: passed }] },
     reviewRequests: { totalCount: 0, nodes: [] },

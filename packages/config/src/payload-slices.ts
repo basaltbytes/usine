@@ -151,6 +151,8 @@ const pullRequest = objectType("PullRequestPayload", [
   ["deletions", "int"],
   ["changedFiles", "int"],
   ["reviewDecision", "string"],
+  ["mergeable", "string"],
+  ["mergeStateStatus", "string"],
   ["statusCheckRollup", "StatusCheckRollup"],
   ["labels", "Labels"],
   ["reviewRequests", "ReviewRequests"],
