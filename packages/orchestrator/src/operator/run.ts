@@ -52,6 +52,8 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   pullRequestUrl: NullableString,
   canApprove: Schema.Boolean,
   canRetry: Schema.Boolean,
+  /** The latest failed Attempt still requests attention; retry availability is independent. */
+  canResolveFailure: Schema.Boolean,
   canCancel: Schema.Boolean,
 }) {}
 

@@ -39,6 +39,7 @@ import {
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { AttemptFailed } from "@usine/core/attempt/outcome";
 import * as RunState from "@usine/core/run/state";
 import { RunEngine } from "@usine/engine/engine";
 import {
@@ -131,6 +132,7 @@ const instance = new LoadedInstance({
 });
 
 const snapshot = new RunSnapshot({
+  resolvedFailureAttemptId: Option.none(),
   event: new Event({
     id: EventId.make("event-operator-test"),
     dedupKey: DedupKey.make("event-operator-test"),
@@ -283,6 +285,7 @@ const testLayer = (
       }),
     );
   const runs = Layer.succeed(RunEngine)({
+    resolveFailure: () => Effect.void,
     intervene: commands.intervene,
     approve: (id, event) => Ref.update(approved, (entries) => [...entries, { runId: id, event }]),
     cancel: () => Effect.void,
@@ -442,6 +445,65 @@ const testLayer = (
 };
 
 describe("Operator", () => {
+  it.effect("clears only resolved failure attention and renews it for a later failed Attempt", () =>
+    Effect.gen(function* () {
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const original = snapshot.attempts[0];
+      assert(original !== undefined);
+      const failed = new Attempt({
+        ...original,
+        outcome: Option.some(
+          new AttemptFailed({
+            failure: new InfraFailure({ message: "Worker unavailable", cause: "disconnected" }),
+          }),
+        ),
+      });
+      const later = new Attempt({
+        ...failed,
+        id: AttemptId.make("later-failure"),
+        number: AttemptNumber.make(2),
+      });
+      for (const [attempts, resolved, needsAttention] of [
+        [[failed], Option.none<AttemptId>(), true],
+        [[failed], Option.some(failed.id), false],
+        [[failed, later], Option.some(failed.id), true],
+      ] as const) {
+        const current = new RunSnapshot({
+          ...snapshot,
+          run: new Run({ ...snapshot.run, state: new RunState.Failed() }),
+          attempts,
+          resolvedFailureAttemptId: resolved,
+        });
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const overview = yield* operator.overview(instance);
+          assert.strictEqual(
+            overview.needsYou.some((need) => need._tag === "RunFailureNeed"),
+            needsAttention,
+          );
+          assert.deepStrictEqual(
+            overview.needsYou
+              .filter((need) => need._tag !== "RunFailureNeed")
+              .map((need) => need._tag),
+            ["BoardProjectionNeed", "PollFailureNeed", "PreflightFindingNeed"],
+          );
+          const card = overview.projects[0]?.board.lanes
+            .flatMap((lane) => lane.items)
+            .find((item) => item.itemKey === itemKey);
+          assert.strictEqual(card?.needsYou, needsAttention);
+          assert.strictEqual(overview.projects[0]?.status, "needs-you");
+          const detail = yield* operator.detail(runId);
+          assert.strictEqual(detail.run.canResolveFailure, needsAttention);
+          assert.strictEqual(detail.run.canRetry, true);
+          assert.strictEqual(detail.run.state, "Failed");
+        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
+      }
+    }),
+  );
+
   it.effect(
     "derives retry context from the selected roster agent and attributes input to the configured operator",
     () =>

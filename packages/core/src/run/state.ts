@@ -85,6 +85,7 @@ export const isStartable = Schema.is(Startable);
 export const operatorActions = (state: RunState) => ({
   canApprove: state._tag === "Waiting",
   canRetry: state._tag === "Failed",
+  canResolveFailure: state._tag === "Failed",
   canCancel: isOpen(state),
 });
 

@@ -82,6 +82,7 @@ const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Attemp
     pullRequestUrl: null,
     canApprove: false,
     canRetry: state === "Failed",
+    canResolveFailure: state === "Failed",
     canCancel: false,
   });
 
@@ -175,6 +176,15 @@ describe("Board Run failure copy", () => {
     assert.strictEqual(
       itemFailure(new BoardTaskView({ ...card, runs: [...card.runs, review], run: review })),
       "new review failure",
+    );
+    const resolved = new RunView({ ...review, canResolveFailure: false });
+    assert.strictEqual(
+      itemFailure(new BoardTaskView({ ...card, runs: [...card.runs, resolved], run: resolved })),
+      "old development failure",
+    );
+    assert.strictEqual(
+      itemFailure(new BoardTaskView({ ...card, runs: [resolved], run: resolved })),
+      null,
     );
   });
 

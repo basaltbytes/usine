@@ -1,0 +1,1 @@
+ALTER TABLE `usine_runs` ADD `resolved_failure_attempt_id` text;

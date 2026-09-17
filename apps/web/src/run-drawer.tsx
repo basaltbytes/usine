@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { AttemptId } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import {
   ColdTranscriptRequest,
@@ -90,8 +91,16 @@ export const RunDrawer = ({
     refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
   });
   const mutation = useMutation({
-    mutationFn: (act: "approve" | "retry" | "cancel") =>
-      api((client) => client[act]({ params: { runId } })),
+    mutationFn: (
+      request:
+        | { readonly action: "approve" | "retry" | "cancel" }
+        | { readonly action: "resolveFailure"; readonly attemptId: AttemptId },
+    ) =>
+      api((client) =>
+        request.action === "resolveFailure"
+          ? client.resolveFailure({ params: { runId }, payload: { attemptId: request.attemptId } })
+          : client[request.action]({ params: { runId } }),
+      ),
     onSuccess: async () => {
       setConfirmCancel(false);
       await Promise.all([
@@ -113,6 +122,7 @@ export const RunDrawer = ({
     },
   });
   const run = detail.data?.run;
+  const latestAttempt = run?.attempts.at(-1);
   const earlier = detail.data?.earlierTranscript.at(-1);
   const meters = poolMeters(detail.data?.transcript ?? []);
   return (
@@ -150,9 +160,21 @@ export const RunDrawer = ({
                   <Button
                     size="sm"
                     disabled={mutation.isPending}
-                    onClick={() => mutation.mutate("approve")}
+                    onClick={() => mutation.mutate({ action: "approve" })}
                   >
                     Approve
+                  </Button>
+                )}
+                {run.canResolveFailure && latestAttempt !== undefined && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    disabled={mutation.isPending}
+                    onClick={() =>
+                      mutation.mutate({ action: "resolveFailure", attemptId: latestAttempt.id })
+                    }
+                  >
+                    Mark resolved
                   </Button>
                 )}
                 {run.canRetry && (
@@ -160,7 +182,7 @@ export const RunDrawer = ({
                     size="sm"
                     variant="secondary"
                     disabled={mutation.isPending}
-                    onClick={() => mutation.mutate("retry")}
+                    onClick={() => mutation.mutate({ action: "retry" })}
                   >
                     Retry
                   </Button>
@@ -171,7 +193,7 @@ export const RunDrawer = ({
                     variant={confirmCancel ? "destructive" : "outline"}
                     disabled={mutation.isPending}
                     onClick={() =>
-                      confirmCancel ? mutation.mutate("cancel") : setConfirmCancel(true)
+                      confirmCancel ? mutation.mutate({ action: "cancel" }) : setConfirmCancel(true)
                     }
                   >
                     {confirmCancel ? "Confirm cancel" : "Cancel Run"}

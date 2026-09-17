@@ -9,12 +9,12 @@ export class RunNotFoundError extends Schema.TaggedError<RunNotFoundError>(
   runId: RunId,
 }) {}
 
-/** The Run's current state does not allow the requested approval or retry. */
+/** The Run's current state does not allow the requested operator action. */
 export class RunOperationRejectedError extends Schema.TaggedError<RunOperationRejectedError>(
   "@usine/engine/RunOperationRejectedError",
 )("RunOperationRejectedError", {
   runId: RunId,
-  operation: Schema.Literals(["approve", "retry"]),
+  operation: Schema.Literals(["approve", "retry", "resolveFailure"]),
   state: Schema.String,
 }) {}
 

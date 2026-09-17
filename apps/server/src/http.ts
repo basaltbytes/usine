@@ -19,6 +19,8 @@ const operatorFailure = (error: BackendError) => {
       case "RunNotFoundError":
         return `Run ${error.runId} was not found.`;
       case "RunOperationRejectedError":
+        if (error.operation === "resolveFailure")
+          return "This failure is no longer current. Refresh the Run before marking it resolved.";
         return `Cannot ${error.operation} Run ${error.runId} while it is ${error.state}.`;
       case "CycleBudgetResetRejectedError":
         return `Cycle budget Ask ${error.askId} is no longer awaiting this answer.`;
@@ -144,6 +146,11 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     )
     .handle("approve", ({ params }) =>
       fromBackend((backend) => backend.approve(params.runId)).pipe(acknowledge),
+    )
+    .handle("resolveFailure", ({ params, payload }) =>
+      fromBackend((backend) => backend.resolveFailure(params.runId, payload.attemptId)).pipe(
+        acknowledge,
+      ),
     )
     .handle("retry", ({ params }) =>
       fromBackend((backend) => backend.retry(params.runId)).pipe(acknowledge),

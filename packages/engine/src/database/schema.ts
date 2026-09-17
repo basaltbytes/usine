@@ -132,6 +132,7 @@ export const runs = snakeCase.table(
       .references(() => triggerEvents.eventId),
     loopName: text().$type<LoopName>().notNull(),
     stateJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    resolvedFailureAttemptId: text().$type<AttemptId>(),
     openedAt: text().notNull(),
     // The Run's effective context, seeded from the claiming submission.
     // Edit-and-retry amends these columns; the Event columns never change (ADR 0018).

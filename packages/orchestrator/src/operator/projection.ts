@@ -73,6 +73,7 @@ const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
 };
 
 export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<LoopName>): RunView => {
+  const actions = RunState.operatorActions(snapshot.run.state);
   const result = Option.getOrNull(snapshot.step.result);
   const pullRequest = result?.facts.find(
     (fact): fact is PullRequest => fact._tag === "PullRequest",
@@ -90,7 +91,10 @@ export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<LoopName>
     attempts: snapshot.attempts.map(attemptView),
     resultMessage: result?.message ?? null,
     pullRequestUrl: pullRequest?.url.toString() ?? null,
-    ...RunState.operatorActions(snapshot.run.state),
+    ...actions,
+    canResolveFailure:
+      actions.canResolveFailure &&
+      !Option.contains(snapshot.resolvedFailureAttemptId, snapshot.attempts.at(-1)?.id),
   });
 };
 

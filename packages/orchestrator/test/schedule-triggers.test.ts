@@ -120,6 +120,7 @@ const fakeLayer = (
   states: ReadonlyArray<LoopRuntimeState> = [],
 ) => {
   const runs = Layer.succeed(RunEngine)({
+    resolveFailure: () => Effect.void,
     intervene: () => Effect.void,
     approve: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),

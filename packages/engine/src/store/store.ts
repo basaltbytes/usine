@@ -343,6 +343,42 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("finish attempt"));
 
+  const resolveFailure = Effect.fn("RunStore.resolveFailure")(function* (
+    runId: RunId,
+    attemptId: AttemptId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, attemptId });
+    yield* database.transaction((transaction) =>
+      Effect.gen(function* () {
+        const tx = queriesFor(transaction);
+        const current = yield* tx.snapshot(runId);
+        const latest = current.attempts.at(-1);
+        if (
+          !RunState.operatorActions(current.run.state).canResolveFailure ||
+          latest?.id !== attemptId
+        ) {
+          yield* Effect.logInfo("Failure resolution rejected; Run or Attempt changed", {
+            runId,
+            attemptId,
+            state: current.run.state._tag,
+            latestAttemptId: latest?.id,
+          });
+          return yield* new RunOperationRejectedError({
+            runId,
+            operation: "resolveFailure",
+            state: current.run.state._tag,
+          });
+        }
+        if (Option.contains(current.resolvedFailureAttemptId, attemptId)) {
+          yield* Effect.logInfo("Run failure already resolved", { runId, attemptId });
+          return;
+        }
+        yield* tx.resolveFailure(runId, attemptId);
+        yield* Effect.logInfo("Run failure resolved", { runId, attemptId });
+      }),
+    );
+  }, persistence("resolve Run failure"));
+
   const approve = Effect.fn("RunStore.approve")(function* (runId: RunId, approval: Event) {
     yield* database.transaction((transaction) =>
       Effect.gen(function* () {
@@ -556,6 +592,7 @@ const makeRunStore = Effect.gen(function* () {
     recordAndClaim,
     reconcileCompletion,
     recoverable: recoverable(),
+    resolveFailure,
     retry,
     revoke,
     snapshot: (runId: RunId) => queries.snapshot(runId).pipe(persistence("read run")),
@@ -613,6 +650,11 @@ export class RunStore extends Context.Service<
       result: Workflow.Result<StepResult, AttemptFailure>,
     ) => Effect.Effect<void, RunStoreError>;
     readonly recoverable: Effect.Effect<ReadonlyArray<RecoverableRun>, RunStoreError>;
+    /** Resolves attention for the current failed Attempt atomically; stale requests are rejected. */
+    readonly resolveFailure: (
+      runId: RunId,
+      attemptId: AttemptId,
+    ) => Effect.Effect<void, RunStoreError>;
     readonly retry: (
       runId: RunId,
       amendment?: Option.Option<AttemptContext>,

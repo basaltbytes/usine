@@ -100,7 +100,7 @@ export const taskCards = (
     // An open Run controls the lane. Between stages, a PR takes over from its issue.
     const current = active?.item ?? prs[0]?.item ?? origin.item;
     const preferred =
-      history.find(({ run }) => run.canApprove || run.canRetry) ?? active ?? history[0];
+      history.find(({ run }) => run.canApprove || run.canResolveFailure) ?? active ?? history[0];
     cards.push(
       new BoardTaskView({
         ...itemLink(current),
@@ -111,7 +111,7 @@ export const taskCards = (
         runs: history.map(({ run }) => run).reverse(),
         run: preferred?.run ?? null,
         needsYou:
-          history.some(({ run }) => run.canApprove || run.canRetry) ||
+          history.some(({ run }) => run.canApprove || run.canResolveFailure) ||
           members.some(({ item }) => blocked.has(item.itemKey)),
       }),
     );

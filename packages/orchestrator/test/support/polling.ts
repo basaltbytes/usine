@@ -98,6 +98,7 @@ export const pollingTestLayer = (
     evaluateScalar: () => Effect.die("unused"),
   });
   const runs = Layer.succeed(RunEngine)({
+    resolveFailure: () => Effect.void,
     intervene: () => Effect.void,
     approve: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),

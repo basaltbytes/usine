@@ -260,6 +260,7 @@ const makeRunEngine = Effect.gen(function* () {
     intervene,
     reconcile,
     retry,
+    resolveFailure: store.resolveFailure,
     revoke,
     submit,
     transcript,
@@ -286,6 +287,11 @@ export class RunEngine extends Context.Service<
     ) => Effect.Effect<void, RunEngineError>;
     /** Recovers unfinished Runs and outstanding actions from stored state; also runs when the engine starts. */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
+    /** Resolves the current failed Attempt's attention without changing its outcome or starting work. */
+    readonly resolveFailure: (
+      runId: RunId,
+      attemptId: AttemptId,
+    ) => Effect.Effect<void, RunEngineError>;
     /** Requests another Attempt for a failed Run using its existing Event and effective task and Agent. */
     readonly retry: (
       runId: RunId,

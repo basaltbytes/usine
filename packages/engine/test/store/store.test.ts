@@ -11,7 +11,7 @@ import {
   SessionIdle,
   TextOutput,
 } from "@usine/core/agent/session";
-import { AttemptTask } from "@usine/core/attempt";
+import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { Event, DedupKey, EventId } from "@usine/core/event";
@@ -56,6 +56,102 @@ import { RunStore } from "../../src/store/store.ts";
 
 import { testAgent, lifecycleSubmission, withRunStore } from "./support.ts";
 describe("run store", () => {
+  it.live(
+    "persists failure resolution across restart without changing history and rejects stale Attempts",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = InstanceDirectory.make(
+          yield* fs.makeTempDirectoryScoped({ prefix: "usine-resolved-failure-" }),
+        );
+        const runId = RunId.make("resolved-failure");
+        const services = Layer.mergeAll(RunStore.layer, RunReader.layer).pipe(
+          Layer.provide(localSqliteLayer(directory)),
+        );
+        const before = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const store = yield* RunStore;
+            const reader = yield* RunReader;
+            yield* store.recordAndClaim(lifecycleSubmission, runId);
+            const rejected = yield* Effect.flip(
+              store.resolveFailure(runId, AttemptId.make("not-started")),
+            );
+            assert.strictEqual(rejected._tag, "RunOperationRejectedError");
+            const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+            assert(started._tag === "AttemptStarted");
+            const attempt = started.execution.attempt;
+            assert.strictEqual(
+              (yield* Effect.flip(store.resolveFailure(runId, attempt.id)))._tag,
+              "RunOperationRejectedError",
+            );
+            yield* store.appendTranscript(
+              "outbound",
+              new AttemptChannel.OutboundEnvelope({
+                version: AttemptChannel.PROTOCOL_VERSION,
+                attemptId: attempt.id,
+                sequence: AttemptChannel.Sequence.make(1),
+                sentAt: attempt.startedAt,
+                payload: new AttemptChannel.Failed({
+                  failure: new AgentFailure({ message: "Handled outside usine" }),
+                }),
+              }),
+            );
+            yield* store.finishAttempt(
+              attempt,
+              Result.fail(new AgentFailure({ message: "Handled outside usine" })),
+            );
+            const evidence = yield* reader.evidence(runId);
+            const commands = yield* store.pendingWorkflowCommands;
+            const revision = yield* reader.revision();
+            yield* store.resolveFailure(runId, attempt.id);
+            const resolvedRevision = yield* reader.revision();
+            assert(Option.isSome(revision) && Option.isSome(resolvedRevision));
+            assert(resolvedRevision.value > revision.value);
+            yield* store.resolveFailure(runId, attempt.id);
+            assert.deepStrictEqual(yield* reader.revision(), resolvedRevision);
+            assert.deepStrictEqual(yield* store.pendingWorkflowCommands, commands);
+            return evidence;
+          }).pipe(Effect.provide(services)),
+        );
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const store = yield* RunStore;
+            const reader = yield* RunReader;
+            const after = yield* reader.evidence(runId);
+            const first = before.snapshot.attempts[0];
+            assert(first !== undefined);
+            assert.deepStrictEqual(after.snapshot.run, before.snapshot.run);
+            assert.deepStrictEqual(after.snapshot.attempts, before.snapshot.attempts);
+            assert.deepStrictEqual(after.transcript, before.transcript);
+            assert.deepStrictEqual(after.snapshot.resolvedFailureAttemptId, Option.some(first.id));
+            const summaries = yield* reader.list({ closedLimit: 10 });
+            assert.deepStrictEqual(summaries[0]?.resolvedFailureAttemptId, Option.some(first.id));
+            const history = yield* reader.forItems([lifecycleSubmission.itemKey]);
+            assert.deepStrictEqual(history[0]?.resolvedFailureAttemptId, Option.some(first.id));
+            yield* store.retry(runId);
+            const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+            assert(started._tag === "AttemptStarted");
+            yield* store.finishAttempt(
+              started.execution.attempt,
+              Result.fail(new AgentFailure({ message: "New failure" })),
+            );
+            const stale = yield* Effect.flip(store.resolveFailure(runId, first.id));
+            assert.strictEqual(stale._tag, "RunOperationRejectedError");
+            const current = yield* store.snapshot(runId);
+            assert.strictEqual(current.run.state._tag, "Failed");
+            assert.strictEqual(current.attempts.length, 2);
+            assert.deepStrictEqual(current.resolvedFailureAttemptId, Option.some(first.id));
+            yield* store.resolveFailure(runId, started.execution.attempt.id);
+            assert.deepStrictEqual(
+              (yield* store.snapshot(runId)).resolvedFailureAttemptId,
+              Option.some(started.execution.attempt.id),
+            );
+          }).pipe(Effect.provide(services)),
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.live(
     "attributes interventions without adding Events and reads held sessions beyond the visible page",
     () =>

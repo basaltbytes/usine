@@ -1,6 +1,7 @@
 import type { LoadedInstance } from "@usine/config/instance";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
+import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import { AgentName } from "@usine/core/agent";
 import {
@@ -35,6 +36,10 @@ export class FactoryBackend extends Context.Service<
     ) => Effect.Effect<RunDetailView, BackendError>;
     readonly approve: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, BackendError>;
+    readonly resolveFailure: (
+      runId: RunId,
+      attemptId: AttemptId,
+    ) => Effect.Effect<void, BackendError>;
     readonly retry: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly agents: Effect.Effect<ReadonlyArray<AgentName>, BackendError>;
     readonly editAndRetry: (runId: RunId, edit: EditAndRetry) => Effect.Effect<void, BackendError>;
@@ -59,6 +64,7 @@ export const liveBackendLayer = (
     approve: operator.approve,
     resetCycleBudget: operator.resetCycleBudget,
     retry: operator.retry,
+    resolveFailure: operator.resolveFailure,
     agents: Effect.succeed(instance.agents.map(({ name }) => name)),
     editAndRetry: (runId, edit) => operator.editAndRetry(instance, runId, edit),
     intervene: (runId, input) => operator.intervene(instance, runId, input),
@@ -91,6 +97,7 @@ export const needsSetupBackendLayer = (
     approve: fail,
     resetCycleBudget: fail,
     retry: fail,
+    resolveFailure: fail,
     agents: Effect.succeed(instance.agents.map(({ name }) => name)),
     editAndRetry: fail,
     intervene: fail,

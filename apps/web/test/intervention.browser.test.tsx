@@ -113,6 +113,7 @@ it("edits failed task text and selects the replacement roster agent", async () =
     pullRequestUrl: null,
     canApprove: false,
     canRetry: true,
+    canResolveFailure: true,
     canCancel: false,
   });
   mount(
