@@ -67,7 +67,7 @@ export const continueWithNewest: (
     const queued = yield* store.nextQueued(completedRunId);
     if (Option.isSome(queued)) {
       const condition = yield* TriggerCondition;
-      const submission = queued.value;
+      const submission = queued.value.submission;
       const fields = {
         completedRunId,
         eventId: submission.event.id,
@@ -85,7 +85,8 @@ export const continueWithNewest: (
           yield* DurableRun.execute({ submission: claimed.value.submission }, { discard: true });
         }
       } else {
-        const revoked = yield* store.revokeQueued(submission.loop, submission.itemKey);
+        // Only the queue observed before the remote check belongs to this result.
+        const revoked = yield* store.revokeQueued(queued.value);
         yield* Effect.logInfo("Queued Event no longer matches its trigger; revoked", {
           ...fields,
           revokedEvents: revoked,

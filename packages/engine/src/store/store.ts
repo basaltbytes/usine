@@ -37,7 +37,7 @@ import { StepExecution } from "../step-executor.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import type { WorkflowCommand } from "../workflow/command.ts";
 import { persistence, submissionFromRow, type WorkflowCommandRow } from "./codec.ts";
-import { queriesFor } from "./queries.ts";
+import { queriesFor, type QueuedEvents } from "./queries.ts";
 import {
   beginAttempt as decideBeginAttempt,
   cancelRun,
@@ -502,12 +502,10 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("revoke run"));
 
-  const revokeQueued = Effect.fn("RunStore.revokeQueued")(function* (
-    loop: LoopName,
-    itemKey: ItemKey,
-  ) {
-    yield* Effect.annotateCurrentSpan({ loop, itemKey });
-    return yield* queries.revokeQueued(loop, itemKey);
+  const revokeQueued = Effect.fn("RunStore.revokeQueued")(function* (queued: QueuedEvents) {
+    const { loop, itemKey, event } = queued.submission;
+    yield* Effect.annotateCurrentSpan({ loop, itemKey, eventId: event.id });
+    return yield* queries.revokeQueued(loop, itemKey, queued.eventIds);
   }, persistence("revoke queued Events"));
 
   const claimQueued = Effect.fn("RunStore.claimQueued")(function* (
@@ -667,7 +665,9 @@ export class RunStore extends Context.Service<
       attempt: Attempt,
       result: Result.Result<StepResult, AttemptFailure>,
     ) => Effect.Effect<FinishDecision, RunStoreError>;
-    readonly nextQueued: (runId: RunId) => Effect.Effect<Option.Option<Submission>, RunStoreError>;
+    readonly nextQueued: (
+      runId: RunId,
+    ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
     readonly parkForApproval: (runId: RunId) => Effect.Effect<void, RunStoreError>;
     readonly pendingWorkflowCommands: Effect.Effect<
       ReadonlyArray<WorkflowCommandRow>,
@@ -701,11 +701,8 @@ export class RunStore extends Context.Service<
       loop: LoopName,
       itemKey: ItemKey,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
-    /** Records every unclaimed Event of the Loop's Item as ignored (revoked) without touching its Runs; returns how many. */
-    readonly revokeQueued: (
-      loop: LoopName,
-      itemKey: ItemKey,
-    ) => Effect.Effect<number, RunStoreError>;
+    /** Revokes only observed Events that remain unclaimed; preserves later arrivals and returns the count. */
+    readonly revokeQueued: (queued: QueuedEvents) => Effect.Effect<number, RunStoreError>;
     readonly snapshot: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
     readonly transcript: (
       query: TranscriptQuery,

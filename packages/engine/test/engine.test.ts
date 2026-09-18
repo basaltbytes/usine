@@ -27,6 +27,7 @@ import {
   Path,
   Ref,
   Schema,
+  Schedule,
   Scope,
 } from "effect";
 import { SqlClient } from "effect/unstable/sql";
@@ -750,6 +751,92 @@ describe("durable run engine", () => {
           // No Run ever opened for the dropped Event, so no approval was asked.
           const missing = yield* Effect.flip(engine.inspect(yield* runIdFor(second)));
           assert.strictEqual(missing._tag, "RunNotFoundError");
+        }).pipe(Effect.provide(runtime));
+      }),
+    ),
+  );
+
+  it.live("preserves newer queued work when an older trigger re-check returns false", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const finishFirst = yield* Deferred.make<void>();
+        const finishThird = yield* Deferred.make<void>();
+        const checking = yield* Deferred.make<void>();
+        const checked = yield* Deferred.make<boolean>();
+        const second = submission({ number: 31 });
+        const fourth = submission({ number: 33 });
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Deferred.await(finishFirst).pipe(Effect.as(stepResult("first"))),
+          Deferred.await(finishThird).pipe(Effect.as(stepResult("third"))),
+          Effect.succeed(stepResult("fourth")),
+        ]);
+        const runtime = layer(directory).pipe(
+          Layer.provide(executorLayer(plans)),
+          Layer.provide(
+            Layer.succeed(TriggerCondition)({
+              holds: (candidate) =>
+                candidate.event.id === second.event.id
+                  ? Deferred.succeed(checking, undefined).pipe(
+                      Effect.andThen(Deferred.await(checked)),
+                    )
+                  : Effect.succeed(true),
+            }),
+          ),
+        );
+        const path = yield* Path.Path;
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const first = yield* engine.submit(submission({ number: 30 }));
+          assert(first._tag === "Claimed");
+          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Running");
+          assert.strictEqual((yield* engine.submit(second))._tag, "Queued");
+          yield* Deferred.succeed(finishFirst, undefined);
+          yield* Deferred.await(checking);
+
+          const third = yield* engine.submit(submission({ number: 32 }));
+          assert(third._tag === "Claimed");
+          yield* waitFor(engine, third.runId, ({ run }) => run.state._tag === "Running");
+          assert.strictEqual((yield* engine.submit(fourth))._tag, "Queued");
+          yield* Deferred.succeed(checked, false);
+
+          // Wait for B's delayed revocation to commit before allowing C to close.
+          const revoked = Effect.gen(function* () {
+            const sql = yield* SqlClient.SqlClient;
+            return (
+              (yield* sql`SELECT event_id FROM usine_ignored_events
+              WHERE event_id = ${second.event.id}`).length > 0
+            );
+          }).pipe(
+            Effect.provide(
+              SqliteClient.layer({
+                filename: path.join(directory, ".usine", "runtime.sqlite"),
+              }),
+            ),
+          );
+          let settled = yield* revoked;
+          for (let poll = 0; poll < 500 && !settled; poll += 1) {
+            yield* Effect.sleep("10 millis");
+            settled = yield* revoked;
+          }
+          assert(settled);
+          assert.strictEqual((yield* engine.submit(fourth))._tag, "Queued");
+          yield* Deferred.succeed(finishThird, undefined);
+          const fourthId = yield* runIdFor(fourth);
+          yield* engine.inspect(fourthId).pipe(
+            Effect.retry({
+              while: (error) => error._tag === "RunNotFoundError",
+              times: 500,
+              schedule: Schedule.spaced("10 millis"),
+            }),
+          );
+          const finished = yield* waitFor(
+            engine,
+            fourthId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(finished.attempts.length, 1);
+          assert(Option.isSome(finished.step.result));
+          assert.strictEqual(finished.step.result.value.message, "fourth");
         }).pipe(Effect.provide(runtime));
       }),
     ),
