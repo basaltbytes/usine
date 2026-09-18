@@ -1,8 +1,7 @@
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
-import { salvageWorktree } from "../salvage.ts";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
-import { RepositoryName } from "@usine/core/repository";
-import { Effect, Exit, Layer, Option, Schema, Scope } from "effect";
+import { RepositoryName, safeSegment } from "@usine/core/repository";
+import { Deferred, Effect, Exit, Layer, Option, Schema, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   CheckoutRequest,
@@ -15,9 +14,10 @@ import { verifyHarnesses } from "../harness-preflight.ts";
 import { preparedAttemptsFor } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
+  cacheDirectoryName,
   type ProvisionedWorktree,
   provisionWorktree,
-  safeSegment,
+  recoverWorktree,
   type WorkspaceOps,
 } from "../provision.ts";
 import { attemptChannelFor } from "./channel.ts";
@@ -100,30 +100,16 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
             "sh",
             runHostPidFile(worktree),
           ]);
-          const git = (args: ReadonlyArray<string>) =>
-            commands.remote("cleanup", vm.sshDest, "git", args);
-          const salvage = yield* salvageWorktree({
-            ...attempt,
-            host: vm.sshDest,
-            worktree,
-            baseCommit: Option.none(),
-            git,
-          });
-          if (Option.isNone(salvage)) return;
-          yield* record(salvage.value);
-          if (salvage.value._tag === "Retained") return;
-          yield* git([
-            "--git-dir",
-            `${root}/repos/${safeSegment(attempt.repository)}.git`,
-            "worktree",
-            "remove",
-            "--force",
-            worktree,
-          ]);
-          yield* Effect.logInfo("Reconciled and released Attempt salvage", {
-            ...attempt,
-            worktree,
-          });
+          yield* recoverWorktree(
+            {
+              attempt,
+              host: vm.sshDest,
+              worktree,
+              cache: `${root}/repos/${cacheDirectoryName(attempt.repository)}`,
+              git: (args) => commands.remote("cleanup", vm.sshDest, "git", args),
+            },
+            record,
+          );
         }),
       );
     });
@@ -147,7 +133,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         commands.remote("preflight", vm.sshDest, command, args),
       );
       const root = `${vm.home}/.usine/workers/${safeSegment(request.worker)}`;
-      const cache = `${root}/repos/${safeSegment(request.repository)}.git`;
+      const cache = `${root}/repos/${cacheDirectoryName(request.repository)}`;
       const worktree = `${root}/attempts/${safeSegment(request.attemptId)}`;
       const staging = `${cache}.cloning`;
       const remoteUrl = `https://github.int.exe.xyz/${request.repository}.git`;
@@ -183,6 +169,9 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         git: (operation, args) => commands.remote(operation, vm.sshDest, "git", args),
       };
 
+      // A checkout retained after a failed remote stop never closes its scope,
+      // so its salvage is answered here rather than by the checkout finalizer.
+      const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>>();
       const releaseWorkspace = Effect.fn("ExeDevExecutor.releaseWorkspace")(
         function* (
           resource: { readonly provisioned: ProvisionedWorktree; readonly scope: Scope.Closeable },
@@ -209,6 +198,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
             runHost: confirmed.trim(),
           });
           yield* Scope.close(resource.scope, exit);
+          const salvage = yield* resource.provisioned.salvaged;
+          yield* Deferred.succeed(salvaged, salvage);
         },
         (effect) =>
           effect.pipe(
@@ -222,6 +213,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
               }),
             ),
             Effect.ignore,
+            Effect.andThen(Deferred.succeed(salvaged, Option.none())),
           ),
       );
 
@@ -284,7 +276,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       return {
         workspace: prepared,
         launch: (io: AttemptChannel.Sink) => attemptChannel.launch(prepared, vm, io),
-        salvaged: provisioned.salvaged,
+        salvaged: Deferred.await(salvaged),
       };
     }, attempts.prepare);
 

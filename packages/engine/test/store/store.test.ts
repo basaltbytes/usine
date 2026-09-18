@@ -781,7 +781,7 @@ describe("cursor store", () => {
           yield* store.recordAndClaim(lifecycleSubmission, runId);
           const first = yield* store.beginAttempt(runId, WorkerName.make("local"));
           assert(first._tag === "AttemptStarted");
-          assert(Option.isNone(first.execution.salvage));
+          assert(Option.isNone(first.execution.resume));
           // Cancellation closes the Attempt before the executor finishes salvaging.
           yield* store.cancel(runId);
           const pushed = new SalvagePushed({
@@ -820,10 +820,11 @@ describe("cursor store", () => {
           yield* store.retry(retriedRun);
           const resumed = yield* store.beginAttempt(retriedRun, WorkerName.make("local"));
           assert(resumed._tag === "AttemptStarted");
-          assert.deepStrictEqual(resumed.execution.salvage, Option.some(pushed));
+          assert.deepStrictEqual(resumed.execution.resume, Option.some(pushed));
           assert(Option.isNone(resumed.execution.attempt.salvage));
 
-          // A retained worktree cannot be fetched by the next Worker, so the retry starts fresh.
+          // A retained worktree cannot be fetched by the next Worker, so the
+          // retry resumes from the newest pushed salvage instead.
           yield* store.finishAttempt(
             resumed.execution.attempt,
             Result.fail(new AgentFailure({ message: "Guard tripped again" })),
@@ -839,7 +840,7 @@ describe("cursor store", () => {
           yield* store.retry(retriedRun);
           const fresh = yield* store.beginAttempt(retriedRun, WorkerName.make("local"));
           assert(fresh._tag === "AttemptStarted");
-          assert(Option.isNone(fresh.execution.salvage));
+          assert.deepStrictEqual(fresh.execution.resume, Option.some(pushed));
           assert.strictEqual(
             (yield* store.snapshot(retriedRun)).attempts[1]?.salvage
               .pipe(Option.map((s) => s._tag))

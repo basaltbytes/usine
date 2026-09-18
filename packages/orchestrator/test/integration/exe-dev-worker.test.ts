@@ -7,7 +7,7 @@ import { AttemptTask } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
-import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { RepositoryName, RepositoryRevision, safeSegment } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -26,8 +26,6 @@ const VmList = Schema.Struct({
     }),
   ),
 });
-
-const safeSegment = (value: string): string => value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
 
 const output = Effect.fn("ExeDevIntegration.output")(function* (
   command: string,

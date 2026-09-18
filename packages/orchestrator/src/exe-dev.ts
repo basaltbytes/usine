@@ -16,17 +16,16 @@ export const layer = (
   options: ExeDevExecutorOptions,
 ) => {
   // Without a wall-clock ceiling the executor's own grant default applies.
-  const executorOptions =
-    options.credentialGrantMinutes === undefined
-      ? Option.match(config.settings.maxAttemptMinutes, {
-          onNone: () => options,
-          onSome: (minutes) => ({
-            ...options,
-            credentialGrantMinutes: CredentialGrantMinutes.make(minutes + 5),
-          }),
-        })
-      : options;
-  const executor = exeDevExecutorLayer(executorOptions).pipe(Layer.provide(NodeServices.layer));
+  const credentialGrantMinutes =
+    options.credentialGrantMinutes ??
+    Option.getOrUndefined(
+      Option.map(config.settings.maxAttemptMinutes, (minutes) =>
+        CredentialGrantMinutes.make(minutes + 5),
+      ),
+    );
+  const executor = exeDevExecutorLayer(
+    credentialGrantMinutes === undefined ? options : { ...options, credentialGrantMinutes },
+  ).pipe(Layer.provide(NodeServices.layer));
   const stepExecutor = stepExecutorLayer(config, brains).pipe(Layer.provide(executor));
   return localEngineLayer(instanceDirectory).pipe(Layer.provide(stepExecutor));
 };

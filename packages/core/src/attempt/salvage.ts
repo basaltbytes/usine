@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { CommitSha, type RepositoryName } from "../repository.ts";
+import { CommitSha, safeSegment, type RepositoryName } from "../repository.ts";
 import type { RunId } from "../run/run.ts";
 import type { WorkerName } from "../worker.ts";
 import type { AttemptId } from "./attempt.ts";
@@ -9,11 +9,9 @@ import type { AttemptNumber } from "./attempt.ts";
 export const SalvageRef = Schema.NonEmptyString.pipe(Schema.brand("SalvageRef"));
 export type SalvageRef = typeof SalvageRef.Type;
 
-const refSegment = (value: string): string => value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
-
 /** The salvage branch an Attempt pushes to when it ends without success. */
 export const salvageRefFor = (runId: RunId, number: AttemptNumber): SalvageRef =>
-  SalvageRef.make(`usine/salvage/${refSegment(runId)}/${number}`);
+  SalvageRef.make(`usine/salvage/${safeSegment(runId)}/${number}`);
 
 /** The Attempt's unfinished work was committed and pushed to `ref`; `commit` is the pushed head. */
 export class SalvagePushed extends Schema.TaggedClass<SalvagePushed>("AttemptSalvage/Pushed")(

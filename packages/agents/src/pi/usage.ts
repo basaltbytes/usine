@@ -24,7 +24,6 @@ const ClaudeAssistantUsage = Schema.Struct({
     usage: Schema.Struct({
       input_tokens: Count,
       output_tokens: Count,
-      cache_read_input_tokens: Schema.optionalKey(Schema.NullOr(Count)),
       cache_creation_input_tokens: Schema.optionalKey(Schema.NullOr(Count)),
     }),
   }),
@@ -32,7 +31,6 @@ const ClaudeAssistantUsage = Schema.Struct({
 const ClaudeModelUsage = Schema.Struct({
   inputTokens: Count,
   outputTokens: Count,
-  cacheReadInputTokens: Count,
   cacheCreationInputTokens: Count,
 });
 const ClaudeResultUsage = Schema.Struct({

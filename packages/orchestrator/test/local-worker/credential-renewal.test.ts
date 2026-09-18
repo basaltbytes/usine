@@ -1,7 +1,5 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, it } from "@effect/vitest";
-import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { SalvageRef } from "@usine/core/attempt/salvage";
@@ -24,7 +22,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { fileURLToPath } from "node:url";
+import { LIVE_TEST_TIMEOUT, RUN_HOST, makeRemote, testAgent } from "./support.ts";
 
 it.effect(
   "existing child environments read renewed Git and gh credentials after three hours",
@@ -33,22 +31,7 @@ it.effect(
       const fs = yield* FileSystem.FileSystem;
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-renewal-" });
-      const git = (args: ReadonlyArray<string>) => spawner.string(ChildProcess.make("git", args));
-      yield* git(["init", "--bare", `${root}/remote.git`]);
-      yield* git(["init", "-b", "main", `${root}/seed`]);
-      yield* git([
-        "-C",
-        `${root}/seed`,
-        "-c",
-        "user.name=test",
-        "-c",
-        "user.email=test@example.com",
-        "commit",
-        "--allow-empty",
-        "-m",
-        "base",
-      ]);
-      yield* git(["-C", `${root}/seed`, "push", `${root}/remote.git`, "main"]);
+      const remote = yield* makeRemote(root);
       let minted = 0;
       const credentials = Layer.succeed(CredentialProvider)({
         issue: () =>
@@ -70,11 +53,8 @@ it.effect(
       );
       const runtime = localExecutorLayer({
         instanceDirectory: InstanceDirectory.make(root),
-        repositoryUrl: () => `${root}/remote.git`,
-        runHost: {
-          command: process.execPath,
-          args: [fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url)), "--stub"],
-        },
+        repositoryUrl: () => remote,
+        runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
       }).pipe(
         Layer.provide(credentials),
         Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, capturing)),
@@ -91,17 +71,7 @@ it.effect(
               revision: RepositoryRevision.make("main"),
               payload: {},
               task: AttemptTask.make("Work"),
-              agent: new Agent({
-                name: AgentName.make("developer"),
-                persona: AgentPersona.make("Work"),
-                brain: new BrainSpec({
-                  harness: "claude",
-                  model: ModelId.make("claude-sonnet-4-6"),
-                  effort: "high",
-                }),
-                parentModel: Option.none(),
-                parentEffort: Option.none(),
-              }),
+              agent: testAgent,
               parentModel: Option.none(),
               parentEffort: "high",
               maxChildren: ChildSessionBudget.make(4),
@@ -146,14 +116,12 @@ it.effect(
           }),
         );
         assert.strictEqual(ghToken.trim(), `test-token-${minted}`);
-        const directory = inherited.GH_CONFIG_DIR;
-        assert(directory !== undefined);
         yield* Scope.close(scope, Exit.void);
-        assert(!(yield* fs.exists(directory)));
+        assert(!(yield* fs.exists(configuration)));
         const releasedCount = minted;
         yield* TestClock.adjust("2 hours");
         assert.strictEqual(minted, releasedCount);
       }).pipe(Effect.provide(runtime));
     }).pipe(Effect.provide(NodeServices.layer)),
-  30_000,
+  LIVE_TEST_TIMEOUT,
 );

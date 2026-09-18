@@ -25,8 +25,8 @@ export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/St
   task: AttemptTask,
   agent: Agent,
   parentModel: Schema.Option(ModelId),
-  /** The previous Attempt's pushed salvage, which this Attempt's checkout resumes from. */
-  salvage: Schema.Option(SalvagePushed),
+  /** The newest pushed salvage of an earlier Attempt of this Run, which this Attempt's checkout resumes from. */
+  resume: Schema.Option(SalvagePushed),
 }) {}
 
 /** A reservation of one Worker's capacity for the length of an Attempt. Call `release` when the Attempt ends. */

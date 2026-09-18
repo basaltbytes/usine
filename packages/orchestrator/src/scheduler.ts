@@ -183,7 +183,7 @@ export const stepExecutorLayer = (
                 maxAttemptTokens: config.settings.maxAttemptTokens,
                 parentEffort: resolveParentEffort(execution.agent, config.settings.parentEffort),
                 salvageRef: salvageRefFor(execution.run.id, execution.attempt.number),
-                resume: execution.salvage,
+                resume: execution.resume,
               }),
             )
             .pipe(Effect.mapError(asAttemptFailure));

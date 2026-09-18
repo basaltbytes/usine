@@ -1,9 +1,8 @@
 import { localCredentialsFor } from "./credentials.ts";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
-import { salvageWorktree } from "../salvage.ts";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { RepositoryName } from "@usine/core/repository";
+import { RepositoryName, safeSegment } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
 import {
   Effect,
@@ -37,7 +36,7 @@ import {
   cacheDirectoryName,
   isCacheDirectoryName,
   provisionWorktree,
-  safeSegment,
+  recoverWorktree,
   type WorkspaceOps,
 } from "../provision.ts";
 import { runHostSessionFor, type RunHostInput } from "../run-host-session.ts";
@@ -213,41 +212,28 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             attempt.attemptId,
             baseEnvironment,
           );
-          const git = (args: ReadonlyArray<string>) =>
-            executeCommand("cleanup", "git", args, {
-              env: credential.environment,
-              extendEnv: false,
-            }).pipe(
-              Effect.mapError((error) =>
-                executorError(
-                  "cleanup",
-                  credential.scrub(error.message),
-                  new Error("salvage git failed"),
+          yield* recoverWorktree(
+            {
+              attempt,
+              host: "local",
+              worktree,
+              cache: path.join(root, "repos", cacheDirectoryName(attempt.repository)),
+              git: (args) =>
+                executeCommand("cleanup", "git", args, {
+                  env: credential.environment,
+                  extendEnv: false,
+                }).pipe(
+                  Effect.mapError((error) =>
+                    executorError(
+                      "cleanup",
+                      credential.scrub(error.message),
+                      new Error("salvage git failed"),
+                    ),
+                  ),
                 ),
-              ),
-            );
-          const salvage = yield* salvageWorktree({
-            ...attempt,
-            host: "local",
-            worktree,
-            baseCommit: Option.none(),
-            git,
-          });
-          if (Option.isNone(salvage)) return;
-          yield* record(salvage.value);
-          if (salvage.value._tag === "Retained") return;
-          yield* git([
-            "--git-dir",
-            path.join(root, "repos", cacheDirectoryName(attempt.repository)),
-            "worktree",
-            "remove",
-            "--force",
-            worktree,
-          ]);
-          yield* Effect.logInfo("Reconciled and released Attempt salvage", {
-            ...attempt,
-            worktree,
-          });
+            },
+            record,
+          );
         }),
       );
     });

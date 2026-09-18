@@ -28,6 +28,9 @@ export const CommitSha = Schema.String.check(
 ).pipe(Schema.brand("CommitSha"));
 export type CommitSha = typeof CommitSha.Type;
 
+/** Renders an identity as one path or ref segment: every character outside `[A-Za-z0-9_.-]` becomes `_`. */
+export const safeSegment = (value: string): string => value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
+
 /** Splits a repository name into its `owner` and `name`. */
 export const splitRepositoryName = (repository: RepositoryName) => {
   const separator = repository.indexOf("/");

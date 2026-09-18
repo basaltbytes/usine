@@ -1,7 +1,7 @@
 import { Attempt, AttemptId, AttemptContext } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import type { AttemptRecovery, AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
+import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -284,12 +284,6 @@ const makeRunStore = Effect.gen(function* () {
         }
         const attemptId = AttemptId.make(`${runId}/${current.step.name}/${decision.number}`);
         const startedAt = yield* DateTime.now;
-        // Only a pushed salvage can be fetched on the next Worker; a retained
-        // worktree is reported to the operator and the retry starts fresh.
-        const salvage = Option.fromNullishOr(current.attempts.at(-1)).pipe(
-          Option.flatMap((previous) => previous.salvage),
-          Option.filter((previous): previous is SalvagePushed => previous._tag === "Pushed"),
-        );
         const attempt = new Attempt({
           id: attemptId,
           runId,
@@ -311,7 +305,7 @@ const makeRunStore = Effect.gen(function* () {
           attemptId,
           number: decision.number,
           worker,
-          resumesFrom: Option.map(salvage, ({ ref }) => ref),
+          resumesFrom: Option.map(decision.resume, ({ ref }) => ref),
         });
         return new AttemptStarted({
           execution: new StepExecution({
@@ -330,7 +324,7 @@ const makeRunStore = Effect.gen(function* () {
             task: current.task,
             agent: current.agent,
             parentModel: current.parentModel,
-            salvage,
+            resume: decision.resume,
           }),
         });
       }),

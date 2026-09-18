@@ -11,7 +11,7 @@ import { Effect, Option, Result, Schema } from "effect";
 
 /** Bounds the salvage push so a stalled remote cannot hold the Attempt's cleanup open. */
 const PUSH_TIMEOUT = "2 minutes";
-const SALVAGE_AUTHOR = [
+const SALVAGE_GIT_CONFIG = [
   "-c",
   "user.name=usine",
   "-c",
@@ -82,7 +82,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     const committed = yield* git(["add", "--all"]).pipe(
       Effect.andThen(
         git([
-          ...SALVAGE_AUTHOR,
+          ...SALVAGE_GIT_CONFIG,
           "commit",
           "--quiet",
           "--no-verify",
@@ -116,13 +116,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     "--no-verify",
     "origin",
     `${commit}:refs/heads/${options.ref}`,
-  ]).pipe(
-    Effect.timeoutOption(PUSH_TIMEOUT),
-    Effect.flatMap((output) =>
-      Option.isNone(output) ? Effect.fail(new Error("push timed out")) : Effect.void,
-    ),
-    Effect.result,
-  );
+  ]).pipe(Effect.timeout(PUSH_TIMEOUT), Effect.result);
   if (Result.isFailure(pushed)) {
     const message = String(pushed.failure);
     yield* Effect.logError("Salvage push failed; retaining the Attempt worktree", {

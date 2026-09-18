@@ -31,6 +31,14 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
     yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, integration });
     const scope = yield* Effect.scope;
     const key = grantKey(worker, integration);
+    const attach = commands.lobby("prepare", [
+      "integrations",
+      "attach",
+      integration,
+      `vm:${worker}`,
+      "--for",
+      `${grantMinutes}m`,
+    ]);
     yield* locks.withLock(key)(
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
@@ -57,25 +65,16 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
             ),
           );
           yield* restore(
-            commands
-              .lobby("prepare", [
-                "integrations",
-                "attach",
-                integration,
-                `vm:${worker}`,
-                "--for",
-                `${grantMinutes}m`,
-              ])
-              .pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new CredentialUnavailableError({
-                      repository,
-                      message: `Could not attach exe.dev GitHub integration ${integration}`,
-                      cause,
-                    }),
-                ),
+            attach.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new CredentialUnavailableError({
+                    repository,
+                    message: `Could not attach exe.dev GitHub integration ${integration}`,
+                    cause,
+                  }),
               ),
+            ),
           );
           yield* Effect.logInfo("Attached or refreshed time-boxed exe.dev GitHub integration", {
             attemptId,
@@ -92,16 +91,7 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
     // is released before its reference; checkout cleanup runs before both.
     const renew = Effect.fn("ExeDevExecutor.renewGrant")(function* () {
       yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, integration });
-      yield* locks.withLock(key)(
-        commands.lobby("prepare", [
-          "integrations",
-          "attach",
-          integration,
-          `vm:${worker}`,
-          "--for",
-          `${grantMinutes}m`,
-        ]),
-      );
+      yield* locks.withLock(key)(attach);
       yield* Effect.logInfo("Renewed exe.dev credential grant", {
         attemptId,
         worker,

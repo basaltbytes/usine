@@ -1,30 +1,18 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Settings, UsineConfig } from "@usine/config/factory";
-import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
-import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
-import { CommitSha } from "@usine/core/repository";
-import { Event, DedupKey, EventId } from "@usine/core/event";
-import { ItemKey } from "@usine/core/item";
-import { LoopName } from "@usine/core/loop";
+import { SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import * as RunState from "@usine/core/run/state";
 import { Run, RunId } from "@usine/core/run";
-import { Step, StepName } from "@usine/core/step";
+import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
-import {
-  CheckoutRequest,
-  CredentialProvider,
-  WorkerCredential,
-  Executor,
-  ExecutorError,
-} from "@usine/executor";
+import { CheckoutRequest, CredentialProvider, Executor, ExecutorError } from "@usine/executor";
 import { InstanceDirectory } from "@usine/core/instance";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
-import { stepExecutorLayer } from "../src/scheduler.ts";
+import { stepExecutorLayer } from "../../src/scheduler.ts";
 import { TestClock } from "effect/testing";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery, TranscriptTailQuery } from "@usine/engine/transcript";
@@ -47,164 +35,29 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
 import { layer as localExecutorLayer } from "@usine/executor/local";
-import { layer as localLayer } from "../src/local.ts";
-import { runView } from "../src/operator/projection.ts";
+import { layer as localLayer } from "../../src/local.ts";
+import { runView } from "../../src/operator/projection.ts";
+import {
+  LIVE_TEST_TIMEOUT,
+  RUN_HOST,
+  STATE_POLL_ATTEMPTS,
+  TOKEN,
+  config,
+  credentialLayer,
+  makeRemote,
+  output,
+  run,
+  submission,
+  testAgent,
+  waitFor,
+  withLocalEngine,
+  workerCredential,
+} from "./support.ts";
 
-const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
-const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
-const TURBO_CACHE_HOST = fileURLToPath(new URL("./fixtures/turbo-cache.mjs", import.meta.url));
-const STDOUT_NOISE_HOST = fileURLToPath(new URL("./fixtures/stdout-noise.mjs", import.meta.url));
-const PULL_REQUEST_HOST = fileURLToPath(new URL("./fixtures/pull-request.mjs", import.meta.url));
-const TOKEN = "one-attempt-test-token";
-// Each live transition crosses real git worktree and child-process boundaries.
-// The 10-second poll horizon absorbs slow CI hosts, and the 10 ms cadence still
-// reports the last durable state when a transition stalls.
-const STATE_POLL_ATTEMPTS = 1_000;
-// The capacity test completes three sequential run-host lifecycles, so its
-// per-test ceiling must cover more than one state-poll horizon plus cleanup.
-const LIVE_TEST_TIMEOUT = 30_000;
-const testAgent = new Agent({
-  name: AgentName.make("developer"),
-  brain: new BrainSpec({
-    harness: "claude",
-    model: ModelId.make("claude-sonnet-4-6"),
-    effort: "high",
-  }),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
-  persona: AgentPersona.make("Implement the task."),
-});
-
-const config = Schema.decodeUnknownSync(UsineConfig)({
-  version: 1,
-  repos: [{ name: "acme/demo" }],
-  workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
-});
-
-const workerCredential = (value: Redacted.Redacted<string>) =>
-  new WorkerCredential({
-    value,
-    expiresAt: DateTime.makeUnsafe(Date.now() + 3_600_000),
-  });
-
-const credentialLayer = Layer.succeed(CredentialProvider)({
-  issue: () => Effect.succeed(workerCredential(Redacted.make(TOKEN))),
-});
-
-const run = Effect.fn("test.git")(function* (
-  command: string,
-  args: ReadonlyArray<string>,
-  cwd?: string,
-) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const exitCode = yield* spawner.exitCode(ChildProcess.make(command, args, { cwd }));
-  if (Number(exitCode) !== 0) {
-    return yield* Effect.die(`${command} ${args.join(" ")} exited with ${String(exitCode)}`);
-  }
-});
-
-const output = Effect.fn("test.gitOutput")(function* (
-  command: string,
-  args: ReadonlyArray<string>,
-  cwd?: string,
-) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  return yield* spawner.string(ChildProcess.make(command, args, { cwd }), {
-    includeStderr: true,
-  });
-});
-
-const makeRemote = Effect.fn("test.makeRemote")(function* (root: string) {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const remote = path.join(root, "origin.git");
-  const seed = path.join(root, "seed");
-  yield* fileSystem.makeDirectory(seed, { recursive: true });
-  yield* run("git", ["init", "--bare", remote]);
-  yield* run("git", ["init"], seed);
-  yield* run("git", ["config", "user.name", "Usine Test"], seed);
-  yield* run("git", ["config", "user.email", "usine@example.invalid"], seed);
-  yield* fileSystem.writeFileString(path.join(seed, "README.md"), "# fixture\n");
-  yield* run("git", ["add", "README.md"], seed);
-  yield* run("git", ["commit", "-m", "fixture"], seed);
-  yield* run("git", ["branch", "-M", "main"], seed);
-  yield* run("git", ["remote", "add", "origin", remote], seed);
-  yield* run("git", ["push", "origin", "main"], seed);
-  return remote;
-});
-
-const submission = (number: number, receivedAt = `2026-08-30T12:00:0${number}Z`) =>
-  new Submission({
-    event: new Event({
-      id: EventId.make(`local-event-${number}`),
-      dedupKey: DedupKey.make(`local/item-${number}/main`),
-      payload: { number },
-      receivedAt: DateTime.makeUnsafe(receivedAt),
-    }),
-    itemKey: ItemKey.make(`item-${number}`),
-    loop: LoopName.make("local-worker"),
-    step: StepName.make("execute"),
-    approval: "none",
-    repository: RepositoryName.make("acme/demo"),
-    revision: RepositoryRevision.make("main"),
-    task: AttemptTask.make(`Complete local task ${number}`),
-    agent: testAgent,
-    parentModel: Option.none(),
-  });
-
-const waitFor = Effect.fn("test.waitFor")(function* (
-  engine: RunEngine["Service"],
-  runId: RunId,
-  state: "Running" | "Succeeded" | "Failed" | "Canceled",
-) {
-  let snapshot = yield* engine.inspect(runId);
-  for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
-    if (snapshot.run.state._tag === state) return snapshot;
-    if (state === "Succeeded" && snapshot.run.state._tag === "Failed") {
-      return yield* Effect.die(JSON.stringify(snapshot.attempts.map((attempt) => attempt.outcome)));
-    }
-    yield* Effect.sleep("10 millis");
-    snapshot = yield* engine.inspect(runId);
-  }
-  return yield* Effect.die(
-    `Run ${runId} did not become ${state}; state=${snapshot.run.state._tag}; attempts=${snapshot.attempts.map((attempt) => Option.match(attempt.outcome, { onNone: () => "open", onSome: (outcome) => outcome._tag })).join(",")}`,
-  );
-});
-
-const withLocalEngine = <A, E, R>(
-  runHostArgs: ReadonlyArray<string>,
-  use: (options: {
-    readonly engine: RunEngine["Service"];
-    readonly instance: InstanceDirectory;
-    readonly remote: string;
-  }) => Effect.Effect<A, E, R>,
-  runHost?: string,
-  credentials = credentialLayer,
-) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-worker-" });
-    const instance = InstanceDirectory.make(root);
-    const remote = yield* makeRemote(root);
-    const runHostOption =
-      runHost === undefined && runHostArgs.length === 0
-        ? {}
-        : {
-            runHost: {
-              command: process.execPath,
-              args: [runHost ?? RUN_HOST, ...runHostArgs],
-            },
-          };
-    const runtime = localLayer(instance, config, [], {
-      repositoryUrl: () => remote,
-      ...runHostOption,
-      interruptGrace: "100 millis",
-    }).pipe(Layer.provide(credentials));
-    return yield* Effect.gen(function* () {
-      const engine = yield* RunEngine;
-      return yield* use({ engine, instance, remote });
-    }).pipe(Effect.provide(runtime));
-  }).pipe(Effect.provide(NodeServices.layer));
+const CHANNEL_LOSS_HOST = fileURLToPath(new URL("../fixtures/channel-loss.mjs", import.meta.url));
+const TURBO_CACHE_HOST = fileURLToPath(new URL("../fixtures/turbo-cache.mjs", import.meta.url));
+const STDOUT_NOISE_HOST = fileURLToPath(new URL("../fixtures/stdout-noise.mjs", import.meta.url));
+const PULL_REQUEST_HOST = fileURLToPath(new URL("../fixtures/pull-request.mjs", import.meta.url));
 
 describe("local worker", () => {
   it.live(
@@ -218,7 +71,7 @@ describe("local worker", () => {
         const runtime = localLayer(instance, config, [testAgent.brain], {
           runHost: {
             command: process.execPath,
-            args: [fileURLToPath(new URL("./fixtures/harness-unavailable.mjs", import.meta.url))],
+            args: [fileURLToPath(new URL("../fixtures/harness-unavailable.mjs", import.meta.url))],
           },
         }).pipe(Layer.provide(credentialLayer));
         const error = yield* Effect.void.pipe(Effect.provide(runtime), Effect.flip);
@@ -248,7 +101,7 @@ describe("local worker", () => {
             const fs = yield* FileSystem.FileSystem;
             assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
           }),
-        fileURLToPath(new URL("./fixtures/harness-unavailable.mjs", import.meta.url)),
+        fileURLToPath(new URL("../fixtures/harness-unavailable.mjs", import.meta.url)),
       ),
     LIVE_TEST_TIMEOUT,
   );
@@ -438,7 +291,7 @@ describe("local worker", () => {
             task: selected.task,
             agent: selected.agent,
             parentModel: selected.parentModel,
-            salvage: Option.none(),
+            resume: Option.none(),
           });
           const running = yield* scheduler
             .execute(execution, { append: () => Effect.void, salvage: () => Effect.void })
@@ -942,158 +795,6 @@ describe("local worker", () => {
           assert(DateTime.toEpochMillis(olderStarted) <= DateTime.toEpochMillis(newerStarted));
         }),
       ),
-    LIVE_TEST_TIMEOUT,
-  );
-
-  it.live(
-    "salvages uncommitted work to the salvage ref when a live Attempt is canceled",
-    () =>
-      withLocalEngine(["--stub-delay-ms", "5000"], ({ engine, instance, remote }) =>
-        Effect.gen(function* () {
-          const path = yield* Path.Path;
-          const fileSystem = yield* FileSystem.FileSystem;
-          const accepted = yield* engine.submit(submission(3));
-          assert.strictEqual(accepted._tag, "Claimed");
-          if (accepted._tag !== "Claimed") return;
-          const running = yield* waitFor(engine, accepted.runId, "Running");
-          const attempt = running.attempts[0];
-          assert(attempt !== undefined);
-          for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
-            const transcript = yield* engine.transcript(
-              new TranscriptAllQuery({ attemptId: attempt.id }),
-            );
-            if (transcript.some(({ envelope }) => envelope.payload._tag === "Started")) break;
-            yield* Effect.sleep("10 millis");
-          }
-          const attemptsDirectory = path.join(instance, ".usine", "workers", "local", "attempts");
-          const worktree = path.join(attemptsDirectory, attempt.id.replaceAll("/", "_"));
-          yield* fileSystem.writeFileString(path.join(worktree, "progress.md"), "half done\n");
-          yield* engine.cancel(accepted.runId);
-          yield* waitFor(engine, accepted.runId, "Canceled");
-          let salvaged = Option.none<SalvagePushed>();
-          for (let poll = 0; Option.isNone(salvaged) && poll < STATE_POLL_ATTEMPTS; poll += 1) {
-            const snapshot = yield* engine.inspect(accepted.runId);
-            salvaged = Option.flatMap(snapshot.attempts[0]?.salvage ?? Option.none(), (salvage) =>
-              salvage._tag === "Pushed" ? Option.some(salvage) : Option.none(),
-            );
-            if (Option.isNone(salvaged)) yield* Effect.sleep("10 millis");
-          }
-          assert(Option.isSome(salvaged), "the canceled Attempt recorded no pushed salvage");
-          assert.strictEqual(salvaged.value.ref, `usine/salvage/${accepted.runId}/1`);
-          const pushed = (yield* output("git", [
-            "--git-dir",
-            remote,
-            "rev-parse",
-            `refs/heads/${salvaged.value.ref}`,
-          ])).trim();
-          assert.strictEqual(pushed, salvaged.value.commit);
-          const subject = (yield* output("git", [
-            "--git-dir",
-            remote,
-            "log",
-            "-1",
-            "--format=%s",
-            salvaged.value.commit,
-          ])).trim();
-          assert.strictEqual(subject, `wip(usine): salvage attempt ${attempt.id}`);
-          const files = (yield* output("git", [
-            "--git-dir",
-            remote,
-            "ls-tree",
-            "--name-only",
-            salvaged.value.commit,
-          ])).trim();
-          assert(files.includes("progress.md"));
-          let leftovers = yield* fileSystem.readDirectory(attemptsDirectory);
-          for (let poll = 0; leftovers.length > 0 && poll < STATE_POLL_ATTEMPTS; poll += 1) {
-            yield* Effect.sleep("10 millis");
-            leftovers = yield* fileSystem.readDirectory(attemptsDirectory);
-          }
-          assert.deepStrictEqual(leftovers, []);
-        }),
-      ),
-    LIVE_TEST_TIMEOUT,
-  );
-
-  it.live(
-    "prepares a retry from the previous Attempt's salvage ref and falls back to the base when it is gone",
-    () =>
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-resume-" });
-        const remote = yield* makeRemote(root);
-        const seed = `${root}/seed`;
-        const base = (yield* output("git", ["rev-parse", "HEAD"], seed)).trim();
-        yield* run(
-          "git",
-          ["commit", "--allow-empty", "-m", "wip(usine): salvage attempt r/1"],
-          seed,
-        );
-        const salvageCommit = CommitSha.make(
-          (yield* output("git", ["rev-parse", "HEAD"], seed)).trim(),
-        );
-        const ref = SalvageRef.make("usine/salvage/r/1");
-        yield* run("git", ["push", "origin", `HEAD:refs/heads/${ref}`], seed);
-        const runtime = localExecutorLayer({
-          instanceDirectory: InstanceDirectory.make(root),
-          repositoryUrl: () => remote,
-          runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
-        }).pipe(Layer.provide(credentialLayer));
-        yield* Effect.gen(function* () {
-          const executor = yield* Executor;
-          const request = new CheckoutRequest({
-            attemptId: AttemptId.make("r/run/2"),
-            worker: WorkerName.make("local"),
-            repository: RepositoryName.make("acme/demo"),
-            revision: RepositoryRevision.make("main"),
-            payload: {},
-            task: AttemptTask.make("Continue the work"),
-            agent: testAgent,
-            parentModel: Option.none(),
-            maxChildren: ChildSessionBudget.make(4),
-            maxAttemptMinutes: Option.none(),
-            maxAttemptTokens: Option.none(),
-            parentEffort: "high",
-            salvageRef: SalvageRef.make("usine/salvage/r/2"),
-            resume: Option.some(new SalvagePushed({ ref, commit: salvageCommit })),
-          });
-          yield* Effect.scoped(
-            Effect.gen(function* () {
-              const prepared = yield* executor.prepare(request);
-              assert.strictEqual(prepared.workspace.spec.baseCommit, base);
-              assert.deepStrictEqual(
-                prepared.workspace.spec.resume,
-                Option.some(new SalvagePushed({ ref, commit: salvageCommit })),
-              );
-              assert.strictEqual(
-                (yield* output("git", ["rev-parse", "HEAD"], prepared.workspace.worktree)).trim(),
-                salvageCommit,
-              );
-            }),
-          );
-          yield* Effect.scoped(
-            Effect.gen(function* () {
-              const prepared = yield* executor.prepare(
-                new CheckoutRequest({
-                  ...request,
-                  attemptId: AttemptId.make("r/run/3"),
-                  resume: Option.some(
-                    new SalvagePushed({
-                      ref: SalvageRef.make("usine/salvage/r/deleted"),
-                      commit: salvageCommit,
-                    }),
-                  ),
-                }),
-              );
-              assert(Option.isNone(prepared.workspace.spec.resume));
-              assert.strictEqual(
-                (yield* output("git", ["rev-parse", "HEAD"], prepared.workspace.worktree)).trim(),
-                base,
-              );
-            }),
-          );
-        }).pipe(Effect.provide(runtime));
-      }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,
   );
 
