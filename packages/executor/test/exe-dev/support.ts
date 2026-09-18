@@ -108,6 +108,7 @@ interface FakeSshState {
   /** What the salvage finds in the worktree after an unsuccessful Attempt. */
   salvage: "clean" | "dirty" | "push-fails" | "inspect-fails" | "add-fails" | "commit-fails";
   salvageCommitted: boolean;
+  resumeFailure?: "lookup" | "fetch" | "decode";
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -418,7 +419,17 @@ export const fakeSsh = (
         }
         return oneShotHandle("", 0);
       }
+      if (remoteLine.includes("'ls-remote'")) {
+        if (state.resumeFailure === "lookup") return oneShotHandle("", 128, "HTTP 503");
+        return oneShotHandle(`${COMMIT}\trefs/heads/usine/salvage/r/1\n`, 0);
+      }
+      if (remoteLine.includes("'fetch'") && remoteLine.includes("refs/heads/usine/salvage/")) {
+        if (state.resumeFailure === "fetch") return oneShotHandle("", 128, "HTTP 503");
+        state.salvageCommitted = true;
+      }
       if (remoteLine.includes("'git' '--git-dir'") && remoteLine.includes("'rev-parse'")) {
+        if (state.resumeFailure === "decode" && state.salvageCommitted)
+          return oneShotHandle("invalid\n", 0);
         return oneShotHandle(`${COMMIT}\n`, 0);
       }
       return oneShotHandle("{}\n", 0);

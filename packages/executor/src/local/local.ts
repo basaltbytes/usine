@@ -360,6 +360,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             spawn(prepared.workspace, credential, input),
           ),
         salvaged: prepared.salvaged,
+        recordSalvage: prepared.recordSalvage,
       };
     }, attempts.prepare);
 

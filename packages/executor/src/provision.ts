@@ -1,3 +1,4 @@
+import type { AttemptFailure } from "@usine/core/attempt/failure";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
   type AttemptRecovery,
@@ -62,7 +63,9 @@ export interface ProvisionOptions<E> {
 export interface ProvisionedWorktree {
   readonly workspace: AttemptWorkspace;
   /** Waits for the workspace scope to close; none after a successful Attempt or a clean worktree. */
-  readonly salvaged: Effect.Effect<Option.Option<AttemptSalvage>>;
+  readonly salvaged: Effect.Effect<Option.Option<AttemptSalvage>, AttemptFailure>;
+  /** Installs durable recording before launch; cleanup keeps unrecorded salvage on disk. */
+  readonly recordSalvage: (record: AttemptChannel.Sink["salvage"]) => Effect.Effect<void>;
 }
 
 /**
@@ -86,7 +89,8 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     repository: request.repository,
   });
   const checkedOut = yield* Ref.make(Option.none<CommitSha>());
-  const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>>();
+  const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>, AttemptFailure>();
+  const recorder = yield* Ref.make(Option.none<AttemptChannel.Sink["salvage"]>());
   const cleanup = <A>(resource: string, effect: Effect.Effect<A, E>) =>
     effect.pipe(
       Effect.tapError((error) =>
@@ -126,6 +130,27 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
               git: (args) => ops.git("cleanup", args),
             })
           : Option.none<AttemptSalvage>();
+      if (Option.isSome(salvage)) {
+        const record = yield* Ref.get(recorder);
+        if (Option.isNone(record)) {
+          yield* Deferred.succeed(salvaged, salvage);
+          yield* Effect.logWarning("Attempt worktree retained; no salvage recorder installed", {
+            attemptId: request.attemptId,
+            worktree: layout.worktree,
+          });
+          return;
+        }
+        const recorded = yield* Effect.result(record.value(salvage.value));
+        if (Result.isFailure(recorded)) {
+          yield* Deferred.fail(salvaged, recorded.failure);
+          yield* Effect.logError("Attempt salvage could not be recorded; checkout retained", {
+            attemptId: request.attemptId,
+            worktree: layout.worktree,
+            errorTag: recorded.failure._tag,
+          });
+          return;
+        }
+      }
       yield* Deferred.succeed(salvaged, salvage);
       if (Option.exists(salvage, ({ _tag }) => _tag === "Retained")) {
         yield* Effect.logWarning("Attempt worktree retained; salvage did not preserve all work", {
@@ -259,6 +284,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
       worktree: WorktreePath.make(layout.worktree),
     }),
     salvaged: Deferred.await(salvaged),
+    recordSalvage: (record) => Ref.set(recorder, Option.some(record)),
   } satisfies ProvisionedWorktree;
 });
 
@@ -314,6 +340,22 @@ const fetchSalvage = Effect.fn("Executor.fetchSalvage")(function* <E>(
     ref: resume.value.ref,
   };
   yield* Effect.annotateCurrentSpan(fields);
+  const ref = `refs/heads/${resume.value.ref}`;
+  const advertised = yield* ops.git("prepare", [
+    "--git-dir",
+    layout.cache,
+    "ls-remote",
+    "--heads",
+    "origin",
+    ref,
+  ]);
+  if (advertised.trim() === "") {
+    yield* Effect.logWarning(
+      "Salvage ref deleted; the Attempt starts from its base revision",
+      fields,
+    );
+    return Option.none<SalvagePushed>();
+  }
   const fetched = yield* ops
     .git("prepare", [
       "--git-dir",
@@ -325,26 +367,29 @@ const fetchSalvage = Effect.fn("Executor.fetchSalvage")(function* <E>(
     ])
     .pipe(
       Effect.andThen(ops.git("prepare", ["--git-dir", layout.cache, "rev-parse", "FETCH_HEAD"])),
-      Effect.flatMap((output) => decodeCommit(output.trim())),
-      Effect.result,
+      Effect.flatMap((output) =>
+        decodeCommit(output.trim()).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ExecutorOperationError({
+                operation: "prepare",
+                message: "git returned an invalid salvage object id",
+                cause,
+              }),
+          ),
+        ),
+      ),
     );
-  if (Result.isFailure(fetched)) {
-    yield* Effect.logWarning("Salvage ref unavailable; the Attempt starts from its base revision", {
-      ...fields,
-      message: String(fetched.failure),
-    });
-    return Option.none<SalvagePushed>();
-  }
-  if (fetched.success !== resume.value.commit) {
+  if (fetched !== resume.value.commit) {
     yield* Effect.logWarning("Salvage ref moved since it was recorded; resuming from its head", {
       ...fields,
       recorded: resume.value.commit,
-      current: fetched.success,
+      current: fetched,
     });
   }
   yield* Effect.logInfo("Resuming the Attempt from the previous salvage", {
     ...fields,
-    commit: fetched.success,
+    commit: fetched,
   });
-  return Option.some(new SalvagePushed({ ref: resume.value.ref, commit: fetched.success }));
+  return Option.some(new SalvagePushed({ ref: resume.value.ref, commit: fetched }));
 });

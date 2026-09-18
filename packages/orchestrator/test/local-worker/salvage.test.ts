@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ChildSessionBudget } from "@usine/core/agent/session";
+import { InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -9,7 +10,7 @@ import { WorkerName } from "@usine/core/worker";
 import { RunEngine } from "@usine/engine/engine";
 import { CheckoutRequest, Executor } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
-import { Effect, FileSystem, Layer, Option, Path } from "effect";
+import { Cause, Effect, Exit, FileSystem, Layer, Option, Path } from "effect";
 import {
   LIVE_TEST_TIMEOUT,
   RUN_HOST,
@@ -86,7 +87,7 @@ describe("local worker salvage", () => {
   );
 
   it.live(
-    "prepares a retry from the previous Attempt's salvage ref and falls back to the base when it is gone",
+    "resumes salvage, recovers a failed durable write, and uses the base only for a deleted ref",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -141,6 +142,67 @@ describe("local worker salvage", () => {
               );
             }),
           );
+          const failedRecordRequest = new CheckoutRequest({
+            ...request,
+            attemptId: AttemptId.make("r/run/4"),
+          });
+          const retained = yield* Effect.scoped(
+            Effect.gen(function* () {
+              const prepared = yield* executor.prepare(failedRecordRequest);
+              const worktree = prepared.workspace.worktree;
+              yield* fileSystem.writeFileString(
+                `${worktree}/progress.txt`,
+                "persist before removal\n",
+              );
+              const exit = yield* Effect.exit(
+                prepared.launch({
+                  append: () =>
+                    Effect.fail(
+                      new InfraFailure({ message: "channel unavailable", cause: "outage" }),
+                    ),
+                  salvage: () =>
+                    Effect.gen(function* () {
+                      assert(yield* fileSystem.exists(worktree).pipe(Effect.orDie));
+                      return yield* new InfraFailure({
+                        message: "salvage database unavailable",
+                        cause: "outage",
+                      });
+                    }),
+                }),
+              );
+              assert(Exit.isFailure(exit));
+              assert(Cause.pretty(exit.cause).includes("salvage database unavailable"));
+              assert(yield* fileSystem.exists(worktree));
+              return worktree;
+            }),
+          );
+          const recorded: Array<SalvagePushed> = [];
+          yield* executor.recover(
+            {
+              attemptId: failedRecordRequest.attemptId,
+              worker: request.worker,
+              repository: request.repository,
+              ref: request.salvageRef,
+            },
+            (salvage) =>
+              Effect.gen(function* () {
+                assert(yield* fileSystem.exists(retained));
+                assert(salvage._tag === "Pushed");
+                recorded.push(salvage);
+              }),
+          );
+          const recovered = recorded[0];
+          assert(recovered !== undefined);
+          assert.strictEqual(
+            (yield* output("git", [
+              "--git-dir",
+              remote,
+              "show",
+              `${recovered.commit}:progress.txt`,
+            ])).trim(),
+            "persist before removal",
+          );
+          assert(!(yield* fileSystem.exists(retained)));
           yield* Effect.scoped(
             Effect.gen(function* () {
               const prepared = yield* executor.prepare(

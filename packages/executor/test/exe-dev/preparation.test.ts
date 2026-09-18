@@ -3,7 +3,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 
-import { type AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
+import { type AttemptSalvage, SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
+import { InfraFailure } from "@usine/core/attempt/failure";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
 import { TestClock } from "effect/testing";
@@ -38,6 +39,12 @@ describe("exe.dev preparation", () => {
             append: () => Effect.void,
             salvage: (value) =>
               Effect.sync(() => {
+                assert(
+                  !ssh.state.commands.some((command) =>
+                    (remoteArgs(command)[0] ?? "").includes("'worktree' 'remove'"),
+                  ),
+                  "salvage must be recorded before checkout removal",
+                );
                 recorded.push(value);
               }),
           })
@@ -70,6 +77,64 @@ describe("exe.dev preparation", () => {
           assert(recorded[0].path.endsWith("/attempts/remote-run_execute_1"));
           assert.deepStrictEqual(recorded[0].commit, Option.some(SALVAGE_COMMIT));
         }
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+    },
+  );
+
+  it.effect("retains pushed work when durable salvage recording fails", () => {
+    const ssh = fakeSsh(PROTOCOL, "final-nonzero");
+    ssh.state.salvage = "dirty";
+    const recordFailure = new InfraFailure({ message: "database unavailable", cause: "outage" });
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const prepared = yield* executor.prepare(request);
+      const cleanupStart = ssh.state.commands.length;
+      const exit = yield* Effect.exit(
+        prepared.launch({
+          append: () => Effect.void,
+          salvage: () => Effect.fail(recordFailure),
+        }),
+      );
+      assert(Exit.isFailure(exit));
+      assert(Cause.pretty(exit.cause).includes("database unavailable"));
+      const lines = ssh.state.commands
+        .slice(cleanupStart)
+        .map((command) => remoteArgs(command)[0] ?? "");
+      assert(lines.some((line) => line.includes("'push' '--force'")));
+      assert(
+        !lines.some(
+          (line) => line.includes("'worktree' 'remove'") || line.startsWith("exec 'rm' '-rf'"),
+        ),
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+  });
+
+  it.effect.each(["lookup", "fetch", "decode"] as const)(
+    "rejects retry preparation when salvage %s fails",
+    (failure) => {
+      const ssh = fakeSsh(PROTOCOL);
+      ssh.state.resumeFailure = failure;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const error = yield* executor
+          .prepare(
+            new CheckoutRequest({
+              ...request,
+              resume: Option.some(
+                new SalvagePushed({
+                  ref: SalvageRef.make("usine/salvage/r/1"),
+                  commit: SALVAGE_COMMIT,
+                }),
+              ),
+            }),
+          )
+          .pipe(Effect.flip);
+        assert.strictEqual(error._tag, "ExecutorOperationError");
+        assert(
+          !ssh.state.commands.some((command) =>
+            (remoteArgs(command)[0] ?? "").includes("'worktree' 'add'"),
+          ),
+        );
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
     },
   );

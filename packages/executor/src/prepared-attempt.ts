@@ -1,7 +1,7 @@
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { Deferred, Effect, Exit, Fiber, Option, Ref, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect";
 import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor.ts";
 import { withAttemptGuard } from "./guard.ts";
 import type { ProvisionedWorktree } from "./provision.ts";
@@ -9,6 +9,7 @@ import type { ProvisionedWorktree } from "./provision.ts";
 /** What an adapter's prepare acquires: the launchable Attempt plus its salvage outcome once released. */
 export interface AcquiredAttempt extends PreparedAttempt {
   readonly salvaged: ProvisionedWorktree["salvaged"];
+  readonly recordSalvage: ProvisionedWorktree["recordSalvage"];
 }
 
 interface OwnedAttempt {
@@ -108,26 +109,7 @@ export const preparedAttemptsFor = (
                 maxAttemptTokens: request.maxAttemptTokens,
                 warn,
               };
-              // The salvage runs among the checkout's finalizers, so it is known
-              // only once release has returned; recording it is the last step.
-              const recordSalvage = prepared.salvaged.pipe(
-                Effect.flatMap(
-                  Option.match({
-                    onNone: () => Effect.void,
-                    onSome: (salvage) =>
-                      io.salvage(salvage).pipe(
-                        Effect.tapError((error) =>
-                          Effect.logError("Attempt salvage could not be recorded", {
-                            attemptId,
-                            salvage: salvage._tag,
-                            errorTag: error._tag,
-                          }),
-                        ),
-                        Effect.ignore,
-                      ),
-                  }),
-                ),
-              );
+              yield* prepared.recordSalvage(io.salvage);
               // Closing the owner's scope interrupts the session before checkout and
               // credential finalizers. Interrupting a caller waiting on join must also
               // stop that scoped fiber, so timeout/cancel completes the handshake first.
@@ -135,7 +117,11 @@ export const preparedAttemptsFor = (
                 Effect.forkIn(withAttemptGuard(limits, io, prepared.launch), scope),
                 Fiber.join,
                 Fiber.interrupt,
-              ).pipe(Effect.onExit((exit) => release(exit).pipe(Effect.andThen(recordSalvage))));
+              ).pipe(
+                Effect.onExit((exit) =>
+                  release(exit).pipe(Effect.andThen(Effect.asVoid(prepared.salvaged))),
+                ),
+              );
             }),
           } satisfies PreparedAttempt;
         }),

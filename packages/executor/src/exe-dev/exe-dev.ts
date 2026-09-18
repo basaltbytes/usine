@@ -1,3 +1,4 @@
+import type { AttemptFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
@@ -171,7 +172,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
 
       // A checkout retained after a failed remote stop never closes its scope,
       // so its salvage is answered here rather than by the checkout finalizer.
-      const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>>();
+      const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>, AttemptFailure>();
       const releaseWorkspace = Effect.fn("ExeDevExecutor.releaseWorkspace")(
         function* (
           resource: { readonly provisioned: ProvisionedWorktree; readonly scope: Scope.Closeable },
@@ -198,8 +199,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
             runHost: confirmed.trim(),
           });
           yield* Scope.close(resource.scope, exit);
-          const salvage = yield* resource.provisioned.salvaged;
-          yield* Deferred.succeed(salvaged, salvage);
+          const salvage = yield* Effect.exit(resource.provisioned.salvaged);
+          yield* Deferred.done(salvaged, salvage);
         },
         (effect) =>
           effect.pipe(
@@ -277,6 +278,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         workspace: prepared,
         launch: (io: AttemptChannel.Sink) => attemptChannel.launch(prepared, vm, io),
         salvaged: Deferred.await(salvaged),
+        recordSalvage: provisioned.recordSalvage,
       };
     }, attempts.prepare);
 
