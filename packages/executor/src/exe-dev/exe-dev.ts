@@ -24,6 +24,7 @@ import {
 import { attemptChannelFor } from "./channel.ts";
 import { commandsFor } from "./commands.ts";
 import { credentialGrantsFor } from "./grants.ts";
+import { workerLeftoversFor } from "./leftovers.ts";
 import type { ExeDevExecutorOptions } from "./model.ts";
 import { preflightFor } from "./preflight.ts";
 import { RUN_HOST_KILL_SCRIPT, runHostPidFile } from "./shell.ts";
@@ -61,6 +62,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     const machines = yield* preflightFor(options, commands, runHost);
     const credentialGrants = yield* credentialGrantsFor(options, commands);
     const sweepAbandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
+    const workerLeftovers = yield* workerLeftoversFor(commands, machines.vmFor);
     const attemptChannel = yield* attemptChannelFor(commands, runHost, interruptGrace);
 
     const attempts = yield* preparedAttemptsFor(attemptChannel.cancel, attemptChannel.intervene);
@@ -70,9 +72,11 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
     ) {
       yield* Effect.annotateCurrentSpan({ ...attempt });
-      const vm = yield* machines.vmFor(attempt.worker);
-      const root = `${vm.home}/.usine/workers/${safeSegment(attempt.worker)}`;
+      const { vm, root, checkouts } = yield* workerLeftovers(attempt.worker);
       const worktree = `${root}/attempts/${safeSegment(attempt.attemptId)}`;
+      // Every persisted Attempt is visited, and almost none left a checkout:
+      // the Worker's one listing answers those without an SSH round trip.
+      if (!checkouts.has(worktree)) return;
       const inspected = yield* commands.remoteRaw("cleanup", vm.sshDest, "test", ["-d", worktree]);
       if (inspected.exitCode === 1) return;
       if (inspected.exitCode !== 0)

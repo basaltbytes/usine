@@ -1,7 +1,7 @@
 import { AttemptId } from "@usine/core/attempt";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
-import { ExecutorOperationError } from "../executor.ts";
+import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import type { ExeDevCommands } from "./commands.ts";
 import type { VmState } from "./model.ts";
@@ -28,6 +28,7 @@ const directChildSchema = (parent: string): Schema.Codec<string> => {
 };
 
 const directChildren = (
+  operation: ExecutorOperation,
   parent: string,
   output: string,
 ): Effect.Effect<ReadonlyArray<string>, ExecutorOperationError> =>
@@ -37,12 +38,36 @@ const directChildren = (
     Effect.mapError(
       (cause) =>
         new ExecutorOperationError({
-          operation: "prepare",
-          message: `Worker returned an invalid path while sweeping ${parent}`,
+          operation,
+          message: `Worker returned an invalid path while listing ${parent}`,
           cause,
         }),
     ),
   );
+
+/**
+ * Lists the paths directly under a Worker's `attempts` directory, creating the
+ * directory first so a Worker that never ran an Attempt lists as empty. Every
+ * returned path is verified to be a direct child of `attemptsRoot`.
+ */
+export const attemptPathsOn = Effect.fn("ExeDevExecutor.attemptPathsOn")(function* (
+  commands: ExeDevCommands,
+  operation: ExecutorOperation,
+  vm: VmState,
+  attemptsRoot: string,
+) {
+  yield* Effect.annotateCurrentSpan({ host: vm.sshDest, operation, attemptsRoot });
+  yield* commands.remote(operation, vm.sshDest, "mkdir", ["-p", attemptsRoot]);
+  const output = yield* commands.remote(operation, vm.sshDest, "find", [
+    attemptsRoot,
+    "-mindepth",
+    "1",
+    "-maxdepth",
+    "1",
+    "-print0",
+  ]);
+  return yield* directChildren(operation, attemptsRoot, output);
+});
 
 /**
  * Preserves crash leftovers and prunes stale cache registrations once per Worker.
@@ -81,18 +106,9 @@ export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWork
             worker,
             host: vm.sshDest,
           });
-          yield* commands.remote("prepare", vm.sshDest, "mkdir", ["-p", attemptsRoot, reposRoot]);
+          yield* commands.remote("prepare", vm.sshDest, "mkdir", ["-p", reposRoot]);
 
-          const attempts = yield* commands
-            .remote("prepare", vm.sshDest, "find", [
-              attemptsRoot,
-              "-mindepth",
-              "1",
-              "-maxdepth",
-              "1",
-              "-print0",
-            ])
-            .pipe(Effect.flatMap((output) => directChildren(attemptsRoot, output)));
+          const attempts = yield* attemptPathsOn(commands, "prepare", vm, attemptsRoot);
           // An unrecognized path can contain unsalvaged work from a crash. Only
           // recovery from the durable Attempt record may authorize its removal.
           yield* Effect.forEach(
@@ -120,7 +136,7 @@ export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWork
               "*.git",
               "-print0",
             ])
-            .pipe(Effect.flatMap((output) => directChildren(reposRoot, output)));
+            .pipe(Effect.flatMap((output) => directChildren("prepare", reposRoot, output)));
           yield* Effect.forEach(
             caches,
             (cache) =>

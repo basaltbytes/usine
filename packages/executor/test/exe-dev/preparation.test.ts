@@ -5,6 +5,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 
 import { type AttemptSalvage, SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { InfraFailure } from "@usine/core/attempt/failure";
+import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
 import { TestClock } from "effect/testing";
@@ -286,6 +287,63 @@ describe("exe.dev preparation", () => {
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
     },
   );
+
+  it.effect("reconciles Attempts that left no checkout from one listing of their Worker", () => {
+    const ssh = fakeSsh(PROTOCOL);
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const recorded: Array<AttemptSalvage> = [];
+      // Reconciliation visits the whole Attempt history, succeeded or not.
+      for (const [index, succeeded] of [true, false, true, true].entries()) {
+        yield* executor.recover(
+          {
+            attemptId: AttemptId.make(`finished-run/execute/${index + 1}`),
+            repository: request.repository,
+            worker: WORKER,
+            ref: SalvageRef.make(`usine/salvage/finished-run/${index + 1}`),
+            succeeded,
+          },
+          (salvage) => Effect.sync(() => void recorded.push(salvage)),
+        );
+      }
+      const remote = ssh.state.commands.map((command) => remoteArgs(command)[0] ?? "");
+      assert.strictEqual(recorded.length, 0);
+      assert.strictEqual(remote.filter((line) => line.startsWith("exec 'find' ")).length, 1);
+      assert(!remote.some((line) => line.startsWith("exec 'test' ")));
+      assert(!remote.some((line) => line.startsWith("exec 'sh' '-c'")));
+      assert(!remote.some((line) => line.startsWith("exec 'git' ")));
+      // The Worker is resolved once, not once per Attempt.
+      assert.strictEqual(
+        ssh.state.commands.filter(({ args }) => args.includes("exe.dev") && args.includes("ls"))
+          .length,
+        1,
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+  });
+
+  it.effect("fails every Attempt of a Worker that is gone after one lookup", () => {
+    const ssh = fakeSsh(PROTOCOL);
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      for (const index of [1, 2, 3]) {
+        const exit = yield* executor
+          .recover(
+            {
+              attemptId: AttemptId.make(`orphaned-run/execute/${index}`),
+              repository: request.repository,
+              worker: WorkerName.make("decommissioned"),
+              ref: SalvageRef.make(`usine/salvage/orphaned-run/${index}`),
+              succeeded: index !== 2,
+            },
+            () => Effect.void,
+          )
+          .pipe(Effect.exit);
+        assert(Exit.isFailure(exit));
+        assert(Cause.pretty(exit.cause).includes("exe.dev has no VM named decommissioned"));
+      }
+      assert.strictEqual(ssh.state.commands.length, 1);
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+  });
 
   it.effect("preflight verifies the baked VM without changing remote state", () => {
     const ssh = fakeSsh(PROTOCOL);
