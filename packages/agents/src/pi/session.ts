@@ -2,6 +2,7 @@ import {
   AgentSession,
   AgentSessionEvent,
   AgentSessionId,
+  ChildSession,
   SessionFinished,
   SessionTokensUpdated,
   TokenCount,
@@ -38,8 +39,35 @@ export interface SessionChannel {
   /** Queues one event; after the terminal transition the event is logged and dropped. */
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
+  /**
+   * Records the report of the child whose result the parent most recently
+   * received. A blocker in it fails the parent's next ordinary `finish`; a
+   * later ordinary child report clears it.
+   */
+  readonly childReturned: (session: ChildSession, result: SessionResult) => Effect.Effect<void>;
   readonly finish: (session: AgentSession, message: string) => Effect.Effect<void>;
 }
+
+/**
+ * Only an answer that opens with the reserved marker is an outcome signal,
+ * whether its details follow on the same line or the next; ordinary prose and
+ * later mentions are unchanged.
+ */
+const reportedBlocker = (
+  session: AgentSession,
+  message: string,
+): Option.Option<AgentResultError> => {
+  const answer = message.trim();
+  if (!answer.startsWith(BLOCKED_MARKER)) return Option.none();
+  return Option.some(
+    new AgentResultError({
+      sessionId: Option.some(session.id),
+      message:
+        answer.slice(BLOCKED_MARKER.length).trim() ||
+        "Agent reported an unresolved blocker without details.",
+    }),
+  );
+};
 
 export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   options: SessionChannelOptions,
@@ -47,6 +75,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   const events = yield* Queue.make<AgentSessionEvent, AgentSessionError | Cause.Done>();
   const result = yield* Deferred.make<SessionResult, AgentSessionError>();
   const terminal = yield* Ref.make(false);
+  const childBlocker = yield* Ref.make(Option.none<AgentResultError>());
   const cleanups: Array<() => void> = [];
   const runCleanups = Effect.sync(() => {
     for (const cleanup of cleanups.splice(0)) cleanup();
@@ -77,24 +106,35 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     yield* runCleanups;
   });
 
+  const childReturned = Effect.fn("SessionChannel.childReturned")(function* (
+    session: ChildSession,
+    result: SessionResult,
+  ) {
+    yield* Effect.annotateCurrentSpan({ childSessionId: session.id, sessionId: options.sessionId });
+    const blocker = reportedBlocker(session, result.message);
+    yield* Ref.set(childBlocker, blocker);
+    if (Option.isSome(blocker)) {
+      yield* Effect.logInfo(`${options.label} received a child's blocker`, {
+        childSessionId: session.id,
+        sessionId: options.sessionId,
+      });
+    }
+  });
+
   const finish = Effect.fn("SessionChannel.finish")(function* (
     session: AgentSession,
     message: string,
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-    // Only an answer that opens with the reserved marker is an outcome signal,
-    // whether its details follow on the same line or the next; ordinary prose
-    // and later mentions are unchanged.
-    const answer = message.trim();
-    if (answer.startsWith(BLOCKED_MARKER)) {
-      return yield* fail(
-        new AgentResultError({
-          sessionId: Option.some(session.id),
-          message:
-            answer.slice(BLOCKED_MARKER.length).trim() ||
-            "Agent reported an unresolved blocker without details.",
-        }),
-      );
+    const own = reportedBlocker(session, message);
+    if (Option.isSome(own)) return yield* fail(own.value);
+    const relayed = yield* Ref.get(childBlocker);
+    if (Option.isSome(relayed)) {
+      yield* Effect.logWarning(`${options.label} finished without relaying its child's blocker`, {
+        childSessionId: Option.getOrUndefined(relayed.value.sessionId),
+        sessionId: session.id,
+      });
+      return yield* fail(relayed.value);
     }
     if (yield* Ref.getAndSet(terminal, true)) return;
     yield* Queue.offer(events, new SessionFinished({ session }));
@@ -115,6 +155,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     },
     emit,
     fail,
+    childReturned,
     finish,
   } satisfies SessionChannel;
 });

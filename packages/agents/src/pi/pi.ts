@@ -249,6 +249,7 @@ const makePiParent = Effect.gen(function* () {
               subagentsExtension({
                 agent: request.spec.agent,
                 backend: childBackend,
+                childReturned: channel.childReturned,
                 cwd: request.cwd,
                 emit: channel.emit,
                 maxChildren: request.spec.maxChildren,
