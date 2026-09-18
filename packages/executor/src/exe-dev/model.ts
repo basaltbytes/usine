@@ -51,7 +51,7 @@ export interface ExeDevExecutorOptions {
   readonly runHost?: RunHostCommand;
   /** Local SSH executable and its control-plane-only arguments. */
   readonly ssh?: RunHostCommand;
-  /** Time-box for the edge credential attachment. Defaults to 65 minutes. */
+  /** Length of each edge credential attachment, renewed at half this length for as long as the Attempt runs; independent of any Attempt ceiling. Defaults to 65 minutes. */
   readonly credentialGrantMinutes?: CredentialGrantMinutes;
   /** Grace for delivering a stop request, then for the run host to exit; each wait is bounded separately. Defaults to 10 seconds. */
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];

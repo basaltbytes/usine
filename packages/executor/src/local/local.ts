@@ -117,6 +117,25 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* executeCommand(operation, command, args, commandOptions);
     });
 
+    // Git can echo the ambient token in diagnostics. Scrub before forming an
+    // error or passing its stdout to the revision parser: the stderr kept in the
+    // error's cause is then safe to record on the Attempt and show an operator.
+    const credentialedGit =
+      (credential: Effect.Success<ReturnType<typeof credentials>>) =>
+      (operation: ExecutorOperation, args: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          yield* credential.refresh();
+          const result = yield* collectCommand(spawner, operation, "git", args, {
+            env: credential.environment,
+            extendEnv: false,
+          });
+          return yield* requireSuccess(operation, "local", "git", args, {
+            ...result,
+            stdout: credential.scrub(result.stdout),
+            stderr: credential.scrub(result.stderr),
+          });
+        });
+
     // Recovery owns checkout removal. Startup only prunes registrations whose
     // directories are already absent; unknown crash leftovers stay on disk.
     const sweepAbandonedWorktrees = Effect.fn("LocalExecutor.sweepAbandonedWorktrees")(
@@ -212,25 +231,14 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             attempt.attemptId,
             baseEnvironment,
           );
+          const git = credentialedGit(credential);
           yield* recoverWorktree(
             {
               attempt,
               host: "local",
               worktree,
               cache: path.join(root, "repos", cacheDirectoryName(attempt.repository)),
-              git: (args) =>
-                executeCommand("cleanup", "git", args, {
-                  env: credential.environment,
-                  extendEnv: false,
-                }).pipe(
-                  Effect.mapError((error) =>
-                    executorError(
-                      "cleanup",
-                      credential.scrub(error.message),
-                      new Error("salvage git failed"),
-                    ),
-                  ),
-                ),
+              git: (args) => git("cleanup", args),
             },
             record,
           );
@@ -292,8 +300,6 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       const workerRoot = path.join(workersRoot, request.worker);
       const cache = path.join(workerRoot, "repos", cacheDirectoryName(request.repository));
       const worktree = path.join(workerRoot, "attempts", safeSegment(request.attemptId));
-      const environment = credential.environment;
-      const commandOptions = { env: environment, extendEnv: false } as const;
       yield* Effect.logInfo("Preparing Attempt workspace", {
         attemptId: request.attemptId,
         worker: request.worker,
@@ -316,18 +322,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         removePath: remove,
         cacheExists: fileSystem.exists(cache),
         promoteStaging: fileSystem.rename(`${cache}.cloning`, cache),
-        git: (operation, args) =>
-          Effect.gen(function* () {
-            // Git can echo the ambient token in diagnostics. Scrub before forming
-            // an error or passing its stdout to the revision parser.
-            yield* credential.refresh();
-            const result = yield* collectCommand(spawner, operation, "git", args, commandOptions);
-            return yield* requireSuccess(operation, "local", "git", args, {
-              ...result,
-              stdout: credential.scrub(result.stdout),
-              stderr: credential.scrub(result.stderr),
-            });
-          }),
+        git: credentialedGit(credential),
       };
       const prepared = yield* fetches
         .withLock(request.repository)(

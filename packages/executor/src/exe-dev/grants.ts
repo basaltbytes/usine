@@ -11,6 +11,8 @@ import {
   type IntegrationName,
 } from "./model.ts";
 
+const RENEWAL_RETRY_INTERVAL = "1 minute";
+
 const grantKey = (worker: WorkerName, integration: IntegrationName): string =>
   `${worker} ${integration}`;
 
@@ -87,8 +89,11 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
         }),
       ),
     );
-    // Renew each live reference before its time-box elapses. The renewal fiber
-    // is released before its reference; checkout cleanup runs before both.
+    // Renew each live reference at half its time-box, for as long as the
+    // Attempt lives; no ceiling bounds this loop. A failed renewal is retried
+    // every minute rather than at the next half-life, which would coincide with
+    // expiry. The renewal fiber is released before its reference; checkout
+    // cleanup runs before both.
     const renew = Effect.fn("ExeDevExecutor.renewGrant")(function* () {
       yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, integration });
       yield* locks.withLock(key)(attach);
@@ -103,16 +108,18 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
     yield* Effect.forever(
       Effect.sleep(`${grantMinutes * 30} seconds`).pipe(
         Effect.andThen(
-          renew().pipe(Effect.retry({ times: 2, schedule: Schedule.spaced("5 seconds") })),
-        ),
-        Effect.tapError((error) =>
-          Effect.logError("Credential grant renewal failed; will retry", {
-            attemptId,
-            worker,
-            repository,
-            integration,
-            message: error.message,
-          }),
+          renew().pipe(
+            Effect.tapError((error) =>
+              Effect.logError("Credential grant renewal failed; retrying in one minute", {
+                attemptId,
+                worker,
+                repository,
+                integration,
+                message: error.message,
+              }),
+            ),
+            Effect.retry(Schedule.spaced(RENEWAL_RETRY_INTERVAL)),
+          ),
         ),
         Effect.ignore,
       ),
