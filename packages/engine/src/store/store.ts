@@ -502,6 +502,14 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("revoke run"));
 
+  const revokeQueued = Effect.fn("RunStore.revokeQueued")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+  ) {
+    yield* Effect.annotateCurrentSpan({ loop, itemKey });
+    return yield* queries.revokeQueued(loop, itemKey);
+  }, persistence("revoke queued Events"));
+
   const claimQueued = Effect.fn("RunStore.claimQueued")(function* (
     submission: Submission,
     runId: RunId,
@@ -618,6 +626,7 @@ const makeRunStore = Effect.gen(function* () {
     resolveFailure,
     retry,
     revoke,
+    revokeQueued,
     snapshot: (runId: RunId) => queries.snapshot(runId).pipe(persistence("read run")),
     transcript,
   } as const;
@@ -692,6 +701,11 @@ export class RunStore extends Context.Service<
       loop: LoopName,
       itemKey: ItemKey,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
+    /** Records every unclaimed Event of the Loop's Item as ignored (revoked) without touching its Runs; returns how many. */
+    readonly revokeQueued: (
+      loop: LoopName,
+      itemKey: ItemKey,
+    ) => Effect.Effect<number, RunStoreError>;
     readonly snapshot: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
     readonly transcript: (
       query: TranscriptQuery,

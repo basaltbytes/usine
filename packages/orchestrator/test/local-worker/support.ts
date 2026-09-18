@@ -18,6 +18,7 @@ import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } f
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
 import { layer as localLayer } from "../../src/local.ts";
+import { alwaysHoldsLayer } from "../support/polling.ts";
 
 export const RUN_HOST = fileURLToPath(new URL("../../../run-host/dist/bin.js", import.meta.url));
 export const TOKEN = "one-attempt-test-token";
@@ -185,7 +186,7 @@ export const localRuntime = (
     repositoryUrl: () => remote,
     ...runHostOption,
     interruptGrace: "100 millis",
-  }).pipe(Layer.provide(credentials));
+  }).pipe(Layer.provide(credentials), Layer.provide(alwaysHoldsLayer));
 };
 
 export const withLocalEngine = <A, E, R>(

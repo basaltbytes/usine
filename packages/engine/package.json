@@ -39,6 +39,10 @@
       "types": "./dist/step-executor.d.ts",
       "default": "./dist/step-executor.js"
     },
+    "./trigger-condition": {
+      "types": "./dist/trigger-condition.d.ts",
+      "default": "./dist/trigger-condition.js"
+    },
     "./transcript": {
       "types": "./dist/transcript.d.ts",
       "default": "./dist/transcript.js"

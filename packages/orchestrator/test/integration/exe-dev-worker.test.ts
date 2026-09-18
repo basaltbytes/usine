@@ -14,9 +14,10 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { GitHubIntegration, IntegrationName } from "@usine/executor/exe-dev";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
-import { Config, DateTime, Effect, FileSystem, Option, Schema } from "effect";
+import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as exeDevLayer } from "../../src/exe-dev.ts";
+import { alwaysHoldsLayer } from "../support/polling.ts";
 
 const VmList = Schema.Struct({
   vms: Schema.Array(
@@ -98,7 +99,7 @@ describe("live exe.dev Worker", () => {
             name: IntegrationName.make(settings.integration),
           }),
         ],
-      });
+      }).pipe(Layer.provide(alwaysHoldsLayer));
 
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;

@@ -19,6 +19,7 @@ import type { InstanceDirectory } from "@usine/core/instance";
 import { EnginePersistenceError, type RunEngineError } from "../engine/error.ts";
 import { RunReader } from "../run-reader/run-reader.ts";
 import type { StepExecutor } from "../step-executor.ts";
+import type { TriggerCondition } from "../trigger-condition.ts";
 import { RunDatabase } from "./database.ts";
 
 const migrationsFolder = fileURLToPath(new URL("../../drizzle", import.meta.url));
@@ -83,7 +84,7 @@ export const layer = (
   | RunEngine
   | RunReader,
   RunEngineError,
-  StepExecutor
+  StepExecutor | TriggerCondition
 > => layerWithDatabase(localSqliteLayer(instanceDirectory)).pipe(Layer.provide(NodeServices.layer));
 
 /** Observation services initialize the local database but never reconcile workflows or start Attempts. */

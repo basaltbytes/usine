@@ -21,6 +21,7 @@ import { layer } from "../src/database/local-sqlite.ts";
 import { RunEngine, Submission } from "../src/engine/engine.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
+import { TriggerCondition } from "../src/trigger-condition.ts";
 
 describe("Run evidence reader", () => {
   it.live("keeps the Attempt's selected model consistent with its transcript while it starts", () =>
@@ -53,7 +54,10 @@ describe("Run evidence reader", () => {
             ),
           ).pipe(Effect.andThen(Effect.never)),
       });
-      const writer = layer(directory).pipe(Layer.provide(executor));
+      const writer = layer(directory).pipe(
+        Layer.provide(executor),
+        Layer.provide(Layer.succeed(TriggerCondition)({ holds: () => Effect.succeed(true) })),
+      );
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
         const submission = {

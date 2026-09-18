@@ -13,7 +13,7 @@ import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { ChangedIssue, ContentHash, IssueSnapshot, type IssuePayload } from "@usine/github/polling";
 import { Deferred, Fiber, FileSystem, Layer } from "effect";
-import { inertLabelReconcilerLayer } from "./support/polling.ts";
+import { alwaysHoldsLayer, inertLabelReconcilerLayer } from "./support/polling.ts";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
@@ -210,7 +210,10 @@ it.live(
         interrupt: () => Effect.void,
         execute: () => Effect.succeed(new StepResult({ message: "Reviewed", facts: [] })),
       });
-      const engineLayer = localEngineLayer(directory).pipe(Layer.provide(executor));
+      const engineLayer = localEngineLayer(directory).pipe(
+        Layer.provide(executor),
+        Layer.provide(alwaysHoldsLayer),
+      );
       const dependencies = Layer.mergeAll(
         engineLayer,
         controlledParser,

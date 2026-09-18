@@ -25,8 +25,9 @@ import { Orchestrator } from "./orchestrator.ts";
 import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
 import { stepExecutorLayer } from "./scheduler.ts";
+import { triggerConditionLayer } from "./trigger-condition.ts";
 
-/** The full engine composition for local Workers. Supply the roster’s brains for startup preflight and provide the credential provider. */
+/** The full engine composition for local Workers. Supply the roster’s brains for startup preflight and provide the credential provider and the `TriggerCondition` that re-checks queued Events. */
 export const layer = (
   instanceDirectory: InstanceDirectory,
   config: UsineConfig,
@@ -65,17 +66,21 @@ export const runtimeLayer = (
     Layer.provide(NodeServices.layer),
   );
   const credentials = gitHubCredentialLayer(instance.config).pipe(Layer.provide(app));
-  const engine = layer(
-    instanceDirectory,
-    instance.config,
-    instance.agents.map(({ harness, model, effort }) => new BrainSpec({ harness, model, effort })),
-    options,
-  ).pipe(Layer.provide(credentials));
   const polling = GitHubPolling.layer.pipe(
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
   );
+  const triggerCondition = triggerConditionLayer(instance).pipe(
+    Layer.provide(polling),
+    Layer.provide(MarcbachmannCelLayer),
+  );
+  const engine = layer(
+    instanceDirectory,
+    instance.config,
+    instance.agents.map(({ harness, model, effort }) => new BrainSpec({ harness, model, effort })),
+    options,
+  ).pipe(Layer.provide(credentials), Layer.provide(triggerCondition));
   const itemWriter = GitHubItemWriter.layer.pipe(
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),

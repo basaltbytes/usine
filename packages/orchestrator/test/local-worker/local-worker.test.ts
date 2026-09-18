@@ -36,6 +36,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { layer as localLayer } from "../../src/local.ts";
+import { alwaysHoldsLayer } from "../support/polling.ts";
 import { runView } from "../../src/operator/projection.ts";
 import {
   LIVE_TEST_TIMEOUT,
@@ -73,7 +74,7 @@ describe("local worker", () => {
             command: process.execPath,
             args: [fileURLToPath(new URL("../fixtures/harness-unavailable.mjs", import.meta.url))],
           },
-        }).pipe(Layer.provide(credentialLayer));
+        }).pipe(Layer.provide(credentialLayer), Layer.provide(alwaysHoldsLayer));
         const error = yield* Effect.void.pipe(Effect.provide(runtime), Effect.flip);
         assert.strictEqual(error._tag, "WorkerCapabilityError");
         assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
@@ -558,6 +559,7 @@ describe("local worker", () => {
         });
         const runtime = localLayer(instance, config, [], { repositoryUrl: () => remote }).pipe(
           Layer.provide(credentialLayer),
+          Layer.provide(alwaysHoldsLayer),
         );
         yield* Effect.gen(function* () {
           yield* RunEngine;

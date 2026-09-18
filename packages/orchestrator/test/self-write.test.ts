@@ -48,7 +48,7 @@ import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
 import { Operator } from "../src/operator/operator.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
-import { inertLabelReconcilerLayer } from "./support/polling.ts";
+import { alwaysHoldsLayer, inertLabelReconcilerLayer } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const agent = new AgentFile({
@@ -194,7 +194,10 @@ describe("Board self-writes", () => {
             reserve: () => Effect.die("approval must precede worker reservation"),
             execute: () => Effect.die("approval must precede an Attempt"),
           });
-          const engine = localEngineLayer(directory).pipe(Layer.provide(executor));
+          const engine = localEngineLayer(directory).pipe(
+            Layer.provide(executor),
+            Layer.provide(alwaysHoldsLayer),
+          );
           const dependencies = Layer.mergeAll(
             engine,
             writer,

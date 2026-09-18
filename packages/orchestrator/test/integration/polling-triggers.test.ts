@@ -38,6 +38,7 @@ import {
 import { FetchHttpClient } from "effect/unstable/http";
 import { LabelReconciler } from "../../src/label-reconciler.ts";
 import { PollingTriggers } from "../../src/polling-triggers.ts";
+import { alwaysHoldsLayer } from "../support/polling.ts";
 
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
   Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
@@ -123,7 +124,10 @@ const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) =
     reserve: () => Effect.die("the approval-gated integration run must not reserve a worker"),
     execute: () => Effect.die("the approval-gated integration run must not execute"),
   });
-  const engine = localEngineLayer(directory).pipe(Layer.provide(executor));
+  const engine = localEngineLayer(directory).pipe(
+    Layer.provide(executor),
+    Layer.provide(alwaysHoldsLayer),
+  );
   const polling = GitHubPolling.layer.pipe(
     Layer.provide(Layer.succeed(GitHubApp, app)),
     Layer.provide(FetchHttpClient.layer),

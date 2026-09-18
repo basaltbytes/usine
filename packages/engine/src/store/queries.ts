@@ -687,23 +687,13 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
-  const revokeUnstarted = Effect.fn("RunStoreQueries.revokeUnstarted")(function* (
+  const revokeQueued = Effect.fn("RunStoreQueries.revokeQueued")(function* (
     loop: LoopName,
     itemKey: ItemKey,
   ) {
-    const rows = yield* decodeRunIds(
-      yield* database
-        .select({ runId: runs.runId })
-        .from(runs)
-        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-        .where(
-          and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey), unstartedState),
-        )
-        .execute(),
-    );
     const candidate = alias(triggerEvents, "candidate");
     const candidateRun = alias(runs, "candidate_run");
-    yield* database
+    const ignored = yield* database
       .insert(ignoredEvents)
       .select(
         database
@@ -722,7 +712,26 @@ export const queriesFor = (database: RunDatabaseClient) => {
           ),
       )
       .onConflictDoNothing()
+      .returning({ eventId: ignoredEvents.eventId })
       .execute();
+    return ignored.length;
+  });
+
+  const revokeUnstarted = Effect.fn("RunStoreQueries.revokeUnstarted")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+  ) {
+    const rows = yield* decodeRunIds(
+      yield* database
+        .select({ runId: runs.runId })
+        .from(runs)
+        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+        .where(
+          and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey), unstartedState),
+        )
+        .execute(),
+    );
+    yield* revokeQueued(loop, itemKey);
     return rows;
   });
 
@@ -750,6 +759,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     requestInterrupt,
     requestWorkflowCommand,
     revision,
+    revokeQueued,
     revokeUnstarted,
     runSummaries,
     itemRunSummaries,
