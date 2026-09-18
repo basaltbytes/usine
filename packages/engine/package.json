@@ -10,6 +10,7 @@
   },
   "files": [
     "dist",
+    "!dist/tsconfig.tsbuildinfo",
     "drizzle"
   ],
   "type": "module",
