@@ -15,6 +15,7 @@ import {
   LIVE_TEST_TIMEOUT,
   RUN_HOST,
   STATE_POLL_ATTEMPTS,
+  TOKEN,
   credentialLayer,
   localRuntime,
   makeRemote,
@@ -238,7 +239,13 @@ describe("local worker salvage", () => {
         const instance = InstanceDirectory.make(root);
         const remote = yield* makeRemote(root);
         const hook = `${remote}/hooks/pre-receive`;
-        yield* fileSystem.writeFileString(hook, "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+        // The hook inherits git's environment, so the remote's reply can echo the
+        // Attempt token the way a verbose transport error would.
+        yield* fileSystem.writeFileString(
+          hook,
+          '#!/bin/sh\necho "access revoked for $(cat "$USINE_GITHUB_TOKEN_FILE")" >&2\nexit 1\n',
+          { mode: 0o755 },
+        );
         const runtime = () => localRuntime(instance, remote, ["--stub-delay-ms", "60000"]);
         const saved = yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -252,12 +259,24 @@ describe("local worker salvage", () => {
           yield* fileSystem.writeFileString(`${worktree}/progress.txt`, "recover this work\n");
           yield* engine.cancel(accepted.runId);
           const salvage = yield* waitForSalvage(engine, accepted.runId);
-          assert.strictEqual(salvage._tag, "Retained");
+          assert(salvage._tag === "Retained");
+          // The remote's own words reach the record, not only git's exit code,
+          // and the token they echoed does not.
+          assert.include(salvage.message, "access revoked for [REDACTED]");
+          assert.notInclude(salvage.message, TOKEN);
           assert(yield* fileSystem.exists(worktree));
           return { runId: accepted.runId, worktree };
         }).pipe(Effect.provide(runtime()));
-        // A second startup during the outage must also retain the only copy.
-        yield* Effect.void.pipe(Effect.provide(runtime()));
+        // A second startup during the outage must also retain the only copy, and
+        // its reconcile rewrites the record with the reason that push failed too.
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const salvage = (yield* engine.inspect(saved.runId)).attempts[0]?.salvage;
+          assert(salvage !== undefined && Option.isSome(salvage));
+          assert(salvage.value._tag === "Retained");
+          assert.include(salvage.value.message, "access revoked for [REDACTED]");
+          assert.notInclude(salvage.value.message, TOKEN);
+        }).pipe(Effect.provide(runtime()));
         assert(yield* fileSystem.exists(saved.worktree));
         yield* fileSystem.remove(hook);
         yield* Effect.gen(function* () {

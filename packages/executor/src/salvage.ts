@@ -20,7 +20,7 @@ const SALVAGE_GIT_CONFIG = [
   "commit.gpgsign=false",
 ];
 
-export interface SalvageOptions<E> {
+export interface SalvageOptions<E extends Error> {
   readonly attemptId: AttemptId;
   readonly worker: WorkerName;
   readonly host: string;
@@ -34,13 +34,25 @@ export interface SalvageOptions<E> {
 const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
 
 /**
+ * The failure as the line an operator reads in the run drawer: its message, then
+ * the diagnostic underneath it. A failed executor command says only `git exited
+ * with code 128` and keeps git's stderr in its cause, which is what tells a
+ * deleted remote from a revoked App. The local adapter scrubs the Attempt's
+ * token from that stderr before forming the error; an exe.dev VM never holds one.
+ */
+const failureMessage = (failure: Error): string => {
+  const detail = failure.cause instanceof Error ? failure.cause.message.trim() : "";
+  return detail.length === 0 ? failure.message : `${failure.message}: ${detail}`;
+};
+
+/**
  * Preserves an unsuccessful Attempt's work before its worktree is removed:
  * commits everything left in the checkout and pushes HEAD to the Attempt's
  * salvage ref. A clean checkout at its base commit has nothing to salvage. A
  * failed push retains the worktree and reports its path instead. Never fails;
  * every skipped or failed stage is logged.
  */
-export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <E>(
+export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <E extends Error>(
   options: SalvageOptions<E>,
 ) {
   const fields = {
@@ -59,16 +71,13 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
     status: git(["status", "--porcelain", "--untracked-files=all"]),
   }).pipe(Effect.result);
   if (Result.isFailure(inspected)) {
+    const message = failureMessage(inspected.failure);
     yield* Effect.logError("Could not inspect the Attempt worktree for salvage", {
       ...fields,
-      message: String(inspected.failure),
+      message,
     });
     return Option.some<AttemptSalvage>(
-      new SalvageRetained({
-        path: options.worktree,
-        commit: options.baseCommit,
-        message: String(inspected.failure),
-      }),
+      new SalvageRetained({ path: options.worktree, commit: options.baseCommit, message }),
     );
   }
   const dirty = inspected.success.status.trim().length > 0;
@@ -94,31 +103,39 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
       Effect.result,
     );
     if (Result.isFailure(committed)) {
+      const message = failureMessage(committed.failure);
       yield* Effect.logError("Could not commit the Attempt's uncommitted changes", {
         ...fields,
-        message: String(committed.failure),
+        message,
       });
       return Option.some<AttemptSalvage>(
-        new SalvageRetained({
-          path: options.worktree,
-          commit: Option.some(commit),
-          message: String(committed.failure),
-        }),
+        new SalvageRetained({ path: options.worktree, commit: Option.some(commit), message }),
       );
     } else {
       commit = committed.success;
     }
   }
 
-  const pushed = yield* git([
+  // A stalled remote is reported in words: a bare `TimeoutError` tells the
+  // operator nothing about which step never finished.
+  const pushFailure = yield* git([
     "push",
     "--force",
     "--no-verify",
     "origin",
     `${commit}:refs/heads/${options.ref}`,
-  ]).pipe(Effect.timeout(PUSH_TIMEOUT), Effect.result);
-  if (Result.isFailure(pushed)) {
-    const message = String(pushed.failure);
+  ]).pipe(
+    Effect.timeoutOption(PUSH_TIMEOUT),
+    Effect.match({
+      onFailure: (failure) => Option.some(failureMessage(failure)),
+      onSuccess: Option.match({
+        onNone: () => Option.some(`git push did not finish within ${PUSH_TIMEOUT}`),
+        onSome: () => Option.none<string>(),
+      }),
+    }),
+  );
+  if (Option.isSome(pushFailure)) {
+    const message = pushFailure.value;
     yield* Effect.logError("Salvage push failed; retaining the Attempt worktree", {
       ...fields,
       ref: options.ref,

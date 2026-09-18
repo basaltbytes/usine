@@ -25,7 +25,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { LIVE_TEST_TIMEOUT, RUN_HOST, makeRemote, testAgent } from "./support.ts";
 
 it.effect(
-  "existing child environments read renewed Git and gh credentials after three hours",
+  "renewed Git and gh credentials reach existing child environments and the salvage push after three hours",
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -44,10 +44,16 @@ it.effect(
           }),
       });
       let environment: ChildProcess.CommandOptions["env"] = {};
+      let pushToken: string | undefined;
       const capturing = ChildProcessSpawner.make(
         Effect.fn("test.captureEnvironment")(function* (command) {
-          if (command._tag === "StandardCommand" && command.command === "git")
+          if (command._tag === "StandardCommand" && command.command === "git") {
             environment = { ...command.options.env };
+            // The token file is removed with the Attempt scope; read it while the push runs.
+            const tokenFile = command.options.env?.USINE_GITHUB_TOKEN_FILE;
+            if (command.args.includes("push") && tokenFile !== undefined)
+              pushToken = yield* fs.readFileString(tokenFile);
+          }
           return yield* spawner.spawn(command);
         }),
       );
@@ -116,7 +122,19 @@ it.effect(
           }),
         );
         assert.strictEqual(ghToken.trim(), `test-token-${minted}`);
-        yield* Scope.close(scope, Exit.void);
+        yield* fs.writeFileString(`${prepared.workspace.worktree}/progress.md`, "half done\n");
+        yield* Scope.close(scope, Exit.fail("the Attempt ended without success"));
+        assert.strictEqual(pushToken, `test-token-${minted}`);
+        const salvaged = yield* spawner.string(
+          ChildProcess.make("git", [
+            "--git-dir",
+            remote,
+            "ls-tree",
+            "--name-only",
+            "usine/salvage/renew/1",
+          ]),
+        );
+        assert(salvaged.includes("progress.md"));
         assert(!(yield* fs.exists(configuration)));
         const releasedCount = minted;
         yield* TestClock.adjust("2 hours");

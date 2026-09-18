@@ -3,7 +3,9 @@ import { AttemptId } from "@usine/core/attempt";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Option } from "effect";
+import { Effect, Fiber, Option } from "effect";
+import { TestClock } from "effect/testing";
+import { ExecutorOperationError } from "../src/executor.ts";
 import { salvageWorktree } from "../src/salvage.ts";
 
 const BASE = CommitSha.make("a".repeat(40));
@@ -18,8 +20,15 @@ interface Scripted {
   readonly inspect?: "fails";
   readonly add?: "fails";
   readonly commit?: "fails";
-  readonly push?: "fails";
+  readonly push?: "fails" | "stalls";
 }
+
+/** What a failed git command looks like from an adapter: the exit code as the message, git's stderr as the cause. */
+const PUSH_REJECTED = new ExecutorOperationError({
+  operation: "cleanup",
+  message: "git exited with code 128",
+  cause: new Error("remote: Repository not found.\n"),
+});
 
 /** A git that answers from the script and records every call, in order. */
 const fakeGit = (script: Scripted) => {
@@ -46,9 +55,8 @@ const fakeGit = (script: Scripted) => {
         return Effect.succeed("");
       }
       if (command[0] === "push") {
-        return script.push === "fails"
-          ? Effect.fail(new Error("remote rejected"))
-          : Effect.succeed("");
+        if (script.push === "fails") return Effect.fail(PUSH_REJECTED);
+        return script.push === "stalls" ? Effect.never : Effect.succeed("");
       }
       return Effect.die(`unexpected git ${command.join(" ")}`);
     });
@@ -144,7 +152,7 @@ describe("salvageWorktree", () => {
       }),
   );
 
-  it.effect("reports the retained worktree when the push fails", () =>
+  it.effect("reports the retained worktree and git's own diagnostic when the push fails", () =>
     Effect.gen(function* () {
       const { result } = yield* salvage({
         head: () => AHEAD,
@@ -154,7 +162,21 @@ describe("salvageWorktree", () => {
       assert(Option.isSome(result) && result.value._tag === "Retained");
       assert.strictEqual(result.value.path, WORKTREE);
       assert.deepStrictEqual(result.value.commit, Option.some(SNAPSHOT));
-      assert(result.value.message.includes("remote rejected"));
+      // The exit code alone cannot tell a deleted remote from a revoked App.
+      assert.include(result.value.message, "git exited with code 128");
+      assert.include(result.value.message, "remote: Repository not found.");
+    }),
+  );
+
+  it.effect("names the stalled push instead of a bare timeout", () =>
+    Effect.gen(function* () {
+      const fiber = yield* Effect.forkChild(
+        salvage({ head: () => AHEAD, status: "", push: "stalls" }),
+      );
+      yield* TestClock.adjust("2 minutes");
+      const { result } = yield* Fiber.join(fiber);
+      assert(Option.isSome(result) && result.value._tag === "Retained");
+      assert.include(result.value.message, "git push did not finish");
     }),
   );
 });
