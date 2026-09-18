@@ -8,7 +8,7 @@ import {
   type AgentSession,
 } from "@usine/core/agent/session";
 import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
-import { Deferred, Effect, Fiber } from "effect";
+import { Deferred, Effect, Fiber, Option } from "effect";
 import { AgentResultError } from "../../src/runtime.ts";
 import { sessionChannel } from "../../src/pi/session.ts";
 import { sessionConversation } from "../../src/pi/conversation.ts";
@@ -40,8 +40,10 @@ const conversation = (session: AgentSession) =>
       beforeFinish: Effect.void,
     });
     const result = yield* Deferred.await(channel.result).pipe(Effect.forkChild);
-    return { ...controls, result, turns };
+    return { ...controls, childBlocked: channel.childBlocked, result, turns };
   });
+const blockedChild = (id: string, message: string) =>
+  new AgentResultError({ sessionId: Option.some(AgentSessionId.make(id)), message });
 
 describe("session supervision", () => {
   it.effect("fails a held child's unresolved blocker only when the operator releases it", () =>
@@ -91,6 +93,60 @@ describe("session supervision", () => {
       const error = yield* Fiber.join(session.result).pipe(Effect.flip);
       assert(error instanceof AgentResultError);
       assert.match(error.message, /without details/u);
+    }),
+  );
+
+  it.effect("fails a parent that paraphrases the blocker its child returned", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(parent);
+      yield* session.childBlocked(
+        child("blocked"),
+        blockedChild("blocked", "Publishing permission denied."),
+      );
+      yield* session.finish("The delegated attempt reported a permissions problem.");
+      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
+      assert(error instanceof AgentResultError);
+      assert.strictEqual(error.message, "Publishing permission denied.");
+      assert.deepStrictEqual(error.sessionId, Option.some(AgentSessionId.make("blocked")));
+    }),
+  );
+
+  it.effect("keeps a parent's own blocker ahead of the one its child returned", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(parent);
+      yield* session.childBlocked(
+        child("blocked"),
+        blockedChild("blocked", "Publishing permission denied."),
+      );
+      yield* session.finish("[usine:blocked] Cannot publish; permission denied on the remote.");
+      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
+      assert(error instanceof AgentResultError);
+      assert.strictEqual(error.message, "Cannot publish; permission denied on the remote.");
+      assert.deepStrictEqual(error.sessionId, Option.some(parent.id));
+    }),
+  );
+
+  it.effect("keeps the first child blocker when a later child also blocks", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(parent);
+      yield* session.childBlocked(
+        child("publishing"),
+        blockedChild("publishing", "Publishing permission denied."),
+      );
+      yield* session.childBlocked(child("tests"), blockedChild("tests", "Database unavailable."));
+      yield* session.finish("Documentation checked; publishing and tests had problems.");
+      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
+      assert(error instanceof AgentResultError);
+      assert.strictEqual(error.message, "Publishing permission denied.");
+      assert.deepStrictEqual(error.sessionId, Option.some(AgentSessionId.make("publishing")));
+    }),
+  );
+
+  it.effect("completes a parent whose children all returned ordinary reports", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(parent);
+      yield* session.finish("Done.");
+      assert.strictEqual((yield* Fiber.join(session.result)).message, "Done.");
     }),
   );
 

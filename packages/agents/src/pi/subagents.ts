@@ -14,11 +14,13 @@ import {
   ChildSessionCount,
   SessionFinished,
 } from "@usine/core/agent/session";
-import { Effect, Exit, Fiber, Stream } from "effect";
+import { Effect, Exit, Fiber, Result, Stream } from "effect";
 import { Type } from "typebox";
 import { assembleChildPrompt } from "../prompt.ts";
 import {
+  AgentResultError,
   type AgentSessionError,
+  BLOCKED_MARKER,
   type ChildBackend,
   ChildRequest,
   ChildSessionBudgetExceededError,
@@ -29,6 +31,8 @@ import {
 export interface SubagentsExtensionOptions {
   readonly agent: Agent;
   readonly backend: ChildBackend["Service"];
+  /** Records a child's blocked report on the parent channel before the tool returns it. */
+  readonly childBlocked: (session: ChildSession, error: AgentResultError) => Effect.Effect<void>;
   readonly cwd: WorkingDirectory;
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly maxChildren: ChildSessionBudget;
@@ -138,20 +142,39 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
           }).pipe(Effect.andThen(options.emit(new SessionFinished({ session: child.session }))))
         : Effect.void,
     );
-    const forward = yield* child.events.pipe(Stream.runForEach(options.emit), Effect.forkScoped);
-    const result = yield* Effect.raceFirst(
-      child.result,
+    // The child's result carries the same AgentResultError that ends its stream.
+    const forward = yield* child.events.pipe(
+      Stream.runForEach(options.emit),
+      Effect.catchTag("AgentResultError", () => Effect.void),
+      Effect.forkScoped,
+    );
+    const outcome = yield* Effect.raceFirst(
+      child.result.pipe(
+        Effect.map(Result.succeed),
+        Effect.catchTag("AgentResultError", (error) => Effect.succeed(Result.fail(error))),
+      ),
       interrupted(signal, request.session.id).pipe(
         Effect.andThen(child.interrupt),
         Effect.andThen(Effect.interrupt),
       ),
     );
     yield* Fiber.join(forward);
-    yield* Effect.logInfo("Child session returned to Pi parent", {
-      sessionId: request.session.id,
+    const text = yield* Result.match(outcome, {
+      onFailure: (error) =>
+        Effect.logInfo("Child session returned a failed report to Pi parent", {
+          sessionId: request.session.id,
+        }).pipe(
+          Effect.andThen(options.childBlocked(session, error)),
+          Effect.andThen(options.emit(new SessionFinished({ session: child.session }))),
+          Effect.as(`${BLOCKED_MARKER}\n${error.message}`),
+        ),
+      onSuccess: (result) =>
+        Effect.logInfo("Child session returned to Pi parent", {
+          sessionId: request.session.id,
+        }).pipe(Effect.as(result.message)),
     });
     const report: AgentToolResult<SpawnDetails> = {
-      content: [{ type: "text", text: result.message }],
+      content: [{ type: "text", text }],
       details: { childSessionId: request.session.id },
     };
     onUpdate?.(report);
@@ -167,6 +190,7 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
         promptSnippet: "Delegate a focused task to an isolated child agent.",
         promptGuidelines: [
           "Delegate only independent, focused work; the child cannot create more children.",
+          `When a child's report starts with ${BLOCKED_MARKER}, return that report verbatim as your own final answer instead of summarising it.`,
         ],
         parameters: Type.Object(
           { task: Type.String({ minLength: 1 }) },
