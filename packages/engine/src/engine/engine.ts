@@ -32,6 +32,7 @@ import {
   runIdFor,
 } from "../workflow/workflow.ts";
 import { StepExecutor } from "../step-executor.ts";
+import { TriggerCondition } from "../trigger-condition.ts";
 import { CursorStore } from "../cursor/cursor.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
@@ -43,6 +44,7 @@ const makeRunEngine = Effect.gen(function* () {
   const store = yield* RunStore;
   const admission = yield* AttemptAdmission;
   const stepExecutor = yield* StepExecutor;
+  const condition = yield* TriggerCondition;
   const workflowEngine = yield* WorkflowEngine.WorkflowEngine;
   const provideWorkflowEngine = <A, E>(
     effect: Effect.Effect<A, E, WorkflowEngine.WorkflowEngine>,
@@ -70,7 +72,10 @@ const makeRunEngine = Effect.gen(function* () {
   });
 
   const deliverContinuation = Effect.fn("RunEngine.deliverContinuation")(function* (runId: RunId) {
-    yield* continueWithNewest(store, runId).pipe(provideWorkflowEngine);
+    yield* continueWithNewest(store, runId).pipe(
+      Effect.provideService(TriggerCondition, condition),
+      provideWorkflowEngine,
+    );
   });
 
   const awaitWorkflowSettlement = Effect.fn("RunEngine.awaitWorkflowSettlement")(function* (
@@ -318,7 +323,8 @@ export class RunEngine extends Context.Service<
  * Provides Run execution and recovery on the supplied database.
  * `database` must supply Drizzle and Effect SQL clients for the same database,
  * so Run records and pending execution remain together across restarts.
- * The deployment supplies `Crypto` and the Worker implementation through `StepExecutor`.
+ * The deployment supplies `Crypto`, the Worker implementation through `StepExecutor`,
+ * and the trigger re-check for queued Events through `TriggerCondition`.
  */
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,
@@ -333,7 +339,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   | RunEngine
   | RunReader,
   RunEngineError | DatabaseError,
-  Crypto.Crypto | StepExecutor | DatabaseRequirements
+  Crypto.Crypto | StepExecutor | TriggerCondition | DatabaseRequirements
 > => {
   const store = RunStore.layer.pipe(
     Layer.provide(database),

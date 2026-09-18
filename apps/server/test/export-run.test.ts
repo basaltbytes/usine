@@ -24,6 +24,7 @@ import { RunEngine, Submission } from "@usine/engine/engine";
 import { layer } from "@usine/engine/local-sqlite";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
+import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { DateTime, Effect, Layer, Option, Schema } from "effect";
 import { assert, describe, expect, it } from "vitest";
@@ -133,7 +134,14 @@ const seed = (directory: string) =>
     );
     assert(waiting._tag === "Claimed");
     return { snapshot, transcript, waitingSnapshot: yield* reader.inspect(waiting.runId) };
-  }).pipe(Effect.provide(layer(InstanceDirectory.make(directory)).pipe(Layer.provide(executor))));
+  }).pipe(
+    Effect.provide(
+      layer(InstanceDirectory.make(directory)).pipe(
+        Layer.provide(executor),
+        Layer.provide(Layer.succeed(TriggerCondition)({ holds: () => Effect.succeed(true) })),
+      ),
+    ),
+  );
 
 const runCli = (directory: string, args: ReadonlyArray<string>) =>
   spawnSync(process.execPath, [cli, ...args], {

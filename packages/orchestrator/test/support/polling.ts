@@ -5,6 +5,7 @@ import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { RunEngine } from "@usine/engine/engine";
 import { ItemProjectionWriter } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
+import { TriggerCondition } from "@usine/engine/trigger-condition";
 import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
@@ -18,6 +19,11 @@ import { PollingTriggers } from "../../src/polling-triggers.ts";
 
 export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
   upsert: () => Effect.succeed(true),
+});
+
+/** A queued Event always keeps its turn: the engine's pre-check behavior. */
+export const alwaysHoldsLayer = Layer.succeed(TriggerCondition)({
+  holds: () => Effect.succeed(true),
 });
 
 export const emptyCycleBudgets: CycleBudgets["Service"] = {

@@ -13,7 +13,18 @@ import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
-import { and, asc, desc, eq, inArray, isNull, ne, notInArray, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  inArray,
+  isNull,
+  ne,
+  notInArray,
+  sql,
+  type SQLWrapper,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import { Array as EffectArray, DateTime, Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
@@ -61,6 +72,12 @@ import {
 } from "./codec.ts";
 
 import { transcriptQueries } from "./transcript.ts";
+
+/** The newest queued submission and the exact Events observed alongside it. */
+export interface QueuedEvents {
+  readonly submission: Submission;
+  readonly eventIds: ReadonlyArray<EventId>;
+}
 
 const newestRunFirst = (left: RunRow, right: RunRow) =>
   DateTime.toEpochMillis(right.openedAt) - DateTime.toEpochMillis(left.openedAt) ||
@@ -620,7 +637,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   const nextQueued = Effect.fn("RunStoreQueries.nextQueued")(function* (runId: RunId) {
     const routes = yield* eventRouteByRun(runId);
     const current = routes[0];
-    if (current === undefined) return Option.none<Submission>();
+    if (current === undefined) return Option.none<QueuedEvents>();
     const queuedRows = yield* database
       .select(eventRouteSelection)
       .from(events)
@@ -637,10 +654,14 @@ export const queriesFor = (database: RunDatabaseClient) => {
         ),
       )
       .orderBy(desc(events.receivedAt))
-      .limit(1)
       .execute();
     const queued = yield* decodeEventRoutes(queuedRows);
-    return Option.fromNullishOr(queued[0]).pipe(Option.map(submissionFromRow));
+    return Option.fromNullishOr(queued[0]).pipe(
+      Option.map((newest): QueuedEvents => ({
+        submission: submissionFromRow(newest),
+        eventIds: queued.map((row) => row.eventId),
+      })),
+    );
   });
 
   const recoverable = Effect.fn("RunStoreQueries.recoverable")(function* () {
@@ -687,6 +708,38 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .execute();
   });
 
+  const revokeQueued = Effect.fn("RunStoreQueries.revokeQueued")(function* (
+    loop: LoopName,
+    itemKey: ItemKey,
+    eventIds: ReadonlyArray<EventId> | SQLWrapper,
+  ) {
+    const candidate = alias(triggerEvents, "candidate");
+    const candidateRun = alias(runs, "candidate_run");
+    const ignored = yield* database
+      .insert(ignoredEvents)
+      .select(
+        database
+          .select({
+            eventId: candidate.eventId,
+            reason: sql<"revoked">`'revoked'`.as("reason"),
+          })
+          .from(candidate)
+          .leftJoin(candidateRun, eq(candidateRun.eventId, candidate.eventId))
+          .where(
+            and(
+              eq(candidate.loopName, loop),
+              eq(candidate.itemKey, itemKey),
+              inArray(candidate.eventId, eventIds),
+              isNull(candidateRun.runId),
+            ),
+          ),
+      )
+      .onConflictDoNothing()
+      .returning({ eventId: ignoredEvents.eventId })
+      .execute();
+    return ignored.length;
+  });
+
   const revokeUnstarted = Effect.fn("RunStoreQueries.revokeUnstarted")(function* (
     loop: LoopName,
     itemKey: ItemKey,
@@ -701,28 +754,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
         )
         .execute(),
     );
-    const candidate = alias(triggerEvents, "candidate");
-    const candidateRun = alias(runs, "candidate_run");
-    yield* database
-      .insert(ignoredEvents)
-      .select(
-        database
-          .select({
-            eventId: candidate.eventId,
-            reason: sql<"revoked">`'revoked'`.as("reason"),
-          })
-          .from(candidate)
-          .leftJoin(candidateRun, eq(candidateRun.eventId, candidate.eventId))
-          .where(
-            and(
-              eq(candidate.loopName, loop),
-              eq(candidate.itemKey, itemKey),
-              isNull(candidateRun.runId),
-            ),
-          ),
-      )
-      .onConflictDoNothing()
-      .execute();
+    const queued = database
+      .select({ eventId: triggerEvents.eventId })
+      .from(triggerEvents)
+      .where(and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey)));
+    yield* revokeQueued(loop, itemKey, queued);
     return rows;
   });
 
@@ -750,6 +786,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     requestInterrupt,
     requestWorkflowCommand,
     revision,
+    revokeQueued,
     revokeUnstarted,
     runSummaries,
     itemRunSummaries,

@@ -3,9 +3,12 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ModelId } from "@usine/core/agent/brain";
 import { AgentName, AgentPersona } from "@usine/core/agent";
+import { ItemKey } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
+import { StepResult } from "@usine/core/step/result";
+import { WorkerName } from "@usine/core/worker";
 import { AgentFile } from "@usine/config/agent";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { IssueTrigger, PullRequestTrigger } from "@usine/config/trigger";
@@ -25,7 +28,9 @@ import {
   type ItemProjection,
 } from "@usine/engine/item-projection";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
+import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
+import type { TriggerCondition } from "@usine/engine/trigger-condition";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Source } from "@usine/expression/expression-engine";
@@ -66,7 +71,9 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { PollingTriggers } from "../src/polling-triggers.ts";
+import { triggerConditionLayer } from "../src/trigger-condition.ts";
 import {
+  alwaysHoldsLayer,
   inertGitHubLabelWriterLayer,
   inertLabelReconcilerLayer,
   itemProjectionWriterLayer,
@@ -160,7 +167,7 @@ interface RemoteState {
 const waitForState = Effect.fn("test.waitForState")(function* (
   engine: RunEngine["Service"],
   runId: RunId,
-  tag: "Canceled" | "Waiting",
+  tag: "Canceled" | "Running" | "Succeeded" | "Waiting",
 ) {
   for (let poll = 0; poll < 500; poll += 1) {
     const snapshot = yield* engine.inspect(runId);
@@ -176,15 +183,24 @@ const claimedRun = (cycle: Effect.Success<ReturnType<PollingTriggers["Service"][
   return submission.runId;
 };
 
-const runtimeLayer = (directory: InstanceDirectory, github: GitHubPolling["Service"]) => {
-  const executor = Layer.succeed(StepExecutor)({
-    recover: () => Effect.void,
-    intervene: () => Effect.void,
-    interrupt: () => Effect.void,
-    reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
-    execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
-  });
-  const engine = localEngineLayer(directory).pipe(Layer.provide(executor));
+const gatedExecutor = Layer.succeed(StepExecutor)({
+  recover: () => Effect.void,
+  intervene: () => Effect.void,
+  interrupt: () => Effect.void,
+  reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
+  execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
+});
+
+const runtimeLayer = (
+  directory: InstanceDirectory,
+  github: GitHubPolling["Service"],
+  executor: Layer.Layer<StepExecutor> = gatedExecutor,
+  condition: Layer.Layer<TriggerCondition> = alwaysHoldsLayer,
+) => {
+  const engine = localEngineLayer(directory).pipe(
+    Layer.provide(executor),
+    Layer.provide(condition),
+  );
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
   const dependencies = Layer.mergeAll(
     engine,
@@ -316,6 +332,135 @@ describe("PollingTriggers", () => {
         yield* polling.poll(instance);
         assert.strictEqual(snapshots, 5);
       }).pipe(Effect.provide(runtimeLayer(directory, github)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("opens exactly one finish Run when the finisher pushes before it relabels", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-finisher-" }),
+      );
+      const loop = new LoopFile({
+        ...issueLoop("finish-pr"),
+        trigger: new PullRequestTrigger({
+          on: "pr",
+          if: Source.make(
+            'item.state == "OPEN" && !item.labels.nodes.exists(label, label.name == "ready-to-merge") && item.labels.nodes.exists(label, label.name == "review-passed")',
+          ),
+        }),
+        approval: "none",
+        body: PromptTemplate.make("Finish pull request {{ item.number }}."),
+      });
+      const instance = instanceWith([loop]);
+      // The PR as GitHub reports it; the finisher Run mutates it mid-flight.
+      const remote = { head: "a", labels: ["review-passed"] };
+      let snapshots = 0;
+      const github: GitHubPolling["Service"] = {
+        labels: () => Effect.succeed(emptyLabelCatalog),
+        changes: (repository, cursor) =>
+          Effect.succeed(
+            repository === watchedRepository
+              ? new RepositoryChanges({
+                  cursor,
+                  items: [
+                    new ChangedPullRequest({
+                      number: 162,
+                      updatedAt: DateTime.makeUnsafe("2026-09-18T04:08:10Z"),
+                    }),
+                  ],
+                  backlog: false,
+                  nextPollAt: Option.none(),
+                })
+              : new RepositoryNotModified({ cursor, nextPollAt: Option.none() }),
+          ),
+        snapshot: () =>
+          Effect.sync(() => {
+            snapshots += 1;
+            const relabeled = remote.labels.includes("ready-to-merge");
+            return new PullRequestSnapshot({
+              contentHash: ContentHash.make(`${remote.head}${relabeled ? "f" : "0"}`.repeat(32)),
+              payload: Schema.decodeUnknownSync(PullRequestPayload)({
+                ...issuePayload(remote.labels, 162),
+                state: "OPEN",
+                mergeable: "MERGEABLE",
+                mergeStateStatus: "CLEAN",
+                isDraft: false,
+                merged: false,
+                mergedAt: null,
+                baseRefName: "main",
+                headRefName: "fix/162",
+                headRefOid: remote.head.repeat(40),
+                additions: 1,
+                deletions: 0,
+                changedFiles: 1,
+                reviewDecision: null,
+                statusCheckRollup: null,
+                reviewThreads: { totalCount: 0, nodes: [] },
+                reviewRequests: { totalCount: 0, nodes: [] },
+                reviews: { totalCount: 0, nodes: [] },
+                closingIssuesReferences: { totalCount: 0, nodes: [] },
+              }),
+            });
+          }),
+      };
+      const finishing = yield* Deferred.make<void>();
+      let executions = 0;
+      const executor = Layer.succeed(StepExecutor)({
+        recover: () => Effect.void,
+        intervene: () => Effect.void,
+        interrupt: () => Effect.void,
+        reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+        execute: () =>
+          Effect.gen(function* () {
+            executions += 1;
+            if (executions > 1) return yield* Effect.die("a second finish Run must not start");
+            yield* Deferred.await(finishing);
+            return new StepResult({ message: "Finished", facts: [] });
+          }),
+      });
+      const condition = triggerConditionLayer(instance).pipe(
+        Layer.provide(Layer.succeed(GitHubPolling, github)),
+        Layer.provide(MarcbachmannCelLayer),
+      );
+
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const engine = yield* RunEngine;
+        const reader = yield* RunReader;
+        const itemKey = ItemKey.make(JSON.stringify(["github", watchedRepository, 162]));
+
+        const reviewPassed = yield* polling.poll(instance);
+        const finishRun = claimedRun(reviewPassed);
+        yield* waitForState(engine, finishRun, "Running");
+
+        // The finisher pushes its fix; the poll between the push and the
+        // relabel sees new content with review-passed still set.
+        remote.head = "b";
+        const pushed = yield* polling.poll(instance);
+        assert.strictEqual(pushed.submissions[0]?._tag, "Queued");
+
+        // The finisher relabels and exits before the next poll.
+        remote.labels = ["ready-to-merge"];
+        const beforeClose = snapshots;
+        yield* Deferred.succeed(finishing, undefined);
+        yield* waitForState(engine, finishRun, "Succeeded");
+        for (let poll = 0; poll < 500 && snapshots === beforeClose; poll += 1) {
+          yield* Effect.sleep("10 millis");
+        }
+        // The queued Event was re-checked against the relabeled PR, not opened.
+        assert.strictEqual(snapshots, beforeClose + 1);
+
+        const relabeled = yield* polling.poll(instance);
+        assert.strictEqual(relabeled.submissions.length, 0);
+        assert.strictEqual(relabeled.revokedRuns, 0);
+        const runs = yield* reader.forItems([itemKey]);
+        assert.deepStrictEqual(
+          runs.map(({ run }) => run.id),
+          [finishRun],
+        );
+        assert.strictEqual(executions, 1);
+      }).pipe(Effect.provide(runtimeLayer(directory, github, executor, condition)));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

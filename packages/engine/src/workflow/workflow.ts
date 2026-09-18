@@ -10,6 +10,7 @@ import { StepResult } from "@usine/core/step/result";
 import { Effect, Option, Result, Schema } from "effect";
 import { DurableDeferred, Workflow, WorkflowEngine } from "effect/unstable/workflow";
 import { StepExecutor } from "../step-executor.ts";
+import { TriggerCondition } from "../trigger-condition.ts";
 import { AttemptAdmission } from "./admission.ts";
 import { AttemptRecoveryFailed, RunStore } from "../store/store.ts";
 import {
@@ -49,23 +50,58 @@ const asAttemptFailure = <A, R>(
 
 const executionId = (submission: Submission) => DurableRun.executionId({ submission });
 
+/**
+ * Gives the newest queued Event its turn once the Run ahead of it closed. The
+ * trigger is re-evaluated against the Item's current state first, because the
+ * queued Event may describe state the closed Run itself changed.
+ */
 export const continueWithNewest: (
   store: RunStore["Service"],
   completedRunId: RunId,
-) => Effect.Effect<void, RunStoreError, WorkflowEngine.WorkflowEngine> = Effect.fn(
-  "DurableRun.continueWithNewest",
-)(function* (store: RunStore["Service"], completedRunId: RunId) {
-  const queued = yield* store.nextQueued(completedRunId);
-  if (Option.isSome(queued)) {
-    const nextExecutionId = yield* executionId(queued.value);
-    const runId = RunId.make(nextExecutionId);
-    const claimed = yield* store.claimQueued(queued.value, runId);
-    if (Option.isSome(claimed)) {
-      yield* DurableRun.execute({ submission: claimed.value.submission }, { discard: true });
+) => Effect.Effect<void, RunStoreError, TriggerCondition | WorkflowEngine.WorkflowEngine> =
+  Effect.fn("DurableRun.continueWithNewest")(function* (
+    store: RunStore["Service"],
+    completedRunId: RunId,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId: completedRunId });
+    const queued = yield* store.nextQueued(completedRunId);
+    if (Option.isSome(queued)) {
+      const condition = yield* TriggerCondition;
+      const submission = queued.value.submission;
+      const fields = {
+        completedRunId,
+        eventId: submission.event.id,
+        loop: submission.loop,
+        itemKey: submission.itemKey,
+      };
+      if (yield* condition.holds(submission)) {
+        const runId = RunId.make(yield* executionId(submission));
+        const claimed = yield* store.claimQueued(submission, runId);
+        if (Option.isSome(claimed)) {
+          yield* Effect.logInfo("Queued Event still matches its trigger; opening its Run", {
+            ...fields,
+            runId: claimed.value.runId,
+          });
+          yield* DurableRun.execute({ submission: claimed.value.submission }, { discard: true });
+        } else {
+          // The Item moved on during the check: the Event was ignored, another
+          // Run opened for the Item, or a cycle reset superseded the Event.
+          yield* Effect.logInfo(
+            "Queued Event still matches its trigger but could no longer be claimed; no Run opened",
+            fields,
+          );
+        }
+      } else {
+        // Only the queue observed before the remote check belongs to this result.
+        const revoked = yield* store.revokeQueued(queued.value);
+        yield* Effect.logInfo("Queued Event no longer matches its trigger; revoked", {
+          ...fields,
+          revokedEvents: revoked,
+        });
+      }
     }
-  }
-  yield* store.completeWorkflowCommand(completedRunId, "Continue");
-});
+    yield* store.completeWorkflowCommand(completedRunId, "Continue");
+  });
 
 const executeAttempt = Effect.fn("DurableRun.attempt")(function* (
   runId: RunId,

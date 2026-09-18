@@ -7,7 +7,7 @@ import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { Layer } from "effect";
 import { stepExecutorLayer } from "./scheduler.ts";
 
-/** The full engine composition for a local orchestrator driving exe.dev Workers; brains are the instance roster checked at startup. */
+/** The full engine composition for a local orchestrator driving exe.dev Workers; brains are the instance roster checked at startup. The caller provides the `TriggerCondition` that re-checks queued Events. */
 export const layer = (
   instanceDirectory: InstanceDirectory,
   config: UsineConfig,

@@ -122,8 +122,12 @@ describe("Item cycle budgets", () => {
           yield* store.finishAttempt(started.execution.attempt, success);
           const eligible = yield* store.nextQueued(idFor(running));
           assert(Option.isSome(eligible));
-          assert.strictEqual(eligible.value.event.id, fresh.event.id);
-          assert(Option.isSome(yield* store.claimQueued(eligible.value, idFor(eligible.value))));
+          assert.strictEqual(eligible.value.submission.event.id, fresh.event.id);
+          assert(
+            Option.isSome(
+              yield* store.claimQueued(eligible.value.submission, idFor(eligible.value.submission)),
+            ),
+          );
         }),
       ),
     ),
@@ -185,11 +189,18 @@ describe("Item cycle budgets", () => {
               const store = yield* RunStore;
               const queued = yield* store.nextQueued(idFor(third));
               assert(Option.isSome(queued));
-              assert.deepStrictEqual(queued.value.cycleLimit, Option.some(CycleLimit.make(3)));
-              assert(Option.isNone(yield* store.claimQueued(queued.value, idFor(queued.value))));
+              assert.deepStrictEqual(
+                queued.value.submission.cycleLimit,
+                Option.some(CycleLimit.make(3)),
+              );
+              assert(
+                Option.isNone(
+                  yield* store.claimQueued(queued.value.submission, idFor(queued.value.submission)),
+                ),
+              );
               assert.strictEqual((yield* (yield* CycleBudgets).asks())[0]?.completedCycles, 3);
               const tick = yield* store.nextQueued(idFor(scheduled));
-              assert(Option.isSome(tick) && Option.isNone(tick.value.cycleLimit));
+              assert(Option.isSome(tick) && Option.isNone(tick.value.submission.cycleLimit));
             }),
           );
         }),

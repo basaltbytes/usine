@@ -37,7 +37,7 @@ import { StepExecution } from "../step-executor.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import type { WorkflowCommand } from "../workflow/command.ts";
 import { persistence, submissionFromRow, type WorkflowCommandRow } from "./codec.ts";
-import { queriesFor } from "./queries.ts";
+import { queriesFor, type QueuedEvents } from "./queries.ts";
 import {
   beginAttempt as decideBeginAttempt,
   cancelRun,
@@ -502,6 +502,12 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("revoke run"));
 
+  const revokeQueued = Effect.fn("RunStore.revokeQueued")(function* (queued: QueuedEvents) {
+    const { loop, itemKey, event } = queued.submission;
+    yield* Effect.annotateCurrentSpan({ loop, itemKey, eventId: event.id });
+    return yield* queries.revokeQueued(loop, itemKey, queued.eventIds);
+  }, persistence("revoke queued Events"));
+
   const claimQueued = Effect.fn("RunStore.claimQueued")(function* (
     submission: Submission,
     runId: RunId,
@@ -618,6 +624,7 @@ const makeRunStore = Effect.gen(function* () {
     resolveFailure,
     retry,
     revoke,
+    revokeQueued,
     snapshot: (runId: RunId) => queries.snapshot(runId).pipe(persistence("read run")),
     transcript,
   } as const;
@@ -658,7 +665,9 @@ export class RunStore extends Context.Service<
       attempt: Attempt,
       result: Result.Result<StepResult, AttemptFailure>,
     ) => Effect.Effect<FinishDecision, RunStoreError>;
-    readonly nextQueued: (runId: RunId) => Effect.Effect<Option.Option<Submission>, RunStoreError>;
+    readonly nextQueued: (
+      runId: RunId,
+    ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
     readonly parkForApproval: (runId: RunId) => Effect.Effect<void, RunStoreError>;
     readonly pendingWorkflowCommands: Effect.Effect<
       ReadonlyArray<WorkflowCommandRow>,
@@ -692,6 +701,8 @@ export class RunStore extends Context.Service<
       loop: LoopName,
       itemKey: ItemKey,
     ) => Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
+    /** Revokes only observed Events that remain unclaimed; preserves later arrivals and returns the count. */
+    readonly revokeQueued: (queued: QueuedEvents) => Effect.Effect<number, RunStoreError>;
     readonly snapshot: (runId: RunId) => Effect.Effect<RunSnapshot, RunStoreError>;
     readonly transcript: (
       query: TranscriptQuery,

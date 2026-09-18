@@ -38,6 +38,7 @@ import { FetchHttpClient } from "effect/unstable/http";
 import { gitHubCredentialLayer } from "../../src/credentials.ts";
 import { LabelReconciler } from "../../src/label-reconciler.ts";
 import { PollingTriggers } from "../../src/polling-triggers.ts";
+import { triggerConditionLayer } from "../../src/trigger-condition.ts";
 import { BrainSpec } from "@usine/core/agent/brain";
 import { layer as localWorkerLayer } from "../../src/local.ts";
 
@@ -182,6 +183,15 @@ const runtimeLayer = (
     Layer.provide(FetchHttpClient.layer),
   );
   const credentials = gitHubCredentialLayer(instance.config).pipe(Layer.provide(app));
+  const polling = GitHubPolling.layer.pipe(
+    Layer.provide(app),
+    Layer.provide(FetchHttpClient.layer),
+    Layer.provide(NodeServices.layer),
+  );
+  const triggerCondition = triggerConditionLayer(instance).pipe(
+    Layer.provide(polling),
+    Layer.provide(MarcbachmannCelLayer),
+  );
   const engine = localWorkerLayer(
     runtimeDirectory,
     instance.config,
@@ -189,12 +199,7 @@ const runtimeLayer = (
     {
       interruptGrace: "10 seconds",
     },
-  ).pipe(Layer.provide(credentials));
-  const polling = GitHubPolling.layer.pipe(
-    Layer.provide(app),
-    Layer.provide(FetchHttpClient.layer),
-    Layer.provide(NodeServices.layer),
-  );
+  ).pipe(Layer.provide(credentials), Layer.provide(triggerCondition));
   const labelWriter = GitHubLabelWriter.layer.pipe(
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),

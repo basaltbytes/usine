@@ -34,6 +34,7 @@ import {
   Scope,
 } from "effect";
 import { TestClock } from "effect/testing";
+import { alwaysHoldsLayer } from "./support/polling.ts";
 import {
   ScheduleCronFailure,
   ScheduleTickFailure,
@@ -177,7 +178,10 @@ const runtimeLayer = (directory: InstanceDirectory) => {
     reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
     execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
   });
-  const engine = localEngineLayer(directory).pipe(Layer.provide(executor));
+  const engine = localEngineLayer(directory).pipe(
+    Layer.provide(executor),
+    Layer.provide(alwaysHoldsLayer),
+  );
   const parser = ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer));
   const dependencies = Layer.mergeAll(engine, MarcbachmannCelLayer, parser);
   return Layer.merge(dependencies, ScheduleTriggers.layer.pipe(Layer.provide(dependencies)));
