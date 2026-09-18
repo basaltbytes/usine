@@ -14,7 +14,7 @@ import {
   ChildSessionCount,
   SessionFinished,
 } from "@usine/core/agent/session";
-import { Effect, Exit, Fiber, Stream } from "effect";
+import { Effect, Exit, Fiber, Result, Stream } from "effect";
 import { Type } from "typebox";
 import { assembleChildPrompt } from "../prompt.ts";
 import {
@@ -24,7 +24,7 @@ import {
   ChildRequest,
   ChildSessionBudgetExceededError,
   type ChildSessions,
-  SessionResult,
+  AgentResultError,
   type WorkingDirectory,
 } from "../runtime.ts";
 
@@ -32,7 +32,8 @@ export interface SubagentsExtensionOptions {
   readonly agent: Agent;
   readonly backend: ChildBackend["Service"];
   /** Records each child's returned report on the parent, so a blocker the parent paraphrases still fails the Attempt. */
-  readonly childReturned: (session: ChildSession, result: SessionResult) => Effect.Effect<void>;
+  /** Records a child's blocked report on the parent channel before the tool returns it. */
+  readonly childBlocked: (session: ChildSession, error: AgentResultError) => Effect.Effect<void>;
   readonly cwd: WorkingDirectory;
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly maxChildren: ChildSessionBudget;
@@ -142,24 +143,16 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
           }).pipe(Effect.andThen(options.emit(new SessionFinished({ session: child.session }))))
         : Effect.void,
     );
-    // A child's failed report ends its event stream with the same error its
-    // result carries; the report below returns that error to the parent.
+    // The child's result carries the same AgentResultError that ends its stream.
     const forward = yield* child.events.pipe(
       Stream.runForEach(options.emit),
       Effect.catchTag("AgentResultError", () => Effect.void),
       Effect.forkScoped,
     );
-    const result = yield* Effect.raceFirst(
+    const outcome = yield* Effect.raceFirst(
       child.result.pipe(
-        Effect.catchTag("AgentResultError", (error) =>
-          Effect.logInfo("Child session reported a blocker to Pi parent", {
-            sessionId: request.session.id,
-          }).pipe(
-            Effect.andThen(Fiber.join(forward)),
-            Effect.andThen(options.emit(new SessionFinished({ session: child.session }))),
-            Effect.as(new SessionResult({ message: `${BLOCKED_MARKER}\n${error.message}` })),
-          ),
-        ),
+        Effect.map(Result.succeed),
+        Effect.catchTag("AgentResultError", (error) => Effect.succeed(Result.fail(error))),
       ),
       interrupted(signal, request.session.id).pipe(
         Effect.andThen(child.interrupt),
@@ -167,12 +160,22 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
       ),
     );
     yield* Fiber.join(forward);
-    yield* options.childReturned(session, result);
-    yield* Effect.logInfo("Child session returned to Pi parent", {
-      sessionId: request.session.id,
+    const text = yield* Result.match(outcome, {
+      onFailure: (error) =>
+        Effect.logInfo("Child session returned a failed report to Pi parent", {
+          sessionId: request.session.id,
+        }).pipe(
+          Effect.andThen(options.childBlocked(session, error)),
+          Effect.andThen(options.emit(new SessionFinished({ session: child.session }))),
+          Effect.as(`${BLOCKED_MARKER}\n${error.message}`),
+        ),
+      onSuccess: (result) =>
+        Effect.logInfo("Child session returned to Pi parent", {
+          sessionId: request.session.id,
+        }).pipe(Effect.as(result.message)),
     });
     const report: AgentToolResult<SpawnDetails> = {
-      content: [{ type: "text", text: result.message }],
+      content: [{ type: "text", text }],
       details: { childSessionId: request.session.id },
     };
     onUpdate?.(report);

@@ -77,7 +77,7 @@ describe("owned Pi subagents extension", () => {
     const extension = createSubagentsExtension({
       agent,
       backend: child,
-      childReturned: () => Effect.void,
+      childBlocked: () => Effect.void,
       cwd: WorkingDirectory.make("/workspace/repo"),
       emit: (event) => Effect.sync(() => events.push(event)),
       maxChildren: ChildSessionBudget.make(4),
@@ -147,9 +147,9 @@ describe("owned Pi subagents extension", () => {
     const extension = createSubagentsExtension({
       agent,
       backend: child,
-      childReturned: (session, result) =>
+      childBlocked: (session, error) =>
         Effect.sync(() => {
-          returned.push([session.id, result.message]);
+          returned.push([session.id, error.message]);
         }),
       cwd: WorkingDirectory.make("/workspace/repo"),
       emit: (event) => Effect.sync(() => events.push(event)),
@@ -173,7 +173,7 @@ describe("owned Pi subagents extension", () => {
     assert.strictEqual(result.content[0]?.type, "text");
     assert.strictEqual(result.content[0]?.text, "[usine:blocked]\nPublishing permission denied.");
     assert.deepStrictEqual(returned, [
-      [AgentSessionId.make("parent-1:child:1"), "[usine:blocked]\nPublishing permission denied."],
+      [AgentSessionId.make("parent-1:child:1"), "Publishing permission denied."],
     ]);
     assert.deepStrictEqual(
       events.map((event) => event._tag),
@@ -205,7 +205,7 @@ describe("owned Pi subagents extension", () => {
     const extension = createSubagentsExtension({
       agent,
       backend: child,
-      childReturned: () => Effect.void,
+      childBlocked: () => Effect.void,
       cwd: WorkingDirectory.make("/workspace/repo"),
       emit: () => Effect.void,
       maxChildren: ChildSessionBudget.make(1),

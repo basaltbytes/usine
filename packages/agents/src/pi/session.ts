@@ -10,7 +10,7 @@ import {
   ToolFinished,
   ToolStarted,
 } from "@usine/core/agent/session";
-import { Array, Cause, Deferred, Effect, HashMap, Option, Queue, Ref, Schema } from "effect";
+import { Cause, Deferred, Effect, Option, Queue, Ref, Schema } from "effect";
 import { piMessageTokens } from "./usage.ts";
 import {
   type AgentSessionError,
@@ -40,11 +40,10 @@ export interface SessionChannel {
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
   /**
-   * Records unresolved blockers by child session. Any remaining blocker fails
-   * the parent's next ordinary `finish`; only an ordinary report from the
-   * same child clears its blocker.
+   * Records a child's blocked report. The first one wins and fails the parent's
+   * ordinary `finish`; the parent's own marker still takes precedence.
    */
-  readonly childReturned: (session: ChildSession, result: SessionResult) => Effect.Effect<void>;
+  readonly childBlocked: (session: ChildSession, error: AgentResultError) => Effect.Effect<void>;
   readonly finish: (session: AgentSession, message: string) => Effect.Effect<void>;
 }
 
@@ -75,7 +74,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   const events = yield* Queue.make<AgentSessionEvent, AgentSessionError | Cause.Done>();
   const result = yield* Deferred.make<SessionResult, AgentSessionError>();
   const terminal = yield* Ref.make(false);
-  const childBlockers = yield* Ref.make(HashMap.empty<AgentSessionId, AgentResultError>());
+  const childBlocker = yield* Ref.make(Option.none<AgentResultError>());
   const cleanups: Array<() => void> = [];
   const runCleanups = Effect.sync(() => {
     for (const cleanup of cleanups.splice(0)) cleanup();
@@ -106,32 +105,19 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     yield* runCleanups;
   });
 
-  const childReturned = Effect.fn("SessionChannel.childReturned")(function* (
+  const childBlocked = Effect.fn("SessionChannel.childBlocked")(function* (
     session: ChildSession,
-    result: SessionResult,
+    error: AgentResultError,
   ) {
     yield* Effect.annotateCurrentSpan({ childSessionId: session.id, sessionId: options.sessionId });
-    const blocker = reportedBlocker(session, result.message);
-    const previous = yield* Ref.getAndUpdate(childBlockers, (blockers) =>
-      Option.match(blocker, {
-        onNone: () => HashMap.remove(blockers, session.id),
-        onSome: (error) => HashMap.set(blockers, session.id, error),
-      }),
+    yield* Ref.update(
+      childBlocker,
+      Option.orElseSome(() => error),
     );
-    if (Option.isSome(blocker)) {
-      yield* Effect.logInfo(`${options.label} received a child's blocker`, {
-        childSessionId: session.id,
-        sessionId: options.sessionId,
-      });
-    } else if (HashMap.has(previous, session.id)) {
-      yield* Effect.logInfo(
-        `${options.label} cleared a child's blocker after its resolved report`,
-        {
-          childSessionId: session.id,
-          sessionId: options.sessionId,
-        },
-      );
-    }
+    yield* Effect.logInfo(`${options.label} received a child's blocker`, {
+      childSessionId: session.id,
+      sessionId: options.sessionId,
+    });
   });
 
   const finish = Effect.fn("SessionChannel.finish")(function* (
@@ -141,8 +127,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
     const own = reportedBlocker(session, message);
     if (Option.isSome(own)) return yield* fail(own.value);
-    const blockers = yield* Ref.get(childBlockers);
-    const relayed = Array.head([...HashMap.values(blockers)]);
+    const relayed = yield* Ref.get(childBlocker);
     if (Option.isSome(relayed)) {
       yield* Effect.logWarning(`${options.label} finished without relaying its child's blocker`, {
         childSessionId: Option.getOrUndefined(relayed.value.sessionId),
@@ -169,7 +154,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     },
     emit,
     fail,
-    childReturned,
+    childBlocked,
     finish,
   } satisfies SessionChannel;
 });
