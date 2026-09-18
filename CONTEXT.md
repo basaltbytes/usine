@@ -153,8 +153,12 @@ The billing source an attempt's usage draws from — API keys (API-key-authentic
 _Avoid_: budget (an amount, not a source), account, quota
 
 **Runaway guard**:
-The per-attempt ceiling — wall-clock and total tokens — that interrupts an attempt burning without progress. The wall-clock pauses while an ask or a hold is open: waiting on — or supervised by — the operator is never runaway; the token ceiling stays armed throughout. Tripping it fails the attempt with its own error class, which never auto-retries; only the operator restarts a runaway.
+The per-attempt ceiling — wall-clock and consumed tokens — that interrupts an attempt burning without progress. Each ceiling is opt-in in `usine.yaml` and absent by default; an armed ceiling warns the parent session once at 80% before tripping. The wall-clock pauses while an ask or a hold is open: waiting on — or supervised by — the operator is never runaway; the token ceiling stays armed throughout. Tripping it fails the attempt with its own error class, which never auto-retries; only the operator restarts a runaway.
 _Avoid_: budget, timeout (the wall-clock half only), kill switch
+
+**Salvage**:
+What the executor preserves of an Attempt's worktree when the Attempt ends without success: uncommitted changes committed as a work-in-progress snapshot and HEAD pushed to `usine/salvage/<run>/<attempt>`, recorded on the Attempt. The next Attempt of the same Run starts from a pushed salvage. A salvage whose push failed keeps the worktree on the Worker and records its path instead.
+_Avoid_: backup, checkpoint, recovery branch
 
 **Child-session budget**:
 The maximum number of child sessions a parent may spawn during one Attempt. It counts sequential and concurrent spawns; the next spawn fails the Attempt and requires operator action.

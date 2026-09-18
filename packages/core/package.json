@@ -46,6 +46,10 @@
       "types": "./dist/attempt/outcome.d.ts",
       "default": "./dist/attempt/outcome.js"
     },
+    "./attempt/salvage": {
+      "types": "./dist/attempt/salvage.d.ts",
+      "default": "./dist/attempt/salvage.js"
+    },
     "./event": {
       "types": "./dist/event.d.ts",
       "default": "./dist/event.js"

@@ -44,9 +44,10 @@ const spec = new AttemptChannel.RunSpec({
   parentModel: Option.some(parentModel),
   maxChildren: ChildSessionBudget.make(4),
   parentEffort: "high",
+  resume: Option.none(),
 });
 
-describe("attempt channel v6", () => {
+describe("attempt channel v7", () => {
   it("round-trips a final envelope through its framed JSON schema", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,

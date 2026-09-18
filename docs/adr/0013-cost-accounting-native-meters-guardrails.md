@@ -19,3 +19,11 @@ v1 meters everything and enforces no dollar budget. Every attempt's usage rides 
 - Per-harness native caps (e.g. the Claude SDK's `maxBudgetUsd`) remain adapter-internal defense-in-depth, additive behind the seam — never the operator-facing guard.
 
 [ADR 0022](./0022-item-cycle-budgets-and-comment-reviews.md) extends this decision with durable Item cycle budgets, operator reset Asks, and comment-only reviews under the shared App identity.
+
+## Amendment (2026-09-18): opt-in ceilings, an honest meter, and salvage before cleanup
+
+The runaway ceilings are now opt-in: `max_attempt_minutes` and `max_attempt_tokens` have no default, and an absent setting leaves that half of the guard unarmed. The old defaults (60 minutes, 10M tokens) were chosen before real Attempts ran; legitimate work on a large issue takes two or three hours, and a tripped guard used to remove the worktree with the finished work still in it (issue #161). An operator who wants a ceiling sets one, and an armed ceiling now sends the parent session one steer at 80% of its limit so the agent can commit and push before the trip.
+
+The token meter changed with it. The guard summed each harness's cumulative total, which for Codex and Claude includes the whole context re-read on every turn, cached or not, so the count grew with conversation length rather than with work: a healthy Codex Attempt reached 2M "tokens" in five minutes. `TokenCount` now means output tokens plus uncached input (new prompt text and cache writes), computed per harness from the fields each SDK reports separately. It still feeds the Attempt row and the drawer whether or not a ceiling is armed.
+
+Independently of the guard, every Attempt that ends without a `Succeeded` outcome now salvages its worktree before cleanup: uncommitted changes become a `wip(usine): salvage attempt <id>` commit and HEAD is pushed to `usine/salvage/<run>/<attempt>`, recorded on the Attempt and checked out by the next retry. A failed push keeps the worktree on the Worker and records its path instead.

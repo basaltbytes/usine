@@ -77,6 +77,17 @@ describe("Attempt migrations", () => {
             payload: { _tag: "Started", parentModel: "openai/model" },
           });
           yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 1, ${envelope}, '2026-09-12T00:00:00.000Z')`;
+          // v6 was the live version until v7 changed only the unstored `Start` frame;
+          // bumping the envelope literal alone once made every existing transcript unreadable.
+          const previousVersion = JSON.stringify({
+            _tag: "OutboundEnvelope",
+            version: 6,
+            attemptId: id,
+            sequence: 2,
+            sentAt: "2026-09-12T00:00:01.000Z",
+            payload: { _tag: "Final", result: { message: "done", facts: [] } },
+          });
+          yield* sql`INSERT INTO usine_attempt_transcripts (attempt_id, direction, channel_sequence, envelope, received_at) VALUES (${id}, 'outbound', 2, ${previousVersion}, '2026-09-12T00:00:01.000Z')`;
         }).pipe(Effect.provide(oldDatabase)),
       );
       yield* Effect.gen(function* () {
@@ -88,9 +99,15 @@ describe("Attempt migrations", () => {
         assert.strictEqual(snapshot.attempts[0]?.operatorIntervened, false);
         const attempt = snapshot.attempts[0];
         assert(attempt !== undefined);
-        assert.strictEqual(
-          (yield* store.transcript(new TranscriptAllQuery({ attemptId: attempt.id }))).length,
-          1,
+        const transcript = yield* store.transcript(
+          new TranscriptAllQuery({ attemptId: attempt.id }),
+        );
+        assert.deepStrictEqual(
+          transcript.map(({ envelope }) => [envelope.version, envelope.payload._tag]),
+          [
+            [4, "Started"],
+            [6, "Final"],
+          ],
         );
         const sql = yield* SqlClient.SqlClient;
         assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);

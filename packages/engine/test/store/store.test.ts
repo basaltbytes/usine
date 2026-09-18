@@ -12,6 +12,8 @@ import {
   TextOutput,
 } from "@usine/core/agent/session";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
+import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
+import { CommitSha } from "@usine/core/repository";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { Event, DedupKey, EventId } from "@usine/core/event";
@@ -767,6 +769,86 @@ describe("cursor store", () => {
         assert(Option.isNone(yield* store.read(key, StricterCursor)));
       }).pipe(Effect.provide(CursorStore.layer), Effect.provide(database));
     }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live(
+    "records an Attempt's salvage after any outcome and resumes the retry from a pushed one",
+    () =>
+      withRunStore(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const runId = RunId.make("salvaged");
+          yield* store.recordAndClaim(lifecycleSubmission, runId);
+          const first = yield* store.beginAttempt(runId, WorkerName.make("local"));
+          assert(first._tag === "AttemptStarted");
+          assert(Option.isNone(first.execution.resume));
+          // Cancellation closes the Attempt before the executor finishes salvaging.
+          yield* store.cancel(runId);
+          const pushed = new SalvagePushed({
+            ref: SalvageRef.make("usine/salvage/salvaged/1"),
+            commit: CommitSha.make("b".repeat(40)),
+          });
+          yield* store.recordSalvage(first.execution.attempt.id, pushed);
+          const canceled = yield* store.snapshot(runId);
+          assert.deepStrictEqual(canceled.attempts[0]?.salvage, Option.some(pushed));
+          assert.strictEqual(
+            canceled.attempts[0]?.outcome.pipe(Option.map((o) => o._tag)).pipe(Option.getOrNull),
+            "Canceled",
+          );
+
+          // A retry of a failed Run picks up the pushed salvage.
+          const retriedRun = RunId.make("salvaged-retry");
+          yield* store.recordAndClaim(
+            new Submission({
+              ...lifecycleSubmission,
+              event: new Event({
+                ...lifecycleSubmission.event,
+                id: EventId.make("salvaged-retry"),
+                dedupKey: DedupKey.make("salvaged/retry"),
+              }),
+              itemKey: ItemKey.make("salvaged-item"),
+            }),
+            retriedRun,
+          );
+          const started = yield* store.beginAttempt(retriedRun, WorkerName.make("local"));
+          assert(started._tag === "AttemptStarted");
+          yield* store.finishAttempt(
+            started.execution.attempt,
+            Result.fail(new AgentFailure({ message: "Guard tripped" })),
+          );
+          yield* store.recordSalvage(started.execution.attempt.id, pushed);
+          yield* store.retry(retriedRun);
+          const resumed = yield* store.beginAttempt(retriedRun, WorkerName.make("local"));
+          assert(resumed._tag === "AttemptStarted");
+          assert.deepStrictEqual(resumed.execution.resume, Option.some(pushed));
+          assert(Option.isNone(resumed.execution.attempt.salvage));
+
+          // A retained worktree cannot be fetched by the next Worker, so the
+          // retry resumes from the newest pushed salvage instead.
+          yield* store.finishAttempt(
+            resumed.execution.attempt,
+            Result.fail(new AgentFailure({ message: "Guard tripped again" })),
+          );
+          yield* store.recordSalvage(
+            resumed.execution.attempt.id,
+            new SalvageRetained({
+              path: "/workers/local/attempts/salvaged-retry",
+              commit: Option.some(CommitSha.make("c".repeat(40))),
+              message: "remote rejected",
+            }),
+          );
+          yield* store.retry(retriedRun);
+          const fresh = yield* store.beginAttempt(retriedRun, WorkerName.make("local"));
+          assert(fresh._tag === "AttemptStarted");
+          assert.deepStrictEqual(fresh.execution.resume, Option.some(pushed));
+          assert.strictEqual(
+            (yield* store.snapshot(retriedRun)).attempts[1]?.salvage
+              .pipe(Option.map((s) => s._tag))
+              .pipe(Option.getOrNull),
+            "Retained",
+          );
+        }),
+      ),
   );
 });
 

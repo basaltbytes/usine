@@ -1,14 +1,21 @@
 import { TokenCount } from "@usine/core/agent/session";
-import { Option, Schema } from "effect";
+import { flow, Option, Schema } from "effect";
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 const PiUsage = Schema.Struct({
   role: Schema.Literal("assistant"),
-  usage: Schema.Struct({ totalTokens: Count }),
+  usage: Schema.Struct({ input: Count, output: Count, cacheWrite: Count }),
 });
 
-/** Pi assistant usage is per completed message, including cache tokens. */
-export const piMessageTokens = Schema.decodeUnknownOption(PiUsage);
+/**
+ * Pi reports usage per completed assistant message with cache reads and writes
+ * split out. The message's consumption is its output plus uncached input, where
+ * a cache write is new context and a cache read is not.
+ */
+export const piMessageTokens = flow(
+  Schema.decodeUnknownOption(PiUsage),
+  Option.map(({ usage }) => TokenCount.make(usage.output + usage.input + usage.cacheWrite)),
+);
 
 const ClaudeAssistantUsage = Schema.Struct({
   type: Schema.Literal("assistant"),
@@ -17,7 +24,6 @@ const ClaudeAssistantUsage = Schema.Struct({
     usage: Schema.Struct({
       input_tokens: Count,
       output_tokens: Count,
-      cache_read_input_tokens: Schema.optionalKey(Schema.NullOr(Count)),
       cache_creation_input_tokens: Schema.optionalKey(Schema.NullOr(Count)),
     }),
   }),
@@ -25,7 +31,6 @@ const ClaudeAssistantUsage = Schema.Struct({
 const ClaudeModelUsage = Schema.Struct({
   inputTokens: Count,
   outputTokens: Count,
-  cacheReadInputTokens: Count,
   cacheCreationInputTokens: Count,
 });
 const ClaudeResultUsage = Schema.Struct({
@@ -35,7 +40,10 @@ const ClaudeResultUsage = Schema.Struct({
 const decodeAssistant = Schema.decodeUnknownOption(ClaudeAssistantUsage);
 const decodeResult = Schema.decodeUnknownOption(ClaudeResultUsage);
 
-/** Tracks Claude's live message usage and reconciles its cumulative query meter at each result.
+/**
+ * Tracks Claude's live message usage and reconciles its cumulative query meter at each result.
+ * The Agent SDK's `input_tokens` and `inputTokens` already exclude cache reads and
+ * cache writes, so consumption is output plus input plus cache creation.
  * Repeated blocks with the same message id count only their additional tokens.
  * The SDK's result.usage is per-turn and excludes auxiliary work; modelUsage
  * includes that work and stays cumulative across streaming-input turns.
@@ -48,10 +56,7 @@ export const claudeTokenMeter = () => {
     if (Option.isSome(assistant)) {
       const { id, usage } = assistant.value.message;
       const consumed =
-        usage.input_tokens +
-        usage.output_tokens +
-        (usage.cache_read_input_tokens ?? 0) +
-        (usage.cache_creation_input_tokens ?? 0);
+        usage.output_tokens + usage.input_tokens + (usage.cache_creation_input_tokens ?? 0);
       const previous = messages.get(id) ?? 0;
       total += Math.max(0, consumed - previous);
       messages.set(id, Math.max(previous, consumed));
@@ -60,12 +65,7 @@ export const claudeTokenMeter = () => {
     const result = decodeResult(message);
     if (Option.isNone(result)) return Option.none();
     const consumed = Object.values(result.value.modelUsage).reduce(
-      (sum, usage) =>
-        sum +
-        usage.inputTokens +
-        usage.outputTokens +
-        usage.cacheReadInputTokens +
-        usage.cacheCreationInputTokens,
+      (sum, usage) => sum + usage.outputTokens + usage.inputTokens + usage.cacheCreationInputTokens,
       0,
     );
     total = Math.max(total, consumed);
@@ -73,8 +73,19 @@ export const claudeTokenMeter = () => {
   };
 };
 
-/** Codex's thread meter is cumulative across turns on the same thread. */
+/** Codex's thread meter is cumulative across turns; `inputTokens` includes the cached portion. */
 export const CodexTokenUsage = Schema.Struct({
   threadId: Schema.NonEmptyString,
-  tokenUsage: Schema.Struct({ total: Schema.Struct({ totalTokens: TokenCount }) }),
+  tokenUsage: Schema.Struct({
+    total: Schema.Struct({ inputTokens: Count, cachedInputTokens: Count, outputTokens: Count }),
+  }),
 });
+export type CodexTokenUsage = typeof CodexTokenUsage.Type;
+
+/**
+ * A Codex thread's cumulative consumption: output plus uncached input. The
+ * thread's `totalTokens` re-counts the whole context on every turn, cached or
+ * not, so it measures conversation length rather than work.
+ */
+export const codexThreadTokens = (total: CodexTokenUsage["tokenUsage"]["total"]): TokenCount =>
+  TokenCount.make(total.outputTokens + Math.max(0, total.inputTokens - total.cachedInputTokens));

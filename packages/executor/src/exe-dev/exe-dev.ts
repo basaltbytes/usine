@@ -1,9 +1,10 @@
+import type { AttemptFailure } from "@usine/core/attempt/failure";
+import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
-import { RepositoryName } from "@usine/core/repository";
-import { Effect, Exit, Layer, Schema, Scope } from "effect";
+import { RepositoryName, safeSegment } from "@usine/core/repository";
+import { Deferred, Effect, Exit, Layer, Option, Schema, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
-  type AttemptWorkspace,
   CheckoutRequest,
   CredentialUnavailableError,
   Executor,
@@ -13,7 +14,13 @@ import {
 import { verifyHarnesses } from "../harness-preflight.ts";
 import { preparedAttemptsFor } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
-import { provisionWorktree, safeSegment, type WorkspaceOps } from "../provision.ts";
+import {
+  cacheDirectoryName,
+  type ProvisionedWorktree,
+  provisionWorktree,
+  recoverWorktree,
+  type WorkspaceOps,
+} from "../provision.ts";
 import { attemptChannelFor } from "./channel.ts";
 import { commandsFor } from "./commands.ts";
 import { credentialGrantsFor } from "./grants.ts";
@@ -56,7 +63,57 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     const sweepAbandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
     const attemptChannel = yield* attemptChannelFor(commands, runHost, interruptGrace);
 
-    const attempts = yield* preparedAttemptsFor(attemptChannel.cancel);
+    const attempts = yield* preparedAttemptsFor(attemptChannel.cancel, attemptChannel.intervene);
+
+    const recover = Effect.fn("ExeDevExecutor.recover")(function* <E>(
+      attempt: AttemptRecovery,
+      record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
+    ) {
+      yield* Effect.annotateCurrentSpan({ ...attempt });
+      const vm = yield* machines.vmFor(attempt.worker);
+      const root = `${vm.home}/.usine/workers/${safeSegment(attempt.worker)}`;
+      const worktree = `${root}/attempts/${safeSegment(attempt.attemptId)}`;
+      const inspected = yield* commands.remoteRaw("cleanup", vm.sshDest, "test", ["-d", worktree]);
+      if (inspected.exitCode === 1) return;
+      if (inspected.exitCode !== 0)
+        return yield* executorError(
+          "Could not inspect recovery checkout",
+          new Error(inspected.stderr),
+        );
+      const integration = integrations.get(attempt.repository);
+      if (integration === undefined)
+        return yield* new CredentialUnavailableError({
+          repository: attempt.repository,
+          message: "No integration configured for salvage recovery",
+          cause: new Error("missing integration"),
+        });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* credentialGrants.acquire(
+            attempt.attemptId,
+            attempt.worker,
+            attempt.repository,
+            integration,
+          );
+          yield* commands.remote("cleanup", vm.sshDest, "sh", [
+            "-c",
+            RUN_HOST_KILL_SCRIPT,
+            "sh",
+            runHostPidFile(worktree),
+          ]);
+          yield* recoverWorktree(
+            {
+              attempt,
+              host: vm.sshDest,
+              worktree,
+              cache: `${root}/repos/${cacheDirectoryName(attempt.repository)}`,
+              git: (args) => commands.remote("cleanup", vm.sshDest, "git", args),
+            },
+            record,
+          );
+        }),
+      );
+    });
 
     const prepare = Effect.fn("ExeDevExecutor.prepare")(function* (request: CheckoutRequest) {
       yield* Effect.annotateCurrentSpan({
@@ -77,7 +134,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         commands.remote("preflight", vm.sshDest, command, args),
       );
       const root = `${vm.home}/.usine/workers/${safeSegment(request.worker)}`;
-      const cache = `${root}/repos/${safeSegment(request.repository)}.git`;
+      const cache = `${root}/repos/${cacheDirectoryName(request.repository)}`;
       const worktree = `${root}/attempts/${safeSegment(request.attemptId)}`;
       const staging = `${cache}.cloning`;
       const remoteUrl = `https://github.int.exe.xyz/${request.repository}.git`;
@@ -113,9 +170,12 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         git: (operation, args) => commands.remote(operation, vm.sshDest, "git", args),
       };
 
+      // A checkout retained after a failed remote stop never closes its scope,
+      // so its salvage is answered here rather than by the checkout finalizer.
+      const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>, AttemptFailure>();
       const releaseWorkspace = Effect.fn("ExeDevExecutor.releaseWorkspace")(
         function* (
-          resource: { readonly workspace: AttemptWorkspace; readonly scope: Scope.Closeable },
+          resource: { readonly provisioned: ProvisionedWorktree; readonly scope: Scope.Closeable },
           exit: Exit.Exit<unknown, unknown>,
         ) {
           yield* Effect.annotateCurrentSpan({
@@ -130,7 +190,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
             "-c",
             RUN_HOST_KILL_SCRIPT,
             "sh",
-            runHostPidFile(resource.workspace.worktree),
+            runHostPidFile(resource.provisioned.workspace.worktree),
           ]);
           yield* Effect.logInfo("Confirmed the remote run host before workspace removal", {
             attemptId: request.attemptId,
@@ -139,6 +199,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
             runHost: confirmed.trim(),
           });
           yield* Scope.close(resource.scope, exit);
+          const salvage = yield* Effect.exit(resource.provisioned.salvaged);
+          yield* Deferred.done(salvaged, salvage);
         },
         (effect) =>
           effect.pipe(
@@ -152,10 +214,11 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
               }),
             ),
             Effect.ignore,
+            Effect.andThen(Deferred.succeed(salvaged, Option.none())),
           ),
       );
 
-      const { workspace: prepared } = yield* fetches
+      const { provisioned } = yield* fetches
         .withLock(request.repository)(
           Effect.gen(function* () {
             // Credentials belong to the Attempt scope independently of the checkout:
@@ -173,7 +236,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
                   // Before preparation succeeds no run host can exist. Roll back the
                   // partial checkout unconditionally; only a completed workspace is
                   // transferred to the guarded remote-process release above.
-                  const workspace = yield* restore(
+                  const provisioned = yield* restore(
                     provisionWorktree({
                       request,
                       url: remoteUrl,
@@ -185,7 +248,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
                     Scope.provide(scope),
                     Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
                   );
-                  return { workspace, scope };
+                  return { provisioned, scope };
                 }),
               ),
               releaseWorkspace,
@@ -201,22 +264,27 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
           ),
         );
 
+      const prepared = provisioned.workspace;
       yield* Effect.logInfo("exe.dev Attempt workspace ready", {
         attemptId: request.attemptId,
         worker: request.worker,
         host: vm.sshDest,
         repository: request.repository,
         baseCommit: prepared.spec.baseCommit,
+        resume: Option.map(prepared.spec.resume, ({ ref }) => ref),
         worktree,
       });
       return {
         workspace: prepared,
         launch: (io: AttemptChannel.Sink) => attemptChannel.launch(prepared, vm, io),
+        salvaged: Deferred.await(salvaged),
+        recordSalvage: provisioned.recordSalvage,
       };
     }, attempts.prepare);
 
     return Executor.of({
       kind: "exe.dev",
+      recover,
       cancel: attempts.cancel,
       intervene: attemptChannel.intervene,
       preflight: machines.preflight,

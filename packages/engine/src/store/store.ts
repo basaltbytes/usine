@@ -1,6 +1,7 @@
 import { Attempt, AttemptId, AttemptContext } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -296,6 +297,7 @@ const makeRunStore = Effect.gen(function* () {
           parentModel: current.parentModel,
           startedAt,
           outcome: Option.none(),
+          salvage: Option.none(),
         });
         yield* tx.addAttempt(attempt);
         yield* Effect.logInfo("Attempt started", {
@@ -303,6 +305,7 @@ const makeRunStore = Effect.gen(function* () {
           attemptId,
           number: decision.number,
           worker,
+          resumesFrom: Option.map(decision.resume, ({ ref }) => ref),
         });
         return new AttemptStarted({
           execution: new StepExecution({
@@ -321,11 +324,29 @@ const makeRunStore = Effect.gen(function* () {
             task: current.task,
             agent: current.agent,
             parentModel: current.parentModel,
+            resume: decision.resume,
           }),
         });
       }),
     );
   }, persistence("begin attempt"));
+
+  const recordSalvage = Effect.fn("RunStore.recordSalvage")(function* (
+    attemptId: AttemptId,
+    salvage: AttemptSalvage,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, salvage: salvage._tag });
+    yield* database.transaction((transaction) =>
+      queriesFor(transaction).recordSalvage(attemptId, salvage),
+    );
+    yield* Effect.logInfo(
+      "Attempt salvage recorded",
+      Match.valueTags(salvage, {
+        Pushed: ({ ref, commit }) => ({ attemptId, ref, commit }),
+        Retained: ({ path, commit }) => ({ attemptId, path, commit }),
+      }),
+    );
+  }, persistence("record attempt salvage"));
 
   const finishAttempt = Effect.fn("RunStore.finishAttempt")(function* (
     attempt: Attempt,
@@ -590,6 +611,8 @@ const makeRunStore = Effect.gen(function* () {
       .pendingWorkflowCommands()
       .pipe(persistence("list pending workflow commands")),
     recordAndClaim,
+    salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
+    recordSalvage,
     reconcileCompletion,
     recoverable: recoverable(),
     resolveFailure,
@@ -649,6 +672,12 @@ export class RunStore extends Context.Service<
       runId: RunId,
       result: Workflow.Result<StepResult, AttemptFailure>,
     ) => Effect.Effect<void, RunStoreError>;
+    /** Records what the executor preserved of an Attempt's workspace, whatever the Attempt's outcome. */
+    readonly recordSalvage: (
+      attemptId: AttemptId,
+      salvage: AttemptSalvage,
+    ) => Effect.Effect<void, RunStoreError>;
+    readonly salvageCandidates: Effect.Effect<ReadonlyArray<AttemptRecovery>, RunStoreError>;
     readonly recoverable: Effect.Effect<ReadonlyArray<RecoverableRun>, RunStoreError>;
     /** Resolves attention for the current failed Attempt atomically; stale requests are rejected. */
     readonly resolveFailure: (

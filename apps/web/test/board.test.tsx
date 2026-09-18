@@ -61,6 +61,7 @@ const attempt = (number: number, message: string | null) =>
       message === null
         ? new SucceededAttemptView()
         : new FailedAttemptView({ failure: new AgentFailureView({ message }) }),
+    salvage: null,
   });
 
 const repository = RepositoryName.make("basaltbytes/usine");

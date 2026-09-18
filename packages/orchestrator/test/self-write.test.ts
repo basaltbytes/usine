@@ -188,6 +188,7 @@ describe("Board self-writes", () => {
               }),
           });
           const executor = Layer.succeed(StepExecutor)({
+            recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
             reserve: () => Effect.die("approval must precede worker reservation"),

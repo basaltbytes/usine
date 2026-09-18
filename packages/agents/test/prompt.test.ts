@@ -1,7 +1,9 @@
 import { assert, describe, it } from "@effect/vitest";
 import { AgentPersona, AgentName } from "@usine/core/agent";
 import { AttemptTask } from "@usine/core/attempt";
-import { RepositoryName } from "@usine/core/repository";
+import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
+import { CommitSha, RepositoryName } from "@usine/core/repository";
+import { Option } from "effect";
 import { assembleChildPrompt, assemblePrompt, githubSignature } from "../src/prompt.ts";
 
 describe("assemblePrompt", () => {
@@ -12,6 +14,7 @@ describe("assemblePrompt", () => {
       agent: AgentName.make("developer"),
       persona: AgentPersona.make("You are the factory's implementation agent."),
       task: AttemptTask.make("Implement issue #30: Build the agent layer"),
+      resume: Option.none(),
     });
 
     assert.strictEqual(
@@ -49,6 +52,33 @@ describe("assemblePrompt", () => {
         "Append this signature to every GitHub comment, issue, pull request, or review you publish:",
         "— usine agent: developer",
       ].join("\n"),
+    );
+  });
+
+  it("names the salvage the Attempt resumes from right after the repository", () => {
+    const commit = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
+    const prompt = assemblePrompt({
+      repository: RepositoryName.make("acme/demo"),
+      payload: {},
+      agent: AgentName.make("developer"),
+      persona: AgentPersona.make("Persona."),
+      task: AttemptTask.make("Finish the work"),
+      resume: Option.some(
+        new SalvagePushed({ ref: SalvageRef.make("usine/salvage/run-1/1"), commit }),
+      ),
+    });
+    assert(
+      prompt.startsWith(
+        [
+          "# Run context",
+          "",
+          "Repository: acme/demo",
+          `Resumes from: usine/salvage/run-1/1 at ${commit}, the previous Attempt's unfinished work, checked out at HEAD. Its last commit is an automatic work-in-progress snapshot. Continue from this state instead of starting over.`,
+          "",
+          "Payload snapshot:",
+        ].join("\n"),
+      ),
+      prompt,
     );
   });
 

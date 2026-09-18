@@ -3,6 +3,7 @@ import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session
 import { AttemptNumber, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
 import { RunawayCeiling } from "@usine/core/attempt/failure";
+import { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { WorkerName } from "@usine/core/worker";
 import { Schema } from "effect";
 
@@ -67,7 +68,7 @@ export const AttemptOutcomeView = Schema.Union([
 ]);
 export type AttemptOutcomeView = typeof AttemptOutcomeView.Type;
 
-/** One Attempt's identity, Worker, effective brain, start time, and optional terminal outcome. */
+/** One Attempt's identity, Worker, effective brain, start time, optional terminal outcome, and salvaged work. */
 export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/AttemptView")({
   id: AttemptId,
   number: AttemptNumber,
@@ -78,4 +79,5 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
   operatorIntervened: Schema.Boolean,
   startedAt: Schema.String,
   outcome: Schema.NullOr(AttemptOutcomeView),
+  salvage: Schema.NullOr(AttemptSalvage),
 }) {}

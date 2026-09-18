@@ -1,8 +1,16 @@
 import type { AttemptId } from "@usine/core/attempt";
-import { InfraFailure } from "@usine/core/attempt/failure";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect";
 import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor.ts";
 import { withAttemptGuard } from "./guard.ts";
+import type { ProvisionedWorktree } from "./provision.ts";
+
+/** What an adapter's prepare acquires: the launchable Attempt plus its salvage outcome once released. */
+export interface AcquiredAttempt extends PreparedAttempt {
+  readonly salvaged: ProvisionedWorktree["salvaged"];
+  readonly recordSalvage: ProvisionedWorktree["recordSalvage"];
+}
 
 interface OwnedAttempt {
   readonly unavailable: Ref.Ref<boolean>;
@@ -19,6 +27,10 @@ interface OwnedAttempt {
  */
 export const preparedAttemptsFor = (
   cancelLive: (attemptId: AttemptId) => Effect.Effect<boolean, ExecutorError>,
+  intervene: (
+    attemptId: AttemptId,
+    intervention: AttemptChannel.Intervention,
+  ) => Effect.Effect<void, AttemptFailure>,
 ) =>
   Effect.sync(() => {
     const attempts = new Map<AttemptId, OwnedAttempt>();
@@ -40,7 +52,7 @@ export const preparedAttemptsFor = (
 
     /** Owns partial preparation and the run host in one child scope, released at the Attempt's end. */
     const prepare = (
-      acquire: Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope>,
+      acquire: Effect.Effect<AcquiredAttempt, ExecutorError, Scope.Scope>,
       request: CheckoutRequest,
     ): Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope> =>
       Effect.uninterruptibleMask((restore) =>
@@ -82,14 +94,34 @@ export const preparedAttemptsFor = (
                   cause: new Error("prepared Attempt is no longer available"),
                 });
               }
+              const warn = (message: string) =>
+                intervene(
+                  attemptId,
+                  new AttemptChannel.Intervention({
+                    operator: "engine",
+                    target: new AttemptChannel.ParentTarget(),
+                    action: new AttemptChannel.Steer({ message }),
+                  }),
+                );
+              const limits = {
+                attemptId,
+                maxAttemptMinutes: request.maxAttemptMinutes,
+                maxAttemptTokens: request.maxAttemptTokens,
+                warn,
+              };
+              yield* prepared.recordSalvage(io.salvage);
               // Closing the owner's scope interrupts the session before checkout and
               // credential finalizers. Interrupting a caller waiting on join must also
               // stop that scoped fiber, so timeout/cancel completes the handshake first.
               return yield* Effect.acquireUseRelease(
-                Effect.forkIn(withAttemptGuard(request, io, prepared.launch), scope),
+                Effect.forkIn(withAttemptGuard(limits, io, prepared.launch), scope),
                 Fiber.join,
                 Fiber.interrupt,
-              ).pipe(Effect.onExit((exit) => release(exit)));
+              ).pipe(
+                Effect.onExit((exit) =>
+                  release(exit).pipe(Effect.andThen(Effect.asVoid(prepared.salvaged))),
+                ),
+              );
             }),
           } satisfies PreparedAttempt;
         }),

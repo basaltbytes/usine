@@ -51,7 +51,7 @@ Exporting opens the instance's existing `.usine/runtime.sqlite` in read-only mod
 
 ## Stopping and updating
 
-Send SIGTERM or press Ctrl+C once to stop trigger polling and drain admitted Attempts. The server waits up to `max_attempt_minutes` from the shutdown request before closing the runtime. A second SIGTERM or Ctrl+C stops the wait immediately. Queued Runs and automatic retries remain saved for the next start. An Attempt interrupted by the deadline or force stop uses normal restart recovery.
+Send SIGTERM or press Ctrl+C once to stop trigger polling and drain admitted Attempts. The server waits up to `max_attempt_minutes` from the shutdown request before closing the runtime, or without a deadline when that setting is absent. A second SIGTERM or Ctrl+C stops the wait immediately. Queued Runs and automatic retries remain saved for the next start. An Attempt interrupted by the deadline or force stop uses normal restart recovery.
 
 After `pnpm build`, reload the page to use the rebuilt web bundle; no process restart is required. Instance configuration and GitHub credentials are read at startup.
 

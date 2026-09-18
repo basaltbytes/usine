@@ -1,14 +1,16 @@
+import { localCredentialsFor } from "./credentials.ts";
+import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { RepositoryName } from "@usine/core/repository";
+import { RepositoryName, safeSegment } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
 import {
   Effect,
   FileSystem,
   Layer,
+  Option,
   Path,
   type PlatformError,
-  Redacted,
   Result,
   Schema,
   Stream,
@@ -34,7 +36,7 @@ import {
   cacheDirectoryName,
   isCacheDirectoryName,
   provisionWorktree,
-  safeSegment,
+  recoverWorktree,
   type WorkspaceOps,
 } from "../provision.ts";
 import { runHostSessionFor, type RunHostInput } from "../run-host-session.ts";
@@ -76,28 +78,9 @@ const executorError = (
   cause: unknown,
 ): ExecutorOperationError => new ExecutorOperationError({ operation, message, cause });
 
-/** Removes the credential from text before it can reach a persisted error message. */
-const scrubbed = (text: string, credential: Redacted.Redacted<string>): string =>
-  text.replaceAll(Redacted.value(credential), "[REDACTED]");
-
-const credentialEnvironment = (
-  base: Record<string, string>,
-  credential: Redacted.Redacted<string>,
-) => {
-  const token = Redacted.value(credential);
-  return {
-    ...base,
-    GH_TOKEN: token,
-    GITHUB_TOKEN: token,
-    GIT_CONFIG_COUNT: "1",
-    GIT_CONFIG_KEY_0: "credential.helper",
-    GIT_CONFIG_VALUE_0: "!f() { echo username=x-access-token; echo password=$GITHUB_TOKEN; }; f",
-  } as const;
-};
-
 const makeLocalExecutor = (options: LocalExecutorOptions) =>
   Effect.gen(function* () {
-    const credentials = yield* CredentialProvider;
+    const credentials = yield* localCredentialsFor;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -134,9 +117,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* executeCommand(operation, command, args, commandOptions);
     });
 
-    // Worktrees never outlive their Attempt (ADR 0006). A crashed orchestrator
-    // leaves directories and bare-cache registrations behind; the sweep reclaims
-    // them at the next layer build, before new Attempts start.
+    // Recovery owns checkout removal. Startup only prunes registrations whose
+    // directories are already absent; unknown crash leftovers stay on disk.
     const sweepAbandonedWorktrees = Effect.fn("LocalExecutor.sweepAbandonedWorktrees")(
       function* () {
         if (!(yield* fileSystem.exists(workersRoot))) return;
@@ -147,12 +129,14 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             const leftovers = yield* fileSystem.readDirectory(attemptsRoot);
             for (const leftover of leftovers) {
               const target = path.join(attemptsRoot, leftover);
-              yield* Effect.logInfo("Sweeping abandoned Attempt worktree", {
-                worker,
-                host: "local",
-                worktree: target,
-              });
-              yield* fileSystem.remove(target, { recursive: true, force: true });
+              yield* Effect.logInfo(
+                "Preserving abandoned Attempt path for salvage reconciliation",
+                {
+                  worker,
+                  host: "local",
+                  worktree: target,
+                },
+              );
             }
           }
           const reposRoot = path.join(workersRoot, worker, "repos");
@@ -213,6 +197,47 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       Effect.ignore,
     );
 
+    const recover = Effect.fn("LocalExecutor.recover")(function* <E>(
+      attempt: AttemptRecovery,
+      record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
+    ) {
+      yield* Effect.annotateCurrentSpan({ ...attempt, host: "local" });
+      const root = path.join(workersRoot, attempt.worker);
+      const worktree = path.join(root, "attempts", safeSegment(attempt.attemptId));
+      if (!(yield* fileSystem.exists(worktree))) return;
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const credential = yield* credentials(
+            attempt.repository,
+            attempt.attemptId,
+            baseEnvironment,
+          );
+          yield* recoverWorktree(
+            {
+              attempt,
+              host: "local",
+              worktree,
+              cache: path.join(root, "repos", cacheDirectoryName(attempt.repository)),
+              git: (args) =>
+                executeCommand("cleanup", "git", args, {
+                  env: credential.environment,
+                  extendEnv: false,
+                }).pipe(
+                  Effect.mapError((error) =>
+                    executorError(
+                      "cleanup",
+                      credential.scrub(error.message),
+                      new Error("salvage git failed"),
+                    ),
+                  ),
+                ),
+            },
+            record,
+          );
+        }),
+      );
+    });
+
     const preflight = Effect.fn("LocalExecutor.preflight")(function* (
       worker: CheckoutRequest["worker"],
       brains: ReadonlyArray<BrainSpec>,
@@ -251,7 +276,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     }, logPreflightFailure);
 
     const session = yield* runHostSessionFor({ interruptGrace });
-    const attempts = yield* preparedAttemptsFor(session.cancel);
+    const attempts = yield* preparedAttemptsFor(session.cancel, session.intervene);
 
     const prepare = Effect.fn("LocalExecutor.prepare")(function* (request: CheckoutRequest) {
       yield* Effect.annotateCurrentSpan({
@@ -263,18 +288,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* verifyHarnesses(request.worker, [request.agent.brain], runHost, (command, args) =>
         executeCommand("preflight", command, args),
       );
-      const credential = yield* Effect.acquireRelease(
-        credentials.issue(request.repository, request.attemptId),
-        (token) =>
-          Effect.sync(() => {
-            Redacted.wipeUnsafe(token);
-          }),
-        { interruptible: true },
-      );
+      const credential = yield* credentials(request.repository, request.attemptId, baseEnvironment);
       const workerRoot = path.join(workersRoot, request.worker);
       const cache = path.join(workerRoot, "repos", cacheDirectoryName(request.repository));
       const worktree = path.join(workerRoot, "attempts", safeSegment(request.attemptId));
-      const environment = credentialEnvironment(baseEnvironment, credential);
+      const environment = credential.environment;
       const commandOptions = { env: environment, extendEnv: false } as const;
       yield* Effect.logInfo("Preparing Attempt workspace", {
         attemptId: request.attemptId,
@@ -290,7 +308,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         target: string,
       ): Effect.Effect<void, PlatformError.PlatformError> =>
         fileSystem.remove(target, { recursive: true, force: true });
-      const ops: WorkspaceOps<PlatformError.PlatformError | ExecutorOperationError> = {
+      const ops: WorkspaceOps<PlatformError.PlatformError | ExecutorError> = {
         ensureRoots: Effect.andThen(
           fileSystem.makeDirectory(path.dirname(cache), { recursive: true }),
           fileSystem.makeDirectory(path.dirname(worktree), { recursive: true }),
@@ -302,11 +320,12 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           Effect.gen(function* () {
             // Git can echo the ambient token in diagnostics. Scrub before forming
             // an error or passing its stdout to the revision parser.
+            yield* credential.refresh();
             const result = yield* collectCommand(spawner, operation, "git", args, commandOptions);
             return yield* requireSuccess(operation, "local", "git", args, {
               ...result,
-              stdout: scrubbed(result.stdout, credential),
-              stderr: scrubbed(result.stderr, credential),
+              stdout: credential.scrub(result.stdout),
+              stderr: credential.scrub(result.stderr),
             });
           }),
       };
@@ -330,19 +349,24 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
 
       yield* Effect.logInfo("Attempt workspace ready", {
         attemptId: request.attemptId,
-        baseCommit: prepared.spec.baseCommit,
+        baseCommit: prepared.workspace.spec.baseCommit,
+        resume: Option.map(prepared.workspace.spec.resume, ({ ref }) => ref),
         worktree,
       });
       return {
-        workspace: prepared,
+        workspace: prepared.workspace,
         launch: (io: AttemptChannel.Sink) =>
-          session.launch(prepared, io, (input) => spawn(prepared, credential, input)),
+          session.launch(prepared.workspace, io, (input) =>
+            spawn(prepared.workspace, credential, input),
+          ),
+        salvaged: prepared.salvaged,
+        recordSalvage: prepared.recordSalvage,
       };
     }, attempts.prepare);
 
     const spawn = Effect.fn("LocalExecutor.spawnRunHost")(function* (
       prepared: AttemptWorkspace,
-      credential: Redacted.Redacted<string>,
+      credential: Effect.Success<ReturnType<typeof credentials>>,
       input: RunHostInput,
     ) {
       const attemptId = prepared.spec.attemptId;
@@ -369,7 +393,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         ChildProcess.make(runHost.command, runHost.args, {
           cwd: prepared.worktree,
           env: {
-            ...credentialEnvironment(baseEnvironment, credential),
+            ...credential.environment,
             TURBO_CACHE_DIR: turboCache,
           },
           extendEnv: false,
@@ -379,12 +403,18 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       return {
         handle,
         host: "local",
-        scrub: (text: string): string => scrubbed(text, credential),
+        scrub: credential.scrub,
       };
     });
 
     return Executor.of({
       kind: "local",
+      recover: (attempt, record) =>
+        recover(attempt, record).pipe(
+          Effect.catchTag("PlatformError", (cause) =>
+            Effect.fail(executorError("cleanup", "Could not reconcile local salvage", cause)),
+          ),
+        ),
       cancel: attempts.cancel,
       intervene: session.intervene,
       preflight,

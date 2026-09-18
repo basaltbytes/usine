@@ -1,7 +1,7 @@
 import { AttemptId } from "@usine/core/attempt";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Ref, Scope } from "effect";
+import { Effect, Ref, Scope, Schedule } from "effect";
 import { CredentialUnavailableError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import type { ExeDevCommands } from "./commands.ts";
@@ -31,6 +31,14 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
     yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, integration });
     const scope = yield* Effect.scope;
     const key = grantKey(worker, integration);
+    const attach = commands.lobby("prepare", [
+      "integrations",
+      "attach",
+      integration,
+      `vm:${worker}`,
+      "--for",
+      `${grantMinutes}m`,
+    ]);
     yield* locks.withLock(key)(
       Effect.uninterruptibleMask((restore) =>
         Effect.gen(function* () {
@@ -57,25 +65,16 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
             ),
           );
           yield* restore(
-            commands
-              .lobby("prepare", [
-                "integrations",
-                "attach",
-                integration,
-                `vm:${worker}`,
-                "--for",
-                `${grantMinutes}m`,
-              ])
-              .pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new CredentialUnavailableError({
-                      repository,
-                      message: `Could not attach exe.dev GitHub integration ${integration}`,
-                      cause,
-                    }),
-                ),
+            attach.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new CredentialUnavailableError({
+                    repository,
+                    message: `Could not attach exe.dev GitHub integration ${integration}`,
+                    cause,
+                  }),
               ),
+            ),
           );
           yield* Effect.logInfo("Attached or refreshed time-boxed exe.dev GitHub integration", {
             attemptId,
@@ -88,6 +87,36 @@ export const credentialGrantsFor = Effect.fn("ExeDevExecutor.credentialGrantsFor
         }),
       ),
     );
+    // Renew each live reference before its time-box elapses. The renewal fiber
+    // is released before its reference; checkout cleanup runs before both.
+    const renew = Effect.fn("ExeDevExecutor.renewGrant")(function* () {
+      yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, integration });
+      yield* locks.withLock(key)(attach);
+      yield* Effect.logInfo("Renewed exe.dev credential grant", {
+        attemptId,
+        worker,
+        repository,
+        integration,
+        grantMinutes,
+      });
+    });
+    yield* Effect.forever(
+      Effect.sleep(`${grantMinutes * 30} seconds`).pipe(
+        Effect.andThen(
+          renew().pipe(Effect.retry({ times: 2, schedule: Schedule.spaced("5 seconds") })),
+        ),
+        Effect.tapError((error) =>
+          Effect.logError("Credential grant renewal failed; will retry", {
+            attemptId,
+            worker,
+            repository,
+            integration,
+            message: error.message,
+          }),
+        ),
+        Effect.ignore,
+      ),
+    ).pipe(Effect.forkScoped);
   });
 
   const release = Effect.fn("ExeDevExecutor.releaseGrant")(function* (

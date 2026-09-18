@@ -1,6 +1,8 @@
+import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import { Agent } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptTask, type AttemptId } from "@usine/core/attempt";
+import { SalvagePushed } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run } from "@usine/core/run";
@@ -23,6 +25,8 @@ export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/St
   task: AttemptTask,
   agent: Agent,
   parentModel: Schema.Option(ModelId),
+  /** The newest pushed salvage of an earlier Attempt of this Run, which this Attempt's checkout resumes from. */
+  resume: Schema.Option(SalvagePushed),
 }) {}
 
 /** A reservation of one Worker's capacity for the length of an Attempt. Call `release` when the Attempt ends. */
@@ -35,6 +39,11 @@ export interface WorkerLease {
 export class StepExecutor extends Context.Service<
   StepExecutor,
   {
+    /** Reconciles an old checkout before new Attempts start; records its salvage before releasing any work. */
+    readonly recover: <E>(
+      attempt: AttemptRecovery,
+      record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
+    ) => Effect.Effect<void, E | AttemptFailure>;
     /** Requests that the identified Attempt stop its current work. */
     readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
     /** Sends a nonterminal operator action to a live session in the identified Attempt. */

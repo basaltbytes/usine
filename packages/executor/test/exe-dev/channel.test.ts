@@ -8,7 +8,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
-import { Deferred, Effect, Exit, Fiber, Result, Scope } from "effect";
+import { Deferred, Effect, Exit, Fiber, Result, Scope, Option } from "effect";
 
 import { TestClock } from "effect/testing";
 
@@ -34,6 +34,7 @@ describe("exe.dev channel", () => {
       let reject = true;
       const launch = yield* prepared
         .launch({
+          salvage: () => Effect.void,
           append: (direction, envelope) => {
             if (envelope.payload._tag === "Started")
               return Effect.asVoid(Deferred.succeed(started, undefined));
@@ -83,6 +84,7 @@ describe("exe.dev channel", () => {
       let first = true;
       const launch = yield* prepared
         .launch({
+          salvage: () => Effect.void,
           append: (_direction, envelope) => {
             if (envelope.payload._tag === "Started")
               return Effect.asVoid(Deferred.succeed(started, undefined));
@@ -128,7 +130,9 @@ describe("exe.dev channel", () => {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       const prepared = yield* executor.prepare(request);
-      const outcome = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.result);
+      const outcome = yield* prepared
+        .launch({ append: () => Effect.void, salvage: () => Effect.void })
+        .pipe(Effect.result);
       assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
       assert.strictEqual(outcome.failure.ceiling, "tokens");
       assert.strictEqual(
@@ -151,6 +155,7 @@ describe("exe.dev channel", () => {
         const started = yield* Deferred.make<void>();
         const launched = yield* prepared
           .launch({
+            salvage: () => Effect.void,
             append: (_direction, envelope) =>
               envelope.payload._tag === "Started"
                 ? Effect.asVoid(Deferred.succeed(started, undefined))
@@ -174,7 +179,9 @@ describe("exe.dev channel", () => {
         assert(kill >= 0 && remove > kill && detach > remove);
         const issued = ssh.state.commands.length;
         yield* Scope.close(owner, Exit.void);
-        const reuse = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.flip);
+        const reuse = yield* prepared
+          .launch({ append: () => Effect.void, salvage: () => Effect.void })
+          .pipe(Effect.flip);
         assert.strictEqual(reuse._tag, "InfraFailure");
         assert.strictEqual(ssh.state.commands.length, issued);
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
@@ -221,7 +228,9 @@ describe("exe.dev channel", () => {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
       const prepared = yield* executor.prepare(request);
-      const error = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.flip);
+      const error = yield* prepared
+        .launch({ append: () => Effect.void, salvage: () => Effect.void })
+        .pipe(Effect.flip);
       assert.strictEqual(error._tag, "InfraFailure");
       assert(error.message.includes("exited with code 17"));
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
@@ -236,6 +245,7 @@ describe("exe.dev channel", () => {
       const prepared = yield* executor.prepare(request);
       const launchFiber = yield* prepared
         .launch({
+          salvage: () => Effect.void,
           append: (direction, envelope) =>
             Effect.sync(() => {
               transcript.push([direction, envelope]);
@@ -275,12 +285,13 @@ describe("exe.dev channel", () => {
         const executor = yield* Executor;
         yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
         const prepared = yield* executor.prepare(
-          new CheckoutRequest({ ...request, maxAttemptMinutes: 1 }),
+          new CheckoutRequest({ ...request, maxAttemptMinutes: Option.some(1) }),
         );
         const started = yield* Deferred.make<void>();
         const stopping = yield* Deferred.make<void>();
         const running = yield* prepared
           .launch({
+            salvage: () => Effect.void,
             append: (_direction, envelope) => {
               if (envelope.payload._tag === "Started")
                 return Effect.asVoid(Deferred.succeed(started, undefined));
@@ -318,6 +329,7 @@ describe("exe.dev channel", () => {
       const prepared = yield* executor.prepare(request);
       const launchFiber = yield* prepared
         .launch({
+          salvage: () => Effect.void,
           append: (direction, envelope) =>
             Effect.sync(() => {
               transcript.push([direction, envelope]);
@@ -351,6 +363,7 @@ describe("exe.dev channel", () => {
       const prepared = yield* executor.prepare(request);
       const launchFiber = yield* prepared
         .launch({
+          salvage: () => Effect.void,
           append: (direction, envelope) =>
             direction === "inbound"
               ? Effect.never

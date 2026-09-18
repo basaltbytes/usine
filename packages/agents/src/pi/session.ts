@@ -257,7 +257,7 @@ export const subscribePiSession = (
       if (event.type === "message_end") {
         const usage = piMessageTokens(event.message);
         if (Option.isSome(usage)) {
-          totalTokens += usage.value.usage.totalTokens;
+          totalTokens += usage.value;
           if (
             !Queue.offerUnsafe(
               channel.events,

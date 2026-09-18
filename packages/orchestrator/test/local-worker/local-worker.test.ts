@@ -1,22 +1,18 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Settings, UsineConfig } from "@usine/config/factory";
-import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
-import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
-import { Event, DedupKey, EventId } from "@usine/core/event";
-import { ItemKey } from "@usine/core/item";
-import { LoopName } from "@usine/core/loop";
+import { SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import * as RunState from "@usine/core/run/state";
 import { Run, RunId } from "@usine/core/run";
-import { Step, StepName } from "@usine/core/step";
+import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, CredentialProvider, Executor, ExecutorError } from "@usine/executor";
 import { InstanceDirectory } from "@usine/core/instance";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
-import { stepExecutorLayer } from "../src/scheduler.ts";
+import { stepExecutorLayer } from "../../src/scheduler.ts";
 import { TestClock } from "effect/testing";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery, TranscriptTailQuery } from "@usine/engine/transcript";
@@ -39,158 +35,29 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
 import { layer as localExecutorLayer } from "@usine/executor/local";
-import { layer as localLayer } from "../src/local.ts";
-import { runView } from "../src/operator/projection.ts";
+import { layer as localLayer } from "../../src/local.ts";
+import { runView } from "../../src/operator/projection.ts";
+import {
+  LIVE_TEST_TIMEOUT,
+  RUN_HOST,
+  STATE_POLL_ATTEMPTS,
+  TOKEN,
+  config,
+  credentialLayer,
+  makeRemote,
+  output,
+  run,
+  submission,
+  testAgent,
+  waitFor,
+  withLocalEngine,
+  workerCredential,
+} from "./support.ts";
 
-const RUN_HOST = fileURLToPath(new URL("../../run-host/dist/bin.js", import.meta.url));
-const CHANNEL_LOSS_HOST = fileURLToPath(new URL("./fixtures/channel-loss.mjs", import.meta.url));
-const TURBO_CACHE_HOST = fileURLToPath(new URL("./fixtures/turbo-cache.mjs", import.meta.url));
-const STDOUT_NOISE_HOST = fileURLToPath(new URL("./fixtures/stdout-noise.mjs", import.meta.url));
-const PULL_REQUEST_HOST = fileURLToPath(new URL("./fixtures/pull-request.mjs", import.meta.url));
-const TOKEN = "one-attempt-test-token";
-// Each live transition crosses real git worktree and child-process boundaries.
-// The 10-second poll horizon absorbs slow CI hosts, and the 10 ms cadence still
-// reports the last durable state when a transition stalls.
-const STATE_POLL_ATTEMPTS = 1_000;
-// The capacity test completes three sequential run-host lifecycles, so its
-// per-test ceiling must cover more than one state-poll horizon plus cleanup.
-const LIVE_TEST_TIMEOUT = 30_000;
-const testAgent = new Agent({
-  name: AgentName.make("developer"),
-  brain: new BrainSpec({
-    harness: "claude",
-    model: ModelId.make("claude-sonnet-4-6"),
-    effort: "high",
-  }),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
-  persona: AgentPersona.make("Implement the task."),
-});
-
-const config = Schema.decodeUnknownSync(UsineConfig)({
-  version: 1,
-  repos: [{ name: "acme/demo" }],
-  workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
-});
-
-const credentialLayer = Layer.succeed(CredentialProvider)({
-  issue: () => Effect.succeed(Redacted.make(TOKEN)),
-});
-
-const run = Effect.fn("test.git")(function* (
-  command: string,
-  args: ReadonlyArray<string>,
-  cwd?: string,
-) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const exitCode = yield* spawner.exitCode(ChildProcess.make(command, args, { cwd }));
-  if (Number(exitCode) !== 0) {
-    return yield* Effect.die(`${command} ${args.join(" ")} exited with ${String(exitCode)}`);
-  }
-});
-
-const output = Effect.fn("test.gitOutput")(function* (
-  command: string,
-  args: ReadonlyArray<string>,
-  cwd?: string,
-) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  return yield* spawner.string(ChildProcess.make(command, args, { cwd }), {
-    includeStderr: true,
-  });
-});
-
-const makeRemote = Effect.fn("test.makeRemote")(function* (root: string) {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const remote = path.join(root, "origin.git");
-  const seed = path.join(root, "seed");
-  yield* fileSystem.makeDirectory(seed, { recursive: true });
-  yield* run("git", ["init", "--bare", remote]);
-  yield* run("git", ["init"], seed);
-  yield* run("git", ["config", "user.name", "Usine Test"], seed);
-  yield* run("git", ["config", "user.email", "usine@example.invalid"], seed);
-  yield* fileSystem.writeFileString(path.join(seed, "README.md"), "# fixture\n");
-  yield* run("git", ["add", "README.md"], seed);
-  yield* run("git", ["commit", "-m", "fixture"], seed);
-  yield* run("git", ["branch", "-M", "main"], seed);
-  yield* run("git", ["remote", "add", "origin", remote], seed);
-  yield* run("git", ["push", "origin", "main"], seed);
-  return remote;
-});
-
-const submission = (number: number, receivedAt = `2026-08-30T12:00:0${number}Z`) =>
-  new Submission({
-    event: new Event({
-      id: EventId.make(`local-event-${number}`),
-      dedupKey: DedupKey.make(`local/item-${number}/main`),
-      payload: { number },
-      receivedAt: DateTime.makeUnsafe(receivedAt),
-    }),
-    itemKey: ItemKey.make(`item-${number}`),
-    loop: LoopName.make("local-worker"),
-    step: StepName.make("execute"),
-    approval: "none",
-    repository: RepositoryName.make("acme/demo"),
-    revision: RepositoryRevision.make("main"),
-    task: AttemptTask.make(`Complete local task ${number}`),
-    agent: testAgent,
-    parentModel: Option.none(),
-  });
-
-const waitFor = Effect.fn("test.waitFor")(function* (
-  engine: RunEngine["Service"],
-  runId: RunId,
-  state: "Running" | "Succeeded" | "Failed" | "Canceled",
-) {
-  let snapshot = yield* engine.inspect(runId);
-  for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
-    if (snapshot.run.state._tag === state) return snapshot;
-    if (state === "Succeeded" && snapshot.run.state._tag === "Failed") {
-      return yield* Effect.die(JSON.stringify(snapshot.attempts.map((attempt) => attempt.outcome)));
-    }
-    yield* Effect.sleep("10 millis");
-    snapshot = yield* engine.inspect(runId);
-  }
-  return yield* Effect.die(
-    `Run ${runId} did not become ${state}; state=${snapshot.run.state._tag}; attempts=${snapshot.attempts.map((attempt) => Option.match(attempt.outcome, { onNone: () => "open", onSome: (outcome) => outcome._tag })).join(",")}`,
-  );
-});
-
-const withLocalEngine = <A, E, R>(
-  runHostArgs: ReadonlyArray<string>,
-  use: (options: {
-    readonly engine: RunEngine["Service"];
-    readonly instance: InstanceDirectory;
-    readonly remote: string;
-  }) => Effect.Effect<A, E, R>,
-  runHost?: string,
-  credentials = credentialLayer,
-) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-worker-" });
-    const instance = InstanceDirectory.make(root);
-    const remote = yield* makeRemote(root);
-    const runHostOption =
-      runHost === undefined && runHostArgs.length === 0
-        ? {}
-        : {
-            runHost: {
-              command: process.execPath,
-              args: [runHost ?? RUN_HOST, ...runHostArgs],
-            },
-          };
-    const runtime = localLayer(instance, config, [], {
-      repositoryUrl: () => remote,
-      ...runHostOption,
-      interruptGrace: "100 millis",
-    }).pipe(Layer.provide(credentials));
-    return yield* Effect.gen(function* () {
-      const engine = yield* RunEngine;
-      return yield* use({ engine, instance, remote });
-    }).pipe(Effect.provide(runtime));
-  }).pipe(Effect.provide(NodeServices.layer));
+const CHANNEL_LOSS_HOST = fileURLToPath(new URL("../fixtures/channel-loss.mjs", import.meta.url));
+const TURBO_CACHE_HOST = fileURLToPath(new URL("../fixtures/turbo-cache.mjs", import.meta.url));
+const STDOUT_NOISE_HOST = fileURLToPath(new URL("../fixtures/stdout-noise.mjs", import.meta.url));
+const PULL_REQUEST_HOST = fileURLToPath(new URL("../fixtures/pull-request.mjs", import.meta.url));
 
 describe("local worker", () => {
   it.live(
@@ -204,7 +71,7 @@ describe("local worker", () => {
         const runtime = localLayer(instance, config, [testAgent.brain], {
           runHost: {
             command: process.execPath,
-            args: [fileURLToPath(new URL("./fixtures/harness-unavailable.mjs", import.meta.url))],
+            args: [fileURLToPath(new URL("../fixtures/harness-unavailable.mjs", import.meta.url))],
           },
         }).pipe(Layer.provide(credentialLayer));
         const error = yield* Effect.void.pipe(Effect.provide(runtime), Effect.flip);
@@ -234,7 +101,7 @@ describe("local worker", () => {
             const fs = yield* FileSystem.FileSystem;
             assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
           }),
-        fileURLToPath(new URL("./fixtures/harness-unavailable.mjs", import.meta.url)),
+        fileURLToPath(new URL("../fixtures/harness-unavailable.mjs", import.meta.url)),
       ),
     LIVE_TEST_TIMEOUT,
   );
@@ -379,13 +246,15 @@ describe("local worker", () => {
           runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
         }).pipe(
           Layer.provide(
-            Layer.succeed(CredentialProvider)({ issue: () => Effect.succeed(credential) }),
+            Layer.succeed(CredentialProvider)({
+              issue: () => Effect.succeed(workerCredential(credential)),
+            }),
           ),
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
         );
         const budgetConfig = new UsineConfig({
           ...config,
-          settings: new Settings({ ...config.settings, maxAttemptMinutes: 1 }),
+          settings: new Settings({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
         });
         const runtime = stepExecutorLayer(budgetConfig, []).pipe(Layer.provide(executor));
         yield* Effect.gen(function* () {
@@ -406,6 +275,7 @@ describe("local worker", () => {
               parentModel: Option.none(),
               startedAt: selected.event.receivedAt,
               outcome: Option.none(),
+              salvage: Option.none(),
             }),
             event: selected.event,
             run: new Run({
@@ -421,9 +291,10 @@ describe("local worker", () => {
             task: selected.task,
             agent: selected.agent,
             parentModel: selected.parentModel,
+            resume: Option.none(),
           });
           const running = yield* scheduler
-            .execute(execution, { append: () => Effect.void })
+            .execute(execution, { append: () => Effect.void, salvage: () => Effect.void })
             .pipe(Effect.forkChild);
           yield* Deferred.await(cleanupStarted);
           // Agent work is complete; only resource release crosses the one-minute budget.
@@ -476,7 +347,7 @@ describe("local worker", () => {
                     [
                       "-e",
                       phase === "diagnostic"
-                        ? "process.stderr.write(process.env.GITHUB_TOKEN); process.exit(1)"
+                        ? 'process.stderr.write(require("node:fs").readFileSync(process.env.USINE_GITHUB_TOKEN_FILE)); process.exit(1)'
                         : "setInterval(() => {}, 1000)",
                     ],
                     command.options,
@@ -499,7 +370,7 @@ describe("local worker", () => {
                   issue: () =>
                     phase === "credential"
                       ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
-                      : Effect.succeed(credential),
+                      : Effect.succeed(workerCredential(credential)),
                 }),
                 Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, controlledSpawner),
               ),
@@ -518,9 +389,11 @@ describe("local worker", () => {
                 agent: testAgent,
                 parentModel: Option.none(),
                 maxChildren: ChildSessionBudget.make(4),
-                maxAttemptMinutes: 60,
-                maxAttemptTokens: 10_000_000,
+                maxAttemptMinutes: Option.none(),
+                maxAttemptTokens: Option.none(),
                 parentEffort: "high",
+                salvageRef: SalvageRef.make(`usine/salvage/prepare-${phase}/1`),
+                resume: Option.none(),
               }),
             );
             if (phase === "diagnostic") {
@@ -568,7 +441,7 @@ describe("local worker", () => {
             Effect.sync(() => {
               const token = Redacted.make(TOKEN);
               issued.push(token);
-              return token;
+              return workerCredential(token);
             }),
         });
         const runtime = localExecutorLayer({
@@ -588,9 +461,11 @@ describe("local worker", () => {
             agent: testAgent,
             parentModel: Option.none(),
             maxChildren: ChildSessionBudget.make(4),
-            maxAttemptMinutes: 60,
-            maxAttemptTokens: 10_000_000,
+            maxAttemptMinutes: Option.none(),
+            maxAttemptTokens: Option.none(),
             parentEffort: "high",
+            salvageRef: SalvageRef.make("usine/salvage/unlaunched/1"),
+            resume: Option.none(),
           });
           const prepared = yield* Effect.scoped(
             Effect.gen(function* () {
@@ -625,7 +500,9 @@ describe("local worker", () => {
           // The surrounding scope is still open: failure must release immediately.
           assert.strictEqual(issued.length, 2);
           for (const token of issued) assert.throws(() => Redacted.value(token));
-          const reused = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.flip);
+          const reused = yield* prepared
+            .launch({ append: () => Effect.void, salvage: () => Effect.void })
+            .pipe(Effect.flip);
           assert.strictEqual(reused._tag, "InfraFailure");
         }).pipe(Effect.provide(runtime));
       }).pipe(Effect.provide(NodeServices.layer)),
@@ -814,7 +691,7 @@ describe("local worker", () => {
                 yield* Deferred.succeed(minting, undefined);
                 yield* Deferred.await(release);
               }
-              return Redacted.make(TOKEN);
+              return workerCredential(Redacted.make(TOKEN));
             }),
         });
         yield* withLocalEngine(

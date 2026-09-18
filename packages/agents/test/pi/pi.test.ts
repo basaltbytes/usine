@@ -391,6 +391,7 @@ const request = new LaunchRequest({
     parentModel: Option.some(parentModel),
     maxChildren: ChildSessionBudget.make(4),
     parentEffort: "medium",
+    resume: Option.none(),
   }),
   cwd: WorkingDirectory.make("/workspace/usine"),
 });

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 if (process.argv.includes("--protocol-version")) {
-  process.stdout.write("6\n");
+  process.stdout.write("7\n");
 } else if (process.argv.includes("--preflight")) {
   const brain = JSON.parse(process.argv[process.argv.indexOf("--preflight") + 1]);
   process.stdout.write(

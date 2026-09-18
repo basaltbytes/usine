@@ -1,11 +1,12 @@
 import { Attempt, AttemptId, AttemptNumber, shouldAutoRetry } from "@usine/core/attempt";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
+import type { SalvagePushed } from "@usine/core/attempt/salvage";
 import { EventId } from "@usine/core/event";
 import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
-import { Option, Result } from "effect";
+import { Array as EffectArray, Option, Result } from "effect";
 import type { WorkflowCommand } from "../workflow/command.ts";
 
 // Engine policy, not a limit imposed on consumers of the core Attempt model.
@@ -125,15 +126,28 @@ type StartDecision =
       readonly state: RunState.Running;
       readonly number: AttemptNumber;
       readonly interrupted: Option.Option<RetryAttempt>;
+      readonly resume: Option.Option<SalvagePushed>;
     }
   | RunFailed
   | { readonly _tag: "RunClosed"; readonly state: RunState.RunState };
+
+// Only a pushed salvage can be fetched on the next Worker. A later Attempt
+// whose own push failed keeps its worktree on that Worker, so the retry resumes
+// from the newest salvage that was published.
+const newestPushedSalvage = (attempts: ReadonlyArray<Attempt>): Option.Option<SalvagePushed> =>
+  EffectArray.findLast(attempts, (attempt) =>
+    Option.filter(
+      attempt.salvage,
+      (salvage): salvage is SalvagePushed => salvage._tag === "Pushed",
+    ),
+  );
 
 /**
  * Admits the next Attempt after a Worker reservation. An unfinished previous
  * Attempt indicates a restart and counts against the same retry cap as ordinary
  * infrastructure failure. `interruption` records the runtime's explanation.
  * The caller creates the new Attempt's identity and timestamp only when admitted.
+ * `resume` names the pushed salvage the new Attempt checks out, if any.
  */
 export const beginAttempt = (current: RunProgress, interruption: InfraFailure): StartDecision => {
   const state = current.run.state;
@@ -152,6 +166,7 @@ export const beginAttempt = (current: RunProgress, interruption: InfraFailure): 
     state: state._tag === "Running" ? state : RunState.start(state),
     number: AttemptNumber.make((current.attempts.at(-1)?.number ?? 0) + 1),
     interrupted,
+    resume: newestPushedSalvage(current.attempts),
   };
 };
 

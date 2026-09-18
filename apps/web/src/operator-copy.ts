@@ -1,4 +1,5 @@
 import { BrainSpec } from "@usine/core/agent/brain";
+import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { FailureView, NeedView } from "@usine/orchestrator/operator";
@@ -22,6 +23,13 @@ export const failureMessage = (failure: FailureView): string =>
     RunawayFailure: ({ ceiling }) => `Runaway guard tripped its ${ceiling} ceiling`,
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
       `This Attempt used its ${maxChildren}-child session budget; child ${attemptedChildren} did not start`,
+  });
+
+export const salvageMessage = (salvage: AttemptSalvage): string =>
+  Match.valueTags(salvage, {
+    Pushed: ({ ref, commit }) =>
+      `Unfinished work pushed to ${ref} at ${commit.slice(0, 7)}; a retry resumes from it`,
+    Retained: ({ path }) => `Salvage incomplete; unfinished work stays at ${path} for recovery`,
   });
 
 export const needCopy = (need: NeedView): NeedCopy =>

@@ -1,8 +1,11 @@
+import { RepositoryName } from "@usine/core/repository";
+import { WorkerName } from "@usine/core/worker";
 import type { Agent } from "@usine/core/agent";
 import type { ModelId } from "@usine/core/agent/brain";
-import { Attempt, AttemptId, AttemptContext } from "@usine/core/attempt";
+import { Attempt, AttemptId, AttemptContext, AttemptNumber } from "@usine/core/attempt";
 
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
+import { AttemptSalvage, salvageRefFor } from "@usine/core/attempt/salvage";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -46,6 +49,7 @@ import {
   encodeBrainSpec,
   encodeDateTime,
   encodeOutcome,
+  encodeSalvage,
   encodePayload,
   encodeRunState,
   encodeStepResult,
@@ -110,6 +114,7 @@ const attemptSelection = {
   parentModel: attempts.parentModel,
   startedAt: attempts.startedAt,
   outcome: attempts.outcomeJson,
+  salvage: attempts.salvageJson,
 } as const;
 
 // The state partitions are owned by @usine/core; these predicates only borrow their tags.
@@ -156,6 +161,36 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .where(eq(runs.runId, runId))
       .execute();
     return yield* decodeRunRows(rows);
+  });
+
+  const salvageCandidates = Effect.fn("RunStoreQueries.salvageCandidates")(function* () {
+    const rows = yield* database
+      .select({
+        attemptId: attempts.attemptId,
+        worker: attempts.workerName,
+        repository: runs.repository,
+        runId: attempts.runId,
+        number: attempts.attemptNumber,
+      })
+      .from(attempts)
+      .innerJoin(runs, eq(runs.runId, attempts.runId))
+      .where(sql`coalesce(json_extract(${attempts.outcomeJson}, '$._tag'), '') != 'Succeeded'`)
+      .execute();
+    const decoded = yield* Schema.decodeUnknownEffect(
+      Schema.Array(
+        Schema.Struct({
+          attemptId: AttemptId,
+          worker: WorkerName,
+          repository: RepositoryName,
+          runId: RunId,
+          number: AttemptNumber,
+        }),
+      ),
+    )(rows);
+    return decoded.map(({ runId, number, ...attempt }) => ({
+      ...attempt,
+      ref: salvageRefFor(runId, number),
+    }));
   });
 
   const attemptRows = Effect.fn("RunStoreQueries.attemptRows")(function* (runId: RunId) {
@@ -319,7 +354,20 @@ export const queriesFor = (database: RunDatabaseClient) => {
         parentModel: Option.getOrNull(attempt.parentModel),
         startedAt: encodeDateTime(attempt.startedAt),
         outcomeJson: null,
+        salvageJson: null,
       })
+      .execute();
+  });
+
+  const recordSalvage = Effect.fn("RunStoreQueries.recordSalvage")(function* (
+    attemptId: AttemptId,
+    salvage: AttemptSalvage,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, salvage: salvage._tag });
+    yield* database
+      .update(attempts)
+      .set({ salvageJson: encodeSalvage(salvage) })
+      .where(eq(attempts.attemptId, attemptId))
       .execute();
   });
 
@@ -679,9 +727,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
   });
 
   return {
+    salvageCandidates,
     cycles: cycleQueries(database),
     ...transcriptQueries(database),
     addAttempt,
+    recordSalvage,
     amend,
     markIntervened,
     approvalExists,

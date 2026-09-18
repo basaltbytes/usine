@@ -10,6 +10,7 @@ import {
   TokenCount,
 } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId } from "@usine/core/attempt";
+import { SalvageRef } from "@usine/core/attempt/salvage";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
@@ -40,6 +41,7 @@ const REPOSITORY = RepositoryName.make("acme/demo");
 // still allows ($, ;, quotes) must die at the shell-quoting boundary.
 const REVISION = RepositoryRevision.make("main;$(touch$IFS/tmp/usine-injected)");
 const COMMIT = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
+export const SALVAGE_COMMIT = CommitSha.make("fedcba9876543210fedcba9876543210fedcba98");
 const TASK = AttemptTask.make("Complete the remote task");
 export const PROTOCOL = String(AttemptChannel.PROTOCOL_VERSION);
 export const TEST_AGENT = new Agent({
@@ -103,6 +105,10 @@ interface FakeSshState {
   failAttach: boolean;
   failStop: boolean;
   cacheExists: boolean;
+  /** What the salvage finds in the worktree after an unsuccessful Attempt. */
+  salvage: "clean" | "dirty" | "push-fails" | "inspect-fails" | "add-fails" | "commit-fails";
+  salvageCommitted: boolean;
+  resumeFailure?: "lookup" | "fetch" | "decode";
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -309,6 +315,8 @@ export const fakeSsh = (
     failAttach: false,
     failStop: false,
     cacheExists: false,
+    salvage: "clean",
+    salvageCommitted: false,
   };
   const service = ChildProcessSpawner.make(
     Effect.fn("FakeSsh.spawn")(function* (command) {
@@ -391,7 +399,37 @@ export const fakeSsh = (
       }
       if (remoteLine.startsWith("exec 'test' "))
         return oneShotHandle("", state.cacheExists ? 0 : 1);
+      if (remoteLine.startsWith("exec 'git' '-C' ")) {
+        if (remoteLine.includes("'rev-parse'")) {
+          return oneShotHandle(`${state.salvageCommitted ? SALVAGE_COMMIT : COMMIT}\n`, 0);
+        }
+        if (remoteLine.includes("'status'")) {
+          if (state.salvage === "inspect-fails") return oneShotHandle("", 128, "inspection failed");
+          return oneShotHandle(state.salvage === "clean" ? "" : " M src/index.ts\n", 0);
+        }
+        if (remoteLine.includes("'add'") && state.salvage === "add-fails")
+          return oneShotHandle("", 128, "index.lock exists");
+        if (remoteLine.includes("'commit'")) {
+          if (state.salvage === "commit-fails") return oneShotHandle("", 128, "commit failed");
+          state.salvageCommitted = true;
+          return oneShotHandle("", 0);
+        }
+        if (remoteLine.includes("'push'") && state.salvage === "push-fails") {
+          return oneShotHandle("", 128, "remote: permission denied");
+        }
+        return oneShotHandle("", 0);
+      }
+      if (remoteLine.includes("'ls-remote'")) {
+        if (state.resumeFailure === "lookup") return oneShotHandle("", 128, "HTTP 503");
+        return oneShotHandle(`${COMMIT}\trefs/heads/usine/salvage/r/1\n`, 0);
+      }
+      if (remoteLine.includes("'fetch'") && remoteLine.includes("refs/heads/usine/salvage/")) {
+        if (state.resumeFailure === "fetch") return oneShotHandle("", 128, "HTTP 503");
+        state.salvageCommitted = true;
+      }
       if (remoteLine.includes("'git' '--git-dir'") && remoteLine.includes("'rev-parse'")) {
+        if (state.resumeFailure === "decode" && state.salvageCommitted)
+          return oneShotHandle("invalid\n", 0);
         return oneShotHandle(`${COMMIT}\n`, 0);
       }
       return oneShotHandle("{}\n", 0);
@@ -415,9 +453,11 @@ export const request = new CheckoutRequest({
   agent: TEST_AGENT,
   parentModel: Option.none(),
   maxChildren: ChildSessionBudget.make(4),
-  maxAttemptMinutes: 60,
-  maxAttemptTokens: 10_000_000,
+  maxAttemptMinutes: Option.some(60),
+  maxAttemptTokens: Option.some(10_000_000),
   parentEffort: "high",
+  salvageRef: SalvageRef.make("usine/salvage/remote-run/1"),
+  resume: Option.none(),
 });
 
 export const runtime = (sshLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>) =>

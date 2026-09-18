@@ -36,6 +36,7 @@ export const spec = new AttemptChannel.RunSpec({
   parentModel: Option.none(),
   maxChildren: ChildSessionBudget.make(4),
   parentEffort: "medium",
+  resume: Option.none(),
 });
 
 export const start = (runSpec = spec) =>
