@@ -12,10 +12,11 @@ Import each domain concept from its owning subpath. Identities, records, and ope
 | `@usine/core/attempt` | `Attempt`, `AttemptId`, `AttemptNumber`, `AttemptTask`, `shouldAutoRetry` |
 | `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptOutcome` |
 | `@usine/core/attempt/failure` | `InfraFailure`, `DefectFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
-| `@usine/core/attempt/channel` | The protocol-v4 attempt channel: `RunSpec`, `Start`, the envelopes, and the `admit` reducer. Import it as a namespace (`AttemptChannel.Started`) |
+| `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvageRetained`, `AttemptSalvage`, `AttemptRecovery` |
+| `@usine/core/attempt/channel` | The protocol-v7 attempt channel: `RunSpec`, `Start`, the envelopes, and the `admit` reducer. Import it as a namespace (`AttemptChannel.Started`) |
 | `@usine/core/agent`, `@usine/core/agent/brain`, `@usine/core/agent/session` | `Agent`, `AgentName`, `AgentPersona`, parent-model resolution; `BrainSpec`, `ModelId`, `Harness`, `Effort`; `AgentSessionId`, session descriptors, `AgentSessionEvent`, `ChildSessionBudget`, `ChildSessionCount` |
 | `@usine/core/agent/capability` | `HarnessCapability`, `HarnessReady`, `HarnessUnavailableError`, and the credential-free `HarnessReadiness` preflight response |
-| `@usine/core/repository` | `RepositoryName`, `RepositoryRevision`, `CommitSha`, `splitRepositoryName`, `canonicalRepositoryName` |
+| `@usine/core/repository` | `RepositoryName`, `RepositoryRevision`, `CommitSha`, `safeSegment`, `splitRepositoryName`, `canonicalRepositoryName` |
 | `@usine/core/worker`, `@usine/core/item`, `@usine/core/loop`, `@usine/core/instance` | `WorkerName`, `WorkerKind`; `ItemKey`, `ItemNumber`; `LoopName`, `ApprovalRequirement`; `InstanceDirectory` |
 
 Branded schemas are exported under their brand name, and each has an `export type` twin of the same name so the name works in type positions too.
@@ -36,4 +37,4 @@ Import `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, and `Cyc
 
 `SessionStarted.harnessSession` optionally records a `HarnessSession`: the harness-native `HarnessSessionId` and worker working directory (`cwd`). Missing metadata in older transcripts decodes to `Option.none()`; usine's session identity remains separate.
 
-Attempt channel protocol v6 adds saved harness session metadata. Upgrade the orchestrator and run host together; worker preflight rejects mismatched protocol versions.
+Attempt channel protocol v7 adds the previous Attempt's pushed salvage to `RunSpec` (`resume`); v6 added saved harness session metadata. Upgrade the orchestrator and run host together; worker preflight rejects mismatched protocol versions.

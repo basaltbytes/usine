@@ -2,8 +2,7 @@ import { Schema } from "effect";
 import { CommitSha, safeSegment, type RepositoryName } from "../repository.ts";
 import type { RunId } from "../run/run.ts";
 import type { WorkerName } from "../worker.ts";
-import type { AttemptId } from "./attempt.ts";
-import type { AttemptNumber } from "./attempt.ts";
+import type { AttemptId, AttemptNumber } from "./attempt.ts";
 
 /** The remote branch name that holds one Attempt's unfinished work, `usine/salvage/<run>/<attempt>`. */
 export const SalvageRef = Schema.NonEmptyString.pipe(Schema.brand("SalvageRef"));

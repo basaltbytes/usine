@@ -148,6 +148,6 @@ Item cycle exhaustion appears as a `CycleBudgetNeed` in the overview and marks t
 
 The operator HTTP API exposes `POST /api/cycle-budgets/reset` with `{ "askId": "…" }`. A stale or differently answered Ask returns HTTP 409.
 
-The orchestrator requires run-host Attempt channel protocol v6 for saved harness session metadata. Upgrade both together; worker preflight rejects a version mismatch. Stored v3–v5 transcripts remain readable.
+The orchestrator requires run-host Attempt channel protocol v7, whose `Start` frame names the previous Attempt's salvage to resume from. Upgrade both together; worker preflight rejects a version mismatch. Stored v3–v6 transcripts remain readable.
 
 `Operator.resolveFailure(runId, attemptId)` clears attention for the current failed Attempt. The operator API exposes it as `POST /api/runs/:runId/resolve-failure` with `{ "attemptId": "..." }`. Resolved failures remain in Run history with retry available. Needs you, Project status, and Board attention reflect resolution; a later failed Attempt requests attention again.

@@ -35,11 +35,19 @@ const LegacyInboundEnvelope = Schema.Struct({
   payload: Schema.Union([AttemptChannel.Steer, AttemptChannel.Interrupt]),
 });
 
-/** Stored v3–v5 envelopes stay readable; the live channel is v6 only. */
+/**
+ * Protocol versions whose envelopes the current wire schema still decodes: v6 added
+ * optional harness session metadata and v7 changed only the `Start` frame,
+ * which is never stored. Each bump must list the version it retires here.
+ */
+const COMPATIBLE_TRANSCRIPT_PROTOCOL_VERSIONS = [5, 6] as const;
+const CompatibleVersion = Schema.Literals(COMPATIBLE_TRANSCRIPT_PROTOCOL_VERSIONS);
+
+/** Stored v3–v6 envelopes stay readable; the live channel is v7 only. */
 const TranscriptEnvelope = Schema.Union([
   AttemptChannel.Envelope,
-  Schema.Struct({ ...AttemptChannel.OutboundEnvelope.fields, version: Schema.Literal(5) }),
-  Schema.Struct({ ...AttemptChannel.InboundEnvelope.fields, version: Schema.Literal(5) }),
+  Schema.Struct({ ...AttemptChannel.OutboundEnvelope.fields, version: CompatibleVersion }),
+  Schema.Struct({ ...AttemptChannel.InboundEnvelope.fields, version: CompatibleVersion }),
   LegacyOutboundEnvelope,
   LegacyInboundEnvelope,
 ]);

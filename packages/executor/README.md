@@ -65,7 +65,7 @@ The Node adapter at `@usine/executor/local` does the following for each Attempt:
 - checks Git, the installed run-host protocol, and the assigned harness before accepting work;
 - updates a per-repository bare cache, then creates a detached worktree at the resolved revision;
 - renews repository credentials before expiry; Git reads an Attempt token file and `gh` reads its private `GH_CONFIG_DIR` on each invocation;
-- exchanges protocol-v6 envelopes with `@usine/run-host` over newline-delimited standard input and output, including immutable payload, agent context, child-session budget, and normalized session events;
+- exchanges protocol-v7 envelopes with `@usine/run-host` over newline-delimited standard input and output, including immutable payload, agent context, child-session budget, and normalized session events;
 - interrupts cooperatively before a hard kill, then removes the worktree and wipes the credential.
 
 `LocalExecutorOptions.runHost` can override the child command for another compatible host. The adapter otherwise launches the executable shipped by `@usine/run-host` and rejects a protocol-version mismatch during preflight.
@@ -80,7 +80,7 @@ The local layer requires Effect `FileSystem`, `Path`, and `ChildProcessSpawner` 
 
 Preflight creates no checkouts or credential grants. It reads VM metadata through `ssh exe.dev ls --json`, checks Git and Node.js over SSH, compares the run-host protocol version, probes the supplied roster through the remote run host, and asks exe.dev to test each native GitHub integration.
 
-Prepare attaches the repository's integration to the VM with a bounded `--for` grant. It then fetches a bare cached clone from `github.int.exe.xyz` and creates a detached worktree for the Attempt. Launch keeps one SSH process open and exchanges protocol-v6 frames on that process's standard input and output. Cleanup removes the worktree, prunes its cache registration, and detaches the integration after the last concurrent Attempt using it finishes.
+Prepare attaches the repository's integration to the VM with a bounded `--for` grant. It then fetches a bare cached clone from `github.int.exe.xyz` and creates a detached worktree for the Attempt. Launch keeps one SSH process open and exchanges protocol-v7 frames on that process's standard input and output. Cleanup removes the worktree, prunes its cache registration, and detaches the integration after the last concurrent Attempt using it finishes.
 
 Startup reconciles unsuccessful Attempts before registering their durable workflows. Each existing checkout is snapshotted and pushed, and its salvage is recorded before removal. Failed pushes and unknown crash leftovers remain on disk. Cache sweeps prune registrations for missing directories; they never delete existing checkouts. One-shot lobby and SSH commands carry a ten-minute timeout, and the SSH client sends keepalives so a dead link fails the operation instead of parking it. Cancellation also bounds interrupt persistence and delivery before escalating to a hard kill, so a parked store or remote process cannot stall shutdown; before removing a workspace, cleanup reads the run host's recorded pid on the VM and confirms the process is dead, because killing the local SSH client alone says nothing about the remote side.
 
