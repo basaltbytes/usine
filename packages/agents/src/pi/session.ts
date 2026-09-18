@@ -110,14 +110,15 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     error: AgentResultError,
   ) {
     yield* Effect.annotateCurrentSpan({ childSessionId: session.id, sessionId: options.sessionId });
-    yield* Ref.update(
-      childBlocker,
-      Option.orElseSome(() => error),
+    const retained = yield* Ref.modify(childBlocker, (held) =>
+      Option.isNone(held) ? [true, Option.some(error)] : [false, held],
     );
-    yield* Effect.logInfo(`${options.label} received a child's blocker`, {
-      childSessionId: session.id,
-      sessionId: options.sessionId,
-    });
+    yield* Effect.logInfo(
+      retained
+        ? `${options.label} received a child's blocker`
+        : `${options.label} kept its first child blocker ahead of another child's`,
+      { childSessionId: session.id, sessionId: options.sessionId },
+    );
   });
 
   const finish = Effect.fn("SessionChannel.finish")(function* (

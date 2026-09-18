@@ -18,20 +18,19 @@ import { Effect, Exit, Fiber, Result, Stream } from "effect";
 import { Type } from "typebox";
 import { assembleChildPrompt } from "../prompt.ts";
 import {
+  AgentResultError,
   type AgentSessionError,
   BLOCKED_MARKER,
   type ChildBackend,
   ChildRequest,
   ChildSessionBudgetExceededError,
   type ChildSessions,
-  AgentResultError,
   type WorkingDirectory,
 } from "../runtime.ts";
 
 export interface SubagentsExtensionOptions {
   readonly agent: Agent;
   readonly backend: ChildBackend["Service"];
-  /** Records each child's returned report on the parent, so a blocker the parent paraphrases still fails the Attempt. */
   /** Records a child's blocked report on the parent channel before the tool returns it. */
   readonly childBlocked: (session: ChildSession, error: AgentResultError) => Effect.Effect<void>;
   readonly cwd: WorkingDirectory;
