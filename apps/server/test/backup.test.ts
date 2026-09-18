@@ -35,12 +35,17 @@ const runBackup = (directory: string, output: string) =>
     timeout: 15_000,
   });
 
+// A cold CLI start under a fully parallel `pnpm test` outlasts vitest's 5 s default. The test
+// budget exceeds the spawn budget so a slow CLI fails with the spawn's own diagnostics.
+const slowCli = { timeout: 30_000 };
+
 test.for([
   { kind: "missing", reason: /NotFound/ },
   { kind: "corrupt", reason: /not a database/ },
   { kind: "directory", reason: /regular SQLite file/ },
 ])(
   "reports an unusable $kind source without creating a backup",
+  slowCli,
   async ({ kind, reason }, { directory }) => {
     const runtime = join(directory, ".usine");
     const filename = join(runtime, "runtime.sqlite");
@@ -70,6 +75,7 @@ test.for([
   { kind: "long filename", output: `${"b".repeat(256)}.sqlite`, reason: "ENAMETOOLONG" },
 ])(
   "reports a $kind destination and preserves existing files",
+  slowCli,
   async ({ kind, output, reason }, { directory }) => {
     const runtime = join(directory, ".usine");
     await mkdir(runtime);
