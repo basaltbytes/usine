@@ -43,6 +43,12 @@ the push succeeds; until then the record carries the latest failure for the run
 drawer. A request whose `resume` names a pushed salvage checks that ref out instead
 of the bare revision; a missing ref falls back to the revision.
 
+Startup reconciliation lists each Worker's `attempts/` directory once per executor
+instance. Both local and exe.dev adapters skip historical Attempts absent from that
+listing without inspecting individual checkout paths. Failed listings remain cached
+for that startup and are retried after restart. Existing checkouts still follow the
+record-before-remove salvage order; succeeded Attempts only need checkout removal.
+
 `cancel(attemptId)` applies from the start of preparation: harness probes, credential
 acquisition, repository lock waits, and checkout creation. Cancellation stops
 preparation before releasing acquired resources and prevents a prepared Attempt from
