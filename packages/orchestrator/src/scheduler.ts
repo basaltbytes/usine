@@ -2,6 +2,7 @@ import type { UsineConfig, Worker as ConfigWorker } from "@usine/config/factory"
 import { resolveParentEffort } from "@usine/core/agent";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { salvageRefFor } from "@usine/core/attempt/salvage";
 import { WorkerName } from "@usine/core/worker";
 import {
   CheckoutRequest,
@@ -181,6 +182,8 @@ export const stepExecutorLayer = (
                 maxAttemptMinutes: config.settings.maxAttemptMinutes,
                 maxAttemptTokens: config.settings.maxAttemptTokens,
                 parentEffort: resolveParentEffort(execution.agent, config.settings.parentEffort),
+                salvageRef: salvageRefFor(execution.run.id, execution.attempt.number),
+                resume: execution.salvage,
               }),
             )
             .pipe(Effect.mapError(asAttemptFailure));

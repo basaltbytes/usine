@@ -82,6 +82,7 @@ const liveAttempt = new AttemptView({
   brain,
   startedAt: "2026-09-01T12:00:00.000Z",
   outcome: null,
+  salvage: null,
 });
 const parent = new ParentSession({
   id: AgentSessionId.make("parent-session"),

@@ -69,6 +69,7 @@ const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
       onNone: () => null,
       onSome: attemptOutcomeView,
     }),
+    salvage: Option.getOrNull(attempt.salvage),
   });
 };
 

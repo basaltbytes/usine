@@ -338,6 +338,7 @@ const makePiParent = Effect.gen(function* () {
               agent: request.spec.agent.name,
               persona: request.spec.agent.persona,
               task: request.spec.task,
+              resume: request.spec.resume,
             });
             const abort = Effect.tryPromise({
               try: () => started.session.abort(),

@@ -164,7 +164,10 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       return yield* withGracefulShutdown(
         startup,
         shutdown,
-        Duration.minutes(instance.config.settings.maxAttemptMinutes),
+        Option.match(instance.config.settings.maxAttemptMinutes, {
+          onNone: () => Duration.infinity,
+          onSome: Duration.minutes,
+        }),
       );
     }),
   );

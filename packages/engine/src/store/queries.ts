@@ -3,6 +3,7 @@ import type { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptContext } from "@usine/core/attempt";
 
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
+import { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -46,6 +47,7 @@ import {
   encodeBrainSpec,
   encodeDateTime,
   encodeOutcome,
+  encodeSalvage,
   encodePayload,
   encodeRunState,
   encodeStepResult,
@@ -110,6 +112,7 @@ const attemptSelection = {
   parentModel: attempts.parentModel,
   startedAt: attempts.startedAt,
   outcome: attempts.outcomeJson,
+  salvage: attempts.salvageJson,
 } as const;
 
 // The state partitions are owned by @usine/core; these predicates only borrow their tags.
@@ -319,7 +322,20 @@ export const queriesFor = (database: RunDatabaseClient) => {
         parentModel: Option.getOrNull(attempt.parentModel),
         startedAt: encodeDateTime(attempt.startedAt),
         outcomeJson: null,
+        salvageJson: null,
       })
+      .execute();
+  });
+
+  const recordSalvage = Effect.fn("RunStoreQueries.recordSalvage")(function* (
+    attemptId: AttemptId,
+    salvage: AttemptSalvage,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, salvage: salvage._tag });
+    yield* database
+      .update(attempts)
+      .set({ salvageJson: encodeSalvage(salvage) })
+      .where(eq(attempts.attemptId, attemptId))
       .execute();
   });
 
@@ -682,6 +698,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     cycles: cycleQueries(database),
     ...transcriptQueries(database),
     addAttempt,
+    recordSalvage,
     amend,
     markIntervened,
     approvalExists,

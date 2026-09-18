@@ -77,7 +77,11 @@ export const withGracefulShutdown = <A, E, R, E2, R2>(
             // interruptible so the losing drain or signal wait can be stopped.
             const outcome = yield* Effect.raceFirst(
               Effect.all([drain, Fiber.join(stopping)], { concurrency: "unbounded" }).pipe(
-                Effect.timeoutOption(deadline),
+                // An unlimited Attempt ceiling means an unlimited drain; only the
+                // second signal ends it.
+                Duration.isFinite(deadline)
+                  ? Effect.timeoutOption(deadline)
+                  : Effect.map(Option.some),
                 Effect.map((result) =>
                   Option.isSome(result) ? ("drained" as const) : ("deadline" as const),
                 ),

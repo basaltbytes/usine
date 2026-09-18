@@ -32,7 +32,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { api } from "./api.ts";
-import { brainLine, failureMessage } from "./operator-copy.ts";
+import { brainLine, failureMessage, salvageMessage } from "./operator-copy.ts";
 import {
   mergeTranscript,
   mergeEarlierTranscript,
@@ -323,6 +323,11 @@ export const RunDrawer = ({
                           <p className="text-destructive wrap-anywhere">
                             <strong>{attempt.outcome.failure._tag}</strong>
                             {` — ${failureMessage(attempt.outcome.failure)}`}
+                          </p>
+                        )}
+                        {attempt.salvage !== null && (
+                          <p className="font-mono text-muted-foreground wrap-anywhere">
+                            {salvageMessage(attempt.salvage)}
                           </p>
                         )}
                       </ItemContent>

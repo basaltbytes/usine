@@ -3,6 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 
+import { type AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
 import { Cause, Effect, Exit, Fiber, Logger, Scope } from "effect";
@@ -11,6 +12,7 @@ import {
   ATTEMPT_ID,
   WORKER,
   PROTOCOL,
+  SALVAGE_COMMIT,
   TEST_AGENT,
   SSH_ENVIRONMENT_ALLOWLIST,
   remoteArgs,
@@ -20,6 +22,57 @@ import {
 } from "./support.ts";
 
 describe("exe.dev preparation", () => {
+  it.effect.each(["dirty", "push-fails"] as const)(
+    "salvages an unsuccessful Attempt's worktree before cleanup (%s)",
+    (salvage) => {
+      const ssh = fakeSsh(PROTOCOL, "final-nonzero");
+      ssh.state.salvage = salvage;
+      const recorded: Array<AttemptSalvage> = [];
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        const prepared = yield* executor.prepare(request);
+        const failure = yield* prepared
+          .launch({
+            append: () => Effect.void,
+            salvage: (value) =>
+              Effect.sync(() => {
+                recorded.push(value);
+              }),
+          })
+          .pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "InfraFailure");
+        const lines = ssh.state.commands.map((command) => remoteArgs(command)[0] ?? "");
+        const push = lines.findIndex((line) => line.includes("'push' '--force'"));
+        assert(push >= 0, "the salvage push never ran");
+        // Preparation removes any stale directory first; only a removal after
+        // the push is cleanup.
+        const removal = lines.findIndex(
+          (line, index) =>
+            index > push &&
+            line.startsWith("exec 'rm' '-rf'") &&
+            line.includes("/attempts/remote-run_execute_1'"),
+        );
+        assert(lines[push]?.includes(`'${SALVAGE_COMMIT}:refs/heads/${request.salvageRef}'`));
+        assert(
+          lines.some((line) => line.includes("'wip(usine): salvage attempt remote-run/execute/1'")),
+        );
+        if (salvage === "dirty") {
+          assert(removal > push, "the worktree was removed before the salvage push");
+          assert.deepStrictEqual(recorded, [
+            new SalvagePushed({ ref: request.salvageRef, commit: SALVAGE_COMMIT }),
+          ]);
+        } else {
+          assert.strictEqual(removal, -1, "a worktree whose push failed must stay on disk");
+          assert.strictEqual(recorded.length, 1);
+          assert(recorded[0]?._tag === "Retained");
+          assert(recorded[0].path.endsWith("/attempts/remote-run_execute_1"));
+          assert.strictEqual(recorded[0].commit, SALVAGE_COMMIT);
+        }
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+    },
+  );
+
   it.effect("preflight verifies the baked VM without changing remote state", () => {
     const ssh = fakeSsh(PROTOCOL);
     return Effect.gen(function* () {
@@ -85,7 +138,10 @@ describe("exe.dev preparation", () => {
         )
         .pipe(Scope.provide(secondScope));
       ssh.state.failWorktreeRm = true;
-      const result = yield* prepared.launch({ append: () => Effect.void });
+      const result = yield* prepared.launch({
+        append: () => Effect.void,
+        salvage: () => Effect.void,
+      });
       assert.strictEqual(result.message, "done");
       assert(JSON.stringify(errors).includes("worktree-directory"));
       assert(
@@ -124,7 +180,10 @@ describe("exe.dev preparation", () => {
         const prepared = yield* executor.prepare(request).pipe(Scope.provide(owner));
         ssh.state.failStop = true;
         const beforeLaunch = ssh.state.commands.length;
-        const result = yield* prepared.launch({ append: () => Effect.void });
+        const result = yield* prepared.launch({
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+        });
         assert.strictEqual(result.message, "done");
         const issued = ssh.state.commands.slice(beforeLaunch);
         const remote = issued.map((command) => remoteArgs(command)[0] ?? "");
@@ -202,7 +261,9 @@ describe("exe.dev preparation", () => {
       const prepared = yield* executor.prepare(request);
       yield* executor.cancel(ATTEMPT_ID);
       yield* executor.cancel(ATTEMPT_ID);
-      const error = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.flip);
+      const error = yield* prepared
+        .launch({ append: () => Effect.void, salvage: () => Effect.void })
+        .pipe(Effect.flip);
       assert.strictEqual(error._tag, "InfraFailure");
       assert.deepStrictEqual(ssh.state.inputs, []);
       assert.strictEqual(
@@ -218,7 +279,9 @@ describe("exe.dev preparation", () => {
       const executor = yield* Executor;
       const prepared = yield* executor.prepare(request);
       ssh.state.hangPreparation = "spawn";
-      const launched = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.forkChild);
+      const launched = yield* prepared
+        .launch({ append: () => Effect.void, salvage: () => Effect.void })
+        .pipe(Effect.forkChild);
       while (!ssh.state.parked) yield* Effect.yieldNow;
       yield* executor.cancel(ATTEMPT_ID);
       const exit = yield* Fiber.await(launched);
@@ -242,7 +305,7 @@ describe("exe.dev preparation", () => {
         ssh.state.hangPreparation = stage;
         const attempt = Effect.gen(function* () {
           const prepared = yield* executor.prepare(request);
-          return yield* prepared.launch({ append: () => Effect.void });
+          return yield* prepared.launch({ append: () => Effect.void, salvage: () => Effect.void });
         }).pipe(Effect.scoped);
         // The grant detaches last, so its count at the owner's exit shows whether
         // the owner returned while the canceling fiber was still cleaning up.
@@ -304,6 +367,7 @@ describe("exe.dev preparation", () => {
         yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
         const prepared = yield* executor.prepare(request);
         const result = yield* prepared.launch({
+          salvage: () => Effect.void,
           append: (direction, envelope) =>
             Effect.sync(() => {
               transcript.push([direction, envelope]);

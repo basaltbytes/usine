@@ -4,6 +4,7 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
+import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName, WorkerKind } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
@@ -102,11 +103,15 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   agent: Agent,
   parentModel: Schema.Option(ModelId),
   maxChildren: ChildSessionBudget,
-  /** Maximum minutes of live run-host execution; preparation and resource cleanup are outside this budget. */
-  maxAttemptMinutes: Schema.Int.check(Schema.isGreaterThan(0)),
-  /** Maximum reported tokens across the parent and every child; operator Holds never pause this ceiling. */
-  maxAttemptTokens: Schema.Int.check(Schema.isGreaterThan(0)),
+  /** Maximum minutes of live run-host execution, or none for no timer; preparation and resource cleanup are outside this budget. */
+  maxAttemptMinutes: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
+  /** Maximum consumed tokens across the parent and every child, or none for no token ceiling; operator Holds never pause this ceiling. */
+  maxAttemptTokens: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
   parentEffort: Effort,
+  /** Where the Worker pushes this Attempt's unfinished work if the Attempt ends without success. */
+  salvageRef: SalvageRef,
+  /** The previous Attempt's pushed salvage to check out instead of the bare revision. */
+  resume: Schema.Option(SalvagePushed),
 }) {}
 
 /** One Attempt's disposable checkout directory. */

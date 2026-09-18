@@ -166,6 +166,7 @@ const snapshot = new RunSnapshot({
       parentModel: Option.none(),
       startedAt: now,
       outcome: Option.none(),
+      salvage: Option.none(),
     }),
   ],
   repository,

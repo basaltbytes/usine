@@ -25,7 +25,16 @@ cleanup before returning on success, failure, or interruption; closing the owner
 scope also stops a launch running in another fiber. Each Attempt launches at most
 once. Cleanup failures are logged without replacing a successful agent result with
 a retryable failure. Set `CheckoutRequest.maxAttemptMinutes` to bound live run-host
-execution; preparation and resource cleanup are outside that time budget.
+execution; preparation and resource cleanup are outside that time budget. Both
+ceilings are optional; an absent one leaves that half of the runaway guard unarmed,
+and an armed one steers the parent session once at 80% of its limit.
+
+An Attempt that ends without a successful result is salvaged before its worktree is
+removed: uncommitted changes are committed as `wip(usine): salvage attempt <id>` and
+HEAD is pushed to `CheckoutRequest.salvageRef` with the Worker's credentials. The
+result reaches the engine through `Sink.salvage`. A failed push keeps the worktree
+on disk and reports its path. A request whose `resume` names a pushed salvage checks
+that ref out instead of the bare revision; a missing ref falls back to the revision.
 
 `cancel(attemptId)` applies from the start of preparation: harness probes, credential
 acquisition, repository lock waits, and checkout creation. Cancellation stops

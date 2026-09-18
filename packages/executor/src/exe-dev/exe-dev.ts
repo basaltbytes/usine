@@ -1,9 +1,8 @@
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName } from "@usine/core/repository";
-import { Effect, Exit, Layer, Schema, Scope } from "effect";
+import { Effect, Exit, Layer, Option, Schema, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
-  type AttemptWorkspace,
   CheckoutRequest,
   CredentialUnavailableError,
   Executor,
@@ -13,7 +12,12 @@ import {
 import { verifyHarnesses } from "../harness-preflight.ts";
 import { preparedAttemptsFor } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
-import { provisionWorktree, safeSegment, type WorkspaceOps } from "../provision.ts";
+import {
+  type ProvisionedWorktree,
+  provisionWorktree,
+  safeSegment,
+  type WorkspaceOps,
+} from "../provision.ts";
 import { attemptChannelFor } from "./channel.ts";
 import { commandsFor } from "./commands.ts";
 import { credentialGrantsFor } from "./grants.ts";
@@ -56,7 +60,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     const sweepAbandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
     const attemptChannel = yield* attemptChannelFor(commands, runHost, interruptGrace);
 
-    const attempts = yield* preparedAttemptsFor(attemptChannel.cancel);
+    const attempts = yield* preparedAttemptsFor(attemptChannel.cancel, attemptChannel.intervene);
 
     const prepare = Effect.fn("ExeDevExecutor.prepare")(function* (request: CheckoutRequest) {
       yield* Effect.annotateCurrentSpan({
@@ -115,7 +119,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
 
       const releaseWorkspace = Effect.fn("ExeDevExecutor.releaseWorkspace")(
         function* (
-          resource: { readonly workspace: AttemptWorkspace; readonly scope: Scope.Closeable },
+          resource: { readonly provisioned: ProvisionedWorktree; readonly scope: Scope.Closeable },
           exit: Exit.Exit<unknown, unknown>,
         ) {
           yield* Effect.annotateCurrentSpan({
@@ -130,7 +134,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
             "-c",
             RUN_HOST_KILL_SCRIPT,
             "sh",
-            runHostPidFile(resource.workspace.worktree),
+            runHostPidFile(resource.provisioned.workspace.worktree),
           ]);
           yield* Effect.logInfo("Confirmed the remote run host before workspace removal", {
             attemptId: request.attemptId,
@@ -155,7 +159,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
           ),
       );
 
-      const { workspace: prepared } = yield* fetches
+      const { provisioned } = yield* fetches
         .withLock(request.repository)(
           Effect.gen(function* () {
             // Credentials belong to the Attempt scope independently of the checkout:
@@ -173,7 +177,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
                   // Before preparation succeeds no run host can exist. Roll back the
                   // partial checkout unconditionally; only a completed workspace is
                   // transferred to the guarded remote-process release above.
-                  const workspace = yield* restore(
+                  const provisioned = yield* restore(
                     provisionWorktree({
                       request,
                       url: remoteUrl,
@@ -185,7 +189,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
                     Scope.provide(scope),
                     Effect.onError((cause) => Scope.close(scope, Exit.failCause(cause))),
                   );
-                  return { workspace, scope };
+                  return { provisioned, scope };
                 }),
               ),
               releaseWorkspace,
@@ -201,17 +205,20 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
           ),
         );
 
+      const prepared = provisioned.workspace;
       yield* Effect.logInfo("exe.dev Attempt workspace ready", {
         attemptId: request.attemptId,
         worker: request.worker,
         host: vm.sshDest,
         repository: request.repository,
         baseCommit: prepared.spec.baseCommit,
+        resume: Option.map(prepared.spec.resume, ({ ref }) => ref),
         worktree,
       });
       return {
         workspace: prepared,
         launch: (io: AttemptChannel.Sink) => attemptChannel.launch(prepared, vm, io),
+        salvaged: provisioned.salvaged,
       };
     }, attempts.prepare);
 

@@ -6,6 +6,7 @@ import {
   Effect,
   FileSystem,
   Layer,
+  Option,
   Path,
   type PlatformError,
   Redacted,
@@ -251,7 +252,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     }, logPreflightFailure);
 
     const session = yield* runHostSessionFor({ interruptGrace });
-    const attempts = yield* preparedAttemptsFor(session.cancel);
+    const attempts = yield* preparedAttemptsFor(session.cancel, session.intervene);
 
     const prepare = Effect.fn("LocalExecutor.prepare")(function* (request: CheckoutRequest) {
       yield* Effect.annotateCurrentSpan({
@@ -330,13 +331,17 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
 
       yield* Effect.logInfo("Attempt workspace ready", {
         attemptId: request.attemptId,
-        baseCommit: prepared.spec.baseCommit,
+        baseCommit: prepared.workspace.spec.baseCommit,
+        resume: Option.map(prepared.workspace.spec.resume, ({ ref }) => ref),
         worktree,
       });
       return {
-        workspace: prepared,
+        workspace: prepared.workspace,
         launch: (io: AttemptChannel.Sink) =>
-          session.launch(prepared, io, (input) => spawn(prepared, credential, input)),
+          session.launch(prepared.workspace, io, (input) =>
+            spawn(prepared.workspace, credential, input),
+          ),
+        salvaged: prepared.salvaged,
       };
     }, attempts.prepare);
 

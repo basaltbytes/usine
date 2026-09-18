@@ -72,10 +72,10 @@ export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
   pollInterval: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
   /** Total child sessions allowed over one Attempt's lifetime, including sequential spawns; defaults to four. */
   maxChildren: ChildSessionBudget.pipe(Schema.withDecodingDefaultKey(Effect.succeed(4))),
-  /** Configured Attempt duration ceiling in minutes; defaults to 60. */
-  maxAttemptMinutes: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(60))),
-  /** Configured total-token ceiling per Attempt; defaults to 10,000,000. */
-  maxAttemptTokens: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(10_000_000))),
+  /** Wall-clock ceiling per Attempt in minutes. Absent by default: the runaway guard's timer is not armed. */
+  maxAttemptMinutes: Schema.OptionFromOptionalKey(PositiveInt),
+  /** Consumed-token ceiling per Attempt across the parent and every child. Absent by default: the token guard is not armed. */
+  maxAttemptTokens: Schema.OptionFromOptionalKey(PositiveInt),
   /** Parent model used when the Agent has no override; an absent default leaves selection to Pi. */
   parentModel: Schema.OptionFromOptionalKey(ModelId),
   /** Default parent reasoning effort; if neither Agent nor factory supplies one, the child's effort applies. */

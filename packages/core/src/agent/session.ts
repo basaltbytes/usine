@@ -6,7 +6,12 @@ import { BrainSpec } from "./brain.ts";
 export const AgentSessionId = Schema.NonEmptyString.pipe(Schema.brand("AgentSessionId"));
 export type AgentSessionId = typeof AgentSessionId.Type;
 
-/** A provider-reported count of input, output, and cached tokens. */
+/**
+ * Tokens a session consumed: output tokens plus uncached input tokens (new
+ * prompt text and cache writes). Cache reads are excluded, so the count grows
+ * with work done rather than with the length of the conversation re-read on
+ * every turn. Each harness computes it from its own usage report.
+ */
 export const TokenCount = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
   Schema.brand("TokenCount"),
 );
@@ -116,7 +121,7 @@ export class SessionResumed extends Schema.TaggedClass<SessionResumed>("Agent/Se
   { session: AgentSession },
 ) {}
 
-/** Cumulative tokens consumed by this session, including its later operator turns. */
+/** Cumulative `TokenCount` consumed by this session so far, including its later operator turns. */
 export class SessionTokensUpdated extends Schema.TaggedClass<SessionTokensUpdated>(
   "Agent/SessionTokensUpdated",
 )("SessionTokensUpdated", { session: AgentSession, totalTokens: TokenCount }) {}

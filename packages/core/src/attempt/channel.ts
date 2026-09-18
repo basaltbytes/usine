@@ -6,8 +6,9 @@ import { AttemptId, AttemptTask } from "./attempt.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
 import { StepResult } from "../step/result.ts";
 import { AttemptFailure } from "./failure.ts";
+import { AttemptSalvage, SalvagePushed } from "./salvage.ts";
 
-export const PROTOCOL_VERSION = 6 as const;
+export const PROTOCOL_VERSION = 7 as const;
 
 /**
  * Per-Attempt, per-direction message sequence, starting at 1. Distinct from the
@@ -38,6 +39,8 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
   parentModel: Schema.OptionFromNullOr(ModelId),
   maxChildren: ChildSessionBudget,
   parentEffort: Effort,
+  /** The previous Attempt's pushed salvage checked out in this workspace; the agent continues from it. */
+  resume: Schema.OptionFromNullOr(SalvagePushed),
 }) {}
 
 /**
@@ -196,12 +199,14 @@ export const EnvelopeFromJson = Schema.fromJsonString(Envelope);
 export const InputFrameFromJson = Schema.fromJsonString(InputFrame);
 export const OutboundEnvelopeFromJson = Schema.fromJsonString(OutboundEnvelope);
 
-/** Where a channel consumer persists envelopes. */
+/** Where a channel consumer persists envelopes and the executor's salvage record. */
 export interface Sink {
   readonly append: (
     direction: Direction,
     envelope: Envelope,
   ) => Effect.Effect<void, AttemptFailure>;
+  /** Records what the executor preserved of the workspace after the Attempt ended without success. */
+  readonly salvage: (salvage: AttemptSalvage) => Effect.Effect<void, AttemptFailure>;
 }
 
 /** How far one outbound channel has legally progressed. */

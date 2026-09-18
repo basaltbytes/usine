@@ -6,6 +6,7 @@ import { StepName } from "../step/step.ts";
 import { WorkerName } from "../worker.ts";
 import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
 import { AttemptOutcome } from "./outcome.ts";
+import { AttemptSalvage } from "./salvage.ts";
 
 /** Identity of one execution try; each retry receives a new identity under the same Run and Step. */
 export const AttemptId = Schema.NonEmptyString.pipe(Schema.brand("AttemptId"));
@@ -34,7 +35,11 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
   parentModel: Schema.OptionFromNullOr(ModelId),
 }) {}
 
-/** One try of a step on a worker. `outcome` is none while the attempt is in flight. */
+/**
+ * One try of a step on a worker. `outcome` is none while the attempt is in flight.
+ * `salvage` records what the executor preserved of the workspace after an
+ * unsuccessful end; the next attempt of the same Run resumes from a pushed salvage.
+ */
 export class Attempt extends Schema.Class<Attempt>("Attempt")({
   id: AttemptId,
   runId: RunId,
@@ -48,6 +53,7 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
   parentModel: Schema.OptionFromNullOr(ModelId),
   startedAt: Schema.DateTimeUtc,
   outcome: Schema.Option(AttemptOutcome),
+  salvage: Schema.Option(AttemptSalvage),
 }) {}
 
 /**

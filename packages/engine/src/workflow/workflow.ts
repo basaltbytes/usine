@@ -85,6 +85,8 @@ const executeAttempt = Effect.fn("DurableRun.attempt")(function* (
     .execute(started.execution, {
       append: (direction, envelope) =>
         store.appendTranscript(direction, envelope).pipe(asAttemptFailure),
+      salvage: (salvage) =>
+        store.recordSalvage(started.execution.attempt.id, salvage).pipe(asAttemptFailure),
     })
     .pipe(
       Effect.catchDefect((defect) =>

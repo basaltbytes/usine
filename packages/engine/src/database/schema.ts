@@ -182,6 +182,7 @@ export const attempts = snakeCase.table(
     parentModel: text().$type<ModelId>(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
+    salvageJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
     check("usine_attempts_number", sql`${table.attemptNumber} >= 1`),

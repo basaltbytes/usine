@@ -38,7 +38,7 @@ import {
 } from "../../runtime.ts";
 import { sessionChannel } from "../session.ts";
 import { sessionConversation } from "../conversation.ts";
-import { CodexTokenUsage } from "../usage.ts";
+import { CodexTokenUsage, codexThreadTokens } from "../usage.ts";
 import { CodexAppServer, type CodexClient, operationError } from "./app-server.ts";
 import { codexPoolUnavailable, initializeCodex, verifyCodexAccount } from "./account.ts";
 
@@ -266,7 +266,7 @@ const makeCodexChild = Effect.gen(function* () {
                 yield* channel.emit(
                   new SessionTokensUpdated({
                     session,
-                    totalTokens: usage.value.tokenUsage.total.totalTokens,
+                    totalTokens: codexThreadTokens(usage.value.tokenUsage.total),
                   }),
                 );
               }

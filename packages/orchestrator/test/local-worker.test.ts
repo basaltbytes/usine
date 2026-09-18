@@ -5,6 +5,8 @@ import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
+import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
+import { CommitSha } from "@usine/core/repository";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -385,7 +387,7 @@ describe("local worker", () => {
         );
         const budgetConfig = new UsineConfig({
           ...config,
-          settings: new Settings({ ...config.settings, maxAttemptMinutes: 1 }),
+          settings: new Settings({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
         });
         const runtime = stepExecutorLayer(budgetConfig, []).pipe(Layer.provide(executor));
         yield* Effect.gen(function* () {
@@ -406,6 +408,7 @@ describe("local worker", () => {
               parentModel: Option.none(),
               startedAt: selected.event.receivedAt,
               outcome: Option.none(),
+              salvage: Option.none(),
             }),
             event: selected.event,
             run: new Run({
@@ -421,9 +424,10 @@ describe("local worker", () => {
             task: selected.task,
             agent: selected.agent,
             parentModel: selected.parentModel,
+            salvage: Option.none(),
           });
           const running = yield* scheduler
-            .execute(execution, { append: () => Effect.void })
+            .execute(execution, { append: () => Effect.void, salvage: () => Effect.void })
             .pipe(Effect.forkChild);
           yield* Deferred.await(cleanupStarted);
           // Agent work is complete; only resource release crosses the one-minute budget.
@@ -518,9 +522,11 @@ describe("local worker", () => {
                 agent: testAgent,
                 parentModel: Option.none(),
                 maxChildren: ChildSessionBudget.make(4),
-                maxAttemptMinutes: 60,
-                maxAttemptTokens: 10_000_000,
+                maxAttemptMinutes: Option.none(),
+                maxAttemptTokens: Option.none(),
                 parentEffort: "high",
+                salvageRef: SalvageRef.make(`usine/salvage/prepare-${phase}/1`),
+                resume: Option.none(),
               }),
             );
             if (phase === "diagnostic") {
@@ -588,9 +594,11 @@ describe("local worker", () => {
             agent: testAgent,
             parentModel: Option.none(),
             maxChildren: ChildSessionBudget.make(4),
-            maxAttemptMinutes: 60,
-            maxAttemptTokens: 10_000_000,
+            maxAttemptMinutes: Option.none(),
+            maxAttemptTokens: Option.none(),
             parentEffort: "high",
+            salvageRef: SalvageRef.make("usine/salvage/unlaunched/1"),
+            resume: Option.none(),
           });
           const prepared = yield* Effect.scoped(
             Effect.gen(function* () {
@@ -625,7 +633,9 @@ describe("local worker", () => {
           // The surrounding scope is still open: failure must release immediately.
           assert.strictEqual(issued.length, 2);
           for (const token of issued) assert.throws(() => Redacted.value(token));
-          const reused = yield* prepared.launch({ append: () => Effect.void }).pipe(Effect.flip);
+          const reused = yield* prepared
+            .launch({ append: () => Effect.void, salvage: () => Effect.void })
+            .pipe(Effect.flip);
           assert.strictEqual(reused._tag, "InfraFailure");
         }).pipe(Effect.provide(runtime));
       }).pipe(Effect.provide(NodeServices.layer)),
@@ -918,6 +928,158 @@ describe("local worker", () => {
           assert(DateTime.toEpochMillis(olderStarted) <= DateTime.toEpochMillis(newerStarted));
         }),
       ),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "salvages uncommitted work to the salvage ref when a live Attempt is canceled",
+    () =>
+      withLocalEngine(["--stub-delay-ms", "5000"], ({ engine, instance, remote }) =>
+        Effect.gen(function* () {
+          const path = yield* Path.Path;
+          const fileSystem = yield* FileSystem.FileSystem;
+          const accepted = yield* engine.submit(submission(3));
+          assert.strictEqual(accepted._tag, "Claimed");
+          if (accepted._tag !== "Claimed") return;
+          const running = yield* waitFor(engine, accepted.runId, "Running");
+          const attempt = running.attempts[0];
+          assert(attempt !== undefined);
+          for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
+            const transcript = yield* engine.transcript(
+              new TranscriptAllQuery({ attemptId: attempt.id }),
+            );
+            if (transcript.some(({ envelope }) => envelope.payload._tag === "Started")) break;
+            yield* Effect.sleep("10 millis");
+          }
+          const attemptsDirectory = path.join(instance, ".usine", "workers", "local", "attempts");
+          const worktree = path.join(attemptsDirectory, attempt.id.replaceAll("/", "_"));
+          yield* fileSystem.writeFileString(path.join(worktree, "progress.md"), "half done\n");
+          yield* engine.cancel(accepted.runId);
+          yield* waitFor(engine, accepted.runId, "Canceled");
+          let salvaged = Option.none<SalvagePushed>();
+          for (let poll = 0; Option.isNone(salvaged) && poll < STATE_POLL_ATTEMPTS; poll += 1) {
+            const snapshot = yield* engine.inspect(accepted.runId);
+            salvaged = Option.flatMap(snapshot.attempts[0]?.salvage ?? Option.none(), (salvage) =>
+              salvage._tag === "Pushed" ? Option.some(salvage) : Option.none(),
+            );
+            if (Option.isNone(salvaged)) yield* Effect.sleep("10 millis");
+          }
+          assert(Option.isSome(salvaged), "the canceled Attempt recorded no pushed salvage");
+          assert.strictEqual(salvaged.value.ref, `usine/salvage/${accepted.runId}/1`);
+          const pushed = (yield* output("git", [
+            "--git-dir",
+            remote,
+            "rev-parse",
+            `refs/heads/${salvaged.value.ref}`,
+          ])).trim();
+          assert.strictEqual(pushed, salvaged.value.commit);
+          const subject = (yield* output("git", [
+            "--git-dir",
+            remote,
+            "log",
+            "-1",
+            "--format=%s",
+            salvaged.value.commit,
+          ])).trim();
+          assert.strictEqual(subject, `wip(usine): salvage attempt ${attempt.id}`);
+          const files = (yield* output("git", [
+            "--git-dir",
+            remote,
+            "ls-tree",
+            "--name-only",
+            salvaged.value.commit,
+          ])).trim();
+          assert(files.includes("progress.md"));
+          let leftovers = yield* fileSystem.readDirectory(attemptsDirectory);
+          for (let poll = 0; leftovers.length > 0 && poll < STATE_POLL_ATTEMPTS; poll += 1) {
+            yield* Effect.sleep("10 millis");
+            leftovers = yield* fileSystem.readDirectory(attemptsDirectory);
+          }
+          assert.deepStrictEqual(leftovers, []);
+        }),
+      ),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "prepares a retry from the previous Attempt's salvage ref and falls back to the base when it is gone",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-resume-" });
+        const remote = yield* makeRemote(root);
+        const seed = `${root}/seed`;
+        const base = (yield* output("git", ["rev-parse", "HEAD"], seed)).trim();
+        yield* run(
+          "git",
+          ["commit", "--allow-empty", "-m", "wip(usine): salvage attempt r/1"],
+          seed,
+        );
+        const salvageCommit = CommitSha.make(
+          (yield* output("git", ["rev-parse", "HEAD"], seed)).trim(),
+        );
+        const ref = SalvageRef.make("usine/salvage/r/1");
+        yield* run("git", ["push", "origin", `HEAD:refs/heads/${ref}`], seed);
+        const runtime = localExecutorLayer({
+          instanceDirectory: InstanceDirectory.make(root),
+          repositoryUrl: () => remote,
+          runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
+        }).pipe(Layer.provide(credentialLayer));
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const request = new CheckoutRequest({
+            attemptId: AttemptId.make("r/run/2"),
+            worker: WorkerName.make("local"),
+            repository: RepositoryName.make("acme/demo"),
+            revision: RepositoryRevision.make("main"),
+            payload: {},
+            task: AttemptTask.make("Continue the work"),
+            agent: testAgent,
+            parentModel: Option.none(),
+            maxChildren: ChildSessionBudget.make(4),
+            maxAttemptMinutes: Option.none(),
+            maxAttemptTokens: Option.none(),
+            parentEffort: "high",
+            salvageRef: SalvageRef.make("usine/salvage/r/2"),
+            resume: Option.some(new SalvagePushed({ ref, commit: salvageCommit })),
+          });
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const prepared = yield* executor.prepare(request);
+              assert.strictEqual(prepared.workspace.spec.baseCommit, base);
+              assert.deepStrictEqual(
+                prepared.workspace.spec.resume,
+                Option.some(new SalvagePushed({ ref, commit: salvageCommit })),
+              );
+              assert.strictEqual(
+                (yield* output("git", ["rev-parse", "HEAD"], prepared.workspace.worktree)).trim(),
+                salvageCommit,
+              );
+            }),
+          );
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const prepared = yield* executor.prepare(
+                new CheckoutRequest({
+                  ...request,
+                  attemptId: AttemptId.make("r/run/3"),
+                  resume: Option.some(
+                    new SalvagePushed({
+                      ref: SalvageRef.make("usine/salvage/r/deleted"),
+                      commit: salvageCommit,
+                    }),
+                  ),
+                }),
+              );
+              assert(Option.isNone(prepared.workspace.spec.resume));
+              assert.strictEqual(
+                (yield* output("git", ["rev-parse", "HEAD"], prepared.workspace.worktree)).trim(),
+                base,
+              );
+            }),
+          );
+        }).pipe(Effect.provide(runtime));
+      }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,
   );
 

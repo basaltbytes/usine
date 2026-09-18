@@ -4,6 +4,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
+import { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ApprovalRequirement, LoopName } from "@usine/core/loop";
 import { ItemKey } from "@usine/core/item";
@@ -70,6 +71,7 @@ export const AttemptRow = Schema.Struct({
   parentModel: Schema.NullOr(ModelId),
   startedAt: Schema.DateTimeUtcFromString,
   outcome: Schema.NullOr(AttemptOutcome),
+  salvage: Schema.NullOr(AttemptSalvage),
 });
 export type AttemptRow = typeof AttemptRow.Type;
 
@@ -114,6 +116,7 @@ export const encodePayload = Schema.encodeSync(Schema.Json);
 export const encodeDateTime = Schema.encodeSync(Schema.DateTimeUtcFromString);
 export const encodeRunState = Schema.encodeSync(RunState.RunState);
 export const encodeOutcome = Schema.encodeSync(AttemptOutcome);
+export const encodeSalvage = Schema.encodeSync(AttemptSalvage);
 export const encodeStepResult = Schema.encodeSync(StepResult);
 export const encodeEnvelope = Schema.encodeSync(AttemptChannel.Envelope);
 export const encodeAgent = Schema.encodeSync(Agent);
@@ -182,6 +185,7 @@ export const attemptFromRow = (row: AttemptRow): Attempt =>
     parentModel: Option.fromNullishOr(row.parentModel),
     startedAt: row.startedAt,
     outcome: Option.fromNullishOr(row.outcome),
+    salvage: Option.fromNullishOr(row.salvage),
   });
 
 export const runSummaryFromRow = (

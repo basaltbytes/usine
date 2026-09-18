@@ -1,7 +1,8 @@
 import type { AgentPersona, AgentName } from "@usine/core/agent";
 import type { AttemptTask } from "@usine/core/attempt";
+import type { SalvagePushed } from "@usine/core/attempt/salvage";
 import type { RepositoryName } from "@usine/core/repository";
-import type { Schema } from "effect";
+import { Option, type Schema } from "effect";
 import { BLOCKED_MARKER } from "./runtime.ts";
 
 /** The recorded trigger context, Agent instructions, and effective task presented to the parent. */
@@ -11,6 +12,8 @@ export interface PromptParts {
   readonly agent: AgentName;
   readonly persona: AgentPersona;
   readonly task: AttemptTask;
+  /** The previous Attempt's salvage checked out in the workspace, when the Run is retrying. */
+  readonly resume: Option.Option<SalvagePushed>;
 }
 
 /** The Agent's standing instructions and the focused task the parent delegates to a child. */
@@ -43,12 +46,21 @@ const githubInstructions = (agent: AgentName): ReadonlyArray<string> => [
   githubSignature(agent),
 ];
 
+const resumeLines = (resume: Option.Option<SalvagePushed>): ReadonlyArray<string> =>
+  Option.match(resume, {
+    onNone: () => [],
+    onSome: ({ ref, commit }) => [
+      `Resumes from: ${ref} at ${commit}, the previous Attempt's unfinished work, checked out at HEAD. Its last commit is an automatic work-in-progress snapshot. Continue from this state instead of starting over.`,
+    ],
+  });
+
 /** Builds the parent's instructions from the saved payload, effective task, and Agent persona, including GitHub attribution. */
 export const assemblePrompt = (parts: PromptParts): string =>
   [
     "# Run context",
     "",
     `Repository: ${parts.repository}`,
+    ...resumeLines(parts.resume),
     "",
     "Payload snapshot:",
     "```json",

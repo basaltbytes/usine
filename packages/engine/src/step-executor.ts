@@ -1,6 +1,7 @@
 import { Agent } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptTask, type AttemptId } from "@usine/core/attempt";
+import { SalvagePushed } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run } from "@usine/core/run";
@@ -23,6 +24,8 @@ export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/St
   task: AttemptTask,
   agent: Agent,
   parentModel: Schema.Option(ModelId),
+  /** The previous Attempt's pushed salvage, which this Attempt's checkout resumes from. */
+  salvage: Schema.Option(SalvagePushed),
 }) {}
 
 /** A reservation of one Worker's capacity for the length of an Attempt. Call `release` when the Attempt ends. */

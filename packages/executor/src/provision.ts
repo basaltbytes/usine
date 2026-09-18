@@ -1,12 +1,14 @@
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { type AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
 import { RepositoryName, CommitSha } from "@usine/core/repository";
-import { Effect, Schema } from "effect";
+import { Effect, Exit, Option, Ref, Result, Schema } from "effect";
 import {
   ExecutorOperationError,
   AttemptWorkspace,
   WorktreePath,
   type CheckoutRequest,
 } from "./executor.ts";
+import { salvageWorktree } from "./salvage.ts";
 
 export const safeSegment = (value: string): string => value.replaceAll(/[^A-Za-z0-9_.-]/gu, "_");
 
@@ -54,11 +56,21 @@ export interface ProvisionOptions<E> {
   readonly ops: WorkspaceOps<E>;
 }
 
+/** A checked-out Attempt workspace and, once its scope has closed, what the salvage step preserved. */
+export interface ProvisionedWorktree {
+  readonly workspace: AttemptWorkspace;
+  /** None until the workspace scope closes, and after a successful Attempt or a clean worktree. */
+  readonly salvaged: Effect.Effect<Option.Option<AttemptSalvage>>;
+}
+
 /**
  * The clone-to-worktree sequence every Executor shares: clone into a staging
  * sibling and promote it on success, so an interrupted clone never leaves a
  * half-initialized cache that later fetches would poison; then fetch the
- * requested revision and check out a detached worktree at the resolved commit.
+ * requested revision and check out a detached worktree at the resolved commit,
+ * or at the previous Attempt's salvage when the request resumes one. Closing
+ * the scope with anything but a success exit salvages the worktree before
+ * removing it; a worktree whose salvage push failed stays on disk.
  */
 export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(function* <E>(
   options: ProvisionOptions<E>,
@@ -70,6 +82,8 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     host: options.host,
     repository: request.repository,
   });
+  const retained = yield* Ref.make(false);
+  const salvaged = yield* Ref.make(Option.none<AttemptSalvage>());
   const cleanup = <A>(resource: string, effect: Effect.Effect<A, E>) =>
     effect.pipe(
       Effect.tapError((error) =>
@@ -94,6 +108,15 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         repository: request.repository,
         host: options.host,
       });
+      if (yield* Ref.get(retained)) {
+        yield* Effect.logWarning("Attempt worktree retained; its salvage push failed", {
+          attemptId: request.attemptId,
+          worker: request.worker,
+          host: options.host,
+          worktree: layout.worktree,
+        });
+        return;
+      }
       yield* Effect.logInfo("Cleaning Attempt workspace", {
         attemptId: request.attemptId,
         worker: request.worker,
@@ -187,6 +210,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         }),
     ),
   );
+  const resume = yield* fetchSalvage(options, request.resume);
   yield* ops.git("prepare", [
     "--git-dir",
     layout.cache,
@@ -194,22 +218,102 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     "add",
     "--detach",
     layout.worktree,
-    baseCommit,
+    Option.match(resume, { onNone: () => baseCommit, onSome: ({ commit }) => commit }),
   ]);
-  return new AttemptWorkspace({
-    worker: request.worker,
-    spec: new AttemptChannel.RunSpec({
-      attemptId: request.attemptId,
-      repository: request.repository,
-      revision: request.revision,
-      baseCommit,
-      payload: request.payload,
-      task: request.task,
-      agent: request.agent,
-      parentModel: request.parentModel,
-      maxChildren: request.maxChildren,
-      parentEffort: request.parentEffort,
+  // Registered after the cleanup finalizer, so it runs first. The exit is the
+  // Attempt's: a success exit means the run host returned a Final result.
+  yield* Effect.addFinalizer((exit) =>
+    Exit.isSuccess(exit)
+      ? Effect.void
+      : salvageWorktree({
+          attemptId: request.attemptId,
+          worker: request.worker,
+          host: options.host,
+          worktree: layout.worktree,
+          baseCommit,
+          ref: request.salvageRef,
+          git: (args) => ops.git("cleanup", args),
+        }).pipe(
+          Effect.tap((salvage) => Ref.set(salvaged, salvage)),
+          Effect.flatMap((salvage) =>
+            Ref.set(
+              retained,
+              Option.exists(salvage, ({ _tag }) => _tag === "Retained"),
+            ),
+          ),
+        ),
+  );
+  return {
+    workspace: new AttemptWorkspace({
+      worker: request.worker,
+      spec: new AttemptChannel.RunSpec({
+        attemptId: request.attemptId,
+        repository: request.repository,
+        revision: request.revision,
+        baseCommit,
+        payload: request.payload,
+        task: request.task,
+        agent: request.agent,
+        parentModel: request.parentModel,
+        maxChildren: request.maxChildren,
+        parentEffort: request.parentEffort,
+        resume,
+      }),
+      worktree: WorktreePath.make(layout.worktree),
     }),
-    worktree: WorktreePath.make(layout.worktree),
+    salvaged: Ref.get(salvaged),
+  } satisfies ProvisionedWorktree;
+});
+
+/**
+ * Fetches the previous Attempt's salvage ref into the cache. A ref that no
+ * longer exists starts the Attempt from its base revision, with a warning, so
+ * an operator can still retry after deleting the branch.
+ */
+const fetchSalvage = Effect.fn("Executor.fetchSalvage")(function* <E>(
+  options: ProvisionOptions<E>,
+  resume: Option.Option<SalvagePushed>,
+) {
+  if (Option.isNone(resume)) return Option.none<SalvagePushed>();
+  const { layout, ops, request } = options;
+  const fields = {
+    attemptId: request.attemptId,
+    worker: request.worker,
+    host: options.host,
+    ref: resume.value.ref,
+  };
+  yield* Effect.annotateCurrentSpan(fields);
+  const fetched = yield* ops
+    .git("prepare", [
+      "--git-dir",
+      layout.cache,
+      "fetch",
+      "--force",
+      "origin",
+      `refs/heads/${resume.value.ref}`,
+    ])
+    .pipe(
+      Effect.andThen(ops.git("prepare", ["--git-dir", layout.cache, "rev-parse", "FETCH_HEAD"])),
+      Effect.flatMap((output) => decodeCommit(output.trim())),
+      Effect.result,
+    );
+  if (Result.isFailure(fetched)) {
+    yield* Effect.logWarning("Salvage ref unavailable; the Attempt starts from its base revision", {
+      ...fields,
+      message: String(fetched.failure),
+    });
+    return Option.none<SalvagePushed>();
+  }
+  if (fetched.success !== resume.value.commit) {
+    yield* Effect.logWarning("Salvage ref moved since it was recorded; resuming from its head", {
+      ...fields,
+      recorded: resume.value.commit,
+      current: fetched.success,
+    });
+  }
+  yield* Effect.logInfo("Resuming the Attempt from the previous salvage", {
+    ...fields,
+    commit: fetched.success,
   });
+  return Option.some(new SalvagePushed({ ref: resume.value.ref, commit: fetched.success }));
 });
