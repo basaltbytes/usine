@@ -300,7 +300,9 @@ export interface RecoveryOptions<E> {
 /**
  * Reconciles a checkout an earlier process left behind: salvages it without a
  * known base, records the outcome, and removes the worktree only once its work
- * is published. A retained worktree stays for the next reconciliation.
+ * is published. A retained worktree stays for the next reconciliation. A
+ * succeeded Attempt already delivered its result, so its checkout is removed
+ * without salvage.
  */
 export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
   E extends Error,
@@ -311,6 +313,15 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
 ) {
   const { attempt, host, worktree } = options;
   yield* Effect.annotateCurrentSpan({ ...attempt, host, worktree });
+  if (attempt.succeeded) {
+    yield* options.git(["--git-dir", options.cache, "worktree", "remove", "--force", worktree]);
+    yield* Effect.logInfo("Released the checkout of a succeeded Attempt", {
+      ...attempt,
+      host,
+      worktree,
+    });
+    return;
+  }
   const salvage = yield* salvageWorktree({
     ...attempt,
     host,

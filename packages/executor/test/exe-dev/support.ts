@@ -387,12 +387,13 @@ export const fakeSsh = (
         );
       }
       if (remoteLine.startsWith("exec 'find' ") && remoteLine.includes("/attempts'")) {
-        return oneShotHandle(
-          sweepMode === "valid"
-            ? "/home/exedev/.usine/workers/remote-one/attempts/abandoned-attempt\0"
-            : "/tmp/not-a-worker-child\0",
-          0,
-        );
+        if (sweepMode !== "valid") return oneShotHandle("/tmp/not-a-worker-child\0", 0);
+        const attemptsRoot = "/home/exedev/.usine/workers/remote-one/attempts";
+        // The Attempt's checkout is listed exactly when `test -d` would find it.
+        const listed = state.cacheExists
+          ? [`${attemptsRoot}/abandoned-attempt`, `${attemptsRoot}/remote-run_execute_1`]
+          : [`${attemptsRoot}/abandoned-attempt`];
+        return oneShotHandle(listed.map((entry) => `${entry}\0`).join(""), 0);
       }
       if (remoteLine.startsWith("exec 'find' ") && remoteLine.includes("/repos'")) {
         return oneShotHandle("/home/exedev/.usine/workers/remote-one/repos/acme_demo.git\0", 0);

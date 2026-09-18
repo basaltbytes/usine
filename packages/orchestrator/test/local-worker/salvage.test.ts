@@ -184,6 +184,7 @@ describe("local worker salvage", () => {
               worker: request.worker,
               repository: request.repository,
               ref: request.salvageRef,
+              succeeded: false,
             },
             (salvage) =>
               Effect.gen(function* () {

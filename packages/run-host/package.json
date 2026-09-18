@@ -12,7 +12,8 @@
     "usine-run-host": "./dist/bin.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/tsconfig.tsbuildinfo"
   ],
   "type": "module",
   "sideEffects": false,

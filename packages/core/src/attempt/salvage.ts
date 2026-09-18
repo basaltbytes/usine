@@ -35,10 +35,12 @@ export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("Attemp
 export const AttemptSalvage = Schema.Union([SalvagePushed, SalvageRetained]);
 export type AttemptSalvage = typeof AttemptSalvage.Type;
 
-/** Identifies a persisted Attempt whose Worker may still hold unpublished work. */
+/** Identifies a persisted Attempt whose Worker may still hold a checkout. */
 export interface AttemptRecovery {
   readonly attemptId: AttemptId;
   readonly worker: WorkerName;
   readonly repository: RepositoryName;
   readonly ref: SalvageRef;
+  /** The Attempt delivered its result, so a leftover checkout is removed rather than salvaged. */
+  readonly succeeded: boolean;
 }

@@ -795,6 +795,14 @@ describe("cursor store", () => {
             canceled.attempts[0]?.outcome.pipe(Option.map((o) => o._tag)).pipe(Option.getOrNull),
             "Canceled",
           );
+          assert.deepStrictEqual(
+            (yield* store.salvageCandidates).map(({ attemptId, ref, succeeded }) => ({
+              attemptId,
+              ref,
+              succeeded,
+            })),
+            [{ attemptId: first.execution.attempt.id, ref: pushed.ref, succeeded: false }],
+          );
 
           // A retry of a failed Run picks up the pushed salvage.
           const retriedRun = RunId.make("salvaged-retry");
@@ -846,6 +854,26 @@ describe("cursor store", () => {
               .pipe(Option.map((s) => s._tag))
               .pipe(Option.getOrNull),
             "Retained",
+          );
+
+          // A succeeded Attempt stays a candidate: a checkout its Worker could
+          // not release at the time is removed at the next reconcile, not salvaged.
+          yield* store.finishAttempt(
+            fresh.execution.attempt,
+            Result.succeed(new StepResult({ message: "delivered", facts: [] })),
+          );
+          const candidates = yield* store.salvageCandidates;
+          assert.strictEqual(candidates.length, 4);
+          assert.deepStrictEqual(
+            Object.fromEntries(
+              candidates.map(({ attemptId, succeeded }) => [attemptId, succeeded]),
+            ),
+            {
+              [first.execution.attempt.id]: false,
+              [started.execution.attempt.id]: false,
+              [resumed.execution.attempt.id]: false,
+              [fresh.execution.attempt.id]: true,
+            },
           );
         }),
       ),

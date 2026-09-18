@@ -12,7 +12,8 @@
     "usine": "./dist/main.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "!dist/tsconfig.tsbuildinfo"
   ],
   "type": "module",
   "publishConfig": {
