@@ -17,6 +17,7 @@ import {
 } from "@usine/core/agent/session";
 import { Effect, Logger, Option, Stream } from "effect";
 import {
+  AgentResultError,
   type AgentSessionError,
   ChildBackend,
   ChildSessionBudgetExceededError,
@@ -76,6 +77,7 @@ describe("owned Pi subagents extension", () => {
     const extension = createSubagentsExtension({
       agent,
       backend: child,
+      childBlocked: () => Effect.void,
       cwd: WorkingDirectory.make("/workspace/repo"),
       emit: (event) => Effect.sync(() => events.push(event)),
       maxChildren: ChildSessionBudget.make(4),
@@ -117,6 +119,68 @@ describe("owned Pi subagents extension", () => {
     );
   });
 
+  it("returns a child's blocker as its report and records it on the parent", async () => {
+    const child = ChildBackend.of({
+      launch: (request) => {
+        const blocker = new AgentResultError({
+          sessionId: Option.some(request.session.id),
+          message: "Publishing permission denied.",
+        });
+        return Effect.succeed({
+          session: request.session,
+          events: Stream.make(
+            new SessionStarted({ session: request.session }),
+            new TextOutput({
+              session: request.session,
+              text: "[usine:blocked] Publishing permission denied.",
+            }),
+          ).pipe(Stream.concat(Stream.fail(blocker))),
+          result: Effect.fail(blocker),
+          steer: () => Effect.void,
+          interrupt: Effect.void,
+        });
+      },
+    });
+    const events: Array<AgentSessionEvent> = [];
+    const returned: Array<readonly [AgentSessionId, string]> = [];
+    let registered: ToolDefinition | undefined;
+    const extension = createSubagentsExtension({
+      agent,
+      backend: child,
+      childBlocked: (session, error) =>
+        Effect.sync(() => {
+          returned.push([session.id, error.message]);
+        }),
+      cwd: WorkingDirectory.make("/workspace/repo"),
+      emit: (event) => Effect.sync(() => events.push(event)),
+      maxChildren: ChildSessionBudget.make(4),
+      onBudgetExceeded: () => Effect.void,
+      parentId: parent.id,
+      register: () => Effect.void,
+      run: (program) => Effect.runPromise(program),
+    });
+    // SAFETY: this extension only calls registerTool; all other ExtensionAPI members are unused.
+    await extension({ registerTool: (tool) => (registered = tool) } as ExtensionAPI);
+    assert(registered !== undefined);
+
+    const result = await registered.execute(
+      "tool-1",
+      { task: "Publish the release." },
+      undefined,
+      undefined,
+      context,
+    );
+    assert.strictEqual(result.content[0]?.type, "text");
+    assert.strictEqual(result.content[0]?.text, "[usine:blocked]\nPublishing permission denied.");
+    assert.deepStrictEqual(returned, [
+      [AgentSessionId.make("parent-1:child:1"), "Publishing permission denied."],
+    ]);
+    assert.deepStrictEqual(
+      events.map((event) => event._tag),
+      ["SessionStarted", "TextOutput", "SessionFinished"],
+    );
+  });
+
   it("rejects a spawn past the budget before launching and reports it to the parent", async () => {
     let launches = 0;
     const child = ChildBackend.of({
@@ -141,6 +205,7 @@ describe("owned Pi subagents extension", () => {
     const extension = createSubagentsExtension({
       agent,
       backend: child,
+      childBlocked: () => Effect.void,
       cwd: WorkingDirectory.make("/workspace/repo"),
       emit: () => Effect.void,
       maxChildren: ChildSessionBudget.make(1),

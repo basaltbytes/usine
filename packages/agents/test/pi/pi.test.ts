@@ -14,13 +14,19 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ChildSession, ChildSessionBudget } from "@usine/core/agent/session";
+import {
+  type AgentSessionEvent,
+  AgentSessionId,
+  ChildSession,
+  ChildSessionBudget,
+} from "@usine/core/agent/session";
 import { AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
-import { Effect, Fiber, Layer, Option, Queue, Stream } from "effect";
+import { Effect, Exit, Fiber, Layer, Option, Queue, Stream } from "effect";
 import { Type } from "typebox";
 import {
+  AgentResultError,
   AgentRuntime,
   ChildBackend,
   ChildRequest,
@@ -629,6 +635,101 @@ describe("Pi parent runtime", () => {
         assert.strictEqual(childLaunches, 1);
         // The budget must stop the SDK session itself, not wait for scope teardown.
         yield* Effect.promise(() => aborted);
+      }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(child)),
+    );
+  });
+
+  it.effect("fails the parent that paraphrases the blocker its child returned", () => {
+    let options: PiStartOptions | undefined;
+    let listener: ((event: PiSessionEvent) => void) | undefined;
+    let report = "";
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => undefined,
+      messages: [],
+      prompt: async () => {
+        const extension = options?.extensions.find(({ name }) => name === "usine-subagents");
+        assert(extension !== undefined);
+        let registered: ToolDefinition | undefined;
+        // SAFETY: this extension only calls registerTool; other members are unused.
+        await extension.factory({
+          registerTool: (tool) => (registered = tool),
+        } as ExtensionAPI);
+        assert(registered !== undefined);
+        const result = await registered.execute(
+          "tool-1",
+          { task: "Publish the release." },
+          undefined,
+          undefined,
+          // SAFETY: the owned subagent tool does not read ExtensionContext.
+          {} as ExtensionContext,
+        );
+        report = result.content[0]?.type === "text" ? result.content[0].text : "";
+        listener?.({
+          type: "message_end",
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "The delegated attempt hit a permissions problem." }],
+          },
+        });
+      },
+      steer: () => Promise.resolve(),
+      subscribe: (found) => {
+        listener = found;
+        return () => undefined;
+      },
+    };
+    const sdk = Layer.succeed(PiSdk)({
+      start: (found) => {
+        options = found;
+        return Promise.resolve({
+          _tag: "Started",
+          model: parentModel,
+          pool: "apiKeys",
+          session,
+        });
+      },
+    });
+    const child = Layer.succeed(ChildBackend)({
+      launch: (childRequest) => {
+        const blocker = new AgentResultError({
+          sessionId: Option.some(childRequest.session.id),
+          message: "Publishing permission denied.",
+        });
+        return Effect.succeed({
+          session: childRequest.session,
+          events: Stream.fail(blocker),
+          result: Effect.fail(blocker),
+          steer: () => Effect.void,
+          interrupt: Effect.void,
+        });
+      },
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const runtime = yield* AgentRuntime;
+        const running = yield* runtime.launch(request, noChildSessions);
+        const events: Array<AgentSessionEvent> = [];
+        const collected = yield* Stream.runForEach(running.events, (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        ).pipe(Effect.exit);
+        const error = yield* running.result.pipe(Effect.flip);
+        assert(error instanceof AgentResultError);
+        assert.strictEqual(error.message, "Publishing permission denied.");
+        assert.deepStrictEqual(
+          error.sessionId,
+          Option.some(AgentSessionId.make("parent:run/step/1:child:1")),
+        );
+        assert.strictEqual(report, "[usine:blocked]\nPublishing permission denied.");
+        assert(Exit.isFailure(collected));
+        const paraphrase = events.find(
+          (event) => event._tag === "TextOutput" && event.session._tag === "ParentSession",
+        );
+        assert(paraphrase?._tag === "TextOutput");
+        assert.strictEqual(paraphrase.text, "The delegated attempt hit a permissions problem.");
       }).pipe(Effect.provide(piParentLayer), Effect.provide(sdk), Effect.provide(child)),
     );
   });
