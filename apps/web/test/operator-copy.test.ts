@@ -21,11 +21,11 @@ describe("salvage copy in the run drawer", () => {
       new SalvageRetained({
         path: "/workers/local/attempts/run_execute_1",
         commit: Option.none(),
-        message: "remote: Repository not found",
+        message: "git exited with code 128: remote: Repository not found.",
       }),
     );
     assert.include(message, "/workers/local/attempts/run_execute_1");
     assert.include(message, "every startup");
-    assert.include(message, "remote: Repository not found");
+    assert.include(message, "remote: Repository not found.");
   });
 });

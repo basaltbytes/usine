@@ -33,7 +33,10 @@ An Attempt that ends without a successful result is salvaged before its worktree
 removed: uncommitted changes are committed as `wip(usine): salvage attempt <id>` and
 HEAD is pushed to `CheckoutRequest.salvageRef` with the Worker's credentials. The
 result reaches the engine through `Sink.salvage`. A failed push keeps the worktree
-on disk and reports its path and the failure message. The startup sweep leaves such a
+on disk and reports its path and the failure: git's exit code followed by git's own
+stderr, so a deleted remote reads differently from a revoked App; a push that stalls
+past two minutes is named as such. The local adapter scrubs the Attempt's token from
+that stderr first, and an exe.dev VM never holds one. The startup sweep leaves such a
 worktree alone. Every later startup retries the salvage with fresh credentials, for
 open and closed Runs alike, and rewrites the record from `Retained` to `Pushed` once
 the push succeeds; until then the record carries the latest failure for the run

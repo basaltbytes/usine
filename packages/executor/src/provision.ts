@@ -78,9 +78,9 @@ export interface ProvisionedWorktree {
  * salvages a checked-out worktree before removing it, and a worktree whose
  * salvage did not preserve all work stays on disk.
  */
-export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(function* <E>(
-  options: ProvisionOptions<E>,
-) {
+export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(function* <
+  E extends Error,
+>(options: ProvisionOptions<E>) {
   const { layout, ops, request } = options;
   yield* Effect.annotateCurrentSpan({
     attemptId: request.attemptId,
@@ -302,7 +302,10 @@ export interface RecoveryOptions<E> {
  * known base, records the outcome, and removes the worktree only once its work
  * is published. A retained worktree stays for the next reconciliation.
  */
-export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <E, RecordError>(
+export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
+  E extends Error,
+  RecordError,
+>(
   options: RecoveryOptions<E>,
   record: (salvage: AttemptSalvage) => Effect.Effect<void, RecordError>,
 ) {
