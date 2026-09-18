@@ -25,7 +25,7 @@ export interface SalvageOptions<E> {
   readonly worker: WorkerName;
   readonly host: string;
   readonly worktree: string;
-  readonly baseCommit: CommitSha;
+  readonly baseCommit: Option.Option<CommitSha>;
   readonly ref: SalvageRef;
   /** Runs git with the Worker's repository credentials; the salvage adds the worktree itself. */
   readonly git: (args: ReadonlyArray<string>) => Effect.Effect<string, E>;
@@ -63,10 +63,16 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
       ...fields,
       message: String(inspected.failure),
     });
-    return Option.none<AttemptSalvage>();
+    return Option.some<AttemptSalvage>(
+      new SalvageRetained({
+        path: options.worktree,
+        commit: options.baseCommit,
+        message: String(inspected.failure),
+      }),
+    );
   }
   const dirty = inspected.success.status.trim().length > 0;
-  if (!dirty && inspected.success.head === options.baseCommit) {
+  if (!dirty && Option.contains(options.baseCommit, inspected.success.head)) {
     yield* Effect.logInfo("Nothing to salvage from the Attempt worktree", fields);
     return Option.none<AttemptSalvage>();
   }
@@ -92,7 +98,13 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
         ...fields,
         message: String(committed.failure),
       });
-      if (commit === options.baseCommit) return Option.none<AttemptSalvage>();
+      return Option.some<AttemptSalvage>(
+        new SalvageRetained({
+          path: options.worktree,
+          commit: Option.some(commit),
+          message: String(committed.failure),
+        }),
+      );
     } else {
       commit = committed.success;
     }
@@ -120,7 +132,7 @@ export const salvageWorktree = Effect.fn("Executor.salvageWorktree")(function* <
       message,
     });
     return Option.some<AttemptSalvage>(
-      new SalvageRetained({ path: options.worktree, commit, message }),
+      new SalvageRetained({ path: options.worktree, commit: Option.some(commit), message }),
     );
   }
   yield* Effect.logInfo("Salvaged the Attempt's work", { ...fields, ref: options.ref, commit });

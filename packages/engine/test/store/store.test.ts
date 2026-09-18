@@ -832,7 +832,7 @@ describe("cursor store", () => {
             resumed.execution.attempt.id,
             new SalvageRetained({
               path: "/workers/local/attempts/salvaged-retry",
-              commit: CommitSha.make("c".repeat(40)),
+              commit: Option.some(CommitSha.make("c".repeat(40))),
               message: "remote rejected",
             }),
           );

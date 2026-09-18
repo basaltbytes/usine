@@ -15,3 +15,5 @@ Salvage an Attempt's unfinished work before its worktree is removed: when an Att
 Make `max_attempt_minutes` and `max_attempt_tokens` opt-in with no default: an absent setting leaves that half of the runaway guard unarmed, and an armed ceiling steers the parent session once at 80% of its limit before tripping. Attempt channel protocol version 7.
 
 Count consumed tokens as output plus uncached input for Codex, Claude, and Pi, so the meter no longer grows with the conversation's re-read context.
+
+Retain work on salvage inspection or snapshot failure, reconcile retained and crashed Attempts at startup before workflow recovery, and renew local credentials and exe.dev grants throughout an Attempt.

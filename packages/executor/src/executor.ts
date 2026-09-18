@@ -1,3 +1,4 @@
+import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
@@ -8,7 +9,7 @@ import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName, WorkerKind } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
-import { Context, Effect, Redacted, Schema, Scope } from "effect";
+import { Context, Effect, Schema, Scope } from "effect";
 
 /** The Worker operation that failed during readiness checks or an Attempt's lifecycle. */
 export const ExecutorOperation = Schema.Literals([
@@ -144,14 +145,22 @@ export interface PreparedAttempt {
   readonly launch: (io: AttemptChannel.Sink) => Effect.Effect<StepResult, AttemptFailure>;
 }
 
-/** Mints exactly one repository-scoped credential for each prepared Attempt. */
+/** A repository-scoped Worker credential and the instant at which it stops authorizing requests. */
+export class WorkerCredential extends Schema.Class<WorkerCredential>(
+  "@usine/executor/WorkerCredential",
+)({
+  value: Schema.Redacted(Schema.String),
+  expiresAt: Schema.DateTimeUtc,
+}) {}
+
+/** Mints renewable repository-scoped credentials for an Attempt. */
 export class CredentialProvider extends Context.Service<
   CredentialProvider,
   {
     readonly issue: (
       repository: RepositoryName,
       attemptId: AttemptId,
-    ) => Effect.Effect<Redacted.Redacted<string>, CredentialUnavailableError>;
+    ) => Effect.Effect<WorkerCredential, CredentialUnavailableError>;
   }
 >()("@usine/executor/CredentialProvider") {}
 
@@ -159,6 +168,11 @@ export class CredentialProvider extends Context.Service<
 export class Executor extends Context.Service<
   Executor,
   {
+    /** Reconciles an old checkout before new Attempts start; records its salvage before releasing any work. */
+    readonly recover: <E>(
+      attempt: AttemptRecovery,
+      record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
+    ) => Effect.Effect<void, E | ExecutorError>;
     readonly kind: WorkerKind;
     /** Verifies Git, the run host, and each rostered brain in the Worker environment; never installs tools or logs in. */
     readonly preflight: (

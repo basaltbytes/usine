@@ -109,7 +109,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         host: options.host,
       });
       if (yield* Ref.get(retained)) {
-        yield* Effect.logWarning("Attempt worktree retained; its salvage push failed", {
+        yield* Effect.logWarning("Attempt worktree retained; salvage did not preserve all work", {
           attemptId: request.attemptId,
           worker: request.worker,
           host: options.host,
@@ -230,7 +230,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
           worker: request.worker,
           host: options.host,
           worktree: layout.worktree,
-          baseCommit,
+          baseCommit: Option.some(baseCommit),
           ref: request.salvageRef,
           git: (args) => ops.git("cleanup", args),
         }).pipe(

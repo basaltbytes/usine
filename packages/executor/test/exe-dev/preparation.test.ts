@@ -6,7 +6,8 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { type AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
-import { Cause, Effect, Exit, Fiber, Logger, Scope } from "effect";
+import { TestClock } from "effect/testing";
+import { Cause, Effect, Exit, Fiber, Logger, Option, Scope } from "effect";
 
 import {
   ATTEMPT_ID,
@@ -67,8 +68,92 @@ describe("exe.dev preparation", () => {
           assert.strictEqual(recorded.length, 1);
           assert(recorded[0]?._tag === "Retained");
           assert(recorded[0].path.endsWith("/attempts/remote-run_execute_1"));
-          assert.strictEqual(recorded[0].commit, SALVAGE_COMMIT);
+          assert.deepStrictEqual(recorded[0].commit, Option.some(SALVAGE_COMMIT));
         }
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+    },
+  );
+
+  it.effect.each(["inspect-fails", "add-fails", "commit-fails"] as const)(
+    "preserves the checkout through scope cleanup when %s",
+    (failure) => {
+      const ssh = fakeSsh(PROTOCOL, "final-nonzero");
+      ssh.state.salvage = failure;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const cleanupStart = ssh.state.commands.length;
+        const recorded: Array<AttemptSalvage> = [];
+        yield* prepared
+          .launch({
+            append: () => Effect.void,
+            salvage: (value) =>
+              Effect.sync(() => {
+                recorded.push(value);
+              }),
+          })
+          .pipe(Effect.flip);
+        assert(recorded[0]?._tag === "Retained");
+        const lines = ssh.state.commands
+          .slice(cleanupStart)
+          .map((command) => remoteArgs(command)[0] ?? "");
+        assert(
+          !lines.some(
+            (line) => line.includes("'worktree' 'remove'") || line.startsWith("exec 'rm' '-rf'"),
+          ),
+        );
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+    },
+  );
+
+  it.effect("renews grants beyond their original lifetime and stops renewal after release", () => {
+    const ssh = fakeSsh(PROTOCOL);
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const prepared = yield* executor.prepare(request);
+      yield* TestClock.adjust("3 hours");
+      assert(ssh.state.commands.filter(({ args }) => args.includes("attach")).length > 3);
+      yield* prepared.launch({ append: () => Effect.void, salvage: () => Effect.void });
+      const released = ssh.state.commands.length;
+      yield* TestClock.adjust("2 hours");
+      assert.strictEqual(ssh.state.commands.length, released);
+      assert.strictEqual(
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+        1,
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+  });
+
+  it.effect(
+    "reconciles a remote crash checkout and records the pushed salvage before removal",
+    () => {
+      const ssh = fakeSsh(PROTOCOL);
+      ssh.state.cacheExists = true;
+      ssh.state.salvage = "dirty";
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.recover(
+          {
+            attemptId: request.attemptId,
+            repository: request.repository,
+            worker: WORKER,
+            ref: request.salvageRef,
+          },
+          (salvage) =>
+            Effect.sync(() => {
+              assert.strictEqual(salvage._tag, "Pushed");
+              assert(
+                !ssh.state.commands.some((command) =>
+                  (remoteArgs(command)[0] ?? "").includes("'worktree' 'remove'"),
+                ),
+              );
+            }),
+        );
+        assert(
+          ssh.state.commands.some((command) =>
+            (remoteArgs(command)[0] ?? "").includes("'worktree' 'remove'"),
+          ),
+        );
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
     },
   );
@@ -406,8 +491,8 @@ describe("exe.dev preparation", () => {
         );
         assert(commandLines.some((line) => line.includes("integrations detach usine-acme-demo")));
         assert(
-          commandLines.some((line) => line.includes("attempts/abandoned-attempt")),
-          "the first prepare must sweep a crash-leftover worktree",
+          !commandLines.some((line) => line.includes("attempts/abandoned-attempt")),
+          "unknown crash leftovers must stay untouched",
         );
         assert(
           commandLines.some(

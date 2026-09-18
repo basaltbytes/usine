@@ -64,7 +64,7 @@ The Node adapter at `@usine/executor/local` does the following for each Attempt:
 
 - checks Git, the installed run-host protocol, and the assigned harness before accepting work;
 - updates a per-repository bare cache, then creates a detached worktree at the resolved revision;
-- mints one repository credential and passes it only through the child process environment;
+- renews repository credentials before expiry; Git reads an Attempt token file and `gh` reads its private `GH_CONFIG_DIR` on each invocation;
 - exchanges protocol-v6 envelopes with `@usine/run-host` over newline-delimited standard input and output, including immutable payload, agent context, child-session budget, and normalized session events;
 - interrupts cooperatively before a hard kill, then removes the worktree and wipes the credential.
 
@@ -82,9 +82,9 @@ Preflight creates no checkouts or credential grants. It reads VM metadata throug
 
 Prepare attaches the repository's integration to the VM with a bounded `--for` grant. It then fetches a bare cached clone from `github.int.exe.xyz` and creates a detached worktree for the Attempt. Launch keeps one SSH process open and exchanges protocol-v6 frames on that process's standard input and output. Cleanup removes the worktree, prunes its cache registration, and detaches the integration after the last concurrent Attempt using it finishes.
 
-The first prepare on each VM after orchestrator startup sweeps abandoned Attempt worktrees and prunes cached worktree registrations left by a crash. Each sweep removal is isolated and logged: an immovable leftover never blocks its siblings or later prepares, and the sweep runs once per process regardless of partial failures. One-shot lobby and SSH commands carry a ten-minute timeout, and the SSH client sends keepalives so a dead link fails the operation instead of parking it. Cancellation also bounds interrupt persistence and delivery before escalating to a hard kill, so a parked store or remote process cannot stall shutdown; before removing a workspace, cleanup reads the run host's recorded pid on the VM and confirms the process is dead, because killing the local SSH client alone says nothing about the remote side.
+Startup reconciles unsuccessful Attempts before registering their durable workflows. Each existing checkout is snapshotted and pushed, and its salvage is recorded before removal. Failed pushes and unknown crash leftovers remain on disk. Cache sweeps prune registrations for missing directories; they never delete existing checkouts. One-shot lobby and SSH commands carry a ten-minute timeout, and the SSH client sends keepalives so a dead link fails the operation instead of parking it. Cancellation also bounds interrupt persistence and delivery before escalating to a hard kill, so a parked store or remote process cannot stall shutdown; before removing a workspace, cleanup reads the run host's recorded pid on the VM and confirms the process is dead, because killing the local SSH client alone says nothing about the remote side.
 
-Concurrent Attempts against different repositories leave their integrations attached to the VM simultaneously; each grant stays time-boxed, and the refcounted release detaches an integration only after its last Attempt finishes. A failed detach is logged and left to lapse with its time-box. If remote termination cannot be confirmed, cleanup retains the checkout and its Git registration for recovery, logs its location, and still releases the credential grant. Partial preparation rolls back without requiring remote-process confirmation because no run host has launched.
+Concurrent Attempts against different repositories leave their integrations attached to the VM simultaneously; each grant renews at half its lifetime while in use, and the refcounted release detaches an integration only after its last Attempt finishes. A failed detach is logged and left to lapse with its time-box. If remote termination cannot be confirmed, cleanup retains the checkout and its Git registration for recovery, logs its location, and still releases the credential grant. Partial preparation rolls back without requiring remote-process confirmation because no run host has launched.
 
 ```ts
 import { RepositoryName } from "@usine/core/repository"
@@ -103,3 +103,5 @@ const executorLayer = layer({
 ```
 
 The native integration holds the GitHub credential at exe.dev's network edge. No GitHub token enters the RunSpec, the Attempt channel, the local SSH environment, or the VM. Git pushes from this Worker use `exe-dev-github-integration[bot]`; agent-authored PRs and comments should carry the Agent signature used by the run.
+
+Salvage inspection, staging, or snapshot failures retain the checkout, including uncommitted files. Restart recovery uses freshly issued credentials and records the recovered ref before releasing the worktree.

@@ -15,6 +15,8 @@ const REF = SalvageRef.make("usine/salvage/run/1");
 interface Scripted {
   readonly head: () => string;
   readonly status: string;
+  readonly inspect?: "fails";
+  readonly add?: "fails";
   readonly commit?: "fails";
   readonly push?: "fails";
 }
@@ -30,8 +32,14 @@ const fakeGit = (script: Scripted) => {
       const command = args.slice(2);
       if (command[0] === "rev-parse")
         return Effect.succeed(`${committed ? SNAPSHOT : script.head()}\n`);
-      if (command[0] === "status") return Effect.succeed(script.status);
-      if (command[0] === "add") return Effect.succeed("");
+      if (command[0] === "status")
+        return script.inspect === "fails"
+          ? Effect.fail(new Error("inspection failed"))
+          : Effect.succeed(script.status);
+      if (command[0] === "add")
+        return script.add === "fails"
+          ? Effect.fail(new Error("index.lock exists"))
+          : Effect.succeed("");
       if (command.includes("commit")) {
         if (script.commit === "fails") return Effect.fail(new Error("nothing added"));
         committed = true;
@@ -54,7 +62,7 @@ const salvage = (script: Scripted) => {
     worker: WorkerName.make("local"),
     host: "local",
     worktree: WORKTREE,
-    baseCommit: BASE,
+    baseCommit: Option.some(BASE),
     ref: REF,
     git,
   }).pipe(Effect.map((result) => ({ result, calls })));
@@ -109,16 +117,31 @@ describe("salvageWorktree", () => {
       }),
   );
 
-  it.effect("still pushes the committed work when the snapshot commit fails", () =>
+  it.effect("retains dirty work when the snapshot commit fails even with commits ahead", () =>
     Effect.gen(function* () {
       const { result } = yield* salvage({
         head: () => AHEAD,
         status: "?? scratch.txt\n",
         commit: "fails",
       });
-      assert(Option.isSome(result) && result.value._tag === "Pushed");
-      assert.strictEqual(result.value.commit, AHEAD);
+      assert(Option.isSome(result) && result.value._tag === "Retained");
+      assert.deepStrictEqual(result.value.commit, Option.some(AHEAD));
     }),
+  );
+
+  it.effect.each(["inspect", "add", "commit"] as const)(
+    "retains dirty work at base when %s fails",
+    (stage) =>
+      Effect.gen(function* () {
+        const { result, calls } = yield* salvage({
+          head: () => BASE,
+          status: "?? unfinished.ts\n",
+          [stage]: "fails",
+        });
+        assert(Option.isSome(result) && result.value._tag === "Retained");
+        assert.strictEqual(result.value.path, WORKTREE);
+        assert(!commandsOf(calls).includes("push"));
+      }),
   );
 
   it.effect("reports the retained worktree when the push fails", () =>
@@ -130,7 +153,7 @@ describe("salvageWorktree", () => {
       });
       assert(Option.isSome(result) && result.value._tag === "Retained");
       assert.strictEqual(result.value.path, WORKTREE);
-      assert.strictEqual(result.value.commit, SNAPSHOT);
+      assert.deepStrictEqual(result.value.commit, Option.some(SNAPSHOT));
       assert(result.value.message.includes("remote rejected"));
     }),
   );

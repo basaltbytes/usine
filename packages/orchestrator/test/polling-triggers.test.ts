@@ -178,6 +178,7 @@ const claimedRun = (cycle: Effect.Success<ReturnType<PollingTriggers["Service"][
 
 const runtimeLayer = (directory: InstanceDirectory, github: GitHubPolling["Service"]) => {
   const executor = Layer.succeed(StepExecutor)({
+    recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
     reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),

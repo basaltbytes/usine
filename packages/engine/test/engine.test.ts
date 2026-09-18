@@ -56,6 +56,7 @@ type AttemptPlan = Effect.Effect<StepResult, AttemptFailure>;
 
 const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
   Layer.succeed(StepExecutor)({
+    recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
     reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
@@ -156,6 +157,7 @@ describe("durable run engine", () => {
             parentModel: Option.some(ModelId.make("openai/changed-parent")),
           });
           const executor = Layer.succeed(StepExecutor)({
+            recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
             reserve: () =>
@@ -220,6 +222,7 @@ describe("durable run engine", () => {
         const delivered: Array<AttemptId> = [];
         const started = yield* Deferred.make<void>();
         const executor = Layer.succeed(StepExecutor)({
+          recover: () => Effect.void,
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
           interrupt: () => Effect.void,
@@ -962,6 +965,7 @@ describe("durable run engine", () => {
         // A 0-capacity scheduler parks the run in `reserve` forever; only a
         // cancel that reaches the parked reservation ends it.
         const executor = Layer.succeed(StepExecutor)({
+          recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
           reserve: () =>

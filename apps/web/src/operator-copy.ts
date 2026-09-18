@@ -29,8 +29,7 @@ export const salvageMessage = (salvage: AttemptSalvage): string =>
   Match.valueTags(salvage, {
     Pushed: ({ ref, commit }) =>
       `Unfinished work pushed to ${ref} at ${commit.slice(0, 7)}; a retry resumes from it`,
-    Retained: ({ path, commit }) =>
-      `Salvage push failed; the worktree stays at ${path} with its work committed at ${commit.slice(0, 7)}`,
+    Retained: ({ path }) => `Salvage incomplete; unfinished work stays at ${path} for recovery`,
   });
 
 export const needCopy = (need: NeedView): NeedCopy =>

@@ -1,6 +1,8 @@
 import { Schema } from "effect";
-import { CommitSha } from "../repository.ts";
+import { CommitSha, type RepositoryName } from "../repository.ts";
 import type { RunId } from "../run/run.ts";
+import type { WorkerName } from "../worker.ts";
+import type { AttemptId } from "./attempt.ts";
 import type { AttemptNumber } from "./attempt.ts";
 
 /** The remote branch name that holds one Attempt's unfinished work, `usine/salvage/<run>/<attempt>`. */
@@ -22,12 +24,12 @@ export class SalvagePushed extends Schema.TaggedClass<SalvagePushed>("AttemptSal
   },
 ) {}
 
-/** The push failed, so the worktree stays on the Worker at `path` until an operator recovers it. */
+/** Salvage failed; `path` stays on the Worker for reconciliation. `commit` is the last known commit, or absent when inspection failed. */
 export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("AttemptSalvage/Retained")(
   "Retained",
   {
     path: Schema.NonEmptyString,
-    commit: CommitSha,
+    commit: Schema.OptionFromNullOr(CommitSha),
     message: Schema.String,
   },
 ) {}
@@ -35,3 +37,11 @@ export class SalvageRetained extends Schema.TaggedClass<SalvageRetained>("Attemp
 /** What the executor preserved of an Attempt's workspace when the Attempt ended without a `Succeeded` outcome. */
 export const AttemptSalvage = Schema.Union([SalvagePushed, SalvageRetained]);
 export type AttemptSalvage = typeof AttemptSalvage.Type;
+
+/** Identifies a persisted Attempt whose Worker may still hold unpublished work. */
+export interface AttemptRecovery {
+  readonly attemptId: AttemptId;
+  readonly worker: WorkerName;
+  readonly repository: RepositoryName;
+  readonly ref: SalvageRef;
+}

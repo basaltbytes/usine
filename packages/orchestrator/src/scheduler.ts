@@ -195,6 +195,19 @@ export const stepExecutorLayer = (
       const interrupt: StepExecutor["Service"]["interrupt"] = (attemptId) =>
         executor.cancel(attemptId).pipe(Effect.mapError(asAttemptFailure));
 
-      return StepExecutor.of({ execute, interrupt, reserve, intervene: executor.intervene });
+      return StepExecutor.of({
+        execute,
+        interrupt,
+        reserve,
+        intervene: executor.intervene,
+        recover: (attempt, record) =>
+          executor
+            .recover(attempt, record)
+            .pipe(
+              Effect.catchIf(Schema.is(ExecutorError), (error) =>
+                Effect.fail(asAttemptFailure(error)),
+              ),
+            ),
+      });
     }),
   );

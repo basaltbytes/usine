@@ -1,7 +1,7 @@
 import { Attempt, AttemptId, AttemptContext } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import type { AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
+import type { AttemptRecovery, AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -617,6 +617,7 @@ const makeRunStore = Effect.gen(function* () {
       .pendingWorkflowCommands()
       .pipe(persistence("list pending workflow commands")),
     recordAndClaim,
+    salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
     recordSalvage,
     reconcileCompletion,
     recoverable: recoverable(),
@@ -682,6 +683,7 @@ export class RunStore extends Context.Service<
       attemptId: AttemptId,
       salvage: AttemptSalvage,
     ) => Effect.Effect<void, RunStoreError>;
+    readonly salvageCandidates: Effect.Effect<ReadonlyArray<AttemptRecovery>, RunStoreError>;
     readonly recoverable: Effect.Effect<ReadonlyArray<RecoverableRun>, RunStoreError>;
     /** Resolves attention for the current failed Attempt atomically; stale requests are rejected. */
     readonly resolveFailure: (

@@ -1,3 +1,5 @@
+import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
+import { salvageWorktree } from "../salvage.ts";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName } from "@usine/core/repository";
 import { Effect, Exit, Layer, Option, Schema, Scope } from "effect";
@@ -61,6 +63,70 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     const attemptChannel = yield* attemptChannelFor(commands, runHost, interruptGrace);
 
     const attempts = yield* preparedAttemptsFor(attemptChannel.cancel, attemptChannel.intervene);
+
+    const recover = Effect.fn("ExeDevExecutor.recover")(function* <E>(
+      attempt: AttemptRecovery,
+      record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
+    ) {
+      yield* Effect.annotateCurrentSpan({ ...attempt });
+      const vm = yield* machines.vmFor(attempt.worker);
+      const root = `${vm.home}/.usine/workers/${safeSegment(attempt.worker)}`;
+      const worktree = `${root}/attempts/${safeSegment(attempt.attemptId)}`;
+      const inspected = yield* commands.remoteRaw("cleanup", vm.sshDest, "test", ["-d", worktree]);
+      if (inspected.exitCode === 1) return;
+      if (inspected.exitCode !== 0)
+        return yield* executorError(
+          "Could not inspect recovery checkout",
+          new Error(inspected.stderr),
+        );
+      const integration = integrations.get(attempt.repository);
+      if (integration === undefined)
+        return yield* new CredentialUnavailableError({
+          repository: attempt.repository,
+          message: "No integration configured for salvage recovery",
+          cause: new Error("missing integration"),
+        });
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* credentialGrants.acquire(
+            attempt.attemptId,
+            attempt.worker,
+            attempt.repository,
+            integration,
+          );
+          yield* commands.remote("cleanup", vm.sshDest, "sh", [
+            "-c",
+            RUN_HOST_KILL_SCRIPT,
+            "sh",
+            runHostPidFile(worktree),
+          ]);
+          const git = (args: ReadonlyArray<string>) =>
+            commands.remote("cleanup", vm.sshDest, "git", args);
+          const salvage = yield* salvageWorktree({
+            ...attempt,
+            host: vm.sshDest,
+            worktree,
+            baseCommit: Option.none(),
+            git,
+          });
+          if (Option.isNone(salvage)) return;
+          yield* record(salvage.value);
+          if (salvage.value._tag === "Retained") return;
+          yield* git([
+            "--git-dir",
+            `${root}/repos/${safeSegment(attempt.repository)}.git`,
+            "worktree",
+            "remove",
+            "--force",
+            worktree,
+          ]);
+          yield* Effect.logInfo("Reconciled and released Attempt salvage", {
+            ...attempt,
+            worktree,
+          });
+        }),
+      );
+    });
 
     const prepare = Effect.fn("ExeDevExecutor.prepare")(function* (request: CheckoutRequest) {
       yield* Effect.annotateCurrentSpan({
@@ -224,6 +290,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
 
     return Executor.of({
       kind: "exe.dev",
+      recover,
       cancel: attempts.cancel,
       intervene: attemptChannel.intervene,
       preflight: machines.preflight,

@@ -335,7 +335,34 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   RunEngineError | DatabaseError,
   Crypto.Crypto | StepExecutor | DatabaseRequirements
 > => {
-  const store = RunStore.layer.pipe(Layer.provide(database));
+  const store = RunStore.layer.pipe(
+    Layer.provide(database),
+    Layer.tap(
+      Effect.fn("RunEngine.recoverWorkspaces")(function* (services) {
+        const store = Context.get(services, RunStore);
+        const stepExecutor = yield* StepExecutor;
+        // Before workflow recovery can admit a retry, publish and durably record any
+        // work left by its predecessor. Failed recovery keeps the checkout on disk.
+        yield* Effect.forEach(
+          yield* store.salvageCandidates,
+          (attempt) =>
+            stepExecutor
+              .recover(attempt, (salvage) => store.recordSalvage(attempt.attemptId, salvage))
+              .pipe(
+                Effect.tapError((error) =>
+                  Effect.logError("Attempt salvage reconciliation failed; work retained", {
+                    attemptId: attempt.attemptId,
+                    worker: attempt.worker,
+                    message: String(error),
+                  }),
+                ),
+                Effect.ignore,
+              ),
+          { discard: true },
+        );
+      }),
+    ),
+  );
   const cluster = SingleRunner.layer({
     runnerStorage: "memory",
     shardingConfig: {

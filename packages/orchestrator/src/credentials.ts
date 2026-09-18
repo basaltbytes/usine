@@ -1,11 +1,11 @@
 import type { UsineConfig } from "@usine/config/factory";
 import type { RepositoryName } from "@usine/core/repository";
-import { CredentialProvider, CredentialUnavailableError } from "@usine/executor";
+import { CredentialProvider, CredentialUnavailableError, WorkerCredential } from "@usine/executor";
 import { GitHubApp, CoveredProject } from "@usine/github/github-app";
 import { Effect, Layer, Option, SynchronizedRef } from "effect";
 
 /**
- * Mints one fresh single-repository GitHub App token per Attempt. Project
+ * Mints renewable single-repository GitHub App tokens for each Attempt. Project
  * access is discovered on the first mint and cached, so a GitHub outage cannot
  * block startup, and a repository added to the installation later is found by
  * the refresh that follows a miss.
@@ -92,7 +92,7 @@ export const gitHubCredentialLayer = (
             repository,
             attemptId,
           });
-          return token.value;
+          return new WorkerCredential({ value: token.value, expiresAt: token.expiresAt });
         }),
       });
     }),

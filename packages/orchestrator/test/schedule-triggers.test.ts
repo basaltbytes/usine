@@ -171,6 +171,7 @@ const waitForWaiting = Effect.fn("test.waitForWaiting")(function* (
 
 const runtimeLayer = (directory: InstanceDirectory) => {
   const executor = Layer.succeed(StepExecutor)({
+    recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
     reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),

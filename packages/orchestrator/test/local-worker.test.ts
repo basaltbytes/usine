@@ -15,7 +15,13 @@ import * as RunState from "@usine/core/run/state";
 import { Run, RunId } from "@usine/core/run";
 import { Step, StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
-import { CheckoutRequest, CredentialProvider, Executor, ExecutorError } from "@usine/executor";
+import {
+  CheckoutRequest,
+  CredentialProvider,
+  WorkerCredential,
+  Executor,
+  ExecutorError,
+} from "@usine/executor";
 import { InstanceDirectory } from "@usine/core/instance";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
 import { stepExecutorLayer } from "../src/scheduler.ts";
@@ -75,8 +81,14 @@ const config = Schema.decodeUnknownSync(UsineConfig)({
   workers: [{ name: "local", kind: "local", max_concurrent_attempts: 1 }],
 });
 
+const workerCredential = (value: Redacted.Redacted<string>) =>
+  new WorkerCredential({
+    value,
+    expiresAt: DateTime.makeUnsafe(Date.now() + 3_600_000),
+  });
+
 const credentialLayer = Layer.succeed(CredentialProvider)({
-  issue: () => Effect.succeed(Redacted.make(TOKEN)),
+  issue: () => Effect.succeed(workerCredential(Redacted.make(TOKEN))),
 });
 
 const run = Effect.fn("test.git")(function* (
@@ -381,7 +393,9 @@ describe("local worker", () => {
           runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
         }).pipe(
           Layer.provide(
-            Layer.succeed(CredentialProvider)({ issue: () => Effect.succeed(credential) }),
+            Layer.succeed(CredentialProvider)({
+              issue: () => Effect.succeed(workerCredential(credential)),
+            }),
           ),
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
         );
@@ -480,7 +494,7 @@ describe("local worker", () => {
                     [
                       "-e",
                       phase === "diagnostic"
-                        ? "process.stderr.write(process.env.GITHUB_TOKEN); process.exit(1)"
+                        ? 'process.stderr.write(require("node:fs").readFileSync(process.env.USINE_GITHUB_TOKEN_FILE)); process.exit(1)'
                         : "setInterval(() => {}, 1000)",
                     ],
                     command.options,
@@ -503,7 +517,7 @@ describe("local worker", () => {
                   issue: () =>
                     phase === "credential"
                       ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
-                      : Effect.succeed(credential),
+                      : Effect.succeed(workerCredential(credential)),
                 }),
                 Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, controlledSpawner),
               ),
@@ -574,7 +588,7 @@ describe("local worker", () => {
             Effect.sync(() => {
               const token = Redacted.make(TOKEN);
               issued.push(token);
-              return token;
+              return workerCredential(token);
             }),
         });
         const runtime = localExecutorLayer({
@@ -824,7 +838,7 @@ describe("local worker", () => {
                 yield* Deferred.succeed(minting, undefined);
                 yield* Deferred.await(release);
               }
-              return Redacted.make(TOKEN);
+              return workerCredential(Redacted.make(TOKEN));
             }),
         });
         yield* withLocalEngine(

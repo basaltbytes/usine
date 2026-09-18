@@ -45,9 +45,8 @@ const directChildren = (
   );
 
 /**
- * Reclaims crash leftovers once per Worker before this process starts work on
- * its VM. Each removal is isolated and each failure is logged, so one immovable
- * leftover never blocks the sweep's siblings or a future prepare.
+ * Preserves crash leftovers and prunes stale cache registrations once per Worker.
+ * Only durable Attempt recovery may authorize removing an existing checkout.
  */
 export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWorktreeSweepFor")(
   function* (commands: ExeDevCommands) {
@@ -94,29 +93,18 @@ export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWork
               "-print0",
             ])
             .pipe(Effect.flatMap((output) => directChildren(attemptsRoot, output)));
-          const failures = yield* Ref.make(0);
+          // An unrecognized path can contain unsalvaged work from a crash. Only
+          // recovery from the durable Attempt record may authorize its removal.
           yield* Effect.forEach(
             attempts,
             (worktree) =>
-              Effect.logInfo("Sweeping abandoned exe.dev Attempt worktree", {
+              Effect.logWarning("Preserving abandoned exe.dev path for salvage reconciliation", {
                 attemptId,
                 worker,
                 host: vm.sshDest,
                 worktree,
-              }).pipe(
-                Effect.andThen(commands.remote("prepare", vm.sshDest, "rm", ["-rf", worktree])),
-                Effect.tapError((error) =>
-                  Effect.logWarning("Could not remove an abandoned exe.dev worktree", {
-                    attemptId,
-                    worker,
-                    host: vm.sshDest,
-                    worktree,
-                    message: error.message,
-                  }).pipe(Effect.andThen(Ref.update(failures, (count) => count + 1))),
-                ),
-                Effect.ignore,
-              ),
-            { concurrency: SWEEP_CONCURRENCY, discard: true },
+              }),
+            { discard: true },
           );
 
           const caches = yield* commands
@@ -153,13 +141,11 @@ export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWork
             { concurrency: SWEEP_CONCURRENCY, discard: true },
           );
 
-          const failed = yield* Ref.get(failures);
           yield* Effect.logInfo("exe.dev abandoned-worktree sweep completed", {
             attemptId,
             worker,
             host: vm.sshDest,
-            removed: attempts.length - failed,
-            failed,
+            retained: attempts.length,
             caches: caches.length,
           });
         }).pipe(

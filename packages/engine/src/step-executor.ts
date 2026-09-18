@@ -1,3 +1,4 @@
+import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import { Agent } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptTask, type AttemptId } from "@usine/core/attempt";
@@ -38,6 +39,11 @@ export interface WorkerLease {
 export class StepExecutor extends Context.Service<
   StepExecutor,
   {
+    /** Reconciles an old checkout before new Attempts start; records its salvage before releasing any work. */
+    readonly recover: <E>(
+      attempt: AttemptRecovery,
+      record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
+    ) => Effect.Effect<void, E | AttemptFailure>;
     /** Requests that the identified Attempt stop its current work. */
     readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
     /** Sends a nonterminal operator action to a live session in the identified Attempt. */

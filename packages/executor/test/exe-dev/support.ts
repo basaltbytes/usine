@@ -106,7 +106,7 @@ interface FakeSshState {
   failStop: boolean;
   cacheExists: boolean;
   /** What the salvage finds in the worktree after an unsuccessful Attempt. */
-  salvage: "clean" | "dirty" | "push-fails";
+  salvage: "clean" | "dirty" | "push-fails" | "inspect-fails" | "add-fails" | "commit-fails";
   salvageCommitted: boolean;
 }
 
@@ -403,9 +403,13 @@ export const fakeSsh = (
           return oneShotHandle(`${state.salvageCommitted ? SALVAGE_COMMIT : COMMIT}\n`, 0);
         }
         if (remoteLine.includes("'status'")) {
+          if (state.salvage === "inspect-fails") return oneShotHandle("", 128, "inspection failed");
           return oneShotHandle(state.salvage === "clean" ? "" : " M src/index.ts\n", 0);
         }
+        if (remoteLine.includes("'add'") && state.salvage === "add-fails")
+          return oneShotHandle("", 128, "index.lock exists");
         if (remoteLine.includes("'commit'")) {
+          if (state.salvage === "commit-fails") return oneShotHandle("", 128, "commit failed");
           state.salvageCommitted = true;
           return oneShotHandle("", 0);
         }
