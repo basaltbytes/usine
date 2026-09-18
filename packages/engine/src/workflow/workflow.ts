@@ -83,6 +83,13 @@ export const continueWithNewest: (
             runId: claimed.value.runId,
           });
           yield* DurableRun.execute({ submission: claimed.value.submission }, { discard: true });
+        } else {
+          // The Item moved on during the check: the Event was ignored, another
+          // Run opened for the Item, or a cycle reset superseded the Event.
+          yield* Effect.logInfo(
+            "Queued Event still matches its trigger but could no longer be claimed; no Run opened",
+            fields,
+          );
         }
       } else {
         // Only the queue observed before the remote check belongs to this result.

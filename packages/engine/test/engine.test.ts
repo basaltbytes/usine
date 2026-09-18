@@ -1,22 +1,15 @@
 import { Intervention, OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { assert, describe, it } from "@effect/vitest";
-import { NodeServices } from "@effect/platform-node";
 import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptContext, AttemptId, AttemptTask } from "@usine/core/attempt";
-import { AgentFailure, AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { Event, DedupKey, EventId } from "@usine/core/event";
+import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
-import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { RunId } from "@usine/core/run";
-import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
-import { StepResult } from "@usine/core/step/result";
 import {
   Context,
-  DateTime,
   Deferred,
   Effect,
   Exit,
@@ -27,116 +20,25 @@ import {
   Path,
   Ref,
   Schema,
-  Schedule,
   Scope,
 } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { layer } from "../src/database/local-sqlite.ts";
-import { InstanceDirectory } from "@usine/core/instance";
 import { RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
 import { LoopControl } from "../src/loop-control/loop-control.ts";
-import { Submission } from "../src/engine/submission.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
-import { TriggerCondition } from "../src/trigger-condition.ts";
 import { runIdFor } from "../src/workflow/workflow.ts";
-
-const stepResult = (message: string) => new StepResult({ message, facts: [] });
-const testAgent = new Agent({
-  name: AgentName.make("developer"),
-  brain: new BrainSpec({
-    harness: "claude",
-    model: ModelId.make("claude-sonnet-4-6"),
-    effort: "high",
-  }),
-  parentModel: Option.none(),
-  parentEffort: Option.none(),
-  persona: AgentPersona.make("Implement the task."),
-});
-
-type AttemptPlan = Effect.Effect<StepResult, AttemptFailure>;
-
-const conditionLayer = (holds: Effect.Effect<boolean>) =>
-  Layer.succeed(TriggerCondition)({ holds: () => holds });
-
-const alwaysHolds = conditionLayer(Effect.succeed(true));
-
-const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
-  Layer.succeed(StepExecutor)({
-    recover: () => Effect.void,
-    intervene: () => Effect.void,
-    interrupt: () => Effect.void,
-    reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
-    execute: () =>
-      Ref.modify(plans, (remaining) => {
-        const [next, ...rest] = remaining;
-        return [next, rest] as const;
-      }).pipe(
-        Effect.flatMap(
-          (plan) => plan ?? Effect.die("The test StepExecutor ran out of scripted attempts"),
-        ),
-      ),
-  });
-
-const submission = (options: {
-  readonly number: number;
-  readonly item?: string;
-  readonly approval?: "none" | "required";
-}) => {
-  const second = String(options.number).padStart(2, "0");
-  return new Submission({
-    event: new Event({
-      id: EventId.make(`event-${options.number}`),
-      dedupKey: DedupKey.make(`loop/item/revision-${options.number}`),
-      payload: { revision: options.number },
-      receivedAt: DateTime.makeUnsafe(`2026-08-24T12:00:${second}Z`),
-    }),
-    itemKey: ItemKey.make(options.item ?? "item-1"),
-    loop: LoopName.make("review"),
-    step: StepName.make("run"),
-    approval: options.approval ?? "none",
-    repository: RepositoryName.make("basaltbytes/usine"),
-    revision: RepositoryRevision.make(`revision-${options.number}`),
-    task: AttemptTask.make(`Run test ${options.number}`),
-    agent: testAgent,
-    parentModel: Option.none(),
-  });
-};
-
-const approvalEvent = (number: number) => {
-  const second = String(number).padStart(2, "0");
-  return new Event({
-    id: EventId.make(`approval-${number}`),
-    dedupKey: DedupKey.make(`approval/run-${number}`),
-    payload: { approved: true },
-    receivedAt: DateTime.makeUnsafe(`2026-08-24T13:00:${second}Z`),
-  });
-};
-
-const waitFor = Effect.fn("test.waitFor")(function* (
-  engine: RunEngine["Service"],
-  runId: RunId,
-  predicate: (snapshot: Effect.Success<ReturnType<RunEngine["Service"]["inspect"]>>) => boolean,
-) {
-  let latest = yield* engine.inspect(runId);
-  for (let attempt = 0; attempt < 500; attempt += 1) {
-    if (predicate(latest)) return latest;
-    yield* Effect.sleep("10 millis");
-    latest = yield* engine.inspect(runId);
-  }
-  return yield* Effect.die(
-    `Run ${runId} did not reach the expected state (state=${latest.run.state._tag}, attempts=${latest.attempts.map((attempt) => Option.match(attempt.outcome, { onNone: () => "open", onSome: (outcome) => outcome._tag })).join(",")})`,
-  );
-});
-
-const withInstance = <A, E, R>(use: (directory: InstanceDirectory) => Effect.Effect<A, E, R>) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
-    const directory = InstanceDirectory.make(
-      yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-engine-" }),
-    );
-    return yield* use(directory);
-  }).pipe(Effect.provide(NodeServices.layer));
+import {
+  approvalEvent,
+  type AttemptPlan,
+  engineLayer,
+  executorLayer,
+  stepResult,
+  submission,
+  testAgent,
+  waitFor,
+  withInstance,
+} from "./support.ts";
 
 describe("durable run engine", () => {
   it.live(
@@ -186,10 +88,7 @@ describe("durable run engine", () => {
                 return stepResult("Amended work completed");
               }),
           });
-          const runtime = layer(directory).pipe(
-            Layer.provide(executor),
-            Layer.provide(alwaysHolds),
-          );
+          const runtime = engineLayer(directory, executor);
           yield* Effect.gen(function* () {
             const engine = yield* RunEngine;
             const original = submission({ number: 1 });
@@ -265,11 +164,7 @@ describe("durable run engine", () => {
           const canceled = yield* Effect.flip(engine.intervene(accepted.runId, attempt.id, input));
           assert.strictEqual(canceled._tag, "RunInterventionRejectedError");
           assert.deepStrictEqual(delivered, [attempt.id]);
-        }).pipe(
-          Effect.provide(
-            layer(directory).pipe(Layer.provide(executor), Layer.provide(alwaysHolds)),
-          ),
-        );
+        }).pipe(Effect.provide(engineLayer(directory, executor)));
       }),
     ),
   );
@@ -280,10 +175,7 @@ describe("durable run engine", () => {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
           Effect.succeed(stepResult("finished")),
         ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -317,10 +209,7 @@ describe("durable run engine", () => {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
           Effect.succeed(stepResult("listed result")),
         ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -380,10 +269,7 @@ describe("durable run engine", () => {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
           Effect.succeed(stepResult("approved result")),
         ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -430,10 +316,7 @@ describe("durable run engine", () => {
           infrastructureFailure,
           Effect.succeed(stepResult("retried")),
         ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -465,10 +348,7 @@ describe("durable run engine", () => {
           Effect.die(new Error("the executor adapter crashed")),
           Effect.succeed(stepResult("recovered")),
         ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -525,10 +405,7 @@ describe("durable run engine", () => {
           failure,
           Effect.succeed(stepResult("operator retry")),
         ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -561,10 +438,7 @@ describe("durable run engine", () => {
           new AgentFailure({ message: "agent could not finish" }),
           Effect.succeed(stepResult("operator-guided result")),
         ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -599,10 +473,7 @@ describe("durable run engine", () => {
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -646,10 +517,7 @@ describe("durable run engine", () => {
           Deferred.await(gate).pipe(Effect.as(stepResult("first result"))),
           Effect.succeed(stepResult("newest result")),
         ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -693,216 +561,11 @@ describe("durable run engine", () => {
     ),
   );
 
-  it.live("revokes a queued Event whose trigger no longer holds when the Run ahead closes", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const gate = yield* Deferred.make<void>();
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Deferred.await(gate).pipe(Effect.as(stepResult("first result"))),
-        ]);
-        // The finisher scenario: the closing Run pushed a commit (Event B) and
-        // then relabeled, so B's trigger is false once A closes.
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(conditionLayer(Effect.succeed(false))),
-        );
-        const path = yield* Path.Path;
-        const database = path.join(directory, ".usine", "runtime.sqlite");
-        const ignoredReason = (eventId: string) =>
-          Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient;
-            const rows = yield* sql`
-              SELECT reason
-              FROM usine_ignored_events
-              WHERE event_id = ${eventId}
-            `;
-            return yield* Schema.decodeUnknownEffect(
-              Schema.Array(Schema.Struct({ reason: Schema.String })),
-            )(rows);
-          }).pipe(Effect.provide(SqliteClient.layer({ filename: database })));
-
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const first = yield* engine.submit(submission({ number: 20, approval: "required" }));
-          assert.strictEqual(first._tag, "Claimed");
-          if (first._tag !== "Claimed") return;
-          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
-          yield* engine.approve(first.runId, approvalEvent(20));
-          yield* waitFor(
-            engine,
-            first.runId,
-            ({ run, attempts }) => run.state._tag === "Running" && attempts.length === 1,
-          );
-
-          const second = submission({ number: 21, approval: "required" });
-          assert.strictEqual((yield* engine.submit(second))._tag, "Queued");
-
-          yield* Deferred.succeed(gate, undefined);
-          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Succeeded");
-          let ignored = yield* ignoredReason(second.event.id);
-          for (let poll = 0; poll < 500 && ignored.length === 0; poll += 1) {
-            yield* Effect.sleep("10 millis");
-            ignored = yield* ignoredReason(second.event.id);
-          }
-          assert.deepStrictEqual(ignored, [{ reason: "revoked" }]);
-          const resubmitted = yield* engine.submit(second);
-          assert.strictEqual(resubmitted._tag, "Ignored");
-          if (resubmitted._tag === "Ignored") assert.strictEqual(resubmitted.reason, "revoked");
-          // No Run ever opened for the dropped Event, so no approval was asked.
-          const missing = yield* Effect.flip(engine.inspect(yield* runIdFor(second)));
-          assert.strictEqual(missing._tag, "RunNotFoundError");
-        }).pipe(Effect.provide(runtime));
-      }),
-    ),
-  );
-
-  it.live("preserves newer queued work when an older trigger re-check returns false", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const finishFirst = yield* Deferred.make<void>();
-        const finishThird = yield* Deferred.make<void>();
-        const checking = yield* Deferred.make<void>();
-        const checked = yield* Deferred.make<boolean>();
-        const second = submission({ number: 31 });
-        const fourth = submission({ number: 33 });
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Deferred.await(finishFirst).pipe(Effect.as(stepResult("first"))),
-          Deferred.await(finishThird).pipe(Effect.as(stepResult("third"))),
-          Effect.succeed(stepResult("fourth")),
-        ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(
-            Layer.succeed(TriggerCondition)({
-              holds: (candidate) =>
-                candidate.event.id === second.event.id
-                  ? Deferred.succeed(checking, undefined).pipe(
-                      Effect.andThen(Deferred.await(checked)),
-                    )
-                  : Effect.succeed(true),
-            }),
-          ),
-        );
-        const path = yield* Path.Path;
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const first = yield* engine.submit(submission({ number: 30 }));
-          assert(first._tag === "Claimed");
-          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Running");
-          assert.strictEqual((yield* engine.submit(second))._tag, "Queued");
-          yield* Deferred.succeed(finishFirst, undefined);
-          yield* Deferred.await(checking);
-
-          const third = yield* engine.submit(submission({ number: 32 }));
-          assert(third._tag === "Claimed");
-          yield* waitFor(engine, third.runId, ({ run }) => run.state._tag === "Running");
-          assert.strictEqual((yield* engine.submit(fourth))._tag, "Queued");
-          yield* Deferred.succeed(checked, false);
-
-          // Wait for B's delayed revocation to commit before allowing C to close.
-          const revoked = Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient;
-            return (
-              (yield* sql`SELECT event_id FROM usine_ignored_events
-              WHERE event_id = ${second.event.id}`).length > 0
-            );
-          }).pipe(
-            Effect.provide(
-              SqliteClient.layer({
-                filename: path.join(directory, ".usine", "runtime.sqlite"),
-              }),
-            ),
-          );
-          let settled = yield* revoked;
-          for (let poll = 0; poll < 500 && !settled; poll += 1) {
-            yield* Effect.sleep("10 millis");
-            settled = yield* revoked;
-          }
-          assert(settled);
-          assert.strictEqual((yield* engine.submit(fourth))._tag, "Queued");
-          yield* Deferred.succeed(finishThird, undefined);
-          const fourthId = yield* runIdFor(fourth);
-          yield* engine.inspect(fourthId).pipe(
-            Effect.retry({
-              while: (error) => error._tag === "RunNotFoundError",
-              times: 500,
-              schedule: Schedule.spaced("10 millis"),
-            }),
-          );
-          const finished = yield* waitFor(
-            engine,
-            fourthId,
-            ({ run }) => run.state._tag === "Succeeded",
-          );
-          assert.strictEqual(finished.attempts.length, 1);
-          assert(Option.isSome(finished.step.result));
-          assert.strictEqual(finished.step.result.value.message, "fourth");
-        }).pipe(Effect.provide(runtime));
-      }),
-    ),
-  );
-
-  it.live("opens a queued Event whose trigger still holds behind its own approval gate", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const gate = yield* Deferred.make<void>();
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Deferred.await(gate).pipe(Effect.as(stepResult("first result"))),
-          Effect.succeed(stepResult("queued result")),
-        ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
-
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const first = yield* engine.submit(submission({ number: 22, approval: "required" }));
-          assert.strictEqual(first._tag, "Claimed");
-          if (first._tag !== "Claimed") return;
-          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
-          yield* engine.approve(first.runId, approvalEvent(22));
-          yield* waitFor(
-            engine,
-            first.runId,
-            ({ run, attempts }) => run.state._tag === "Running" && attempts.length === 1,
-          );
-
-          const second = submission({ number: 23, approval: "required" });
-          assert.strictEqual((yield* engine.submit(second))._tag, "Queued");
-
-          yield* Deferred.succeed(gate, undefined);
-          yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Succeeded");
-          // The first approval covered only its own Run: the queued Event's
-          // Run parks on the gate again before any Attempt.
-          const secondRunId = yield* runIdFor(second);
-          const parked = yield* waitFor(
-            engine,
-            secondRunId,
-            ({ run }) => run.state._tag === "Waiting",
-          );
-          assert.strictEqual(parked.attempts.length, 0);
-          yield* engine.approve(secondRunId, approvalEvent(23));
-          const finished = yield* waitFor(
-            engine,
-            secondRunId,
-            ({ run }) => run.state._tag === "Succeeded",
-          );
-          assert(Option.isSome(finished.step.result));
-          assert.strictEqual(finished.step.result.value.message, "queued result");
-        }).pipe(Effect.provide(runtime));
-      }),
-    ),
-  );
-
   it.live("records operator cancellation of a running Attempt atomically", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([Effect.never]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -931,10 +594,7 @@ describe("durable run engine", () => {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
           Effect.succeed(stepResult("approved after restart")),
         ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         const firstScope = yield* Scope.make();
         const firstContext = yield* Scope.provide(Layer.build(runtime), firstScope);
@@ -974,10 +634,7 @@ describe("durable run engine", () => {
           Effect.never,
           Effect.succeed(stepResult("resumed after restart")),
         ]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
 
         const firstScope = yield* Scope.make();
         const firstContext = yield* Scope.provide(Layer.build(runtime), firstScope);
@@ -1028,10 +685,7 @@ describe("durable run engine", () => {
             Effect.succeed(stepResult("queued work after restart")),
             Effect.succeed(stepResult("new work after restart")),
           ]);
-          const runtime = layer(directory).pipe(
-            Layer.provide(executorLayer(plans)),
-            Layer.provide(alwaysHolds),
-          );
+          const runtime = engineLayer(directory, executorLayer(plans));
           const firstScope = yield* Scope.make();
           const first = Context.get(
             yield* Scope.provide(Layer.build(runtime), firstScope),
@@ -1081,10 +735,7 @@ describe("durable run engine", () => {
             Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)),
             Effect.succeed(stepResult("recovered after restart")),
           ]);
-          const runtime = layer(directory).pipe(
-            Layer.provide(executorLayer(plans)),
-            Layer.provide(alwaysHolds),
-          );
+          const runtime = engineLayer(directory, executorLayer(plans));
           const firstScope = yield* Scope.make();
           const first = Context.get(
             yield* Scope.provide(Layer.build(runtime), firstScope),
@@ -1138,10 +789,7 @@ describe("durable run engine", () => {
             ),
             Effect.succeed(stepResult("retried after restart")),
           ]);
-          const runtime = layer(directory).pipe(
-            Layer.provide(executorLayer(plans)),
-            Layer.provide(alwaysHolds),
-          );
+          const runtime = engineLayer(directory, executorLayer(plans));
           const firstScope = yield* Scope.make();
           const first = Context.get(
             yield* Scope.provide(Layer.build(runtime), firstScope),
@@ -1183,10 +831,7 @@ describe("durable run engine", () => {
     withInstance((directory) =>
       Effect.gen(function* () {
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
-        const runtime = layer(directory).pipe(
-          Layer.provide(executorLayer(plans)),
-          Layer.provide(alwaysHolds),
-        );
+        const runtime = engineLayer(directory, executorLayer(plans));
         const path = yield* Path.Path;
         const database = path.join(directory, ".usine", "runtime.sqlite");
 
@@ -1236,7 +881,7 @@ describe("durable run engine", () => {
             Deferred.succeed(reserveEntered, undefined).pipe(Effect.andThen(Effect.never)),
           execute: () => Effect.die("a canceled queued run must not execute"),
         });
-        const runtime = layer(directory).pipe(Layer.provide(executor), Layer.provide(alwaysHolds));
+        const runtime = engineLayer(directory, executor);
 
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
