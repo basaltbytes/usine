@@ -33,8 +33,12 @@ An Attempt that ends without a successful result is salvaged before its worktree
 removed: uncommitted changes are committed as `wip(usine): salvage attempt <id>` and
 HEAD is pushed to `CheckoutRequest.salvageRef` with the Worker's credentials. The
 result reaches the engine through `Sink.salvage`. A failed push keeps the worktree
-on disk and reports its path. A request whose `resume` names a pushed salvage checks
-that ref out instead of the bare revision; a missing ref falls back to the revision.
+on disk and reports its path and the failure message. The startup sweep leaves such a
+worktree alone. Every later startup retries the salvage with fresh credentials, for
+open and closed Runs alike, and rewrites the record from `Retained` to `Pushed` once
+the push succeeds; until then the record carries the latest failure for the run
+drawer. A request whose `resume` names a pushed salvage checks that ref out instead
+of the bare revision; a missing ref falls back to the revision.
 
 `cancel(attemptId)` applies from the start of preparation: harness probes, credential
 acquisition, repository lock waits, and checkout creation. Cancellation stops
@@ -64,7 +68,7 @@ The Node adapter at `@usine/executor/local` does the following for each Attempt:
 
 - checks Git, the installed run-host protocol, and the assigned harness before accepting work;
 - updates a per-repository bare cache, then creates a detached worktree at the resolved revision;
-- renews repository credentials before expiry; Git reads an Attempt token file and `gh` reads its private `GH_CONFIG_DIR` on each invocation;
+- renews repository credentials before expiry; Git reads an Attempt token file and `gh` reads its private `GH_CONFIG_DIR` on each invocation, so the salvage push at the end of a multi-hour Attempt uses the credential renewed last, and startup reconciliation issues a fresh one;
 - exchanges protocol-v7 envelopes with `@usine/run-host` over newline-delimited standard input and output, including immutable payload, agent context, child-session budget, and normalized session events;
 - interrupts cooperatively before a hard kill, then removes the worktree and wipes the credential.
 
@@ -84,7 +88,7 @@ Prepare attaches the repository's integration to the VM with a bounded `--for` g
 
 Startup reconciles unsuccessful Attempts before registering their durable workflows. Each existing checkout is snapshotted and pushed, and its salvage is recorded before removal. Failed pushes and unknown crash leftovers remain on disk. Cache sweeps prune registrations for missing directories; they never delete existing checkouts. One-shot lobby and SSH commands carry a ten-minute timeout, and the SSH client sends keepalives so a dead link fails the operation instead of parking it. Cancellation also bounds interrupt persistence and delivery before escalating to a hard kill, so a parked store or remote process cannot stall shutdown; before removing a workspace, cleanup reads the run host's recorded pid on the VM and confirms the process is dead, because killing the local SSH client alone says nothing about the remote side.
 
-Concurrent Attempts against different repositories leave their integrations attached to the VM simultaneously; each grant renews at half its lifetime while in use, and the refcounted release detaches an integration only after its last Attempt finishes. A failed detach is logged and left to lapse with its time-box. If remote termination cannot be confirmed, cleanup retains the checkout and its Git registration for recovery, logs its location, and still releases the credential grant. Partial preparation rolls back without requiring remote-process confirmation because no run host has launched.
+Concurrent Attempts against different repositories leave their integrations attached to the VM simultaneously; each grant renews at half its lifetime for as long as its Attempt runs, a failed renewal is retried every minute until it succeeds, and the refcounted release detaches an integration only after its last Attempt finishes. The grant length (`credentialGrantMinutes`, 65 by default) is a renewal window, not an Attempt bound: it does not depend on `max_attempt_minutes`, and an Attempt with no ceiling keeps its grant for its whole life. A failed detach is logged and left to lapse with its time-box. If remote termination cannot be confirmed, cleanup retains the checkout and its Git registration for recovery, logs its location, and still releases the credential grant. Partial preparation rolls back without requiring remote-process confirmation because no run host has launched.
 
 ```ts
 import { RepositoryName } from "@usine/core/repository"

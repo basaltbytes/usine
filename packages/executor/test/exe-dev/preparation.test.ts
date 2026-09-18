@@ -189,6 +189,25 @@ describe("exe.dev preparation", () => {
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
   });
 
+  it.effect("retries a failed grant renewal every minute instead of at the next half-life", () => {
+    const ssh = fakeSsh(PROTOCOL);
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.prepare(request);
+      const attaches = () =>
+        ssh.state.commands.filter(({ args }) => args.includes("attach")).length;
+      assert.strictEqual(attaches(), 1);
+      ssh.state.failAttach = true;
+      // The first renewal is due at half the 65-minute grant.
+      yield* TestClock.adjust("33 minutes");
+      const failed = attaches();
+      assert(failed >= 2, "the half-life renewal never ran");
+      ssh.state.failAttach = false;
+      yield* TestClock.adjust("2 minutes");
+      assert(attaches() > failed, "a failed renewal must be retried within minutes");
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+  });
+
   it.effect(
     "reconciles a remote crash checkout and records the pushed salvage before removal",
     () => {

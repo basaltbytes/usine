@@ -107,7 +107,7 @@ const EngineLive = exeDevLayer(instanceDirectory, config, brains, {
 })
 ```
 
-The composition sets the GitHub integration grant to five minutes beyond `max_attempt_minutes` when that setting exists, and to the executor's default window otherwise. Pass `credentialGrantMinutes` to use another bounded window. When `max_attempt_minutes` is set, the scheduler bounds every launch at it: a hung run host or dead link is interrupted through the normal cancel handshake and reported as a typed infrastructure failure before its credential grant lapses.
+The GitHub integration grant is a renewal window, not an Attempt bound. The executor attaches it for `credentialGrantMinutes` (65 by default), renews it at half that length for as long as the Attempt runs, and retries a failed renewal every minute; `max_attempt_minutes` plays no part in it. When `max_attempt_minutes` is set, the scheduler bounds every launch at it: a hung run host or dead link is interrupted through the normal cancel handshake and reported as a typed infrastructure failure.
 
 The live exe.dev check requires an existing baked VM and its GitHub integration:
 
