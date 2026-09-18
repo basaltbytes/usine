@@ -224,6 +224,19 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       const root = path.join(workersRoot, attempt.worker);
       const worktree = path.join(root, "attempts", safeSegment(attempt.attemptId));
       if (!(yield* fileSystem.exists(worktree))) return;
+      const cache = path.join(root, "repos", cacheDirectoryName(attempt.repository));
+      if (attempt.succeeded) {
+        return yield* recoverWorktree(
+          {
+            attempt,
+            host: "local",
+            worktree,
+            cache,
+            git: (args) => executeCommand("cleanup", "git", args),
+          },
+          record,
+        );
+      }
       yield* Effect.scoped(
         Effect.gen(function* () {
           const credential = yield* credentials(
@@ -233,13 +246,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           );
           const git = credentialedGit(credential);
           yield* recoverWorktree(
-            {
-              attempt,
-              host: "local",
-              worktree,
-              cache: path.join(root, "repos", cacheDirectoryName(attempt.repository)),
-              git: (args) => git("cleanup", args),
-            },
+            { attempt, host: "local", worktree, cache, git: (args) => git("cleanup", args) },
             record,
           );
         }),

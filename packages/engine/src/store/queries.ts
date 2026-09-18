@@ -188,10 +188,10 @@ export const queriesFor = (database: RunDatabaseClient) => {
         repository: runs.repository,
         runId: attempts.runId,
         number: attempts.attemptNumber,
+        outcome: sql<string>`coalesce(json_extract(${attempts.outcomeJson}, '$._tag'), '')`,
       })
       .from(attempts)
       .innerJoin(runs, eq(runs.runId, attempts.runId))
-      .where(sql`coalesce(json_extract(${attempts.outcomeJson}, '$._tag'), '') != 'Succeeded'`)
       .execute();
     const decoded = yield* Schema.decodeUnknownEffect(
       Schema.Array(
@@ -201,12 +201,14 @@ export const queriesFor = (database: RunDatabaseClient) => {
           repository: RepositoryName,
           runId: RunId,
           number: AttemptNumber,
+          outcome: Schema.String,
         }),
       ),
     )(rows);
-    return decoded.map(({ runId, number, ...attempt }) => ({
+    return decoded.map(({ runId, number, outcome, ...attempt }) => ({
       ...attempt,
       ref: salvageRefFor(runId, number),
+      succeeded: outcome === "Succeeded",
     }));
   });
 

@@ -222,6 +222,7 @@ describe("exe.dev preparation", () => {
             repository: request.repository,
             worker: WORKER,
             ref: request.salvageRef,
+            succeeded: false,
           },
           (salvage) =>
             Effect.sync(() => {
@@ -238,6 +239,50 @@ describe("exe.dev preparation", () => {
             (remoteArgs(command)[0] ?? "").includes("'worktree' 'remove'"),
           ),
         );
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
+    },
+  );
+
+  it.effect(
+    "removes the checkout retained by a failed remote stop on a succeeded Attempt without salvage",
+    () => {
+      const ssh = fakeSsh(PROTOCOL);
+      ssh.state.salvage = "dirty";
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        const owner = yield* Scope.make();
+        const prepared = yield* executor.prepare(request).pipe(Scope.provide(owner));
+        ssh.state.failStop = true;
+        const result = yield* prepared.launch({
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+        });
+        assert.strictEqual(result.message, "done");
+        yield* Scope.close(owner, Exit.void);
+        ssh.state.failStop = false;
+        const reconciled = ssh.state.commands.length;
+        const recorded: Array<AttemptSalvage> = [];
+        yield* executor.recover(
+          {
+            attemptId: request.attemptId,
+            repository: request.repository,
+            worker: WORKER,
+            ref: request.salvageRef,
+            succeeded: true,
+          },
+          (salvage) => Effect.sync(() => void recorded.push(salvage)),
+        );
+        const remote = ssh.state.commands
+          .slice(reconciled)
+          .map((command) => remoteArgs(command)[0] ?? "");
+        assert.strictEqual(recorded.length, 0);
+        assert(remote.some((line) => line.startsWith("exec 'sh' '-c'")));
+        assert(remote.some((line) => line.includes("'worktree' 'remove' '--force'")));
+        assert(!remote.some((line) => line.includes("'status'")));
+        assert(!remote.some((line) => line.includes("'commit'")));
+        assert(!remote.some((line) => line.includes("'push'")));
+        assert(!ssh.state.commands.slice(reconciled).some(({ args }) => args.includes("attach")));
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
     },
   );

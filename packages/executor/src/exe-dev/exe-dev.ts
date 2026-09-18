@@ -80,6 +80,27 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
           "Could not inspect recovery checkout",
           new Error(inspected.stderr),
         );
+      const stopRunHost = commands.remote("cleanup", vm.sshDest, "sh", [
+        "-c",
+        RUN_HOST_KILL_SCRIPT,
+        "sh",
+        runHostPidFile(worktree),
+      ]);
+      const reconcile = recoverWorktree(
+        {
+          attempt,
+          host: vm.sshDest,
+          worktree,
+          cache: `${root}/repos/${cacheDirectoryName(attempt.repository)}`,
+          git: (args) => commands.remote("cleanup", vm.sshDest, "git", args),
+        },
+        record,
+      );
+      if (attempt.succeeded) {
+        yield* stopRunHost;
+        yield* reconcile;
+        return;
+      }
       const integration = integrations.get(attempt.repository);
       if (integration === undefined)
         return yield* new CredentialUnavailableError({
@@ -95,22 +116,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
             attempt.repository,
             integration,
           );
-          yield* commands.remote("cleanup", vm.sshDest, "sh", [
-            "-c",
-            RUN_HOST_KILL_SCRIPT,
-            "sh",
-            runHostPidFile(worktree),
-          ]);
-          yield* recoverWorktree(
-            {
-              attempt,
-              host: vm.sshDest,
-              worktree,
-              cache: `${root}/repos/${cacheDirectoryName(attempt.repository)}`,
-              git: (args) => commands.remote("cleanup", vm.sshDest, "git", args),
-            },
-            record,
-          );
+          yield* stopRunHost;
+          yield* reconcile;
         }),
       );
     });
