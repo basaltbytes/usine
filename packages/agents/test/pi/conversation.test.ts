@@ -124,19 +124,56 @@ describe("session supervision", () => {
     }),
   );
 
-  it.effect("completes a parent whose latest child returned ordinary work", () =>
+  for (const order of ["blocker-first", "success-first"] as const) {
+    it.effect(`preserves an independent child's blocker when reports arrive ${order}`, () =>
+      Effect.gen(function* () {
+        const session = yield* conversation(parent);
+        const blocked = childReport("publishing", "[usine:blocked] Publishing permission denied.");
+        const succeeded = childReport("documentation", "Documentation checked.");
+        const reports = order === "blocker-first" ? [blocked, succeeded] : [succeeded, blocked];
+        for (const report of reports) yield* session.childReturned(...report);
+        yield* session.finish(
+          "Documentation checked; publishing encountered a permissions problem.",
+        );
+        const error = yield* Fiber.join(session.result).pipe(Effect.flip);
+        assert(error instanceof AgentResultError);
+        assert.strictEqual(error.message, "Publishing permission denied.");
+        assert.deepStrictEqual(error.sessionId, Option.some(AgentSessionId.make("publishing")));
+      }),
+    );
+  }
+
+  it.effect("resolving one child leaves another child's blocker unresolved", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(parent);
+      yield* session.childReturned(
+        ...childReport("publishing", "[usine:blocked] Permission denied."),
+      );
+      yield* session.childReturned(
+        ...childReport("tests", "[usine:blocked] Database unavailable."),
+      );
+      yield* session.childReturned(...childReport("publishing", "Published."));
+      yield* session.finish("Published; tests could not connect to the database.");
+      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
+      assert(error instanceof AgentResultError);
+      assert.strictEqual(error.message, "Database unavailable.");
+      assert.deepStrictEqual(error.sessionId, Option.some(AgentSessionId.make("tests")));
+    }),
+  );
+
+  it.effect("completes a parent when the blocked child returns a resolved report", () =>
     Effect.gen(function* () {
       const session = yield* conversation(parent);
       yield* session.childReturned(
         ...childReport("blocked", "[usine:blocked] Publishing permission denied."),
       );
       yield* session.childReturned(
-        ...childReport("retried", "Published after the permission fix."),
+        ...childReport("blocked", "Published after the permission fix."),
       );
-      yield* session.finish("Done: the retried child published the change.");
+      yield* session.finish("Done: the child published the change.");
       assert.strictEqual(
         (yield* Fiber.join(session.result)).message,
-        "Done: the retried child published the change.",
+        "Done: the child published the change.",
       );
     }),
   );
