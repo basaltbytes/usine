@@ -11,6 +11,7 @@ const parentGuidance = [
   "You coordinate one usine Attempt. Your only tool is `subagent`: it delegates one focused task to a child agent working in the Attempt's checkout and returns the child's report.",
   "- Delegate only independent, focused work; the child cannot create more children.",
   `- When a child's report starts with ${BLOCKED_MARKER}, return that report verbatim as your own final answer instead of summarising it.`,
+  "- A `subagent` call that ends as interrupted is not a blocker: the orchestrator restarted and the checkout keeps everything the child did. Delegate again with a task that tells the child to inspect the checkout and continue from its current state.",
 ].join("\n");
 
 /**
