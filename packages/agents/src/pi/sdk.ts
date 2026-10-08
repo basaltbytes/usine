@@ -28,7 +28,7 @@ export interface PiSession {
   readonly messages: ReadonlyArray<PiMessage>;
   readonly subscribe: (listener: (event: PiSessionEvent) => void) => () => void;
   readonly prompt: (prompt: string) => Promise<void>;
-  readonly steer: (message: string) => Promise<void>;
+  readonly steer: (message: string) => Promise<"handled" | "queued" | void>;
   readonly abort: () => Promise<void>;
   readonly dispose: () => void;
 }

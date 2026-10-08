@@ -61,7 +61,7 @@ export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
     Effect.tryPromise({
       try: () => options.sdk.steer(message),
       catch: (cause) => options.error("steer", cause),
-    });
+    }).pipe(Effect.asVoid);
   const conversation = yield* sessionConversation({
     session: options.session,
     channel: options.channel,
