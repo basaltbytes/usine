@@ -9,7 +9,12 @@ import {
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import { AttemptReport, type AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
+import {
+  AttemptReport,
+  type AttemptRequest,
+  AttemptRuntime,
+  StoredRequest,
+} from "@usine/durable/attempt-runtime";
 import { StepResult } from "@usine/core/step/result";
 import { DateTime, Deferred, Effect, Layer, Option } from "effect";
 
@@ -140,6 +145,14 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
       return AttemptRuntime.of({
         execute,
         isLive: (attemptId) => Effect.sync(() => storage.tasks.get(attemptId)?.state === "live"),
+        request: (attemptId) =>
+          Effect.sync(() =>
+            Option.map(
+              Option.fromNullishOr(storage.tasks.get(attemptId)),
+              ({ request }) =>
+                new StoredRequest({ spec: request.spec, worker: request.worker, cwd: request.cwd }),
+            ),
+          ),
         cancel: (attemptId) =>
           Effect.gen(function* () {
             const task = storage.tasks.get(attemptId);

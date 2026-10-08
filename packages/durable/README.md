@@ -4,7 +4,7 @@ Runs an Attempt's Pi parent inside the orchestrator on [`@earendil-works/pi-dura
 
 ## Entry points
 
-- `@usine/durable/attempt-runtime`: the `AttemptRuntime` contract the executor calls, with `AttemptRequest` and `AttemptReport`.
+- `@usine/durable/attempt-runtime`: the `AttemptRuntime` contract the executor calls, with `AttemptRequest`, `StoredRequest`, and `AttemptReport`.
 - `@usine/durable/harness`: the `DurableHarness` service, which owns the open pi-durable Harness, and its platform-free `layer(options)`.
 - `@usine/durable/live`: the Node composition: the harness on `<instance>/.usine/durable.sqlite`, Pi's configured models and credentials, and the Claude, Codex, and Pi child backends from `@usine/agents`.
 - `@usine/durable/testing`: a scripted parent model and stub children for driving whole Attempts in tests.
@@ -22,9 +22,9 @@ Building the layer installs the usine extension and resumes the harness's tasks.
 
 `execute(request, io)` creates the Attempt's task, or finds it by Attempt id after a restart, and waits for its outcome. The Attempt id and the task id are committed together, so a crash never leaves a task that a later call cannot find. `isLive(attemptId)` is true from the first `execute` until the terminal envelope has been sent, so a restarted orchestrator reattaches instead of starting a new Attempt.
 
-Everything reaches `io` as attempt channel envelopes: `Started` with the resolved parent model, `SessionEvent`s for the parent's committed entries and the children's events in the order they happened, `InterventionApplied` or `InterventionRejected` for operator input, and exactly one `Final`, `Failed`, or `Interrupted`. The next sequence is stored with the Attempt, so a reattached `execute` continues the numbering. Each envelope is appended before its progress is committed: a crash between the two sends that sequence again, which the transcript keeps once.
+Everything reaches `io` as attempt channel envelopes: `Started` with the resolved parent model, `SessionEvent`s for the parent's committed entries and the children's events in the order they happened, `InterventionApplied` or `InterventionRejected` for operator input, and exactly one `Final`, `Failed`, or `Interrupted`. The next sequence is stored with the Attempt, so a reattached `execute` continues the numbering. Progress is committed once per parent entry, after all of its envelopes are appended, and once per other envelope: a crash before the commit relays the same envelopes again with the same sequences, which the transcript keeps once.
 
-`AttemptRequest.environment` is the complete environment of every child and every command it runs. It is never written to storage. After a restart, the parent waits for the next `execute` call before it launches another child.
+`AttemptRequest.environment` is the complete environment of every child and every command it runs. It is never written to storage: the task stores the rest of the request as a `StoredRequest`, which `request(attemptId)` reads back so a reattachment knows the RunSpec and base commit the Attempt started with. After a restart, the parent waits for the next `execute` call before it launches another child.
 
 A child is not resumed after a restart. Its tool call settles as interrupted with the output committed so far, and the parent model decides what to do next.
 

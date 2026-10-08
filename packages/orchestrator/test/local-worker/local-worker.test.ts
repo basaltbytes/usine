@@ -2,7 +2,6 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Settings, UsineConfig } from "@usine/config/factory";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
-import { SessionTokensUpdated, TokenCount } from "@usine/core/agent/session";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -860,51 +859,6 @@ describe("local worker", () => {
             assert.deepStrictEqual(attempts, []);
           }),
       );
-    },
-    LIVE_TEST_TIMEOUT,
-  );
-
-  it.live(
-    "stops the parent task when the token ceiling trips instead of leaving it live",
-    () => {
-      const storage = new StubStorage();
-      const spender: StubParent = ({ emit, session }) =>
-        emit(
-          new AttemptChannel.SessionEvent({
-            event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(150) }),
-          }),
-        ).pipe(Effect.andThen(Effect.never));
-      const ceiling = new UsineConfig({
-        ...config,
-        settings: new Settings({ ...config.settings, maxAttemptTokens: Option.some(100) }),
-      });
-      return Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-ceiling-" });
-        const instance = InstanceDirectory.make(root);
-        const remote = yield* makeRemote(root);
-        const runtime = localLayer(instance, ceiling, [], {
-          repositoryUrl: () => remote,
-          interruptGrace: "100 millis",
-          harnessReadiness: harnessReady,
-        }).pipe(
-          Layer.provide(credentialLayer),
-          Layer.provide(stubAttemptRuntime(storage, spender)),
-          Layer.provide(alwaysHoldsLayer),
-        );
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const accepted = yield* engine.submit(submission(4));
-          assert(accepted._tag === "Claimed");
-          const failed = yield* waitFor(engine, accepted.runId, "Failed");
-          const outcome = Option.getOrUndefined(failed.attempts[0]?.outcome ?? Option.none());
-          assert(outcome?._tag === "Failed");
-          assert.strictEqual(outcome.failure._tag, "RunawayFailure");
-          const attemptId = failed.attempts[0]?.id;
-          assert(attemptId !== undefined);
-          assert.strictEqual(storage.tasks.get(attemptId)?.state, "canceled");
-        }).pipe(Effect.provide(runtime));
-      }).pipe(Effect.provide(NodeServices.layer));
     },
     LIVE_TEST_TIMEOUT,
   );

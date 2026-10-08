@@ -24,7 +24,7 @@ import { type AttemptResult, AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import { assistantText } from "./events.ts";
 import { completedOutcome, failedOutcome } from "./outcome.ts";
 import { parentSessionId, resolveParent } from "./parent.ts";
-import { type AttemptTaskInput, type StoredRequest, storedRequestOf } from "./request.ts";
+import { type AttemptTaskInput, storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
 import { firstAccepted } from "./watch.ts";
 
@@ -214,7 +214,7 @@ export const attemptTask = (
     runtime: Runtime,
     context: ChordContext,
   ) {
-    const request: StoredRequest = yield* storedRequestOf(task.input);
+    const request = yield* storedRequestOf(task.input);
     const spec = request.spec;
     const { parent, turn, message } = task.state.checkpoint;
     yield* Effect.annotateCurrentSpan({

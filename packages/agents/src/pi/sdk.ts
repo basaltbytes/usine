@@ -15,8 +15,10 @@ import { Context, Effect, Exit, Layer, Option } from "effect";
 import {
   type PiAuthentication,
   type PiPool,
+  piAuthentication,
   requiredPiPool,
   resolvePiPool,
+  splitPiModel,
 } from "./authentication.ts";
 import { supportedThinkingLevels } from "./thinking.ts";
 
@@ -97,21 +99,14 @@ export class PiSdk extends Context.Service<
   { readonly start: (options: PiStartOptions) => Promise<PiStartResult> }
 >()("@usine/agents/pi/PiSdk") {}
 
-const splitModel = (model: ModelId): readonly [string, string] | undefined => {
-  const separator = model.indexOf("/");
-  return separator <= 0 || separator === model.length - 1
-    ? undefined
-    : [model.slice(0, separator), model.slice(separator + 1)];
-};
-
 export const piSdkLive = Layer.succeed(PiSdk)({
   start: async (options) => {
     const modelRuntime = await ModelRuntime.create({ signal: options.signal });
     let selected: ReturnType<ModelRuntime["getModel"]>;
     if (Option.isSome(options.model)) {
-      const parts = splitModel(options.model.value);
+      const parts = splitPiModel(options.model.value);
       if (parts === undefined) return { _tag: "UnknownModel" };
-      selected = modelRuntime.getModel(parts[0], parts[1]);
+      selected = modelRuntime.getModel(parts.provider, parts.modelId);
       if (selected === undefined) return { _tag: "UnknownModel" };
     }
     const agentDir = getAgentDir();
@@ -165,19 +160,10 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       if (!supported.includes(options.thinkingLevel)) {
         return { _tag: "UnsupportedEffort", effort: options.thinkingLevel, model, supported };
       }
-      const resolvedAuthentication = await modelRuntime.checkAuth(active.provider, {
-        signal: options.signal,
-      });
-      const authentication: PiAuthentication | undefined =
-        resolvedAuthentication?.type === "api_key"
-          ? { _tag: "ApiKey" }
-          : resolvedAuthentication?.type === "oauth"
-            ? {
-                _tag: "OAuth",
-                subscription:
-                  modelRuntime.getProvider(active.provider)?.auth.oauth?.isSubscription === true,
-              }
-            : undefined;
+      const authentication = piAuthentication(
+        await modelRuntime.checkAuth(active.provider, { signal: options.signal }),
+        modelRuntime.getProvider(active.provider)?.auth.oauth?.isSubscription === true,
+      );
       const requiredPool = requiredPiPool(active.provider);
       const pool = resolvePiPool(active.provider, authentication);
       if (authentication === undefined) {

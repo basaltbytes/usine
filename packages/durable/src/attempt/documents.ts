@@ -26,9 +26,8 @@ export type AttemptRecord = {
   /** The next outbound and inbound attempt channel sequences. */
   nextOutbound: number;
   nextInbound: number;
-  /** The newest parent entry relayed, and how many of its session events were sent. */
+  /** The newest parent entry whose session events were all relayed, and the parent's last relayed token count. */
   relayedEntry: number;
-  relayedParts: number;
   relayedTokens: number;
   terminalRelayed: boolean;
 };
@@ -50,7 +49,6 @@ export const AttemptRecordDoc = defineDocFamily<AttemptRecord, null>({
     nextOutbound: 1,
     nextInbound: 1,
     relayedEntry: 0,
-    relayedParts: 0,
     relayedTokens: 0,
     terminalRelayed: false,
   }),

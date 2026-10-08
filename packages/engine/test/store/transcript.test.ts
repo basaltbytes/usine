@@ -63,7 +63,7 @@ describe("Attempt transcripts", () => {
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
         yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert.strictEqual(started._tag, "AttemptStarted");
         if (started._tag !== "AttemptStarted") return;
         const attemptId = started.execution.attempt.id;
@@ -180,7 +180,7 @@ describe("Attempt transcripts", () => {
         const database = yield* RunDatabase;
         const store = yield* RunStore;
         yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert.strictEqual(started._tag, "AttemptStarted");
         if (started._tag !== "AttemptStarted") return;
         const attemptId = started.execution.attempt.id;
@@ -238,7 +238,7 @@ describe("Attempt transcripts", () => {
         const database = yield* RunDatabase;
         const store = yield* RunStore;
         yield* store.recordAndClaim(submission, runId);
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert.strictEqual(started._tag, "AttemptStarted");
         if (started._tag !== "AttemptStarted") return;
         const attemptId = started.execution.attempt.id;

@@ -31,6 +31,10 @@
       "types": "./dist/pi/codex/codex.d.ts",
       "default": "./dist/pi/codex/codex.js"
     },
+    "./pi/authentication": {
+      "types": "./dist/pi/authentication.d.ts",
+      "default": "./dist/pi/authentication.js"
+    },
     "./pi/live": {
       "types": "./dist/pi/live.d.ts",
       "default": "./dist/pi/live.js"

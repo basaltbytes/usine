@@ -1,11 +1,14 @@
 import { assert, describe, it } from "@effect/vitest";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { InfraFailure } from "@usine/core/attempt/failure";
 import { Context, Effect, Exit, Fiber, Layer } from "effect";
 import { AttemptRuntime } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
 import { layer as attemptRuntimeLayer } from "../src/attempt/runtime.ts";
+import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
 import { DurableHarness, durableError, layer as durableHarnessLayer } from "../src/harness.ts";
 import {
   answer,
@@ -156,6 +159,88 @@ describe("durable AttemptRuntime", () => {
         assert.match(output, /Half way there/u);
         assert.match(output, /interrupted/u);
       }).pipe(Effect.scoped),
+  );
+
+  it.live("relays an entry again after a crash between its appends and its commit", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/9");
+        const recording = recordingSink();
+        const appended: Array<AttemptChannel.OutboundEnvelope> = [];
+        let crashed = false;
+        // The crash comes after the parent entry's last envelope is appended, before its commit.
+        const sink: AttemptChannel.Sink = {
+          append: (direction, envelope) =>
+            Effect.gen(function* () {
+              yield* recording.sink.append(direction, envelope);
+              if (envelope._tag !== "OutboundEnvelope") return;
+              appended.push(envelope);
+              const { payload } = envelope;
+              if (crashed || payload._tag !== "SessionEvent") return;
+              if (payload.event._tag !== "ToolStarted") return;
+              crashed = true;
+              return yield* new InfraFailure({ message: "The orchestrator stopped", cause: null });
+            }),
+          salvage: () => Effect.void,
+        };
+        const stopped = yield* runtime.execute(request, sink).pipe(Effect.flip);
+        assert.strictEqual(stopped._tag, "InfraFailure");
+        const record = yield* (yield* DurableHarness).use("read the record", (harness, context) =>
+          harness.snapshot(AttemptRecordDoc, request.spec.attemptId, context),
+        );
+        const entry = recording
+          .outbound()
+          .filter(({ payload }) => payload._tag === "SessionEvent")
+          .slice(-2);
+        assert.deepStrictEqual(trace(entry), ["parent.TextOutput", "parent.ToolStarted:subagent"]);
+        assert.strictEqual(record?.nextOutbound, entry[0]?.sequence);
+
+        const execution = yield* Effect.forkChild(runtime.execute(request, sink));
+        yield* (yield* (yield* StubChildren).next).reply("Child fixed the test.");
+        const report = yield* Fiber.join(execution);
+        assert.strictEqual(report.message, "Fixed after the replay.");
+        const replayed = appended.filter(({ sequence }) =>
+          entry.some((first) => first.sequence === sequence),
+        );
+        assert.deepStrictEqual(
+          replayed.map(({ sequence, payload }) => [sequence, payload]),
+          [...entry, ...entry].map(({ sequence, payload }) => [sequence, payload]),
+        );
+        const outbound = recording.outbound();
+        assertAdmitted(request.spec.attemptId, outbound);
+        assert.deepStrictEqual(trace(outbound), [
+          "Started",
+          "parent.SessionStarted",
+          "parent.TextOutput",
+          "parent.ToolStarted:subagent",
+          "child.SessionStarted",
+          "child.TextOutput",
+          "child.SessionFinished",
+          "parent.ToolFinished:subagent",
+          "parent.TextOutput",
+          "parent.SessionFinished",
+          "Final",
+        ]);
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [
+              fauxAssistantMessage(
+                [
+                  fauxText("Delegating the fix."),
+                  fauxToolCall(SUBAGENT_TOOL, { task: "Fix the flaky test" }),
+                ],
+                { stopReason: "toolUse" },
+              ),
+              answer("Fixed after the replay."),
+            ],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
   );
 
   it.live("applies a steer to a busy parent at its next turn", () =>

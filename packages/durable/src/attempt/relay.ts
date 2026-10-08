@@ -59,21 +59,12 @@ const progressOf = (record: Readonly<AttemptRecord>): RelayProgress => ({
   },
   inbound: record.nextInbound,
   entry: record.relayedEntry,
-  parts: record.relayedParts,
   tokens: record.relayedTokens,
 });
 
-interface RelayCursor {
-  readonly entry: number;
-  readonly parts: number;
-  readonly tokens: number;
-}
+type RelayCursor = Pick<RelayProgress, "entry" | "tokens">;
 
-const cursorOf = (progress: RelayProgress): RelayCursor => ({
-  entry: progress.entry,
-  parts: progress.parts,
-  tokens: progress.tokens,
-});
+const cursorOf = ({ entry, tokens }: RelayProgress): RelayCursor => ({ entry, tokens });
 
 /** Reads one Attempt's durable record; absent until `execute` first creates its task. */
 export const readRecord = (durable: DurableHarness["Service"], attemptId: string) =>
@@ -82,49 +73,51 @@ export const readRecord = (durable: DurableHarness["Service"], attemptId: string
   );
 
 /**
- * Sends one outbound envelope with the next sequence and records the new
- * progress in the Attempt's record. The append comes first: a crash between
- * the two resends the same sequence, which the transcript keeps once, instead
- * of leaving a gap `admit` would reject.
+ * Sends `payloads` with the next sequences, then commits the progress they
+ * reach in the Attempt's record. The appends come first: a crash before the
+ * commit sends the same payloads again with the same sequences, which the
+ * transcript keeps once, instead of leaving a gap `admit` would reject.
  */
 const emit = (
   durable: DurableHarness["Service"],
   hub: AttemptHub,
-  payload: AttemptChannel.OutboundPayload,
+  payloads: ReadonlyArray<AttemptChannel.OutboundPayload>,
   advance: (progress: RelayProgress) => RelayCursor,
 ): Effect.Effect<void, AttemptFailure | DurableHarnessError> =>
   hub.emission.withPermits(1)(
     Effect.gen(function* () {
       if (Option.isNone(hub.channel)) return yield* unavailable();
       const { io, progress } = hub.channel.value;
-      const envelope = new AttemptChannel.OutboundEnvelope({
-        version: AttemptChannel.PROTOCOL_VERSION,
-        attemptId: hub.attemptId,
-        sequence: AttemptChannel.Sequence.make(progress.outbound.nextSequence),
-        sentAt: yield* DateTime.now,
-        payload,
-      });
-      const admitted = AttemptChannel.admit(progress.outbound, hub.attemptId, envelope);
-      if (Result.isFailure(admitted)) {
-        return yield* Effect.die(
-          new Error(`${admitted.failure.message}: ${admitted.failure.detail}`),
-        );
+      let outbound = progress.outbound;
+      for (const payload of payloads) {
+        const envelope = new AttemptChannel.OutboundEnvelope({
+          version: AttemptChannel.PROTOCOL_VERSION,
+          attemptId: hub.attemptId,
+          sequence: AttemptChannel.Sequence.make(outbound.nextSequence),
+          sentAt: yield* DateTime.now,
+          payload,
+        });
+        const admitted = AttemptChannel.admit(outbound, hub.attemptId, envelope);
+        if (Result.isFailure(admitted)) {
+          return yield* Effect.die(
+            new Error(`${admitted.failure.message}: ${admitted.failure.detail}`),
+          );
+        }
+        yield* io.append("outbound", envelope);
+        outbound = admitted.success;
       }
       const cursor = advance(progress);
-      yield* io.append("outbound", envelope);
-      yield* durable.use("record the relayed envelope", (harness, context) =>
+      yield* durable.use("record the relayed envelopes", (harness, context) =>
         harness.commit(async (tx) => {
           const record = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
-          record.nextOutbound = admitted.success.nextSequence;
+          record.nextOutbound = outbound.nextSequence;
           record.relayedEntry = cursor.entry;
-          record.relayedParts = cursor.parts;
           record.relayedTokens = cursor.tokens;
-          record.terminalRelayed = admitted.success.state === "Terminal";
+          record.terminalRelayed = outbound.state === "Terminal";
         }, context),
       );
-      progress.outbound = admitted.success;
+      progress.outbound = outbound;
       progress.entry = cursor.entry;
-      progress.parts = cursor.parts;
       progress.tokens = cursor.tokens;
     }),
   );
@@ -134,7 +127,7 @@ export const emitPayload = (
   durable: DurableHarness["Service"],
   hub: AttemptHub,
   payload: AttemptChannel.OutboundPayload,
-) => emit(durable, hub, payload, cursorOf);
+) => emit(durable, hub, [payload], cursorOf);
 
 /** Records one operator input in the transcript with the next inbound sequence, and returns that sequence. */
 export const appendInbound = (
@@ -277,9 +270,11 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     yield* emit(
       durable,
       hub,
-      new AttemptChannel.SessionEvent({
-        event: new SessionTokensUpdated({ session: started, totalTokens: total }),
-      }),
+      [
+        new AttemptChannel.SessionEvent({
+          event: new SessionTokensUpdated({ session: started, totalTokens: total }),
+        }),
+      ],
       (current) => ({ ...cursorOf(current), tokens: total }),
     );
   });
@@ -290,7 +285,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     const parent = hub.parent.value;
     let next = Option.none<Cursor>();
     do {
-      const query = entryQuery(progress().entry, bound);
+      const query = entryQuery(progress().entry + 1, bound);
       const cursor = Option.getOrUndefined(next);
       const found = yield* durable.use(
         "read the parent's entries",
@@ -303,20 +298,16 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       );
       for (const entry of found.items) {
         const events = entryEvents(entry, started.value);
-        const current = progress();
-        const skip = entry.id === current.entry ? current.parts : 0;
-        for (let part = skip; part < events.length; part += 1) {
-          const event = events[part];
-          if (event === undefined) continue;
-          yield* emit(durable, hub, new AttemptChannel.SessionEvent({ event }), (latest) => ({
-            ...cursorOf(latest),
-            entry: entry.id,
-            parts: part + 1,
-          }));
+        if (events.length === 0) {
+          progress().entry = entry.id;
+          continue;
         }
-        const latest = progress();
-        latest.entry = entry.id;
-        latest.parts = events.length;
+        yield* emit(
+          durable,
+          hub,
+          events.map((event) => new AttemptChannel.SessionEvent({ event })),
+          (latest) => ({ ...cursorOf(latest), entry: entry.id }),
+        );
       }
       next = Option.fromNullishOr(found.next);
     } while (Option.isSome(next));

@@ -336,7 +336,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
 });
 
 export interface ReattachOptions<E> extends ReleaseOptions<E> {
-  /** The RunSpec the Attempt's parent started with, read back from its checkout. */
+  /** The RunSpec the Attempt's parent started with, read back from its durable request. */
   readonly spec: AttemptChannel.RunSpec;
 }
 

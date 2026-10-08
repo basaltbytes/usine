@@ -2,14 +2,19 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
 import type { AttemptFailure } from "@usine/core/attempt/failure";
 import { WorkerName } from "@usine/core/worker";
-import { Context, Effect, Schema } from "effect";
+import { Context, type Effect, type Option, Schema } from "effect";
 
-/** One Attempt's parent to run: the same RunSpec the run host received, plus the checkout the parent and its children work in. */
-export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable/AttemptRequest")({
+/** What durable storage keeps of an Attempt's request: all of it but the environment, which carries credentials. */
+export class StoredRequest extends Schema.Class<StoredRequest>("@usine/durable/StoredRequest")({
   spec: AttemptChannel.RunSpec,
   worker: WorkerName,
   /** Absolute path of the Attempt's worktree on this machine. */
   cwd: Schema.NonEmptyString,
+}) {}
+
+/** One Attempt's parent to run: the same RunSpec the run host received, plus the checkout the parent and its children work in. */
+export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable/AttemptRequest")({
+  ...StoredRequest.fields,
   /**
    * The only process environment the parent's children and every command they
    * run may see: the Worker's allowlisted variables plus the Attempt's single-repo
@@ -46,6 +51,10 @@ export class AttemptRuntime extends Context.Service<
      * Stays true until `execute` has relayed the terminal envelope, even when the task itself finished earlier.
      */
     readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
+    /** The request the Attempt's task was created with, read back for a reattachment; none when the Attempt has no task. */
+    readonly request: (
+      attemptId: AttemptId,
+    ) => Effect.Effect<Option.Option<StoredRequest>, AttemptFailure>;
     /** Applies an operator action to the live parent or one of its children; the result is recorded through the Attempt's sink. */
     readonly intervene: (
       attemptId: AttemptId,

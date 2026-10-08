@@ -288,7 +288,7 @@ const makeRunStore = Effect.gen(function* () {
   const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (
     runId: RunId,
     worker: WorkerName,
-    live: Option.Option<AttemptId> = Option.none(),
+    live: Option.Option<AttemptId>,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, worker });
     return yield* database.transaction((transaction) =>
@@ -699,14 +699,14 @@ export class RunStore extends Context.Service<
       envelope: AttemptChannel.Envelope,
     ) => Effect.Effect<void, RunStoreError>;
     /**
-     * Admits the Run's next Attempt on `worker`. An open Attempt left by a
-     * restart is reattached when it is `live` (its parent task outlived the
-     * restart); otherwise it is failed and the next Attempt opens.
+     * Admits the Run's next Attempt on `worker`. `live` names the Run's open
+     * Attempt whose parent task outlived a restart, if any: that Attempt is
+     * reattached; any other open Attempt is failed and the next one opens.
      */
     readonly beginAttempt: (
       runId: RunId,
       worker: WorkerName,
-      live?: Option.Option<AttemptId>,
+      live: Option.Option<AttemptId>,
     ) => Effect.Effect<AttemptStarted | AttemptRecoveryFailed | RunClosed, RunStoreError>;
     readonly cancel: (runId: RunId) => Effect.Effect<CancelOutcome, RunStoreError>;
     readonly claimQueued: (

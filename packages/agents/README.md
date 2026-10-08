@@ -44,6 +44,8 @@ Pi, Claude, and Codex interpret this final-answer marker as `AgentResultError`. 
 
 Model identifiers stay opaque until the selected harness checks its registry. Agent-reported failures use `AgentResultError`; SDK, process, and protocol failures use `SessionOperationError`. `toAttemptFailure` maps only `SessionOperationError` to retryable infrastructure failure, while `ChildSessionBudgetExceededError` becomes a non-retryable `ChildSessionBudgetFailure`.
 
+`@usine/agents/pi/authentication` holds the Pi parent's model and pool rules for other parent runtimes: `splitPiModel` parses `provider/model`, `piAuthentication` reads a provider's credential check, `requiredPiPool` names the pool a provider spends from, and `resolvePiPool` the pool the credential actually pays from.
+
 Configure Pi with either a provider API key or ChatGPT Plus/Pro OAuth for the parent. Pi children require API keys; Claude and Codex children use their CLI login state. The parent-start log records `apiKeys` or `chatgptPlan` according to the resolved credential. The harness SDK and protocol dependencies use exact versions.
 
 `@usine/agents/preflight` provides the Node `preflight(brain)` operation. Supply a `ChildProcessSpawner` layer to check a worker without running a prompt. It accepts Codex CLI **0.144.0 or 0.153.4**, verifies the Codex ChatGPT account, checks `claude auth status --json` for a Claude subscription, and checks Pi’s model and API-key authentication through the installed SDK. `HarnessUnavailableError` identifies a binary, version, or login gap; `SessionOperationError` reports an incomplete check, including a timeout or failed SDK connection. Install and log in as the worker user before starting usine.

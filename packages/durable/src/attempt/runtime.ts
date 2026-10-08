@@ -7,12 +7,12 @@ import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { Effect, Layer, Option, Result, Schema } from "effect";
 import { type AttemptRequest, AttemptRuntime } from "../attempt-runtime.ts";
 import { DurableHarness, type DurableHarnessError } from "../harness.ts";
-import { AttemptRecordDoc, HoldDoc } from "./documents.ts";
+import { AttemptRecordDoc, type Hold, HoldDoc } from "./documents.ts";
 import { usineExtension } from "./extension.ts";
 import { type AttemptHub, attemptHubs } from "./hubs.ts";
 import { parentSessionId } from "./parent.ts";
 import { appendInbound, emitPayload, readRecord, relayAttempt } from "./relay.ts";
-import { taskInput } from "./request.ts";
+import { readStoredRequest, taskInput } from "./request.ts";
 
 /** The operator message that resumes an interrupted parent the operator released without guidance. */
 const RELEASE_GUIDANCE =
@@ -107,22 +107,17 @@ const makeAttemptRuntime = Effect.gen(function* () {
     Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),
   );
 
-  const hold = (hub: AttemptHub, update: (held: ReadonlyArray<string>) => Array<string>) =>
-    durable.use("update the Hold", (harness, context) =>
-      harness.commit(async (tx) => {
-        const current = await tx.task(hub.taskId);
-        if (current === undefined || !LIVE_STATUSES.includes(current.state.status)) return;
-        const document = await tx.doc(HoldDoc, hub.taskId);
-        document.held = update(document.held);
-      }, context),
-    );
+  const request = Effect.fn("AttemptRuntime.request")(
+    function* (attemptId: AttemptId) {
+      yield* Effect.annotateCurrentSpan({ attemptId });
+      return yield* readStoredRequest(durable, attemptId);
+    },
+    Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),
+  );
 
-  /** Commits a change to the parent's supervision while the task is live; `undefined` means it already returned. */
-  const supervise = <A>(
-    hub: AttemptHub,
-    change: (document: { paused: boolean; guidance: Array<string> }) => A,
-  ) =>
-    durable.use("update the parent's supervision", (harness, context) =>
+  /** Commits a change to the Attempt's Hold document while the task is live; none means it already returned. */
+  const supervise = <A>(hub: AttemptHub, change: (document: Hold) => A) =>
+    durable.use("update the Hold", (harness, context) =>
       harness.commit(async (tx) => {
         const current = await tx.task(hub.taskId);
         if (current === undefined || !LIVE_STATUSES.includes(current.state.status)) {
@@ -131,6 +126,11 @@ const makeAttemptRuntime = Effect.gen(function* () {
         return Option.some(change(await tx.doc(HoldDoc, hub.taskId)));
       }, context),
     );
+
+  const hold = (hub: AttemptHub, update: (held: ReadonlyArray<string>) => Array<string>) =>
+    supervise(hub, (document) => {
+      document.held = update(document.held);
+    });
 
   const routeChild = Effect.fn("AttemptRuntime.routeChild")(function* (
     hub: AttemptHub,
@@ -348,7 +348,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
   );
 
   yield* Effect.logInfo("The durable Attempt runtime is ready");
-  return AttemptRuntime.of({ execute, isLive, intervene, cancel });
+  return AttemptRuntime.of({ execute, isLive, request, intervene, cancel });
 });
 
 /**

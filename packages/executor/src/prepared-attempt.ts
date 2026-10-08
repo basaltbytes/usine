@@ -7,8 +7,13 @@ import {
 } from "@usine/core/attempt/failure";
 import { Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect";
 import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor.ts";
-import { withAttemptGuard } from "./guard.ts";
+import { attemptGuard } from "./guard.ts";
 import type { ProvisionedWorktree } from "./provision.ts";
+
+/** Why an Attempt's live session is stopping: operator cancel, or a runaway ceiling that tripped. */
+export type AttemptStop =
+  | { readonly _tag: "Cancel" }
+  | { readonly _tag: "Runaway"; readonly ceiling: RunawayCeiling };
 
 /** What an adapter's prepare acquires: the launchable Attempt plus its salvage outcome once released. */
 export interface AcquiredAttempt extends PreparedAttempt {
@@ -24,19 +29,18 @@ interface OwnedAttempt {
 
 /**
  * Tracks each Attempt of one Executor instance from the start of preparation until
- * its resources are released, so `cancel` reaches it at any stage. `cancelLive`
- * stops the Attempt's live session and reports whether one existed; without one,
- * cancellation releases the Attempt directly. `trip` runs when a runaway ceiling
- * trips, for sessions that interruption alone does not stop. `cancel`, a failed
- * `prepare`, and `launch` each return only after the Attempt's resources are released.
+ * its resources are released, so `cancel` reaches it at any stage. `stop` stops the
+ * Attempt's live session for a reason and reports whether one existed: `cancel` calls
+ * it, and so does a tripped wall-clock ceiling before the guard's race interrupts the
+ * launch. Without a live session, cancellation releases the Attempt directly. `cancel`,
+ * a failed `prepare`, and `launch` each return only after the Attempt's resources are released.
  */
 export const preparedAttemptsFor = (
-  cancelLive: (attemptId: AttemptId) => Effect.Effect<boolean, ExecutorError>,
+  stop: (attemptId: AttemptId, reason: AttemptStop) => Effect.Effect<boolean, ExecutorError>,
   intervene: (
     attemptId: AttemptId,
     intervention: AttemptChannel.Intervention,
   ) => Effect.Effect<void, AttemptFailure>,
-  trip: (attemptId: AttemptId, ceiling: RunawayCeiling) => Effect.Effect<void> = () => Effect.void,
 ) =>
   Effect.sync(() => {
     const attempts = new Map<AttemptId, OwnedAttempt>();
@@ -50,7 +54,7 @@ export const preparedAttemptsFor = (
       yield* Ref.set(active.unavailable, true);
       // Preserve the live session's terminal envelope and typed delivery errors.
       // Before registration, scope closure interrupts preparation or process spawn.
-      if (!(yield* cancelLive(attemptId))) {
+      if (!(yield* stop(attemptId, { _tag: "Cancel" }))) {
         yield* Effect.logInfo("Canceling Attempt before its channel is ready", { attemptId });
         yield* active.release(Exit.void);
       }
@@ -100,28 +104,43 @@ export const preparedAttemptsFor = (
                   cause: new Error("prepared Attempt is no longer available"),
                 });
               }
-              const warn = (message: string) =>
-                intervene(
+              const guard = yield* attemptGuard(
+                {
                   attemptId,
-                  new AttemptChannel.Intervention({
-                    operator: "engine",
-                    target: new AttemptChannel.ParentTarget(),
-                    action: new AttemptChannel.Steer({ message }),
-                  }),
-                );
-              const limits = {
-                attemptId,
-                maxAttemptMinutes: request.maxAttemptMinutes,
-                maxAttemptTokens: request.maxAttemptTokens,
-                warn,
-                trip: (ceiling: RunawayCeiling) => trip(attemptId, ceiling),
-              };
+                  maxAttemptMinutes: request.maxAttemptMinutes,
+                  maxAttemptTokens: request.maxAttemptTokens,
+                  warn: (message) =>
+                    intervene(
+                      attemptId,
+                      new AttemptChannel.Intervention({
+                        operator: "engine",
+                        target: new AttemptChannel.ParentTarget(),
+                        action: new AttemptChannel.Steer({ message }),
+                      }),
+                    ),
+                },
+                io,
+              );
+              const tripped = guard.tripped.pipe(
+                Effect.tapError(({ ceiling }) =>
+                  stop(attemptId, { _tag: "Runaway", ceiling }).pipe(
+                    Effect.tapError((error) =>
+                      Effect.logWarning("Could not stop the runaway Attempt", {
+                        attemptId,
+                        ceiling,
+                        errorTag: error._tag,
+                      }),
+                    ),
+                    Effect.ignore,
+                  ),
+                ),
+              );
               yield* prepared.recordSalvage(io.salvage);
               // Closing the owner's scope interrupts the session before checkout and
               // credential finalizers. Interrupting a caller waiting on join must also
               // stop that scoped fiber, so timeout/cancel completes the handshake first.
               return yield* Effect.acquireUseRelease(
-                Effect.forkIn(withAttemptGuard(limits, io, prepared.launch), scope),
+                Effect.forkIn(Effect.raceFirst(prepared.launch(guard.sink), tripped), scope),
                 Fiber.join,
                 Fiber.interrupt,
               ).pipe(

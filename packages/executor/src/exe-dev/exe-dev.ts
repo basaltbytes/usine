@@ -65,7 +65,12 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     const workerLeftovers = yield* workerLeftoversFor(commands, machines.vmFor);
     const attemptChannel = yield* attemptChannelFor(commands, runHost, interruptGrace);
 
-    const attempts = yield* preparedAttemptsFor(attemptChannel.cancel, attemptChannel.intervene);
+    // A tripped ceiling stops the run host when the guard's race interrupts its launch.
+    const attempts = yield* preparedAttemptsFor(
+      (attemptId, reason) =>
+        reason._tag === "Cancel" ? attemptChannel.cancel(attemptId) : Effect.succeed(false),
+      attemptChannel.intervene,
+    );
 
     const recover = Effect.fn("ExeDevExecutor.recover")(function* <E>(
       attempt: AttemptRecovery,

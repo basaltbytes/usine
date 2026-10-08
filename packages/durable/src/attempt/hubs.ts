@@ -14,12 +14,11 @@ export type RelayItem =
   | { readonly _tag: "Child"; readonly event: AgentSessionEvent }
   | { readonly _tag: "Wake" };
 
-/** How far the attached channel has progressed; persisted in the Attempt's record after every envelope. */
+/** How far the attached channel has progressed; persisted in the Attempt's record after each parent entry and each other envelope. */
 export interface RelayProgress {
   outbound: AttemptChannel.Progress;
   inbound: number;
   entry: number;
-  parts: number;
   tokens: number;
 }
 

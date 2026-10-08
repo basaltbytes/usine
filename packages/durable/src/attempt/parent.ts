@@ -1,18 +1,23 @@
 import { getSupportedThinkingLevels, type Models } from "@earendil-works/pi-ai";
 import type { ModelRef } from "@earendil-works/pi-durable";
 import {
+  piAuthentication,
+  type PiPool,
+  requiredPiPool,
+  resolvePiPool,
+  splitPiModel,
+} from "@usine/agents/pi/authentication";
+import {
   PoolUnavailableError,
   SessionOperationError,
   UnknownModelError,
   UnsupportedEffortError,
 } from "@usine/agents/runtime";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, type BillingPool, ParentSession } from "@usine/core/agent/session";
+import { AgentSessionId, ParentSession } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
 import { Effect, Option } from "effect";
-
-type PiPool = Extract<BillingPool, "apiKeys" | "chatgptPlan">;
 
 /** The model the Attempt's Pi parent runs with, checked against its effort and credential before the conversation exists. */
 interface ResolvedParent {
@@ -33,17 +38,6 @@ export const parentSession = (spec: RunSpec, model: ModelId): ParentSession =>
     brain: new BrainSpec({ harness: "pi", model, effort: spec.parentEffort }),
   });
 
-const splitModel = (model: ModelId): Option.Option<ModelRef> => {
-  const separator = model.indexOf("/");
-  return separator <= 0 || separator === model.length - 1
-    ? Option.none()
-    : Option.some({ provider: model.slice(0, separator), modelId: model.slice(separator + 1) });
-};
-
-/** The billing pool the chosen provider spends from, checked before the parent starts (ADR 0021). */
-const requiredPool = (provider: string): PiPool =>
-  provider === "openai-codex" ? "chatgptPlan" : "apiKeys";
-
 const launchError = (spec: RunSpec, message: string, cause: unknown) =>
   new SessionOperationError({
     operation: "launch",
@@ -59,7 +53,7 @@ const selectModel = Effect.fn("ParentModel.select")(function* (
 ) {
   if (Option.isSome(spec.parentModel)) {
     const named = spec.parentModel.value;
-    const found = Option.flatMap(splitModel(named), (ref) =>
+    const found = Option.flatMap(Option.fromNullishOr(splitPiModel(named)), (ref) =>
       Option.fromNullishOr(models.getModel(ref.provider, ref.modelId)),
     );
     if (Option.isNone(found)) {
@@ -130,45 +124,34 @@ export const resolveParent = Effect.fn("ParentModel.resolve")(function* (
       message: `Pi model ${model} does not support effort ${spec.parentEffort}; supported: ${supported.join(", ")}`,
     });
   }
-  const authentication = yield* Effect.tryPromise({
+  const check = yield* Effect.tryPromise({
     try: (signal) => models.checkAuth(selected.provider, { signal }),
     catch: (cause) => launchError(spec, "Could not check the parent model's credential", cause),
   });
-  const required = requiredPool(selected.provider);
-  const unavailable = new PoolUnavailableError({
-    harness: "pi",
-    model,
-    pool: required,
-    message: `Pi parent model ${model} requires a credential from the ${required} pool`,
-  });
-  if (authentication === undefined) {
-    yield* Effect.logError("Pi parent has no credential for its model", {
+  const authentication = piAuthentication(
+    check,
+    models.getProvider(selected.provider)?.auth.oauth?.isSubscription === true,
+  );
+  const required = requiredPiPool(selected.provider);
+  const pool = resolvePiPool(selected.provider, authentication);
+  if (pool === undefined) {
+    yield* Effect.logError(
+      authentication === undefined
+        ? "Pi parent has no credential for its model"
+        : "Pi parent model has unsupported OAuth authentication",
+      { model, requiredPool: required, authentication: authentication?._tag },
+    );
+    return yield* new PoolUnavailableError({
+      harness: "pi",
       model,
-      requiredPool: required,
+      pool: required,
+      message: `Pi parent model ${model} requires a credential from the ${required} pool`,
     });
-    return yield* unavailable;
   }
-  if (authentication.type === "api_key") {
-    yield* Effect.logInfo("Pi parent authenticated", { model, pool: "apiKeys" });
-    return {
-      ref: { provider: selected.provider, modelId: selected.id },
-      model,
-      pool: "apiKeys",
-    } satisfies ResolvedParent;
-  }
-  const subscription = models.getProvider(selected.provider)?.auth.oauth?.isSubscription === true;
-  if (!subscription || required !== "chatgptPlan") {
-    yield* Effect.logError("Pi parent model has unsupported OAuth authentication", {
-      model,
-      requiredPool: required,
-      subscription,
-    });
-    return yield* unavailable;
-  }
-  yield* Effect.logInfo("Pi parent authenticated", { model, pool: "chatgptPlan" });
+  yield* Effect.logInfo("Pi parent authenticated", { model, pool });
   return {
     ref: { provider: selected.provider, modelId: selected.id },
     model,
-    pool: "chatgptPlan",
+    pool,
   } satisfies ResolvedParent;
 });

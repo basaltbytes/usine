@@ -1,27 +1,19 @@
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import {
-  AgentFailure,
-  type AttemptFailure,
-  type RunawayCeiling,
-  RunawayFailure,
-} from "@usine/core/attempt/failure";
+import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import { StepResult, type StepResultFact } from "@usine/core/step/result";
 import { type AttemptReport, AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Cause, Deferred, Effect, Exit, Fiber, Option, Ref, Result, type Scope } from "effect";
 import { type AttemptWorkspace, ExecutorOperationError } from "../executor.ts";
-
-/** Why a live Attempt is stopping; the first reason wins. */
-type Stop =
-  | { readonly _tag: "Cancel" }
-  | { readonly _tag: "Runaway"; readonly ceiling: RunawayCeiling };
+import type { AttemptStop } from "../prepared-attempt.ts";
 
 interface ActiveAttempt {
   readonly worker: AttemptWorkspace["worker"];
-  /** The launch's scope: intervention delivery and the runaway stop outlive their callers inside it. */
+  /** The launch's scope: intervention delivery outlives its caller inside it. */
   readonly scope: Scope.Scope;
-  readonly stopping: Ref.Ref<Option.Option<Stop>>;
-  /** The running `execute` call, interrupted when a cancel's grace runs out. */
+  /** Why the Attempt is stopping; the first reason wins. */
+  readonly stopping: Ref.Ref<Option.Option<AttemptStop>>;
+  /** The running `execute` call, interrupted when a stop's grace runs out. */
   readonly execution: Ref.Ref<Option.Option<Fiber.Fiber<AttemptReport, AttemptFailure>>>;
   readonly settled: Deferred.Deferred<void>;
 }
@@ -50,8 +42,8 @@ const cancelError = (attemptId: AttemptId, cause: unknown) =>
 
 /**
  * Runs Attempts whose Pi parent is a durable task in this process
- * (`AttemptRuntime`). Interrupting a launch without a cancel or a tripped
- * ceiling is this process stopping: the parent task stays live in durable
+ * (`AttemptRuntime`). Interrupting a launch that was not stopped first is
+ * this process stopping: the parent task stays live in durable
  * storage and the checkout stays on disk for the reattachment after restart.
  * Every other way an Attempt ends leaves no live parent task behind.
  */
@@ -110,7 +102,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     const spec = prepared.spec;
     const attemptId = spec.attemptId;
     yield* Effect.annotateCurrentSpan({ attemptId, worker: prepared.worker });
-    const stopping = yield* Ref.make(Option.none<Stop>());
+    const stopping = yield* Ref.make(Option.none<AttemptStop>());
     const execution = yield* Ref.make(Option.none<Fiber.Fiber<AttemptReport, AttemptFailure>>());
     const settled = yield* Deferred.make<void>();
     const run = Effect.gen(function* () {
@@ -185,28 +177,37 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     );
   });
 
-  /** Stops a launched Attempt: cancels its parent task, then waits for it to settle within the grace before interrupting it. */
-  const cancel = Effect.fn("DurableSession.cancel")(function* (attemptId: AttemptId) {
+  /**
+   * Stops a launched Attempt for `reason` and reports whether one was running
+   * here: cancels its parent task, then waits for the Attempt to settle within
+   * the grace before interrupting it. The launch fails with the first reason.
+   */
+  const stop = Effect.fn("DurableSession.stop")(function* (
+    attemptId: AttemptId,
+    reason: AttemptStop,
+  ) {
     const active = attempts.get(attemptId);
     if (active === undefined) return false;
     return yield* Effect.uninterruptible(
       Effect.gen(function* () {
-        yield* Effect.annotateCurrentSpan({ attemptId, worker: active.worker });
-        const first = yield* Ref.modify(active.stopping, (stop) =>
-          Option.isNone(stop)
-            ? ([true, Option.some<Stop>({ _tag: "Cancel" })] as const)
-            : ([false, stop] as const),
+        yield* Effect.annotateCurrentSpan({ attemptId, worker: active.worker, stop: reason._tag });
+        const first = yield* Ref.modify(active.stopping, (stopping) =>
+          Option.isNone(stopping)
+            ? ([true, Option.some(reason)] as const)
+            : ([false, stopping] as const),
         );
         if (!first) {
           yield* Effect.logDebug("The Attempt is already stopping", {
             attemptId,
             worker: active.worker,
+            stop: reason,
           });
           return true;
         }
         yield* Effect.logInfo("Canceling the Attempt's parent task", {
           attemptId,
           worker: active.worker,
+          stop: reason,
         });
         const canceled = yield* runtime
           .cancel(attemptId)
@@ -260,28 +261,6 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     );
   });
 
-  /** Marks a tripped ceiling and cancels the parent task without waiting, since the runtime may be the caller. */
-  const trip = Effect.fn("DurableSession.trip")(function* (
-    attemptId: AttemptId,
-    ceiling: RunawayCeiling,
-  ) {
-    yield* Effect.annotateCurrentSpan({ attemptId, ceiling });
-    const active = attempts.get(attemptId);
-    if (active === undefined) return;
-    const first = yield* Ref.modify(active.stopping, (stop) =>
-      Option.isNone(stop)
-        ? ([true, Option.some<Stop>({ _tag: "Runaway", ceiling })] as const)
-        : ([false, stop] as const),
-    );
-    if (!first) return;
-    yield* Effect.logWarning("Canceling the Attempt's parent task after a ceiling tripped", {
-      attemptId,
-      worker: active.worker,
-      ceiling,
-    });
-    yield* stopTask(attemptId, "a ceiling tripped").pipe(Effect.forkIn(active.scope));
-  });
-
   const intervene = Effect.fn("DurableSession.intervene")(function* (
     attemptId: AttemptId,
     intervention: AttemptChannel.Intervention,
@@ -316,5 +295,5 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     );
   });
 
-  return { launch, cancel, trip, intervene, stopTask } as const;
+  return { launch, stop, intervene, stopTask } as const;
 });

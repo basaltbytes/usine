@@ -71,13 +71,13 @@ This replaces exe.dev’s `HarnessLoginCheck` and `harnessLoginChecks` options. 
 The Node adapter at `@usine/executor/local` does the following for each Attempt:
 
 - checks Git and the assigned harness before accepting work;
-- updates a per-repository bare cache, then creates a detached worktree at the resolved revision and records the Attempt's RunSpec beside the worktree's Git metadata;
+- updates a per-repository bare cache, then creates a detached worktree at the resolved revision;
 - renews repository credentials before expiry; Git reads an Attempt token file and `gh` reads its private `GH_CONFIG_DIR` on each invocation, so the salvage push at the end of a multi-hour Attempt uses the credential renewed last, and startup reconciliation issues a fresh one;
 - runs the Attempt's Pi parent as a durable task in this process through `AttemptRuntime` (`@usine/durable`), passing the Attempt's environment: the allowlisted variables, the credential configuration, and `TURBO_CACHE_DIR`, never the orchestrator's own environment;
 - harvests commits and pull requests from the worktree with `@usine/core/step/harvest`, running `git` and `gh` in that same environment;
 - cancels the parent task before forced interruption, then removes the worktree and wipes the credential.
 
-When the orchestrator stops while an Attempt runs, the parent task stays live in durable storage and the worktree stays on disk. After a restart, `recover` leaves a live open Attempt alone, `isLive` lets the engine reattach it, and `prepare` with `reattach` takes over the existing worktree with freshly issued credentials instead of checking out a new one. Every other end of an Attempt leaves no live parent task behind: a failure, a cancel, or a tripped ceiling cancels it, and recovery cancels the live task of an Attempt the engine already closed.
+When the orchestrator stops while an Attempt runs, the parent task stays live in durable storage and the worktree stays on disk. After a restart, `recover` leaves a live open Attempt alone, `isLive` lets the engine reattach it, and `prepare` with `reattach` takes over the existing worktree with freshly issued credentials instead of checking out a new one, reading the RunSpec and its base commit from the parent task's stored request (`AttemptRuntime.request`). Every other end of an Attempt leaves no live parent task behind: a failure, a cancel, or a tripped ceiling cancels it, and recovery cancels the live task of an Attempt the engine already closed.
 
 `TURBO_CACHE_DIR` points at `.usine/workers/<worker>/turbo`. Startup cache sweeps prune only the `*.git` cache directories the adapter itself creates under `repos/`; every other entry is skipped and logged at debug level, and each sweep ends with an info log of pruned, skipped, and failed counts.
 

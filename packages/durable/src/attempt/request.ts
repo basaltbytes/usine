@@ -1,36 +1,36 @@
 import type { JsonValue } from "@earendil-works/chord";
-import { RunSpec } from "@usine/core/attempt/channel";
-import { WorkerName } from "@usine/core/worker";
-import { Effect, Schema } from "effect";
-import type { AttemptRequest } from "../attempt-runtime.ts";
+import type { AttemptId } from "@usine/core/attempt";
+import { Effect, Option, Schema } from "effect";
+import { type AttemptRequest, StoredRequest } from "../attempt-runtime.ts";
+import type { DurableHarness } from "../harness.ts";
+import { readRecord } from "./relay.ts";
 
-/**
- * What the `usine.attempt` task stores of its request. The environment is left
- * out because it carries the Attempt's credential configuration; children get
- * it from the `execute` call currently relaying the Attempt.
- */
-export class StoredRequest extends Schema.Class<StoredRequest>("@usine/durable/StoredRequest")({
-  spec: RunSpec,
-  worker: WorkerName,
-  cwd: Schema.NonEmptyString,
-}) {}
+/** The `usine.attempt` task's input: its `StoredRequest`, encoded, so no credential reaches storage. */
+export type AttemptTaskInput = typeof StoredRequest.Encoded;
 
-/** The `usine.attempt` task's input: its stored request as JSON. */
-export type AttemptTaskInput = { request: string };
+const encodeStored = Schema.encodeSync(StoredRequest);
+const decodeStored = Schema.decodeUnknownEffect(StoredRequest);
 
-const storedJson = Schema.fromJsonString(StoredRequest);
-const encodeStored = Schema.encodeSync(storedJson);
-const decodeInput = Schema.decodeUnknownEffect(Schema.Struct({ request: storedJson }));
+export const taskInput = (request: AttemptRequest): AttemptTaskInput =>
+  encodeStored(new StoredRequest({ spec: request.spec, worker: request.worker, cwd: request.cwd }));
 
-export const taskInput = (request: AttemptRequest): AttemptTaskInput => ({
-  request: encodeStored(
-    new StoredRequest({ spec: request.spec, worker: request.worker, cwd: request.cwd }),
-  ),
-});
+/** Decodes a stored task input, typed or as a task record returns it; a malformed one is a defect, since only this package writes it. */
+export const storedRequestOf = (input: AttemptTaskInput | JsonValue) =>
+  decodeStored(input).pipe(Effect.orDie);
 
-/** Decodes a stored task input; a malformed one is a defect, since only this package writes it. */
-export const storedRequestOf = (input: JsonValue): Effect.Effect<StoredRequest> =>
-  decodeInput(input).pipe(
-    Effect.map(({ request }) => request),
-    Effect.orDie,
-  );
+/** Reads back the request an Attempt's task was created with; none when the Attempt has no task. */
+export const readStoredRequest = (durable: DurableHarness["Service"], attemptId: AttemptId) =>
+  Effect.gen(function* () {
+    const taskId = (yield* readRecord(durable, attemptId))?.taskId ?? null;
+    const task =
+      taskId === null
+        ? undefined
+        : yield* durable.use("read the Attempt task", (harness, context) =>
+            harness.getTask(taskId, context),
+          );
+    yield* Effect.logDebug("Read the Attempt's stored request", {
+      attemptId,
+      found: task !== undefined,
+    });
+    return task === undefined ? Option.none() : Option.some(yield* storedRequestOf(task.input));
+  });

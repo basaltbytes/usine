@@ -83,7 +83,11 @@ describe("run store", () => {
               store.resolveFailure(runId, AttemptId.make("not-started")),
             );
             assert.strictEqual(rejected._tag, "RunOperationRejectedError");
-            const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+            const started = yield* store.beginAttempt(
+              runId,
+              WorkerName.make("local"),
+              Option.none(),
+            );
             assert(started._tag === "AttemptStarted");
             const attempt = started.execution.attempt;
             assert.strictEqual(
@@ -136,7 +140,11 @@ describe("run store", () => {
             const history = yield* reader.forItems([lifecycleSubmission.itemKey]);
             assert.deepStrictEqual(history[0]?.resolvedFailureAttemptId, Option.some(first.id));
             yield* store.retry(runId);
-            const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+            const started = yield* store.beginAttempt(
+              runId,
+              WorkerName.make("local"),
+              Option.none(),
+            );
             assert(started._tag === "AttemptStarted");
             yield* store.finishAttempt(
               started.execution.attempt,
@@ -166,7 +174,7 @@ describe("run store", () => {
           const store = yield* RunStore;
           const runId = RunId.make("intervened");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert(started._tag === "AttemptStarted");
           const attemptId = started.execution.attempt.id;
           const parent = new ParentSession({
@@ -277,8 +285,8 @@ describe("run store", () => {
         const store = yield* RunStore;
         const runId = RunId.make("late-completion");
         yield* store.recordAndClaim(lifecycleSubmission, runId);
-        const first = yield* store.beginAttempt(runId, WorkerName.make("local"));
-        const recovered = yield* store.beginAttempt(runId, WorkerName.make("local"));
+        const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        const recovered = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert(first._tag === "AttemptStarted" && recovered._tag === "AttemptStarted");
         yield* store.finishAttempt(
           first.execution.attempt,
@@ -318,7 +326,7 @@ describe("run store", () => {
           const store = yield* RunStore;
           const runId = RunId.make("reattached");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const first = yield* store.beginAttempt(runId, WorkerName.make("local"));
+          const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert(first._tag === "AttemptStarted");
           const attemptId = first.execution.attempt.id;
           const session = new ParentSession({
@@ -414,7 +422,7 @@ describe("run store", () => {
         const store = yield* RunStore;
         yield* store.recordAndClaim(submission, runId);
         for (let number = 1; number <= 3; number += 1) {
-          const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+          const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert.strictEqual(started._tag, "AttemptStarted");
           if (started._tag !== "AttemptStarted") return;
           assert.deepStrictEqual(started.execution.attempt.brain, testAgent.brain);
@@ -446,7 +454,7 @@ describe("run store", () => {
           (yield* Effect.flip(store.retry(runId)))._tag,
           "RunOperationRejectedError",
         );
-        const restarted = yield* store.beginAttempt(runId, WorkerName.make("local"));
+        const restarted = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert(restarted._tag === "AttemptStarted");
         assert.strictEqual(restarted.execution.attempt.number, 4);
         assert.strictEqual(
@@ -466,11 +474,19 @@ describe("run store", () => {
           const runId = RunId.make("interrupted-cap");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
           for (let number = 1; number <= 3; number += 1) {
-            const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+            const started = yield* store.beginAttempt(
+              runId,
+              WorkerName.make("local"),
+              Option.none(),
+            );
             assert(started._tag === "AttemptStarted");
             assert.strictEqual(started.execution.attempt.number, number);
           }
-          const exhausted = yield* store.beginAttempt(runId, WorkerName.make("local"));
+          const exhausted = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            Option.none(),
+          );
           assert.strictEqual(exhausted._tag, "AttemptRecoveryFailed");
           const failed = yield* store.snapshot(runId);
           assert.strictEqual(failed.run.state._tag, "Failed");
@@ -487,7 +503,7 @@ describe("run store", () => {
           const canceled = yield* store.cancel(runId);
           assert(canceled._tag === "Canceled" && Option.isNone(canceled.openAttempt));
           assert.strictEqual(
-            (yield* store.beginAttempt(runId, WorkerName.make("local")))._tag,
+            (yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none()))._tag,
             "RunClosed",
           );
           assert.deepStrictEqual((yield* store.snapshot(runId)).attempts, failed.attempts);
@@ -511,7 +527,7 @@ describe("run store", () => {
             const store = yield* RunStore;
             const runId = RunId.make("final-reconciliation");
             yield* store.recordAndClaim(lifecycleSubmission, runId);
-            yield* store.beginAttempt(runId, WorkerName.make("local"));
+            yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
             const complete = new Workflow.Complete({ exit });
             yield* store.reconcileCompletion(runId, complete);
             const settled = yield* store.snapshot(runId);
@@ -555,7 +571,7 @@ describe("run store", () => {
           const store = yield* RunStore;
           const runId = RunId.make("unsettled-workflow");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          yield* store.beginAttempt(runId, WorkerName.make("local"));
+          yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           const running = yield* store.snapshot(runId);
           yield* store.reconcileCompletion(runId, new Workflow.Suspended({}));
           yield* store.reconcileCompletion(
@@ -564,7 +580,11 @@ describe("run store", () => {
           );
           assert.deepStrictEqual(yield* store.snapshot(runId), running);
           assert.deepStrictEqual(yield* store.pendingWorkflowCommands, []);
-          const recovered = yield* store.beginAttempt(runId, WorkerName.make("local"));
+          const recovered = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            Option.none(),
+          );
           assert(recovered._tag === "AttemptStarted");
           assert.strictEqual(recovered.execution.attempt.number, 2);
           const outcome = yield* store.cancel(runId);
@@ -589,18 +609,19 @@ describe("run store", () => {
         const sql = yield* SqlClient.SqlClient;
         const runId = RunId.make("atomic-lifecycle");
         yield* store.recordAndClaim(lifecycleSubmission, runId);
-        yield* store.beginAttempt(runId, WorkerName.make("local"));
+        yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         const running = yield* store.snapshot(runId);
         // Reject the new Attempt after recovery has tried closing its predecessor.
         yield* sql`CREATE TRIGGER reject_attempt BEFORE INSERT ON usine_attempts
         BEGIN SELECT RAISE(ABORT, 'attempt insertion unavailable'); END`;
         assert.strictEqual(
-          (yield* Effect.flip(store.beginAttempt(runId, WorkerName.make("local"))))._tag,
+          (yield* Effect.flip(store.beginAttempt(runId, WorkerName.make("local"), Option.none())))
+            ._tag,
           "EnginePersistenceError",
         );
         assert.deepStrictEqual(yield* store.snapshot(runId), running);
         yield* sql`DROP TRIGGER reject_attempt`;
-        const recovered = yield* store.beginAttempt(runId, WorkerName.make("local"));
+        const recovered = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert(recovered._tag === "AttemptStarted");
         const beforeCompletion = yield* store.snapshot(runId);
         // The outbox insert follows the Attempt, Step result and Run updates.
@@ -672,7 +693,7 @@ describe("run store", () => {
         yield* store.approve(runId, approval);
         assert.strictEqual(yield* state(), "Queued");
 
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert.strictEqual(started._tag, "AttemptStarted");
         assert.strictEqual(yield* state(), "Running");
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
@@ -711,7 +732,7 @@ describe("run store", () => {
         // that is not a defect.
         const outcome = yield* store.cancel(runId);
         assert.strictEqual(outcome._tag, "Canceled");
-        const started = yield* store.beginAttempt(runId, WorkerName.make("local"));
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert.strictEqual(started._tag, "RunClosed");
         const snapshot = yield* store.snapshot(runId);
         assert.strictEqual(snapshot.attempts.length, 0);
@@ -853,7 +874,7 @@ describe("cursor store", () => {
           const store = yield* RunStore;
           const runId = RunId.make("salvaged");
           yield* store.recordAndClaim(lifecycleSubmission, runId);
-          const first = yield* store.beginAttempt(runId, WorkerName.make("local"));
+          const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
           assert(first._tag === "AttemptStarted");
           assert(Option.isNone(first.execution.resume));
           // Cancellation closes the Attempt before the executor finishes salvaging.
@@ -892,7 +913,11 @@ describe("cursor store", () => {
             }),
             retriedRun,
           );
-          const started = yield* store.beginAttempt(retriedRun, WorkerName.make("local"));
+          const started = yield* store.beginAttempt(
+            retriedRun,
+            WorkerName.make("local"),
+            Option.none(),
+          );
           assert(started._tag === "AttemptStarted");
           yield* store.finishAttempt(
             started.execution.attempt,
@@ -900,7 +925,11 @@ describe("cursor store", () => {
           );
           yield* store.recordSalvage(started.execution.attempt.id, pushed);
           yield* store.retry(retriedRun);
-          const resumed = yield* store.beginAttempt(retriedRun, WorkerName.make("local"));
+          const resumed = yield* store.beginAttempt(
+            retriedRun,
+            WorkerName.make("local"),
+            Option.none(),
+          );
           assert(resumed._tag === "AttemptStarted");
           assert.deepStrictEqual(resumed.execution.resume, Option.some(pushed));
           assert(Option.isNone(resumed.execution.attempt.salvage));
@@ -920,7 +949,11 @@ describe("cursor store", () => {
             }),
           );
           yield* store.retry(retriedRun);
-          const fresh = yield* store.beginAttempt(retriedRun, WorkerName.make("local"));
+          const fresh = yield* store.beginAttempt(
+            retriedRun,
+            WorkerName.make("local"),
+            Option.none(),
+          );
           assert(fresh._tag === "AttemptStarted");
           assert.deepStrictEqual(fresh.execution.resume, Option.some(pushed));
           assert.strictEqual(

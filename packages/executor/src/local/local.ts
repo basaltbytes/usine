@@ -1,8 +1,8 @@
 import { localCredentialsFor } from "./credentials.ts";
 import { durableSessionFor } from "./durable-session.ts";
+import { agentsHarnessProbe } from "./harness-probe.ts";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
-import { HarnessReadiness } from "@usine/core/agent/capability";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -20,7 +20,7 @@ import {
   Result,
   Schema,
 } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { type ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { allowlistedEnvironment, collectCommand, requireSuccess } from "../child-command.ts";
 import {
   type AttemptWorkspace,
@@ -61,54 +61,6 @@ export interface LocalExecutorOptions {
 
 const isExecutorError = Schema.is(ExecutorError);
 
-/** Beside the worktree's Git metadata, so it leaves with the worktree's registration. */
-const RUN_SPEC_FILE = "usine-run-spec.json";
-const encodeRunSpec = Schema.encodeEffect(Schema.fromJsonString(AttemptChannel.RunSpec));
-const decodeRunSpec = (text: string) =>
-  Schema.decodeUnknownEffect(Schema.fromJsonString(AttemptChannel.RunSpec))(text, {
-    onExcessProperty: "error",
-  });
-
-/**
- * Checks one brain in this process with the harness CLIs and SDKs, as the run
- * host's `--preflight` does on a remote Worker. The probe's commands see only
- * `environment`, never the orchestrator's own (ADR 0011). A timed-out probe
- * stays a retryable infrastructure error.
- */
-const agentsHarnessReadiness =
-  (
-    spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-    environment: Record<string, string>,
-  ): HarnessProbe =>
-  (brain) =>
-    Effect.promise(() => import("@usine/agents/preflight")).pipe(
-      Effect.flatMap(({ preflight }) => preflight(brain)),
-      Effect.map((ready): HarnessReadiness => ready),
-      Effect.catchTag("HarnessUnavailableError", (unavailable) => Effect.succeed(unavailable)),
-      Effect.mapError(
-        (cause) =>
-          new ExecutorOperationError({
-            operation: "preflight",
-            message: cause.message,
-            cause,
-          }),
-      ),
-      Effect.provideService(
-        ChildProcessSpawner.ChildProcessSpawner,
-        ChildProcessSpawner.make((command) =>
-          command._tag === "StandardCommand"
-            ? spawner.spawn(
-                ChildProcess.make(command.command, command.args, {
-                  ...command.options,
-                  env: environment,
-                  extendEnv: false,
-                }),
-              )
-            : Effect.die(new Error("Harness readiness probes run single commands, not pipelines")),
-        ),
-      ),
-    );
-
 /**
  * Git and gh commands for an Attempt inherit only these variables. The App
  * private key and every other orchestrator secret stay out; the single-repo
@@ -139,7 +91,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const fetches = yield* keyedLockFor<RepositoryName>();
     const baseEnvironment = yield* allowlistedEnvironment(HOST_ENVIRONMENT_ALLOWLIST);
     const harnessReadiness =
-      options.harnessReadiness ?? agentsHarnessReadiness(spawner, baseEnvironment);
+      options.harnessReadiness ?? agentsHarnessProbe(spawner, baseEnvironment);
     const repositoryUrl =
       options.repositoryUrl ??
       ((repository: RepositoryName): string => `https://github.com/${repository}.git`);
@@ -363,22 +315,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       });
     }, logPreflightFailure);
 
-    const attempts = yield* preparedAttemptsFor(session.cancel, session.intervene, session.trip);
-
-    // A checkout's Git metadata outlives this process, so a reattached Attempt finds
-    // the RunSpec its parent started with, including the base its commits count from.
-    const runSpecFile = Effect.fn("LocalExecutor.runSpecFile")(function* <E>(
-      git: (operation: "prepare", args: ReadonlyArray<string>) => Effect.Effect<string, E>,
-      worktree: string,
-    ) {
-      const gitDirectory = (yield* git("prepare", [
-        "-C",
-        worktree,
-        "rev-parse",
-        "--absolute-git-dir",
-      ])).trim();
-      return path.join(gitDirectory, RUN_SPEC_FILE);
-    });
+    const attempts = yield* preparedAttemptsFor(session.stop, session.intervene);
 
     // Nothing an Attempt runs inherits this process's environment, which holds
     // the App private key: only the allowlist and the Attempt's credential (ADR 0011).
@@ -467,47 +404,38 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         promoteStaging: fileSystem.rename(`${cache}.cloning`, cache),
         git: credentialedGit(credential),
       };
-      const acquire = request.reattach
-        ? Effect.gen(function* () {
-            if (!(yield* fileSystem.exists(worktree)))
-              return yield* executorError(
-                "prepare",
-                "The checkout of the reattached Attempt is gone",
-                new Error(worktree),
-              );
-            const spec = yield* decodeRunSpec(
-              yield* fileSystem.readFileString(yield* runSpecFile(ops.git, worktree)),
-            );
-            if (spec.attemptId !== request.attemptId)
-              return yield* executorError(
-                "prepare",
-                "The checkout holds another Attempt's RunSpec",
-                new Error(spec.attemptId),
-              );
-            return yield* reattachWorktree({
+      const acquire = Effect.gen(function* () {
+        if (!request.reattach)
+          return yield* fetches.withLock(request.repository)(
+            provisionWorktree({
               request,
+              url: repositoryUrl(request.repository),
               host: "local",
-              layout: { cache, worktree },
+              layout: { cache, staging: `${cache}.cloning`, worktree },
               ops,
-              spec,
-            });
-          })
-        : Effect.gen(function* () {
-            const provisioned = yield* fetches.withLock(request.repository)(
-              provisionWorktree({
-                request,
-                url: repositoryUrl(request.repository),
-                host: "local",
-                layout: { cache, staging: `${cache}.cloning`, worktree },
-                ops,
-              }),
-            );
-            yield* fileSystem.writeFileString(
-              yield* runSpecFile(ops.git, worktree),
-              yield* encodeRunSpec(provisioned.workspace.spec),
-            );
-            return provisioned;
-          });
+            }),
+          );
+        if (!(yield* fileSystem.exists(worktree)))
+          return yield* executorError(
+            "prepare",
+            "The checkout of the reattached Attempt is gone",
+            new Error(worktree),
+          );
+        const stored = yield* runtime.request(request.attemptId);
+        if (Option.isNone(stored))
+          return yield* executorError(
+            "prepare",
+            "The reattached Attempt has no durable request",
+            new Error(request.attemptId),
+          );
+        return yield* reattachWorktree({
+          request,
+          host: "local",
+          layout: { cache, worktree },
+          ops,
+          spec: stored.value.spec,
+        });
+      });
       const prepared = yield* acquire.pipe(
         Effect.mapError((error) =>
           isExecutorError(error)
