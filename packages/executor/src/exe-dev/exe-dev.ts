@@ -298,6 +298,8 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       recover,
       cancel: attempts.cancel,
       intervene: attemptChannel.intervene,
+      // The one-shot run host dies with its SSH session, so no parent outlives the orchestrator.
+      isLive: () => Effect.succeed(false),
       preflight: machines.preflight,
       prepare,
     });

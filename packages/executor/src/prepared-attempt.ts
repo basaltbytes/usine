@@ -1,6 +1,10 @@
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import {
+  type AttemptFailure,
+  InfraFailure,
+  type RunawayCeiling,
+} from "@usine/core/attempt/failure";
 import { Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect";
 import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor.ts";
 import { withAttemptGuard } from "./guard.ts";
@@ -21,8 +25,9 @@ interface OwnedAttempt {
 /**
  * Tracks each Attempt of one Executor instance from the start of preparation until
  * its resources are released, so `cancel` reaches it at any stage. `cancelLive`
- * delivers Cancel through the Attempt's live channel and reports whether one existed;
- * without one, cancellation releases the Attempt directly. `cancel`, a failed
+ * stops the Attempt's live session and reports whether one existed; without one,
+ * cancellation releases the Attempt directly. `trip` runs when a runaway ceiling
+ * trips, for sessions that interruption alone does not stop. `cancel`, a failed
  * `prepare`, and `launch` each return only after the Attempt's resources are released.
  */
 export const preparedAttemptsFor = (
@@ -31,6 +36,7 @@ export const preparedAttemptsFor = (
     attemptId: AttemptId,
     intervention: AttemptChannel.Intervention,
   ) => Effect.Effect<void, AttemptFailure>,
+  trip: (attemptId: AttemptId, ceiling: RunawayCeiling) => Effect.Effect<void> = () => Effect.void,
 ) =>
   Effect.sync(() => {
     const attempts = new Map<AttemptId, OwnedAttempt>();
@@ -42,7 +48,7 @@ export const preparedAttemptsFor = (
         return;
       }
       yield* Ref.set(active.unavailable, true);
-      // Preserve the live channel's terminal envelope and typed delivery errors.
+      // Preserve the live session's terminal envelope and typed delivery errors.
       // Before registration, scope closure interrupts preparation or process spawn.
       if (!(yield* cancelLive(attemptId))) {
         yield* Effect.logInfo("Canceling Attempt before its channel is ready", { attemptId });
@@ -50,7 +56,7 @@ export const preparedAttemptsFor = (
       }
     }, Effect.uninterruptible);
 
-    /** Owns partial preparation and the run host in one child scope, released at the Attempt's end. */
+    /** Owns partial preparation and the live session in one child scope, released at the Attempt's end. */
     const prepare = (
       acquire: Effect.Effect<AcquiredAttempt, ExecutorError, Scope.Scope>,
       request: CheckoutRequest,
@@ -108,6 +114,7 @@ export const preparedAttemptsFor = (
                 maxAttemptMinutes: request.maxAttemptMinutes,
                 maxAttemptTokens: request.maxAttemptTokens,
                 warn,
+                trip: (ceiling: RunawayCeiling) => trip(attemptId, ceiling),
               };
               yield* prepared.recordSalvage(io.salvage);
               // Closing the owner's scope interrupts the session before checkout and

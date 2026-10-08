@@ -1,8 +1,12 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Settings, UsineConfig } from "@usine/config/factory";
+import { HarnessUnavailableError } from "@usine/core/agent/capability";
+import { SessionTokensUpdated, TokenCount } from "@usine/core/agent/session";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import * as RunState from "@usine/core/run/state";
@@ -11,6 +15,7 @@ import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, CredentialProvider, Executor, ExecutorError } from "@usine/executor";
 import { InstanceDirectory } from "@usine/core/instance";
+import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
 import { stepExecutorLayer } from "../../src/scheduler.ts";
 import { TestClock } from "effect/testing";
@@ -34,31 +39,123 @@ import {
 } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
-import { layer as localExecutorLayer } from "@usine/executor/local";
+import { type HarnessProbe, layer as localExecutorLayer } from "@usine/executor/local";
 import { layer as localLayer } from "../../src/local.ts";
+import {
+  completes,
+  type StubParent,
+  stubAttemptRuntime,
+  StubStorage,
+  worksFor,
+} from "../support/attempt-runtime.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import { runView } from "../../src/operator/projection.ts";
 import {
   LIVE_TEST_TIMEOUT,
-  RUN_HOST,
   STATE_POLL_ATTEMPTS,
   TOKEN,
   config,
   credentialLayer,
+  harnessReady,
   makeRemote,
   output,
   run,
   submission,
   testAgent,
   waitFor,
+  waitForStarted,
   withLocalEngine,
   workerCredential,
 } from "./support.ts";
 
-const CHANNEL_LOSS_HOST = fileURLToPath(new URL("../fixtures/channel-loss.mjs", import.meta.url));
-const TURBO_CACHE_HOST = fileURLToPath(new URL("../fixtures/turbo-cache.mjs", import.meta.url));
-const STDOUT_NOISE_HOST = fileURLToPath(new URL("../fixtures/stdout-noise.mjs", import.meta.url));
-const PULL_REQUEST_HOST = fileURLToPath(new URL("../fixtures/pull-request.mjs", import.meta.url));
+const PULL_REQUEST_GH = fileURLToPath(new URL("../fixtures/pull-request.mjs", import.meta.url));
+
+const harnessUnavailable: HarnessProbe = (brain) =>
+  Effect.succeed(
+    new HarnessUnavailableError({
+      harness: brain.harness,
+      capability: "login",
+      message: "Worker login expired",
+    }),
+  );
+
+/** A parent that commits (unless it only updates its PR) and records the PR the fake `gh` reports. */
+const pullRequestParent =
+  (operation: "create" | "update"): StubParent =>
+  ({ request }) =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      if (operation === "create")
+        yield* run(
+          "git",
+          [
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.invalid",
+            "commit",
+            "--allow-empty",
+            "-m",
+            "Implement the issue",
+          ],
+          request.cwd,
+        );
+      const head = (yield* output("git", ["rev-parse", "HEAD"], request.cwd)).trim();
+      yield* fileSystem.writeFileString(
+        `${request.cwd}/.test-pull-request.json`,
+        JSON.stringify({
+          number: 71,
+          html_url: "https://github.com/acme/demo/pull/71",
+          head: { sha: head },
+        }),
+      );
+      return `Completed: ${request.spec.task}`;
+    }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
+
+/** The local composition with `gh` answered by the pull request fixture, as `../../src/local.ts` builds it. */
+const withPullRequestEngine = <A, E, R>(
+  operation: "create" | "update",
+  lookup: "answers" | "fails",
+  use: (options: {
+    readonly engine: RunEngine["Service"];
+    readonly remote: string;
+  }) => Effect.Effect<A, E, R>,
+) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-pr-" });
+    const instance = InstanceDirectory.make(root);
+    const remote = yield* makeRemote(root);
+    const github = ChildProcessSpawner.make((command) =>
+      command._tag === "StandardCommand" && command.command === "gh"
+        ? spawner.spawn(
+            ChildProcess.make(
+              process.execPath,
+              [PULL_REQUEST_GH, ...command.args, ...(lookup === "fails" ? ["--lookup-fails"] : [])],
+              command.options,
+            ),
+          )
+        : spawner.spawn(command),
+    );
+    const executor = localExecutorLayer({
+      instanceDirectory: instance,
+      repositoryUrl: () => remote,
+      harnessReadiness: harnessReady,
+    }).pipe(
+      Layer.provide(credentialLayer),
+      Layer.provide(stubAttemptRuntime(new StubStorage(), pullRequestParent(operation))),
+      Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, github)),
+      Layer.provide(NodeServices.layer),
+    );
+    const engine = localEngineLayer(instance).pipe(
+      Layer.provide(stepExecutorLayer(config, []).pipe(Layer.provide(executor))),
+      Layer.provide(alwaysHoldsLayer),
+    );
+    return yield* Effect.gen(function* () {
+      return yield* use({ engine: yield* RunEngine, remote });
+    }).pipe(Effect.provide(engine));
+  }).pipe(Effect.provide(NodeServices.layer));
 
 describe("local worker", () => {
   it.live(
@@ -70,11 +167,12 @@ describe("local worker", () => {
           yield* fs.makeTempDirectoryScoped({ prefix: "usine-preflight-" }),
         );
         const runtime = localLayer(instance, config, [testAgent.brain], {
-          runHost: {
-            command: process.execPath,
-            args: [fileURLToPath(new URL("../fixtures/harness-unavailable.mjs", import.meta.url))],
-          },
-        }).pipe(Layer.provide(credentialLayer), Layer.provide(alwaysHoldsLayer));
+          harnessReadiness: harnessUnavailable,
+        }).pipe(
+          Layer.provide(credentialLayer),
+          Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(alwaysHoldsLayer),
+        );
         const error = yield* Effect.void.pipe(Effect.provide(runtime), Effect.flip);
         assert.strictEqual(error._tag, "WorkerCapabilityError");
         assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
@@ -86,7 +184,7 @@ describe("local worker", () => {
     "does not spend infrastructure retries or prepare a checkout on a harness gap",
     () =>
       withLocalEngine(
-        [],
+        { executor: { harnessReadiness: harnessUnavailable } },
         ({ engine, instance }) =>
           Effect.gen(function* () {
             const accepted = yield* engine.submit(submission(1));
@@ -102,7 +200,6 @@ describe("local worker", () => {
             const fs = yield* FileSystem.FileSystem;
             assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
           }),
-        fileURLToPath(new URL("../fixtures/harness-unavailable.mjs", import.meta.url)),
       ),
     LIVE_TEST_TIMEOUT,
   );
@@ -110,111 +207,63 @@ describe("local worker", () => {
   it.live(
     "preserves successful agent work when PR discovery fails",
     () =>
-      withLocalEngine(
-        ["--lookup-fails"],
-        ({ engine }) =>
-          Effect.gen(function* () {
-            const accepted = yield* engine.submit(submission(1));
-            assert.strictEqual(accepted._tag, "Claimed");
-            if (accepted._tag !== "Claimed") return;
-            const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
-            assert.strictEqual(snapshot.attempts.length, 1);
-            assert(Option.isSome(snapshot.step.result));
-            assert.deepStrictEqual(
-              snapshot.step.result.value.facts.map((fact) => fact._tag),
-              ["Commit"],
-            );
-            assert.strictEqual(runView(snapshot, new Set()).pullRequestUrl, null);
-          }),
-        PULL_REQUEST_HOST,
-      ),
-    LIVE_TEST_TIMEOUT,
-  );
-  it.live.each(["create", "update"])(
-    "persists a PR fact and operator link after an agent %s",
-    (operation) =>
-      withLocalEngine(
-        operation === "update" ? ["--update-pr"] : [],
-        ({ engine, remote }) =>
-          Effect.gen(function* () {
-            const initial = submission(1);
-            const request =
-              operation === "update"
-                ? new Submission({
-                    ...initial,
-                    revision: RepositoryRevision.make(
-                      (yield* output("git", ["--git-dir", remote, "rev-parse", "main"])).trim(),
-                    ),
-                  })
-                : initial;
-            const accepted = yield* engine.submit(request);
-            assert.strictEqual(accepted._tag, "Claimed");
-            if (accepted._tag !== "Claimed") return;
-            const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
-            assert.strictEqual(snapshot.attempts.length, 1);
-            assert(Option.isSome(snapshot.step.result));
-            const facts = snapshot.step.result.value.facts;
-            assert.strictEqual(
-              facts.filter((fact) => fact._tag === "Commit").length,
-              operation === "create" ? 1 : 0,
-            );
-            assert.deepStrictEqual(
-              facts.filter((fact) => fact._tag === "PullRequest").map((fact) => fact.number),
-              [71],
-            );
-            assert.strictEqual(
-              runView(snapshot, new Set()).pullRequestUrl,
-              "https://github.com/acme/demo/pull/71",
-            );
-          }),
-        PULL_REQUEST_HOST,
-      ),
-    LIVE_TEST_TIMEOUT,
-  );
-  it.live(
-    "completes one Attempt despite stray Effect and console logs",
-    () =>
-      withLocalEngine(
-        ["--stub"],
-        ({ engine }) =>
-          Effect.gen(function* () {
-            const accepted = yield* engine.submit(submission(1));
-            assert.strictEqual(accepted._tag, "Claimed");
-            if (accepted._tag !== "Claimed") return;
-            const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
-            assert.strictEqual(snapshot.attempts.length, 1);
-            const attempt = snapshot.attempts[0] ?? assert.fail("missing Attempt");
-            const transcript = yield* engine.transcript(
-              new TranscriptAllQuery({ attemptId: attempt.id }),
-            );
-            assert.strictEqual(transcript.at(-1)?.envelope.payload._tag, "Final");
-            assert(!JSON.stringify(transcript).includes("library diagnostic"));
-          }),
-        STDOUT_NOISE_HOST,
+      withPullRequestEngine("create", "fails", ({ engine }) =>
+        Effect.gen(function* () {
+          const accepted = yield* engine.submit(submission(1));
+          assert.strictEqual(accepted._tag, "Claimed");
+          if (accepted._tag !== "Claimed") return;
+          const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
+          assert.strictEqual(snapshot.attempts.length, 1);
+          assert(Option.isSome(snapshot.step.result));
+          assert.deepStrictEqual(
+            snapshot.step.result.value.facts.map((fact) => fact._tag),
+            ["Commit"],
+          );
+          assert.strictEqual(runView(snapshot, new Set()).pullRequestUrl, null);
+        }),
       ),
     LIVE_TEST_TIMEOUT,
   );
 
-  it.live(
-    "still fails schema-invalid protocol frames",
-    () =>
-      withLocalEngine(
-        ["--stub", "--malformed-frame"],
-        ({ engine }) =>
-          Effect.gen(function* () {
-            const accepted = yield* engine.submit(submission(1));
-            assert.strictEqual(accepted._tag, "Claimed");
-            if (accepted._tag !== "Claimed") return;
-            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
-            const outcome = Option.getOrUndefined(snapshot.attempts[0]?.outcome ?? Option.none());
-            assert.strictEqual(outcome?._tag, "Failed");
-            if (outcome?._tag !== "Failed") return;
-            assert.match(outcome.failure.message, /schema-invalid frame/u);
-          }),
-        STDOUT_NOISE_HOST,
+  it.live.each(["create", "update"] as const)(
+    "persists a PR fact and operator link after an agent %s",
+    (operation) =>
+      withPullRequestEngine(operation, "answers", ({ engine, remote }) =>
+        Effect.gen(function* () {
+          const initial = submission(1);
+          const request =
+            operation === "update"
+              ? new Submission({
+                  ...initial,
+                  revision: RepositoryRevision.make(
+                    (yield* output("git", ["--git-dir", remote, "rev-parse", "main"])).trim(),
+                  ),
+                })
+              : initial;
+          const accepted = yield* engine.submit(request);
+          assert.strictEqual(accepted._tag, "Claimed");
+          if (accepted._tag !== "Claimed") return;
+          const snapshot = yield* waitFor(engine, accepted.runId, "Succeeded");
+          assert.strictEqual(snapshot.attempts.length, 1);
+          assert(Option.isSome(snapshot.step.result));
+          const facts = snapshot.step.result.value.facts;
+          assert.strictEqual(
+            facts.filter((fact) => fact._tag === "Commit").length,
+            operation === "create" ? 1 : 0,
+          );
+          assert.deepStrictEqual(
+            facts.filter((fact) => fact._tag === "PullRequest").map((fact) => fact.number),
+            [71],
+          );
+          assert.strictEqual(
+            runView(snapshot, new Set()).pullRequestUrl,
+            "https://github.com/acme/demo/pull/71",
+          );
+        }),
       ),
     LIVE_TEST_TIMEOUT,
   );
+
   it.effect(
     "keeps completed agent work successful when checkout cleanup passes the Attempt deadline",
     () =>
@@ -244,13 +293,14 @@ describe("local worker", () => {
         const executor = localExecutorLayer({
           instanceDirectory: instance,
           repositoryUrl: () => remote,
-          runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
+          harnessReadiness: harnessReady,
         }).pipe(
           Layer.provide(
             Layer.succeed(CredentialProvider)({
               issue: () => Effect.succeed(workerCredential(credential)),
             }),
           ),
+          Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
         );
         const budgetConfig = new UsineConfig({
@@ -328,14 +378,6 @@ describe("local worker", () => {
           const controlledSpawner = ChildProcessSpawner.make(
             Effect.fn("test.controlGit")(function* (command) {
               if (
-                phase === "preflight" &&
-                command._tag === "StandardCommand" &&
-                command.args.includes("--preflight")
-              ) {
-                yield* Deferred.succeed(started, undefined);
-                return yield* Effect.never;
-              }
-              if (
                 command._tag === "StandardCommand" &&
                 command.command === "git" &&
                 command.args.includes(phase === "diagnostic" ? "fetch" : phase)
@@ -363,16 +405,20 @@ describe("local worker", () => {
           const runtime = localExecutorLayer({
             instanceDirectory: InstanceDirectory.make(root),
             repositoryUrl: () => remote,
-            runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
+            harnessReadiness: (brain) =>
+              phase === "preflight"
+                ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
+                : harnessReady(brain),
           }).pipe(
             Layer.provide(
-              Layer.merge(
+              Layer.mergeAll(
                 Layer.succeed(CredentialProvider)({
                   issue: () =>
                     phase === "credential"
                       ? Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never))
                       : Effect.succeed(workerCredential(credential)),
                 }),
+                stubAttemptRuntime(new StubStorage()),
                 Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, controlledSpawner),
               ),
             ),
@@ -448,8 +494,8 @@ describe("local worker", () => {
         const runtime = localExecutorLayer({
           instanceDirectory: InstanceDirectory.make(root),
           repositoryUrl: () => remote,
-          runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
-        }).pipe(Layer.provide(credentials));
+          harnessReadiness: harnessReady,
+        }).pipe(Layer.provide(credentials), Layer.provide(stubAttemptRuntime(new StubStorage())));
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const request = new CheckoutRequest({
@@ -557,8 +603,12 @@ describe("local worker", () => {
             message: Array.isArray(message) ? message.map(String).join(" ") : String(message),
           });
         });
-        const runtime = localLayer(instance, config, [], { repositoryUrl: () => remote }).pipe(
+        const runtime = localLayer(instance, config, [], {
+          repositoryUrl: () => remote,
+          harnessReadiness: harnessReady,
+        }).pipe(
           Layer.provide(credentialLayer),
+          Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(alwaysHoldsLayer),
         );
         yield* Effect.gen(function* () {
@@ -595,30 +645,65 @@ describe("local worker", () => {
   );
 
   it.live(
-    "points the run host's TURBO_CACHE_DIR at a worker-scoped directory outside repos/",
+    "gives the parent task only the allowlisted environment, the Attempt credential, and a Worker-scoped Turbo cache",
     () =>
-      withLocalEngine(
-        ["--stub"],
-        ({ engine, instance }) =>
-          Effect.gen(function* () {
-            const accepted = yield* engine.submit(submission(7));
-            assert.strictEqual(accepted._tag, "Claimed");
-            if (accepted._tag !== "Claimed") return;
-            yield* waitFor(engine, accepted.runId, "Succeeded");
-            const path = yield* Path.Path;
-            const fileSystem = yield* FileSystem.FileSystem;
-            const workerRoot = path.join(instance, ".usine", "workers", "local");
-            assert(yield* fileSystem.exists(path.join(workerRoot, "turbo", "test-marker")));
-          }),
-        TURBO_CACHE_HOST,
-      ),
+      Effect.gen(function* () {
+        const environments: Array<Record<string, string>> = [];
+        yield* withLocalEngine(
+          {
+            attemptRuntime: stubAttemptRuntime(new StubStorage(), (context) =>
+              Effect.sync(() => environments.push(context.request.environment)).pipe(
+                Effect.andThen(completes(context)),
+              ),
+            ),
+          },
+          ({ engine, instance }) =>
+            Effect.gen(function* () {
+              const accepted = yield* engine.submit(submission(7));
+              assert(accepted._tag === "Claimed");
+              yield* waitFor(engine, accepted.runId, "Succeeded");
+              const path = yield* Path.Path;
+              const [environment] = environments;
+              assert(environment !== undefined && environments.length === 1);
+              // Nothing from the orchestrator's own environment beyond the
+              // allowlist, which keeps the App private key out (ADR 0011).
+              const allowed = new Set([
+                "HOME",
+                "LANG",
+                "LC_ALL",
+                "PATH",
+                "SHELL",
+                "TMPDIR",
+                "USER",
+                "GH_CONFIG_DIR",
+                "GH_PROMPT_DISABLED",
+                "USINE_GITHUB_TOKEN_FILE",
+                "GIT_CONFIG_COUNT",
+                "GIT_CONFIG_KEY_0",
+                "GIT_CONFIG_VALUE_0",
+                "GIT_CONFIG_KEY_1",
+                "GIT_CONFIG_VALUE_1",
+                "TURBO_CACHE_DIR",
+              ]);
+              assert.deepStrictEqual(
+                Object.keys(environment).filter((name) => !allowed.has(name)),
+                [],
+              );
+              assert.strictEqual(
+                environment.TURBO_CACHE_DIR,
+                path.join(instance, ".usine", "workers", "local", "turbo"),
+              );
+              assert(!JSON.stringify(environment).includes(TOKEN));
+            }),
+        );
+      }),
     LIVE_TEST_TIMEOUT,
   );
 
   it.live(
     "runs Event → Attempt, persists the transcript, and removes the worktree",
     () =>
-      withLocalEngine(["--stub"], ({ engine, instance }) =>
+      withLocalEngine({}, ({ engine, instance }) =>
         Effect.gen(function* () {
           const path = yield* Path.Path;
           const fileSystem = yield* FileSystem.FileSystem;
@@ -643,13 +728,17 @@ describe("local worker", () => {
             new TranscriptAllQuery({ attemptId: attempt.id }),
           );
           assert.deepStrictEqual(
-            transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
+            transcript.map(({ direction, envelope }) => [
+              direction,
+              envelope.sequence,
+              envelope.payload._tag,
+            ]),
             [
-              ["outbound", "Started"],
-              ["outbound", "SessionEvent"],
-              ["outbound", "SessionEvent"],
-              ["outbound", "SessionEvent"],
-              ["outbound", "Final"],
+              ["outbound", 1, "Started"],
+              ["outbound", 2, "SessionEvent"],
+              ["outbound", 3, "SessionEvent"],
+              ["outbound", 4, "SessionEvent"],
+              ["outbound", 5, "Final"],
             ],
           );
           const firstTranscriptEntry = transcript[0];
@@ -696,115 +785,173 @@ describe("local worker", () => {
               return workerCredential(Redacted.make(TOKEN));
             }),
         });
-        yield* withLocalEngine(
-          ["--stub"],
-          ({ engine }) =>
-            Effect.gen(function* () {
-              const accepted = yield* engine.submit(submission(1));
-              assert(accepted._tag === "Claimed");
-              yield* Deferred.await(minting);
-              yield* engine.cancel(accepted.runId);
-              yield* Deferred.succeed(release, undefined);
-              const canceled = yield* waitFor(engine, accepted.runId, "Canceled");
-              const attempt = canceled.attempts[0];
-              assert(attempt !== undefined);
-              assert(Option.isSome(attempt.outcome) && attempt.outcome.value._tag === "Canceled");
-              const next = yield* engine.submit(submission(2));
-              assert(next._tag === "Claimed");
-              yield* waitFor(engine, next.runId, "Succeeded");
-              assert.deepStrictEqual(
-                yield* engine.transcript(new TranscriptAllQuery({ attemptId: attempt.id })),
-                [],
-              );
-            }),
-          undefined,
-          credentials,
+        yield* withLocalEngine({ credentials }, ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert(accepted._tag === "Claimed");
+            yield* Deferred.await(minting);
+            yield* engine.cancel(accepted.runId);
+            yield* Deferred.succeed(release, undefined);
+            const canceled = yield* waitFor(engine, accepted.runId, "Canceled");
+            const attempt = canceled.attempts[0];
+            assert(attempt !== undefined);
+            assert(Option.isSome(attempt.outcome) && attempt.outcome.value._tag === "Canceled");
+            const next = yield* engine.submit(submission(2));
+            assert(next._tag === "Claimed");
+            yield* waitFor(engine, next.runId, "Succeeded");
+            assert.deepStrictEqual(
+              yield* engine.transcript(new TranscriptAllQuery({ attemptId: attempt.id })),
+              [],
+            );
+          }),
         );
       }),
     LIVE_TEST_TIMEOUT,
   );
 
   it.live(
-    "cancels idempotently with an interrupt envelope before cleanup",
-    () =>
-      withLocalEngine(["--stub-delay-ms", "5000"], ({ engine, instance }) =>
-        Effect.gen(function* () {
-          const accepted = yield* engine.submit(submission(2));
-          assert.strictEqual(accepted._tag, "Claimed");
-          if (accepted._tag !== "Claimed") return;
-          const running = yield* waitFor(engine, accepted.runId, "Running");
-          const attempt = running.attempts[0];
-          assert(attempt !== undefined);
-          for (let poll = 0; poll < STATE_POLL_ATTEMPTS; poll += 1) {
+    "delivers a steer to the parent task, then cancels it idempotently before cleanup",
+    () => {
+      const storage = new StubStorage();
+      return withLocalEngine(
+        { attemptRuntime: stubAttemptRuntime(storage, worksFor(5_000)) },
+        ({ engine, instance }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(2));
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            const running = yield* waitFor(engine, accepted.runId, "Running");
+            const attempt = running.attempts[0];
+            assert(attempt !== undefined);
+            yield* waitForStarted(engine, attempt.id);
+            yield* engine.intervene(
+              accepted.runId,
+              attempt.id,
+              new AttemptChannel.Intervention({
+                operator: "Philippe",
+                target: new AttemptChannel.ParentTarget(),
+                action: new AttemptChannel.Steer({ message: "Use pnpm" }),
+              }),
+            );
+            yield* engine.cancel(accepted.runId);
+            yield* engine.cancel(accepted.runId);
+            const canceled = yield* waitFor(engine, accepted.runId, "Canceled");
+            assert.strictEqual(canceled.attempts.length, 1);
+            assert.strictEqual(canceled.attempts[0]?.operatorIntervened, true);
+            assert.strictEqual(storage.tasks.get(attempt.id)?.state, "canceled");
+
             const transcript = yield* engine.transcript(
               new TranscriptAllQuery({ attemptId: attempt.id }),
             );
-            if (transcript.some(({ envelope }) => envelope.payload._tag === "Started")) break;
-            yield* Effect.sleep("10 millis");
-          }
-          yield* engine.cancel(accepted.runId);
-          yield* engine.cancel(accepted.runId);
-          const canceled = yield* waitFor(engine, accepted.runId, "Canceled");
-          assert.strictEqual(canceled.attempts.length, 1);
+            assert(
+              transcript.some(
+                ({ direction, envelope }) =>
+                  direction === "inbound" && envelope.payload._tag === "Steer",
+              ),
+            );
+            const path = yield* Path.Path;
+            const fileSystem = yield* FileSystem.FileSystem;
+            const attemptsDirectory = path.join(instance, ".usine", "workers", "local", "attempts");
+            let attempts = yield* fileSystem.readDirectory(attemptsDirectory);
+            for (let poll = 0; attempts.length > 0 && poll < STATE_POLL_ATTEMPTS; poll += 1) {
+              yield* Effect.sleep("10 millis");
+              attempts = yield* fileSystem.readDirectory(attemptsDirectory);
+            }
+            assert.deepStrictEqual(attempts, []);
+          }),
+      );
+    },
+    LIVE_TEST_TIMEOUT,
+  );
 
-          const transcript = yield* engine.transcript(
-            new TranscriptAllQuery({ attemptId: attempt.id }),
-          );
-          assert(
-            transcript.some(
-              ({ direction, envelope }) =>
-                direction === "inbound" && envelope.payload._tag === "Cancel",
-            ),
-          );
-          const path = yield* Path.Path;
-          const fileSystem = yield* FileSystem.FileSystem;
-          const attemptsDirectory = path.join(instance, ".usine", "workers", "local", "attempts");
-          let attempts = yield* fileSystem.readDirectory(attemptsDirectory);
-          for (let poll = 0; attempts.length > 0 && poll < STATE_POLL_ATTEMPTS; poll += 1) {
-            yield* Effect.sleep("10 millis");
-            attempts = yield* fileSystem.readDirectory(attemptsDirectory);
-          }
-          assert.deepStrictEqual(attempts, []);
-        }),
-      ),
+  it.live(
+    "stops the parent task when the token ceiling trips instead of leaving it live",
+    () => {
+      const storage = new StubStorage();
+      const spender: StubParent = ({ emit, session }) =>
+        emit(
+          new AttemptChannel.SessionEvent({
+            event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(150) }),
+          }),
+        ).pipe(Effect.andThen(Effect.never));
+      const ceiling = new UsineConfig({
+        ...config,
+        settings: new Settings({ ...config.settings, maxAttemptTokens: Option.some(100) }),
+      });
+      return Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-ceiling-" });
+        const instance = InstanceDirectory.make(root);
+        const remote = yield* makeRemote(root);
+        const runtime = localLayer(instance, ceiling, [], {
+          repositoryUrl: () => remote,
+          interruptGrace: "100 millis",
+          harnessReadiness: harnessReady,
+        }).pipe(
+          Layer.provide(credentialLayer),
+          Layer.provide(stubAttemptRuntime(storage, spender)),
+          Layer.provide(alwaysHoldsLayer),
+        );
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(submission(4));
+          assert(accepted._tag === "Claimed");
+          const failed = yield* waitFor(engine, accepted.runId, "Failed");
+          const outcome = Option.getOrUndefined(failed.attempts[0]?.outcome ?? Option.none());
+          assert(outcome?._tag === "Failed");
+          assert.strictEqual(outcome.failure._tag, "RunawayFailure");
+          const attemptId = failed.attempts[0]?.id;
+          assert(attemptId !== undefined);
+          assert.strictEqual(storage.tasks.get(attemptId)?.state, "canceled");
+        }).pipe(Effect.provide(runtime));
+      }).pipe(Effect.provide(NodeServices.layer));
+    },
     LIVE_TEST_TIMEOUT,
   );
 
   it.live(
     "keeps excess Runs pending and assigns the oldest pending Event first",
     () =>
-      withLocalEngine(["--stub-delay-ms", "300"], ({ engine }) =>
-        Effect.gen(function* () {
-          const first = yield* engine.submit(submission(3, "2026-08-30T12:00:03Z"));
-          assert.strictEqual(first._tag, "Claimed");
-          if (first._tag !== "Claimed") return;
-          yield* waitFor(engine, first.runId, "Running");
+      withLocalEngine(
+        { attemptRuntime: stubAttemptRuntime(new StubStorage(), worksFor(300)) },
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const first = yield* engine.submit(submission(3, "2026-08-30T12:00:03Z"));
+            assert.strictEqual(first._tag, "Claimed");
+            if (first._tag !== "Claimed") return;
+            yield* waitFor(engine, first.runId, "Running");
 
-          const newer = yield* engine.submit(submission(4, "2026-08-30T12:00:05Z"));
-          const older = yield* engine.submit(submission(5, "2026-08-30T12:00:04Z"));
-          assert.strictEqual(newer._tag, "Claimed");
-          assert.strictEqual(older._tag, "Claimed");
-          if (newer._tag !== "Claimed" || older._tag !== "Claimed") return;
-          assert.strictEqual((yield* engine.inspect(newer.runId)).run.state._tag, "Pending");
-          assert.strictEqual((yield* engine.inspect(older.runId)).run.state._tag, "Pending");
+            const newer = yield* engine.submit(submission(4, "2026-08-30T12:00:05Z"));
+            const older = yield* engine.submit(submission(5, "2026-08-30T12:00:04Z"));
+            assert.strictEqual(newer._tag, "Claimed");
+            assert.strictEqual(older._tag, "Claimed");
+            if (newer._tag !== "Claimed" || older._tag !== "Claimed") return;
+            assert.strictEqual((yield* engine.inspect(newer.runId)).run.state._tag, "Pending");
+            assert.strictEqual((yield* engine.inspect(older.runId)).run.state._tag, "Pending");
 
-          yield* waitFor(engine, first.runId, "Succeeded");
-          const olderFinished = yield* waitFor(engine, older.runId, "Succeeded");
-          const newerFinished = yield* waitFor(engine, newer.runId, "Succeeded");
-          const olderStarted = olderFinished.attempts[0]?.startedAt;
-          const newerStarted = newerFinished.attempts[0]?.startedAt;
-          assert(olderStarted !== undefined && newerStarted !== undefined);
-          assert(DateTime.toEpochMillis(olderStarted) <= DateTime.toEpochMillis(newerStarted));
-        }),
+            yield* waitFor(engine, first.runId, "Succeeded");
+            const olderFinished = yield* waitFor(engine, older.runId, "Succeeded");
+            const newerFinished = yield* waitFor(engine, newer.runId, "Succeeded");
+            const olderStarted = olderFinished.attempts[0]?.startedAt;
+            const newerStarted = newerFinished.attempts[0]?.startedAt;
+            assert(olderStarted !== undefined && newerStarted !== undefined);
+            assert(DateTime.toEpochMillis(olderStarted) <= DateTime.toEpochMillis(newerStarted));
+          }),
       ),
     LIVE_TEST_TIMEOUT,
   );
 
   it.live(
-    "classifies channel loss as retryable infrastructure failure",
+    "retries a parent task's infrastructure failure and removes every worktree",
     () =>
       withLocalEngine(
-        [],
+        {
+          attemptRuntime: stubAttemptRuntime(new StubStorage(), () =>
+            Effect.fail(
+              new InfraFailure({ message: "model provider unreachable", cause: "outage" }),
+            ),
+          ),
+        },
         ({ engine, instance }) =>
           Effect.gen(function* () {
             const accepted = yield* engine.submit(submission(6));
@@ -825,7 +972,6 @@ describe("local worker", () => {
             );
             assert.deepStrictEqual(attempts, []);
           }),
-        CHANNEL_LOSS_HOST,
       ),
     LIVE_TEST_TIMEOUT,
   );

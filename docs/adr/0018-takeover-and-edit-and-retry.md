@@ -19,3 +19,7 @@ Takeover is conversing inside a live session. The attempt channel's inbound enve
 - [ADR 0008](./0008-web-ui-projects-kanban-spine.md)'s run drawer: the parent transcript and each child's session events become chat surfaces with a per-child release control; failed runs get the edit-and-retry form (task-text editor + roster agent picker). UI-only — a GitHub 👍 restart (ADR 0017) never carries edits.
 - An agent swap on retry re-derives persona and brain spec from the swapped roster agent; usage lands in that agent's pool per child, as ADR 0013 already meters.
 - **Takeover**, **Hold**, and **Edit-and-retry** enter the glossary.
+
+## Amendment (2026-10-08, #176): interventions reach the parent through the durable runtime
+
+On local Workers the Pi parent and its children are durable conversations in the orchestrator process, so there is no channel to write inbound frames to. Steer, interrupt, operator messages, and release go to `AttemptRuntime.intervene`, which delivers them to the parent or the addressed child and records the inbound envelope and its receipt in the transcript with the task's own sequence numbers. The transcript records are the same as before, so Holds, the operator-intervened flag, and the runaway guard's wall-clock pause keep working unchanged. The executor rejects input only for an Attempt with no live session in this orchestrator, which includes an Attempt still waiting to be reattached after a restart. exe.dev keeps delivering interventions through the run host's channel.

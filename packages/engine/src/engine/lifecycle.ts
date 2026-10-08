@@ -128,6 +128,12 @@ type StartDecision =
       readonly interrupted: Option.Option<RetryAttempt>;
       readonly resume: Option.Option<SalvagePushed>;
     }
+  | {
+      readonly _tag: "ReattachAttempt";
+      readonly state: RunState.Running;
+      readonly attempt: Attempt;
+      readonly resume: Option.Option<SalvagePushed>;
+    }
   | RunFailed
   | { readonly _tag: "RunClosed"; readonly state: RunState.RunState };
 
@@ -144,12 +150,18 @@ const newestPushedSalvage = (attempts: ReadonlyArray<Attempt>): Option.Option<Sa
 
 /**
  * Admits the next Attempt after a Worker reservation. An unfinished previous
- * Attempt indicates a restart and counts against the same retry cap as ordinary
- * infrastructure failure. `interruption` records the runtime's explanation.
- * The caller creates the new Attempt's identity and timestamp only when admitted.
- * `resume` names the pushed salvage the new Attempt checks out, if any.
+ * Attempt indicates a restart. When its parent task is still `live`, the
+ * Attempt is reattached: it keeps its identity and number and spends no retry.
+ * Otherwise it counts against the same retry cap as ordinary infrastructure
+ * failure, with `interruption` as the runtime's explanation. The caller creates
+ * a new Attempt's identity and timestamp only when admitted. `resume` names the
+ * pushed salvage the Attempt's checkout starts from, if any.
  */
-export const beginAttempt = (current: RunProgress, interruption: InfraFailure): StartDecision => {
+export const beginAttempt = (
+  current: RunProgress,
+  interruption: InfraFailure,
+  live: Option.Option<AttemptId>,
+): StartDecision => {
   const state = current.run.state;
   if (!RunState.isStartable(state) && state._tag !== "Running") {
     return { _tag: "RunClosed", state };
@@ -157,6 +169,14 @@ export const beginAttempt = (current: RunProgress, interruption: InfraFailure): 
   let interrupted = Option.none<RetryAttempt>();
   const attempt = openAttempt(current);
   if (state._tag === "Running" && Option.isSome(attempt)) {
+    if (Option.contains(live, attempt.value.id)) {
+      return {
+        _tag: "ReattachAttempt",
+        state,
+        attempt: attempt.value,
+        resume: newestPushedSalvage(current.attempts),
+      };
+    }
     const recovery = failRunningAttempt(state, attempt.value, interruption, "Execution");
     if (recovery._tag === "RunFailed") return recovery;
     interrupted = Option.some(recovery);

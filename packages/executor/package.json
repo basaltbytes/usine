@@ -37,6 +37,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@usine/agents": "workspace:*",
     "@usine/core": "workspace:*",
     "@usine/durable": "workspace:*"
   },

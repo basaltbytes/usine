@@ -254,11 +254,43 @@ const makeRunStore = Effect.gen(function* () {
     yield* tx.requestWorkflowCommand(runId, "Continue");
   });
 
+  const executionOf = (
+    current: RunSnapshot,
+    {
+      attempt,
+      state,
+      resume,
+      reattach,
+    }: Pick<StepExecution, "attempt" | "resume" | "reattach"> & {
+      readonly state: RunState.Running;
+    },
+  ) =>
+    new StepExecution({
+      attempt,
+      event: current.event,
+      run: new Run({
+        id: current.run.id,
+        eventId: current.run.eventId,
+        loop: current.run.loop,
+        state,
+        openedAt: current.run.openedAt,
+      }),
+      step: current.step,
+      repository: current.repository,
+      revision: current.revision,
+      task: current.task,
+      agent: current.agent,
+      parentModel: current.parentModel,
+      resume,
+      reattach,
+    });
+
   const beginAttempt = Effect.fn("RunStore.beginAttempt")(function* (
     runId: RunId,
     worker: WorkerName,
+    live: Option.Option<AttemptId> = Option.none(),
   ) {
-    yield* Effect.annotateCurrentSpan({ runId });
+    yield* Effect.annotateCurrentSpan({ runId, worker });
     return yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
@@ -267,7 +299,7 @@ const makeRunStore = Effect.gen(function* () {
           message: "The orchestrator stopped during the attempt",
           cause: new Error("attempt interrupted by orchestrator restart"),
         });
-        const decision = decideBeginAttempt(current, interruption);
+        const decision = decideBeginAttempt(current, interruption, live);
         if (decision._tag === "RunClosed") {
           yield* Effect.logInfo("Attempt start skipped", { runId, state: decision.state._tag });
           return new RunClosed({ state: decision.state._tag });
@@ -275,6 +307,36 @@ const makeRunStore = Effect.gen(function* () {
         if (decision._tag === "RunFailed") {
           yield* applyFinish(tx, runId, decision);
           return new AttemptRecoveryFailed({ failure: interruption });
+        }
+        if (decision._tag === "ReattachAttempt") {
+          const attempt = decision.attempt;
+          yield* Effect.annotateCurrentSpan({ attemptId: attempt.id });
+          yield* Effect.logInfo("Attempt reattached after an orchestrator restart", {
+            runId,
+            attemptId: attempt.id,
+            number: attempt.number,
+            worker: attempt.worker,
+          });
+          if (attempt.worker !== worker) {
+            // The parent task and its checkout stay where they started.
+            yield* Effect.logWarning(
+              "Reattached Attempt keeps its own Worker, not the reserved one",
+              {
+                runId,
+                attemptId: attempt.id,
+                worker: attempt.worker,
+                reservedWorker: worker,
+              },
+            );
+          }
+          return new AttemptStarted({
+            execution: executionOf(current, {
+              attempt,
+              state: decision.state,
+              resume: decision.resume,
+              reattach: true,
+            }),
+          });
         }
         if (Option.isSome(decision.interrupted)) {
           yield* applyFinish(tx, runId, decision.interrupted.value);
@@ -308,23 +370,11 @@ const makeRunStore = Effect.gen(function* () {
           resumesFrom: Option.map(decision.resume, ({ ref }) => ref),
         });
         return new AttemptStarted({
-          execution: new StepExecution({
+          execution: executionOf(current, {
             attempt,
-            event: current.event,
-            run: new Run({
-              id: current.run.id,
-              eventId: current.run.eventId,
-              loop: current.run.loop,
-              state: decision.state,
-              openedAt: current.run.openedAt,
-            }),
-            step: current.step,
-            repository: current.repository,
-            revision: current.revision,
-            task: current.task,
-            agent: current.agent,
-            parentModel: current.parentModel,
+            state: decision.state,
             resume: decision.resume,
+            reattach: false,
           }),
         });
       }),
@@ -559,7 +609,12 @@ const makeRunStore = Effect.gen(function* () {
         if (direction === "outbound" && envelope.payload._tag === "InterventionApplied") {
           yield* tx.markIntervened(envelope.attemptId);
         }
-        yield* tx.appendTranscript(direction, envelope, receivedAt);
+        if (!(yield* tx.appendTranscript(direction, envelope, receivedAt)))
+          yield* Effect.logDebug("Transcript envelope already recorded; keeping the first copy", {
+            attemptId: envelope.attemptId,
+            direction,
+            sequence: envelope.sequence,
+          });
       }),
     );
   }, persistence("append Attempt transcript"));
@@ -643,9 +698,15 @@ export class RunStore extends Context.Service<
       direction: AttemptChannel.Direction,
       envelope: AttemptChannel.Envelope,
     ) => Effect.Effect<void, RunStoreError>;
+    /**
+     * Admits the Run's next Attempt on `worker`. An open Attempt left by a
+     * restart is reattached when it is `live` (its parent task outlived the
+     * restart); otherwise it is failed and the next Attempt opens.
+     */
     readonly beginAttempt: (
       runId: RunId,
       worker: WorkerName,
+      live?: Option.Option<AttemptId>,
     ) => Effect.Effect<AttemptStarted | AttemptRecoveryFailed | RunClosed, RunStoreError>;
     readonly cancel: (runId: RunId) => Effect.Effect<CancelOutcome, RunStoreError>;
     readonly claimQueued: (

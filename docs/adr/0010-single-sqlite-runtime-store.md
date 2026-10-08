@@ -22,3 +22,11 @@ All durable runtime state — the Event ledger and payload snapshots, Run/Step/A
 `usine backup <path>` opens the runtime database read-only and copies all tables, including committed WAL data, through SQLite's backup API. It writes the copy beside the destination, then uses a hard link to create the final file without overwriting an existing path. The destination filesystem must support hard links. Restore with the orchestrator stopped: replace the runtime database, remove old WAL and SHM files, and use the matching instance configuration and engine version.
 
 `usine export-run <runId>` reads a Run snapshot and every saved transcript entry through `RunReader.evidence` in one transaction. The JSON contains the evidence for that Run; use a database backup to restore the factory. Neither command prunes data or changes the deduplication ledger.
+
+## Amendment (2026-10-08, #176): two SQLite files in the instance directory
+
+The instance directory now holds two SQLite files: usine's runtime database, and the pi-durable storage (`.usine/durable.sqlite`) that holds each local Attempt's parent task and conversations (ADR 0006 amendment of the same date). They use separate connections and never share a transaction. pi-durable owns its storage format and assumes one writer per storage, and it commits through its own connection whatever file it uses, so putting it in usine's file would buy no atomicity.
+
+The projection-plus-startup-sweep pattern therefore stays for the rows usine keeps. An Attempt row can say open while its parent task has finished, failed, or is still running; at startup the engine reads the task's liveness through the executor and either reattaches the Attempt or fails it, and executor recovery cancels a live task whose Attempt row is already closed. A transcript envelope that a reattached parent sends again after a restart is identified by its Attempt, direction, and channel sequence, and keeps its first stored copy, so the transcript stays one contiguous sequence.
+
+Startup order matters: the durable storage is opened and its tasks resumed before the engine reconciles worktrees and recovers Runs. The layers enforce it, since the engine needs the `StepExecutor`, which needs the local executor, which needs the `AttemptRuntime`. Moving or backing up the factory now means copying both files with the orchestrator stopped.

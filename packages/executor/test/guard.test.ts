@@ -10,7 +10,11 @@ import {
 } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
+import {
+  AgentFailure,
+  type AttemptFailure,
+  type RunawayCeiling,
+} from "@usine/core/attempt/failure";
 import { DateTime, Deferred, Effect, Fiber, Option, Queue, Result } from "effect";
 import { TestClock } from "effect/testing";
 import { type AttemptGuardLimits, withAttemptGuard } from "../src/guard.ts";
@@ -32,6 +36,7 @@ const setup = (
 ) =>
   Effect.gen(function* () {
     const warnings: Array<string> = [];
+    const trips: Array<RunawayCeiling> = [];
     const finished = yield* Deferred.make<void>();
     const inputs = yield* Queue.make<{
       readonly envelope: AttemptChannel.OutboundEnvelope;
@@ -49,6 +54,10 @@ const setup = (
               warnFails ? new AgentFailure({ message: "no live channel" }) : Effect.void,
             ),
           ),
+        trip: (ceiling) =>
+          Effect.sync(() => {
+            trips.push(ceiling);
+          }),
       },
       { append: () => Effect.void, salvage: () => Effect.void },
       (sink) =>
@@ -100,7 +109,7 @@ const setup = (
           event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(count) }),
         }),
       );
-    return { result, emit, hold, usage, warnings, finished };
+    return { result, emit, hold, usage, warnings, trips, finished };
   });
 
 describe("Attempt guard", () => {
@@ -108,7 +117,7 @@ describe("Attempt guard", () => {
     "preserves the remaining time across concurrent Holds, warns once at 80% of unsupervised time, and trips at the end",
     () =>
       Effect.gen(function* () {
-        const { result, emit, hold, warnings } = yield* setup({
+        const { result, emit, hold, warnings, trips } = yield* setup({
           maxAttemptMinutes: Option.some(1),
           maxAttemptTokens: Option.some(100),
         });
@@ -136,6 +145,8 @@ describe("Attempt guard", () => {
         assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
         assert.strictEqual(outcome.failure.ceiling, "wall-clock");
         assert.strictEqual(warnings.length, 1);
+        // An in-process parent is stopped by the trip, not by the race's interruption.
+        assert.deepStrictEqual(trips, ["wall-clock"]);
       }),
   );
 
@@ -143,7 +154,7 @@ describe("Attempt guard", () => {
     "keeps the aggregate token ceiling armed during a Hold, warns once at 80%, and survives an undeliverable warning",
     () =>
       Effect.gen(function* () {
-        const { result, hold, usage, warnings } = yield* setup(
+        const { result, hold, usage, warnings, trips } = yield* setup(
           { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.some(100) },
           true,
         );
@@ -162,6 +173,7 @@ describe("Attempt guard", () => {
         assert.strictEqual(warnings.length, 1);
         const rejected = yield* usage(second, 40).pipe(Effect.result);
         assert(Result.isFailure(rejected) && rejected.failure._tag === "RunawayFailure");
+        assert.deepStrictEqual(trips, ["tokens"]);
         const outcome = yield* Fiber.join(result);
         assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
         assert.strictEqual(outcome.failure.ceiling, "tokens");

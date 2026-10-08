@@ -130,7 +130,7 @@ export USINE_GITHUB_INTEGRATION_ISSUE_NUMBER=123
 pnpm --filter @usine/orchestrator test:integration
 ```
 
-The agent contract test also starts the local worker and production run host. The Pi parent delegates to Claude Code, which reads the issue with `gh` and posts one signed comment as the App bot. Build the workspace first, provide working Pi and Claude credentials in the worker user's home directory, then run:
+The agent contract test also starts the local worker with the production durable parent runtime. The Pi parent delegates to Claude Code, which reads the issue with `gh` and posts one signed comment as the App bot. Build the workspace first, provide working Pi and Claude credentials in the worker user's home directory, then run:
 
 ```sh
 pnpm build
@@ -148,6 +148,6 @@ Item cycle exhaustion appears as a `CycleBudgetNeed` in the overview and marks t
 
 The operator HTTP API exposes `POST /api/cycle-budgets/reset` with `{ "askId": "…" }`. A stale or differently answered Ask returns HTTP 409.
 
-The orchestrator requires run-host Attempt channel protocol v7, whose `Start` frame names the previous Attempt's salvage to resume from. Upgrade both together; worker preflight rejects a version mismatch. Stored v3–v6 transcripts remain readable.
+Local Workers run each Attempt's Pi parent in the orchestrator process as a durable task (`@usine/durable`); `layer` requires the `AttemptRuntime` and builds it before the engine, so durable storage is open and its tasks resumed before Run recovery. An orchestrator restart reattaches a live Attempt instead of failing it. exe.dev Workers still run the parent in the one-shot run host over Attempt channel protocol v7, whose `Start` frame names the previous Attempt's salvage to resume from; upgrade the orchestrator and the VM's run host together, since worker preflight rejects a version mismatch. Stored v3–v6 transcripts remain readable.
 
 `Operator.resolveFailure(runId, attemptId)` clears attention for the current failed Attempt. The operator API exposes it as `POST /api/runs/:runId/resolve-failure` with `{ "attemptId": "..." }`. Resolved failures remain in Run history with retry available. Needs you, Project status, and Board attention reflect resolution; a later failed Attempt requests attention again.

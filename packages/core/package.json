@@ -87,6 +87,10 @@
       "types": "./dist/step/result.d.ts",
       "default": "./dist/step/result.js"
     },
+    "./step/harvest": {
+      "types": "./dist/step/harvest.d.ts",
+      "default": "./dist/step/harvest.js"
+    },
     "./worker": {
       "types": "./dist/worker.d.ts",
       "default": "./dist/worker.js"

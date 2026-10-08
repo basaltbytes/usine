@@ -1,7 +1,7 @@
 import type { AttemptId } from "@usine/core/attempt";
 import { AgentSessionId } from "@usine/core/agent/session";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
-import { AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
+import { AttemptFailure, type RunawayCeiling, RunawayFailure } from "@usine/core/attempt/failure";
 import { Clock, Effect, Option, Queue } from "effect";
 
 /** The share of a ceiling at which the guard warns the parent session once, before tripping. */
@@ -15,6 +15,8 @@ export interface AttemptGuardLimits {
   readonly maxAttemptTokens: Option.Option<number>;
   /** Delivers the warning steer to the parent session; failures are logged and never fail the Attempt. */
   readonly warn: (message: string) => Effect.Effect<void, AttemptFailure>;
+  /** Runs when a ceiling trips, before the Attempt fails with `RunawayFailure`, for sessions that interruption alone does not stop. */
+  readonly trip: (ceiling: RunawayCeiling) => Effect.Effect<void>;
 }
 
 /** One armed ceiling: the limit that trips the guard and the point at which it warns first. */
@@ -29,7 +31,12 @@ type Warn = (ceiling: "tokens" | "wall-clock", message: string) => Effect.Effect
 type Observer = (envelope: AttemptChannel.Envelope) => Effect.Effect<void, RunawayFailure>;
 
 /** Sums the highest reported count per session; tokens keep accumulating through Holds. */
-const tokenWatcher = (attemptId: AttemptId, tokens: Ceiling, warn: Warn): Observer => {
+const tokenWatcher = (
+  attemptId: AttemptId,
+  tokens: Ceiling,
+  warn: Warn,
+  trip: AttemptGuardLimits["trip"],
+): Observer => {
   const reported = new Map<AgentSessionId, number>();
   let warned = false;
   return (envelope) =>
@@ -45,6 +52,7 @@ const tokenWatcher = (attemptId: AttemptId, tokens: Ceiling, warn: Warn): Observ
           consumed,
           maxAttemptTokens: tokens.limit,
         });
+        yield* trip("tokens");
         return yield* new RunawayFailure({ ceiling: "tokens" });
       }
       if (!warned && consumed >= tokens.warnAt) {
@@ -65,6 +73,7 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   attemptId: AttemptId,
   wallClock: Ceiling,
   warn: Warn,
+  trip: AttemptGuardLimits["trip"],
 ) {
   const ended = new Set<AgentSessionId>();
   const holds = new Set<AgentSessionId>();
@@ -117,6 +126,7 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
       attemptId,
       maxAttemptMinutes: wallClock.limit / 60_000,
     });
+    yield* trip("wall-clock");
     return yield* new RunawayFailure({ ceiling: "wall-clock" });
   }).pipe(Effect.withSpan("AttemptGuard.watch"));
   return { observe, watch };
@@ -153,10 +163,12 @@ export const withAttemptGuard = <A>(
         Effect.ignore,
       );
     const observeTokens = Option.map(tokens, (tokens) =>
-      tokenWatcher(limits.attemptId, tokens, warn),
+      tokenWatcher(limits.attemptId, tokens, warn, limits.trip),
     );
     const clock = yield* Effect.transposeOption(
-      Option.map(wallClock, (wallClock) => wallClockWatcher(limits.attemptId, wallClock, warn)),
+      Option.map(wallClock, (wallClock) =>
+        wallClockWatcher(limits.attemptId, wallClock, warn, limits.trip),
+      ),
     );
     const sink: AttemptChannel.Sink = {
       append: Effect.fn("AttemptGuard.append")(function* (direction, envelope) {

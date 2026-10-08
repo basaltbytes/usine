@@ -4,6 +4,7 @@ import {
   DefectFailure,
   InfraFailure,
 } from "@usine/core/attempt/failure";
+import type { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import type { WorkerName } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
@@ -103,6 +104,43 @@ export const continueWithNewest: (
     yield* store.completeWorkflowCommand(completedRunId, "Continue");
   });
 
+/**
+ * The Run's open Attempt when its parent task outlived an orchestrator restart.
+ * A liveness read that fails is logged and treated as not live, so the Run
+ * moves on to a new Attempt as it did before reattachment existed.
+ */
+const liveAttempt = Effect.fn("DurableRun.liveAttempt")(function* (runId: RunId) {
+  yield* Effect.annotateCurrentSpan({ runId });
+  const store = yield* RunStore;
+  const executor = yield* StepExecutor;
+  const current = yield* store.snapshot(runId).pipe(asAttemptFailure);
+  const open = current.attempts.at(-1);
+  if (current.run.state._tag !== "Running" || open === undefined || Option.isSome(open.outcome))
+    return Option.none<AttemptId>();
+  yield* Effect.annotateCurrentSpan({ attemptId: open.id, worker: open.worker });
+  const live = yield* executor.isLive(open.id).pipe(Effect.result);
+  if (Result.isFailure(live)) {
+    yield* Effect.logWarning(
+      "Could not read whether the open Attempt is live; opening the next one",
+      {
+        runId,
+        attemptId: open.id,
+        worker: open.worker,
+        errorTag: live.failure._tag,
+        message: live.failure.message,
+      },
+    );
+    return Option.none<AttemptId>();
+  }
+  yield* Effect.logInfo(
+    live.success
+      ? "The open Attempt's parent task is live; reattaching it"
+      : "The open Attempt's parent task is gone; opening the next Attempt",
+    { runId, attemptId: open.id, worker: open.worker },
+  );
+  return live.success ? Option.some(open.id) : Option.none<AttemptId>();
+});
+
 const executeAttempt = Effect.fn("DurableRun.attempt")(function* (
   runId: RunId,
   worker: WorkerName,
@@ -110,7 +148,9 @@ const executeAttempt = Effect.fn("DurableRun.attempt")(function* (
   yield* Effect.annotateCurrentSpan({ runId, worker });
   const store = yield* RunStore;
   const executor = yield* StepExecutor;
-  const started = yield* store.beginAttempt(runId, worker).pipe(asAttemptFailure);
+  const started = yield* store
+    .beginAttempt(runId, worker, yield* liveAttempt(runId))
+    .pipe(asAttemptFailure);
   if (started instanceof AttemptRecoveryFailed || started._tag === "RunClosed") {
     return started;
   }
@@ -126,7 +166,11 @@ const executeAttempt = Effect.fn("DurableRun.attempt")(function* (
     })
     .pipe(
       Effect.catchDefect((defect) =>
-        Effect.logError("Step executor defect; operator intervention required", { runId }).pipe(
+        Effect.logError("Step executor defect; operator intervention required", {
+          runId,
+          attemptId: started.execution.attempt.id,
+          defect: defect instanceof Error ? defect.message : String(defect),
+        }).pipe(
           Effect.andThen(
             new DefectFailure({
               message: "The step executor crashed outside its typed failure channel",

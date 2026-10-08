@@ -27,6 +27,8 @@ export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/St
   parentModel: Schema.Option(ModelId),
   /** The newest pushed salvage of an earlier Attempt of this Run, which this Attempt's checkout resumes from. */
   resume: Schema.Option(SalvagePushed),
+  /** The Attempt was open when the orchestrator stopped and its parent task is still live: execution reattaches to it instead of starting it. */
+  reattach: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
 }) {}
 
 /** A reservation of one Worker's capacity for the length of an Attempt. Call `release` when the Attempt ends. */
@@ -39,6 +41,8 @@ export interface WorkerLease {
 export class StepExecutor extends Context.Service<
   StepExecutor,
   {
+    /** Whether the Attempt's parent task outlived an orchestrator restart, so its Run reattaches it instead of opening the next Attempt. */
+    readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
     /** Reconciles an old checkout before new Attempts start; records its salvage before releasing any work. */
     readonly recover: <E>(
       attempt: AttemptRecovery,
@@ -53,7 +57,7 @@ export class StepExecutor extends Context.Service<
     ) => Effect.Effect<void, AttemptFailure>;
     /** Waits for Worker capacity; the returned lease must be released after execution or cancellation. */
     readonly reserve: (submission: Submission) => Effect.Effect<WorkerLease, AttemptFailure>;
-    /** Runs the reserved Attempt, recording channel activity through `io`, and waits for its result. */
+    /** Runs the reserved Attempt, or reattaches to it when `execution.reattach` is set, recording channel activity through `io`, and waits for its result. */
     readonly execute: (
       execution: StepExecution,
       io: AttemptChannel.Sink,

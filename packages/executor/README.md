@@ -1,6 +1,6 @@
 # @usine/executor
 
-Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free package root defines Worker preflight, scoped Attempt preparation, and cancellation. Each prepared Attempt launches its own run host and releases its resources at completion or when its scope closes. It also owns the credential provider, Worker capability errors, and adapter-neutral request types.
+Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free package root defines Worker preflight, scoped Attempt preparation, and cancellation. Each prepared Attempt launches its Pi parent (in this process on the local Worker, in a one-shot run host on exe.dev) and releases its resources at completion or when its scope closes. It also owns the credential provider, Worker capability errors, and adapter-neutral request types.
 
 ## Attempt lifetime
 
@@ -24,7 +24,7 @@ Attempt releases its resources when the surrounding scope closes. Launch finishe
 cleanup before returning on success, failure, or interruption; closing the owner
 scope also stops a launch running in another fiber. Each Attempt launches at most
 once. Cleanup failures are logged without replacing a successful agent result with
-a retryable failure. Set `CheckoutRequest.maxAttemptMinutes` to bound live run-host
+a retryable failure. Set `CheckoutRequest.maxAttemptMinutes` to bound live
 execution; preparation and resource cleanup are outside that time budget. Both
 ceilings are optional; an absent one leaves that half of the runaway guard unarmed,
 and an armed one steers the parent session once at 80% of its limit.
@@ -47,11 +47,12 @@ of the bare revision; a missing ref falls back to the revision.
 acquisition, repository lock waits, and checkout creation. Cancellation stops
 preparation before releasing acquired resources and prevents a prepared Attempt from
 launching later. Both `cancel` and the canceled `prepare` or `launch` return only after
-those resources are released. Once the channel is live, cancellation sends the Cancel
-envelope and uses the configured grace period before forced termination. Repeated
-cancellation after release is a no-op.
+those resources are released. Once the Attempt is live, cancellation stops its session
+(the parent task's cancellation locally, the Cancel envelope on exe.dev) and uses the
+configured grace period before forced termination. Repeated cancellation after release
+is a no-op.
 
-Recognizable Effect log lines on run-host stdout are dropped with a warning that records safe shape metadata. Invalid JSON, schema-invalid frames, and protocol sequence violations still fail the Attempt.
+On exe.dev, recognizable Effect log lines on run-host stdout are dropped with a warning that records safe shape metadata. Invalid JSON, schema-invalid frames, and protocol sequence violations still fail the Attempt.
 
 This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prepared)`
 methods. Consumers supply a scope instead of coordinating cleanup. The engine's
@@ -59,7 +60,7 @@ methods. Consumers supply a scope instead of coordinating cleanup. The engine's
 
 ## Worker preflight
 
-Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpec` values before scheduling Attempts. Both adapters invoke `usine-run-host --preflight '<brain-json>'` on the Worker. The run host checks each selected harness’s executable and authentication; Codex requires supported CLI 0.144.0 or 0.153.4 and a ChatGPT login, Claude requires its CLI and subscription login, and Pi children require API keys for their selected models.
+Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpec` values before scheduling Attempts. The local adapter probes in its own process with `@usine/agents/preflight` (override with `LocalExecutorOptions.harnessReadiness`); the exe.dev adapter invokes `usine-run-host --preflight '<brain-json>'` on the VM. Both check each selected harness’s executable and authentication; Codex requires supported CLI 0.144.0 or 0.153.4 and a ChatGPT login, Claude requires its CLI and subscription login, and Pi children require API keys for their selected models.
 
 `prepare` repeats the assigned brain’s probe before acquiring credentials or creating a checkout. This checks roster changes and logouts after startup. A reported capability gap returns `WorkerCapabilityError` and requires operator action. Transport failures and probe timeouts remain infrastructure failures eligible for retry. Custom run hosts must implement the credential-free `HarnessReadiness` response from `@usine/core/agent/capability`.
 
@@ -69,17 +70,18 @@ This replaces exe.dev’s `HarnessLoginCheck` and `harnessLoginChecks` options. 
 
 The Node adapter at `@usine/executor/local` does the following for each Attempt:
 
-- checks Git, the installed run-host protocol, and the assigned harness before accepting work;
-- updates a per-repository bare cache, then creates a detached worktree at the resolved revision;
+- checks Git and the assigned harness before accepting work;
+- updates a per-repository bare cache, then creates a detached worktree at the resolved revision and records the Attempt's RunSpec beside the worktree's Git metadata;
 - renews repository credentials before expiry; Git reads an Attempt token file and `gh` reads its private `GH_CONFIG_DIR` on each invocation, so the salvage push at the end of a multi-hour Attempt uses the credential renewed last, and startup reconciliation issues a fresh one;
-- exchanges protocol-v7 envelopes with `@usine/run-host` over newline-delimited standard input and output, including immutable payload, agent context, child-session budget, and normalized session events;
-- interrupts cooperatively before a hard kill, then removes the worktree and wipes the credential.
+- runs the Attempt's Pi parent as a durable task in this process through `AttemptRuntime` (`@usine/durable`), passing the Attempt's environment: the allowlisted variables, the credential configuration, and `TURBO_CACHE_DIR`, never the orchestrator's own environment;
+- harvests commits and pull requests from the worktree with `@usine/core/step/harvest`, running `git` and `gh` in that same environment;
+- cancels the parent task before forced interruption, then removes the worktree and wipes the credential.
 
-`LocalExecutorOptions.runHost` can override the child command for another compatible host. The adapter otherwise launches the executable shipped by `@usine/run-host` and rejects a protocol-version mismatch during preflight.
+When the orchestrator stops while an Attempt runs, the parent task stays live in durable storage and the worktree stays on disk. After a restart, `recover` leaves a live open Attempt alone, `isLive` lets the engine reattach it, and `prepare` with `reattach` takes over the existing worktree with freshly issued credentials instead of checking out a new one. Every other end of an Attempt leaves no live parent task behind: a failure, a cancel, or a tripped ceiling cancels it, and recovery cancels the live task of an Attempt the engine already closed.
 
-The adapter sets `TURBO_CACHE_DIR` to `.usine/workers/<worker>/turbo` for the run host. Startup cache sweeps prune only the `*.git` cache directories the adapter itself creates under `repos/`; every other entry is skipped and logged at debug level, and each sweep ends with an info log of pruned, skipped, and failed counts.
+`TURBO_CACHE_DIR` points at `.usine/workers/<worker>/turbo`. Startup cache sweeps prune only the `*.git` cache directories the adapter itself creates under `repos/`; every other entry is skipped and logged at debug level, and each sweep ends with an info log of pruned, skipped, and failed counts.
 
-The local layer requires Effect `FileSystem`, `Path`, and `ChildProcessSpawner` services plus a `CredentialProvider`. Everything is 0.x, so APIs may change. Supply `effect` at the version pinned by the usine workspace.
+The local layer requires Effect `FileSystem`, `Path`, and `ChildProcessSpawner` services, a `CredentialProvider`, and an `AttemptRuntime`. Everything is 0.x, so APIs may change. Supply `effect` at the version pinned by the usine workspace.
 
 ## exe.dev Worker
 

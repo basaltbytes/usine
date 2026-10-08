@@ -51,7 +51,11 @@ import {
   RepositoryLabelProjectionWriter,
 } from "../../src/repository-label-projection/repository-label-projection.ts";
 import { Submission } from "../../src/engine/submission.ts";
-import { TranscriptSessionsQuery, TranscriptPageQuery } from "../../src/transcript.ts";
+import {
+  TranscriptAllQuery,
+  TranscriptSessionsQuery,
+  TranscriptPageQuery,
+} from "../../src/transcript.ts";
 import { InstanceDirectory } from "@usine/core/instance";
 import { RunReader } from "../../src/run-reader/run-reader.ts";
 import { RunStore } from "../../src/store/store.ts";
@@ -304,6 +308,76 @@ describe("run store", () => {
         assert.strictEqual(finished.run.state._tag, "Succeeded");
       }),
     ),
+  );
+
+  it.live(
+    "reattaches a live open Attempt after a restart and continues its transcript sequence",
+    () =>
+      withRunStore(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const runId = RunId.make("reattached");
+          yield* store.recordAndClaim(lifecycleSubmission, runId);
+          const first = yield* store.beginAttempt(runId, WorkerName.make("local"));
+          assert(first._tag === "AttemptStarted");
+          const attemptId = first.execution.attempt.id;
+          const session = new ParentSession({
+            id: AgentSessionId.make("parent"),
+            agent: testAgent.name,
+            brain: testAgent.brain,
+          });
+          const emit = (sequence: number, text: string) =>
+            store.appendTranscript(
+              "outbound",
+              new AttemptChannel.OutboundEnvelope({
+                version: AttemptChannel.PROTOCOL_VERSION,
+                attemptId,
+                sequence: AttemptChannel.Sequence.make(sequence),
+                sentAt: DateTime.makeUnsafe("2026-10-08"),
+                payload: new AttemptChannel.SessionEvent({
+                  event: new TextOutput({ session, text }),
+                }),
+              }),
+            );
+          yield* emit(1, "before the restart");
+          yield* emit(2, "last before the restart");
+          // The restarted workflow asks again for the open Attempt's parent task, still live.
+          const reattached = yield* store.beginAttempt(
+            runId,
+            WorkerName.make("local"),
+            Option.some(attemptId),
+          );
+          assert(reattached._tag === "AttemptStarted");
+          assert.strictEqual(reattached.execution.attempt.id, attemptId);
+          assert.strictEqual(reattached.execution.reattach, true);
+          yield* emit(2, "redelivered after the restart");
+          yield* emit(3, "after the restart");
+          const transcript = yield* store.transcript(new TranscriptAllQuery({ attemptId }));
+          assert.deepStrictEqual(
+            transcript.map(({ envelope }) =>
+              envelope.payload._tag === "SessionEvent" &&
+              envelope.payload.event._tag === "TextOutput"
+                ? [envelope.sequence, envelope.payload.event.text]
+                : [envelope.sequence, envelope.payload._tag],
+            ),
+            [
+              [1, "before the restart"],
+              [2, "last before the restart"],
+              [3, "after the restart"],
+            ],
+          );
+          yield* store.finishAttempt(
+            reattached.execution.attempt,
+            Result.succeed(new StepResult({ message: "finished after the restart", facts: [] })),
+          );
+          const finished = yield* store.snapshot(runId);
+          assert.strictEqual(finished.run.state._tag, "Succeeded");
+          assert.deepStrictEqual(
+            finished.attempts.map(({ id, number }) => [id, number]),
+            [[attemptId, 1]],
+          );
+        }),
+      ),
   );
 
   it.live("commits the failed state with the capped Attempt", () =>

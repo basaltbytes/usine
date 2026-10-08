@@ -85,13 +85,13 @@ export const logPreflightFailure = <A, R>(
         }),
   );
 
-/** Process command for a one-shot run host or a preflight capability probe. */
+/** Process command for a one-shot run host or its preflight capability probe on a remote Worker. */
 export interface RunHostCommand {
   readonly command: string;
   readonly args: ReadonlyArray<string>;
 }
 
-/** The repository, revision, and Agent task assigned to a Worker for one fresh Attempt checkout. */
+/** The repository, revision, and Agent task assigned to a Worker for one Attempt's checkout. */
 export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   "@usine/executor/CheckoutRequest",
 )({
@@ -113,6 +113,12 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   salvageRef: SalvageRef,
   /** The previous Attempt's pushed salvage to check out instead of the bare revision. */
   resume: Schema.Option(SalvagePushed),
+  /**
+   * The Attempt outlived an orchestrator restart and its parent task is still
+   * live: preparation takes over the checkout it already has instead of
+   * creating one, and launch reattaches to the running parent.
+   */
+  reattach: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
 }) {}
 
 /** One Attempt's disposable checkout directory. */
@@ -130,7 +136,7 @@ export class AttemptWorkspace extends Schema.Class<AttemptWorkspace>(
 
 /**
  * One prepared Attempt with a scoped checkout and repository access. Use it within
- * the scope that prepared it. Closing that scope stops any active run host before
+ * the scope that prepared it. Closing that scope stops any active session before
  * removing the checkout and releasing credentials, including when launch never starts.
  */
 export interface PreparedAttempt {
@@ -174,26 +180,30 @@ export class Executor extends Context.Service<
       record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
     ) => Effect.Effect<void, E | ExecutorError>;
     readonly kind: WorkerKind;
-    /** Verifies Git, the run host, and each rostered brain in the Worker environment; never installs tools or logs in. */
+    /** Whether the Attempt's parent task survived an orchestrator restart and can be reattached; always false where the parent runs in a one-shot run host. */
+    readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
+    /** Verifies Git, the run host where the Worker uses one, and each rostered brain in the Worker environment; never installs tools or logs in. */
     readonly preflight: (
       worker: WorkerName,
       brains: ReadonlyArray<BrainSpec>,
     ) => Effect.Effect<void, ExecutorError>;
     /**
-     * Verifies the assigned brain before acquiring a fresh Attempt in the caller's scope. Clone, fetch, and lock waits
+     * Verifies the assigned brain before acquiring the Attempt in the caller's scope. Clone, fetch, and lock waits
      * remain interruptible; partial preparation releases everything already acquired
-     * before reporting failure. Each request must identify a fresh Attempt.
+     * before reporting failure. Each request identifies a fresh Attempt, or a live one
+     * to reattach when `reattach` is set.
      */
     readonly prepare: (
       request: CheckoutRequest,
     ) => Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope>;
     /**
-     * Stops preparation and releases partial resources, or sends Cancel through a live
-     * channel with a grace period before forced termination. A canceled prepared
-     * Attempt cannot launch. Repeated cancellation after release is a no-op.
+     * Stops preparation and releases partial resources, or stops the live session
+     * (Cancel through the run host's channel, or the parent task's cancellation)
+     * with a grace period before forced termination. A canceled prepared Attempt
+     * cannot launch. Repeated cancellation after release is a no-op.
      */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
-    /** Delivers an attributed operator action through the active Attempt's channel. */
+    /** Delivers an attributed operator action to the active Attempt's live session. */
     readonly intervene: (
       attemptId: AttemptId,
       intervention: AttemptChannel.Intervention,

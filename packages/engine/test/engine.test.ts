@@ -19,6 +19,7 @@ import {
   Option,
   Path,
   Ref,
+  Schedule,
   Schema,
   Scope,
 } from "effect";
@@ -66,6 +67,7 @@ describe("durable run engine", () => {
             parentModel: Option.some(ModelId.make("openai/changed-parent")),
           });
           const executor = Layer.succeed(StepExecutor)({
+            isLive: () => Effect.succeed(false),
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
@@ -131,6 +133,7 @@ describe("durable run engine", () => {
         const delivered: Array<AttemptId> = [];
         const started = yield* Deferred.make<void>();
         const executor = Layer.succeed(StepExecutor)({
+          isLive: () => Effect.succeed(false),
           recover: () => Effect.void,
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
@@ -671,6 +674,68 @@ describe("durable run engine", () => {
     ),
   );
 
+  it.live("reattaches an in-flight Attempt whose parent task outlived the restart", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const executions = yield* Ref.make<ReadonlyArray<readonly [AttemptId, boolean]>>([]);
+        const live = yield* Ref.make<ReadonlySet<AttemptId>>(new Set());
+        const executor = Layer.succeed(StepExecutor)({
+          isLive: (attemptId) => Ref.get(live).pipe(Effect.map((ids) => ids.has(attemptId))),
+          recover: () => Effect.void,
+          intervene: () => Effect.void,
+          interrupt: () => Effect.void,
+          reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+          execute: (execution) =>
+            Ref.updateAndGet(executions, (seen) => [
+              ...seen,
+              [execution.attempt.id, execution.reattach] as const,
+            ]).pipe(
+              Effect.flatMap((seen) =>
+                seen.length === 1
+                  ? Ref.update(live, (ids) => new Set([...ids, execution.attempt.id])).pipe(
+                      Effect.andThen(Effect.never),
+                    )
+                  : Effect.succeed(stepResult("finished by the reattached parent")),
+              ),
+            ),
+        });
+        const runtime = engineLayer(directory, executor);
+
+        const firstScope = yield* Scope.make();
+        const firstEngine = Context.get(
+          yield* Scope.provide(Layer.build(runtime), firstScope),
+          RunEngine,
+        );
+        const accepted = yield* firstEngine.submit(submission({ number: 10 }));
+        assert(accepted._tag === "Claimed");
+        // The first execution never returns: the parent task is live when the runtime closes.
+        yield* Effect.repeat(Ref.get(executions), {
+          until: (seen) => seen.length === 1,
+          schedule: Schedule.spaced("10 millis"),
+        });
+        yield* Scope.close(firstScope, Exit.void);
+
+        const secondScope = yield* Scope.make();
+        const secondEngine = Context.get(
+          yield* Scope.provide(Layer.build(runtime), secondScope),
+          RunEngine,
+        );
+        const finished = yield* waitFor(
+          secondEngine,
+          accepted.runId,
+          ({ run }) => run.state._tag === "Succeeded",
+        );
+        const [started] = finished.attempts;
+        assert(started !== undefined && finished.attempts.length === 1);
+        assert.deepStrictEqual(yield* Ref.get(executions), [
+          [started.id, false],
+          [started.id, true],
+        ]);
+        yield* Scope.close(secondScope, Exit.void);
+      }),
+    ),
+  );
+
   it.live("drains an admitted Attempt and leaves queued and new work for restart", () =>
     withInstance((directory) =>
       Effect.scoped(
@@ -874,6 +939,7 @@ describe("durable run engine", () => {
         // A 0-capacity scheduler parks the run in `reserve` forever; only a
         // cancel that reaches the parked reservation ends it.
         const executor = Layer.succeed(StepExecutor)({
+          isLive: () => Effect.succeed(false),
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
