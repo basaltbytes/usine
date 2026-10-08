@@ -10,6 +10,13 @@ export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable
   worker: WorkerName,
   /** Absolute path of the Attempt's worktree on this machine. */
   cwd: Schema.NonEmptyString,
+  /**
+   * The only process environment the parent's children and every command they
+   * run may see: the Worker's allowlisted variables plus the Attempt's single-repo
+   * credential configuration (ADR 0011). The orchestrator's own environment,
+   * which holds the App private key, is never inherited.
+   */
+  environment: Schema.Record(Schema.String, Schema.String),
 }) {}
 
 /** What the parent said when it finished. Commits and pull requests are harvested by the executor afterwards. */
