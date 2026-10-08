@@ -1,5 +1,7 @@
 import {
+  type BashSpawnHook,
   createAgentSession,
+  createBashToolDefinition,
   DefaultResourceLoader,
   getAgentDir,
   ModelRuntime,
@@ -35,6 +37,12 @@ export interface PiSession {
 
 export interface PiStartOptions {
   readonly cwd: string;
+  /**
+   * The complete environment of every command the session's bash tool runs.
+   * None inherits this process's environment, which suits the run host and
+   * preflight because the executor already restricted it (ADR 0011).
+   */
+  readonly environment: Option.Option<Readonly<Record<string, string>>>;
   readonly extensions: ReadonlyArray<InlineExtension>;
   readonly model: Option.Option<ModelId>;
   readonly signal: AbortSignal;
@@ -67,6 +75,18 @@ export type PiStartResult =
       readonly pool: PiPool;
       readonly session: PiSession;
     };
+
+/**
+ * The bash tool of a session whose commands run with exactly `environment`,
+ * replacing what the tool would inherit; Pi's own `PI_*` variables are not added.
+ */
+export const environmentBashTool = (
+  cwd: string,
+  environment: Readonly<Record<string, string>>,
+): ReturnType<typeof createBashToolDefinition> => {
+  const exact: BashSpawnHook = (context) => ({ ...context, env: { ...environment } });
+  return createBashToolDefinition(cwd, { exposeSessionEnvironment: false, spawnHook: exact });
+};
 
 /** The parent works only through usine extensions; repository tools belong to the harness children. */
 export const piParentSessionToolPolicy = { noTools: "builtin" } as const;
@@ -120,10 +140,18 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       settingsManager,
       thinkingLevel: options.thinkingLevel,
     } as const;
+    // A custom tool replaces the built-in tool of the same name.
+    const environmentScopedSessionOptions = Option.match(options.environment, {
+      onNone: () => sessionOptions,
+      onSome: (environment) => ({
+        ...sessionOptions,
+        customTools: [environmentBashTool(options.cwd, environment)],
+      }),
+    });
     const toolScopedSessionOptions =
       options.toolMode === "orchestration"
-        ? { ...sessionOptions, ...piParentSessionToolPolicy }
-        : sessionOptions;
+        ? { ...environmentScopedSessionOptions, ...piParentSessionToolPolicy }
+        : environmentScopedSessionOptions;
     const { session } =
       selected === undefined
         ? await createAgentSession(toolScopedSessionOptions)

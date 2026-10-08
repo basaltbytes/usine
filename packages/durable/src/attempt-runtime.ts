@@ -41,7 +41,10 @@ export class AttemptRuntime extends Context.Service<
       request: AttemptRequest,
       io: AttemptChannel.Sink,
     ) => Effect.Effect<AttemptReport, AttemptFailure>;
-    /** Whether the Attempt's task is still open in durable storage, so a restart reattaches instead of starting over. */
+    /**
+     * Whether the Attempt is still open in durable storage, so a restart reattaches instead of starting over.
+     * Stays true until `execute` has relayed the terminal envelope, even when the task itself finished earlier.
+     */
     readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
     /** Applies an operator action to the live parent or one of its children; the result is recorded through the Attempt's sink. */
     readonly intervene: (

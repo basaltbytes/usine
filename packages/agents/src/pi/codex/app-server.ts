@@ -22,6 +22,11 @@ export interface CodexClient {
   readonly cwd: WorkingDirectory;
   /** None during preflight, before a child Session exists. */
   readonly sessionId: Option.Option<AgentSessionId>;
+  /**
+   * The complete environment of the app server and every command it runs.
+   * None inherits this process's environment, as preflight in the run host does.
+   */
+  readonly environment: Option.Option<Readonly<Record<string, string>>>;
 }
 
 export interface CodexNotification {
@@ -105,9 +110,10 @@ const disableRecursiveAgentsOverride = "features.multi_agent=false";
 
 export const codexAppServerCommand = (
   cwd: string,
+  environment: Option.Option<Readonly<Record<string, string>>>,
   stdin?: ChildProcess.CommandOptions["stdin"],
 ): ChildProcess.Command => {
-  const options: ChildProcess.CommandOptions = {
+  const inherited: ChildProcess.CommandOptions = {
     // Start outside the worktree so process startup cannot read
     // repository-owned config before thread trust is set.
     cwd: homedir(),
@@ -117,6 +123,14 @@ export const codexAppServerCommand = (
     detached: false,
     forceKillAfter: "5 seconds",
   };
+  const options = Option.match(environment, {
+    onNone: () => inherited,
+    onSome: (variables): ChildProcess.CommandOptions => ({
+      ...inherited,
+      env: { ...variables },
+      extendEnv: false,
+    }),
+  });
   return ChildProcess.make(
     "codex",
     [
@@ -152,7 +166,7 @@ const makeCodexAppServer = Effect.gen(function* () {
       const stderrTail = yield* Ref.make<ReadonlyArray<string>>([]);
       const handle = yield* spawner
         .spawn(
-          codexAppServerCommand(request.cwd, {
+          codexAppServerCommand(request.cwd, request.environment, {
             stream: Stream.fromQueue(input),
             endOnDone: true,
           }),

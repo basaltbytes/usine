@@ -35,6 +35,8 @@ export interface SubagentsExtensionOptions {
   readonly childBlocked: (session: ChildSession, error: AgentResultError) => Effect.Effect<void>;
   readonly cwd: WorkingDirectory;
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
+  /** The complete environment each child runs with; see `ChildRequest.environment`. */
+  readonly environment: Readonly<Record<string, string>>;
   readonly maxChildren: ChildSessionBudget;
   /** Called on every rejected spawn; the parent decides what a repeat means. */
   readonly onBudgetExceeded: (error: ChildSessionBudgetExceededError) => Effect.Effect<void>;
@@ -117,6 +119,7 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
     const request = new ChildRequest({
       session,
       cwd: options.cwd,
+      environment: options.environment,
       prompt: assembleChildPrompt({
         agent: options.agent.name,
         persona: options.agent.persona,

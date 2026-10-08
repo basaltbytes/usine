@@ -50,7 +50,7 @@ import {
   type PiStartOptions,
   type PiStartResult,
 } from "@usine/agents/pi";
-import { piParentSessionToolPolicy } from "../../src/pi/sdk.ts";
+import { environmentBashTool, piParentSessionToolPolicy } from "../../src/pi/sdk.ts";
 import { resolvePiPool } from "../../src/pi/authentication.ts";
 
 describe("Pi pool resolution", () => {
@@ -131,6 +131,7 @@ const agent = new Agent({
 
 describe("Pi child backend", () => {
   const childRequest = new ChildRequest({
+    environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     session: new ChildSession({
       id: AgentSessionId.make("pi-child-1"),
       parentId: AgentSessionId.make("parent-1"),
@@ -283,6 +284,7 @@ describe("Pi child backend", () => {
         );
         assert.deepStrictEqual(options?.model, Option.some(childRequest.session.brain.model));
         assert.strictEqual(options?.toolMode, "repository");
+        assert.deepStrictEqual(options?.environment, Option.some(childRequest.environment));
         assert.deepStrictEqual(
           events.map((event) => event._tag),
           ["SessionStarted", "TextOutput", "SessionFinished"],
@@ -338,6 +340,39 @@ describe("Pi child backend", () => {
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
     );
   });
+
+  it.effect("runs a child's bash commands with exactly its environment and nothing inherited", () =>
+    Effect.gen(function* () {
+      const directory = mkdtempSync(join(tmpdir(), "usine-pi-bash-"));
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => rmSync(directory, { force: true, recursive: true })),
+      );
+      const bash = environmentBashTool(directory, { PATH: "/usr/bin:/bin", USINE_ONLY: "yes" });
+      const result = yield* Effect.promise(() =>
+        bash.execute(
+          "call-1",
+          { command: "env" },
+          undefined,
+          undefined,
+          // SAFETY: without session variables the bash tool reads only the optional `cwd` of its context.
+          {} as ExtensionContext,
+        ),
+      );
+      const output = result.content.flatMap((part) => (part.type === "text" ? [part.text] : []));
+      const names = output
+        .join("\n")
+        .split("\n")
+        .flatMap((line) => (line.includes("=") ? [line.slice(0, line.indexOf("="))] : []));
+      assert(names.includes("USINE_ONLY"));
+      // The shell itself sets PWD, SHLVL, and _ for every command.
+      assert.deepStrictEqual(
+        names.filter(
+          (name) => !["PATH", "USINE_ONLY", "PWD", "OLDPWD", "SHLVL", "_"].includes(name),
+        ),
+        [],
+      );
+    }).pipe(Effect.scoped),
+  );
 
   it.effect("disposes a child session that resolves after launch interruption", () => {
     const delayed = delayedPiStart();
@@ -532,6 +567,7 @@ describe("Pi parent runtime", () => {
         assert.strictEqual(interrupted, true);
         assert.strictEqual(options?.extensions.length, 2);
         assert.strictEqual(options?.toolMode, "orchestration");
+        assert.deepStrictEqual(options?.environment, Option.none());
         assert.strictEqual(options?.thinkingLevel, "medium");
         const started = [...events][0];
         assert(started?._tag === "SessionStarted");

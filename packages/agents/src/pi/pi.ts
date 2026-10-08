@@ -6,6 +6,7 @@ import {
   SessionStarted,
 } from "@usine/core/agent/session";
 import { Deferred, Effect, Fiber, Layer, Option, Stream } from "effect";
+import { env } from "node:process";
 import { assemblePrompt } from "../prompt.ts";
 import {
   type AgentSessionError,
@@ -34,6 +35,16 @@ export {
   type PiStartOptions,
   type PiStartResult,
 } from "./sdk.ts";
+
+/**
+ * The run host's own environment, which the executor already restricted to
+ * the Worker's allowlist and the Attempt's credential configuration; its
+ * children receive exactly this.
+ */
+const runHostEnvironment = (): Readonly<Record<string, string>> =>
+  Object.fromEntries(
+    Object.entries(env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+  );
 
 const parentError = (
   operation: SessionOperationError["operation"],
@@ -97,6 +108,7 @@ const makePiChild = Effect.gen(function* () {
         (signal) =>
           sdk.start({
             cwd: request.cwd,
+            environment: Option.some(request.environment),
             extensions: [gate.extension],
             model: Option.some(request.session.brain.model),
             signal,
@@ -244,6 +256,7 @@ const makePiParent = Effect.gen(function* () {
         (signal) =>
           sdk.start({
             cwd: request.cwd,
+            environment: Option.none(),
             extensions: [
               gate.extension,
               subagentsExtension({
@@ -252,6 +265,7 @@ const makePiParent = Effect.gen(function* () {
                 childBlocked: channel.childBlocked,
                 cwd: request.cwd,
                 emit: channel.emit,
+                environment: runHostEnvironment(),
                 maxChildren: request.spec.maxChildren,
                 onBudgetExceeded: (error) =>
                   Deferred.succeed(childBudgetExceeded, error).pipe(Effect.asVoid),

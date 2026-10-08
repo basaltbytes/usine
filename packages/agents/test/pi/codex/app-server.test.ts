@@ -26,6 +26,7 @@ import {
 } from "../../../src/pi/codex/app-server.ts";
 
 const request = new ChildRequest({
+  environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
   session: new ChildSession({
     id: AgentSessionId.make("codex-child-1"),
     parentId: AgentSessionId.make("parent-1"),
@@ -134,6 +135,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
+            environment: Option.some(request.environment),
           });
           const first = yield* Effect.forkChild(connection.close);
           yield* Deferred.await(process.stdinClosed);
@@ -164,6 +166,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
+            environment: Option.some(request.environment),
           });
           return yield* Effect.flip(connection.close);
         }),
@@ -190,6 +193,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
+            environment: Option.some(request.environment),
           });
           const pending = yield* connection
             .request("steer", "turn/steer", {})
@@ -220,6 +224,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
+            environment: Option.some(request.environment),
           });
           const closing = yield* connection.close.pipe(Effect.result, Effect.forkChild);
           yield* Deferred.await(process.stdinClosed);
@@ -248,6 +253,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
+            environment: Option.some(request.environment),
           });
           const replied = yield* Effect.forkChild(connection.request("steer", "turn/steer", {}));
           const unanswered = yield* connection
@@ -275,10 +281,12 @@ describe("Codex app-server transport", () => {
   );
 
   it("starts outside the worktree with repository trust and recursive agents disabled", () => {
-    const command = codexAppServerCommand("/workspace/repo");
+    const command = codexAppServerCommand("/workspace/repo", Option.some(request.environment));
     assert.strictEqual(command._tag, "StandardCommand");
     if (command._tag !== "StandardCommand") return;
     assert.notStrictEqual(command.options.cwd, "/workspace/repo");
+    assert.deepStrictEqual(command.options.env, request.environment);
+    assert.strictEqual(command.options.extendEnv, false);
     assert.strictEqual(command.options.detached, false);
     assert.strictEqual(command.options.forceKillAfter, "5 seconds");
     assert.deepStrictEqual(command.args, [
@@ -291,6 +299,13 @@ describe("Codex app-server transport", () => {
     ]);
   });
 
+  it("inherits this process's environment only when no environment is given", () => {
+    const command = codexAppServerCommand("/workspace/repo", Option.none());
+    assert.strictEqual(command._tag, "StandardCommand");
+    if (command._tag !== "StandardCommand") return;
+    assert.strictEqual(command.options.env, undefined);
+  });
+
   it.effect("skips blank, malformed, and unknown-shaped lines instead of failing", () =>
     Effect.gen(function* () {
       const process = yield* fakeProcess;
@@ -300,6 +315,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
+            environment: Option.some(request.environment),
           });
           const pending = yield* Effect.forkChild(connection.request("launch", "initialize", {}));
           yield* awaitStdinLines(process, 1);
@@ -323,6 +339,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
+            environment: Option.some(request.environment),
           });
           const notifications = yield* Effect.forkChild(Stream.runHead(connection.notifications));
           yield* Queue.offer(process.stdout, line({ id: 9, method: "item/approval" }));
@@ -349,6 +366,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
+            environment: Option.some(request.environment),
           });
           yield* Queue.offer(process.stderr, encoder.encode("codex: no login found\n"));
           const pending = yield* Effect.forkChild(connection.request("launch", "initialize", {}));
@@ -379,6 +397,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
+            environment: Option.some(request.environment),
           });
           const pending = yield* Effect.forkChild(connection.request("launch", "initialize", {}));
           yield* awaitStdinLines(process, 1);
