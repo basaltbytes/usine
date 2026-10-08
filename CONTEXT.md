@@ -85,7 +85,7 @@ One try of a step on a worker. Retries are new attempts under the same step, nev
 _Avoid_: retry (the act; the record is an attempt)
 
 **Reattach**:
-The orchestrator continuing an open Attempt after a restart when its parent task is still live, preserving the Attempt's identity, number, and worktree without spending a retry. Applies to local Workers; a remote Worker's lost run-host connection remains an infrastructure failure eligible for capped retry as a new Attempt.
+The orchestrator continuing an open Attempt after a restart when its Pi parent's durable task is still live, preserving the Attempt's identity, number, and worktree without spending a retry. Applies to local Workers; a remote Worker's lost run-host connection remains an infrastructure failure eligible for capped retry as a new Attempt.
 _Avoid_: retry (starts a new Attempt), takeover (operator intervention in a live session)
 
 **Approval**:
