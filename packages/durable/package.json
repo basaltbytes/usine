@@ -1,0 +1,52 @@
+{
+  "name": "@usine/durable",
+  "version": "0.0.0",
+  "description": "The usine Pi parent on pi-durable storage: one durable conversation per Attempt, resumed after an orchestrator restart.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/basaltbytes/usine.git",
+    "directory": "packages/durable"
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./attempt-runtime": {
+      "types": "./dist/attempt-runtime.d.ts",
+      "default": "./dist/attempt-runtime.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-durable": "1.1.0",
+    "@usine/agents": "workspace:*",
+    "@usine/core": "workspace:*",
+    "typebox": "1.3.7"
+  },
+  "devDependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/vitest": "catalog:",
+    "@usine/tsconfig": "workspace:*",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.19"
+  }
+}

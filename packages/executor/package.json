@@ -37,7 +37,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@usine/core": "workspace:*"
+    "@usine/core": "workspace:*",
+    "@usine/durable": "workspace:*"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
