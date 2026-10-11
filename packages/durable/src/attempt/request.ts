@@ -12,7 +12,14 @@ const encodeStored = Schema.encodeSync(StoredRequest);
 const decodeStored = Schema.decodeUnknownEffect(StoredRequest);
 
 export const taskInput = (request: AttemptRequest): AttemptTaskInput =>
-  encodeStored(new StoredRequest({ spec: request.spec, worker: request.worker, cwd: request.cwd }));
+  encodeStored(
+    new StoredRequest({
+      spec: request.spec,
+      worker: request.worker,
+      cwd: request.cwd,
+      host: request.host,
+    }),
+  );
 
 /** Decodes a stored task input, typed or as a task record returns it; a malformed one is a defect, since only this package writes it. */
 export const storedRequestOf = (input: AttemptTaskInput | JsonValue) =>

@@ -11,6 +11,7 @@ import { RepositoryName, RepositoryRevision, safeSegment } from "@usine/core/rep
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { InstanceDirectory } from "@usine/core/instance";
+import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
 import { GitHubIntegration, IntegrationName } from "@usine/executor/exe-dev";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
@@ -61,7 +62,7 @@ const waitForSuccess = Effect.fn("ExeDevIntegration.waitForSuccess")(function* (
 });
 
 describe("live exe.dev Worker", () => {
-  it.live("runs one Attempt through the remote run host and persists its transcript", () =>
+  it.live("runs one Attempt with its children on the VM and persists its transcript", () =>
     Effect.gen(function* () {
       const settings = yield* Effect.all({
         worker: Config.string("USINE_EXE_DEV_INTEGRATION_WORKER"),
@@ -99,7 +100,10 @@ describe("live exe.dev Worker", () => {
             name: IntegrationName.make(settings.integration),
           }),
         ],
-      }).pipe(Layer.provide(alwaysHoldsLayer));
+      }).pipe(
+        Layer.provide(alwaysHoldsLayer),
+        Layer.provide(durableAttemptRuntimeLayer(instanceDirectory)),
+      );
 
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;
@@ -133,13 +137,20 @@ describe("live exe.dev Worker", () => {
         const transcript = yield* engine.transcript(
           new TranscriptAllQuery({ attemptId: attempt.id }),
         );
-        assert.deepStrictEqual(
-          transcript.map(({ direction, envelope }) => [direction, envelope.payload._tag]),
-          [
-            ["outbound", "Started"],
-            ["outbound", "SessionEvent"],
-            ["outbound", "Final"],
-          ],
+        const tags = transcript.map(({ direction, envelope }) => [
+          direction,
+          envelope.payload._tag,
+        ]);
+        assert.deepStrictEqual(tags.at(0), ["outbound", "Started"]);
+        assert.deepStrictEqual(tags.at(-1), ["outbound", "Final"]);
+        assert(
+          transcript.some(
+            ({ envelope }) =>
+              envelope.payload._tag === "SessionEvent" &&
+              envelope.payload.event._tag === "SessionStarted" &&
+              envelope.payload.event.session._tag === "ChildSession",
+          ),
+          "the parent must have delegated to a child on the VM",
         );
 
         const machines = yield* output("ssh", ["exe.dev", "ls", worker, "--json"]).pipe(

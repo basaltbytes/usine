@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
+import { LocalProcess } from "@usine/agents/child-host";
 import { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessReadiness, HarnessReady } from "@usine/core/agent/capability";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -36,7 +37,7 @@ const program = Effect.gen(function* () {
     const result = useStub
       ? new HarnessReady({ harness: brain.harness })
       : yield* Effect.promise(() => import("@usine/agents/preflight")).pipe(
-          Effect.flatMap(({ preflight }) => preflight(brain)),
+          Effect.flatMap(({ preflight }) => preflight(brain, new LocalProcess())),
           Effect.catchTag("HarnessUnavailableError", Effect.succeed),
         );
     const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(HarnessReadiness))(result);

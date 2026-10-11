@@ -4,6 +4,7 @@ import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capabil
 import { Deferred, Effect, Fiber, Layer, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { TestClock } from "effect/testing";
+import { LocalProcess, RemoteShell } from "../src/child-host.ts";
 import { CodexAppServer, type CodexConnection } from "../src/pi/codex/app-server.ts";
 import { PiSdk, type PiStartResult } from "../src/pi/sdk.ts";
 import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts";
@@ -12,6 +13,13 @@ import packageJson from "../package.json" with { type: "json" };
 const brain = (harness: BrainSpec["harness"]) =>
   new BrainSpec({ harness, model: ModelId.make("provider/model"), effort: "low" });
 const coder = brain("codex");
+const local = new LocalProcess();
+const remote = new RemoteShell({
+  ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
+  sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
+  destination: "worker.exe.xyz",
+});
+const overSsh = (line: string) => `ssh -o BatchMode=yes worker.exe.xyz -- ${line}`;
 const encoder = new TextEncoder();
 
 const commands = (
@@ -91,7 +99,7 @@ describe("worker harness readiness", () => {
     it.effect(`refuses a Codex ${result.capability} gap before any account request`, () => {
       const server = account(Effect.succeed(null));
       return Effect.gen(function* () {
-        const error = yield* verifyHarness(coder).pipe(Effect.flip);
+        const error = yield* verifyHarness(coder, local).pipe(Effect.flip);
         assert(error instanceof HarnessUnavailableError);
         assert.strictEqual(error.capability, result.capability);
         assert.strictEqual(server.opened(), 0);
@@ -113,11 +121,11 @@ describe("worker harness readiness", () => {
           return Effect.gen(function* () {
             if (auth.type === "chatgpt") {
               assert.deepStrictEqual(
-                yield* verifyHarness(coder),
+                yield* verifyHarness(coder, local),
                 new HarnessReady({ harness: "codex" }),
               );
             } else {
-              const error = yield* verifyHarness(coder).pipe(Effect.flip);
+              const error = yield* verifyHarness(coder, local).pipe(Effect.flip);
               assert(error instanceof HarnessUnavailableError);
               assert.strictEqual(error.capability, "login");
             }
@@ -143,7 +151,7 @@ describe("worker harness readiness", () => {
       const server = account(
         Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
       );
-      const pending = yield* verifyHarness(coder).pipe(
+      const pending = yield* verifyHarness(coder, local).pipe(
         Effect.flip,
         Effect.provide(
           commands({
@@ -171,11 +179,11 @@ describe("worker harness readiness", () => {
       return Effect.gen(function* () {
         if (auth.authMethod === "claude.ai") {
           assert.deepStrictEqual(
-            yield* verifyHarness(brain("claude")),
+            yield* verifyHarness(brain("claude"), local),
             new HarnessReady({ harness: "claude" }),
           );
         } else {
-          const error = yield* verifyHarness(brain("claude")).pipe(Effect.flip);
+          const error = yield* verifyHarness(brain("claude"), local).pipe(Effect.flip);
           assert(error instanceof HarnessUnavailableError);
           assert.strictEqual(error.capability, "login");
         }
@@ -219,11 +227,11 @@ describe("worker harness readiness", () => {
       return Effect.gen(function* () {
         if (pool === "apiKeys") {
           assert.deepStrictEqual(
-            yield* verifyHarness(brain("pi")),
+            yield* verifyHarness(brain("pi"), local),
             new HarnessReady({ harness: "pi" }),
           );
         } else {
-          const error = yield* verifyHarness(brain("pi")).pipe(Effect.flip);
+          const error = yield* verifyHarness(brain("pi"), local).pipe(Effect.flip);
           assert(error instanceof HarnessUnavailableError);
           assert.strictEqual(error.capability, "login");
         }
@@ -235,4 +243,56 @@ describe("worker harness readiness", () => {
       );
     });
   }
+
+  it.effect("checks Claude on a remote host through one SSH command per probe", () =>
+    Effect.gen(function* () {
+      assert.deepStrictEqual(
+        yield* verifyHarness(brain("claude"), remote),
+        new HarnessReady({ harness: "claude" }),
+      );
+    }).pipe(
+      Effect.provide(
+        commands({
+          [overSsh("exec 'claude' '--version'")]: { stdout: "2.1.296 (Claude Code)", exitCode: 0 },
+          [overSsh("exec 'claude' 'auth' 'status' '--json'")]: {
+            stdout: JSON.stringify({
+              loggedIn: true,
+              authMethod: "claude.ai",
+              apiProvider: "firstParty",
+            }),
+            exitCode: 0,
+          },
+        }),
+      ),
+      Effect.provide(account(Effect.succeed(null)).layer),
+      Effect.provide(unusedPi),
+    ),
+  );
+
+  it.effect(
+    "reports an unreachable remote host as an incomplete check, not a missing harness",
+    () =>
+      Effect.gen(function* () {
+        const error = yield* verifyHarness(brain("claude"), remote).pipe(Effect.flip);
+        assert.strictEqual(error._tag, "SessionOperationError");
+      }).pipe(
+        Effect.provide(
+          commands({ [overSsh("exec 'claude' '--version'")]: { stdout: "", exitCode: 255 } }),
+        ),
+        Effect.provide(account(Effect.succeed(null)).layer),
+        Effect.provide(unusedPi),
+      ),
+  );
+
+  it.effect("refuses Pi on a remote host without starting the SDK", () =>
+    Effect.gen(function* () {
+      const error = yield* verifyHarness(brain("pi"), remote).pipe(Effect.flip);
+      assert(error instanceof HarnessUnavailableError);
+      assert.strictEqual(error.message, "Pi children run only on local Workers");
+    }).pipe(
+      Effect.provide(commands({})),
+      Effect.provide(account(Effect.succeed(null)).layer),
+      Effect.provide(unusedPi),
+    ),
+  );
 });

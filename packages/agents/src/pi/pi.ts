@@ -9,6 +9,7 @@ import { Deferred, Effect, Fiber, Layer, Option, Stream } from "effect";
 import { env } from "node:process";
 import { assemblePrompt } from "../prompt.ts";
 import {
+  AgentResultError,
   type AgentSessionError,
   AgentRuntime,
   ChildBackend,
@@ -102,6 +103,16 @@ const makePiChild = Effect.gen(function* () {
         parentSessionId: request.session.parentId,
         sessionId: request.session.id,
       });
+      if (request.host._tag === "RemoteShell") {
+        yield* Effect.logError("Pi child refused a remote host", {
+          destination: request.host.destination,
+        });
+        return yield* new AgentResultError({
+          sessionId: Option.some(request.session.id),
+          message:
+            "Pi children run only on local Workers: their tools run in the orchestrator process, not on the Worker",
+        });
+      }
       yield* Effect.logInfo("Launching Pi child session");
       const gate = yield* piPauseGate;
       return yield* usePiStart(

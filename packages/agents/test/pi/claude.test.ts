@@ -4,6 +4,11 @@ import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import { Cause, Effect, Exit, Fiber, Layer, Option, Queue, Schema, Scope, Stream } from "effect";
 import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { type ChildHost, LocalProcess, RemoteShell } from "../../src/child-host.ts";
 import {
   AgentResultError,
   ChildBackend,
@@ -20,15 +25,19 @@ import {
   type ClaudeUserMessage,
 } from "../../src/pi/claude.ts";
 
+const RECORD_SSH = fileURLToPath(new URL("../fixtures/record-ssh.mjs", import.meta.url));
+
 const request = (
   model = "claude-sonnet-4-6",
   options?: { readonly harness?: Harness; readonly effort?: Effort },
+  host: ChildHost = new LocalProcess(),
 ) =>
   new ChildRequest({
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
+    host,
     session: new ChildSession({
-      id: AgentSessionId.make("child-1"),
-      parentId: AgentSessionId.make("parent-1"),
+      id: AgentSessionId.make("parent:attempt-1:child:1"),
+      parentId: AgentSessionId.make("parent:attempt-1"),
       agent: AgentName.make("developer"),
       brain: new BrainSpec({
         harness: "claude",
@@ -383,8 +392,63 @@ describe("Claude child backend", () => {
         assert.strictEqual(options?.persistSession, true);
         assert.deepStrictEqual(options?.settingSources, ["user"]);
         assert.deepStrictEqual(options?.env, request().environment);
+        assert.strictEqual(options?.spawnClaudeCodeProcess, undefined);
         const first = yield* Effect.promise(() => input![Symbol.asyncIterator]().next());
         assert.strictEqual(first.value?.message.content, "Implement the focused task.");
+      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect("starts Claude Code on a remote host as one SSH command", () => {
+    let options: ClaudeQueryOptions | undefined;
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: (_input, supplied) => {
+        options = supplied;
+        return scripted([{ type: "result", subtype: "success", result: "done" }]);
+      },
+    });
+    const record = join(mkdtempSync(join(tmpdir(), "usine-claude-ssh-")), "ssh.json");
+    const host = new RemoteShell({
+      ssh: { command: process.execPath, args: [RECORD_SSH] },
+      sshEnvironment: { RECORD_TO: record },
+      destination: "worker.exe.xyz",
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* (yield* ChildBackend).launch(request(undefined, undefined, host));
+        assert.strictEqual(options?.pathToClaudeCodeExecutable, "claude");
+        const spawn = options?.spawnClaudeCodeProcess;
+        assert(spawn !== undefined);
+        const child = spawn({
+          command: "claude",
+          args: ["--output-format", "stream-json"],
+          cwd: "/workspace/repo",
+          env: {
+            GH_HOST: "github.int.exe.xyz",
+            CLAUDE_CODE_ENTRYPOINT: "sdk-ts",
+            NODE_OPTIONS: undefined,
+          },
+          signal: new AbortController().signal,
+        });
+        const exitCode = yield* Effect.callback<number | null>((resume) => {
+          child.once("exit", (code) => resume(Effect.succeed(code)));
+        });
+        assert.strictEqual(exitCode, 0);
+        const spawned = Schema.decodeUnknownSync(
+          Schema.fromJsonString(
+            Schema.Struct({
+              argv: Schema.Array(Schema.String),
+              env: Schema.Record(Schema.String, Schema.String),
+            }),
+          ),
+        )(readFileSync(record, "utf8"));
+        assert.deepStrictEqual(spawned.argv, [
+          "worker.exe.xyz",
+          "--",
+          `cd '/workspace/repo' && export GH_HOST='github.int.exe.xyz' CLAUDE_CODE_ENTRYPOINT='sdk-ts' && sh -c 'printf %s "$$" > "$0" && exec "$@"' '/workspace/repo.child-1.pid' 'claude' '--output-format' 'stream-json'; code=$?; rm -f '/workspace/repo.child-1.pid'; exit "$code"`,
+        ]);
+        assert.strictEqual(spawned.env.RECORD_TO, record);
+        assert.strictEqual(spawned.env.HOME, undefined, "the SSH client inherits nothing");
       }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
     );
   });

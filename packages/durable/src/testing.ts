@@ -361,6 +361,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
                   spec: request.spec,
                   worker: request.worker,
                   cwd: request.cwd,
+                  host: request.host,
                 }),
             ),
           ),

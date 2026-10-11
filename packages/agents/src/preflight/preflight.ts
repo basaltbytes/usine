@@ -2,6 +2,7 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import { Effect, Option, Schema } from "effect";
 import { homedir } from "node:os";
+import type { ChildHost } from "../child-host.ts";
 import { SessionOperationError, WorkingDirectory } from "../runtime.ts";
 import { CodexAppServer, codexAppServerLive } from "../pi/codex/app-server.ts";
 import { initializeCodex, verifyCodexAccount } from "../pi/codex/account.ts";
@@ -20,10 +21,18 @@ const ClaudeAuthentication = Schema.Struct({
   apiProvider: Schema.String,
 });
 
-/** Verifies a rostered brain through supplied process and SDK services; starts no prompt. */
+/**
+ * Verifies a rostered brain where `host` runs children, through supplied
+ * process and SDK services; starts no prompt. Pi children run their tools in
+ * this process, so a remote host cannot run them.
+ */
 export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
-  function* (brain: BrainSpec) {
-    yield* Effect.annotateCurrentSpan({ harness: brain.harness, model: brain.model });
+  function* (brain: BrainSpec, host: ChildHost) {
+    yield* Effect.annotateCurrentSpan({
+      harness: brain.harness,
+      model: brain.model,
+      host: host._tag,
+    });
     const loginError = (message: string) =>
       new HarnessUnavailableError({
         harness: brain.harness,
@@ -32,7 +41,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
       });
     switch (brain.harness) {
       case "codex": {
-        const version = yield* probeCommand("codex", "binary", "codex", ["--version"]);
+        const version = yield* probeCommand(host, "codex", "binary", "codex", ["--version"]);
         if (!supportedCodexVersions.some((supported) => version === `codex-cli ${supported}`))
           return yield* new HarnessUnavailableError({
             harness: "codex",
@@ -46,6 +55,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
               cwd: WorkingDirectory.make(homedir()),
               sessionId: Option.none(),
               environment: Option.none(),
+              host,
             });
             yield* initializeCodex(connection);
             yield* verifyCodexAccount(connection, brain.model);
@@ -54,8 +64,8 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
         break;
       }
       case "claude": {
-        yield* probeCommand("claude", "binary", "claude", ["--version"]);
-        const response = yield* probeCommand("claude", "login", "claude", [
+        yield* probeCommand(host, "claude", "binary", "claude", ["--version"]);
+        const response = yield* probeCommand(host, "claude", "login", "claude", [
           "auth",
           "status",
           "--json",
@@ -70,7 +80,13 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
         break;
       }
       case "pi": {
-        // Pi is the SDK installed with this run host, not a separate CLI binary.
+        if (host._tag === "RemoteShell")
+          return yield* new HarnessUnavailableError({
+            harness: "pi",
+            capability: "binary",
+            message: "Pi children run only on local Workers",
+          });
+        // Pi is the SDK installed with this process, not a separate CLI binary.
         const sdk = yield* PiSdk;
         yield* usePiStart(
           (signal) =>
@@ -106,6 +122,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
     yield* Effect.logInfo("Worker harness verified", {
       harness: brain.harness,
       model: brain.model,
+      host: host._tag,
     });
     return new HarnessReady({ harness: brain.harness });
   },
@@ -133,6 +150,6 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
     ),
 );
 
-/** Checks only the requested brain using the worker user's configuration, without running a prompt or logging in. */
-export const preflight = (brain: BrainSpec) =>
-  verifyHarness(brain).pipe(Effect.provide(codexAppServerLive), Effect.provide(piSdkLive));
+/** Checks only the requested brain where `host` runs children, using the worker user's configuration, without running a prompt or logging in. */
+export const preflight = (brain: BrainSpec, host: ChildHost) =>
+  verifyHarness(brain, host).pipe(Effect.provide(codexAppServerLive), Effect.provide(piSdkLive));

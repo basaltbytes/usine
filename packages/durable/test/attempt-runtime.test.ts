@@ -4,8 +4,9 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure, RunawayFailure } from "@usine/core/attempt/failure";
-import { Context, Effect, Exit, Fiber, Layer } from "effect";
-import { AttemptRuntime } from "../src/attempt-runtime.ts";
+import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
+import { Context, Effect, Exit, Fiber, Layer, Option, Schema } from "effect";
+import { AttemptRuntime, StoredRequest } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
 import { layer as attemptRuntimeLayer } from "../src/attempt/runtime.ts";
 import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
@@ -42,6 +43,7 @@ describe("durable AttemptRuntime", () => {
         const child = yield* children.next;
         assert.deepStrictEqual(child.request.environment, workerEnvironment);
         assert.strictEqual(child.request.cwd, "/workspace/usine");
+        assert.deepStrictEqual(child.request.host, new LocalProcess());
         assert.match(child.request.prompt, /Fix the flaky test/u);
         assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
         yield* child.reply("Child fixed the test.");
@@ -349,6 +351,44 @@ describe("durable AttemptRuntime", () => {
       );
     }).pipe(Effect.scoped),
   );
+
+  it.live("stores the Attempt's child host and gives it to every child", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const host = new RemoteShell({
+        ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
+        sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
+        destination: "worker.exe.xyz",
+      });
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/11", 3, host);
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+        const child = yield* (yield* StubChildren).next;
+        assert.deepStrictEqual(child.request.host, host);
+        const stored = yield* runtime.request(request.spec.attemptId);
+        assert(Option.isSome(stored));
+        assert.deepStrictEqual(stored.value.host, host);
+        yield* child.reply("Done.");
+        yield* Fiber.join(execution);
+      }).pipe(
+        Effect.provide(
+          layer({ database, parent: [delegate("Fix the flaky test"), answer("Done.")] }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it("reads a request stored before child hosts existed as one whose children run here", () => {
+    const { spec, worker, cwd, host } = attemptRequest("run/step/12");
+    const { host: _host, ...withoutHost } = Schema.encodeSync(StoredRequest)(
+      new StoredRequest({ spec, worker, cwd, host }),
+    );
+    assert.deepStrictEqual(
+      Schema.decodeUnknownSync(StoredRequest)(withoutHost).host,
+      new LocalProcess(),
+    );
+  });
 
   it.live("cancels an Attempt bottom-up and settles its execute call", () =>
     Effect.gen(function* () {

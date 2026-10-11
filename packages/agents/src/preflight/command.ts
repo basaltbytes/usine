@@ -3,26 +3,43 @@ import { HarnessUnavailableError, type HarnessCapability } from "@usine/core/age
 import { Effect, Option, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { homedir } from "node:os";
+import { type ChildHost, sshArguments } from "../child-host.ts";
 import { SessionOperationError } from "../runtime.ts";
 
-/** Runs a bounded readiness command without retaining its potentially sensitive diagnostics. */
+/** OpenSSH exits with 255 when it cannot reach the remote machine or run the command there. */
+const SSH_FAILURE = 255;
+
+const probeProcess = (
+  host: ChildHost,
+  command: string,
+  args: ReadonlyArray<string>,
+): ChildProcess.Command => {
+  const options: ChildProcess.CommandOptions = { detached: false, forceKillAfter: "2 seconds" };
+  switch (host._tag) {
+    case "LocalProcess":
+      return ChildProcess.make(command, args, { ...options, cwd: homedir() });
+    case "RemoteShell":
+      return ChildProcess.make(host.ssh.command, sshArguments(host, { command, args }), {
+        ...options,
+        env: { ...host.sshEnvironment },
+        extendEnv: false,
+      });
+  }
+};
+
+/** Runs a bounded readiness command on `host` without retaining its potentially sensitive diagnostics. */
 export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
+  host: ChildHost,
   harness: Harness,
   capability: HarnessCapability,
   command: string,
   args: ReadonlyArray<string>,
 ) {
-  yield* Effect.annotateCurrentSpan({ harness, capability });
+  yield* Effect.annotateCurrentSpan({ harness, capability, host: host._tag });
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   return yield* Effect.scoped(
     Effect.gen(function* () {
-      const handle = yield* spawner.spawn(
-        ChildProcess.make(command, args, {
-          cwd: homedir(),
-          detached: false,
-          forceKillAfter: "2 seconds",
-        }),
-      );
+      const handle = yield* spawner.spawn(probeProcess(host, command, args));
       const [stdout, , exitCode] = yield* Effect.all(
         [
           handle.stdout.pipe(Stream.decodeText(), Stream.mkString),
@@ -31,6 +48,13 @@ export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
         ],
         { concurrency: "unbounded" },
       );
+      if (host._tag === "RemoteShell" && exitCode === SSH_FAILURE)
+        return yield* new SessionOperationError({
+          operation: "launch",
+          sessionId: Option.none(),
+          message: `Could not reach ${host.destination} to run ${command}`,
+          cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
+        });
       if (exitCode !== 0)
         return yield* new HarnessUnavailableError({
           harness,

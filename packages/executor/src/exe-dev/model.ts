@@ -1,6 +1,6 @@
 import { RepositoryName } from "@usine/core/repository";
 import { Schema, type Effect } from "effect";
-import type { RunHostCommand } from "../executor.ts";
+import type { SshCommand } from "../executor.ts";
 
 /** The name of one exe.dev edge-injected integration. */
 export const IntegrationName = Schema.String.check(
@@ -43,17 +43,15 @@ export const CredentialGrantMinutes = Schema.Int.check(Schema.isGreaterThanOrEqu
 );
 export type CredentialGrantMinutes = typeof CredentialGrantMinutes.Type;
 
-/** Repository access and run-host settings for the configured exe.dev Workers. */
+/** Repository access and SSH settings for the configured exe.dev Workers. */
 export interface ExeDevExecutorOptions {
   /** Existing native GitHub integrations, one per repository this Worker may receive. */
   readonly githubIntegrations: ReadonlyArray<GitHubIntegration>;
-  /** Installed in the baked image; defaults to the published worker executable. */
-  readonly runHost?: RunHostCommand;
-  /** Local SSH executable and its control-plane-only arguments. */
-  readonly ssh?: RunHostCommand;
+  /** Local SSH executable and its arguments, used for the lobby, VM commands, and every child. */
+  readonly ssh?: SshCommand;
   /** Length of each edge credential attachment, renewed at half this length for as long as the Attempt runs; independent of any Attempt ceiling. Defaults to 65 minutes. */
   readonly credentialGrantMinutes?: CredentialGrantMinutes;
-  /** Grace for delivering a stop request, then for the run host to exit; each wait is bounded separately. Defaults to 10 seconds. */
+  /** Grace for the parent task's cancellation, then for the Attempt to settle; each wait is bounded separately. Defaults to 10 seconds. */
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
 }
 

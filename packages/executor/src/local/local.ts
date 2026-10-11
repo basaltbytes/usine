@@ -1,7 +1,6 @@
 import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
-import { durableSessionFor } from "./durable-session.ts";
-import { agentsHarnessProbe } from "./harness-probe.ts";
+import { LocalProcess } from "@usine/agents/child-host";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
@@ -23,6 +22,7 @@ import {
 } from "effect";
 import { type ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { allowlistedEnvironment, collectCommand, requireSuccess } from "../child-command.ts";
+import { durableSessionFor } from "../durable-session.ts";
 import {
   type AttemptWorkspace,
   CheckoutRequest,
@@ -34,7 +34,11 @@ import {
   WorkerCapabilityError,
   type ExecutorOperation,
 } from "../executor.ts";
-import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
+import {
+  agentsHarnessProbe,
+  type HarnessProbe,
+  verifyHarnessReadiness,
+} from "../harness-preflight.ts";
 import { preparedAttemptsFor } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
@@ -92,7 +96,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const fetches = yield* keyedLockFor<RepositoryName>();
     const baseEnvironment = yield* allowlistedEnvironment(HOST_ENVIRONMENT_ALLOWLIST);
     const harnessReadiness =
-      options.harnessReadiness ?? agentsHarnessProbe(spawner, baseEnvironment);
+      options.harnessReadiness ?? agentsHarnessProbe(spawner, baseEnvironment, new LocalProcess());
     const repositoryUrl =
       options.repositoryUrl ??
       ((repository: RepositoryName): string => `https://github.com/${repository}.git`);
@@ -445,6 +449,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         workspace: prepared.workspace,
         launch: (io: AttemptChannel.Sink) =>
           session.launch(prepared.workspace, io, {
+            host: new LocalProcess(),
             environment,
             harvest: harvest(prepared.workspace, credential, environment),
             keepForReattach: prepared.keepForReattach,

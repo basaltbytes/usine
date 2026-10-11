@@ -1,11 +1,12 @@
+import type { ChildHost } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import { StepResult, type StepResultFact } from "@usine/core/step/result";
 import { type AttemptReport, AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Cause, Deferred, Effect, Exit, Fiber, Option, Ref, Result, type Scope } from "effect";
-import { type AttemptWorkspace, ExecutorOperationError } from "../executor.ts";
-import type { AttemptStop } from "../prepared-attempt.ts";
+import { type AttemptWorkspace, ExecutorOperationError } from "./executor.ts";
+import type { AttemptStop } from "./prepared-attempt.ts";
 
 interface ActiveAttempt {
   readonly worker: AttemptWorkspace["worker"];
@@ -18,8 +19,10 @@ interface ActiveAttempt {
   readonly settled: Deferred.Deferred<void>;
 }
 
-/** What launch needs from the Attempt's checkout: the environment its work runs in, the harvest once the parent finishes, and how to keep it for a reattachment. */
+/** What launch needs from the Attempt's checkout: where its children run, the environment its work runs in, the harvest once the parent finishes, and how to keep it for a reattachment. */
 export interface DurableCheckout {
+  /** The machine that holds the checkout, where the parent's children run. */
+  readonly host: ChildHost;
   /** The only environment the parent's children and the harvesting commands see (ADR 0011). */
   readonly environment: Record<string, string>;
   /** Collects the commits and pull requests the checkout holds. */
@@ -117,6 +120,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         attemptId,
         worker: prepared.worker,
         worktree: prepared.worktree,
+        childHost: checkout.host._tag,
       });
       const running = yield* runtime
         .execute(
@@ -124,6 +128,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
             spec,
             worker: prepared.worker,
             cwd: prepared.worktree,
+            host: checkout.host,
             environment: checkout.environment,
           }),
           io,

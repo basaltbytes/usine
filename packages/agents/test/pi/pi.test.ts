@@ -37,10 +37,12 @@ import {
   PoolUnavailableError,
   SessionOperationError,
   SessionResult,
+  toAttemptFailure,
   UnknownModelError,
   UnsupportedEffortError,
   WorkingDirectory,
 } from "@usine/agents/runtime";
+import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import {
   PiSdk,
   piChildBackendLayer,
@@ -132,6 +134,7 @@ const agent = new Agent({
 describe("Pi child backend", () => {
   const childRequest = new ChildRequest({
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
+    host: new LocalProcess(),
     session: new ChildSession({
       id: AgentSessionId.make("pi-child-1"),
       parentId: AgentSessionId.make("parent-1"),
@@ -289,6 +292,36 @@ describe("Pi child backend", () => {
           events.map((event) => event._tag),
           ["SessionStarted", "TextOutput", "SessionFinished"],
         );
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect("refuses a remote host before starting the Pi SDK", () => {
+    let started = false;
+    const sdk = Layer.succeed(PiSdk)({
+      start: () => {
+        started = true;
+        return Promise.resolve({ _tag: "UnknownModel" });
+      },
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const error = yield* Effect.flip(
+          (yield* PiChildBackend).launch(
+            new ChildRequest({
+              ...childRequest,
+              host: new RemoteShell({
+                ssh: { command: "ssh", args: [] },
+                sshEnvironment: {},
+                destination: "worker.exe.xyz",
+              }),
+            }),
+          ),
+        );
+        assert(error instanceof AgentResultError);
+        assert.match(error.message, /^Pi children run only on local Workers/u);
+        assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
+        assert.strictEqual(started, false);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
     );
   });

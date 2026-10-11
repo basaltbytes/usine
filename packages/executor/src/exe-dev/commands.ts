@@ -1,3 +1,4 @@
+import { RemoteShell, type RemoteInvocation, sshArguments } from "@usine/agents/child-host";
 import { Effect } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
@@ -6,13 +7,17 @@ import {
   requireSuccess,
   type CommandResult,
 } from "../child-command.ts";
-import type { ExecutorOperation, ExecutorOperationError, RunHostCommand } from "../executor.ts";
+import type { ExecutorOperation, ExecutorOperationError, SshCommand } from "../executor.ts";
 import type { SshDestination } from "./model.ts";
-import { shellCommand } from "./shell.ts";
+
+/** Where a remote command starts and what it exports on top of the VM's own environment. */
+export type RemoteContext = Pick<RemoteInvocation, "cwd" | "environment">;
 
 export interface ExeDevCommands {
   readonly environment: Record<string, string>;
-  readonly ssh: RunHostCommand;
+  readonly ssh: SshCommand;
+  /** The child host that runs an Attempt's children on this VM through the same SSH client. */
+  readonly childHost: (sshDest: SshDestination) => RemoteShell;
   readonly lobby: (
     operation: ExecutorOperation,
     args: ReadonlyArray<string>,
@@ -32,6 +37,7 @@ export interface ExeDevCommands {
     sshDest: SshDestination,
     command: string,
     args: ReadonlyArray<string>,
+    context?: RemoteContext,
   ) => Effect.Effect<string, ExecutorOperationError>;
 }
 
@@ -52,7 +58,7 @@ const SSH_ENVIRONMENT_ALLOWLIST = [
 ] as const;
 
 export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
-  configuredSsh?: RunHostCommand,
+  configuredSsh?: SshCommand,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const environment = yield* allowlistedEnvironment(SSH_ENVIRONMENT_ALLOWLIST);
@@ -62,6 +68,9 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     // of a silent park, so a lost VM fails the operation.
     args: ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4"],
   };
+
+  const childHost = (sshDest: SshDestination) =>
+    new RemoteShell({ ssh, sshEnvironment: environment, destination: sshDest });
 
   const executeRaw = Effect.fn("ExeDevExecutor.executeRaw")(function* (
     operation: ExecutorOperation,
@@ -106,27 +115,29 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     command: string,
     args: ReadonlyArray<string>,
   ): Effect.Effect<CommandResult, ExecutorOperationError> =>
-    executeRaw(operation, sshDest, ssh.command, [
-      ...ssh.args,
+    executeRaw(
+      operation,
       sshDest,
-      "--",
-      shellCommand(command, args),
-    ]);
+      ssh.command,
+      sshArguments(childHost(sshDest), { command, args }),
+    );
 
   const remote = (
     operation: ExecutorOperation,
     sshDest: SshDestination,
     command: string,
     args: ReadonlyArray<string>,
+    context: RemoteContext = {},
   ): Effect.Effect<string, ExecutorOperationError> =>
-    executeChecked(operation, sshDest, ssh.command, [
-      ...ssh.args,
+    executeChecked(
+      operation,
       sshDest,
-      "--",
-      shellCommand(command, args),
-    ]);
+      ssh.command,
+      sshArguments(childHost(sshDest), { ...context, command, args }),
+    );
 
   return {
+    childHost,
     environment,
     lobby,
     lobbyJson,

@@ -9,6 +9,7 @@ import {
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import { Option, Schema } from "effect";
+import { RemoteShell } from "../src/child-host.ts";
 import {
   AgentResultError,
   ChildRequest,
@@ -45,10 +46,18 @@ describe("agent runtime contract", () => {
         }),
       }),
       cwd: WorkingDirectory.make("/workspace/repo"),
+      host: new RemoteShell({
+        ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
+        sshEnvironment: { HOME: "/home/orchestrator" },
+        destination: "worker.exe.xyz",
+      }),
       prompt: "Implement the focused change.",
     });
 
-    assert.deepStrictEqual(Schema.decodeUnknownSync(ChildRequest)(request), request);
+    assert.deepStrictEqual(
+      Schema.decodeUnknownSync(ChildRequest)(Schema.encodeSync(ChildRequest)(request)),
+      request,
+    );
   });
 
   it("retries SDK trouble as infrastructure and parks everything else on the operator", () => {

@@ -4,7 +4,10 @@ import {
   type HookCallback,
   type SDKMessage,
   type SDKUserMessage,
+  type SpawnedProcess,
+  type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
+import { spawn } from "node:child_process";
 import { ModelId } from "@usine/core/agent/brain";
 import {
   AgentSessionEvent,
@@ -27,6 +30,12 @@ import {
   SessionOperationError,
   UnknownModelError,
 } from "../runtime.ts";
+import {
+  childPidFile,
+  type RemoteInvocation,
+  type RemoteShell,
+  sshArguments,
+} from "../child-host.ts";
 import { sessionChannel } from "./session.ts";
 import { sessionConversation } from "./conversation.ts";
 import { claudeTokenMeter } from "./usage.ts";
@@ -48,6 +57,7 @@ export type ClaudeQueryOptions = Pick<
   | "permissionMode"
   | "persistSession"
   | "settingSources"
+  | "spawnClaudeCodeProcess"
   | "thinking"
   | "hooks"
 >;
@@ -147,9 +157,43 @@ const operationError = (
     cause,
   });
 
-const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
+/**
+ * Starts Claude Code on the host's machine as one SSH command: the SDK's
+ * command, arguments, working directory, and whole environment become the
+ * remote command line, and its abort signal stops the SSH client.
+ */
+const sshSpawner =
+  (host: RemoteShell, pidFile: string, onStderr: (text: string) => void) =>
+  (options: SpawnOptions): SpawnedProcess => {
+    const invocation: RemoteInvocation = {
+      environment: options.env,
+      pidFile,
+      command: options.command,
+      args: options.args,
+    };
+    const child = spawn(
+      host.ssh.command,
+      sshArguments(
+        host,
+        options.cwd === undefined ? invocation : { ...invocation, cwd: options.cwd },
+      ),
+      {
+        env: { ...host.sshEnvironment },
+        signal: options.signal,
+        stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
+      },
+    );
+    child.stderr.setEncoding("utf8").on("data", onStderr);
+    return child;
+  };
+
+const optionsFor = (
+  request: ChildRequest,
+  onStderr: (text: string) => void,
+): ClaudeQueryOptions => {
   const effort = request.session.brain.effort;
-  const shared: Omit<ClaudeQueryOptions, "effort" | "thinking"> = {
+  const local: Omit<ClaudeQueryOptions, "effort" | "thinking"> = {
     allowDangerouslySkipPermissions: true,
     cwd: request.cwd,
     // Replaces the subprocess environment instead of extending this process's.
@@ -164,6 +208,17 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
     // credential, so only the worker user's settings apply.
     settingSources: ["user"],
   };
+  const shared =
+    request.host._tag === "RemoteShell"
+      ? {
+          ...local,
+          spawnClaudeCodeProcess: sshSpawner(
+            request.host,
+            childPidFile(request.cwd, request.session.id),
+            onStderr,
+          ),
+        }
+      : local;
   return effort === "off"
     ? { ...shared, thinking: { type: "disabled" } }
     : {
@@ -305,7 +360,14 @@ const makeClaudeChild = Effect.gen(function* () {
         return {};
       };
       const query = sdk.open(input, {
-        ...optionsFor(request),
+        ...optionsFor(request, (text) => {
+          Effect.runForkWith(context)(
+            Effect.logDebug("Claude child stderr", {
+              sessionId: request.session.id,
+              text: text.trimEnd(),
+            }),
+          );
+        }),
         hooks: {
           PreToolUse: [{ hooks: [pauseAtBoundary], timeout: 86_400 }],
           PostToolUse: [{ hooks: [pauseAtBoundary], timeout: 86_400 }],

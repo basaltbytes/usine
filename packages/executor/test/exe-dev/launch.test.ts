@@ -1,0 +1,321 @@
+import { assert, describe, it } from "@effect/vitest";
+import { RemoteShell } from "@usine/agents/child-host";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import * as AttemptChannel from "@usine/core/attempt/channel";
+import type { AttemptRequest } from "@usine/durable/attempt-runtime";
+import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
+import { Deferred, Effect, Fiber, Option } from "effect";
+import { TestClock } from "effect/testing";
+import { CheckoutRequest, Executor } from "../../src/executor.ts";
+import { CHILD_KILL_SCRIPT } from "../../src/exe-dev/shell.ts";
+import {
+  ATTEMPT_ID,
+  SSH_ENVIRONMENT_ALLOWLIST,
+  TEST_AGENT,
+  WORKER,
+  WORKTREE,
+  fakeSsh,
+  remoteLine,
+  request,
+  runtime,
+} from "./support.ts";
+
+const KILL_CHILDREN = `exec 'sh' '-c' '${CHILD_KILL_SCRIPT.replaceAll("'", `'"'"'`)}' 'sh' '${WORKTREE}'`;
+
+const recording = () => {
+  const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
+  const sink: AttemptChannel.Sink = {
+    salvage: () => Effect.void,
+    append: (direction, envelope) =>
+      Effect.sync(() => {
+        transcript.push([direction, envelope]);
+      }),
+  };
+  return { transcript, sink };
+};
+
+/** A parent that reports it started, then works until its task is canceled or this process stops. */
+const working =
+  (started: Deferred.Deferred<void>): StubParent =>
+  () =>
+    Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
+
+/** Runs the Attempt in one orchestrator process until that process stops mid-Attempt. */
+const stopMidAttempt = (ssh: ReturnType<typeof fakeSsh>, storage: StubStorage) =>
+  Effect.gen(function* () {
+    const started = yield* Deferred.make<void>();
+    yield* Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      const prepared = yield* executor.prepare(request);
+      const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      yield* Fiber.interrupt(launch);
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started), storage)));
+  });
+
+describe("exe.dev launch", () => {
+  it.effect(
+    "runs the parent in this process with the VM as the child host, then harvests and cleans up over SSH",
+    () => {
+      const ssh = fakeSsh();
+      const { transcript, sink } = recording();
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return completes(context);
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        assert.strictEqual(executor.kind, "exe.dev");
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        const prepared = yield* executor.prepare(request);
+        const result = yield* prepared.launch(sink);
+        assert.strictEqual(result.message, `Completed: ${request.task}`);
+        assert.deepStrictEqual(result.facts, []);
+        assert.deepStrictEqual(transcript.at(0)?.[1].payload._tag, "Started");
+        assert.deepStrictEqual(transcript.at(-1)?.[1].payload._tag, "Final");
+
+        assert(given !== undefined);
+        assert.strictEqual(given.cwd, WORKTREE);
+        assert.deepStrictEqual(given.spec, prepared.workspace.spec);
+        assert.deepStrictEqual(given.environment, { GH_HOST: "github.int.exe.xyz" });
+        assert(given.host instanceof RemoteShell);
+        assert.strictEqual(given.host.destination, "remote-one.exe.xyz");
+        assert.strictEqual(given.host.ssh.command, "ssh");
+        assert.include(given.host.ssh.args, "BatchMode=yes");
+        for (const name of Object.keys(given.host.sshEnvironment))
+          assert(SSH_ENVIRONMENT_ALLOWLIST.has(name), `unexpected SSH environment key: ${name}`);
+
+        const lines = ssh.state.commands.map(remoteLine);
+        const harvest = `cd '${WORKTREE}' && export GH_HOST='github.int.exe.xyz' && exec 'git' 'log' '--reverse' '--format=%H %s' '${prepared.workspace.spec.baseCommit}..HEAD'`;
+        assert.include(lines, harvest);
+        const stop = lines.indexOf(KILL_CHILDREN);
+        const remove = lines.findIndex((line) => line.includes("'worktree' 'remove'"));
+        assert(stop > lines.indexOf(harvest), "children are stopped once the parent finished");
+        assert(remove > stop, "the worktree is removed only after its children are stopped");
+
+        const commandLines = ssh.state.commands.map(({ args }) => args.join(" "));
+        assert(commandLines.some((line) => line.includes("integrations test usine-acme-demo")));
+        assert(
+          commandLines.some((line) =>
+            line.includes("integrations attach usine-acme-demo vm:remote-one --for 65m"),
+          ),
+        );
+        assert(
+          commandLines.some((line) => line.includes("https://github.int.exe.xyz/acme/demo.git")),
+        );
+        assert(
+          commandLines.some((line) => line.includes("'main;$(touch$IFS/tmp/usine-injected)'")),
+        );
+        assert(commandLines.some((line) => line.includes("integrations detach usine-acme-demo")));
+        assert(
+          !commandLines.some((line) => line.includes("attempts/abandoned-attempt")),
+          "unknown crash leftovers must stay untouched",
+        );
+        assert(
+          commandLines.some(
+            (line) => line.includes("repos/acme_demo.git") && line.includes("worktree' 'prune"),
+          ),
+          "the first prepare must prune crash-leftover cache registrations",
+        );
+        for (const command of ssh.state.commands) {
+          assert.strictEqual(command.options.extendEnv, false);
+          for (const name of Object.keys(command.options.env ?? {})) {
+            assert(SSH_ENVIRONMENT_ALLOWLIST.has(name), `unexpected SSH environment key: ${name}`);
+          }
+          if (command.args.includes("integrations")) assert(!command.args.includes("--json"));
+          const separator = command.args.indexOf("--");
+          if (separator >= 0) assert.strictEqual(command.args.slice(separator + 1).length, 1);
+        }
+        assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, parent)));
+    },
+  );
+
+  it.effect("cancels the parent task and stops its remote children through their pid files", () => {
+    const ssh = fakeSsh();
+    const started = Deferred.makeUnsafe<void>();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const prepared = yield* executor.prepare(request);
+      const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
+      const before = ssh.state.commands.length;
+      yield* executor.cancel(ATTEMPT_ID);
+      const failure = yield* Fiber.join(launch).pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "AgentFailure");
+      const lines = ssh.state.commands.slice(before).map(remoteLine);
+      const stop = lines.indexOf(KILL_CHILDREN);
+      assert(stop >= 0, "cancel must stop the remote children");
+      assert(lines.findIndex((line) => line.includes("'worktree' 'remove'")) > stop);
+      assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+      assert.strictEqual(
+        ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+        1,
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started))));
+  });
+
+  it.effect("stops a parent that runs past its wall-clock ceiling", () => {
+    const ssh = fakeSsh();
+    const started = Deferred.makeUnsafe<void>();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const prepared = yield* executor.prepare(
+        new CheckoutRequest({ ...request, maxAttemptMinutes: Option.some(1) }),
+      );
+      const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      yield* TestClock.adjust("1 minute");
+      const failure = yield* Fiber.join(launch).pipe(Effect.flip);
+      assert(failure._tag === "RunawayFailure");
+      assert.strictEqual(failure.ceiling, "wall-clock");
+      assert.include(ssh.state.commands.map(remoteLine), KILL_CHILDREN);
+      assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started))));
+  });
+
+  it.effect("delivers operator input to the live parent task", () => {
+    const ssh = fakeSsh();
+    const started = Deferred.makeUnsafe<void>();
+    const release = Deferred.makeUnsafe<void>();
+    const { transcript, sink } = recording();
+    const parent: StubParent = (context) =>
+      Deferred.succeed(started, undefined).pipe(
+        Effect.andThen(Deferred.await(release)),
+        Effect.andThen(completes(context)),
+      );
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const prepared = yield* executor.prepare(request);
+      const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
+      yield* Deferred.await(started);
+      yield* executor.intervene(
+        ATTEMPT_ID,
+        new AttemptChannel.Intervention({
+          operator: "Philippe",
+          target: new AttemptChannel.ParentTarget(),
+          action: new AttemptChannel.Steer({ message: "Use pnpm" }),
+        }),
+      );
+      yield* Deferred.succeed(release, undefined);
+      yield* Fiber.join(launch);
+      assert.deepStrictEqual(
+        transcript
+          .filter(([, envelope]) => envelope.payload._tag !== "SessionEvent")
+          .map(([direction, envelope]) => [direction, envelope.payload._tag]),
+        [
+          ["outbound", "Started"],
+          ["inbound", "Steer"],
+          ["outbound", "InterventionApplied"],
+          ["outbound", "Final"],
+        ],
+      );
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, parent)));
+  });
+
+  it.effect(
+    "reattaches after a restart and takes over the VM checkout with fresh credentials",
+    () => {
+      const ssh = fakeSsh();
+      const storage = new StubStorage();
+      return Effect.gen(function* () {
+        yield* stopMidAttempt(ssh, storage);
+        const lines = ssh.state.commands.map(remoteLine);
+        const stop = lines.indexOf(KILL_CHILDREN);
+        assert(stop >= 0, "a stopping process still stops the Attempt's remote children");
+        assert(
+          !lines
+            .slice(stop)
+            .some((line) => line.includes("'worktree' 'remove'") || line.startsWith("exec 'rm'")),
+          "the checkout stays on the VM for the reattachment",
+        );
+
+        const { transcript, sink } = recording();
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+          assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
+          const before = ssh.state.commands.length;
+          const prepared = yield* executor.prepare(
+            new CheckoutRequest({ ...request, reattach: true }),
+          );
+          const issued = ssh.state.commands.slice(before);
+          const lines = issued.map(remoteLine);
+          for (const fresh of ["'clone'", "'fetch'", "'worktree' 'add'"])
+            assert(!lines.some((line) => line.includes(fresh)), `reattach must not run ${fresh}`);
+          assert.include(lines, `exec 'test' '-d' '${WORKTREE}'`);
+          assert.include(lines, KILL_CHILDREN);
+          assert(issued.some(({ args }) => args.includes("attach")));
+          assert.strictEqual(prepared.workspace.worktree, WORKTREE);
+          const result = yield* prepared.launch(sink);
+          assert.strictEqual(result.message, `Completed: ${request.task}`);
+          assert(
+            transcript.some(
+              ([, envelope]) =>
+                envelope.payload._tag === "SessionEvent" &&
+                envelope.payload.event._tag === "TextOutput" &&
+                envelope.payload.event.text === "Resumed after a restart",
+            ),
+          );
+          assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
+      });
+    },
+  );
+
+  it.effect("fails the reattachment and cancels the parent task when its checkout is gone", () => {
+    const ssh = fakeSsh();
+    const storage = new StubStorage();
+    return Effect.gen(function* () {
+      yield* stopMidAttempt(ssh, storage);
+      ssh.state.worktreeGone = true;
+      yield* Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        const before = ssh.state.commands.length;
+        const error = yield* executor
+          .prepare(new CheckoutRequest({ ...request, reattach: true }))
+          .pipe(Effect.scoped, Effect.flip);
+        assert.strictEqual(error._tag, "ExecutorOperationError");
+        assert.strictEqual(error.message, "The checkout of the reattached Attempt is gone");
+        assert(!ssh.state.commands.slice(before).some(({ args }) => args.includes("attach")));
+        assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
+    });
+  });
+
+  it.effect("checks the roster on the VM and refuses login loss before preparation", () => {
+    const ssh = fakeSsh();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain, new BrainSpec({ ...TEST_AGENT.brain })]);
+      assert.strictEqual(
+        ssh.state.commands.filter((command) => remoteLine(command) === "exec 'claude' '--version'")
+          .length,
+        1,
+      );
+      ssh.state.claudeLoggedIn = false;
+      const error = yield* executor.prepare(request).pipe(Effect.scoped, Effect.flip);
+      assert(error._tag === "WorkerCapabilityError");
+      assert.strictEqual(error.capability, "harness-login");
+      assert(!ssh.state.commands.some((command) => command.args.includes("attach")));
+    }).pipe(Effect.provide(runtime(ssh.layer)));
+  });
+
+  it.effect("refuses a Pi roster brain, whose children cannot run on the VM", () => {
+    const ssh = fakeSsh();
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const error = yield* executor
+        .preflight(WORKER, [
+          new BrainSpec({ harness: "pi", model: ModelId.make("anthropic/claude"), effort: "low" }),
+        ])
+        .pipe(Effect.flip);
+      assert(error._tag === "WorkerCapabilityError");
+      assert.strictEqual(error.message, "Pi children run only on local Workers");
+    }).pipe(Effect.provide(runtime(ssh.layer)));
+  });
+});
