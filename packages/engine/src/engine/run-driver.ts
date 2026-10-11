@@ -71,7 +71,7 @@ export class RunDriver extends Context.Service<
       const crypto = yield* Crypto.Crypto;
       const loops = yield* FiberMap.make<RunId>();
 
-      // Typed up front: a loop's continuation launches the next Run's loop.
+      // Annotated because a loop's continuation calls launch again, which TypeScript cannot infer.
       const launch: RunDriver["Service"]["launch"] = Effect.fn("RunDriver.launch")(function* (
         runId: RunId,
         submission: Submission,
@@ -81,6 +81,7 @@ export class RunDriver extends Context.Service<
           yield* Effect.logDebug("The Run's loop already runs in this process", { runId });
           return;
         }
+        yield* Effect.logDebug("Starting the Run's loop", { runId });
         yield* FiberMap.run(
           loops,
           runId,
