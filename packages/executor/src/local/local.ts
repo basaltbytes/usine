@@ -1,3 +1,4 @@
+import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
@@ -143,21 +144,6 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         if (!(yield* fileSystem.exists(workersRoot))) return;
         const workers = yield* fileSystem.readDirectory(workersRoot);
         for (const worker of workers) {
-          const attemptsRoot = path.join(workersRoot, worker, "attempts");
-          if (yield* fileSystem.exists(attemptsRoot)) {
-            const leftovers = yield* fileSystem.readDirectory(attemptsRoot);
-            for (const leftover of leftovers) {
-              const target = path.join(attemptsRoot, leftover);
-              yield* Effect.logInfo(
-                "Preserving abandoned Attempt path for salvage reconciliation",
-                {
-                  worker,
-                  host: "local",
-                  worktree: target,
-                },
-              );
-            }
-          }
           const reposRoot = path.join(workersRoot, worker, "repos");
           if (yield* fileSystem.exists(reposRoot)) {
             const entries = yield* fileSystem.readDirectory(reposRoot);
@@ -216,6 +202,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       Effect.ignore,
     );
 
+    const workerLeftovers = yield* workerLeftoversFor(workersRoot);
+
     const recover = Effect.fn("LocalExecutor.recover")(function* <E>(
       attempt: AttemptRecovery,
       record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
@@ -223,6 +211,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* Effect.annotateCurrentSpan({ ...attempt, host: "local" });
       const root = path.join(workersRoot, attempt.worker);
       const worktree = path.join(root, "attempts", safeSegment(attempt.attemptId));
+      if (!(yield* workerLeftovers(attempt.worker)).has(worktree)) return;
       if (!(yield* fileSystem.exists(worktree))) return;
       const cache = path.join(root, "repos", cacheDirectoryName(attempt.repository));
       if (attempt.succeeded) {
