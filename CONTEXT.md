@@ -84,6 +84,10 @@ _Avoid_: stage, node, activity (the Effect mechanism underneath, not the domain 
 One try of a step on a worker. Retries are new attempts under the same step, never new runs; only typed infra errors retry automatically, capped — agent failures wait for the operator.
 _Avoid_: retry (the act; the record is an attempt)
 
+**Reattach**:
+The orchestrator continuing an open Attempt after a restart when its Pi parent's durable task is still live, preserving the Attempt's identity, number, and worktree without spending a retry. Applies to local Workers; a remote Worker's lost run-host connection remains an infrastructure failure eligible for capped retry as a new Attempt.
+_Avoid_: retry (starts a new Attempt), takeover (operator intervention in a live session)
+
 **Approval**:
 An operator's go-ahead for a run gated by its loop — recorded as an Event the waiting run consumes, not a flag.
 _Avoid_: confirmation, sign-off
@@ -125,19 +129,19 @@ The place an agent run executes — a machine with a checkout. Local process fir
 _Avoid_: runner, sandbox, executor (the seam may be named executor in code, but the concept is Worker)
 
 **Run host**:
-The one-shot usine process an executor launches on a worker for a single attempt — it hosts the run's Pi parent session and exits when the attempt ends. Its final message is the step result.
+The one-shot usine process an executor launches on a remote Worker for a single Attempt, hosting its Pi parent session and returning the Step result when it exits. A local Worker's Pi parent runs in the orchestrator as a durable task.
 _Avoid_: runner, daemon, worker process
 
 **Attempt channel**:
-The duplex channel between orchestrator and run host for one attempt — normalized events flowing out, session-addressed operator input (steer, interrupt, takeover messages) flowing in, as attempt-scoped framed messages. The byte transport underneath (stdio, SSH) never changes the messages.
+The duplex channel between the orchestrator and a remote Worker's run host for one Attempt: normalized events flowing out and session-addressed operator input (steer, interrupt, takeover messages) flowing in as attempt-scoped framed messages. The byte transport underneath never changes the messages.
 _Avoid_: stream (reserved for what a trigger watches), pipe, socket
 
 **Transcript**:
-The persisted flow of one attempt's channel events — the attempt's durable record, which the run drawer replays live or after the fact. Stored by the orchestrator; outlives the worker and the run host.
+The persisted flow of one Attempt's activity, which the run drawer replays live or after the fact, including Attempt channel events for remote Workers. The orchestrator stores this durable record beyond the Attempt's lifetime.
 _Avoid_: log, session history, output
 
 **Preflight**:
-The executor's verify-only readiness check of a worker — toolchain, run-host version, login state, attached credentials — failing with typed capability errors. It never installs; making a worker ready is out-of-band.
+The executor's verify-only readiness check of a Worker: toolchain, login state, attached credentials, and, for remote Workers, run-host and protocol versions, failing with typed capability errors. It never installs; making a Worker ready is out-of-band.
 _Avoid_: bootstrap, provisioning (that's the out-of-band act), health check
 
 **Agent**:
