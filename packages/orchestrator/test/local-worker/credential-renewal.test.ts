@@ -22,7 +22,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { stubAttemptRuntime, StubStorage } from "../support/attempt-runtime.ts";
+import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { LIVE_TEST_TIMEOUT, harnessReady, makeRemote, testAgent } from "./support.ts";
 
 it.effect(

@@ -46,7 +46,7 @@ import {
   stubAttemptRuntime,
   StubStorage,
   worksFor,
-} from "../support/attempt-runtime.ts";
+} from "@usine/durable/testing";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import { runView } from "../../src/operator/projection.ts";
 import {

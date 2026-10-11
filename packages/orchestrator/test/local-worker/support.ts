@@ -20,7 +20,7 @@ import type { HarnessProbe, LocalExecutorOptions } from "@usine/executor/local";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as localLayer } from "../../src/local.ts";
-import { stubAttemptRuntime, StubStorage } from "../support/attempt-runtime.ts";
+import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
 export const TOKEN = "one-attempt-test-token";

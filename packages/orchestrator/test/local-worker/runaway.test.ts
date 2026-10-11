@@ -16,7 +16,7 @@ import { Deferred, Effect, Fiber, FileSystem, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { layer as localLayer } from "../../src/local.ts";
 import { stepExecutorLayer } from "../../src/scheduler.ts";
-import { type StubParent, stubAttemptRuntime, StubStorage } from "../support/attempt-runtime.ts";
+import { type StubParent, stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import {
   LIVE_TEST_TIMEOUT,
