@@ -18,7 +18,8 @@ import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApiError } from "@usine/github/github-app";
 import { GitHubPolling } from "@usine/github/polling";
-import { DateTime, Effect, Layer, Option, Schema } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect";
+import { TestClock } from "effect/testing";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
@@ -113,6 +114,34 @@ describe("TriggerCondition", () => {
       );
       assert.strictEqual(holds, true);
     }).pipe(Effect.provide(layerWith(failingGitHub))),
+  );
+
+  it.effect("interrupts a hung snapshot and keeps the queued Event's turn after five seconds", () =>
+    Effect.gen(function* () {
+      const started = yield* Deferred.make<void>();
+      const interrupted = yield* Deferred.make<void>();
+      const github: GitHubPolling["Service"] = {
+        ...failingGitHub,
+        snapshot: () =>
+          Deferred.succeed(started, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(interrupted, undefined)),
+          ),
+      };
+      const fiber = yield* Effect.gen(function* () {
+        const condition = yield* TriggerCondition;
+        return yield* condition.holds(
+          submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
+        );
+      }).pipe(Effect.provide(layerWith(github)), Effect.forkChild);
+
+      yield* Deferred.await(started);
+      yield* TestClock.adjust("4 seconds");
+      assert.isUndefined(fiber.pollUnsafe());
+      yield* TestClock.adjust("1 second");
+      assert.strictEqual(yield* Fiber.join(fiber), true);
+      assert.isTrue(yield* Deferred.isDone(interrupted));
+    }),
   );
 
   it.effect("never re-fetches for a schedule Tick, which has no standing condition", () =>
