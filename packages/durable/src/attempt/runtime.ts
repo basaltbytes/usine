@@ -96,12 +96,29 @@ const makeAttemptRuntime = Effect.gen(function* () {
       ),
   );
 
+  // An aborted task is never live: only `cancel` aborts one, and every caller of `cancel` has the engine close the Attempt itself.
   const isLive = Effect.fn("AttemptRuntime.isLive")(
     function* (attemptId: AttemptId) {
       yield* Effect.annotateCurrentSpan({ attemptId });
       const record = yield* readRecord(durable, attemptId);
-      const live = record !== undefined && record.taskId !== null && !record.terminalRelayed;
-      yield* Effect.logDebug("Checked whether the Attempt is live", { attemptId, live });
+      if (record === undefined || record.taskId === null) {
+        yield* Effect.logDebug("The Attempt has no durable task; it is not live", { attemptId });
+        return false;
+      }
+      const taskId = record.taskId;
+      const task = yield* durable.use("read the Attempt task", (harness, context) =>
+        harness.getTask(taskId, context),
+      );
+      const outcome = task?.state.outcome?.status;
+      const live = task !== undefined && outcome !== "aborted" && !record.terminalRelayed;
+      yield* Effect.logDebug("Checked whether the Attempt is live", {
+        attemptId,
+        taskId,
+        status: task?.state.status,
+        outcome,
+        terminalRelayed: record.terminalRelayed,
+        live,
+      });
       return live;
     },
     Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),

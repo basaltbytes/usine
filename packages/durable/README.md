@@ -20,7 +20,7 @@ Building the layer installs the usine extension and resumes the harness's tasks.
 
 ## Running an Attempt
 
-`execute(request, io)` creates the Attempt's task, or finds it by Attempt id after a restart, and waits for its outcome. The Attempt id and the task id are committed together, so a crash never leaves a task that a later call cannot find. `isLive(attemptId)` is true from the first `execute` until the terminal envelope has been sent, so a restarted orchestrator reattaches instead of starting a new Attempt.
+`execute(request, io)` creates the Attempt's task, or finds it by Attempt id after a restart, and waits for its outcome. The Attempt id and the task id are committed together, so a crash never leaves a task that a later call cannot find. `isLive(attemptId)` is true from the first `execute` until the terminal envelope has been sent or the task is canceled, so a restarted orchestrator reattaches instead of starting a new Attempt.
 
 Everything reaches `io` as attempt channel envelopes: `Started` with the resolved parent model, `SessionEvent`s for the parent's committed entries and the children's events in the order they happened, `InterventionApplied` or `InterventionRejected` for operator input, and exactly one `Final`, `Failed`, or `Interrupted`. The next sequence is stored with the Attempt, so a reattached `execute` continues the numbering. Progress is committed once per parent entry, after all of its envelopes are appended, and once per other envelope: a crash before the commit relays the same envelopes again with the same sequences, which the transcript keeps once.
 

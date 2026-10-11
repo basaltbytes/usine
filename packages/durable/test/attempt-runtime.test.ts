@@ -3,7 +3,7 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { InfraFailure } from "@usine/core/attempt/failure";
+import { InfraFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import { Context, Effect, Exit, Fiber, Layer } from "effect";
 import { AttemptRuntime } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
@@ -127,6 +127,7 @@ describe("durable AttemptRuntime", () => {
         );
         yield* before.child.interrupted.pipe(Effect.timeout("5 seconds"));
         assert(before.found !== undefined);
+        const taskId = before.found.taskId;
 
         const after = yield* Effect.scoped(
           Effect.gen(function* () {
@@ -134,9 +135,16 @@ describe("durable AttemptRuntime", () => {
               layer({ database, parent: [answer("Finished after the restart.")] }),
             );
             const runtime = Context.get(services, AttemptRuntime);
+            const harness = Context.get(services, DurableHarness);
+            // The resumed task finishes before any execute call relays it.
+            const settled = yield* harness.use("wait for the resumed task", (opened, context) =>
+              opened.waitForTask(taskId, context),
+            );
+            assert.strictEqual(settled.state.outcome.status, "completed");
             assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
             const report = yield* runtime.execute(request, recording.sink);
-            const found = yield* turn(Context.get(services, DurableHarness));
+            assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
+            const found = yield* turn(harness);
             return { report, found };
           }),
         );
@@ -362,6 +370,31 @@ describe("durable AttemptRuntime", () => {
           recording.inbound().map(({ payload, operator }) => [payload._tag, operator]),
           [["Cancel", "engine"]],
         );
+        assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
+      }).pipe(Effect.provide(layer({ database, parent: [delegate("Fix the flaky test")] })));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("leaves no live Attempt once the executor canceled it after a failed relay", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/10");
+        // The sink fails the relay before its terminal envelope, as the runaway guard does at a ceiling.
+        const sink: AttemptChannel.Sink = {
+          append: (_direction, envelope) =>
+            envelope._tag === "OutboundEnvelope" &&
+            envelope.payload._tag === "SessionEvent" &&
+            envelope.payload.event._tag === "ToolStarted"
+              ? Effect.fail(new RunawayFailure({ ceiling: "tokens" }))
+              : Effect.void,
+          salvage: () => Effect.void,
+        };
+        const failure = yield* runtime.execute(request, sink).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "RunawayFailure");
+        assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+        yield* runtime.cancel(request.spec.attemptId);
         assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
       }).pipe(Effect.provide(layer({ database, parent: [delegate("Fix the flaky test")] })));
     }).pipe(Effect.scoped),

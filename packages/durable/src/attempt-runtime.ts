@@ -49,6 +49,7 @@ export class AttemptRuntime extends Context.Service<
     /**
      * Whether the Attempt is still open in durable storage, so a restart reattaches instead of starting over.
      * Stays true until `execute` has relayed the terminal envelope, even when the task itself finished earlier.
+     * A canceled task is never live.
      */
     readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
     /** The request the Attempt's task was created with, read back for a reattachment; none when the Attempt has no task. */
