@@ -17,7 +17,7 @@ const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
  * Item, using the Loops and registry of the loaded instance. The stored
  * projection is not enough: the Run that just closed may have changed the
  * Item after the poll that recorded the Event and before the next poll. A
- * check that cannot complete answers `true`, so the Run opens as it did
+ * check that fails or exceeds five seconds answers `true`, so the Run opens as it did
  * before the check existed; the next poll revokes it if the Item moved on.
  */
 export const triggerConditionLayer = (
@@ -91,7 +91,9 @@ export const triggerConditionLayer = (
             repository: submission.repository,
             itemKey: submission.itemKey,
           });
-          return yield* evaluate(submission);
+          // Bound the whole re-check so a stalled read cannot retain the closed
+          // Run's continuation and block the Item or an operator retry.
+          return yield* evaluate(submission).pipe(Effect.timeout("5 seconds"));
         },
         (effect, submission) =>
           Effect.catch(effect, (error) =>
@@ -99,7 +101,9 @@ export const triggerConditionLayer = (
               loop: submission.loop,
               repository: submission.repository,
               itemKey: submission.itemKey,
-              ...repositoryFailureLogFields(error),
+              ...(error._tag === "TimeoutError"
+                ? { errorTag: error._tag, message: "Trigger re-check exceeded five seconds" }
+                : repositoryFailureLogFields(error)),
             }).pipe(Effect.as(true)),
           ),
       );
