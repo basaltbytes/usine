@@ -209,6 +209,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       ...attempt,
       ref: salvageRefFor(runId, number),
       succeeded: outcome === "Succeeded",
+      open: outcome === "",
     }));
   });
 

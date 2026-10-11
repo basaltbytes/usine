@@ -1,0 +1,65 @@
+{
+  "name": "@usine/durable",
+  "version": "0.0.0",
+  "description": "The usine Pi parent on pi-durable storage: one durable conversation per Attempt, resumed after an orchestrator restart.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/basaltbytes/usine.git",
+    "directory": "packages/durable"
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./attempt-runtime": {
+      "types": "./dist/attempt-runtime.d.ts",
+      "default": "./dist/attempt-runtime.js"
+    },
+    "./harness": {
+      "types": "./dist/harness.d.ts",
+      "default": "./dist/harness.js"
+    },
+    "./live": {
+      "types": "./dist/live.d.ts",
+      "default": "./dist/live.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "default": "./dist/testing.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@earendil-works/chord": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-coding-agent": "1.1.0",
+    "@earendil-works/pi-durable": "1.1.0",
+    "@effect/platform-node": "catalog:",
+    "@usine/agents": "workspace:*",
+    "@usine/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@usine/tsconfig": "workspace:*",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  },
+  "engines": {
+    "node": ">=22.19"
+  }
+}

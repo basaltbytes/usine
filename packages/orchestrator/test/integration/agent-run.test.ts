@@ -41,6 +41,7 @@ import { PollingTriggers } from "../../src/polling-triggers.ts";
 import { triggerConditionLayer } from "../../src/trigger-condition.ts";
 import { BrainSpec } from "@usine/core/agent/brain";
 import { layer as localWorkerLayer } from "../../src/local.ts";
+import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
 
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
   Schema.decodeTo(Schema.Int.check(Schema.isGreaterThanOrEqualTo(1))),
@@ -199,7 +200,13 @@ const runtimeLayer = (
     {
       interruptGrace: "10 seconds",
     },
-  ).pipe(Layer.provide(credentials), Layer.provide(triggerCondition));
+  ).pipe(
+    Layer.provide(credentials),
+    Layer.provide(triggerCondition),
+    Layer.provide(
+      durableAttemptRuntimeLayer(runtimeDirectory).pipe(Layer.provide(NodeServices.layer)),
+    ),
+  );
   const labelWriter = GitHubLabelWriter.layer.pipe(
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),

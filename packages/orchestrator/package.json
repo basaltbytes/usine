@@ -79,11 +79,11 @@
     "@effect/platform-node": "catalog:",
     "@usine/config": "workspace:*",
     "@usine/core": "workspace:*",
+    "@usine/durable": "workspace:*",
     "@usine/engine": "workspace:*",
     "@usine/executor": "workspace:*",
     "@usine/expression": "workspace:*",
-    "@usine/github": "workspace:*",
-    "@usine/run-host": "workspace:*"
+    "@usine/github": "workspace:*"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

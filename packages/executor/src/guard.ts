@@ -122,20 +122,29 @@ const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   return { observe, watch };
 });
 
+/** One Attempt under its ceilings: the sink that meters it and the watch of its unsupervised time. */
+export interface AttemptGuard {
+  /** Appends through to the Attempt's sink; the append that reaches the token ceiling fails with `RunawayFailure`. */
+  readonly sink: AttemptChannel.Sink;
+  /** Fails with `RunawayFailure` when the wall-clock ceiling trips; never ends while that ceiling is unarmed. */
+  readonly tripped: Effect.Effect<never, RunawayFailure>;
+}
+
 /**
- * Enforces the Attempt ceilings that are configured: Holds pause elapsed
+ * Arms the Attempt ceilings that are configured: Holds pause elapsed
  * execution time; reported tokens continue accumulating. Each armed ceiling
  * sends the parent one warning steer at `WARNING_FRACTION` of its limit.
  * With no ceiling armed the Attempt runs on the channel untouched.
  */
-export const withAttemptGuard = <A>(
+export const attemptGuard = (
   limits: AttemptGuardLimits,
   io: AttemptChannel.Sink,
-  run: (sink: AttemptChannel.Sink) => Effect.Effect<A, AttemptFailure>,
-): Effect.Effect<A, AttemptFailure> => {
+): Effect.Effect<AttemptGuard> => {
   const wallClock = Option.map(limits.maxAttemptMinutes, (minutes) => ceiling(minutes * 60_000));
   const tokens = Option.map(limits.maxAttemptTokens, ceiling);
-  if (Option.isNone(wallClock) && Option.isNone(tokens)) return run(io);
+  if (Option.isNone(wallClock) && Option.isNone(tokens)) {
+    return Effect.succeed({ sink: io, tripped: Effect.never });
+  }
   return Effect.gen(function* () {
     const warn: Warn = (ceiling, message) =>
       Effect.logInfo("Warning the Attempt before its ceiling", {
@@ -167,9 +176,9 @@ export const withAttemptGuard = <A>(
       }),
       salvage: io.salvage,
     };
-    return yield* Option.match(clock, {
-      onNone: () => run(sink),
-      onSome: ({ watch }) => Effect.raceFirst(run(sink), watch),
-    });
+    return {
+      sink,
+      tripped: Option.match(clock, { onNone: () => Effect.never, onSome: ({ watch }) => watch }),
+    };
   });
 };

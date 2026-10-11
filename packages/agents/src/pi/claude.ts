@@ -42,6 +42,7 @@ export type ClaudeQueryOptions = Pick<
   | "allowDangerouslySkipPermissions"
   | "cwd"
   | "effort"
+  | "env"
   | "model"
   | "pathToClaudeCodeExecutable"
   | "permissionMode"
@@ -151,6 +152,8 @@ const optionsFor = (request: ChildRequest): ClaudeQueryOptions => {
   const shared: Omit<ClaudeQueryOptions, "effort" | "thinking"> = {
     allowDangerouslySkipPermissions: true,
     cwd: request.cwd,
+    // Replaces the subprocess environment instead of extending this process's.
+    env: { ...request.environment },
     model: request.session.brain.model,
     // Use the same worker-provisioned binary that readiness checks inspect.
     pathToClaudeCodeExecutable: "claude",

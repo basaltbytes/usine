@@ -13,6 +13,7 @@ import {
   Schedule,
   Stream,
 } from "effect";
+import { env } from "node:process";
 import {
   ChildRequest,
   type ChildBackendService,
@@ -50,6 +51,11 @@ const controlledChild = <A, E, R>(
       const running = yield* backend.launch(
         new ChildRequest({
           cwd: WorkingDirectory.make(cwd),
+          environment: Object.fromEntries(
+            Object.entries(env).filter(
+              (entry): entry is [string, string] => entry[1] !== undefined,
+            ),
+          ),
           session: new ChildSession({
             id: AgentSessionId.make(`${brain.harness}-live-child`),
             parentId: AgentSessionId.make(`${brain.harness}-live-parent`),

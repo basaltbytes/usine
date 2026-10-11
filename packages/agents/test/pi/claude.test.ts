@@ -25,6 +25,7 @@ const request = (
   options?: { readonly harness?: Harness; readonly effort?: Effort },
 ) =>
   new ChildRequest({
+    environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     session: new ChildSession({
       id: AgentSessionId.make("child-1"),
       parentId: AgentSessionId.make("parent-1"),
@@ -381,6 +382,7 @@ describe("Claude child backend", () => {
         assert.strictEqual(options?.allowDangerouslySkipPermissions, true);
         assert.strictEqual(options?.persistSession, true);
         assert.deepStrictEqual(options?.settingSources, ["user"]);
+        assert.deepStrictEqual(options?.env, request().environment);
         const first = yield* Effect.promise(() => input![Symbol.asyncIterator]().next());
         assert.strictEqual(first.value?.message.content, "Implement the focused task.");
       }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),

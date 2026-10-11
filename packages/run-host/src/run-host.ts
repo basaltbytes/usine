@@ -8,8 +8,8 @@ import {
 } from "@usine/agents/runtime";
 import { AgentSessionId } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { CommitSha, RepositoryRevision } from "@usine/core/repository";
-import { Commit, PullRequest, StepResult } from "@usine/core/step/result";
+import { harvestFacts } from "@usine/core/step/harvest";
+import { StepResult } from "@usine/core/step/result";
 import {
   DateTime,
   Effect,
@@ -41,14 +41,6 @@ const decodeInput = (line: string) =>
     onExcessProperty: "error",
   });
 const encodeOutput = Schema.encodeSync(Schema.fromJsonString(AttemptChannel.OutboundEnvelope));
-const PullRequestResponse = Schema.Struct({
-  number: PullRequest.fields.number,
-  url: Schema.URLFromString,
-  head: Schema.Struct({ sha: CommitSha }),
-}).pipe(Schema.encodeKeys({ url: "html_url" }));
-const decodePullRequestPages = Schema.decodeUnknownEffect(
-  Schema.fromJsonString(Schema.Array(Schema.Array(PullRequestResponse))),
-);
 
 const hostError = (stage: RunHostError["stage"], message: string, cause: unknown): RunHostError =>
   new RunHostError({ stage, message, cause });
@@ -163,80 +155,16 @@ export const runHost = Effect.fn("RunHost.run")(() =>
         );
       });
 
-      const harvestCommits = Effect.fn("RunHost.harvestCommits")(function* () {
-        const lines = yield* commandLines("git", [
-          "log",
-          "--reverse",
-          "--format=%H%x00%s",
-          `${spec.baseCommit}..HEAD`,
-        ]);
-        return yield* Effect.forEach(lines, (line) =>
-          Effect.gen(function* () {
-            const separator = line.indexOf("\u0000");
-            const sha = yield* Schema.decodeUnknownEffect(CommitSha)(
-              separator < 0 ? line : line.slice(0, separator),
-            ).pipe(
-              Effect.mapError((cause) =>
-                hostError("git", "git returned an invalid commit id", cause),
-              ),
-            );
-            const summary = separator < 0 ? "" : line.slice(separator + 1).trim();
-            if (summary.length === 0) {
-              return yield* hostError(
-                "git",
-                `Commit ${sha} has no summary`,
-                new Error("empty commit summary"),
-              );
-            }
-            return new Commit({ sha, summary });
-          }),
-        );
-      });
-
-      const harvestPullRequests = Effect.fn("RunHost.harvestPullRequests")(function* () {
+      const harvest = Effect.fn("RunHost.harvest")(function* () {
         yield* Effect.annotateCurrentSpan({
           attemptId: spec.attemptId,
           repository: spec.repository,
         });
-        const head = yield* Schema.decodeUnknownEffect(CommitSha)(
-          (yield* commandLines("git", ["rev-parse", "HEAD"])).join(""),
-        ).pipe(
-          Effect.mapError((cause) => hostError("git", "git returned an invalid final HEAD", cause)),
-        );
-        const branch = (yield* commandLines("git", ["branch", "--show-current"])).join("");
-        // Executors start detached. An unchanged default-branch Attempt has no
-        // PR candidate; a fixed revision, changed HEAD, or agent-created branch does.
-        if (
-          head === spec.baseCommit &&
-          spec.revision !== RepositoryRevision.make(spec.baseCommit) &&
-          branch === ""
-        ) {
-          yield* Effect.logDebug("No pull request candidate in the Attempt checkout");
-          return [];
-        }
-        const output = yield* commandLines("gh", [
-          "api",
-          `repos/${spec.repository}/commits/${head}/pulls?per_page=100`,
-          "--paginate",
-          "--slurp",
-        ]);
-        const pages = yield* decodePullRequestPages(output.join("\n")).pipe(
-          Effect.mapError((cause) =>
-            hostError("github", "GitHub returned invalid pull request results", cause),
+        return yield* harvestFacts(spec, commandLines).pipe(
+          Effect.catchTag("HarvestError", (error) =>
+            Effect.fail(hostError(error.stage, error.message, error.cause)),
           ),
         );
-        // Associated PRs can contain this commit as an ancestor. Record only
-        // PRs whose head is the checkout's final commit, once across all pages.
-        const facts = new Map<number, PullRequest>();
-        for (const pr of pages.flat()) {
-          if (pr.head.sha === head)
-            facts.set(pr.number, new PullRequest({ number: pr.number, url: pr.url }));
-        }
-        yield* Effect.logInfo("Collected Attempt pull request results", {
-          head,
-          pullRequests: [...facts.keys()],
-        });
-        return [...facts.values()];
       });
 
       // The parent and each live child are addressable by the id they report in
@@ -379,36 +307,11 @@ export const runHost = Effect.fn("RunHost.run")(() =>
           { concurrency: "unbounded" },
         ).pipe(Effect.onExit(() => routing.withPermits(1)(Effect.void)));
         // Successful and failed completions both wait for an in-flight receipt.
-        const commits = yield* harvestCommits();
-        const pullRequests = yield* harvestPullRequests().pipe(
-          Effect.timeout("10 seconds"),
-          // Result discovery is read-only enrichment after the agent completed.
-          // A GitHub outage must not automatically repeat already-pushed work.
-          Effect.catchTags({
-            RunHostError: (error) =>
-              Effect.logWarning(
-                "Pull request discovery failed; retaining the completed agent result",
-                {
-                  attemptId: spec.attemptId,
-                  repository: spec.repository,
-                  stage: error.stage,
-                  message: error.message,
-                },
-              ).pipe(Effect.as([])),
-            TimeoutError: () =>
-              Effect.logWarning(
-                "Pull request discovery timed out; retaining the completed agent result",
-                {
-                  attemptId: spec.attemptId,
-                  repository: spec.repository,
-                },
-              ).pipe(Effect.as([])),
-          }),
-        );
+        const facts = yield* harvest();
         return new AttemptChannel.Final({
           result: new StepResult({
             message: sessionResult.message,
-            facts: [...commits, ...pullRequests],
+            facts,
           }),
         });
       });

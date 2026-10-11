@@ -8,6 +8,7 @@ import { WorkerName } from "@usine/core/worker";
 import { Effect, FileSystem, Layer, Result } from "effect";
 import { CredentialProvider, Executor } from "@usine/executor";
 import { layer } from "@usine/executor/local";
+import { stubAttemptRuntime, StubStorage } from "../support/attempt-runtime.ts";
 
 const attempt = (worker: string, number: number) => ({
   attemptId: AttemptId.make(`closed/run/${number}`),
@@ -15,6 +16,7 @@ const attempt = (worker: string, number: number) => ({
   repository: RepositoryName.make("acme/demo"),
   ref: SalvageRef.make(`usine/salvage/closed/${number}`),
   succeeded: number % 2 === 0,
+  open: false,
 });
 
 const credentials = Layer.succeed(CredentialProvider)({
@@ -22,11 +24,9 @@ const credentials = Layer.succeed(CredentialProvider)({
 });
 
 const executorLayer = (root: string, fileSystem: FileSystem.FileSystem) =>
-  layer({
-    instanceDirectory: InstanceDirectory.make(root),
-    runHost: { command: "unused", args: [] },
-  }).pipe(
+  layer({ instanceDirectory: InstanceDirectory.make(root) }).pipe(
     Layer.provide(credentials),
+    Layer.provide(stubAttemptRuntime(new StubStorage())),
     Layer.provide(Layer.succeed(FileSystem.FileSystem)(fileSystem)),
   );
 

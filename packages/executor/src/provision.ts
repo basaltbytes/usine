@@ -66,49 +66,54 @@ export interface ProvisionedWorktree {
   readonly salvaged: Effect.Effect<Option.Option<AttemptSalvage>, AttemptFailure>;
   /** Installs durable recording before launch; cleanup keeps unrecorded salvage on disk. */
   readonly recordSalvage: (record: AttemptChannel.Sink["salvage"]) => Effect.Effect<void>;
+  /**
+   * Leaves the checkout untouched when the scope closes without success: the
+   * Attempt's parent task outlives this process and reattaches to it after a restart.
+   */
+  readonly keepForReattach: Effect.Effect<void>;
 }
 
-/**
- * The clone-to-worktree sequence every Executor shares: clone into a staging
- * sibling and promote it on success, so an interrupted clone never leaves a
- * half-initialized cache that later fetches would poison; then fetch the
- * requested revision and check out a detached worktree at the resolved commit,
- * or at the previous Attempt's salvage when the request resumes one. One
- * finalizer owns the exit: closing the scope with anything but a success exit
- * salvages a checked-out worktree before removing it, and a worktree whose
- * salvage did not preserve all work stays on disk.
- */
-export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(function* <
-  E extends Error,
->(options: ProvisionOptions<E>) {
-  const { layout, ops, request } = options;
-  yield* Effect.annotateCurrentSpan({
-    attemptId: request.attemptId,
-    worker: request.worker,
-    host: options.host,
-    repository: request.repository,
-  });
-  const checkedOut = yield* Ref.make(Option.none<CommitSha>());
-  const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>, AttemptFailure>();
-  const recorder = yield* Ref.make(Option.none<AttemptChannel.Sink["salvage"]>());
-  const cleanup = <A>(resource: string, effect: Effect.Effect<A, E>) =>
+interface ReleaseOptions<E> {
+  readonly request: CheckoutRequest;
+  readonly host: string;
+  readonly layout: Pick<WorkspaceLayout, "cache" | "worktree">;
+  readonly ops: Pick<WorkspaceOps<E>, "cacheExists" | "git" | "removePath">;
+}
+
+/** Runs one cleanup step, logging and dropping its failure so the remaining steps still release their resources. */
+const cleanupFor =
+  <E>(options: Pick<ReleaseOptions<E>, "request" | "host" | "layout">) =>
+  <A>(resource: string, effect: Effect.Effect<A, E>) =>
     effect.pipe(
       Effect.tapError((error) =>
         Effect.logError("Attempt cleanup operation failed", {
-          attemptId: request.attemptId,
-          worker: request.worker,
+          attemptId: options.request.attemptId,
+          worker: options.request.worker,
           host: options.host,
-          worktree: layout.worktree,
+          worktree: options.layout.worktree,
           resource,
           message: String(error),
         }),
       ),
       Effect.ignore,
     );
-  // Register before any filesystem mutation. This also covers failed worktree
-  // creation, which can leave both a directory and a bare-cache registration.
-  // The exit is the Attempt's: a success exit means the run host returned a
-  // Final result.
+
+/**
+ * Registers the one finalizer that owns an Attempt checkout's exit: closing the
+ * scope with anything but a success exit salvages a checked-out worktree before
+ * removing it, and a worktree whose salvage did not preserve all work stays on
+ * disk. `checkedOut` holds the checkout's base once a worktree exists.
+ */
+const registerRelease = Effect.fn("Executor.registerRelease")(function* <E extends Error>(
+  options: ReleaseOptions<E>,
+) {
+  const { layout, ops, request } = options;
+  const checkedOut = yield* Ref.make(Option.none<CommitSha>());
+  const salvaged = yield* Deferred.make<Option.Option<AttemptSalvage>, AttemptFailure>();
+  const recorder = yield* Ref.make(Option.none<AttemptChannel.Sink["salvage"]>());
+  const cleanup = cleanupFor(options);
+  const kept = yield* Ref.make(false);
+  // The exit is the Attempt's: a success exit means the Attempt delivered its result.
   yield* Effect.addFinalizer(
     Effect.fn("Executor.releaseWorktree")(function* (exit) {
       yield* Effect.annotateCurrentSpan({
@@ -117,6 +122,16 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         repository: request.repository,
         host: options.host,
       });
+      if (!Exit.isSuccess(exit) && (yield* Ref.get(kept))) {
+        yield* Deferred.succeed(salvaged, Option.none());
+        yield* Effect.logInfo("Leaving the checkout in place for the Attempt's reattachment", {
+          attemptId: request.attemptId,
+          worker: request.worker,
+          host: options.host,
+          worktree: layout.worktree,
+        });
+        return;
+      }
       const baseCommit = yield* Ref.get(checkedOut);
       const salvage =
         Option.isSome(baseCommit) && !Exit.isSuccess(exit)
@@ -198,6 +213,37 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
       }
     }),
   );
+  return {
+    checkedOut,
+    salvaged: Deferred.await(salvaged),
+    recordSalvage: (record: AttemptChannel.Sink["salvage"]) =>
+      Ref.set(recorder, Option.some(record)),
+    keepForReattach: Ref.set(kept, true),
+  };
+});
+
+/**
+ * The clone-to-worktree sequence every Executor shares: clone into a staging
+ * sibling and promote it on success, so an interrupted clone never leaves a
+ * half-initialized cache that later fetches would poison; then fetch the
+ * requested revision and check out a detached worktree at the resolved commit,
+ * or at the previous Attempt's salvage when the request resumes one. The
+ * checkout's release finalizer is registered before the first mutation.
+ */
+export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(function* <
+  E extends Error,
+>(options: ProvisionOptions<E>) {
+  const { layout, ops, request } = options;
+  yield* Effect.annotateCurrentSpan({
+    attemptId: request.attemptId,
+    worker: request.worker,
+    host: options.host,
+    repository: request.repository,
+  });
+  // Register before any filesystem mutation. This also covers failed worktree
+  // creation, which can leave both a directory and a bare-cache registration.
+  const release = yield* registerRelease(options);
+  const cleanup = cleanupFor(options);
   yield* ops.ensureRoots;
   yield* ops.removePath("prepare", layout.worktree);
   if (yield* ops.cacheExists) {
@@ -264,7 +310,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     layout.worktree,
     Option.match(resume, { onNone: () => baseCommit, onSome: ({ commit }) => commit }),
   ]);
-  yield* Ref.set(checkedOut, Option.some(baseCommit));
+  yield* Ref.set(release.checkedOut, Option.some(baseCommit));
   return {
     workspace: new AttemptWorkspace({
       worker: request.worker,
@@ -283,8 +329,43 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
       }),
       worktree: WorktreePath.make(layout.worktree),
     }),
-    salvaged: Deferred.await(salvaged),
-    recordSalvage: (record) => Ref.set(recorder, Option.some(record)),
+    salvaged: release.salvaged,
+    recordSalvage: release.recordSalvage,
+    keepForReattach: release.keepForReattach,
+  } satisfies ProvisionedWorktree;
+});
+
+export interface ReattachOptions<E> extends ReleaseOptions<E> {
+  /** The RunSpec the Attempt's parent started with, read back from its durable request. */
+  readonly spec: AttemptChannel.RunSpec;
+}
+
+/**
+ * Takes over the checkout an Attempt still holds after an orchestrator restart,
+ * for its reattachment: nothing is cloned, fetched, or checked out, and the
+ * same release as a fresh checkout salvages and removes it when the Attempt ends.
+ */
+export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function* <E extends Error>(
+  options: ReattachOptions<E>,
+) {
+  const { layout, request, spec } = options;
+  yield* Effect.annotateCurrentSpan({
+    attemptId: request.attemptId,
+    worker: request.worker,
+    host: options.host,
+    repository: request.repository,
+  });
+  const release = yield* registerRelease(options);
+  yield* Ref.set(release.checkedOut, Option.some(spec.baseCommit));
+  return {
+    workspace: new AttemptWorkspace({
+      worker: request.worker,
+      spec,
+      worktree: WorktreePath.make(layout.worktree),
+    }),
+    salvaged: release.salvaged,
+    recordSalvage: release.recordSalvage,
+    keepForReattach: release.keepForReattach,
   } satisfies ProvisionedWorktree;
 });
 

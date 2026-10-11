@@ -224,6 +224,7 @@ describe("exe.dev preparation", () => {
             worker: WORKER,
             ref: request.salvageRef,
             succeeded: false,
+            open: false,
           },
           (salvage) =>
             Effect.sync(() => {
@@ -271,6 +272,7 @@ describe("exe.dev preparation", () => {
             worker: WORKER,
             ref: request.salvageRef,
             succeeded: true,
+            open: false,
           },
           (salvage) => Effect.sync(() => void recorded.push(salvage)),
         );
@@ -302,6 +304,7 @@ describe("exe.dev preparation", () => {
             worker: WORKER,
             ref: SalvageRef.make(`usine/salvage/finished-run/${index + 1}`),
             succeeded,
+            open: false,
           },
           (salvage) => Effect.sync(() => void recorded.push(salvage)),
         );
@@ -334,6 +337,7 @@ describe("exe.dev preparation", () => {
               worker: WorkerName.make("decommissioned"),
               ref: SalvageRef.make(`usine/salvage/orphaned-run/${index}`),
               succeeded: index !== 2,
+              open: false,
             },
             () => Effect.void,
           )

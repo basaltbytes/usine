@@ -17,12 +17,17 @@ import {
 
 /** Owns durable transcript writes and bounded history/session reads on the caller's transaction. */
 export const transcriptQueries = (database: RunDatabaseClient) => {
+  /**
+   * Appends one envelope and reports whether it was new. A redelivered envelope,
+   * such as one a reattached parent task sends again after a restart, keeps the
+   * first stored copy; the per-direction channel sequence is its identity.
+   */
   const appendTranscript = Effect.fn("RunStoreQueries.appendTranscript")(function* (
     direction: AttemptChannel.Direction,
     envelope: AttemptChannel.Envelope,
     receivedAt: DateTime.Utc,
   ) {
-    yield* database
+    const inserted = yield* database
       .insert(attemptTranscripts)
       .values({
         attemptId: envelope.attemptId,
@@ -32,7 +37,9 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
         receivedAt: encodeDateTime(receivedAt),
       })
       .onConflictDoNothing()
+      .returning({ sequence: attemptTranscripts.sequence })
       .execute();
+    return inserted.length > 0;
   });
 
   const transcript = Effect.fn("RunStoreQueries.transcript")(function* (query: TranscriptQuery) {

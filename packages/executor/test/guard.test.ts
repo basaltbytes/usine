@@ -13,7 +13,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
 import { DateTime, Deferred, Effect, Fiber, Option, Queue, Result } from "effect";
 import { TestClock } from "effect/testing";
-import { type AttemptGuardLimits, withAttemptGuard } from "../src/guard.ts";
+import { type AttemptGuardLimits, attemptGuard } from "../src/guard.ts";
 
 const child = (id: string) =>
   new ChildSession({
@@ -37,7 +37,7 @@ const setup = (
       readonly envelope: AttemptChannel.OutboundEnvelope;
       readonly written: Deferred.Deferred<void, AttemptFailure>;
     }>();
-    const result = yield* withAttemptGuard(
+    const guard = yield* attemptGuard(
       {
         attemptId,
         ...ceilings,
@@ -51,19 +51,22 @@ const setup = (
           ),
       },
       { append: () => Effect.void, salvage: () => Effect.void },
-      (sink) =>
-        Effect.raceFirst(
-          Effect.forever(
-            Effect.gen(function* () {
-              const { envelope, written } = yield* Queue.take(inputs);
-              yield* sink
-                .append("outbound", envelope)
-                .pipe(Effect.onExit((exit) => Deferred.done(written, exit)));
-            }),
-          ),
-          Deferred.await(finished).pipe(Effect.as("finished" as const)),
-        ),
-    ).pipe(Effect.result, Effect.forkChild);
+    );
+    const attempt = Effect.raceFirst(
+      Effect.forever(
+        Effect.gen(function* () {
+          const { envelope, written } = yield* Queue.take(inputs);
+          yield* guard.sink
+            .append("outbound", envelope)
+            .pipe(Effect.onExit((exit) => Deferred.done(written, exit)));
+        }),
+      ),
+      Deferred.await(finished).pipe(Effect.as("finished" as const)),
+    );
+    const result = yield* Effect.raceFirst(attempt, guard.tripped).pipe(
+      Effect.result,
+      Effect.forkChild,
+    );
     let sequence = 0;
     const emit = (payload: AttemptChannel.OutboundPayload) =>
       Effect.gen(function* () {

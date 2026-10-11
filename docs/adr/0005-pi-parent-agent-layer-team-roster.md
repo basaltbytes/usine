@@ -19,3 +19,11 @@ Usine's agent layer is a single adapter: the in-process Pi SDK. Every run is a P
 ## Amendment (2026-09-03, #102)
 
 The Pi parent's reasoning effort is authored, not inherited. `settings.parent_effort` in `usine.yaml` sets the instance default and `parent_effort` in an agent file overrides it, the same two levels as the parent model. Unset keeps the original behavior: the parent runs at its child's effort. A parent model that cannot run the resolved effort fails the Attempt with a typed error before the session starts, instead of letting the SDK clamp the level.
+
+## Amendment (2026-10-08, #176)
+
+The subagents extension is now a pi-durable extension (`@usine/durable`), and the Pi parent runs in the orchestrator instead of a run host on the Worker. Each Attempt is a `usine.attempt` task that owns its parent conversation; the `subagent` tool is the parent's only tool, and pi-durable commits the conversation, every tool call's intent, and its running output before anything is shown. An orchestrator restart therefore resumes the Attempt from its last commit instead of failing it into a new Attempt.
+
+What did not change: the parent's model, effort, and billing-pool resolution, the child-session budget, the `[usine:blocked]` reports, and the three child backends. A child is still a vendor process the parent cannot replay, so the tool is declared not replay-safe: after a restart its call settles as interrupted with the output committed so far, and the parent model decides whether to delegate again. Resuming the vendor session by its recorded id is a later step.
+
+Two behaviours changed with the move. Every child and every command it runs now receives exactly the Attempt's environment, because the orchestrator's own environment holds the App private key ([ADR 0011](./0011-github-app-identity-scoped-worker-tokens.md)); the environment is never stored, so after a restart new children wait for the executor to supply it. Interrupting the parent aborts its current turn, children included, instead of gating its next tool call; the parent holds until operator guidance or a release starts its next turn ([ADR 0018](./0018-takeover-and-edit-and-retry.md)).

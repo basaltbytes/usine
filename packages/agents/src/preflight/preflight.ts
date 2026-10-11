@@ -45,6 +45,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
             const connection = yield* server.open({
               cwd: WorkingDirectory.make(homedir()),
               sessionId: Option.none(),
+              environment: Option.none(),
             });
             yield* initializeCodex(connection);
             yield* verifyCodexAccount(connection, brain.model);
@@ -75,6 +76,7 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
           (signal) =>
             sdk.start({
               cwd: homedir(),
+              environment: Option.none(),
               extensions: [],
               model: Option.some(brain.model),
               signal,

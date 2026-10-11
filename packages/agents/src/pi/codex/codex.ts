@@ -68,7 +68,11 @@ const makeCodexChild = Effect.gen(function* () {
         sessionId: request.session.id,
       });
       yield* Effect.logInfo("Launching Codex child session");
-      const client: CodexClient = { cwd: request.cwd, sessionId: Option.some(request.session.id) };
+      const client: CodexClient = {
+        cwd: request.cwd,
+        sessionId: Option.some(request.session.id),
+        environment: Option.some(request.environment),
+      };
       const connection = yield* appServer.open(client);
       yield* initializeCodex(connection);
       const pool = yield* verifyCodexAccount(connection, request.session.brain.model);

@@ -32,6 +32,13 @@ export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/Chil
   session: ChildSession,
   cwd: WorkingDirectory,
   prompt: Schema.NonEmptyString,
+  /**
+   * The complete environment of the child's process and every command it runs:
+   * the Worker's allowlisted variables plus the Attempt's credential
+   * configuration. Nothing is inherited from the process that launches the
+   * child (ADR 0011).
+   */
+  environment: Schema.Record(Schema.String, Schema.String),
 }) {}
 
 /** The final message a parent or child session returns. */

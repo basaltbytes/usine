@@ -92,7 +92,7 @@ const cancelError = (attemptId: AttemptId, cause: unknown) =>
     cause,
   });
 
-/** The run-host byte-channel session every process-backed Executor shares. */
+/** The run-host byte-channel session of an Executor whose Pi parent runs in a one-shot run host on the Worker (exe.dev). */
 export const runHostSessionFor: (options: RunHostSessionOptions) => Effect.Effect<RunHostSession> =
   Effect.fn("RunHostSession.for")(function* (options: RunHostSessionOptions) {
     const activeAttempts = yield* Ref.make(new Map<AttemptId, ActiveAttempt>());

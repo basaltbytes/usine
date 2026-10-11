@@ -22,7 +22,8 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { LIVE_TEST_TIMEOUT, RUN_HOST, makeRemote, testAgent } from "./support.ts";
+import { stubAttemptRuntime, StubStorage } from "../support/attempt-runtime.ts";
+import { LIVE_TEST_TIMEOUT, harnessReady, makeRemote, testAgent } from "./support.ts";
 
 it.effect(
   "renewed Git and gh credentials reach existing child environments and the salvage push after three hours",
@@ -60,9 +61,10 @@ it.effect(
       const runtime = localExecutorLayer({
         instanceDirectory: InstanceDirectory.make(root),
         repositoryUrl: () => remote,
-        runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
+        harnessReadiness: harnessReady,
       }).pipe(
         Layer.provide(credentials),
+        Layer.provide(stubAttemptRuntime(new StubStorage())),
         Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, capturing)),
       );
       yield* Effect.gen(function* () {

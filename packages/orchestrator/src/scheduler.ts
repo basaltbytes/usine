@@ -166,6 +166,7 @@ export const stepExecutorLayer = (
             attemptId: execution.attempt.id,
             runId: execution.run.id,
             worker: execution.attempt.worker,
+            reattach: execution.reattach,
           });
           const prepared = yield* executor
             .prepare(
@@ -184,6 +185,7 @@ export const stepExecutorLayer = (
                 parentEffort: resolveParentEffort(execution.agent, config.settings.parentEffort),
                 salvageRef: salvageRefFor(execution.run.id, execution.attempt.number),
                 resume: execution.resume,
+                reattach: execution.reattach,
               }),
             )
             .pipe(Effect.mapError(asAttemptFailure));
@@ -198,6 +200,7 @@ export const stepExecutorLayer = (
       return StepExecutor.of({
         execute,
         interrupt,
+        isLive: executor.isLive,
         reserve,
         intervene: executor.intervene,
         recover: (attempt, record) =>

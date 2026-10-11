@@ -11,12 +11,13 @@ import { RunEngine } from "@usine/engine/engine";
 import { CheckoutRequest, Executor } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { Cause, Effect, Exit, FileSystem, Layer, Option, Path } from "effect";
+import { stubAttemptRuntime, StubStorage, worksFor } from "../support/attempt-runtime.ts";
 import {
   LIVE_TEST_TIMEOUT,
-  RUN_HOST,
   STATE_POLL_ATTEMPTS,
   TOKEN,
   credentialLayer,
+  harnessReady,
   localRuntime,
   makeRemote,
   output,
@@ -33,56 +34,58 @@ describe("local worker salvage", () => {
   it.live(
     "salvages uncommitted work to the salvage ref when a live Attempt is canceled",
     () =>
-      withLocalEngine(["--stub-delay-ms", "5000"], ({ engine, instance, remote }) =>
-        Effect.gen(function* () {
-          const path = yield* Path.Path;
-          const fileSystem = yield* FileSystem.FileSystem;
-          const accepted = yield* engine.submit(submission(3));
-          assert.strictEqual(accepted._tag, "Claimed");
-          if (accepted._tag !== "Claimed") return;
-          const running = yield* waitFor(engine, accepted.runId, "Running");
-          const attempt = running.attempts[0];
-          assert(attempt !== undefined);
-          yield* waitForStarted(engine, attempt.id);
-          const attemptsDirectory = path.join(instance, ".usine", "workers", "local", "attempts");
-          const worktree = path.join(attemptsDirectory, attempt.id.replaceAll("/", "_"));
-          yield* fileSystem.writeFileString(path.join(worktree, "progress.md"), "half done\n");
-          yield* engine.cancel(accepted.runId);
-          yield* waitFor(engine, accepted.runId, "Canceled");
-          const salvaged = yield* waitForSalvage(engine, accepted.runId);
-          assert(salvaged._tag === "Pushed", "the canceled Attempt recorded no pushed salvage");
-          assert.strictEqual(salvaged.ref, `usine/salvage/${accepted.runId}/1`);
-          const pushed = (yield* output("git", [
-            "--git-dir",
-            remote,
-            "rev-parse",
-            `refs/heads/${salvaged.ref}`,
-          ])).trim();
-          assert.strictEqual(pushed, salvaged.commit);
-          const subject = (yield* output("git", [
-            "--git-dir",
-            remote,
-            "log",
-            "-1",
-            "--format=%s",
-            salvaged.commit,
-          ])).trim();
-          assert.strictEqual(subject, `wip(usine): salvage attempt ${attempt.id}`);
-          const files = (yield* output("git", [
-            "--git-dir",
-            remote,
-            "ls-tree",
-            "--name-only",
-            salvaged.commit,
-          ])).trim();
-          assert(files.includes("progress.md"));
-          let leftovers = yield* fileSystem.readDirectory(attemptsDirectory);
-          for (let poll = 0; leftovers.length > 0 && poll < STATE_POLL_ATTEMPTS; poll += 1) {
-            yield* Effect.sleep("10 millis");
-            leftovers = yield* fileSystem.readDirectory(attemptsDirectory);
-          }
-          assert.deepStrictEqual(leftovers, []);
-        }),
+      withLocalEngine(
+        { attemptRuntime: stubAttemptRuntime(new StubStorage(), worksFor(5_000)) },
+        ({ engine, instance, remote }) =>
+          Effect.gen(function* () {
+            const path = yield* Path.Path;
+            const fileSystem = yield* FileSystem.FileSystem;
+            const accepted = yield* engine.submit(submission(3));
+            assert.strictEqual(accepted._tag, "Claimed");
+            if (accepted._tag !== "Claimed") return;
+            const running = yield* waitFor(engine, accepted.runId, "Running");
+            const attempt = running.attempts[0];
+            assert(attempt !== undefined);
+            yield* waitForStarted(engine, attempt.id);
+            const attemptsDirectory = path.join(instance, ".usine", "workers", "local", "attempts");
+            const worktree = path.join(attemptsDirectory, attempt.id.replaceAll("/", "_"));
+            yield* fileSystem.writeFileString(path.join(worktree, "progress.md"), "half done\n");
+            yield* engine.cancel(accepted.runId);
+            yield* waitFor(engine, accepted.runId, "Canceled");
+            const salvaged = yield* waitForSalvage(engine, accepted.runId);
+            assert(salvaged._tag === "Pushed", "the canceled Attempt recorded no pushed salvage");
+            assert.strictEqual(salvaged.ref, `usine/salvage/${accepted.runId}/1`);
+            const pushed = (yield* output("git", [
+              "--git-dir",
+              remote,
+              "rev-parse",
+              `refs/heads/${salvaged.ref}`,
+            ])).trim();
+            assert.strictEqual(pushed, salvaged.commit);
+            const subject = (yield* output("git", [
+              "--git-dir",
+              remote,
+              "log",
+              "-1",
+              "--format=%s",
+              salvaged.commit,
+            ])).trim();
+            assert.strictEqual(subject, `wip(usine): salvage attempt ${attempt.id}`);
+            const files = (yield* output("git", [
+              "--git-dir",
+              remote,
+              "ls-tree",
+              "--name-only",
+              salvaged.commit,
+            ])).trim();
+            assert(files.includes("progress.md"));
+            let leftovers = yield* fileSystem.readDirectory(attemptsDirectory);
+            for (let poll = 0; leftovers.length > 0 && poll < STATE_POLL_ATTEMPTS; poll += 1) {
+              yield* Effect.sleep("10 millis");
+              leftovers = yield* fileSystem.readDirectory(attemptsDirectory);
+            }
+            assert.deepStrictEqual(leftovers, []);
+          }),
       ),
     LIVE_TEST_TIMEOUT,
   );
@@ -109,8 +112,11 @@ describe("local worker salvage", () => {
         const runtime = localExecutorLayer({
           instanceDirectory: InstanceDirectory.make(root),
           repositoryUrl: () => remote,
-          runHost: { command: process.execPath, args: [RUN_HOST, "--stub"] },
-        }).pipe(Layer.provide(credentialLayer));
+          harnessReadiness: harnessReady,
+        }).pipe(
+          Layer.provide(credentialLayer),
+          Layer.provide(stubAttemptRuntime(new StubStorage())),
+        );
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const request = new CheckoutRequest({
@@ -185,6 +191,7 @@ describe("local worker salvage", () => {
               repository: request.repository,
               ref: request.salvageRef,
               succeeded: false,
+              open: false,
             },
             (salvage) =>
               Effect.gen(function* () {
@@ -247,7 +254,11 @@ describe("local worker salvage", () => {
           '#!/bin/sh\necho "access revoked for $(cat "$USINE_GITHUB_TOKEN_FILE")" >&2\nexit 1\n',
           { mode: 0o755 },
         );
-        const runtime = () => localRuntime(instance, remote, ["--stub-delay-ms", "60000"]);
+        const storage = new StubStorage();
+        const runtime = () =>
+          localRuntime(instance, remote, {
+            attemptRuntime: stubAttemptRuntime(storage, worksFor(60_000)),
+          });
         const saved = yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
           const accepted = yield* engine.submit(submission(1));

@@ -29,6 +29,7 @@ import {
 } from "../../../src/runtime.ts";
 import {
   CodexAppServer,
+  type CodexClient,
   type CodexConnection,
   type CodexNotification,
 } from "../../../src/pi/codex/app-server.ts";
@@ -36,6 +37,7 @@ import { codexChildBackendLayer } from "../../../src/pi/codex/codex.ts";
 
 const request = (model = "gpt-5.6-terra", effort: Effort = "off") =>
   new ChildRequest({
+    environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     session: new ChildSession({
       id: AgentSessionId.make("codex-child-1"),
       parentId: AgentSessionId.make("parent-1"),
@@ -55,31 +57,34 @@ const connectionLayer = (
   notifications: ReadonlyArray<CodexNotification> = [],
   calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [],
   close: CodexConnection["close"] = Effect.void,
+  clients: Array<CodexClient> = [],
 ) =>
   Layer.succeed(CodexAppServer)({
-    open: () =>
-      Effect.succeed({
-        close,
-        notifications: Stream.fromIterable(notifications),
-        notify: (_operation, method, params) =>
-          Effect.sync(() => {
-            calls.push({ method, params });
-          }),
-        request: (_operation, method, params) =>
-          Effect.gen(function* () {
-            calls.push({ method, params });
-            const response = responses[method];
-            if (response === undefined) {
-              return yield* new SessionOperationError({
-                operation: "stream",
-                sessionId: Option.none(),
-                message: `Unexpected ${method}`,
-                cause: new Error(method),
-              });
-            }
-            return response;
-          }),
-      } satisfies CodexConnection),
+    open: (client) =>
+      Effect.sync(() => clients.push(client)).pipe(
+        Effect.as({
+          close,
+          notifications: Stream.fromIterable(notifications),
+          notify: (_operation, method, params) =>
+            Effect.sync(() => {
+              calls.push({ method, params });
+            }),
+          request: (_operation, method, params) =>
+            Effect.gen(function* () {
+              calls.push({ method, params });
+              const response = responses[method];
+              if (response === undefined) {
+                return yield* new SessionOperationError({
+                  operation: "stream",
+                  sessionId: Option.none(),
+                  message: `Unexpected ${method}`,
+                  cause: new Error(method),
+                });
+              }
+              return response;
+            }),
+        } satisfies CodexConnection),
+      ),
   });
 
 const successfulResponses = (
@@ -301,16 +306,23 @@ describe("Codex child backend", () => {
         params: { turn: { id: "turn-1", status: "completed", error: null } },
       },
     ];
+    const clients: Array<CodexClient> = [];
     const server = connectionLayer(
       successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
       notifications,
       calls,
+      Effect.void,
+      clients,
     );
 
     return Effect.scoped(
       Effect.gen(function* () {
         const backend = yield* CodexChildBackend;
         const running = yield* backend.launch(request());
+        assert.deepStrictEqual(
+          clients.map(({ environment }) => environment),
+          [Option.some(request().environment)],
+        );
         yield* running.steer("Check the test output.");
         yield* running.interrupt;
         const [events, result] = yield* Effect.all([

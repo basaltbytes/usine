@@ -46,6 +46,7 @@ const parent = new ParentSession({
     effort: "high",
   }),
 });
+const workerEnvironment = { HOME: "/home/worker", PATH: "/usr/bin:/bin" };
 // SAFETY: the owned subagent tool does not read ExtensionContext.
 const context = {} as ExtensionContext;
 
@@ -79,6 +80,7 @@ describe("owned Pi subagents extension", () => {
       backend: child,
       childBlocked: () => Effect.void,
       cwd: WorkingDirectory.make("/workspace/repo"),
+      environment: workerEnvironment,
       emit: (event) => Effect.sync(() => events.push(event)),
       maxChildren: ChildSessionBudget.make(4),
       onBudgetExceeded: () => Effect.void,
@@ -100,6 +102,7 @@ describe("owned Pi subagents extension", () => {
     assert.strictEqual(result.content[0]?.type, "text");
     assert.strictEqual(result.content[0]?.text, "child done");
     assert.strictEqual(childRequest?.session.parentId, parent.id);
+    assert.deepStrictEqual(childRequest?.environment, workerEnvironment);
     assert.match(childRequest?.prompt ?? "", /Implement focused TypeScript changes/u);
     assert.match(childRequest?.prompt ?? "", /— usine agent: developer/u);
     assert.deepStrictEqual(
@@ -152,6 +155,7 @@ describe("owned Pi subagents extension", () => {
           returned.push([session.id, error.message]);
         }),
       cwd: WorkingDirectory.make("/workspace/repo"),
+      environment: workerEnvironment,
       emit: (event) => Effect.sync(() => events.push(event)),
       maxChildren: ChildSessionBudget.make(4),
       onBudgetExceeded: () => Effect.void,
@@ -207,6 +211,7 @@ describe("owned Pi subagents extension", () => {
       backend: child,
       childBlocked: () => Effect.void,
       cwd: WorkingDirectory.make("/workspace/repo"),
+      environment: workerEnvironment,
       emit: () => Effect.void,
       maxChildren: ChildSessionBudget.make(1),
       onBudgetExceeded: (error) => Effect.sync(() => reported.push(error)),

@@ -17,6 +17,7 @@ import { childDispatcherLayer } from "../../src/pi/children.ts";
 
 const request = (harness: Harness) =>
   new ChildRequest({
+    environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
     session: new ChildSession({
       id: AgentSessionId.make(`child-${harness}`),
       parentId: AgentSessionId.make("parent-1"),

@@ -43,4 +43,6 @@ export interface AttemptRecovery {
   readonly ref: SalvageRef;
   /** The Attempt delivered its result, so a leftover checkout is removed rather than salvaged. */
   readonly succeeded: boolean;
+  /** The Attempt has no outcome yet: an orchestrator restart may reattach it if its parent task is still live. */
+  readonly open: boolean;
 }

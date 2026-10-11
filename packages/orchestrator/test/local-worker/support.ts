@@ -13,22 +13,28 @@ import type { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
+import { HarnessReady } from "@usine/core/agent/capability";
+import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { CredentialProvider, WorkerCredential } from "@usine/executor";
+import type { HarnessProbe, LocalExecutorOptions } from "@usine/executor/local";
 import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { fileURLToPath } from "node:url";
 import { layer as localLayer } from "../../src/local.ts";
+import { stubAttemptRuntime, StubStorage } from "../support/attempt-runtime.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
-export const RUN_HOST = fileURLToPath(new URL("../../../run-host/dist/bin.js", import.meta.url));
 export const TOKEN = "one-attempt-test-token";
 // Each live transition crosses real git worktree and child-process boundaries.
 // The 10-second poll horizon absorbs slow CI hosts, and the 10 ms cadence still
 // reports the last durable state when a transition stalls.
 export const STATE_POLL_ATTEMPTS = 1_000;
-// The capacity test completes three sequential run-host lifecycles, so its
+// The capacity test completes three sequential Attempt lifecycles, so its
 // per-test ceiling must cover more than one state-poll horizon plus cleanup.
 export const LIVE_TEST_TIMEOUT = 30_000;
+
+/** Reports every brain ready without probing the machine's harness CLIs. */
+export const harnessReady: HarnessProbe = (brain) =>
+  Effect.succeed(new HarnessReady({ harness: brain.harness }));
 
 export const testAgent = new Agent({
   name: AgentName.make("developer"),
@@ -139,7 +145,7 @@ export const waitFor = Effect.fn("test.waitFor")(function* (
   );
 });
 
-/** Waits until the run host has acknowledged the Attempt, so its worktree is checked out and in use. */
+/** Waits until the parent task has reported Started, so the Attempt's worktree is checked out and in use. */
 export const waitForStarted = Effect.fn("test.waitForStarted")(function* (
   engine: RunEngine["Service"],
   attemptId: AttemptId,
@@ -165,39 +171,37 @@ export const waitForSalvage = Effect.fn("test.waitForSalvage")(function* (
   return yield* Effect.die(`Run ${runId} recorded no salvage`);
 });
 
+/** How a test runtime differs from the default: its parent tasks, credentials, or executor settings. */
+export interface LocalRuntimeOptions {
+  readonly attemptRuntime?: Layer.Layer<AttemptRuntime>;
+  readonly credentials?: Layer.Layer<CredentialProvider>;
+  readonly executor?: Omit<LocalExecutorOptions, "instanceDirectory">;
+}
+
 /** The orchestrator layer for one local Worker over `remote`; every call builds a fresh runtime. */
 export const localRuntime = (
   instance: InstanceDirectory,
   remote: string,
-  runHostArgs: ReadonlyArray<string>,
-  runHost?: string,
-  credentials = credentialLayer,
-) => {
-  const runHostOption =
-    runHost === undefined && runHostArgs.length === 0
-      ? {}
-      : {
-          runHost: {
-            command: process.execPath,
-            args: [runHost ?? RUN_HOST, ...runHostArgs],
-          },
-        };
-  return localLayer(instance, config, [], {
+  options: LocalRuntimeOptions = {},
+) =>
+  localLayer(instance, config, [], {
     repositoryUrl: () => remote,
-    ...runHostOption,
     interruptGrace: "100 millis",
-  }).pipe(Layer.provide(credentials), Layer.provide(alwaysHoldsLayer));
-};
+    harnessReadiness: harnessReady,
+    ...options.executor,
+  }).pipe(
+    Layer.provide(options.credentials ?? credentialLayer),
+    Layer.provide(options.attemptRuntime ?? stubAttemptRuntime(new StubStorage())),
+    Layer.provide(alwaysHoldsLayer),
+  );
 
 export const withLocalEngine = <A, E, R>(
-  runHostArgs: ReadonlyArray<string>,
+  options: LocalRuntimeOptions,
   use: (options: {
     readonly engine: RunEngine["Service"];
     readonly instance: InstanceDirectory;
     readonly remote: string;
   }) => Effect.Effect<A, E, R>,
-  runHost?: string,
-  credentials = credentialLayer,
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
@@ -207,5 +211,5 @@ export const withLocalEngine = <A, E, R>(
     return yield* Effect.gen(function* () {
       const engine = yield* RunEngine;
       return yield* use({ engine, instance, remote });
-    }).pipe(Effect.provide(localRuntime(instance, remote, runHostArgs, runHost, credentials)));
+    }).pipe(Effect.provide(localRuntime(instance, remote, options)));
   }).pipe(Effect.provide(NodeServices.layer));

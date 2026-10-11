@@ -1,5 +1,7 @@
 import {
+  type BashSpawnHook,
   createAgentSession,
+  createBashToolDefinition,
   DefaultResourceLoader,
   getAgentDir,
   ModelRuntime,
@@ -13,8 +15,10 @@ import { Context, Effect, Exit, Layer, Option } from "effect";
 import {
   type PiAuthentication,
   type PiPool,
+  piAuthentication,
   requiredPiPool,
   resolvePiPool,
+  splitPiModel,
 } from "./authentication.ts";
 import { supportedThinkingLevels } from "./thinking.ts";
 
@@ -35,6 +39,12 @@ export interface PiSession {
 
 export interface PiStartOptions {
   readonly cwd: string;
+  /**
+   * The complete environment of every command the session's bash tool runs.
+   * None inherits this process's environment, which suits the run host and
+   * preflight because the executor already restricted it (ADR 0011).
+   */
+  readonly environment: Option.Option<Readonly<Record<string, string>>>;
   readonly extensions: ReadonlyArray<InlineExtension>;
   readonly model: Option.Option<ModelId>;
   readonly signal: AbortSignal;
@@ -68,6 +78,18 @@ export type PiStartResult =
       readonly session: PiSession;
     };
 
+/**
+ * The bash tool of a session whose commands run with exactly `environment`,
+ * replacing what the tool would inherit; Pi's own `PI_*` variables are not added.
+ */
+export const environmentBashTool = (
+  cwd: string,
+  environment: Readonly<Record<string, string>>,
+): ReturnType<typeof createBashToolDefinition> => {
+  const exact: BashSpawnHook = (context) => ({ ...context, env: { ...environment } });
+  return createBashToolDefinition(cwd, { exposeSessionEnvironment: false, spawnHook: exact });
+};
+
 /** The parent works only through usine extensions; repository tools belong to the harness children. */
 export const piParentSessionToolPolicy = { noTools: "builtin" } as const;
 
@@ -77,21 +99,14 @@ export class PiSdk extends Context.Service<
   { readonly start: (options: PiStartOptions) => Promise<PiStartResult> }
 >()("@usine/agents/pi/PiSdk") {}
 
-const splitModel = (model: ModelId): readonly [string, string] | undefined => {
-  const separator = model.indexOf("/");
-  return separator <= 0 || separator === model.length - 1
-    ? undefined
-    : [model.slice(0, separator), model.slice(separator + 1)];
-};
-
 export const piSdkLive = Layer.succeed(PiSdk)({
   start: async (options) => {
     const modelRuntime = await ModelRuntime.create({ signal: options.signal });
     let selected: ReturnType<ModelRuntime["getModel"]>;
     if (Option.isSome(options.model)) {
-      const parts = splitModel(options.model.value);
+      const parts = splitPiModel(options.model.value);
       if (parts === undefined) return { _tag: "UnknownModel" };
-      selected = modelRuntime.getModel(parts[0], parts[1]);
+      selected = modelRuntime.getModel(parts.provider, parts.modelId);
       if (selected === undefined) return { _tag: "UnknownModel" };
     }
     const agentDir = getAgentDir();
@@ -120,10 +135,18 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       settingsManager,
       thinkingLevel: options.thinkingLevel,
     } as const;
+    // A custom tool replaces the built-in tool of the same name.
+    const environmentScopedSessionOptions = Option.match(options.environment, {
+      onNone: () => sessionOptions,
+      onSome: (environment) => ({
+        ...sessionOptions,
+        customTools: [environmentBashTool(options.cwd, environment)],
+      }),
+    });
     const toolScopedSessionOptions =
       options.toolMode === "orchestration"
-        ? { ...sessionOptions, ...piParentSessionToolPolicy }
-        : sessionOptions;
+        ? { ...environmentScopedSessionOptions, ...piParentSessionToolPolicy }
+        : environmentScopedSessionOptions;
     const { session } =
       selected === undefined
         ? await createAgentSession(toolScopedSessionOptions)
@@ -137,19 +160,10 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       if (!supported.includes(options.thinkingLevel)) {
         return { _tag: "UnsupportedEffort", effort: options.thinkingLevel, model, supported };
       }
-      const resolvedAuthentication = await modelRuntime.checkAuth(active.provider, {
-        signal: options.signal,
-      });
-      const authentication: PiAuthentication | undefined =
-        resolvedAuthentication?.type === "api_key"
-          ? { _tag: "ApiKey" }
-          : resolvedAuthentication?.type === "oauth"
-            ? {
-                _tag: "OAuth",
-                subscription:
-                  modelRuntime.getProvider(active.provider)?.auth.oauth?.isSubscription === true,
-              }
-            : undefined;
+      const authentication = piAuthentication(
+        await modelRuntime.checkAuth(active.provider, { signal: options.signal }),
+        modelRuntime.getProvider(active.provider)?.auth.oauth?.isSubscription === true,
+      );
       const requiredPool = requiredPiPool(active.provider);
       const pool = resolvePiPool(active.provider, authentication);
       if (authentication === undefined) {
