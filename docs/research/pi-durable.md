@@ -98,6 +98,15 @@ Adopt as the single durable substrate. usine has no users, so a staged migration
 
 ADRs to amend with the new why: 0003 (Run durability is a pi-durable task), 0006 (run host and attempt channel become the child-spawn transport; reattach is in), 0018 (interventions as submissions), 0010 (two SQLite connections, one file), 0005 (the subagents extension becomes a pi-durable extension).
 
+## Outcome (2026-10-11)
+
+Steps 1 to 4 landed on main in PRs #188, #194, #202, #206, and #208, with two departures from the order above.
+
+- The pi-durable task is the Attempt (`usine.attempt`), not the Run. The Run loop (approval gate, Worker reserve, Attempt, finish decision, continuation) is an engine fiber over usine's own Run tables with a startup reconcile; the Effect workflow, the workflow commands table, and the cluster tables are gone (ADR 0003 amendment). A Run task would have added a second task type for a dozen lines of state machine whose state already lives in the tables.
+- The transcript store stays. Claude Code and Codex children are processes outside the harness, so their events reach storage only through the relay that appends attempt channel envelopes to `usine_attempt_transcripts`; pi-durable's conversation entries hold the parent alone. The run drawer keeps reading the transcript, and `PROTOCOL_VERSION` stays on the envelopes for that reason.
+
+Dogfooded on the factory instance: a SIGKILL mid-Attempt followed by a restart reattaches the same Attempt and the Run finishes on it; cancel stops the parent task and its child with no orphan; the approval gate parks and resumes. Open follow-ups are tracked on the issues referenced from #176.
+
 ## Appendix: experiment script
 
 Run with pi-durable, pi-ai, and chord at 1.1.0 installed beside it:
