@@ -13,7 +13,7 @@ import { LoopName, ApprovalRequirement } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
-import { Effect, Option, Schema } from "effect";
+import { Crypto, Effect, Encoding, Option, Schema } from "effect";
 
 /** A matched Event with the Loop, Item, and execution choices that determine the work owed. */
 export class Submission extends Schema.Class<Submission>("@usine/engine/Submission")({
@@ -38,6 +38,22 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   agent: Agent,
   parentModel: Schema.Option(ModelId),
 }) {}
+
+// Runs opened before the engine drove them itself took this Effect workflow
+// execution id; hashing the same input keeps every Run id stable.
+const RUN_ID_NAMESPACE = "@usine/engine/DurableRun";
+
+/**
+ * The id of the Run a Submission's Event opens: the first 16 bytes of the
+ * SHA-256 of the Event's dedup key, in hex. The same Event always names the same Run.
+ */
+export const runIdFor = Effect.fn("Submission.runIdFor")(function* (submission: Submission) {
+  const crypto = yield* Crypto.Crypto;
+  const digest = yield* crypto
+    .digest("SHA-256", new TextEncoder().encode(`${RUN_ID_NAMESPACE}-${submission.event.dedupKey}`))
+    .pipe(Effect.orDie);
+  return RunId.make(Encoding.encodeHex(digest.subarray(0, 16)));
+});
 
 /** The Event now owns a Run; submitting it again returns the same run id. */
 export class Claimed extends Schema.TaggedClass<Claimed>("@usine/engine/Claimed")("Claimed", {

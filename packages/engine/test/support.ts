@@ -13,10 +13,11 @@ import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { DateTime, Effect, FileSystem, Layer, Option, Ref } from "effect";
-import { layer } from "../src/database/local-sqlite.ts";
+import { layer, localSqliteLayer } from "../src/database/local-sqlite.ts";
 import type { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { StepExecutor } from "../src/step-executor.ts";
+import { RunStore } from "../src/store/store.ts";
 import { TriggerCondition } from "../src/trigger-condition.ts";
 
 export const stepResult = (message: string) => new StepResult({ message, facts: [] });
@@ -127,3 +128,15 @@ export const withInstance = <A, E, R>(
     );
     return yield* use(directory);
   }).pipe(Effect.provide(NodeServices.layer));
+
+/**
+ * Writes, through the store alone, what a process committed before it
+ * stopped, so a test can then start the engine on the same instance.
+ */
+export const committedBeforeCrash = <A, E>(
+  directory: InstanceDirectory,
+  write: (store: RunStore["Service"]) => Effect.Effect<A, E>,
+) =>
+  Effect.gen(function* () {
+    return yield* write(yield* RunStore);
+  }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)))));

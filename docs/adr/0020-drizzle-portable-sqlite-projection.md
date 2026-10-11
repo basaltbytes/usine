@@ -18,3 +18,7 @@ This revises [ADR 0010](./0010-single-sqlite-runtime-store.md). Usine migrations
 - RC.4's published Effect peer range is wider than its runtime compatibility. Until a later release is verified, usine carries a narrow patch from the removed `Schema.TaggedErrorClass` name to `Schema.TaggedError` and executes query builders through their explicit `.execute()` Effect.
 - D1 remains an adapter target. Its deployment would apply the generated migration tree through Drizzle Kit or Wrangler with a deployment-owned migration ledger; it must not reuse the local `usine_migrations` table format.
 - The engine's public contracts stay platform-free so a Workers/D1 bundle never pulls Node builtins: adapters use separate subpath exports (`@usine/engine/local-sqlite` today). `layerWithDatabase` at `@usine/engine/engine` accepts `RunDatabase` from `@usine/engine/database` and leaves platform `Crypto` in its requirements for the deployment to provide. `RunStore`'s declared interface is the store contract a non-SQLite backend implements.
+
+## Amendment (2026-10-11, #176): no shared `SqlClient`
+
+Effect Cluster is gone (ADR 0003 amendment of the same date), so the engine's database layer provides `RunDatabase` alone and a driver no longer shares its `SqlClient` with cluster storage.

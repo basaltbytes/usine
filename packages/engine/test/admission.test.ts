@@ -2,7 +2,7 @@ import { assert, it } from "@effect/vitest";
 import { RunId } from "@usine/core/run";
 import { Deferred, Effect, Fiber } from "effect";
 import { RunEngineShutdown } from "../src/engine/shutdown.ts";
-import { AttemptAdmission } from "../src/workflow/admission.ts";
+import { AttemptAdmission } from "../src/engine/admission.ts";
 
 it.effect(
   "a host latch denies admission before any drain call and denied work remains cancelable",

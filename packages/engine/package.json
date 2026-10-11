@@ -1,7 +1,7 @@
 {
   "name": "@usine/engine",
   "version": "0.3.0",
-  "description": "The usine run engine: event ledger, dedup/supersede/revoke, run scheduling, durable-execution seam, SQLite store.",
+  "description": "The usine run engine: event ledger, dedup/supersede/revoke, run scheduling and restart recovery, SQLite store.",
   "license": "MIT",
   "repository": {
     "type": "git",

@@ -5,9 +5,6 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { Context, Crypto, Effect, Layer, Option, Result } from "effect";
-import { ClusterWorkflowEngine, SingleRunner } from "effect/unstable/cluster";
-import { SqlClient } from "effect/unstable/sql";
-import { DurableDeferred, WorkflowEngine } from "effect/unstable/workflow";
 import { RunDatabase } from "../database/database.ts";
 import {
   AttemptCancellationError,
@@ -15,7 +12,7 @@ import {
   type RunEngineError,
 } from "./error.ts";
 import type { RunSnapshot } from "../run-reader/model.ts";
-import type { Submission, SubmissionResult } from "./submission.ts";
+import { runIdFor, type Submission, type SubmissionResult } from "./submission.ts";
 import type { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import { RunStore } from "../store/store.ts";
 import { RunReader } from "../run-reader/run-reader.ts";
@@ -24,118 +21,63 @@ import {
   RepositoryLabelProjectionReader,
   RepositoryLabelProjectionWriter,
 } from "../repository-label-projection/repository-label-projection.ts";
-import {
-  ApprovalGate,
-  DurableRun,
-  continueWithNewest,
-  durableRunLayer,
-  runIdFor,
-} from "../workflow/workflow.ts";
 import { StepExecutor } from "../step-executor.ts";
 import { TriggerCondition } from "../trigger-condition.ts";
 import { CursorStore } from "../cursor/cursor.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
-import { AttemptAdmission } from "../workflow/admission.ts";
+import { AttemptAdmission } from "./admission.ts";
+import { RunDriver } from "./run-driver.ts";
 
-const MAX_SETTLEMENT_POLLS = 500;
-
+// Every operation that commits a Run transition also hands it to the Run's
+// fiber. Both happen uninterruptibly, so a caller that goes away cannot leave a
+// committed transition undriven until the next restart.
 const makeRunEngine = Effect.gen(function* () {
   const store = yield* RunStore;
+  const driver = yield* RunDriver;
   const admission = yield* AttemptAdmission;
   const stepExecutor = yield* StepExecutor;
-  const condition = yield* TriggerCondition;
-  const workflowEngine = yield* WorkflowEngine.WorkflowEngine;
-  const provideWorkflowEngine = <A, E>(
-    effect: Effect.Effect<A, E, WorkflowEngine.WorkflowEngine>,
-  ): Effect.Effect<A, E> =>
-    Effect.provideService(effect, WorkflowEngine.WorkflowEngine, workflowEngine);
-
-  const launch = Effect.fn("RunEngine.launch")(function* (submission: Submission) {
-    yield* DurableRun.execute({ submission }, { discard: true }).pipe(provideWorkflowEngine);
-  });
-
-  const deliverInterrupt = Effect.fn("RunEngine.deliverInterrupt")(function* (runId: RunId) {
-    yield* DurableRun.interrupt(runId).pipe(provideWorkflowEngine);
-    yield* store.completeWorkflowCommand(runId, "Interrupt");
-  });
-
-  const deliverApproval = Effect.fn("RunEngine.deliverApproval")(function* (runId: RunId) {
-    const token = DurableDeferred.tokenFromExecutionId(ApprovalGate, {
-      workflow: DurableRun,
-      executionId: runId,
-    });
-    yield* DurableDeferred.succeed(ApprovalGate, { token, value: undefined }).pipe(
-      provideWorkflowEngine,
-    );
-    yield* store.completeWorkflowCommand(runId, "Approve");
-  });
-
-  const deliverContinuation = Effect.fn("RunEngine.deliverContinuation")(function* (runId: RunId) {
-    yield* continueWithNewest(store, runId).pipe(
-      Effect.provideService(TriggerCondition, condition),
-      provideWorkflowEngine,
-    );
-  });
-
-  const awaitWorkflowSettlement = Effect.fn("RunEngine.awaitWorkflowSettlement")(function* (
-    runId: RunId,
-  ) {
-    // A Failed projection commits before the workflow finishes suspending, so
-    // poll across that handover or an immediate operator retry is lost. A
-    // workflow still absent at the deadline means a corrupted instance
-    // database, so fail loudly instead of hanging.
-    for (let poll = 0; poll < MAX_SETTLEMENT_POLLS; poll += 1) {
-      const status = yield* DurableRun.poll(runId).pipe(provideWorkflowEngine);
-      if (Option.isSome(status)) return status.value;
-      yield* Effect.sleep("10 millis");
-    }
-    return yield* Effect.die(new Error(`Run ${runId} has no durable workflow execution to settle`));
-  });
-
-  const deliverResume = Effect.fn("RunEngine.deliverResume")(function* (runId: RunId) {
-    const status = yield* awaitWorkflowSettlement(runId);
-    if (status._tag === "Complete") {
-      yield* store.reconcileCompletion(runId, status);
-      yield* store.completeWorkflowCommand(runId, "Resume");
-      yield* deliverContinuation(runId);
-      return;
-    }
-    yield* DurableRun.resume(runId).pipe(provideWorkflowEngine);
-    yield* store.completeWorkflowCommand(runId, "Resume");
-  });
-
-  const commandHandlers = {
-    Approve: deliverApproval,
-    Continue: deliverContinuation,
-    Interrupt: deliverInterrupt,
-    Resume: deliverResume,
-  } as const;
+  const crypto = yield* Crypto.Crypto;
 
   const submit = Effect.fn("RunEngine.submit")(function* (submission: Submission) {
-    const requestedRunId = yield* runIdFor(submission);
+    const requestedRunId = yield* runIdFor(submission).pipe(
+      Effect.provideService(Crypto.Crypto, crypto),
+    );
     const claim = yield* store.recordAndClaim(submission, requestedRunId);
+    // The superseded Run's fiber stops before the new Run's fiber starts, so
+    // the Item never has two fibers reserving Workers at once.
     if (Option.isSome(claim.supersededRun)) {
-      yield* deliverInterrupt(claim.supersededRun.value);
+      yield* driver.stop(claim.supersededRun.value);
     }
-    if (claim.result._tag === "Claimed") {
-      yield* launch(claim.submission);
+    if (Option.isSome(claim.openedRun)) {
+      yield* driver.launch(claim.openedRun.value);
     }
     return claim.result;
-  });
+  }, Effect.uninterruptible);
 
   const approve = Effect.fn("RunEngine.approve")(function* (runId: RunId, approval: Event) {
-    yield* store.approve(runId, approval);
-    yield* deliverApproval(runId);
-  });
+    if (yield* store.approve(runId, approval)) {
+      yield* driver.resume(runId);
+      return;
+    }
+    yield* Effect.logDebug("Approval was already recorded; the Run is unchanged", {
+      runId,
+      eventId: approval.id,
+    });
+  }, Effect.uninterruptible);
 
   const retry = Effect.fn("RunEngine.retry")(function* (
     runId: RunId,
     amendment: Option.Option<AttemptContext> = Option.none(),
   ) {
-    yield* store.retry(runId, amendment);
-    yield* deliverResume(runId);
-  });
+    if (yield* store.retry(runId, amendment)) {
+      yield* driver.resume(runId);
+      return;
+    }
+    yield* Effect.logDebug("Retry changed nothing; the Run already waits for its next Attempt", {
+      runId,
+    });
+  }, Effect.uninterruptible);
 
   const cancel = Effect.fn("RunEngine.cancel")(function* (runId: RunId) {
     // The closing transaction decides both facts at once: whether the run was
@@ -149,18 +91,21 @@ const makeRunEngine = Effect.gen(function* () {
       runId,
       openAttempt: Option.getOrElse(outcome.openAttempt, () => "none"),
     });
+    // The executor stops the Attempt before its fiber is interrupted: an
+    // interrupted launch that was never stopped keeps its parent task live for
+    // a reattachment that will not come.
     const handshake = Option.isSome(outcome.openAttempt)
       ? yield* stepExecutor.interrupt(outcome.openAttempt.value).pipe(Effect.result)
       : Result.succeed(undefined);
-    yield* deliverInterrupt(runId);
-    yield* deliverContinuation(runId);
+    yield* driver.stop(runId);
+    yield* driver.continueWithNewest(runId);
     if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
       return yield* new AttemptCancellationError({
         attemptId: outcome.openAttempt.value,
         cause: handshake.failure,
       });
     }
-  });
+  }, Effect.uninterruptible);
 
   const intervene = Effect.fn("RunEngine.intervene")(function* (
     runId: RunId,
@@ -211,12 +156,9 @@ const makeRunEngine = Effect.gen(function* () {
 
   const revoke = Effect.fn("RunEngine.revoke")(function* (loop: LoopName, itemKey: ItemKey) {
     const revoked = yield* store.revoke(loop, itemKey);
-    yield* Effect.forEach(revoked, deliverInterrupt, {
-      concurrency: "unbounded",
-      discard: true,
-    });
+    yield* Effect.forEach(revoked, driver.stop, { concurrency: "unbounded", discard: true });
     return revoked;
-  });
+  }, Effect.uninterruptible);
 
   const inspect = Effect.fn("RunEngine.inspect")(function* (runId: RunId) {
     return yield* store.snapshot(runId);
@@ -226,36 +168,7 @@ const makeRunEngine = Effect.gen(function* () {
     return yield* store.transcript(query);
   });
 
-  const reconcile = Effect.fn("RunEngine.reconcile")(function* () {
-    yield* Effect.forEach(
-      yield* store.pendingWorkflowCommands,
-      ({ command, runId }) => commandHandlers[command](runId),
-      { discard: true },
-    );
-    const recoverable = yield* store.recoverable;
-    yield* Effect.forEach(
-      recoverable,
-      ({ runId, state, submission }) =>
-        Effect.gen(function* () {
-          const status = yield* DurableRun.poll(runId).pipe(provideWorkflowEngine);
-          if (Option.isSome(status) && status.value._tag === "Complete") {
-            yield* store.reconcileCompletion(runId, status.value);
-            yield* deliverContinuation(runId);
-            return;
-          }
-          if (Option.isSome(status) && status.value._tag === "Suspended") {
-            if (state._tag === "Running") {
-              yield* deliverResume(runId);
-            }
-            return;
-          }
-          yield* launch(submission);
-        }),
-      { concurrency: "unbounded", discard: true },
-    );
-  });
-
-  yield* reconcile();
+  yield* driver.reconcile();
 
   return {
     approve,
@@ -263,7 +176,7 @@ const makeRunEngine = Effect.gen(function* () {
     drain: admission.drain,
     inspect,
     intervene,
-    reconcile,
+    reconcile: driver.reconcile,
     retry,
     resolveFailure: store.resolveFailure,
     revoke,
@@ -290,7 +203,7 @@ export class RunEngine extends Context.Service<
       attemptId: AttemptId,
       intervention: Intervention,
     ) => Effect.Effect<void, RunEngineError>;
-    /** Recovers unfinished Runs and outstanding actions from stored state; also runs when the engine starts. */
+    /** Starts a fiber for every open Run without one in this process and opens the queued Events no closed Run continued; also runs when the engine starts. */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     /** Resolves the current failed Attempt's attention without changing its outcome or starting work. */
     readonly resolveFailure: (
@@ -320,14 +233,14 @@ export class RunEngine extends Context.Service<
 >()("@usine/engine/RunEngine") {}
 
 /**
- * Provides Run execution and recovery on the supplied database.
- * `database` must supply Drizzle and Effect SQL clients for the same database,
- * so Run records and pending execution remain together across restarts.
- * The deployment supplies `Crypto`, the Worker implementation through `StepExecutor`,
- * and the trigger re-check for queued Events through `TriggerCondition`.
+ * Provides Run execution and recovery on the supplied database, whose run
+ * tables are the only durable state of the Run lifecycle. The deployment
+ * supplies `Crypto`, which hashes dedup keys into Run ids, the Worker
+ * implementation through `StepExecutor`, and the trigger re-check for queued
+ * Events through `TriggerCondition`.
  */
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
-  database: Layer.Layer<RunDatabase | SqlClient.SqlClient, DatabaseError, DatabaseRequirements>,
+  database: Layer.Layer<RunDatabase, DatabaseError, DatabaseRequirements>,
 ): Layer.Layer<
   | CursorStore
   | CycleBudgets
@@ -347,7 +260,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
       Effect.fn("RunEngine.recoverWorkspaces")(function* (services) {
         const store = Context.get(services, RunStore);
         const stepExecutor = yield* StepExecutor;
-        // Before workflow recovery can admit a retry, publish and durably record any
+        // Before Run recovery can admit a retry, publish and durably record any
         // work left by its predecessor. Failed recovery keeps the checkout on disk.
         yield* Effect.forEach(
           yield* store.salvageCandidates,
@@ -369,22 +282,11 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
       }),
     ),
   );
-  const cluster = SingleRunner.layer({
-    runnerStorage: "memory",
-    shardingConfig: {
-      availableShardGroups: ["default", "workflow"],
-      assignedShardGroups: ["default", "workflow"],
-      entityTerminationTimeout: 0,
-    },
-  }).pipe(Layer.provide(database), Layer.orDie);
-  const workflowEngine = ClusterWorkflowEngine.layer.pipe(Layer.provide(cluster));
-  const admission = AttemptAdmission.layer;
-  const runtime = durableRunLayer.pipe(
-    Layer.provideMerge(workflowEngine),
+  const driver = RunDriver.layer.pipe(
     Layer.provideMerge(store),
-    Layer.provideMerge(admission),
+    Layer.provideMerge(AttemptAdmission.layer),
   );
-  const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(runtime));
+  const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(driver));
   return Layer.mergeAll(
     runEngine,
     CycleBudgets.layer.pipe(Layer.provide(database)),

@@ -22,7 +22,6 @@ import {
   uniqueIndex,
 } from "drizzle-orm/sqlite-core";
 import { IGNORED_REASONS, type IgnoreReason } from "../engine/submission.ts";
-import { WORKFLOW_COMMANDS, type WorkflowCommand } from "../workflow/command.ts";
 
 export const events = snakeCase.table(
   "usine_events",
@@ -254,24 +253,6 @@ export const ignoredEvents = snakeCase.table(
   },
   (table) => [
     check("usine_ignored_events_reason", sql`${table.reason} in ('superseded', 'revoked')`),
-  ],
-);
-
-export const workflowCommands = snakeCase.table(
-  "usine_workflow_commands",
-  {
-    runId: text()
-      .$type<RunId>()
-      .notNull()
-      .references(() => runs.runId),
-    command: text({ enum: WORKFLOW_COMMANDS }).$type<WorkflowCommand>().notNull(),
-  },
-  (table) => [
-    check(
-      "usine_workflow_commands_command",
-      sql`${table.command} in ('Approve', 'Continue', 'Interrupt', 'Resume')`,
-    ),
-    primaryKey({ columns: [table.runId, table.command] }),
   ],
 );
 
