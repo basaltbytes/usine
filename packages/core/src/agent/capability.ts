@@ -19,6 +19,6 @@ export class HarnessReady extends Schema.TaggedClass<HarnessReady>("HarnessReady
   harness: Harness,
 }) {}
 
-/** The run host's preflight response; contains no credentials or account identity. */
+/** A harness preflight response; contains no credentials or account identity. */
 export const HarnessReadiness = Schema.Union([HarnessReady, HarnessUnavailableError]);
 export type HarnessReadiness = typeof HarnessReadiness.Type;

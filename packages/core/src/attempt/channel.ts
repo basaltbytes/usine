@@ -20,8 +20,8 @@ export const Sequence = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)).pipe(
 export type Sequence = typeof Sequence.Type;
 
 /**
- * Relative to the run host: `inbound` frames go from the orchestrator to the run
- * host (Start, operator input, Cancel) and `outbound` frames go the other way.
+ * Relative to the Attempt's parent: `inbound` envelopes carry operator input and
+ * Cancel to it, and `outbound` envelopes carry its activity and outcome.
  */
 export const DIRECTIONS = ["inbound", "outbound"] as const;
 export const Direction = Schema.Literals(DIRECTIONS);
@@ -65,7 +65,7 @@ export class Failed extends Schema.TaggedClass<Failed>("AttemptChannel/Failed")(
   failure: AttemptFailure,
 }) {}
 
-/** The run host acknowledged Attempt cancellation. Terminal. */
+/** The Attempt's parent acknowledged cancellation. Terminal. */
 export class Interrupted extends Schema.TaggedClass<Interrupted>("AttemptChannel/Interrupted")(
   "Interrupted",
   {},
@@ -111,7 +111,7 @@ export class ChildTarget extends Schema.TaggedClass<ChildTarget>("AttemptChannel
   { sessionId: AgentSessionId },
 ) {}
 
-/** Which session inside an Attempt an inbound frame addresses: the Pi parent, or one of its children. */
+/** Which session inside an Attempt an inbound envelope addresses: the Pi parent, or one of its children. */
 export const SessionTarget = Schema.Union([ParentTarget, ChildTarget]);
 export type SessionTarget = typeof SessionTarget.Type;
 
@@ -177,7 +177,7 @@ export class InboundEnvelope extends Schema.TaggedClass<InboundEnvelope>(
   "AttemptChannel/InboundEnvelope",
 )("InboundEnvelope", {
   ...EnvelopeFields,
-  /** The session this frame addresses; the Pi parent unless a child is named. */
+  /** The session this envelope addresses; the Pi parent unless a child is named. */
   target: SessionTarget.pipe(Schema.withDecodingDefaultKey(Effect.succeed({ _tag: "Parent" }))),
   operator: Schema.NonEmptyString,
   payload: InboundPayload,
@@ -185,19 +185,6 @@ export class InboundEnvelope extends Schema.TaggedClass<InboundEnvelope>(
 
 export const Envelope = Schema.Union([OutboundEnvelope, InboundEnvelope]);
 export type Envelope = typeof Envelope.Type;
-
-/** The first framed stdin message. Later frames are inbound envelopes. */
-export class Start extends Schema.TaggedClass<Start>("AttemptChannel/Start")("Start", {
-  version: Schema.Literal(PROTOCOL_VERSION),
-  spec: RunSpec,
-}) {}
-
-export const InputFrame = Schema.Union([Start, InboundEnvelope]);
-export type InputFrame = typeof InputFrame.Type;
-
-export const EnvelopeFromJson = Schema.fromJsonString(Envelope);
-export const InputFrameFromJson = Schema.fromJsonString(InputFrame);
-export const OutboundEnvelopeFromJson = Schema.fromJsonString(OutboundEnvelope);
 
 /** Where a channel consumer persists envelopes and the executor's salvage record. */
 export interface Sink {
@@ -228,8 +215,8 @@ const isTerminal = (payload: OutboundPayload): boolean =>
 
 /**
  * Checks one outbound envelope against the progress so far and returns the next
- * progress, or the violation. Every transport adapter folds the same state
- * machine through it.
+ * progress, or the violation. Whatever sends outbound envelopes folds each
+ * one through it before appending it.
  */
 export const admit = (
   progress: Progress,
@@ -238,19 +225,19 @@ export const admit = (
 ): Result.Result<Progress, Violation> => {
   if (envelope.attemptId !== attemptId) {
     return Result.fail({
-      message: "The run host emitted a frame for another Attempt",
+      message: "The outbound channel carried an envelope for another Attempt",
       detail: String(envelope.attemptId),
     });
   }
   if (envelope.sequence !== progress.nextSequence) {
     return Result.fail({
-      message: "The run host emitted a non-contiguous sequence",
+      message: "The outbound channel carried a non-contiguous sequence",
       detail: `expected ${progress.nextSequence}, received ${envelope.sequence}`,
     });
   }
   if (progress.state === "Terminal") {
     return Result.fail({
-      message: "The run host emitted an envelope after its terminal envelope",
+      message: "The outbound channel carried an envelope after its terminal envelope",
       detail: envelope.payload._tag,
     });
   }
@@ -260,13 +247,13 @@ export const admit = (
     envelope.payload._tag !== "Failed"
   ) {
     return Result.fail({
-      message: "The run host did not begin with a Started or Failed envelope",
+      message: "The outbound channel did not begin with a Started or Failed envelope",
       detail: envelope.payload._tag,
     });
   }
   if (progress.state === "Running" && envelope.payload._tag === "Started") {
     return Result.fail({
-      message: "The run host emitted more than one Started envelope",
+      message: "The outbound channel carried more than one Started envelope",
       detail: "duplicate Started envelope",
     });
   }

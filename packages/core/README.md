@@ -14,7 +14,7 @@ Import each domain concept from its owning subpath. Identities, records, and ope
 | `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptOutcome` |
 | `@usine/core/attempt/failure` | `InfraFailure`, `DefectFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
 | `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvageRetained`, `AttemptSalvage`, `AttemptRecovery` |
-| `@usine/core/attempt/channel` | The protocol-v7 attempt channel: `RunSpec`, `Start`, the envelopes, and the `admit` reducer. Import it as a namespace (`AttemptChannel.Started`) |
+| `@usine/core/attempt/channel` | The attempt channel: `RunSpec`, the versioned envelopes, the `Sink` that stores them, and the `admit` reducer. Import it as a namespace (`AttemptChannel.Started`) |
 | `@usine/core/agent`, `@usine/core/agent/brain`, `@usine/core/agent/session` | `Agent`, `AgentName`, `AgentPersona`, parent-model resolution; `BrainSpec`, `ModelId`, `Harness`, `Effort`; `AgentSessionId`, session descriptors, `AgentSessionEvent`, `ChildSessionBudget`, `ChildSessionCount` |
 | `@usine/core/agent/capability` | `HarnessCapability`, `HarnessReady`, `HarnessUnavailableError`, and the credential-free `HarnessReadiness` preflight response |
 | `@usine/core/repository` | `RepositoryName`, `RepositoryRevision`, `CommitSha`, `safeSegment`, `splitRepositoryName`, `canonicalRepositoryName` |
@@ -28,7 +28,7 @@ The run state machine is `pending → waiting → queued → running → succeed
 
 `RunState.operatorActions(state)` returns approval, retry, failure-resolution, and cancel availability for operator views. The command handlers enforce the same lifecycle through the typed transitions. Failure resolution is available only in the failed state; operator views also check whether the latest failed Attempt has already been resolved.
 
-Each Attempt records the child `BrainSpec` and effective Pi parent model used for that try. The attempt channel includes immutable repository, payload, task, agent context, and child-session budget in its `Start` frame; outbound `SessionEvent` envelopes retain parent and first-level child session identity.
+Each Attempt records the child `BrainSpec` and effective Pi parent model used for that try. `RunSpec` holds the immutable repository, payload, task, agent context, and child-session budget an Attempt's parent starts from; outbound `SessionEvent` envelopes retain parent and first-level child session identity.
 
 Everything is 0.x: APIs change without notice while the engine grows. `effect` is a peer dependency — supply it yourself at the pinned version.
 
@@ -38,4 +38,4 @@ Import `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, and `Cyc
 
 `SessionStarted.harnessSession` optionally records a `HarnessSession`: the harness-native `HarnessSessionId` and worker working directory (`cwd`). Missing metadata in older transcripts decodes to `Option.none()`; usine's session identity remains separate.
 
-Attempt channel protocol v7 adds the previous Attempt's pushed salvage to `RunSpec` (`resume`); v6 added saved harness session metadata. Upgrade the orchestrator and run host together; worker preflight rejects mismatched protocol versions.
+Envelopes carry `PROTOCOL_VERSION` (7), which the transcript store uses to read envelopes stored by earlier versions. Version 7 added the previous Attempt's pushed salvage to `RunSpec` (`resume`); version 6 added saved harness session metadata.

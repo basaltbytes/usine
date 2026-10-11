@@ -3,7 +3,7 @@ import { ChildSessionBudget, ChildSessionCount } from "../agent/session.ts";
 
 /**
  * Infrastructure failed around the agent: worker unreachable, checkout failed,
- * run host died. The only class the engine retries on its own, capped.
+ * parent task lost. The only class the engine retries on its own, capped.
  */
 export class InfraFailure extends Schema.TaggedError<InfraFailure>("AttemptFailure/InfraFailure")(
   "InfraFailure",

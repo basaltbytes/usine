@@ -17,7 +17,7 @@ export class StoredRequest extends Schema.Class<StoredRequest>("@usine/durable/S
   cwd: Schema.NonEmptyString,
 }) {}
 
-/** One Attempt's parent to run: the same RunSpec the run host received, plus the checkout the parent and its children work in. */
+/** One Attempt's parent to run: its RunSpec, plus the checkout the parent and its children work in. */
 export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable/AttemptRequest")({
   ...StoredRequest.fields,
   /** Where the parent's children run. */
