@@ -30,3 +30,7 @@ The instance directory now holds two SQLite files: usine's runtime database, and
 The projection-plus-startup-sweep pattern therefore stays for the rows usine keeps. An Attempt row can say open while its parent task has finished, failed, or is still running; at startup the engine reads the task's liveness through the executor and either reattaches the Attempt or fails it, and executor recovery cancels a live task whose Attempt row is already closed. A transcript envelope that a reattached parent sends again after a restart is identified by its Attempt, direction, and channel sequence, and keeps its first stored copy, so the transcript stays one contiguous sequence.
 
 Startup order matters: the durable storage is opened and its tasks resumed before the engine reconciles worktrees and recovers Runs. The layers enforce it, since the engine needs the `StepExecutor`, which needs the local executor, which needs the `AttemptRuntime`. Moving or backing up the factory now means copying both files with the orchestrator stopped.
+
+## Amendment (2026-10-11, #176): the cluster tables are gone
+
+A migration drops `usine_workflow_commands` and Effect's `cluster_messages`, `cluster_replies`, and `cluster_migrations` with the Effect workflow (ADR 0003 amendment of the same date), so the runtime database holds only usine's own tables and pi-durable's storage is the second file.

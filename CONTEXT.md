@@ -78,7 +78,7 @@ _Avoid_: execution, job, workflow run
 
 **Step**:
 A named unit inside a run whose stored result is addressable by name; exactly one per run in v1 (the agent action). The loop file names it, and the name is its identity — renaming makes a new step.
-_Avoid_: stage, node, activity (the Effect mechanism underneath, not the domain concept)
+_Avoid_: stage, node, activity (a workflow-engine term, not the domain concept)
 
 **Attempt**:
 One try of a step on a worker. Retries are new attempts under the same step, never new runs; only typed infra errors retry automatically, capped — agent failures wait for the operator.
