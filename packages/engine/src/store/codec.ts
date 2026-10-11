@@ -83,12 +83,6 @@ export const TranscriptRow = Schema.Struct({
 });
 export type TranscriptRow = typeof TranscriptRow.Type;
 
-const RecoverableRunRow = Schema.Struct({
-  ...EventRouteRow.fields,
-  runId: RunId,
-  state: RunState.RunState,
-});
-
 const RunIdRow = Schema.Struct({ runId: RunId });
 const DiscardRow = Schema.Struct({ reason: IgnoreReason });
 
@@ -97,7 +91,6 @@ const ProjectionRevisionRow = Schema.Struct({ revision: ProjectionRevision });
 export const decodeEventRoutes = Schema.decodeUnknownEffect(Schema.Array(EventRouteRow));
 export const decodeRunRows = Schema.decodeUnknownEffect(Schema.Array(RunRow));
 export const decodeAttemptRows = Schema.decodeUnknownEffect(Schema.Array(AttemptRow));
-export const decodeRecoverableRuns = Schema.decodeUnknownEffect(Schema.Array(RecoverableRunRow));
 export const decodeRunIds = Schema.decodeUnknownEffect(Schema.Array(RunIdRow));
 export const decodeDiscards = Schema.decodeUnknownEffect(Schema.Array(DiscardRow));
 export const decodeProjectionRevision = Schema.decodeUnknownEffect(

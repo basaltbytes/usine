@@ -13,7 +13,8 @@ import type {
   RunOperationRejectedError,
   RunStoreError,
 } from "./error.ts";
-import { runIdFor, type Submission } from "./submission.ts";
+import type { FinishDecision } from "./lifecycle.ts";
+import { runIdFor } from "./submission.ts";
 
 // The executor's sinks speak AttemptFailure: a write the store could not make
 // fails the Attempt as infrastructure, and a missing or rejected Run is a defect.
@@ -31,21 +32,24 @@ const asAttemptFailure = <A, R>(
   });
 
 /**
- * Drives open Runs in this process, one loop per Run, with usine's run tables
- * as the only durable state. A loop parks a gated Run for approval, then
- * reserves a Worker, opens or reattaches the Attempt, records its outcome, and
- * repeats until the Run closes; the newest queued Event of the Item then gets
- * its turn. A loop that ends without closing its Run (approval, operator
- * retry, this process stopping) leaves the Run for `resume` or `reconcile`.
+ * Drives open Runs in this process, one fiber per Run, with usine's run
+ * tables as the only durable state. A Run's fiber parks a gated Run for
+ * approval, then reserves a Worker, opens or reattaches the Attempt, records
+ * its outcome, and repeats until the Run closes. The fiber that closes its Run
+ * then gives the newest queued Event of the Item its turn; when cancel,
+ * supersede, or revoke closes the Run under its fiber, that operation takes
+ * care of the queued Events instead. A fiber that ends without closing its Run
+ * (approval, operator retry, this process stopping) leaves the Run for
+ * `resume` or `reconcile`.
  */
 export class RunDriver extends Context.Service<
   RunDriver,
   {
-    /** Starts the loop of a Run this process just opened or recovered. A Run whose loop already runs here keeps it. */
-    readonly launch: (runId: RunId, submission: Submission) => Effect.Effect<void>;
-    /** Starts the loop of a Run an approval or an operator retry just reopened, after its previous loop has ended. */
-    readonly resume: (runId: RunId) => Effect.Effect<void, RunStoreError>;
-    /** Interrupts the loop of a Run that just closed and waits for it to end. */
+    /** Starts the fiber of an open Run. A Run whose fiber already runs here keeps it. */
+    readonly launch: (runId: RunId) => Effect.Effect<void>;
+    /** Starts the fiber of a Run an approval or an operator retry just reopened, after its previous fiber has ended. */
+    readonly resume: (runId: RunId) => Effect.Effect<void>;
+    /** Interrupts the fiber of a Run that just closed and waits for it to end. */
     readonly stop: (runId: RunId) => Effect.Effect<void>;
     /**
      * Gives the newest queued Event of the closed Run's Item its turn. The
@@ -55,8 +59,8 @@ export class RunDriver extends Context.Service<
     readonly continueWithNewest: (closedRunId: RunId) => Effect.Effect<void, RunStoreError>;
     /**
      * Recovers from the run tables: opens the queued Events whose continuation
-     * did not run, and starts the loop of every open Run except those awaiting
-     * approval. Runs whose loop already runs here are left alone.
+     * did not run, and starts the fiber of every open Run. Runs whose fiber
+     * already runs here are left alone.
      */
     readonly reconcile: () => Effect.Effect<void, RunStoreError>;
   }
@@ -69,28 +73,27 @@ export class RunDriver extends Context.Service<
       const admission = yield* AttemptAdmission;
       const condition = yield* TriggerCondition;
       const crypto = yield* Crypto.Crypto;
-      const loops = yield* FiberMap.make<RunId>();
+      const fibers = yield* FiberMap.make<RunId>();
 
-      // Annotated because a loop's continuation calls launch again, which TypeScript cannot infer.
+      // Annotated because a fiber's continuation calls launch again, which TypeScript cannot infer.
       const launch: RunDriver["Service"]["launch"] = Effect.fn("RunDriver.launch")(function* (
         runId: RunId,
-        submission: Submission,
       ) {
         yield* Effect.annotateCurrentSpan({ runId });
-        if (yield* FiberMap.has(loops, runId)) {
-          yield* Effect.logDebug("The Run's loop already runs in this process", { runId });
+        if (yield* FiberMap.has(fibers, runId)) {
+          yield* Effect.logDebug("The Run's fiber already runs in this process", { runId });
           return;
         }
-        yield* Effect.logDebug("Starting the Run's loop", { runId });
+        yield* Effect.logDebug("Starting the Run's fiber", { runId });
         yield* FiberMap.run(
-          loops,
+          fibers,
           runId,
-          drive(runId, submission).pipe(
+          drive(runId).pipe(
             Effect.catchCause((cause) =>
               Cause.hasInterruptsOnly(cause)
                 ? Effect.failCause(cause)
                 : Effect.logError(
-                    "The Run's loop stopped on an engine failure; the next reconcile resumes it",
+                    "The Run's fiber stopped on an engine failure; RunEngine.reconcile or a restart resumes it",
                     { runId, cause },
                   ),
             ),
@@ -101,24 +104,24 @@ export class RunDriver extends Context.Service<
 
       const resume = Effect.fn("RunDriver.resume")(function* (runId: RunId) {
         yield* Effect.annotateCurrentSpan({ runId });
-        const previous = yield* FiberMap.get(loops, runId);
+        const previous = yield* FiberMap.get(fibers, runId);
         if (Option.isSome(previous)) {
-          // The loop that parked or failed the Run ends right after its last
-          // write; a new loop must not start until that one has left the map.
-          yield* Effect.logDebug("Waiting for the Run's previous loop to end", { runId });
+          // The fiber that parked or failed the Run ends right after its last
+          // write; a new fiber must not start until that one has left the map.
+          yield* Effect.logDebug("Waiting for the Run's previous fiber to end", { runId });
           yield* Fiber.await(previous.value);
         }
-        yield* launch(runId, yield* store.submission(runId));
+        yield* launch(runId);
       });
 
       const stop = Effect.fn("RunDriver.stop")(function* (runId: RunId) {
         yield* Effect.annotateCurrentSpan({ runId });
-        if (!(yield* FiberMap.has(loops, runId))) {
-          yield* Effect.logDebug("The closed Run has no loop in this process", { runId });
+        if (!(yield* FiberMap.has(fibers, runId))) {
+          yield* Effect.logDebug("The closed Run has no fiber in this process", { runId });
           return;
         }
-        yield* FiberMap.remove(loops, runId);
-        yield* Effect.logInfo("The closed Run's loop stopped", { runId });
+        yield* FiberMap.remove(fibers, runId);
+        yield* Effect.logInfo("The closed Run's fiber stopped", { runId });
       });
 
       const continueWithNewest = Effect.fn("RunDriver.continueWithNewest")(function* (
@@ -158,9 +161,9 @@ export class RunDriver extends Context.Service<
         }
         yield* Effect.logInfo("Queued Event still matches its trigger; opening its Run", {
           ...fields,
-          runId: claimed.value.runId,
+          runId: claimed.value,
         });
-        yield* launch(claimed.value.runId, claimed.value.submission);
+        yield* launch(claimed.value);
       });
 
       /**
@@ -202,13 +205,15 @@ export class RunDriver extends Context.Service<
         return live.success ? Option.some(open.id) : Option.none<AttemptId>();
       });
 
+      /** Runs one Attempt on the reserved Worker and returns what it did to the Run. */
       const executeAttempt = Effect.fn("RunDriver.attempt")(function* (
         runId: RunId,
         worker: WorkerName,
       ) {
         yield* Effect.annotateCurrentSpan({ runId, worker });
         const started = yield* store.beginAttempt(runId, worker, yield* liveAttempt(runId));
-        if (started._tag !== "AttemptStarted") return started;
+        if (started._tag === "AttemptRecoveryFailed") return "RunFailed";
+        if (started._tag === "RunClosed") return "Unchanged";
 
         // Preserve an executor defect as a terminal Attempt outcome without
         // turning a programming bug into an automatic retry (ADR 0003).
@@ -236,29 +241,30 @@ export class RunDriver extends Context.Service<
             ),
             Effect.result,
           );
-        const decision = yield* store.finishAttempt(started.execution.attempt, result);
-        return { _tag: "AttemptExecuted" as const, decision };
+        return (yield* store.finishAttempt(started.execution.attempt, result))._tag;
       });
 
-      const drive = Effect.fn("RunDriver.drive")(function* (runId: RunId, submission: Submission) {
+      const drive = Effect.fn("RunDriver.drive")(function* (runId: RunId) {
+        const submission = yield* store.submission(runId);
         yield* Effect.annotateCurrentSpan({
           runId,
           loop: submission.loop,
           itemKey: submission.itemKey,
         });
-        if (submission.approval === "required") {
-          const state = yield* store.parkForApproval(runId);
-          if (state._tag === "Waiting") {
-            yield* Effect.logInfo("Run waits for its approval", { runId });
-            return;
-          }
+        if (
+          submission.approval === "required" &&
+          (yield* store.parkForApproval(runId))._tag === "Waiting"
+        ) {
+          yield* Effect.logInfo("Run waits for its approval", { runId });
+          return;
         }
 
-        while (true) {
+        let outcome: FinishDecision["_tag"];
+        do {
           // The wait for a worker slot stays interruptible so a cancel can reach a run
           // parked in `reserve`; the scheduler releases or reoffers the slot in its own
           // onInterrupt. The release obligation begins only once the lease exists.
-          const attempted = yield* Effect.uninterruptibleMask((restore) =>
+          outcome = yield* Effect.uninterruptibleMask((restore) =>
             restore(executor.reserve(submission)).pipe(
               Effect.flatMap((lease) =>
                 restore(admission.withAttempt(runId, executeAttempt(runId, lease.worker))).pipe(
@@ -267,21 +273,16 @@ export class RunDriver extends Context.Service<
               ),
             ),
           );
-          if (attempted._tag === "RunClosed") {
-            // Canceled, superseded, or revoked while queued: release was the only
-            // obligation, and the closing operation already stopped this loop's work.
-            yield* Effect.logInfo("Run closed while it waited for a worker", {
-              runId,
-              state: attempted.state,
-            });
-            return yield* continueWithNewest(runId);
-          }
-          if (
-            attempted._tag === "AttemptRecoveryFailed" ||
-            attempted.decision._tag !== "RetryAttempt"
-          )
-            return yield* continueWithNewest(runId);
+        } while (outcome === "RetryAttempt");
+
+        // Cancel, supersede, and revoke close a Run under its fiber and take care
+        // of the Item's queued Events themselves; their stop may interrupt this
+        // fiber anywhere, including between claiming an Event and starting its Run.
+        if (outcome === "Unchanged") {
+          yield* Effect.logInfo("Run closed by another operation; its fiber ends", { runId });
+          return;
         }
+        yield* continueWithNewest(runId);
       });
 
       const reconcile = Effect.fn("RunDriver.reconcile")(function* () {
@@ -300,17 +301,11 @@ export class RunDriver extends Context.Service<
             ),
           { discard: true },
         );
-        const open = yield* store.recoverable;
-        const driven = open.filter(({ state }) => state._tag !== "Waiting");
-        yield* Effect.forEach(driven, ({ runId, submission }) => launch(runId, submission), {
-          discard: true,
-        });
+        const open = yield* store.openRunIds;
+        yield* Effect.forEach(open, launch, { discard: true });
         yield* Effect.logInfo("Runs recovered from the run tables", {
           continuedAfterRunIds: continuations,
-          drivenRunIds: driven.map(({ runId }) => runId),
-          waitingForApprovalRunIds: open
-            .filter(({ state }) => state._tag === "Waiting")
-            .map(({ runId }) => runId),
+          openRunIds: open,
         });
       });
 

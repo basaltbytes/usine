@@ -199,8 +199,9 @@ type RetryDecision =
 
 /**
  * Reopens a failed Run for operator retry regardless of its Attempt count.
- * Repeating the request is accepted while the reopened Run has not started
- * its next Attempt; once that Attempt is open, retrying is rejected.
+ * A request while the Run runs but has no open Attempt, as after a retry that
+ * has not started its Attempt yet, is accepted and changes nothing; once an
+ * Attempt is open, retrying is rejected.
  */
 export const retryRun = (current: RunProgress): RetryDecision => {
   const state = current.run.state;

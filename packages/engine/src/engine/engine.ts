@@ -30,7 +30,7 @@ import { AttemptAdmission } from "./admission.ts";
 import { RunDriver } from "./run-driver.ts";
 
 // Every operation that commits a Run transition also hands it to the Run's
-// loop. Both happen uninterruptibly, so a caller that goes away cannot leave a
+// fiber. Both happen uninterruptibly, so a caller that goes away cannot leave a
 // committed transition undriven until the next restart.
 const makeRunEngine = Effect.gen(function* () {
   const store = yield* RunStore;
@@ -44,13 +44,13 @@ const makeRunEngine = Effect.gen(function* () {
       Effect.provideService(Crypto.Crypto, crypto),
     );
     const claim = yield* store.recordAndClaim(submission, requestedRunId);
-    // The superseded Run's loop stops before the new Run's loop starts, so the
-    // Item never has two loops reserving Workers at once.
+    // The superseded Run's fiber stops before the new Run's fiber starts, so
+    // the Item never has two fibers reserving Workers at once.
     if (Option.isSome(claim.supersededRun)) {
       yield* driver.stop(claim.supersededRun.value);
     }
     if (Option.isSome(claim.openedRun)) {
-      yield* driver.launch(claim.openedRun.value, claim.submission);
+      yield* driver.launch(claim.openedRun.value);
     }
     return claim.result;
   }, Effect.uninterruptible);
@@ -74,7 +74,7 @@ const makeRunEngine = Effect.gen(function* () {
       yield* driver.resume(runId);
       return;
     }
-    yield* Effect.logDebug("Retry was already requested; the reopened Run is unchanged", {
+    yield* Effect.logDebug("Retry changed nothing; the Run already waits for its next Attempt", {
       runId,
     });
   }, Effect.uninterruptible);
@@ -91,7 +91,7 @@ const makeRunEngine = Effect.gen(function* () {
       runId,
       openAttempt: Option.getOrElse(outcome.openAttempt, () => "none"),
     });
-    // The executor stops the Attempt before its loop is interrupted: an
+    // The executor stops the Attempt before its fiber is interrupted: an
     // interrupted launch that was never stopped keeps its parent task live for
     // a reattachment that will not come.
     const handshake = Option.isSome(outcome.openAttempt)
@@ -203,7 +203,7 @@ export class RunEngine extends Context.Service<
       attemptId: AttemptId,
       intervention: Intervention,
     ) => Effect.Effect<void, RunEngineError>;
-    /** Recovers unfinished Runs and outstanding actions from stored state; also runs when the engine starts. */
+    /** Starts a fiber for every open Run without one in this process and opens the queued Events no closed Run continued; also runs when the engine starts. */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     /** Resolves the current failed Attempt's attention without changing its outcome or starting work. */
     readonly resolveFailure: (

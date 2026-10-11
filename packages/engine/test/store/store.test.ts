@@ -345,7 +345,7 @@ describe("run store", () => {
             );
           yield* emit(1, "before the restart");
           yield* emit(2, "last before the restart");
-          // The restarted Run loop asks again for the open Attempt's parent task, still live.
+          // The restarted Run's fiber asks again for the open Attempt's parent task, still live.
           const reattached = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),

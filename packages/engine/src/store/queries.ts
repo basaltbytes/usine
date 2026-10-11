@@ -49,7 +49,6 @@ import {
   decodeAttemptRows,
   decodeDiscards,
   decodeEventRoutes,
-  decodeRecoverableRuns,
   decodeProjectionRevision,
   decodeRunIds,
   decodeRunRows,
@@ -627,19 +626,13 @@ export const queriesFor = (database: RunDatabaseClient) => {
     );
   });
 
-  const recoverable = Effect.fn("RunStoreQueries.recoverable")(function* () {
+  const openRunIds = Effect.fn("RunStoreQueries.openRunIds")(function* () {
     const rows = yield* database
-      .select({
-        ...eventRouteSelection,
-        runId: runs.runId,
-        state: runs.stateJson,
-      })
+      .select({ runId: runs.runId })
       .from(runs)
-      .innerJoin(events, eq(events.eventId, runs.eventId))
-      .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
       .where(openState)
       .execute();
-    return yield* decodeRecoverableRuns(rows);
+    return (yield* decodeRunIds(rows)).map(({ runId }) => runId);
   });
 
   // The newest Run of each Item that has a current queued Event and no open
@@ -754,7 +747,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     nextQueued,
     pendingContinuations,
     recordTriggerEvent,
-    recoverable,
+    openRunIds,
     recordApproval,
     revision,
     revokeQueued,
