@@ -25,9 +25,8 @@ import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 
-import { DateTime, Effect, Exit, FileSystem, Layer, Option, Result, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
-import { Workflow } from "effect/unstable/workflow";
 
 import { localSqliteLayer } from "../../src/database/local-sqlite.ts";
 
@@ -111,7 +110,6 @@ describe("run store", () => {
               Result.fail(new AgentFailure({ message: "Handled outside usine" })),
             );
             const evidence = yield* reader.evidence(runId);
-            const commands = yield* store.pendingWorkflowCommands;
             const revision = yield* reader.revision();
             yield* store.resolveFailure(runId, attempt.id);
             const resolvedRevision = yield* reader.revision();
@@ -119,7 +117,6 @@ describe("run store", () => {
             assert(resolvedRevision.value > revision.value);
             yield* store.resolveFailure(runId, attempt.id);
             assert.deepStrictEqual(yield* reader.revision(), resolvedRevision);
-            assert.deepStrictEqual(yield* store.pendingWorkflowCommands, commands);
             return evidence;
           }).pipe(Effect.provide(services)),
         );
@@ -302,7 +299,6 @@ describe("run store", () => {
         assert(Option.isNone(current.step.result));
         const active = current.attempts[1];
         assert(active !== undefined && Option.isNone(active.outcome));
-        assert.deepStrictEqual(yield* store.pendingWorkflowCommands, []);
         yield* store.finishAttempt(
           recovered.execution.attempt,
           Result.succeed(new StepResult({ message: "current", facts: [] })),
@@ -349,7 +345,7 @@ describe("run store", () => {
             );
           yield* emit(1, "before the restart");
           yield* emit(2, "last before the restart");
-          // The restarted workflow asks again for the open Attempt's parent task, still live.
+          // The restarted Run loop asks again for the open Attempt's parent task, still live.
           const reattached = yield* store.beginAttempt(
             runId,
             WorkerName.make("local"),
@@ -431,10 +427,6 @@ describe("run store", () => {
             (yield* store.finishAttempt(started.execution.attempt, Result.fail(failure)))._tag,
             number < 3 ? "RetryAttempt" : "RunFailed",
           );
-          assert.deepStrictEqual(
-            (yield* store.pendingWorkflowCommands).map(({ command }) => command),
-            number < 3 ? [] : ["Continue"],
-          );
         }
         const snapshot = yield* store.snapshot(runId);
         assert.strictEqual(snapshot.itemKey, submission.itemKey);
@@ -443,20 +435,16 @@ describe("run store", () => {
         assert(snapshot.attempts.every((attempt) => Option.isSome(attempt.outcome)));
         assert(Option.isNone(snapshot.step.result));
 
-        yield* store.retry(runId);
-        yield* store.retry(runId);
-        assert.deepStrictEqual(
-          (yield* store.pendingWorkflowCommands).map(({ command }) => command),
-          ["Resume", "Continue"],
-        );
-        yield* store.completeWorkflowCommand(runId, "Resume");
+        // A repeated retry is accepted until the reopened Run starts its next Attempt.
+        assert.strictEqual(yield* store.retry(runId), true);
+        assert.strictEqual(yield* store.retry(runId), false);
+        const restarted = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(restarted._tag === "AttemptStarted");
+        assert.strictEqual(restarted.execution.attempt.number, 4);
         assert.strictEqual(
           (yield* Effect.flip(store.retry(runId)))._tag,
           "RunOperationRejectedError",
         );
-        const restarted = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
-        assert(restarted._tag === "AttemptStarted");
-        assert.strictEqual(restarted.execution.attempt.number, 4);
         assert.strictEqual(
           (yield* store.finishAttempt(restarted.execution.attempt, Result.fail(failure)))._tag,
           "RunFailed",
@@ -495,10 +483,6 @@ describe("run store", () => {
             assert(Option.isSome(attempt.outcome) && attempt.outcome.value._tag === "Failed");
             assert.strictEqual(attempt.outcome.value.failure._tag, "InfraFailure");
           }
-          assert.deepStrictEqual(
-            (yield* store.pendingWorkflowCommands).map(({ command }) => command),
-            ["Continue"],
-          );
           yield* store.retry(runId);
           const canceled = yield* store.cancel(runId);
           assert(canceled._tag === "Canceled" && Option.isNone(canceled.openAttempt));
@@ -507,99 +491,31 @@ describe("run store", () => {
             "RunClosed",
           );
           assert.deepStrictEqual((yield* store.snapshot(runId)).attempts, failed.attempts);
-          assert.deepStrictEqual(
-            (yield* store.pendingWorkflowCommands).map(({ command }) => command),
-            ["Interrupt", "Continue"],
-          );
         }),
       ),
   );
 
-  for (const exit of [
-    Exit.succeed(new StepResult({ message: "durable result", facts: [] })),
-    Exit.fail(new InfraFailure({ message: "durable failure", cause: new Error("offline") })),
-  ]) {
-    it.live(
-      `reconciles final workflow ${exit._tag} without retrying or replacing a settled outcome`,
-      () =>
-        withRunStore(
-          Effect.gen(function* () {
-            const store = yield* RunStore;
-            const runId = RunId.make("final-reconciliation");
-            yield* store.recordAndClaim(lifecycleSubmission, runId);
-            yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
-            const complete = new Workflow.Complete({ exit });
-            yield* store.reconcileCompletion(runId, complete);
-            const settled = yield* store.snapshot(runId);
-            assert.strictEqual(
-              settled.run.state._tag,
-              Exit.isSuccess(exit) ? "Succeeded" : "Failed",
-            );
-            assert.strictEqual(settled.attempts.length, 1);
-            const attempt = settled.attempts[0];
-            assert(attempt !== undefined && Option.isSome(attempt.outcome));
-            assert.strictEqual(
-              attempt.outcome.value._tag,
-              Exit.isSuccess(exit) ? "Succeeded" : "Failed",
-            );
-            assert.deepStrictEqual(
-              settled.step.result,
-              Exit.isSuccess(exit) ? Option.some(exit.value) : Option.none(),
-            );
-            assert.deepStrictEqual(
-              (yield* store.pendingWorkflowCommands).map(({ command }) => command),
-              ["Continue"],
-            );
-            yield* store.reconcileCompletion(runId, complete);
-            yield* store.reconcileCompletion(
-              runId,
-              new Workflow.Complete({
-                exit: Exit.succeed(new StepResult({ message: "late result", facts: [] })),
-              }),
-            );
-            assert.deepStrictEqual(yield* store.snapshot(runId), settled);
-          }),
-        ),
-    );
-  }
-
-  it.live(
-    "leaves workflow suspension and defects for restart recovery and preserves cancellation",
-    () =>
-      withRunStore(
-        Effect.gen(function* () {
-          const store = yield* RunStore;
-          const runId = RunId.make("unsettled-workflow");
-          yield* store.recordAndClaim(lifecycleSubmission, runId);
-          yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
-          const running = yield* store.snapshot(runId);
-          yield* store.reconcileCompletion(runId, new Workflow.Suspended({}));
-          yield* store.reconcileCompletion(
-            runId,
-            new Workflow.Complete({ exit: Exit.die(new Error("workflow defect")) }),
-          );
-          assert.deepStrictEqual(yield* store.snapshot(runId), running);
-          assert.deepStrictEqual(yield* store.pendingWorkflowCommands, []);
-          const recovered = yield* store.beginAttempt(
-            runId,
-            WorkerName.make("local"),
-            Option.none(),
-          );
-          assert(recovered._tag === "AttemptStarted");
-          assert.strictEqual(recovered.execution.attempt.number, 2);
-          const outcome = yield* store.cancel(runId);
-          assert(outcome._tag === "Canceled");
-          assert.deepStrictEqual(outcome.openAttempt, Option.some(recovered.execution.attempt.id));
-          const canceled = yield* store.snapshot(runId);
-          const result = new StepResult({ message: "after cancellation", facts: [] });
-          yield* store.finishAttempt(recovered.execution.attempt, Result.succeed(result));
-          yield* store.reconcileCompletion(
-            runId,
-            new Workflow.Complete({ exit: Exit.succeed(result) }),
-          );
-          assert.deepStrictEqual(yield* store.snapshot(runId), canceled);
-        }),
-      ),
+  it.live("keeps a canceled Run closed when its recovered Attempt reports late", () =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const runId = RunId.make("late-after-cancel");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        const recovered = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(recovered._tag === "AttemptStarted");
+        assert.strictEqual(recovered.execution.attempt.number, 2);
+        const outcome = yield* store.cancel(runId);
+        assert(outcome._tag === "Canceled");
+        assert.deepStrictEqual(outcome.openAttempt, Option.some(recovered.execution.attempt.id));
+        const canceled = yield* store.snapshot(runId);
+        yield* store.finishAttempt(
+          recovered.execution.attempt,
+          Result.succeed(new StepResult({ message: "after cancellation", facts: [] })),
+        );
+        assert.deepStrictEqual(yield* store.snapshot(runId), canceled);
+      }),
+    ),
   );
 
   it.live("rolls back recovery and completion if their final persistence operation fails", () =>
@@ -624,9 +540,9 @@ describe("run store", () => {
         const recovered = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert(recovered._tag === "AttemptStarted");
         const beforeCompletion = yield* store.snapshot(runId);
-        // The outbox insert follows the Attempt, Step result and Run updates.
-        yield* sql`CREATE TRIGGER reject_command BEFORE INSERT ON usine_workflow_commands
-        BEGIN SELECT RAISE(ABORT, 'workflow command insertion unavailable'); END`;
+        // The Run's closing state follows the Attempt outcome and the Step result.
+        yield* sql`CREATE TRIGGER reject_closing BEFORE UPDATE ON usine_runs
+        BEGIN SELECT RAISE(ABORT, 'run update unavailable'); END`;
         const result = new StepResult({ message: "atomic success", facts: [] });
         assert.strictEqual(
           (yield* Effect.flip(
@@ -635,16 +551,11 @@ describe("run store", () => {
           "EnginePersistenceError",
         );
         assert.deepStrictEqual(yield* store.snapshot(runId), beforeCompletion);
-        assert.deepStrictEqual(yield* store.pendingWorkflowCommands, []);
-        yield* sql`DROP TRIGGER reject_command`;
+        yield* sql`DROP TRIGGER reject_closing`;
         yield* store.finishAttempt(recovered.execution.attempt, Result.succeed(result));
         const completed = yield* store.snapshot(runId);
         assert.strictEqual(completed.run.state._tag, "Succeeded");
         assert.deepStrictEqual(completed.step.result, Option.some(result));
-        assert.deepStrictEqual(
-          (yield* store.pendingWorkflowCommands).map(({ command }) => command),
-          ["Continue"],
-        );
       }),
     ),
   );

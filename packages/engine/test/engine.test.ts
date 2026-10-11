@@ -1,10 +1,10 @@
 import { Intervention, OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
 import { assert, describe, it } from "@effect/vitest";
-import { SqliteClient } from "@effect/sql-sqlite-node";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptContext, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { WorkerName } from "@usine/core/worker";
@@ -13,22 +13,22 @@ import {
   Deferred,
   Effect,
   Exit,
-  FileSystem,
   Fiber,
   Layer,
   Option,
-  Path,
   Ref,
+  Result,
   Schedule,
-  Schema,
   Scope,
 } from "effect";
-import { SqlClient } from "effect/unstable/sql";
+import { localSqliteLayer } from "../src/database/local-sqlite.ts";
 import { RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
 import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
-import { runIdFor } from "../src/workflow/workflow.ts";
+import { TriggerCondition } from "../src/trigger-condition.ts";
+import { runIdFor, Submission } from "../src/engine/submission.ts";
+import { RunStore } from "../src/store/store.ts";
 import {
   approvalEvent,
   type AttemptPlan,
@@ -458,7 +458,7 @@ describe("durable run engine", () => {
           yield* Effect.sleep("25 millis");
           assert.strictEqual((yield* engine.inspect(accepted.runId)).attempts.length, 1);
 
-          // Retry as soon as the projection is Failed, while the workflow may still be suspending.
+          // Retry as soon as the projection is Failed, while the Run's loop may still be ending.
           yield* engine.retry(accepted.runId);
           const finished = yield* waitFor(
             engine,
@@ -467,6 +467,52 @@ describe("durable run engine", () => {
           );
           assert.strictEqual(finished.attempts.length, 2);
           assert.strictEqual(finished.attempts[1]?.number, 2);
+        }).pipe(Effect.provide(runtime));
+      }),
+    ),
+  );
+
+  it.live("starts a retry that lands while the failed Run's loop still re-checks its Item", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const finish = yield* Deferred.make<void>();
+        const checking = yield* Deferred.make<void>();
+        const answer = yield* Deferred.make<boolean>();
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Deferred.await(finish).pipe(
+            Effect.andThen(new AgentFailure({ message: "needs the operator" })),
+          ),
+          Effect.succeed(stepResult("retried")),
+        ]);
+        const runtime = engineLayer(
+          directory,
+          executorLayer(plans),
+          Layer.succeed(TriggerCondition)({
+            holds: () =>
+              Deferred.succeed(checking, undefined).pipe(Effect.andThen(Deferred.await(answer))),
+          }),
+        );
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const failing = yield* engine.submit(submission({ number: 56, item: "retry-race" }));
+          assert(failing._tag === "Claimed");
+          yield* waitFor(engine, failing.runId, ({ run }) => run.state._tag === "Running");
+          const queued = yield* engine.submit(submission({ number: 57, item: "retry-race" }));
+          assert.strictEqual(queued._tag, "Queued");
+          yield* Deferred.succeed(finish, undefined);
+          // The failed Run's loop is still re-checking the queued Event's trigger.
+          yield* Deferred.await(checking);
+          const retrying = yield* Effect.forkChild(engine.retry(failing.runId), {
+            startImmediately: true,
+          });
+          yield* Deferred.succeed(answer, false);
+          yield* Fiber.join(retrying);
+          const finished = yield* waitFor(
+            engine,
+            failing.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(finished.attempts.length, 2);
         }).pipe(Effect.provide(runtime));
       }),
     ),
@@ -892,50 +938,11 @@ describe("durable run engine", () => {
     ),
   );
 
-  it.live("co-locates usine and cluster tables in the instance database", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([]);
-        const runtime = engineLayer(directory, executorLayer(plans));
-        const path = yield* Path.Path;
-        const database = path.join(directory, ".usine", "runtime.sqlite");
-
-        yield* Effect.gen(function* () {
-          const fileSystem = yield* FileSystem.FileSystem;
-          assert.strictEqual(yield* fileSystem.exists(database), true);
-          const tableRows = yield* Effect.gen(function* () {
-            const sql = yield* SqlClient.SqlClient;
-            const rows = yield* sql`
-              SELECT name
-              FROM sqlite_master
-              WHERE type = 'table'
-              ORDER BY name
-            `;
-            return yield* Schema.decodeUnknownEffect(
-              Schema.Array(Schema.Struct({ name: Schema.String })),
-            )(rows);
-          }).pipe(Effect.provide(SqliteClient.layer({ filename: database })));
-          const tables = tableRows.map(({ name }) => name);
-          assert.includeMembers(tables, [
-            "cluster_messages",
-            "cluster_migrations",
-            "cluster_replies",
-            "usine_attempts",
-            "usine_events",
-            "usine_migrations",
-            "usine_runs",
-            "usine_steps",
-            "usine_workflow_commands",
-          ]);
-        }).pipe(Effect.provide(runtime));
-      }),
-    ),
-  );
-
   it.live("cancels a run parked in the worker queue without starting an attempt", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const reserveEntered = yield* Deferred.make<void>();
+        const reserveLeft = yield* Deferred.make<void>();
         // A 0-capacity scheduler parks the run in `reserve` forever; only a
         // cancel that reaches the parked reservation ends it.
         const executor = Layer.succeed(StepExecutor)({
@@ -944,7 +951,10 @@ describe("durable run engine", () => {
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
           reserve: () =>
-            Deferred.succeed(reserveEntered, undefined).pipe(Effect.andThen(Effect.never)),
+            Deferred.succeed(reserveEntered, undefined).pipe(
+              Effect.andThen(Effect.never),
+              Effect.onInterrupt(() => Deferred.succeed(reserveLeft, undefined)),
+            ),
           execute: () => Effect.die("a canceled queued run must not execute"),
         });
         const runtime = engineLayer(directory, executor);
@@ -956,14 +966,209 @@ describe("durable run engine", () => {
           if (result._tag !== "Claimed") return;
           yield* Deferred.await(reserveEntered);
           yield* engine.cancel(result.runId);
-          const snapshot = yield* waitFor(
-            engine,
-            result.runId,
-            ({ run }) => run.state._tag === "Canceled",
-          );
+          // The cancel returns only after the Run's loop left its reservation.
+          assert.isTrue(yield* Deferred.isDone(reserveLeft));
+          const snapshot = yield* engine.inspect(result.runId);
+          assert.strictEqual(snapshot.run.state._tag, "Canceled");
           assert.strictEqual(snapshot.attempts.length, 0);
         }).pipe(Effect.provide(runtime));
       }),
     ),
+  );
+
+  it.live("names a Run by its Event's dedup key and joins a resubmission to it", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([Effect.never]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const original = submission({ number: 1 });
+          const first = yield* engine.submit(original);
+          assert(first._tag === "Claimed");
+          // The id earlier versions gave this Event, so existing Runs keep theirs.
+          assert.strictEqual(first.runId, "c33a338a9aaafa7490fa315fbf02a437");
+          assert.strictEqual(yield* runIdFor(original), first.runId);
+          const resubmitted = yield* engine.submit(
+            new Submission({
+              ...original,
+              event: new Event({ ...original.event, id: EventId.make("event-1-seen-again") }),
+            }),
+          );
+          assert(resubmitted._tag === "Claimed");
+          assert.strictEqual(resubmitted.runId, first.runId);
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+      }),
+    ),
+  );
+
+  it.live("cancels a Run parked for approval so a later approval cannot start it", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.die("a canceled Run must not execute"),
+        ]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const parked = yield* engine.submit(
+            submission({ number: 50, item: "cancel-waiting", approval: "required" }),
+          );
+          assert(parked._tag === "Claimed");
+          yield* waitFor(engine, parked.runId, ({ run }) => run.state._tag === "Waiting");
+          yield* engine.cancel(parked.runId);
+          const rejected = yield* Effect.flip(engine.approve(parked.runId, approvalEvent(50)));
+          assert.strictEqual(rejected._tag, "RunOperationRejectedError");
+          const canceled = yield* engine.inspect(parked.runId);
+          assert.strictEqual(canceled.run.state._tag, "Canceled");
+          assert.strictEqual(canceled.attempts.length, 0);
+          assert.strictEqual((yield* Ref.get(plans)).length, 1);
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+      }),
+    ),
+  );
+
+  // Each crash test writes what a stopped process committed through the store
+  // alone, then starts the engine on the same instance.
+  const committedBeforeCrash = <A, E>(
+    directory: Parameters<typeof localSqliteLayer>[0],
+    write: (store: RunStore["Service"]) => Effect.Effect<A, E>,
+  ) =>
+    Effect.gen(function* () {
+      return yield* write(yield* RunStore);
+    }).pipe(Effect.provide(RunStore.layer.pipe(Layer.provide(localSqliteLayer(directory)))));
+
+  it.live("starts an approved Run whose approval committed just before a crash", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("approved before the crash")),
+        ]);
+        const gated = submission({ number: 51, approval: "required" });
+        const runId = yield* runIdFor(gated);
+        yield* committedBeforeCrash(directory, (store) =>
+          Effect.gen(function* () {
+            yield* store.recordAndClaim(gated, runId);
+            yield* store.parkForApproval(runId);
+            yield* store.approve(runId, approvalEvent(51));
+          }),
+        );
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const finished = yield* waitFor(
+            engine,
+            runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(finished.attempts.length, 1);
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+      }),
+    ),
+  );
+
+  it.live("starts the next Attempt of a Run whose retry committed just before a crash", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("retried after the crash")),
+        ]);
+        const failing = submission({ number: 52 });
+        const runId = yield* runIdFor(failing);
+        yield* committedBeforeCrash(directory, (store) =>
+          Effect.gen(function* () {
+            yield* store.recordAndClaim(failing, runId);
+            const started = yield* store.beginAttempt(
+              runId,
+              WorkerName.make("local"),
+              Option.none(),
+            );
+            assert(started._tag === "AttemptStarted");
+            yield* store.finishAttempt(
+              started.execution.attempt,
+              Result.fail(new AgentFailure({ message: "needs the operator" })),
+            );
+            yield* store.retry(runId);
+          }),
+        );
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const finished = yield* waitFor(
+            engine,
+            runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.deepStrictEqual(
+            finished.attempts.map(({ number }) => number),
+            [1, 2],
+          );
+        }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+      }),
+    ),
+  );
+
+  it.live(
+    "finishes a Run's closing after a crash: an owed retry starts and the queued Event opens",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Effect.succeed(stepResult("owed retry")),
+            Effect.succeed(stepResult("queued Event")),
+          ]);
+          const retrying = submission({ number: 53, item: "owed-retry" });
+          const closed = submission({ number: 54, item: "closed-before-crash" });
+          const queued = submission({ number: 55, item: "closed-before-crash" });
+          const retryingRunId = yield* runIdFor(retrying);
+          const closedRunId = yield* runIdFor(closed);
+          const queuedRunId = yield* runIdFor(queued);
+          yield* committedBeforeCrash(directory, (store) =>
+            Effect.gen(function* () {
+              // The first Attempt settled with an automatic retry still owed.
+              yield* store.recordAndClaim(retrying, retryingRunId);
+              const interrupted = yield* store.beginAttempt(
+                retryingRunId,
+                WorkerName.make("local"),
+                Option.none(),
+              );
+              assert(interrupted._tag === "AttemptStarted");
+              const decision = yield* store.finishAttempt(
+                interrupted.execution.attempt,
+                Result.fail(new InfraFailure({ message: "worker lost", cause: "test" })),
+              );
+              assert.strictEqual(decision._tag, "RetryAttempt");
+              // This Run closed with an Event queued behind it, before its continuation ran.
+              yield* store.recordAndClaim(closed, closedRunId);
+              const started = yield* store.beginAttempt(
+                closedRunId,
+                WorkerName.make("local"),
+                Option.none(),
+              );
+              assert(started._tag === "AttemptStarted");
+              const waiting = yield* store.recordAndClaim(queued, queuedRunId);
+              assert.strictEqual(waiting.result._tag, "Queued");
+              yield* store.finishAttempt(
+                started.execution.attempt,
+                Result.succeed(stepResult("closed before the crash")),
+              );
+            }),
+          );
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const retried = yield* waitFor(
+              engine,
+              retryingRunId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.deepStrictEqual(
+              retried.attempts.map(({ number }) => number),
+              [1, 2],
+            );
+            const opened = yield* waitFor(
+              engine,
+              queuedRunId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.strictEqual(opened.attempts.length, 1);
+          }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+        }),
+      ),
   );
 });

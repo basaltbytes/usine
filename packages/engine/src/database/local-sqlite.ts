@@ -87,7 +87,7 @@ export const layer = (
   StepExecutor | TriggerCondition
 > => layerWithDatabase(localSqliteLayer(instanceDirectory)).pipe(Layer.provide(NodeServices.layer));
 
-/** Observation services initialize the local database but never reconcile workflows or start Attempts. */
+/** Observation services initialize the local database but never recover Runs or start Attempts. */
 export const observationLayer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<

@@ -4,7 +4,7 @@ import { Deferred, Effect, Layer, Option, Path, Ref, Schedule, Schema } from "ef
 import { SqlClient } from "effect/unstable/sql";
 import { RunEngine } from "../src/engine/engine.ts";
 import { TriggerCondition } from "../src/trigger-condition.ts";
-import { runIdFor } from "../src/workflow/workflow.ts";
+import { runIdFor } from "../src/engine/submission.ts";
 import {
   approvalEvent,
   type AttemptPlan,

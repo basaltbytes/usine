@@ -19,7 +19,6 @@ import { EnginePersistenceError, RunStoreError } from "../engine/error.ts";
 import { IgnoreReason, Submission } from "../engine/submission.ts";
 import { ProjectionRevision, RunSummary } from "../run-reader/model.ts";
 import { TranscriptEntry, TranscriptSequence } from "../transcript.ts";
-import { WorkflowCommand } from "../workflow/command.ts";
 
 export const EventRouteRow = Schema.Struct({
   eventId: EventId,
@@ -92,11 +91,6 @@ const RecoverableRunRow = Schema.Struct({
 
 const RunIdRow = Schema.Struct({ runId: RunId });
 const DiscardRow = Schema.Struct({ reason: IgnoreReason });
-export const WorkflowCommandRow = Schema.Struct({
-  runId: RunId,
-  command: WorkflowCommand,
-});
-export type WorkflowCommandRow = typeof WorkflowCommandRow.Type;
 
 const ProjectionRevisionRow = Schema.Struct({ revision: ProjectionRevision });
 
@@ -106,7 +100,6 @@ export const decodeAttemptRows = Schema.decodeUnknownEffect(Schema.Array(Attempt
 export const decodeRecoverableRuns = Schema.decodeUnknownEffect(Schema.Array(RecoverableRunRow));
 export const decodeRunIds = Schema.decodeUnknownEffect(Schema.Array(RunIdRow));
 export const decodeDiscards = Schema.decodeUnknownEffect(Schema.Array(DiscardRow));
-export const decodeWorkflowCommands = Schema.decodeUnknownEffect(Schema.Array(WorkflowCommandRow));
 export const decodeProjectionRevision = Schema.decodeUnknownEffect(
   Schema.Array(ProjectionRevisionRow),
 );

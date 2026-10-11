@@ -121,3 +121,57 @@ describe("Attempt migrations", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
+
+describe("Run driver migration", () => {
+  it.live("drops the Effect workflow and cluster tables from an existing instance", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({ prefix: "usine-workflow-upgrade-" }),
+      );
+      const historical = yield* fs.makeTempDirectoryScoped({
+        prefix: "usine-workflow-migrations-",
+      });
+      const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
+      for (const name of yield* fs.readDirectory(source)) {
+        if (name >= "20261011153856_drop_workflow_tables") continue;
+        yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
+      }
+      yield* fs.makeDirectory(`${directory}/.usine`);
+      const workflowEraDatabase = Layer.effect(
+        RunDatabase,
+        Effect.gen(function* () {
+          const database = yield* SQLiteDrizzle.makeWithDefaults();
+          yield* migrate(database, {
+            migrationsFolder: historical,
+            migrationsTable: "usine_migrations",
+          });
+          return database;
+        }),
+      ).pipe(
+        Layer.provideMerge(SqliteClient.layer({ filename: `${directory}/.usine/runtime.sqlite` })),
+      );
+      const runId = RunId.make("workflow-era-run");
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          yield* store.recordAndClaim(lifecycleSubmission, runId);
+          const sql = yield* SqlClient.SqlClient;
+          // The tables Effect's SingleRunner kept beside usine's, and a pending command.
+          yield* sql`CREATE TABLE cluster_migrations (migration_id integer PRIMARY KEY)`;
+          yield* sql`CREATE TABLE cluster_messages (id text PRIMARY KEY)`;
+          yield* sql`CREATE TABLE cluster_replies (id text PRIMARY KEY)`;
+          yield* sql`INSERT INTO usine_workflow_commands (run_id, command) VALUES (${runId}, 'Resume')`;
+        }).pipe(Effect.provide(RunStore.layer), Effect.provide(workflowEraDatabase)),
+      );
+      yield* Effect.gen(function* () {
+        const sql = yield* SqlClient.SqlClient;
+        const remaining = yield* sql`SELECT name FROM sqlite_master
+          WHERE type = 'table' AND (name LIKE 'cluster_%' OR name = 'usine_workflow_commands')`;
+        assert.deepStrictEqual(remaining, []);
+        const store = yield* RunStore;
+        assert.strictEqual((yield* store.snapshot(runId)).run.state._tag, "Pending");
+      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});

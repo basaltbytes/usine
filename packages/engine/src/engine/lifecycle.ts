@@ -7,7 +7,6 @@ import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
 import { Array as EffectArray, Option, Result } from "effect";
-import type { WorkflowCommand } from "../workflow/command.ts";
 
 // Engine policy, not a limit imposed on consumers of the core Attempt model.
 const MAX_AUTO_ATTEMPTS = AttemptNumber.make(3);
@@ -56,42 +55,12 @@ const failRunningAttempt = (
   state: RunState.Running,
   attempt: Attempt,
   failure: AttemptFailure,
-  policy: "Execution" | "FinalReconciliation",
 ): RetryAttempt | RunFailed => {
   const outcome = new AttemptFailed({ failure });
-  if (
-    policy === "Execution" &&
-    shouldAutoRetry({ failure, number: attempt.number, maxAutoAttempts: MAX_AUTO_ATTEMPTS })
-  ) {
+  if (shouldAutoRetry({ failure, number: attempt.number, maxAutoAttempts: MAX_AUTO_ATTEMPTS })) {
     return { _tag: "RetryAttempt", attempt, outcome };
   }
   return { _tag: "RunFailed", attempt, outcome, state: RunState.fail(state) };
-};
-
-const finish = (
-  current: RunProgress,
-  attemptId: AttemptId,
-  result: Result.Result<StepResult, AttemptFailure>,
-  policy: "Execution" | "FinalReconciliation",
-): FinishDecision => {
-  if (current.run.state._tag !== "Running") {
-    return { _tag: "Unchanged", reason: "RunNotRunning" };
-  }
-  const attempt = openAttempt(current);
-  if (Option.isNone(attempt)) return { _tag: "Unchanged", reason: "NoOpenAttempt" };
-  // A completion from before restart or operator retry cannot settle the
-  // replacement Attempt, even though the Run is Running again.
-  if (attempt.value.id !== attemptId) return { _tag: "Unchanged", reason: "AttemptReplaced" };
-  if (Result.isFailure(result)) {
-    return failRunningAttempt(current.run.state, attempt.value, result.failure, policy);
-  }
-  return {
-    _tag: "RunSucceeded",
-    attempt: attempt.value,
-    outcome: new AttemptSucceeded(),
-    state: RunState.succeed(current.run.state),
-    result: result.success,
-  };
 };
 
 /**
@@ -102,22 +71,25 @@ export const finishAttempt = (
   current: RunProgress,
   attemptId: AttemptId,
   result: Result.Result<StepResult, AttemptFailure>,
-): FinishDecision => finish(current, attemptId, result, "Execution");
-
-/**
- * Repairs an open Attempt from a final durable result. The workflow has already
- * ended, so even an infrastructure failure closes the Run without auto-retry.
- * The runtime must first translate its completion into a typed result; defects
- * and suspension are not Attempt outcomes here (ADRs 0003 and 0010).
- */
-export const reconcileAttempt = (
-  current: RunProgress,
-  result: Result.Result<StepResult, AttemptFailure>,
 ): FinishDecision => {
+  if (current.run.state._tag !== "Running") {
+    return { _tag: "Unchanged", reason: "RunNotRunning" };
+  }
   const attempt = openAttempt(current);
-  return Option.isNone(attempt)
-    ? { _tag: "Unchanged", reason: "NoOpenAttempt" }
-    : finish(current, attempt.value.id, result, "FinalReconciliation");
+  if (Option.isNone(attempt)) return { _tag: "Unchanged", reason: "NoOpenAttempt" };
+  // A completion from before restart or operator retry cannot settle the
+  // replacement Attempt, even though the Run is Running again.
+  if (attempt.value.id !== attemptId) return { _tag: "Unchanged", reason: "AttemptReplaced" };
+  if (Result.isFailure(result)) {
+    return failRunningAttempt(current.run.state, attempt.value, result.failure);
+  }
+  return {
+    _tag: "RunSucceeded",
+    attempt: attempt.value,
+    outcome: new AttemptSucceeded(),
+    state: RunState.succeed(current.run.state),
+    result: result.success,
+  };
 };
 
 type StartDecision =
@@ -177,7 +149,7 @@ export const beginAttempt = (
         resume: newestPushedSalvage(current.attempts),
       };
     }
-    const recovery = failRunningAttempt(state, attempt.value, interruption, "Execution");
+    const recovery = failRunningAttempt(state, attempt.value, interruption);
     if (recovery._tag === "RunFailed") return recovery;
     interrupted = Option.some(recovery);
   }
@@ -227,15 +199,13 @@ type RetryDecision =
 
 /**
  * Reopens a failed Run for operator retry regardless of its Attempt count.
- * Repeating the request is accepted while its Resume command remains pending;
- * after delivery, retrying a Running Run is rejected.
+ * Repeating the request is accepted while the reopened Run has not started
+ * its next Attempt; once that Attempt is open, retrying is rejected.
  */
-export const retryRun = (
-  state: RunState.RunState,
-  pendingCommands: ReadonlyArray<WorkflowCommand>,
-): RetryDecision => {
+export const retryRun = (current: RunProgress): RetryDecision => {
+  const state = current.run.state;
   if (state._tag === "Failed") return { _tag: "Resume", state: RunState.retry(state) };
-  if (state._tag === "Running" && pendingCommands.includes("Resume")) {
+  if (state._tag === "Running" && Option.isNone(openAttempt(current))) {
     return { _tag: "ResumePending" };
   }
   return { _tag: "RetryRejected" };

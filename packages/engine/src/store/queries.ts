@@ -33,17 +33,15 @@ import {
   attempts,
   events,
   ignoredEvents,
+  itemCycleBudgets,
   projectionRevision,
   runs,
   steps,
   triggerEvents,
-  workflowCommands,
 } from "../database/schema.ts";
 import { RunNotFoundError } from "../engine/error.ts";
 import { RunSnapshot, RunSummary } from "../run-reader/model.ts";
 import { Submission } from "../engine/submission.ts";
-
-import { WORKFLOW_COMMAND_PRIORITY, type WorkflowCommand } from "../workflow/command.ts";
 import { cycleQueries } from "../cycle-budget/queries.ts";
 import {
   type RunRow,
@@ -55,7 +53,6 @@ import {
   decodeProjectionRevision,
   decodeRunIds,
   decodeRunRows,
-  decodeWorkflowCommands,
   encodeAgent,
   encodeBrainSpec,
   encodeDateTime,
@@ -144,8 +141,7 @@ const storedAgent = (agent: Agent): Schema.Json =>
   Schema.decodeUnknownSync(Schema.Json)(encodeAgent(agent));
 
 export const queriesFor = (database: RunDatabaseClient) => {
-  // Keep `.execute()` explicit: the yieldable wrapper can cross an Effect
-  // Workflow suspension before its final mutation is observable (ADR 0020).
+  // Keep `.execute()` explicit (ADR 0020).
   const eventRouteByDedup = Effect.fn("RunStoreQueries.eventRouteByDedup")(function* (
     dedupKey: DedupKey,
   ) {
@@ -473,42 +469,6 @@ export const queriesFor = (database: RunDatabaseClient) => {
     yield* database.insert(approvals).values({ runId, eventId: approval.id }).execute();
   });
 
-  const requestWorkflowCommand = Effect.fn("RunStoreQueries.requestWorkflowCommand")(function* (
-    runId: RunId,
-    command: WorkflowCommand,
-  ) {
-    yield* database
-      .insert(workflowCommands)
-      .values({ runId, command })
-      .onConflictDoNothing()
-      .execute();
-  });
-
-  const requestInterrupt = Effect.fn("RunStoreQueries.requestInterrupt")(function* (runId: RunId) {
-    yield* database
-      .delete(workflowCommands)
-      .where(
-        and(
-          eq(workflowCommands.runId, runId),
-          inArray(workflowCommands.command, ["Approve", "Resume"]),
-        ),
-      )
-      .execute();
-    yield* requestWorkflowCommand(runId, "Interrupt");
-  });
-
-  const workflowCommandsFor = Effect.fn("RunStoreQueries.workflowCommandsFor")(function* (
-    runId: RunId,
-  ) {
-    yield* Effect.annotateCurrentSpan({ runId });
-    const rows = yield* database
-      .select({ runId: workflowCommands.runId, command: workflowCommands.command })
-      .from(workflowCommands)
-      .where(eq(workflowCommands.runId, runId))
-      .execute();
-    return (yield* decodeWorkflowCommands(rows)).map(({ command }) => command);
-  });
-
   const createRun = Effect.fn("RunStoreQueries.createRun")(function* (
     submission: Submission,
     eventId: EventId,
@@ -682,33 +642,45 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* decodeRecoverableRuns(rows);
   });
 
-  const pendingWorkflowCommands = Effect.fn("RunStoreQueries.pendingWorkflowCommands")(
-    function* () {
-      const rows = yield* database
-        .select({ runId: workflowCommands.runId, command: workflowCommands.command })
-        .from(workflowCommands)
-        .execute();
-      const decoded = yield* decodeWorkflowCommands(rows);
-      // Delivery order per run is a replay invariant; WORKFLOW_COMMAND_PRIORITY names it.
-      const priority = (command: WorkflowCommand) => WORKFLOW_COMMAND_PRIORITY.indexOf(command);
-      return [...decoded].sort((left, right) =>
-        left.runId === right.runId
-          ? priority(left.command) - priority(right.command)
-          : left.runId < right.runId
-            ? -1
-            : 1,
-      );
-    },
-  );
-
-  const completeWorkflowCommand = Effect.fn("RunStoreQueries.completeWorkflowCommand")(function* (
-    runId: RunId,
-    command: WorkflowCommand,
-  ) {
-    yield* database
-      .delete(workflowCommands)
-      .where(and(eq(workflowCommands.runId, runId), eq(workflowCommands.command, command)))
+  // The newest Run of each Item that has a current queued Event and no open
+  // Run: the Run closed before its continuation opened or revoked that Event.
+  // An Item awaiting a cycle-budget reset is left out, since none of its
+  // queued Events can open a Run before the reset supersedes them.
+  const pendingContinuations = Effect.fn("RunStoreQueries.pendingContinuations")(function* () {
+    const items = yield* database
+      .selectDistinct({ loop: triggerEvents.loopName, itemKey: triggerEvents.itemKey })
+      .from(triggerEvents)
+      .leftJoin(runs, eq(runs.eventId, triggerEvents.eventId))
+      .leftJoin(ignoredEvents, eq(ignoredEvents.eventId, triggerEvents.eventId))
+      .leftJoin(itemCycleBudgets, eq(itemCycleBudgets.itemKey, triggerEvents.itemKey))
+      .where(
+        and(
+          isNull(runs.runId),
+          isNull(ignoredEvents.eventId),
+          isNull(itemCycleBudgets.askJson),
+          cycleQueries(database).currentEvent,
+        ),
+      )
       .execute();
+    const decoded = yield* Schema.decodeUnknownEffect(
+      Schema.Array(Schema.Struct({ loop: LoopName, itemKey: ItemKey })),
+    )(items);
+    const closed = yield* Effect.forEach(decoded, ({ loop, itemKey }) =>
+      Effect.gen(function* () {
+        if ((yield* blockingRun(loop, itemKey)).length > 0) return [];
+        return yield* decodeRunIds(
+          yield* database
+            .select({ runId: runs.runId })
+            .from(runs)
+            .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
+            .where(and(eq(triggerEvents.loopName, loop), eq(triggerEvents.itemKey, itemKey)))
+            .orderBy(desc(runs.openedAt), desc(runs.runId))
+            .limit(1)
+            .execute(),
+        );
+      }),
+    );
+    return closed.flat().map(({ runId }) => runId);
   });
 
   const revokeQueued = Effect.fn("RunStoreQueries.revokeQueued")(function* (
@@ -776,18 +748,14 @@ export const queriesFor = (database: RunDatabaseClient) => {
     approvalExists,
     blockingRun,
     closeAttempt,
-    completeWorkflowCommand,
     createRun,
     eventRouteByRun,
-    workflowCommandsFor,
     ignoredEvent,
     nextQueued,
-    pendingWorkflowCommands,
+    pendingContinuations,
     recordTriggerEvent,
     recoverable,
     recordApproval,
-    requestInterrupt,
-    requestWorkflowCommand,
     revision,
     revokeQueued,
     revokeUnstarted,

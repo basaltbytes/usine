@@ -1,6 +1,6 @@
 import type { RunId } from "@usine/core/run";
 import { Context, Deferred, Effect, Layer, Option, Ref } from "effect";
-import { RunEngineShutdown } from "../engine/shutdown.ts";
+import { RunEngineShutdown } from "./shutdown.ts";
 
 /** Process-local Attempt admission. Durable Runs stay recoverable when admission closes (ADR 0023). */
 export class AttemptAdmission extends Context.Service<
