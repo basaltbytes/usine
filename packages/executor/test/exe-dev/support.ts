@@ -6,6 +6,7 @@ import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
+import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
   completes,
   type StubParent,
@@ -295,9 +296,11 @@ export const runtime = (
   sshLayer: Layer.Layer<ChildProcessSpawner.ChildProcessSpawner>,
   parent: StubParent = completes,
   storage: StubStorage = new StubStorage(),
+  /** Wraps the stub runtime, for tests that hold one of its durable operations open. */
+  wrap: (stub: Layer.Layer<AttemptRuntime>) => Layer.Layer<AttemptRuntime> = (stub) => stub,
 ) =>
   exeDevLayer({
     githubIntegrations: [integration],
     // The cancellation tests advance the TestClock by exactly this much.
     interruptGrace: "2 seconds",
-  }).pipe(Layer.provide(sshLayer), Layer.provide(stubAttemptRuntime(storage, parent)));
+  }).pipe(Layer.provide(sshLayer), Layer.provide(wrap(stubAttemptRuntime(storage, parent))));

@@ -2,9 +2,9 @@ import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import type { AttemptRequest } from "@usine/durable/attempt-runtime";
+import { type AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Deferred, Effect, Fiber, Option } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
@@ -13,6 +13,7 @@ import {
   TEST_AGENT,
   WORKER,
   WORKTREE,
+  fails,
   fakeSsh,
   remoteLine,
   request,
@@ -209,6 +210,73 @@ describe("exe.dev launch", () => {
       yield* executor.cancel(ATTEMPT_ID);
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started))));
   });
+
+  it.effect(
+    "a cancel while a failed Attempt's task is still being stopped waits for release and keeps the failure",
+    () => {
+      const ssh = fakeSsh();
+      const stoppingTask = Deferred.makeUnsafe<void>();
+      const taskStopped = Deferred.makeUnsafe<void>();
+      // Holds the durable task stop open, as a slow durable round trip would.
+      const holdingTaskStop = (stub: Layer.Layer<AttemptRuntime>) =>
+        Layer.effect(
+          AttemptRuntime,
+          Effect.gen(function* () {
+            const stubbed = yield* AttemptRuntime;
+            return AttemptRuntime.of({
+              ...stubbed,
+              cancel: (attemptId) =>
+                stubbed
+                  .cancel(attemptId)
+                  .pipe(
+                    Effect.andThen(Deferred.succeed(stoppingTask, undefined)),
+                    Effect.andThen(Deferred.await(taskStopped)),
+                  ),
+            });
+          }),
+        ).pipe(Layer.provide(stub));
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
+        yield* Deferred.await(stoppingTask);
+        // The parent crashed: its run has ended and the launch is stopping its durable task.
+        const refused = yield* executor
+          .intervene(
+            ATTEMPT_ID,
+            new AttemptChannel.Intervention({
+              operator: "Philippe",
+              target: new AttemptChannel.ParentTarget(),
+              action: new AttemptChannel.Steer({ message: "Use pnpm" }),
+            }),
+          )
+          .pipe(Effect.flip);
+        assert.strictEqual(refused._tag, "AgentFailure");
+        assert.strictEqual(
+          refused.message,
+          "This Attempt has no live session in this orchestrator",
+        );
+        const cancel = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.forkChild);
+        // A whole interrupt grace passes: the cancel must not time out on a stop it did not start.
+        yield* TestClock.adjust("2 seconds");
+        yield* Effect.sync(() => {
+          assert.isUndefined(cancel.pollUnsafe(), "the cancel must wait for the release");
+        }).pipe(Effect.ensuring(Deferred.succeed(taskStopped, undefined)));
+        yield* Fiber.join(cancel);
+        const failure = yield* Fiber.join(launch).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.strictEqual(failure.message, "The parent stopped");
+        assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        assert.strictEqual(
+          ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+          1,
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(ssh.layer, fails, new StubStorage(), holdingTaskStop)),
+      );
+    },
+  );
 
   it.effect("stops a parent that runs past its wall-clock ceiling", () => {
     const ssh = fakeSsh();
