@@ -6,7 +6,6 @@
 "@usine/orchestrator": minor
 "@usine/config": minor
 "@usine/server": minor
-"@usine/web": patch
 ---
 
 Salvage an Attempt's unfinished work before its worktree is removed: when an Attempt ends without success, the executor commits uncommitted changes and pushes HEAD to `usine/salvage/<run>/<attempt>`, records the ref on the Attempt, shows it in the run drawer, and checks it out for the next retry with a preamble line telling the agent to continue.
