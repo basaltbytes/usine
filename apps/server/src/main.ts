@@ -88,7 +88,7 @@ const main = Effect.gen(function* () {
       ),
     PortInUseError: ({ port }) =>
       exitWith(
-        `Port ${port} is already in use. Stop the process using it or run usine up --port <port>.`,
+        `usine up stopped: port ${port} is already in use. Stop the process using it or run usine up --port <port>.`,
       ),
   }),
 );
