@@ -129,11 +129,10 @@ The place an Attempt's children run — a machine with the Attempt's checkout. L
 _Avoid_: runner, sandbox, executor (the seam may be named executor in code, but the concept is Worker)
 
 **Run host**:
-The one-shot usine process that hosted a single Attempt's Pi parent session on a Worker before the parent moved into the orchestrator. No Worker launches it any more.
-_Avoid_: runner, daemon, worker process
+No longer exists. The one-shot usine process that hosted an Attempt's Pi parent on a Worker until the parent moved into the orchestrator (ADR 0006).
 
 **Attempt channel**:
-The attempt-scoped framed messages that carry one Attempt's activity: normalized events flowing out of its parent and children, and session-addressed operator input (steer, interrupt, takeover messages) flowing in. Where the children run never changes the messages.
+The attempt-scoped messages that carry one Attempt's activity: normalized events flowing out of its parent and children, and session-addressed operator input (steer, interrupt, takeover messages) flowing in. The parent's durable task relays them inside the orchestrator; where the children run never changes the messages.
 _Avoid_: stream (reserved for what a trigger watches), pipe, socket
 
 **Transcript**:
