@@ -22,6 +22,7 @@ interface ActiveAttempt {
   readonly stopping: Ref.Ref<Option.Option<AttemptStop>>;
   /** The running `execute` call, interrupted when a stop's grace runs out. */
   readonly execution: Ref.Ref<Option.Option<Fiber.Fiber<AttemptReport, AttemptFailure>>>;
+  /** The run has ended: the session takes no more operator input and no further stop; only its release remains. */
   readonly settled: Deferred.Deferred<void>;
 }
 
@@ -164,7 +165,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     return yield* Effect.scoped(run).pipe(
       Effect.onExit((exit) =>
         Effect.gen(function* () {
-          attempts.delete(attemptId);
+          // Settle first: from here `stop` and `intervene` see an ended run, so
+          // `stopping` is final when the branches below read it.
+          yield* Deferred.succeed(settled, undefined);
           if (Exit.isFailure(exit)) {
             const stop = yield* Ref.get(stopping);
             if (Option.isNone(stop) && Cause.hasInterruptsOnly(exit.cause)) {
@@ -184,7 +187,6 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
               );
             }
           }
-          yield* Deferred.succeed(settled, undefined);
         }),
       ),
     );
@@ -194,6 +196,8 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
    * Stops a launched Attempt for `reason` and reports whether one was running
    * here: cancels its parent task, then waits for the Attempt to settle within
    * the grace before interrupting it. The launch fails with the first reason.
+   * A run that has already ended has nothing to stop; its session stays
+   * registered until its resources are released, which the caller waits for.
    */
   const stop = Effect.fn("DurableSession.stop")(function* (
     attemptId: AttemptId,
@@ -204,6 +208,17 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     return yield* Effect.uninterruptible(
       Effect.gen(function* () {
         yield* Effect.annotateCurrentSpan({ attemptId, worker: active.worker, stop: reason._tag });
+        if (yield* Deferred.isDone(active.settled)) {
+          yield* Effect.logDebug(
+            "The Attempt's run has ended; nothing to stop before its release",
+            {
+              attemptId,
+              worker: active.worker,
+              stop: reason,
+            },
+          );
+          return true;
+        }
         const first = yield* Ref.modify(active.stopping, (stopping) =>
           Option.isNone(stopping)
             ? ([true, Option.some(reason)] as const)
@@ -284,7 +299,11 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       action: intervention.action._tag,
     });
     const active = attempts.get(attemptId);
-    if (active === undefined || Option.isSome(yield* Ref.get(active.stopping)))
+    if (
+      active === undefined ||
+      (yield* Deferred.isDone(active.settled)) ||
+      Option.isSome(yield* Ref.get(active.stopping))
+    )
       return yield* new AgentFailure({
         message: "This Attempt has no live session in this orchestrator",
       });
@@ -320,7 +339,18 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     request: CheckoutRequest,
   ) =>
     prepared
-      .prepare(acquire, request)
+      .prepare(
+        // The first finalizer of the resources scope runs last, so the session
+        // stays registered until checkout and credential cleanup finish. Removing
+        // it when the launch settled let a second cancel close the scope while
+        // the launch was still returning (#197).
+        Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            attempts.delete(request.attemptId);
+          }),
+        ).pipe(Effect.andThen(acquire)),
+        request,
+      )
       .pipe(
         Effect.tapError(() =>
           request.reattach

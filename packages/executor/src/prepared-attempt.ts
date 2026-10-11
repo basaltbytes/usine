@@ -23,6 +23,7 @@ export interface AcquiredAttempt extends PreparedAttempt {
 
 interface OwnedAttempt {
   readonly unavailable: Ref.Ref<boolean>;
+  readonly released: Effect.Effect<void>;
   /** Closes the Attempt's scope and returns once every resource is released. */
   readonly release: (exit: Exit.Exit<unknown, unknown>) => Effect.Effect<void>;
 }
@@ -57,6 +58,8 @@ export const preparedAttemptsFor = (
       if (!(yield* stop(attemptId, { _tag: "Cancel" }))) {
         yield* Effect.logInfo("Canceling Attempt before its channel is ready", { attemptId });
         yield* active.release(Exit.void);
+      } else {
+        yield* active.released;
       }
     }, Effect.uninterruptible);
 
@@ -75,7 +78,11 @@ export const preparedAttemptsFor = (
           // last-run finalizer, so neither returns while resources are still held.
           const release: OwnedAttempt["release"] = (exit) =>
             Scope.close(scope, exit).pipe(Effect.andThen(Deferred.await(released)));
-          attempts.set(request.attemptId, { unavailable, release });
+          attempts.set(request.attemptId, {
+            unavailable,
+            release,
+            released: Deferred.await(released),
+          });
           yield* Scope.addFinalizer(
             scope,
             Effect.suspend(() => {
