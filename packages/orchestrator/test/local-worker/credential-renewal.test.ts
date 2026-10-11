@@ -34,10 +34,27 @@ it.effect(
       const root = yield* fs.makeTempDirectoryScoped({ prefix: "usine-renewal-" });
       const remote = yield* makeRemote(root);
       let minted = 0;
+      let renewalFiber: number | undefined;
+      let rearmed = false;
+      // The renewal loop arms its next timer only after publishing, so a timer
+      // armed after the clock moved starts from the later time and misses the next
+      // renewal. Move the clock only once the fiber that minted the latest
+      // credential waits on it again.
+      const testClock = yield* TestClock.testClockWith(Effect.succeed);
+      const clock: TestClock.TestClock = {
+        ...testClock,
+        sleep: (duration) =>
+          Effect.flatMap(Effect.fiberId, (fiber) => {
+            if (fiber === renewalFiber) rearmed = true;
+            return testClock.sleep(duration);
+          }),
+      };
       const credentials = Layer.succeed(CredentialProvider)({
         issue: () =>
           Effect.gen(function* () {
             minted += 1;
+            renewalFiber = yield* Effect.fiberId;
+            rearmed = false;
             return new WorkerCredential({
               value: Redacted.make(`test-token-${minted}`),
               expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 3_600_000),
@@ -97,14 +114,13 @@ it.effect(
         assert(configuration !== undefined);
         for (let hour = 1; hour <= 3; hour += 1) {
           yield* TestClock.adjust("55 minutes");
-          // Real filesystem promises are suspended fibers to TestClock: wait
-          // for publication before advancing the next interval.
-          while (
-            !(yield* fs.readFileString(`${configuration}/hosts.yml`)).includes(
+          assert.strictEqual(minted, hour + 1);
+          while (!rearmed) yield* Effect.yieldNow;
+          assert(
+            (yield* fs.readFileString(`${configuration}/hosts.yml`)).includes(
               `test-token-${hour + 1}`,
-            )
-          )
-            yield* Effect.yieldNow;
+            ),
+          );
           yield* TestClock.adjust("5 minutes");
         }
         assert.strictEqual(minted, 4);
@@ -141,7 +157,7 @@ it.effect(
         const releasedCount = minted;
         yield* TestClock.adjust("2 hours");
         assert.strictEqual(minted, releasedCount);
-      }).pipe(Effect.provide(runtime));
+      }).pipe(Effect.provide(runtime), Effect.provideService(Clock.Clock, clock));
     }).pipe(Effect.provide(NodeServices.layer)),
   LIVE_TEST_TIMEOUT,
 );
