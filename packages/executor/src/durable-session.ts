@@ -164,7 +164,6 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     return yield* Effect.scoped(run).pipe(
       Effect.onExit((exit) =>
         Effect.gen(function* () {
-          attempts.delete(attemptId);
           if (Exit.isFailure(exit)) {
             const stop = yield* Ref.get(stopping);
             if (Option.isNone(stop) && Cause.hasInterruptsOnly(exit.cause)) {
@@ -284,7 +283,11 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       action: intervention.action._tag,
     });
     const active = attempts.get(attemptId);
-    if (active === undefined || Option.isSome(yield* Ref.get(active.stopping)))
+    if (
+      active === undefined ||
+      (yield* Deferred.isDone(active.settled)) ||
+      Option.isSome(yield* Ref.get(active.stopping))
+    )
       return yield* new AgentFailure({
         message: "This Attempt has no live session in this orchestrator",
       });
@@ -320,7 +323,17 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     request: CheckoutRequest,
   ) =>
     prepared
-      .prepare(acquire, request)
+      .prepare(
+        // Register before acquisition so the session remains discoverable until
+        // checkout and credential cleanup finish. Removing it at launch settlement
+        // lets a second cancel close the scope while launch is still returning.
+        Effect.addFinalizer(() =>
+          Effect.sync(() => {
+            attempts.delete(request.attemptId);
+          }),
+        ).pipe(Effect.andThen(acquire)),
+        request,
+      )
       .pipe(
         Effect.tapError(() =>
           request.reattach

@@ -54,8 +54,9 @@ acquisition, repository lock waits, and checkout creation. Cancellation stops
 preparation before releasing acquired resources and prevents a prepared Attempt from
 launching later. Both `cancel` and the canceled `prepare` or `launch` return only after
 those resources are released. Once the Attempt is live, cancellation cancels its parent
-task and uses the configured grace period before forced termination. Repeated
-cancellation after release is a no-op.
+task and uses the configured grace period before forced termination. Concurrent and
+repeated cancellation wait for cleanup and preserve the launch's typed failure.
+Repeated cancellation after release is a no-op.
 
 This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prepared)`
 methods. Consumers supply a scope instead of coordinating cleanup. The engine's

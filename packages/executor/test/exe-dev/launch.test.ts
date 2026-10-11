@@ -132,28 +132,81 @@ describe("exe.dev launch", () => {
     },
   );
 
-  it.effect("cancels the parent task and stops its remote children through their pid files", () => {
+  it.effect(
+    "repeated cancellation preserves the parent failure and releases remote resources once",
+    () => {
+      const ssh = fakeSsh();
+      const started = Deferred.makeUnsafe<void>();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+        assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
+        const before = ssh.state.commands.length;
+        const released = yield* executor
+          .cancel(ATTEMPT_ID)
+          .pipe(
+            Effect.map(
+              () => ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+            ),
+          );
+        yield* executor.cancel(ATTEMPT_ID);
+        const failure = yield* Fiber.join(launch).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "AgentFailure");
+        assert.strictEqual(failure.message, "The parent task was canceled");
+        assert.strictEqual(released, 1, "cancel waits for resource release");
+        const lines = ssh.state.commands.slice(before).map(remoteLine);
+        const stop = lines.indexOf(KILL_CHILDREN);
+        assert(stop >= 0, "cancel must stop the remote children");
+        assert(lines.findIndex((line) => line.includes("'worktree' 'remove'")) > stop);
+        assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        assert.strictEqual(
+          ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
+          1,
+        );
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started))));
+    },
+  );
+
+  it.effect("concurrent cancellation waits for salvage and preserves the launch failure", () => {
     const ssh = fakeSsh();
+    ssh.state.salvage = "dirty";
     const started = Deferred.makeUnsafe<void>();
     return Effect.gen(function* () {
       const executor = yield* Executor;
+      const recordingSalvage = yield* Deferred.make<void>();
+      const finishSalvage = yield* Deferred.make<void>();
       const prepared = yield* executor.prepare(request);
-      const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
+      const launch = yield* prepared
+        .launch({
+          ...recording().sink,
+          salvage: () =>
+            Deferred.succeed(recordingSalvage, undefined).pipe(
+              Effect.andThen(Deferred.await(finishSalvage)),
+            ),
+        })
+        .pipe(Effect.forkChild);
       yield* Deferred.await(started);
-      assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
-      const before = ssh.state.commands.length;
-      yield* executor.cancel(ATTEMPT_ID);
+      const first = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.forkChild);
+      yield* Deferred.await(recordingSalvage);
+      const second = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.forkChild);
+      // Drain runnable fibers while cleanup is blocked on durable salvage recording.
+      yield* TestClock.adjust("0 millis");
+      yield* Effect.sync(() => {
+        assert.isUndefined(first.pollUnsafe(), "the first cancel must wait for cleanup");
+        assert.isUndefined(second.pollUnsafe(), "the repeated cancel must wait for cleanup");
+      }).pipe(Effect.ensuring(Deferred.succeed(finishSalvage, undefined)));
+      yield* Fiber.join(first);
+      yield* Fiber.join(second);
       const failure = yield* Fiber.join(launch).pipe(Effect.flip);
       assert.strictEqual(failure._tag, "AgentFailure");
-      const lines = ssh.state.commands.slice(before).map(remoteLine);
-      const stop = lines.indexOf(KILL_CHILDREN);
-      assert(stop >= 0, "cancel must stop the remote children");
-      assert(lines.findIndex((line) => line.includes("'worktree' 'remove'")) > stop);
-      assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+      assert.strictEqual(failure.message, "The parent task was canceled");
       assert.strictEqual(
         ssh.state.commands.filter(({ args }) => args.includes("detach")).length,
         1,
       );
+      yield* executor.cancel(ATTEMPT_ID);
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started))));
   });
 
