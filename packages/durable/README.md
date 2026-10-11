@@ -38,9 +38,13 @@ A child is not resumed after a restart. Its tool call settles as interrupted wit
 
 `cancel(attemptId)` aborts the task bottom-up, children first, waits until it is terminal, and makes `execute` end with `Interrupted`.
 
-## Recovery from a poisoned Session
+## Recovery from a poisoned Session or a stuck step
 
 A pi-durable commit that fails after storage admission poisons the whole Session. `DurableHarness` detects it, logs the cause, closes the Session, opens the storage again, and resumes. A `DurableHarness.use` call that failed because of the reopen runs once more on the new harness.
+
+pi-durable reports failures that do not fail their caller through `onReport`. The harness logs the first report of each failure, then the number of repeats at most once every five seconds. One failure reported 1,000 times with no commit adopted in between means pi-durable is retrying a step that cannot succeed. It retries at once, in microtasks, so the process runs no timer and no I/O until the harness closes: the harness closes it from inside the report and reopens the storage, which also clears a scheduler state that no longer matches storage. If the reopened harness gets stuck again within a minute, the harness stops for good. The cause is logged as an error, every later call fails with a `DurableHarnessError` that names it, and each running Attempt fails with an `InfraFailure`. The next orchestrator start opens the storage again.
+
+One process owns the storage at a time; pi-durable has no cross-process locking, and a second writer leaves tasks and documents that no longer read back. `usine up` holds the instance folder for this reason.
 
 ## Testing
 
