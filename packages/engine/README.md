@@ -35,12 +35,16 @@ import { WorkerName } from "@usine/core/worker"
 import { InstanceDirectory } from "@usine/core/instance"
 import { StepResult } from "@usine/core/step/result"
 import { StepExecutor } from "@usine/engine/step-executor"
+import { TriggerCondition } from "@usine/engine/trigger-condition"
 import { layer } from "@usine/engine/local-sqlite"
 import { RunEngine } from "@usine/engine/engine"
 import { CursorStore } from "@usine/engine/cursor"
 import { LoopControl } from "@usine/engine/loop-control"
 
 const StepExecutorLive = Layer.succeed(StepExecutor)({
+  isLive: () => Effect.succeed(false),
+  recover: () => Effect.void,
+  intervene: () => Effect.void,
   reserve: () => Effect.succeed({
     worker: WorkerName.make("local"),
     release: Effect.void,
@@ -52,8 +56,14 @@ const StepExecutorLive = Layer.succeed(StepExecutor)({
   interrupt: () => Effect.void,
 })
 
+// Re-checks a queued Event's trigger before its Run opens; this one always holds.
+const TriggerConditionLive = Layer.succeed(TriggerCondition)({
+  holds: () => Effect.succeed(true),
+})
+
 const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(
   Layer.provide(StepExecutorLive),
+  Layer.provide(TriggerConditionLive),
 )
 
 const program = Effect.gen(function* () {
