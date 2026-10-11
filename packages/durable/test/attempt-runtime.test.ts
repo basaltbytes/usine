@@ -5,7 +5,7 @@ import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { Context, Effect, Exit, Fiber, Layer } from "effect";
+import { Context, Effect, Exit, Fiber, Layer, Logger } from "effect";
 import { AttemptRuntime } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
 import { layer as attemptRuntimeLayer } from "../src/attempt/runtime.ts";
@@ -28,6 +28,20 @@ import {
   trace,
   workerEnvironment,
 } from "./support.ts";
+
+/** Keeps every log line as its level and JSON-encoded message. */
+const capturedLogs = () => {
+  const lines: Array<{ readonly level: string; readonly text: string }> = [];
+  const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+    lines.push({ level: logLevel, text: JSON.stringify(message) });
+  });
+  return {
+    layer: Logger.layer([logger]),
+    matching: (pattern: RegExp) => lines.filter(({ text }) => pattern.test(text)),
+  };
+};
+
+const REPORTED = /pi-durable reported/u;
 
 describe("durable AttemptRuntime", () => {
   it.live("relays one whole Attempt and reports the parent's final answer", () =>
@@ -469,6 +483,101 @@ describe("durable AttemptRuntime", () => {
         assertAdmitted(request.spec.attemptId, recording.outbound());
       }).pipe(Effect.provide(services));
     }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "closing the runtime while a child runs reports no failure and leaves the task to resume",
+    () => {
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = attemptRequest("run/step/12");
+        const recording = recordingSink();
+        const before = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const services = yield* Layer.build(
+              layer({ database, parent: [delegate("Fix the flaky test")] }),
+            );
+            // Detached like an Attempt fiber the orchestrator stops only after its runtime closes.
+            const execution = yield* Effect.forkDetach(
+              Context.get(services, AttemptRuntime).execute(request, recording.sink),
+            );
+            const child = yield* Context.get(services, StubChildren).next;
+            yield* child.emit(
+              new TextOutput({ session: child.request.session, text: "Half way there." }),
+            );
+            return { child, execution };
+          }),
+        );
+        yield* before.child.interrupted.pipe(Effect.timeout("5 seconds"));
+        yield* Fiber.interrupt(before.execution);
+
+        const report = yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+          return yield* runtime.execute(request, recording.sink);
+        }).pipe(
+          Effect.provide(layer({ database, parent: [answer("Finished after the restart.")] })),
+        );
+        assert.strictEqual(report.message, "Finished after the restart.");
+        assertAdmitted(request.spec.attemptId, recording.outbound());
+        assert.deepStrictEqual(logs.matching(REPORTED), []);
+      }).pipe(Effect.scoped, Effect.provide(logs.layer));
+    },
+  );
+
+  it.live(
+    "stops a harness whose step pi-durable cannot settle and fails the Attempt with the cause",
+    () => {
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const request = attemptRequest("run/step/13");
+        const recording = recordingSink();
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const services = yield* Layer.build(
+              layer({ database, parent: [delegate("Fix the flaky test")] }),
+            );
+            const execution = yield* Effect.forkChild(
+              Context.get(services, AttemptRuntime).execute(request, recording.sink),
+            );
+            yield* Context.get(services, StubChildren).next;
+            yield* Fiber.interrupt(execution);
+          }),
+        );
+        // The parent's live state no longer reads back, as when a delta in its chain does not apply.
+        const openStorage = Effect.tryPromise({
+          try: async () => {
+            const storage = await openNodeSqliteStorage(database);
+            const read = storage.document.bind(storage);
+            storage.document = async (id, at, context) => {
+              const stored = await read(id, at, context);
+              if (stored?.record.kind === "pi.live") {
+                throw new Error('unresolvable path: ["tools",0]');
+              }
+              return stored;
+            };
+            return storage;
+          },
+          catch: (cause) => durableError("open the durable storage", cause),
+        });
+        const services = attemptRuntimeLayer.pipe(
+          Layer.provideMerge(
+            durableHarnessLayer({ ...fauxParent([answer("Never reached.")]), openStorage }),
+          ),
+          Layer.provideMerge(stubChildBackendLayer),
+        );
+        const failure = yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          return yield* runtime.execute(request, recording.sink).pipe(Effect.flip);
+        }).pipe(Effect.provide(services));
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.match(failure.message, /unresolvable path/u);
+        assert.lengthOf(logs.matching(/Stopped the durable harness/u), 1);
+        assert.isAtMost(logs.matching(REPORTED).length, 20);
+      }).pipe(Effect.scoped, Effect.provide(logs.layer));
+    },
   );
 
   it.live("fails the Attempt when the parent exceeds its child-session budget", () =>

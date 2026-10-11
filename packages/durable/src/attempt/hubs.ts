@@ -59,7 +59,7 @@ export interface AttemptHubs {
   readonly bindParent: (hub: AttemptHub, parent: ConversationId) => void;
   /** Queues one child event behind everything that happened before it. */
   readonly child: (hub: AttemptHub, event: AgentSessionEvent) => Effect.Effect<void>;
-  /** Routes commits to hubs: parent entries in order, task and record changes as wake-ups. */
+  /** Routes commits to hubs: parent entries in order, task and record changes as wake-ups; wakes every hub after a reopen or the stop. */
   readonly listener: HarnessListener;
 }
 
@@ -135,6 +135,9 @@ export const attemptHubs = Effect.gen(function* () {
       }
     },
     onReopen: () => {
+      for (const target of byAttempt.values()) wake(target);
+    },
+    onStop: () => {
       for (const target of byAttempt.values()) wake(target);
     },
   };

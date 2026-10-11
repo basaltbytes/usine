@@ -75,9 +75,20 @@ const main = Effect.gen(function* () {
       exitWith(
         `Refusing to start: ${directory} sits under ${root}, which the OS clears. The runtime store there is the only copy of every Run and transcript. Move the instance folder, or pass --allow-volatile-instance (or USINE_ALLOW_VOLATILE_INSTANCE=1) to proceed anyway.`,
       ),
+    InstanceInUseError: ({ directory, holder }) =>
+      exitWith(
+        `usine up did not start: another usine process${Option.match(holder, {
+          onNone: () => "",
+          onSome: (pid) => ` (pid ${pid})`,
+        })} is running in ${directory}, possibly still draining its Attempts. Wait for it to exit or stop it, then run usine up again.`,
+      ),
+    InstanceLockError: ({ directory, reason }) =>
+      exitWith(
+        `usine up did not start: could not lock ${directory}/.usine/instance.lock (${reason}). Check that the folder is writable.`,
+      ),
     PortInUseError: ({ port }) =>
       exitWith(
-        `Port ${port} is already in use. Stop the process using it or run usine up --port <port>.`,
+        `usine up stopped: port ${port} is already in use. Stop the process using it or run usine up --port <port>.`,
       ),
   }),
 );
