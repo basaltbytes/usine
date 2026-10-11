@@ -35,9 +35,9 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const workers = yield* Ref.make(new Map<WorkerName, VmState>());
 
-  /** Checks a brain on the VM, where the Attempt's children run. */
+  /** Checks a brain on the VM, where the Attempt's children run; the checks export nothing there. */
   const harnessProbe = (vm: VmState) =>
-    agentsHarnessProbe(spawner, commands.environment, commands.childHost(vm.sshDest));
+    agentsHarnessProbe(spawner, commands.childHost(vm.sshDest), {});
 
   const resolveVm = Effect.fn("ExeDevExecutor.resolveVm")(function* (worker: WorkerName) {
     const response = yield* commands.lobbyJson("preflight", ["ls", worker]);

@@ -12,15 +12,10 @@ import {
   Scope,
   Stream,
 } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { homedir } from "node:os";
+import { type ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { AgentSessionId } from "@usine/core/agent/session";
-import {
-  type ChildHost,
-  childPidFile,
-  type RemoteInvocation,
-  sshArguments,
-} from "../../child-host.ts";
+import { type ChildHost, childPidFile } from "../../child-host/child-host.ts";
+import { hostCommand } from "../../child-host/command.ts";
 import { type WorkingDirectory, SessionOperationError } from "../../runtime.ts";
 
 /** Worker directory and optional session identity for a scoped app-server connection. */
@@ -30,11 +25,10 @@ export interface CodexClient {
   /** None during preflight, before a child Session exists. */
   readonly sessionId: Option.Option<AgentSessionId>;
   /**
-   * The complete environment of the app server and every command it runs, or
-   * the variables exported on a remote host's own environment.
-   * None inherits this process's environment, as preflight does.
+   * The complete environment of the app server and every command it runs on
+   * this machine, or the variables exported on a remote host's own environment.
    */
-  readonly environment: Option.Option<Readonly<Record<string, string>>>;
+  readonly environment: Readonly<Record<string, string>>;
   /** Where the app server runs. */
   readonly host: ChildHost;
 }
@@ -119,22 +113,15 @@ const repositoryTrustOverride = (cwd: string): string =>
 const disableRecursiveAgentsOverride = "features.multi_agent=false";
 
 /**
- * The app-server process for `client`: `codex` on this machine, or one SSH
- * command that runs it on the client's remote host. Either way it starts
- * outside the worktree, which it receives through its thread parameters.
+ * The app-server process for `client`, on the machine its host names. It
+ * starts in the home directory, outside the worktree it receives through its
+ * thread parameters, so process startup cannot read repository-owned config
+ * before thread trust is set.
  */
 export const codexAppServerCommand = (
   client: CodexClient,
   stdin?: ChildProcess.CommandOptions["stdin"],
 ): ChildProcess.Command => {
-  const args = [
-    "app-server",
-    "--stdio",
-    "-c",
-    repositoryTrustOverride(client.cwd),
-    "-c",
-    disableRecursiveAgentsOverride,
-  ];
   const lifetime: ChildProcess.CommandOptions = {
     // Stay in the launching process's group so its hard kill reaps the app
     // server too; the bounded SIGTERM window is the grace-then-force stop
@@ -142,43 +129,25 @@ export const codexAppServerCommand = (
     detached: false,
     forceKillAfter: "5 seconds",
   };
-  const process = stdin === undefined ? lifetime : { ...lifetime, stdin };
-  switch (client.host._tag) {
-    case "LocalProcess": {
-      // Start outside the worktree so process startup cannot read
-      // repository-owned config before thread trust is set.
-      const local: ChildProcess.CommandOptions = { ...process, cwd: homedir() };
-      return ChildProcess.make(
-        "codex",
-        args,
-        Option.match(client.environment, {
-          onNone: () => local,
-          onSome: (variables) => ({ ...local, env: { ...variables }, extendEnv: false }),
-        }),
-      );
-    }
-    case "RemoteShell": {
-      const invocation: RemoteInvocation = {
-        environment: Option.getOrElse(client.environment, () => ({})),
-        command: "codex",
-        args,
-      };
-      return ChildProcess.make(
-        client.host.ssh.command,
-        sshArguments(
-          client.host,
-          Option.match(client.sessionId, {
-            onNone: () => invocation,
-            onSome: (sessionId) => ({
-              ...invocation,
-              pidFile: childPidFile(client.cwd, sessionId),
-            }),
-          }),
-        ),
-        { ...process, env: { ...client.host.sshEnvironment }, extendEnv: false },
-      );
-    }
-  }
+  return hostCommand(
+    client.host,
+    {
+      environment: client.environment,
+      pidFile: Option.getOrUndefined(
+        Option.map(client.sessionId, (sessionId) => childPidFile(client.cwd, sessionId)),
+      ),
+      command: "codex",
+      args: [
+        "app-server",
+        "--stdio",
+        "-c",
+        repositoryTrustOverride(client.cwd),
+        "-c",
+        disableRecursiveAgentsOverride,
+      ],
+    },
+    stdin === undefined ? lifetime : { ...lifetime, stdin },
+  );
 };
 
 const makeCodexAppServer = Effect.gen(function* () {

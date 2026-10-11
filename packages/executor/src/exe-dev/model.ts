@@ -1,6 +1,6 @@
 import { RepositoryName } from "@usine/core/repository";
 import { Schema, type Effect } from "effect";
-import type { SshCommand } from "../executor.ts";
+import type { SshCommand } from "@usine/agents/child-host";
 
 /** The name of one exe.dev edge-injected integration. */
 export const IntegrationName = Schema.String.check(

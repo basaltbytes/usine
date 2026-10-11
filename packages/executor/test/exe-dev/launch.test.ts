@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest";
-import { RemoteShell } from "@usine/agents/child-host";
+import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
@@ -7,7 +7,6 @@ import { completes, type StubParent, StubStorage } from "@usine/durable/testing"
 import { Deferred, Effect, Fiber, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
-import { CHILD_KILL_SCRIPT } from "../../src/exe-dev/shell.ts";
 import {
   ATTEMPT_ID,
   SSH_ENVIRONMENT_ALLOWLIST,

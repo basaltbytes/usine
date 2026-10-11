@@ -71,7 +71,7 @@ const makeCodexChild = Effect.gen(function* () {
       const client: CodexClient = {
         cwd: request.cwd,
         sessionId: Option.some(request.session.id),
-        environment: Option.some(request.environment),
+        environment: request.environment,
         host: request.host,
       };
       const connection = yield* appServer.open(client);

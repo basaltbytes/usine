@@ -16,7 +16,7 @@ import {
 } from "effect";
 import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
 import { TestClock } from "effect/testing";
-import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host.ts";
+import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
 import {
   AgentResultError,
   ChildRequest,
@@ -327,7 +327,7 @@ describe("Codex child backend", () => {
         const running = yield* backend.launch(request());
         assert.deepStrictEqual(
           clients.map(({ environment, host }) => [environment, host]),
-          [[Option.some(request().environment), new LocalProcess()]],
+          [[request().environment, new LocalProcess()]],
         );
         yield* running.steer("Check the test output.");
         yield* running.interrupt;

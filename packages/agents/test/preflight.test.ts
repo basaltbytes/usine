@@ -4,7 +4,7 @@ import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capabil
 import { Deferred, Effect, Fiber, Layer, Schema, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { TestClock } from "effect/testing";
-import { LocalProcess, RemoteShell } from "../src/child-host.ts";
+import { LocalProcess, RemoteShell } from "../src/child-host/child-host.ts";
 import { CodexAppServer, type CodexConnection } from "../src/pi/codex/app-server.ts";
 import { PiSdk, type PiStartResult } from "../src/pi/sdk.ts";
 import { CODEX_CLI_VERSION, verifyHarness } from "../src/preflight/preflight.ts";
@@ -20,6 +20,8 @@ const remote = new RemoteShell({
   destination: "worker.exe.xyz",
 });
 const overSsh = (line: string) => `ssh -o BatchMode=yes worker.exe.xyz -- ${line}`;
+/** The environment local checks must run with instead of the test process's own. */
+const workerEnvironment = { PATH: "/usr/bin:/bin" };
 const encoder = new TextEncoder();
 
 const commands = (
@@ -30,6 +32,11 @@ const commands = (
       Effect.gen(function* () {
         assert.strictEqual(command._tag, "StandardCommand");
         if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected pipeline");
+        assert.deepStrictEqual(
+          command.options.env,
+          command.command === "ssh" ? remote.sshEnvironment : workerEnvironment,
+        );
+        assert.strictEqual(command.options.extendEnv, false);
         const key = [command.command, ...command.args].join(" ");
         const response = responses[key];
         assert(response !== undefined, `unexpected command ${key}`);
@@ -99,7 +106,7 @@ describe("worker harness readiness", () => {
     it.effect(`refuses a Codex ${result.capability} gap before any account request`, () => {
       const server = account(Effect.succeed(null));
       return Effect.gen(function* () {
-        const error = yield* verifyHarness(coder, local).pipe(Effect.flip);
+        const error = yield* verifyHarness(coder, local, workerEnvironment).pipe(Effect.flip);
         assert(error instanceof HarnessUnavailableError);
         assert.strictEqual(error.capability, result.capability);
         assert.strictEqual(server.opened(), 0);
@@ -121,11 +128,11 @@ describe("worker harness readiness", () => {
           return Effect.gen(function* () {
             if (auth.type === "chatgpt") {
               assert.deepStrictEqual(
-                yield* verifyHarness(coder, local),
+                yield* verifyHarness(coder, local, workerEnvironment),
                 new HarnessReady({ harness: "codex" }),
               );
             } else {
-              const error = yield* verifyHarness(coder, local).pipe(Effect.flip);
+              const error = yield* verifyHarness(coder, local, workerEnvironment).pipe(Effect.flip);
               assert(error instanceof HarnessUnavailableError);
               assert.strictEqual(error.capability, "login");
             }
@@ -151,7 +158,7 @@ describe("worker harness readiness", () => {
       const server = account(
         Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
       );
-      const pending = yield* verifyHarness(coder, local).pipe(
+      const pending = yield* verifyHarness(coder, local, workerEnvironment).pipe(
         Effect.flip,
         Effect.provide(
           commands({
@@ -179,11 +186,13 @@ describe("worker harness readiness", () => {
       return Effect.gen(function* () {
         if (auth.authMethod === "claude.ai") {
           assert.deepStrictEqual(
-            yield* verifyHarness(brain("claude"), local),
+            yield* verifyHarness(brain("claude"), local, workerEnvironment),
             new HarnessReady({ harness: "claude" }),
           );
         } else {
-          const error = yield* verifyHarness(brain("claude"), local).pipe(Effect.flip);
+          const error = yield* verifyHarness(brain("claude"), local, workerEnvironment).pipe(
+            Effect.flip,
+          );
           assert(error instanceof HarnessUnavailableError);
           assert.strictEqual(error.capability, "login");
         }
@@ -227,11 +236,13 @@ describe("worker harness readiness", () => {
       return Effect.gen(function* () {
         if (pool === "apiKeys") {
           assert.deepStrictEqual(
-            yield* verifyHarness(brain("pi"), local),
+            yield* verifyHarness(brain("pi"), local, workerEnvironment),
             new HarnessReady({ harness: "pi" }),
           );
         } else {
-          const error = yield* verifyHarness(brain("pi"), local).pipe(Effect.flip);
+          const error = yield* verifyHarness(brain("pi"), local, workerEnvironment).pipe(
+            Effect.flip,
+          );
           assert(error instanceof HarnessUnavailableError);
           assert.strictEqual(error.capability, "login");
         }
@@ -247,7 +258,7 @@ describe("worker harness readiness", () => {
   it.effect("checks Claude on a remote host through one SSH command per probe", () =>
     Effect.gen(function* () {
       assert.deepStrictEqual(
-        yield* verifyHarness(brain("claude"), remote),
+        yield* verifyHarness(brain("claude"), remote, {}),
         new HarnessReady({ harness: "claude" }),
       );
     }).pipe(
@@ -273,7 +284,7 @@ describe("worker harness readiness", () => {
     "reports an unreachable remote host as an incomplete check, not a missing harness",
     () =>
       Effect.gen(function* () {
-        const error = yield* verifyHarness(brain("claude"), remote).pipe(Effect.flip);
+        const error = yield* verifyHarness(brain("claude"), remote, {}).pipe(Effect.flip);
         assert.strictEqual(error._tag, "SessionOperationError");
       }).pipe(
         Effect.provide(
@@ -286,7 +297,7 @@ describe("worker harness readiness", () => {
 
   it.effect("refuses Pi on a remote host without starting the SDK", () =>
     Effect.gen(function* () {
-      const error = yield* verifyHarness(brain("pi"), remote).pipe(Effect.flip);
+      const error = yield* verifyHarness(brain("pi"), remote, {}).pipe(Effect.flip);
       assert(error instanceof HarnessUnavailableError);
       assert.strictEqual(error.message, "Pi children run only on local Workers");
     }).pipe(

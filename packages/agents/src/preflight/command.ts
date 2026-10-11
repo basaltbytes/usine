@@ -1,35 +1,18 @@
 import type { Harness } from "@usine/core/agent/brain";
 import { HarnessUnavailableError, type HarnessCapability } from "@usine/core/agent/capability";
 import { Effect, Option, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { homedir } from "node:os";
-import { type ChildHost, sshArguments } from "../child-host.ts";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import type { ChildHost } from "../child-host/child-host.ts";
+import { hostCommand } from "../child-host/command.ts";
 import { SessionOperationError } from "../runtime.ts";
 
 /** OpenSSH exits with 255 when it cannot reach the remote machine or run the command there. */
 const SSH_FAILURE = 255;
 
-const probeProcess = (
-  host: ChildHost,
-  command: string,
-  args: ReadonlyArray<string>,
-): ChildProcess.Command => {
-  const options: ChildProcess.CommandOptions = { detached: false, forceKillAfter: "2 seconds" };
-  switch (host._tag) {
-    case "LocalProcess":
-      return ChildProcess.make(command, args, { ...options, cwd: homedir() });
-    case "RemoteShell":
-      return ChildProcess.make(host.ssh.command, sshArguments(host, { command, args }), {
-        ...options,
-        env: { ...host.sshEnvironment },
-        extendEnv: false,
-      });
-  }
-};
-
 /** Runs a bounded readiness command on `host` without retaining its potentially sensitive diagnostics. */
 export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
   host: ChildHost,
+  environment: Readonly<Record<string, string>>,
   harness: Harness,
   capability: HarnessCapability,
   command: string,
@@ -39,7 +22,13 @@ export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   return yield* Effect.scoped(
     Effect.gen(function* () {
-      const handle = yield* spawner.spawn(probeProcess(host, command, args));
+      const handle = yield* spawner.spawn(
+        hostCommand(
+          host,
+          { environment, command, args },
+          { detached: false, forceKillAfter: "2 seconds" },
+        ),
+      );
       const [stdout, , exitCode] = yield* Effect.all(
         [
           handle.stdout.pipe(Stream.decodeText(), Stream.mkString),

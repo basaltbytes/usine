@@ -9,7 +9,7 @@ import {
 } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import { Option, Schema } from "effect";
-import { RemoteShell } from "../src/child-host.ts";
+import { RemoteShell } from "../src/child-host/child-host.ts";
 import {
   AgentResultError,
   ChildRequest,

@@ -2,11 +2,17 @@ import type { ChildHost } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
+import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { StepResult, type StepResultFact } from "@usine/core/step/result";
 import { type AttemptReport, AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Cause, Deferred, Effect, Exit, Fiber, Option, Ref, Result, type Scope } from "effect";
-import { type AttemptWorkspace, ExecutorOperationError } from "./executor.ts";
-import type { AttemptStop } from "./prepared-attempt.ts";
+import {
+  type AttemptWorkspace,
+  type CheckoutRequest,
+  type ExecutorError,
+  ExecutorOperationError,
+} from "./executor.ts";
+import { type AcquiredAttempt, type AttemptStop, preparedAttemptsFor } from "./prepared-attempt.ts";
 
 interface ActiveAttempt {
   readonly worker: AttemptWorkspace["worker"];
@@ -45,10 +51,12 @@ const cancelError = (attemptId: AttemptId, cause: unknown) =>
 
 /**
  * Runs Attempts whose Pi parent is a durable task in this process
- * (`AttemptRuntime`). Interrupting a launch that was not stopped first is
- * this process stopping: the parent task stays live in durable
- * storage and the checkout stays on disk for the reattachment after restart.
- * Every other way an Attempt ends leaves no live parent task behind.
+ * (`AttemptRuntime`), for every Worker kind: the executors supply the
+ * checkout, and everything about the parent task lives here. Interrupting a
+ * launch that was not stopped first is this process stopping: the parent
+ * task stays live in durable storage and the checkout stays on disk for the
+ * reattachment after restart. Every other way an Attempt ends leaves no live
+ * parent task behind.
  */
 export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   options: DurableSessionOptions,
@@ -300,5 +308,95 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     );
   });
 
-  return { launch, stop, intervene, stopTask } as const;
+  const prepared = yield* preparedAttemptsFor(stop, intervene);
+
+  /**
+   * Owns an executor's preparation of `request` through `preparedAttemptsFor`.
+   * A reattachment that cannot be prepared has its parent task canceled, so
+   * the task never runs unobserved and the engine retries on a fresh Attempt.
+   */
+  const prepare = (
+    acquire: Effect.Effect<AcquiredAttempt, ExecutorError, Scope.Scope>,
+    request: CheckoutRequest,
+  ) =>
+    prepared
+      .prepare(acquire, request)
+      .pipe(
+        Effect.tapError(() =>
+          request.reattach
+            ? stopTask(request.attemptId, "its reattachment could not be prepared")
+            : Effect.void,
+        ),
+      );
+
+  /**
+   * Cancels the Attempt at any stage, then a live parent task this process
+   * never launched, such as one still awaiting its reattachment after a restart.
+   */
+  const cancel = Effect.fn("DurableSession.cancel")(function* (attemptId: AttemptId) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    yield* prepared.cancel(attemptId);
+    yield* stopTask(attemptId, "the Attempt was canceled");
+  });
+
+  const isLive = Effect.fn("DurableSession.isLive")(function* (attemptId: AttemptId) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    const live = yield* runtime.isLive(attemptId);
+    yield* Effect.logDebug("Read whether the Attempt's parent task is live", { attemptId, live });
+    return live;
+  });
+
+  /**
+   * Whether startup recovery must leave `attempt`'s checkout for its
+   * reattachment: true when the Attempt is open and its parent task is live.
+   * A closed Attempt's parent task is canceled here, since nothing reattaches it.
+   */
+  const awaitsReattach = Effect.fn("DurableSession.awaitsReattach")(function* (
+    attempt: AttemptRecovery,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId: attempt.attemptId, worker: attempt.worker });
+    if (!attempt.open) {
+      yield* stopTask(attempt.attemptId, "its Attempt is closed");
+      return false;
+    }
+    const live = yield* isLive(attempt.attemptId).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          "Could not read whether an open Attempt's parent task is live; reconciling its checkout",
+          { attemptId: attempt.attemptId, worker: attempt.worker, message: error.message },
+        ),
+      ),
+      Effect.orElseSucceed(() => false),
+    );
+    if (live)
+      yield* Effect.logInfo("Leaving the checkout of a live Attempt for its reattachment", {
+        attemptId: attempt.attemptId,
+        worker: attempt.worker,
+      });
+    return live;
+  });
+
+  /** The request a reattached Attempt's parent task was created with; a missing one fails the reattachment. */
+  const storedRequest = Effect.fn("DurableSession.storedRequest")(function* (attemptId: AttemptId) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    const stored = yield* runtime.request(attemptId).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ExecutorOperationError({
+            operation: "prepare",
+            message: "Could not read the reattached Attempt's durable request",
+            cause,
+          }),
+      ),
+    );
+    if (Option.isNone(stored))
+      return yield* new ExecutorOperationError({
+        operation: "prepare",
+        message: "The reattached Attempt has no durable request",
+        cause: new Error(attemptId),
+      });
+    return stored.value;
+  });
+
+  return { launch, prepare, cancel, intervene, isLive, awaitsReattach, storedRequest } as const;
 });

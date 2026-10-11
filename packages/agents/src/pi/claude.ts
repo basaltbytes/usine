@@ -30,12 +30,7 @@ import {
   SessionOperationError,
   UnknownModelError,
 } from "../runtime.ts";
-import {
-  childPidFile,
-  type RemoteInvocation,
-  type RemoteShell,
-  sshArguments,
-} from "../child-host.ts";
+import { childPidFile, type RemoteShell, sshArguments } from "../child-host/child-host.ts";
 import { sessionChannel } from "./session.ts";
 import { sessionConversation } from "./conversation.ts";
 import { claudeTokenMeter } from "./usage.ts";
@@ -165,18 +160,15 @@ const operationError = (
 const sshSpawner =
   (host: RemoteShell, pidFile: string, onStderr: (text: string) => void) =>
   (options: SpawnOptions): SpawnedProcess => {
-    const invocation: RemoteInvocation = {
-      environment: options.env,
-      pidFile,
-      command: options.command,
-      args: options.args,
-    };
     const child = spawn(
       host.ssh.command,
-      sshArguments(
-        host,
-        options.cwd === undefined ? invocation : { ...invocation, cwd: options.cwd },
-      ),
+      sshArguments(host, {
+        cwd: options.cwd,
+        environment: options.env,
+        pidFile,
+        command: options.command,
+        args: options.args,
+      }),
       {
         env: { ...host.sshEnvironment },
         signal: options.signal,
@@ -193,7 +185,7 @@ const optionsFor = (
   onStderr: (text: string) => void,
 ): ClaudeQueryOptions => {
   const effort = request.session.brain.effort;
-  const local: Omit<ClaudeQueryOptions, "effort" | "thinking"> = {
+  const shared: Omit<ClaudeQueryOptions, "effort" | "thinking"> = {
     allowDangerouslySkipPermissions: true,
     cwd: request.cwd,
     // Replaces the subprocess environment instead of extending this process's.
@@ -207,18 +199,15 @@ const optionsFor = (
     // settings (hooks, env) must not load into a child that runs with the App
     // credential, so only the worker user's settings apply.
     settingSources: ["user"],
+    // On this machine the SDK spawns the process itself.
+    ...(request.host._tag === "RemoteShell" && {
+      spawnClaudeCodeProcess: sshSpawner(
+        request.host,
+        childPidFile(request.cwd, request.session.id),
+        onStderr,
+      ),
+    }),
   };
-  const shared =
-    request.host._tag === "RemoteShell"
-      ? {
-          ...local,
-          spawnClaudeCodeProcess: sshSpawner(
-            request.host,
-            childPidFile(request.cwd, request.session.id),
-            onStderr,
-          ),
-        }
-      : local;
   return effort === "off"
     ? { ...shared, thinking: { type: "disabled" } }
     : {

@@ -4,7 +4,7 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import type { HarnessReadiness } from "@usine/core/agent/capability";
 import type { WorkerName } from "@usine/core/worker";
 import { Array as Arr, Effect } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { logPreflightFailure, ExecutorOperationError, WorkerCapabilityError } from "./executor.ts";
 
 /**
@@ -45,19 +45,18 @@ export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness
 
 /**
  * Checks one brain where `host` runs children, with the `@usine/agents/preflight`
- * checks. Every probe process this machine starts, the harness CLI itself or
- * the SSH client that reaches it, sees only `environment`, never the
+ * checks and `environment` as a child of the Worker would see it, never the
  * orchestrator's own (ADR 0011). A timed-out or unreachable probe stays a
  * retryable infrastructure error.
  */
 export const agentsHarnessProbe =
   (
     spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
-    environment: Record<string, string>,
     host: ChildHost,
+    environment: Readonly<Record<string, string>>,
   ): HarnessProbe =>
   (brain) =>
-    preflight(brain, host).pipe(
+    preflight(brain, host, environment).pipe(
       Effect.map((ready): HarnessReadiness => ready),
       Effect.catchTag("HarnessUnavailableError", (unavailable) => Effect.succeed(unavailable)),
       Effect.mapError(
@@ -68,18 +67,5 @@ export const agentsHarnessProbe =
             cause,
           }),
       ),
-      Effect.provideService(
-        ChildProcessSpawner.ChildProcessSpawner,
-        ChildProcessSpawner.make((command) =>
-          command._tag === "StandardCommand"
-            ? spawner.spawn(
-                ChildProcess.make(command.command, command.args, {
-                  ...command.options,
-                  env: environment,
-                  extendEnv: false,
-                }),
-              )
-            : Effect.die(new Error("Harness readiness probes run single commands, not pipelines")),
-        ),
-      ),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
     );

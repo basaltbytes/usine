@@ -16,7 +16,7 @@ import {
   InfraFailure,
 } from "@usine/core/attempt/failure";
 import { Context, Effect, Match, Schema, Scope, Stream } from "effect";
-import { ChildHost } from "./child-host.ts";
+import { ChildHost } from "./child-host/child-host.ts";
 
 /** The checkout directory one Attempt runs in. */
 export const WorkingDirectory = Schema.NonEmptyString.pipe(Schema.brand("AgentWorkingDirectory"));

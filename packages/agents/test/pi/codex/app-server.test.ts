@@ -18,7 +18,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host.ts";
+import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
 import { ChildRequest, SessionOperationError, WorkingDirectory } from "../../../src/runtime.ts";
 import {
   CodexAppServer,
@@ -137,7 +137,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
-            environment: Option.some(request.environment),
+            environment: request.environment,
             host: request.host,
           });
           const first = yield* Effect.forkChild(connection.close);
@@ -169,7 +169,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
-            environment: Option.some(request.environment),
+            environment: request.environment,
             host: request.host,
           });
           return yield* Effect.flip(connection.close);
@@ -197,7 +197,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
-            environment: Option.some(request.environment),
+            environment: request.environment,
             host: request.host,
           });
           const pending = yield* connection
@@ -229,7 +229,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
-            environment: Option.some(request.environment),
+            environment: request.environment,
             host: request.host,
           });
           const closing = yield* connection.close.pipe(Effect.result, Effect.forkChild);
@@ -259,7 +259,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
-            environment: Option.some(request.environment),
+            environment: request.environment,
             host: request.host,
           });
           const replied = yield* Effect.forkChild(connection.request("steer", "turn/steer", {}));
@@ -287,7 +287,7 @@ describe("Codex app-server transport", () => {
     }),
   );
 
-  const client = (host: ChildHost, environment = Option.some(request.environment)) => ({
+  const client = (host: ChildHost, environment = request.environment) => ({
     cwd: request.cwd,
     sessionId: Option.some(request.session.id),
     environment,
@@ -313,13 +313,6 @@ describe("Codex app-server transport", () => {
     ]);
   });
 
-  it("inherits this process's environment only when no environment is given", () => {
-    const command = codexAppServerCommand(client(new LocalProcess(), Option.none()));
-    assert.strictEqual(command._tag, "StandardCommand");
-    if (command._tag !== "StandardCommand") return;
-    assert.strictEqual(command.options.env, undefined);
-  });
-
   it("runs the app server on a remote host as one SSH command with its pid recorded", () => {
     const host = new RemoteShell({
       ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
@@ -327,10 +320,7 @@ describe("Codex app-server transport", () => {
       destination: "worker.exe.xyz",
     });
     const stdin = { stream: Stream.empty, endOnDone: true };
-    const command = codexAppServerCommand(
-      client(host, Option.some({ GH_HOST: "github.int.exe.xyz" })),
-      stdin,
-    );
+    const command = codexAppServerCommand(client(host, { GH_HOST: "github.int.exe.xyz" }), stdin);
     assert.strictEqual(command._tag, "StandardCommand");
     if (command._tag !== "StandardCommand") return;
     assert.strictEqual(command.command, "ssh");
@@ -357,7 +347,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
-            environment: Option.some(request.environment),
+            environment: request.environment,
             host: request.host,
           });
           const pending = yield* Effect.forkChild(connection.request("launch", "initialize", {}));
@@ -382,7 +372,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
-            environment: Option.some(request.environment),
+            environment: request.environment,
             host: request.host,
           });
           const notifications = yield* Effect.forkChild(Stream.runHead(connection.notifications));
@@ -410,7 +400,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
-            environment: Option.some(request.environment),
+            environment: request.environment,
             host: request.host,
           });
           yield* Queue.offer(process.stderr, encoder.encode("codex: no login found\n"));
@@ -442,7 +432,7 @@ describe("Codex app-server transport", () => {
           const connection = yield* server.open({
             cwd: request.cwd,
             sessionId: Option.some(request.session.id),
-            environment: Option.some(request.environment),
+            environment: request.environment,
             host: request.host,
           });
           const pending = yield* Effect.forkChild(connection.request("launch", "initialize", {}));

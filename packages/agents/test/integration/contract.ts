@@ -17,7 +17,12 @@ import {
 } from "effect";
 import { env } from "node:process";
 import { fileURLToPath } from "node:url";
-import { type ChildHost, childPidFile, LocalProcess, RemoteShell } from "../../src/child-host.ts";
+import {
+  type ChildHost,
+  childPidFile,
+  LocalProcess,
+  RemoteShell,
+} from "../../src/child-host/child-host.ts";
 import {
   ChildRequest,
   type ChildBackendService,

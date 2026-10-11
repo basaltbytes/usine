@@ -357,12 +357,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             Option.map(
               Option.fromNullishOr(storage.tasks.get(attemptId)),
               ({ request }) =>
-                new StoredRequest({
-                  spec: request.spec,
-                  worker: request.worker,
-                  cwd: request.cwd,
-                  host: request.host,
-                }),
+                new StoredRequest({ spec: request.spec, worker: request.worker, cwd: request.cwd }),
             ),
           ),
         cancel: (attemptId) =>

@@ -3,13 +3,12 @@ import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
-import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
 import { harvestFacts } from "@usine/core/step/harvest";
-import { AttemptRuntime } from "@usine/durable/attempt-runtime";
+import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
   Effect,
   FileSystem,
@@ -39,7 +38,6 @@ import {
   type HarnessProbe,
   verifyHarnessReadiness,
 } from "../harness-preflight.ts";
-import { preparedAttemptsFor } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
   cacheDirectoryName,
@@ -96,11 +94,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const fetches = yield* keyedLockFor<RepositoryName>();
     const baseEnvironment = yield* allowlistedEnvironment(HOST_ENVIRONMENT_ALLOWLIST);
     const harnessReadiness =
-      options.harnessReadiness ?? agentsHarnessProbe(spawner, baseEnvironment, new LocalProcess());
+      options.harnessReadiness ?? agentsHarnessProbe(spawner, new LocalProcess(), baseEnvironment);
     const repositoryUrl =
       options.repositoryUrl ??
       ((repository: RepositoryName): string => `https://github.com/${repository}.git`);
-    const runtime = yield* AttemptRuntime;
     const interruptGrace = options.interruptGrace ?? "2 seconds";
 
     const workersRoot = path.join(options.instanceDirectory, ".usine", "workers");
@@ -215,16 +212,6 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       Effect.ignore,
     );
 
-    const isLive = Effect.fn("LocalExecutor.isLive")(function* (attemptId: AttemptId) {
-      yield* Effect.annotateCurrentSpan({ attemptId, host: "local" });
-      const live = yield* runtime.isLive(attemptId);
-      yield* Effect.logDebug("Read whether the Attempt's parent task is live", {
-        attemptId,
-        live,
-      });
-      return live;
-    });
-
     const workerLeftovers = yield* workerLeftoversFor(workersRoot);
 
     const recover = Effect.fn("LocalExecutor.recover")(function* <E>(
@@ -232,27 +219,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
     ) {
       yield* Effect.annotateCurrentSpan({ ...attempt, host: "local" });
-      if (attempt.open) {
-        const live = yield* isLive(attempt.attemptId).pipe(
-          Effect.tapError((error) =>
-            Effect.logWarning(
-              "Could not read whether an open Attempt's parent task is live; reconciling its checkout",
-              { attemptId: attempt.attemptId, worker: attempt.worker, message: error.message },
-            ),
-          ),
-          Effect.orElseSucceed(() => false),
-        );
-        if (live) {
-          yield* Effect.logInfo("Leaving the checkout of a live Attempt for its reattachment", {
-            attemptId: attempt.attemptId,
-            worker: attempt.worker,
-            host: "local",
-          });
-          return;
-        }
-      } else {
-        yield* session.stopTask(attempt.attemptId, "its Attempt is closed");
-      }
+      if (yield* session.awaitsReattach(attempt)) return;
       const root = path.join(workersRoot, attempt.worker);
       const worktree = path.join(root, "attempts", safeSegment(attempt.attemptId));
       if (!(yield* workerLeftovers(attempt.worker)).has(worktree)) return;
@@ -307,8 +274,6 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         gitVersion,
       });
     }, logPreflightFailure);
-
-    const attempts = yield* preparedAttemptsFor(session.stop, session.intervene);
 
     // Nothing an Attempt runs inherits this process's environment, which holds
     // the App private key: only the allowlist and the Attempt's credential (ADR 0011).
@@ -414,19 +379,13 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             "The checkout of the reattached Attempt is gone",
             new Error(worktree),
           );
-        const stored = yield* runtime.request(request.attemptId);
-        if (Option.isNone(stored))
-          return yield* executorError(
-            "prepare",
-            "The reattached Attempt has no durable request",
-            new Error(request.attemptId),
-          );
+        const { spec } = yield* session.storedRequest(request.attemptId);
         return yield* reattachWorktree({
           request,
           host: "local",
           layout: { cache, worktree },
           ops,
-          spec: stored.value.spec,
+          spec,
         });
       });
       const prepared = yield* acquire.pipe(
@@ -457,25 +416,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         salvaged: prepared.salvaged,
         recordSalvage: prepared.recordSalvage,
       };
-    }, attempts.prepare);
-
-    // A reattachment that cannot start must not leave its parent task running unobserved.
-    const prepareOrStop = (request: CheckoutRequest) =>
-      prepare(request).pipe(
-        Effect.tapError(() =>
-          request.reattach
-            ? session.stopTask(request.attemptId, "its reattachment could not be prepared")
-            : Effect.void,
-        ),
-      );
-
-    // A canceled Attempt may hold a live parent task this process never
-    // launched, such as one still awaiting its reattachment after a restart.
-    const cancel = Effect.fn("LocalExecutor.cancel")(function* (attemptId: AttemptId) {
-      yield* Effect.annotateCurrentSpan({ attemptId, host: "local" });
-      yield* attempts.cancel(attemptId);
-      yield* session.stopTask(attemptId, "the Attempt was canceled");
-    });
+    }, session.prepare);
 
     return Executor.of({
       kind: "local",
@@ -485,11 +426,11 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             Effect.fail(executorError("cleanup", "Could not reconcile local salvage", cause)),
           ),
         ),
-      cancel,
+      cancel: session.cancel,
       intervene: session.intervene,
-      isLive,
+      isLive: session.isLive,
       preflight,
-      prepare: prepareOrStop,
+      prepare,
     });
   });
 

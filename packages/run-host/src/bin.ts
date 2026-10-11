@@ -1,11 +1,7 @@
 #!/usr/bin/env node
 
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
-import { LocalProcess } from "@usine/agents/child-host";
-import { BrainSpec } from "@usine/core/agent/brain";
-import { HarnessReadiness, HarnessReady } from "@usine/core/agent/capability";
-import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Effect, Logger, Schema, Stdio, Stream } from "effect";
+import { Effect, Logger, Stdio } from "effect";
 import { Console } from "node:console";
 
 // Libraries and independent Effect runtimes may use the process console instead
@@ -16,11 +12,6 @@ globalThis.console = new Console({ stdout: process.stderr, stderr: process.stder
 const program = Effect.gen(function* () {
   const stdio = yield* Stdio.Stdio;
   const args = yield* stdio.args;
-  if (args.includes("--protocol-version")) {
-    yield* Effect.logTrace("reporting protocol version");
-    yield* Stream.run(Stream.make(`${AttemptChannel.PROTOCOL_VERSION}\n`), stdio.stdout());
-    return;
-  }
   const delayFlag = args.indexOf("--stub-delay-ms");
   const candidate = delayFlag < 0 ? undefined : args[delayFlag + 1];
   const stubDelayMillis = candidate === undefined ? 0 : Number(candidate);
@@ -28,22 +19,6 @@ const program = Effect.gen(function* () {
     return yield* Effect.die(new Error("--stub-delay-ms must be a non-negative integer"));
   }
   const useStub = args.includes("--stub") || delayFlag >= 0;
-  const preflightFlag = args.indexOf("--preflight");
-  if (preflightFlag >= 0) {
-    const brain = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(BrainSpec))(
-      args[preflightFlag + 1],
-      { onExcessProperty: "error" },
-    );
-    const result = useStub
-      ? new HarnessReady({ harness: brain.harness })
-      : yield* Effect.promise(() => import("@usine/agents/preflight")).pipe(
-          Effect.flatMap(({ preflight }) => preflight(brain, new LocalProcess())),
-          Effect.catchTag("HarnessUnavailableError", Effect.succeed),
-        );
-    const encoded = yield* Schema.encodeEffect(Schema.fromJsonString(HarnessReadiness))(result);
-    yield* Stream.run(Stream.make(`${encoded}\n`), stdio.stdout());
-    return;
-  }
   const [{ runHost }, agentLayer] = yield* Effect.promise(() =>
     Promise.all([
       import("./run-host.ts"),

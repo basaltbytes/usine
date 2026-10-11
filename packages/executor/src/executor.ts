@@ -84,12 +84,6 @@ export const logPreflightFailure = <A, R>(
         }),
   );
 
-/** The local SSH executable and the options placed before the destination. */
-export interface SshCommand {
-  readonly command: string;
-  readonly args: ReadonlyArray<string>;
-}
-
 /** The repository, revision, and Agent task assigned to a Worker for one Attempt's checkout. */
 export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   "@usine/executor/CheckoutRequest",

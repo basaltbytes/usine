@@ -5,8 +5,8 @@ import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { Context, Effect, Exit, Fiber, Layer, Option, Schema } from "effect";
-import { AttemptRuntime, StoredRequest } from "../src/attempt-runtime.ts";
+import { Context, Effect, Exit, Fiber, Layer } from "effect";
+import { AttemptRuntime } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
 import { layer as attemptRuntimeLayer } from "../src/attempt/runtime.ts";
 import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
@@ -352,7 +352,7 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("stores the Attempt's child host and gives it to every child", () =>
+  it.live("gives every child the child host its execute call supplies", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
       const host = new RemoteShell({
@@ -366,9 +366,6 @@ describe("durable AttemptRuntime", () => {
         const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
         const child = yield* (yield* StubChildren).next;
         assert.deepStrictEqual(child.request.host, host);
-        const stored = yield* runtime.request(request.spec.attemptId);
-        assert(Option.isSome(stored));
-        assert.deepStrictEqual(stored.value.host, host);
         yield* child.reply("Done.");
         yield* Fiber.join(execution);
       }).pipe(
@@ -378,17 +375,6 @@ describe("durable AttemptRuntime", () => {
       );
     }).pipe(Effect.scoped),
   );
-
-  it("reads a request stored before child hosts existed as one whose children run here", () => {
-    const { spec, worker, cwd, host } = attemptRequest("run/step/12");
-    const { host: _host, ...withoutHost } = Schema.encodeSync(StoredRequest)(
-      new StoredRequest({ spec, worker, cwd, host }),
-    );
-    assert.deepStrictEqual(
-      Schema.decodeUnknownSync(StoredRequest)(withoutHost).host,
-      new LocalProcess(),
-    );
-  });
 
   it.live("cancels an Attempt bottom-up and settles its execute call", () =>
     Effect.gen(function* () {

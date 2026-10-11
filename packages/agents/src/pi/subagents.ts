@@ -16,7 +16,7 @@ import {
 } from "@usine/core/agent/session";
 import { Effect, Exit, Fiber, Result, Stream } from "effect";
 import { Type } from "typebox";
-import { LocalProcess } from "../child-host.ts";
+import { LocalProcess } from "../child-host/child-host.ts";
 import { assembleChildPrompt } from "../prompt.ts";
 import {
   AgentResultError,

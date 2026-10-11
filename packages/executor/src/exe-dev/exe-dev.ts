@@ -1,10 +1,10 @@
-import type { AttemptId } from "@usine/core/attempt";
+import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import { harvestFacts } from "@usine/core/step/harvest";
-import { AttemptRuntime } from "@usine/durable/attempt-runtime";
+import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Deferred, Effect, Exit, Layer, Option, Schema, Scope } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import { durableSessionFor } from "../durable-session.ts";
@@ -18,7 +18,6 @@ import {
   ExecutorOperationError,
 } from "../executor.ts";
 import { verifyHarnessReadiness } from "../harness-preflight.ts";
-import { preparedAttemptsFor } from "../prepared-attempt.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
 import {
   cacheDirectoryName,
@@ -33,7 +32,6 @@ import { credentialGrantsFor } from "./grants.ts";
 import { workerLeftoversFor } from "./leftovers.ts";
 import type { ExeDevExecutorOptions, VmState } from "./model.ts";
 import { preflightFor } from "./preflight.ts";
-import { CHILD_KILL_SCRIPT } from "./shell.ts";
 import { abandonedWorktreeSweepFor } from "./sweep.ts";
 
 const isExecutorError = Schema.is(ExecutorError);
@@ -54,7 +52,6 @@ const ATTEMPT_ENVIRONMENT = { GH_HOST: EDGE_GITHUB_HOST } satisfies Record<strin
 const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
   Effect.gen(function* () {
     const commands = yield* commandsFor(options.ssh);
-    const runtime = yield* AttemptRuntime;
     const fetches = yield* keyedLockFor<RepositoryName>();
     const integrations = new Map(
       options.githubIntegrations.map(({ name, repository }) => [repository, name]),
@@ -80,7 +77,6 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
     const sweepAbandonedWorktrees = yield* abandonedWorktreeSweepFor(commands);
     const workerLeftovers = yield* workerLeftoversFor(commands, machines.vmFor);
     const session = yield* durableSessionFor({ interruptGrace });
-    const attempts = yield* preparedAttemptsFor(session.stop, session.intervene);
 
     const stopChildren = Effect.fn("ExeDevExecutor.stopChildren")(function* (
       operation: ExecutorOperation,
@@ -101,41 +97,12 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       });
     });
 
-    const isLive = Effect.fn("ExeDevExecutor.isLive")(function* (attemptId: AttemptId) {
-      yield* Effect.annotateCurrentSpan({ attemptId });
-      const live = yield* runtime.isLive(attemptId);
-      yield* Effect.logDebug("Read whether the Attempt's parent task is live", {
-        attemptId,
-        live,
-      });
-      return live;
-    });
-
     const recover = Effect.fn("ExeDevExecutor.recover")(function* <E>(
       attempt: AttemptRecovery,
       record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
     ) {
       yield* Effect.annotateCurrentSpan({ ...attempt });
-      if (attempt.open) {
-        const live = yield* isLive(attempt.attemptId).pipe(
-          Effect.tapError((error) =>
-            Effect.logWarning(
-              "Could not read whether an open Attempt's parent task is live; reconciling its checkout",
-              { attemptId: attempt.attemptId, worker: attempt.worker, message: error.message },
-            ),
-          ),
-          Effect.orElseSucceed(() => false),
-        );
-        if (live) {
-          yield* Effect.logInfo("Leaving the checkout of a live Attempt for its reattachment", {
-            attemptId: attempt.attemptId,
-            worker: attempt.worker,
-          });
-          return;
-        }
-      } else {
-        yield* session.stopTask(attempt.attemptId, "its Attempt is closed");
-      }
+      if (yield* session.awaitsReattach(attempt)) return;
       const { vm, root, checkouts } = yield* workerLeftovers(attempt.worker);
       const worktree = `${root}/attempts/${safeSegment(attempt.attemptId)}`;
       // Every persisted Attempt is visited, and almost none left a checkout:
@@ -209,32 +176,20 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
 
     /**
      * Confirms an Attempt reattached after a restart can take over its checkout:
-     * its parent task stored this VM and worktree, and the worktree is still
-     * there. Children that outlived the restart are stopped, since the parent
-     * starts new ones. Returns the RunSpec the parent started with.
+     * its parent task was created for this worktree, and the worktree is still
+     * on the VM. Children that outlived the restart are stopped, since the
+     * parent starts new ones. Returns the RunSpec the parent started with.
      */
     const takeOver = Effect.fn("ExeDevExecutor.takeOver")(function* (
       request: CheckoutRequest,
       vm: VmState,
       worktree: string,
     ) {
-      const stored = yield* runtime
-        .request(request.attemptId)
-        .pipe(
-          Effect.mapError((cause) =>
-            executorError("Could not read the reattached Attempt's durable request", cause),
-          ),
-        );
-      if (Option.isNone(stored))
-        return yield* executorError(
-          "The reattached Attempt has no durable request",
-          new Error(request.attemptId),
-        );
-      const { host, cwd, spec } = stored.value;
-      if (host._tag !== "RemoteShell" || host.destination !== vm.sshDest || cwd !== worktree)
+      const { cwd, spec } = yield* session.storedRequest(request.attemptId);
+      if (cwd !== worktree)
         return yield* executorError(
           "The reattached Attempt's checkout is not on this Worker's VM",
-          new Error(`${host._tag === "RemoteShell" ? host.destination : host._tag}:${cwd}`),
+          new Error(cwd),
         );
       const inspected = yield* commands.remoteRaw("prepare", vm.sshDest, "test", ["-d", worktree]);
       if (inspected.exitCode === 1)
@@ -291,9 +246,6 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         },
       );
       yield* sweepAbandonedWorktrees(request.attemptId, request.worker, vm, root);
-      const reattached = request.reattach
-        ? Option.some(yield* takeOver(request, vm, worktree))
-        : Option.none();
 
       const remove = (
         operation: "prepare" | "cleanup",
@@ -323,6 +275,22 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         ),
         git: (operation, args) => commands.remote(operation, vm.sshDest, "git", args),
       };
+      // A reattachment takes its checkout over before any credential is granted.
+      const checkout = request.reattach
+        ? reattachWorktree({
+            request,
+            host: vm.sshDest,
+            layout: { cache, worktree },
+            ops,
+            spec: yield* takeOver(request, vm, worktree),
+          })
+        : provisionWorktree({
+            request,
+            url: remoteUrl,
+            host: vm.sshDest,
+            layout: { cache, staging, worktree },
+            ops,
+          });
 
       // A checkout retained after a failed remote stop never closes its scope,
       // so its salvage is answered here rather than by the checkout finalizer.
@@ -360,18 +328,6 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
           ),
       );
 
-      const checkout = Option.match(reattached, {
-        onNone: () =>
-          provisionWorktree({
-            request,
-            url: remoteUrl,
-            host: vm.sshDest,
-            layout: { cache, staging, worktree },
-            ops,
-          }),
-        onSome: (spec) =>
-          reattachWorktree({ request, host: vm.sshDest, layout: { cache, worktree }, ops, spec }),
-      });
       const acquire = Effect.gen(function* () {
         // Credentials belong to the Attempt scope independently of the checkout:
         // refusing destructive cleanup must still release this grant exactly once.
@@ -432,35 +388,16 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
         salvaged: Deferred.await(salvaged),
         recordSalvage: provisioned.recordSalvage,
       };
-    }, attempts.prepare);
-
-    // A reattachment that cannot start must not leave its parent task running
-    // unobserved; the engine then retries on a fresh Attempt.
-    const prepareOrStop = (request: CheckoutRequest) =>
-      prepare(request).pipe(
-        Effect.tapError(() =>
-          request.reattach
-            ? session.stopTask(request.attemptId, "its reattachment could not be prepared")
-            : Effect.void,
-        ),
-      );
-
-    // A canceled Attempt may hold a live parent task this process never
-    // launched, such as one still awaiting its reattachment after a restart.
-    const cancel = Effect.fn("ExeDevExecutor.cancel")(function* (attemptId: AttemptId) {
-      yield* Effect.annotateCurrentSpan({ attemptId });
-      yield* attempts.cancel(attemptId);
-      yield* session.stopTask(attemptId, "the Attempt was canceled");
-    });
+    }, session.prepare);
 
     return Executor.of({
       kind: "exe.dev",
       recover,
-      cancel,
+      cancel: session.cancel,
       intervene: session.intervene,
-      isLive,
+      isLive: session.isLive,
       preflight: machines.preflight,
-      prepare: prepareOrStop,
+      prepare,
     });
   });
 

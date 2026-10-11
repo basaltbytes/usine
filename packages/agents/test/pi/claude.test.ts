@@ -8,7 +8,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type ChildHost, LocalProcess, RemoteShell } from "../../src/child-host.ts";
+import { type ChildHost, LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
 import {
   AgentResultError,
   ChildBackend,

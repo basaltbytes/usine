@@ -20,8 +20,8 @@
       "default": "./dist/pi/pi.js"
     },
     "./child-host": {
-      "types": "./dist/child-host.d.ts",
-      "default": "./dist/child-host.js"
+      "types": "./dist/child-host/child-host.d.ts",
+      "default": "./dist/child-host/child-host.js"
     },
     "./children": {
       "types": "./dist/pi/children.d.ts",

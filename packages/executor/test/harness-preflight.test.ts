@@ -10,10 +10,9 @@ import { agentsHarnessProbe } from "../src/harness-preflight.ts";
 const claude = new BrainSpec({ harness: "claude", model: ModelId.make("sonnet"), effort: "low" });
 const host = new RemoteShell({
   ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
-  sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
+  sshEnvironment: { PATH: "/usr/bin:/bin", SSH_AUTH_SOCK: "/tmp/agent.sock" },
   destination: "remote-one.exe.xyz",
 });
-const sshEnvironment = { PATH: "/usr/bin:/bin", SSH_AUTH_SOCK: "/tmp/agent.sock" };
 
 const exited = (exitCode: number) =>
   ChildProcessSpawner.makeHandle({
@@ -40,7 +39,7 @@ describe("harness probe on a remote host", () => {
           return exited(255);
         }),
       );
-      yield* agentsHarnessProbe(spawner, sshEnvironment, host)(claude).pipe(Effect.flip);
+      yield* agentsHarnessProbe(spawner, host, {})(claude).pipe(Effect.flip);
       const first = spawned[0];
       assert(first !== undefined);
       assert.strictEqual(first.command, "ssh");
@@ -51,7 +50,7 @@ describe("harness probe on a remote host", () => {
         "--",
         "exec 'claude' '--version'",
       ]);
-      assert.deepStrictEqual(first.options.env, sshEnvironment);
+      assert.deepStrictEqual(first.options.env, host.sshEnvironment);
       assert.strictEqual(first.options.extendEnv, false);
     }),
   );
@@ -59,11 +58,7 @@ describe("harness probe on a remote host", () => {
   it.effect("keeps an unreachable Worker's failure retryable instead of a capability gap", () =>
     Effect.gen(function* () {
       const spawner = ChildProcessSpawner.make(() => Effect.succeed(exited(255)));
-      const error = yield* agentsHarnessProbe(
-        spawner,
-        sshEnvironment,
-        host,
-      )(claude).pipe(Effect.flip);
+      const error = yield* agentsHarnessProbe(spawner, host, {})(claude).pipe(Effect.flip);
       assert.strictEqual(error._tag, "ExecutorOperationError");
     }),
   );
@@ -98,8 +93,8 @@ describe("harness probe on a remote host", () => {
       );
       const pending = yield* agentsHarnessProbe(
         spawner,
-        sshEnvironment,
         host,
+        {},
       )(claude).pipe(Effect.flip, Effect.forkChild);
       yield* Deferred.await(started);
       yield* TestClock.adjust("60 seconds");
