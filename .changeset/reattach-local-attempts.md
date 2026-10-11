@@ -3,7 +3,6 @@
 "@usine/executor": minor
 "@usine/engine": minor
 "@usine/orchestrator": minor
-"@usine/run-host": patch
 ---
 
 Run the local Worker's Pi parent in the orchestrator process as a durable task and reattach a live Attempt after an orchestrator restart instead of failing it and opening the next Attempt.

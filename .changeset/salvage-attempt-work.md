@@ -3,7 +3,6 @@
 "@usine/executor": minor
 "@usine/engine": minor
 "@usine/agents": minor
-"@usine/run-host": minor
 "@usine/orchestrator": minor
 "@usine/config": minor
 "@usine/server": minor
