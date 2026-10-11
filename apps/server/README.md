@@ -10,6 +10,8 @@ usine up
 
 The command prints `http://127.0.0.1:7331` and stays attached to the terminal. Pass `--port <port>` (or set `USINE_PORT`) to listen elsewhere. `usine --help` prints the complete command surface and `usine --version` prints the exact `@usine/server` version pinned by the instance. If the chosen port is occupied, the CLI names the conflict and suggests the override instead of exposing Node's bind failure.
 
+One `usine up` runs per instance folder. It holds `.usine/instance.lock` from startup until every store has closed, and writes its process id to `.usine/instance.pid`. A second `usine up` in the same folder exits with a nonzero status before it opens any store, and names the running process; a process that is still draining its Attempts keeps the folder until it exits.
+
 Without GitHub App credentials, it opens the setup screen in the default browser, logs the typed credential error, and leaves both trigger streams idle instead of crashing. The browser command has a two-second timeout; a failed opener produces a warning and does not stop the server. Existing Runs, transcript detail, and database-backed Loop pause state remain observable, while interventions stay unavailable. Credentials may come from `USINE_GITHUB_APP_ID` plus `USINE_GITHUB_PRIVATE_KEY`, or from a mode-0600 `.usine/github-app.json` file with `app_id` and `private_key` fields. The running process reads credentials only at startup, so stop and rerun `usine up` after adding them; the setup screen states that restart requirement explicitly.
 
 The local-only UI opens each project as a Board built from its authored or proposed lanes. Proposed lanes are read-only. Configure `repos[].lanes` in `usine.yaml` and restart `usine up` to enable moves; see the [lane configuration example](../../packages/config/README.md). Moving an Item into an authored label-backed lane exchanges only the labels in that map, preserving descriptive labels outside it; normal polling then evaluates label-protocol loops. Board cards show the latest Run and open its existing detail drawer. The UI can also approve, retry, or cancel a Run; pause or unpause a Loop's database runtime state; page backward through older transcript rows; and tail parent and one-level child session activity.
@@ -51,7 +53,7 @@ Exporting opens the instance's existing `.usine/runtime.sqlite` in read-only mod
 
 ## Stopping and updating
 
-Send SIGTERM or press Ctrl+C once to stop trigger polling and drain admitted Attempts. The server waits up to `max_attempt_minutes` from the shutdown request before closing the runtime, or without a deadline when that setting is absent. A second SIGTERM or Ctrl+C stops the wait immediately. Queued Runs and automatic retries remain saved for the next start. An Attempt interrupted by the deadline or force stop uses normal restart recovery.
+Send SIGTERM or press Ctrl+C once to stop trigger polling and drain admitted Attempts. The server waits up to `max_attempt_minutes` from the shutdown request before closing the runtime, or without a deadline when that setting is absent. A second SIGTERM or Ctrl+C stops the wait immediately. Start the next `usine up` once the process has exited. Queued Runs and automatic retries remain saved for the next start. An Attempt interrupted by the deadline or force stop uses normal restart recovery.
 
 After `pnpm build`, reload the page to use the rebuilt web bundle; no process restart is required. Instance configuration and GitHub credentials are read at startup.
 

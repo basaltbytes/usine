@@ -33,6 +33,7 @@ import {
   volatileRoots,
 } from "./cli.ts";
 import { serverLayer } from "./http.ts";
+import { holdInstance } from "./instance-lock.ts";
 import { withGracefulShutdown } from "./shutdown.ts";
 
 const loadInstance = (directory: InstanceDirectory) => {
@@ -104,6 +105,8 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       yield* refuseVolatileInstance(directory, allowVolatileInstance).pipe(
         Effect.provide(NodeServices.layer),
       );
+      // Taken before any store opens and released after every store has closed.
+      yield* holdInstance(directory).pipe(Effect.provide(NodeServices.layer));
       const instance = yield* loadInstance(directory);
       const credentials = yield* loadLocalCredentials(directory).pipe(
         Effect.provide(NodeServices.layer),
