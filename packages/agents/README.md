@@ -1,35 +1,36 @@
 # @usine/agents
 
-The agent runtime for [usine](https://github.com/basaltbytes/usine). Each Attempt starts an in-process Pi parent, which can delegate focused work through the usine-owned `subagent` tool. An agent's brain spec selects Claude Code, Codex, or Pi for the child.
+The agent layer for [usine](https://github.com/basaltbytes/usine): the Claude Code, Codex, and Pi child backends an Attempt's Pi parent delegates focused work to, the prompts the parent and its children receive, and the harness preflight. The Pi parent runs in the orchestrator as a durable task (`@usine/durable`); its `subagent` tool launches the child that the Agent's brain spec selects.
 
-`@usine/agents/prompt` and `@usine/agents/runtime` are platform-free: prompt assembly, typed runtime errors, and the `AgentRuntime` and `ChildBackend` service contracts. The Node implementation lives at `@usine/agents/pi/live`:
+`@usine/agents/prompt` and `@usine/agents/runtime` are platform-free: prompt assembly, typed runtime errors, and the `ChildBackend` service contracts.
 
-```ts
-import { layer as agentLayer } from "@usine/agents/pi/live";
-```
-
-Use `@usine/agents/pi` to compose the Pi parent with your own child backend:
+`@usine/agents/children` provides `childDispatcherLayer`, which selects a child backend from the rostered `harness` field. Compose its `ClaudeChildBackend`, `CodexChildBackend`, and `PiChildBackend` requirements with the adapter layers from `/claude`, `/codex`, and `/pi`. These Node entry points also provide their SDK service contracts and production SDK layers for caller-controlled composition; `@usine/durable/live` assembles all three.
 
 ```ts
 import { Layer } from "effect";
-import { piParentLayer, piSdkLive } from "@usine/agents/pi";
+import { childDispatcherLayer } from "@usine/agents/children";
+import { claudeChildBackendLayer, claudeSdkLive } from "@usine/agents/claude";
+import { codexAppServerLive, codexChildBackendLayer } from "@usine/agents/codex";
+import { piChildBackendLayer, piSdkLive } from "@usine/agents/pi";
 
-// childBackendLayer supplies ChildBackend from @usine/agents/runtime.
-const agentLayer = piParentLayer.pipe(
-  Layer.provide(piSdkLive),
-  Layer.provide(childBackendLayer),
+const childBackendLayer = childDispatcherLayer.pipe(
+  Layer.provide(
+    Layer.mergeAll(
+      claudeChildBackendLayer.pipe(Layer.provide(claudeSdkLive)),
+      codexChildBackendLayer.pipe(Layer.provide(codexAppServerLive)),
+      piChildBackendLayer.pipe(Layer.provide(piSdkLive)),
+    ),
+  ),
 );
 ```
 
-`@usine/agents/children` provides `childDispatcherLayer`, which selects a child backend by harness. Compose its `ClaudeChildBackend`, `CodexChildBackend`, and `PiChildBackend` requirements with the adapter layers from `/claude`, `/codex`, and `/pi`. These Node entry points also provide their SDK service contracts and production SDK layers for caller-controlled composition. `/pi/live` assembles the parent and all three child backends.
-
-The production layer resolves the Pi parent model from the Run spec, installs the subagents extension, and dispatches each child from the rostered `harness` field. The Run spec also defines the per-Attempt child-session budget. Every accepted spawn logs its cumulative count and a 160-character task excerpt; an excess spawn stops the parent with `ChildSessionBudgetExceededError`. The parent accepts API-key-backed Pi models and ChatGPT subscription models from the `openai-codex` provider. Claude Code runs the worker’s `claude` executable through the Agent SDK with `bypassPermissions` and reads only worker-user settings. Codex uses app-server JSON-RPC over standard input and output with `approvalPolicy: never`; it verifies ChatGPT authentication with `account/read` before creating an ephemeral thread and records ChatGPT plan rate-window updates as `PoolRateLimitsUpdated` session events. Pi children remain API-key-only.
+The Run spec defines the per-Attempt child-session budget; a spawn past it stops the parent with `ChildSessionBudgetExceededError`. The parent accepts API-key-backed Pi models and ChatGPT subscription models from the `openai-codex` provider. Claude Code runs the worker’s `claude` executable through the Agent SDK with `bypassPermissions` and reads only worker-user settings. Codex uses app-server JSON-RPC over standard input and output with `approvalPolicy: never`; it verifies ChatGPT authentication with `account/read` before creating an ephemeral thread and records ChatGPT plan rate-window updates as `PoolRateLimitsUpdated` session events. Pi children remain API-key-only.
 
 `ChildRequest.host` (`@usine/agents/child-host`) says where a child's process runs. `LocalProcess` spawns it on this machine with `ChildRequest.environment` as its complete environment. `RemoteShell` runs it as one SSH command, `ssh <args> <destination> -- <remote command>`: the remote command changes into the worktree, exports the request's environment on top of the remote machine's own, records its pid at `<worktree>.child-<n>.pid` while it runs, and executes the harness. `CHILD_KILL_SCRIPT` stops every child those pid files record, for an executor to run on the remote machine before it keeps or removes the worktree. The SSH client itself sees only `RemoteShell.sshEnvironment`. Claude Code reaches the remote machine through the Agent SDK's `spawnClaudeCodeProcess`, still running the `claude` executable; Codex runs its app server over the same SSH command. Pi children run their tools in this process, so a `RemoteShell` host fails their launch with `AgentResultError`.
 
 The Attempt worktree counts as repository-controlled input. Pi ignores project `.pi/` settings, extensions, prompt templates, skills, and themes. Claude omits project setting sources, while Codex marks the worktree untrusted before starting its thread. AGENTS instructions remain available to the coding harnesses. Worker isolation remains the executor's responsibility.
 
-Parent and child output becomes typed session events: `SessionStarted`, `TextOutput`, tool calls, pool observations, and `SessionFinished`. Completed assistant text produces `TextOutput` events; streaming deltas don't enter the Attempt transcript. Parent and child controls support steer and interrupt. A child session always names one parent session, so recursive child events cannot enter the public model.
+Child output becomes typed session events: `SessionStarted`, `TextOutput`, tool calls, pool observations, and `SessionFinished`. Completed assistant text produces `TextOutput` events; streaming deltas don't enter the Attempt transcript. Child controls support steer, interrupt, and operator Holds. A child session always names one parent session, so recursive child events cannot enter the public model.
 
 Claude children use the CLI's background-task snapshots and session-idle signal to wait for background work and its follow-up answer before returning to the parent. Background waits do not require an operator Hold. Ambient watchers do not delay completion; queued user turns do. A closed output stream without a completed answer fails through `SessionOperationError`.
 
@@ -42,7 +43,7 @@ An unresolved blocker must open its final answer with the reserved marker `[usin
 Repository permission denied; publishing remains incomplete.
 ```
 
-Pi, Claude, and Codex interpret this final-answer marker as `AgentResultError`. A parent's blocker becomes a non-retryable `AgentFailure` on the Attempt channel, so the Run fails and waits for operator action. A child's failed report returns to the parent's `subagent` tool call as text opening with the marker, and the tool guidelines tell the parent to return it verbatim. A child's blocker is sticky on the parent channel: a parent that later finishes with an ordinary answer fails with the first child blocker, and its paraphrase stays in the transcript. Successful siblings do not clear it. Held children can receive guidance and replace a blocked answer before release. A marker without details still fails; ordinary prose and marker mentions elsewhere keep their existing behavior.
+Pi, Claude, and Codex children interpret this final-answer marker as `AgentResultError`. A parent's blocker becomes a non-retryable `AgentFailure` on the Attempt channel, so the Run fails and waits for operator action. A child's failed report returns to the parent's `subagent` tool call as text opening with the marker, and the tool guidelines tell the parent to return it verbatim. The parent keeps the first child blocker: a parent that later finishes with an ordinary answer fails with it, and its paraphrase stays in the transcript. Successful siblings do not clear it. Held children can receive guidance and replace a blocked answer before release. A marker without details still fails; ordinary prose and marker mentions elsewhere keep their existing behavior.
 
 Model identifiers stay opaque until the selected harness checks its registry. Agent-reported failures use `AgentResultError`; SDK, process, and protocol failures use `SessionOperationError`. `toAttemptFailure` maps only `SessionOperationError` to retryable infrastructure failure, while `ChildSessionBudgetExceededError` becomes a non-retryable `ChildSessionBudgetFailure`.
 

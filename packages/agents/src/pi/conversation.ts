@@ -1,11 +1,11 @@
-import { AgentSession, SessionIdle, SessionResumed } from "@usine/core/agent/session";
+import { ChildSession, SessionIdle, SessionResumed } from "@usine/core/agent/session";
 import { InterventionState, type OperatorAction } from "@usine/core/attempt/channel";
 import { Deferred, Effect, Option, Semaphore } from "effect";
 import { type AgentSessionError, SessionOperationError } from "../runtime.ts";
 import type { SessionChannel } from "./session.ts";
 
 interface ConversationOptions {
-  readonly session: AgentSession;
+  readonly session: ChildSession;
   readonly channel: SessionChannel;
   /** Queues guidance during a turn, or starts another turn in the same idle session. */
   readonly send: (
@@ -59,14 +59,6 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       });
     }
     if (action._tag === "Release") {
-      if (session._tag === "ParentSession") {
-        return yield* new SessionOperationError({
-          operation: "steer",
-          sessionId: Option.some(session.id),
-          message: "Only a child session can be released",
-          cause: new Error("parent has no Hold"),
-        });
-      }
       held = false;
       if (Option.isSome(idle) && !paused) yield* finish(idle.value);
     } else if (action._tag === "Interrupt") {
@@ -85,7 +77,7 @@ export const sessionConversation = Effect.fn("SessionConversation.make")(functio
       // Completion shares this lock: a successful message owns its Hold before
       // an in-flight turn can return, while a refused message changes no state.
       yield* options.send(action.message, activity);
-      if (action._tag === "OperatorMessage" && session._tag === "ChildSession") held = true;
+      if (action._tag === "OperatorMessage") held = true;
       paused = false;
       idle = Option.none();
       yield* Deferred.succeed(resume, undefined);

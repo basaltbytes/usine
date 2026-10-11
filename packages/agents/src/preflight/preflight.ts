@@ -98,10 +98,9 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
               cwd: homedir(),
               environment: Option.none(),
               extensions: [],
-              model: Option.some(brain.model),
+              model: brain.model,
               signal,
               thinkingLevel: brain.effort,
-              toolMode: "repository",
             }),
           (cause) =>
             new SessionOperationError({

@@ -107,7 +107,7 @@ const EngineLive = exeDevLayer(instanceDirectory, config, brains, {
 })
 ```
 
-The GitHub integration grant is a renewal window, not an Attempt bound. The executor attaches it for `credentialGrantMinutes` (65 by default), renews it at half that length for as long as the Attempt runs, and retries a failed renewal every minute; `max_attempt_minutes` plays no part in it. When `max_attempt_minutes` is set, the scheduler bounds every launch at it: a hung run host or dead link is interrupted through the normal cancel handshake and reported as a typed infrastructure failure.
+The GitHub integration grant is a renewal window, not an Attempt bound. The executor attaches it for `credentialGrantMinutes` (65 by default), renews it at half that length for as long as the Attempt runs, and retries a failed renewal every minute; `max_attempt_minutes` plays no part in it. When `max_attempt_minutes` is set, the scheduler bounds every launch at it: a hung parent or dead link is interrupted through the normal cancel handshake and reported as a typed infrastructure failure.
 
 The live exe.dev check requires an existing baked VM and its GitHub integration:
 
@@ -148,6 +148,6 @@ Item cycle exhaustion appears as a `CycleBudgetNeed` in the overview and marks t
 
 The operator HTTP API exposes `POST /api/cycle-budgets/reset` with `{ "askId": "…" }`. A stale or differently answered Ask returns HTTP 409.
 
-Local Workers run each Attempt's Pi parent in the orchestrator process as a durable task (`@usine/durable`); `layer` requires the `AttemptRuntime` and builds it before the engine, so durable storage is open and its tasks resumed before Run recovery. An orchestrator restart reattaches a live Attempt instead of failing it. exe.dev Workers still run the parent in the one-shot run host over Attempt channel protocol v7, whose `Start` frame names the previous Attempt's salvage to resume from; upgrade the orchestrator and the VM's run host together, since worker preflight rejects a version mismatch. Stored v3–v6 transcripts remain readable.
+Local and exe.dev Workers both run each Attempt's Pi parent in the orchestrator process as a durable task (`@usine/durable`); `layer` requires the `AttemptRuntime` and builds it before the engine, so durable storage is open and its tasks resumed before Run recovery. An orchestrator restart reattaches a live Attempt instead of failing it. Stored v3–v6 transcripts remain readable.
 
 `Operator.resolveFailure(runId, attemptId)` clears attention for the current failed Attempt. The operator API exposes it as `POST /api/runs/:runId/resolve-failure` with `{ "attemptId": "..." }`. Resolved failures remain in Run history with retry available. Needs you, Project status, and Board attention reflect resolution; a later failed Attempt requests attention again.

@@ -67,7 +67,7 @@ const childImplementations = Layer.mergeAll(
   piChildBackendLayer.pipe(Layer.provide(piSdkLive)),
 );
 
-/** Claude Code, Codex, and Pi children, chosen per Agent harness, as `@usine/agents/pi/live` composes them. */
+/** Claude Code, Codex, and Pi children, chosen per Agent harness. */
 export const childBackendLayer = childDispatcherLayer.pipe(Layer.provide(childImplementations));
 
 /**
