@@ -1,25 +1,33 @@
+import { ChildHost } from "@usine/agents/child-host";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
 import type { AttemptFailure } from "@usine/core/attempt/failure";
 import { WorkerName } from "@usine/core/worker";
 import { Context, type Effect, type Option, Schema } from "effect";
 
-/** What durable storage keeps of an Attempt's request: all of it but the environment, which carries credentials. */
+/**
+ * What durable storage keeps of an Attempt's request: what identifies its
+ * work. The child host and the environment describe the process that runs
+ * the Attempt, so each `execute` call supplies them afresh.
+ */
 export class StoredRequest extends Schema.Class<StoredRequest>("@usine/durable/StoredRequest")({
   spec: AttemptChannel.RunSpec,
   worker: WorkerName,
-  /** Absolute path of the Attempt's worktree on this machine. */
+  /** Absolute path of the Attempt's worktree on the machine its children run on. */
   cwd: Schema.NonEmptyString,
 }) {}
 
 /** One Attempt's parent to run: the same RunSpec the run host received, plus the checkout the parent and its children work in. */
 export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable/AttemptRequest")({
   ...StoredRequest.fields,
+  /** Where the parent's children run. */
+  host: ChildHost,
   /**
    * The only process environment the parent's children and every command they
    * run may see: the Worker's allowlisted variables plus the Attempt's single-repo
    * credential configuration (ADR 0011). The orchestrator's own environment,
-   * which holds the App private key, is never inherited.
+   * which holds the App private key, is never inherited. On a `RemoteShell`
+   * host the variables are exported on top of the remote machine's own environment.
    */
   environment: Schema.Record(Schema.String, Schema.String),
 }) {}

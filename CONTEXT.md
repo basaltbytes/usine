@@ -85,7 +85,7 @@ One try of a step on a worker. Retries are new attempts under the same step, nev
 _Avoid_: retry (the act; the record is an attempt)
 
 **Reattach**:
-The orchestrator continuing an open Attempt after a restart when its Pi parent's durable task is still live, preserving the Attempt's identity, number, and worktree without spending a retry. Applies to local Workers; a remote Worker's lost run-host connection remains an infrastructure failure eligible for capped retry as a new Attempt.
+The orchestrator continuing an open Attempt after a restart when its Pi parent's durable task is still live, preserving the Attempt's identity, number, and worktree without spending a retry. Applies to every Worker; a reattachment whose worktree is gone fails, and the next Attempt starts fresh.
 _Avoid_: retry (starts a new Attempt), takeover (operator intervention in a live session)
 
 **Approval**:
@@ -125,23 +125,23 @@ The long-running headless server that evaluates triggers, schedules work, holds 
 _Avoid_: daemon, app, backend
 
 **Worker**:
-The place an agent run executes — a machine with a checkout. Local process first; remote executors (e.g. exe.dev) behind the same seam.
+The place an Attempt's children run — a machine with the Attempt's checkout. Local processes first; remote Workers (e.g. exe.dev, over SSH) behind the same seam. Every Attempt's Pi parent runs in the orchestrator, whatever the Worker.
 _Avoid_: runner, sandbox, executor (the seam may be named executor in code, but the concept is Worker)
 
 **Run host**:
-The one-shot usine process an executor launches on a remote Worker for a single Attempt, hosting its Pi parent session and returning the Step result when it exits. A local Worker's Pi parent runs in the orchestrator as a durable task.
+The one-shot usine process that hosted a single Attempt's Pi parent session on a Worker before the parent moved into the orchestrator. No Worker launches it any more.
 _Avoid_: runner, daemon, worker process
 
 **Attempt channel**:
-The duplex channel between the orchestrator and a remote Worker's run host for one Attempt: normalized events flowing out and session-addressed operator input (steer, interrupt, takeover messages) flowing in as attempt-scoped framed messages. The byte transport underneath never changes the messages.
+The attempt-scoped framed messages that carry one Attempt's activity: normalized events flowing out of its parent and children, and session-addressed operator input (steer, interrupt, takeover messages) flowing in. Where the children run never changes the messages.
 _Avoid_: stream (reserved for what a trigger watches), pipe, socket
 
 **Transcript**:
-The persisted flow of one Attempt's activity, which the run drawer replays live or after the fact, including Attempt channel events for remote Workers. The orchestrator stores this durable record beyond the Attempt's lifetime.
+The persisted flow of one Attempt's activity, its Attempt channel messages, which the run drawer replays live or after the fact. The orchestrator stores this durable record beyond the Attempt's lifetime.
 _Avoid_: log, session history, output
 
 **Preflight**:
-The executor's verify-only readiness check of a Worker: toolchain, login state, attached credentials, and, for remote Workers, run-host and protocol versions, failing with typed capability errors. It never installs; making a Worker ready is out-of-band.
+The executor's verify-only readiness check of a Worker: toolchain, each rostered harness and its login where the Worker runs children, and attached credentials, failing with typed capability errors. It never installs; making a Worker ready is out-of-band.
 _Avoid_: bootstrap, provisioning (that's the out-of-band act), health check
 
 **Agent**:

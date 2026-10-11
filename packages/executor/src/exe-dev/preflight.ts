@@ -1,19 +1,16 @@
 import type { BrainSpec } from "@usine/core/agent/brain";
-import * as AttemptChannel from "@usine/core/attempt/channel";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import {
   ExecutorOperationError,
   logPreflightFailure,
-  type RunHostCommand,
   WorkerCapabilityError,
   type WorkerCapability,
 } from "../executor.ts";
-import { verifyHarnesses } from "../harness-preflight.ts";
+import { agentsHarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
 import type { ExeDevCommands } from "./commands.ts";
 import { HomePath, SshDestination, type ExeDevExecutorOptions, type VmState } from "./model.ts";
-
-const MINIMUM_NODE_MAJOR = 22;
 
 const Vm = Schema.Struct({
   vmName: Schema.NonEmptyString,
@@ -34,9 +31,13 @@ const capabilityError = (
 export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   options: ExeDevExecutorOptions,
   commands: ExeDevCommands,
-  runHost: RunHostCommand,
 ) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const workers = yield* Ref.make(new Map<WorkerName, VmState>());
+
+  /** Checks a brain on the VM, where the Attempt's children run; the checks export nothing there. */
+  const harnessProbe = (vm: VmState) =>
+    agentsHarnessProbe(spawner, commands.childHost(vm.sshDest), {});
 
   const resolveVm = Effect.fn("ExeDevExecutor.resolveVm")(function* (worker: WorkerName) {
     const response = yield* commands.lobbyJson("preflight", ["ls", worker]);
@@ -114,43 +115,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       );
     }
 
-    const nodeVersion = (yield* asCapability(
-      worker,
-      "toolchain",
-      `Worker ${worker} cannot run Node.js`,
-      commands.remote("preflight", vm.sshDest, "node", ["--version"]),
-    )).trim();
-    const nodeMajor = Number(/^v(?<major>\d+)/u.exec(nodeVersion)?.groups?.major ?? Number.NaN);
-    if (!Number.isSafeInteger(nodeMajor) || nodeMajor < MINIMUM_NODE_MAJOR) {
-      return yield* capabilityError(
-        worker,
-        "toolchain",
-        `Worker ${worker} has Node.js ${nodeVersion || "unknown"}; expected ${MINIMUM_NODE_MAJOR}+`,
-        new Error("Node.js version mismatch"),
-      );
-    }
-
-    const protocol = (yield* asCapability(
-      worker,
-      "run-host",
-      `Worker ${worker} cannot run ${runHost.command}`,
-      commands.remote("preflight", vm.sshDest, runHost.command, [
-        ...runHost.args,
-        "--protocol-version",
-      ]),
-    )).trim();
-    if (protocol !== String(AttemptChannel.PROTOCOL_VERSION)) {
-      return yield* capabilityError(
-        worker,
-        "run-host",
-        `Worker ${worker} has run-host protocol ${protocol || "unknown"}; expected ${AttemptChannel.PROTOCOL_VERSION}`,
-        new Error("run-host protocol mismatch"),
-      );
-    }
-
-    yield* verifyHarnesses(worker, brains, runHost, (command, args) =>
-      commands.remote("preflight", vm.sshDest, command, args),
-    );
+    yield* verifyHarnessReadiness(worker, brains, harnessProbe(vm));
 
     for (const integration of options.githubIntegrations) {
       yield* asCapability(
@@ -170,8 +135,6 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       worker,
       host: vm.sshDest,
       gitVersion,
-      nodeVersion,
-      protocolVersion: AttemptChannel.PROTOCOL_VERSION,
       harnesses: [...new Set(brains.map(({ harness }) => harness))].join(","),
       integrations: options.githubIntegrations.length,
     });
@@ -185,5 +148,5 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
     return yield* resolveVm(worker);
   });
 
-  return { preflight, vmFor };
+  return { preflight, vmFor, harnessProbe };
 });

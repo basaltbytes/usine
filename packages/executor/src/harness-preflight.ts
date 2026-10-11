@@ -1,13 +1,11 @@
-import { BrainSpec } from "@usine/core/agent/brain";
-import { HarnessReadiness } from "@usine/core/agent/capability";
+import type { ChildHost } from "@usine/agents/child-host";
+import { preflight } from "@usine/agents/preflight";
+import type { BrainSpec } from "@usine/core/agent/brain";
+import type { HarnessReadiness } from "@usine/core/agent/capability";
 import type { WorkerName } from "@usine/core/worker";
-import { Array as Arr, Effect, Schema } from "effect";
-import {
-  logPreflightFailure,
-  ExecutorOperationError,
-  type RunHostCommand,
-  WorkerCapabilityError,
-} from "./executor.ts";
+import { Array as Arr, Effect } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import { logPreflightFailure, ExecutorOperationError, WorkerCapabilityError } from "./executor.ts";
 
 /**
  * Reports one rostered brain's readiness on a Worker. Only a readiness report
@@ -45,58 +43,29 @@ export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness
     yield* Effect.logDebug("No rostered harnesses to preflight", { worker });
 }, logPreflightFailure);
 
-/** Uses the installed run host so both adapters check the same worker-side harness contract. */
-export const verifyHarnesses = (
-  worker: WorkerName,
-  brains: ReadonlyArray<BrainSpec>,
-  runHost: RunHostCommand,
-  execute: (
-    command: string,
-    args: ReadonlyArray<string>,
-  ) => Effect.Effect<string, ExecutorOperationError>,
-) =>
-  verifyHarnessReadiness(
-    worker,
-    brains,
-    Effect.fn("Executor.probeRunHostHarness")(function* (brain: BrainSpec) {
-      yield* Effect.annotateCurrentSpan({ worker, harness: brain.harness });
-      const response = yield* execute(runHost.command, [
-        ...runHost.args,
-        "--preflight",
-        Schema.encodeSync(Schema.fromJsonString(BrainSpec))(brain),
-      ]).pipe(
-        Effect.timeout("75 seconds"),
-        Effect.catchTag(
-          "TimeoutError",
-          (cause) =>
-            new ExecutorOperationError({
-              operation: "preflight",
-              message: `Worker ${worker} did not finish probing ${brain.harness} readiness`,
-              cause,
-            }),
-        ),
-      );
-      const result = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(HarnessReadiness))(
-        response,
-        { onExcessProperty: "error" },
-      ).pipe(
-        Effect.mapError(
-          () =>
-            new WorkerCapabilityError({
-              worker,
-              capability: "run-host",
-              message: `Worker ${worker} returned an invalid harness preflight response; update its run host`,
-              cause: new Error("invalid harness readiness response"),
-            }),
-        ),
-      );
-      if (result.harness !== brain.harness)
-        return yield* new WorkerCapabilityError({
-          worker,
-          capability: "run-host",
-          message: `Worker ${worker} returned readiness for the wrong harness`,
-          cause: new Error("harness readiness mismatch"),
-        });
-      return result;
-    }),
-  );
+/**
+ * Checks one brain where `host` runs children, with the `@usine/agents/preflight`
+ * checks and `environment` as a child of the Worker would see it, never the
+ * orchestrator's own (ADR 0011). A timed-out or unreachable probe stays a
+ * retryable infrastructure error.
+ */
+export const agentsHarnessProbe =
+  (
+    spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+    host: ChildHost,
+    environment: Readonly<Record<string, string>>,
+  ): HarnessProbe =>
+  (brain) =>
+    preflight(brain, host, environment).pipe(
+      Effect.map((ready): HarnessReadiness => ready),
+      Effect.catchTag("HarnessUnavailableError", (unavailable) => Effect.succeed(unavailable)),
+      Effect.mapError(
+        (cause) =>
+          new ExecutorOperationError({
+            operation: "preflight",
+            message: cause.message,
+            cause,
+          }),
+      ),
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    );

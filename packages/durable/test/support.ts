@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert } from "@effect/vitest";
+import { type ChildHost, LocalProcess } from "@usine/agents/child-host";
 import { Agent, AgentName, AgentPersona } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { type AgentSessionEvent, ChildSessionBudget } from "@usine/core/agent/session";
@@ -28,7 +29,11 @@ const agent = new Agent({
 /** The environment children must receive instead of the test process's own. */
 export const workerEnvironment = { PATH: "/usr/bin:/bin", GH_CONFIG_DIR: "/tmp/usine-gh" };
 
-export const attemptRequest = (attemptId: string, maxChildren = 3) =>
+export const attemptRequest = (
+  attemptId: string,
+  maxChildren = 3,
+  host: ChildHost = new LocalProcess(),
+) =>
   new AttemptRequest({
     spec: new AttemptChannel.RunSpec({
       attemptId: AttemptId.make(attemptId),
@@ -45,6 +50,7 @@ export const attemptRequest = (attemptId: string, maxChildren = 3) =>
     }),
     worker: WorkerName.make("local"),
     cwd: "/workspace/usine",
+    host,
     environment: workerEnvironment,
   });
 

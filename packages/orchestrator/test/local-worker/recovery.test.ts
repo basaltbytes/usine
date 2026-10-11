@@ -8,7 +8,7 @@ import { WorkerName } from "@usine/core/worker";
 import { Effect, FileSystem, Layer, Result } from "effect";
 import { CredentialProvider, Executor } from "@usine/executor";
 import { layer } from "@usine/executor/local";
-import { stubAttemptRuntime, StubStorage } from "../support/attempt-runtime.ts";
+import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 
 const attempt = (worker: string, number: number) => ({
   attemptId: AttemptId.make(`closed/run/${number}`),

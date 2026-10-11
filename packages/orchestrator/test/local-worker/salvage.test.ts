@@ -11,7 +11,7 @@ import { RunEngine } from "@usine/engine/engine";
 import { CheckoutRequest, Executor } from "@usine/executor";
 import { layer as localExecutorLayer } from "@usine/executor/local";
 import { Cause, Effect, Exit, FileSystem, Layer, Option, Path } from "effect";
-import { stubAttemptRuntime, StubStorage, worksFor } from "../support/attempt-runtime.ts";
+import { stubAttemptRuntime, StubStorage, worksFor } from "@usine/durable/testing";
 import {
   LIVE_TEST_TIMEOUT,
   STATE_POLL_ATTEMPTS,

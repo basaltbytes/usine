@@ -1,27 +1,33 @@
 import type { Harness } from "@usine/core/agent/brain";
 import { HarnessUnavailableError, type HarnessCapability } from "@usine/core/agent/capability";
 import { Effect, Option, Stream } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { homedir } from "node:os";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import type { ChildHost } from "../child-host/child-host.ts";
+import { hostCommand } from "../child-host/command.ts";
 import { SessionOperationError } from "../runtime.ts";
 
-/** Runs a bounded readiness command without retaining its potentially sensitive diagnostics. */
+/** OpenSSH exits with 255 when it cannot reach the remote machine or run the command there. */
+const SSH_FAILURE = 255;
+
+/** Runs a bounded readiness command on `host` without retaining its potentially sensitive diagnostics. */
 export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
+  host: ChildHost,
+  environment: Readonly<Record<string, string>>,
   harness: Harness,
   capability: HarnessCapability,
   command: string,
   args: ReadonlyArray<string>,
 ) {
-  yield* Effect.annotateCurrentSpan({ harness, capability });
+  yield* Effect.annotateCurrentSpan({ harness, capability, host: host._tag });
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   return yield* Effect.scoped(
     Effect.gen(function* () {
       const handle = yield* spawner.spawn(
-        ChildProcess.make(command, args, {
-          cwd: homedir(),
-          detached: false,
-          forceKillAfter: "2 seconds",
-        }),
+        hostCommand(
+          host,
+          { environment, command, args },
+          { detached: false, forceKillAfter: "2 seconds" },
+        ),
       );
       const [stdout, , exitCode] = yield* Effect.all(
         [
@@ -31,6 +37,13 @@ export const probeCommand = Effect.fn("HarnessPreflight.command")(function* (
         ],
         { concurrency: "unbounded" },
       );
+      if (host._tag === "RemoteShell" && exitCode === SSH_FAILURE)
+        return yield* new SessionOperationError({
+          operation: "launch",
+          sessionId: Option.none(),
+          message: `Could not reach ${host.destination} to run ${command}`,
+          cause: new Error(`${host.ssh.command} exited with code ${SSH_FAILURE}`),
+        });
       if (exitCode !== 0)
         return yield* new HarnessUnavailableError({
           harness,

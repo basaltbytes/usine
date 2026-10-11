@@ -45,8 +45,8 @@ export interface AttemptHub {
   channel: Option.Option<AttachedChannel>;
   /**
    * Completed with the request of the `execute` call relaying this Attempt, and
-   * replaced when it detaches. Its environment is never stored, so new
-   * children wait for a live `execute` to supply it.
+   * replaced when it detaches. Its child host and environment are never
+   * stored, so new children wait for a live `execute` to supply them.
    */
   attached: Deferred.Deferred<AttemptRequest>;
 }

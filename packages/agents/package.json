@@ -19,6 +19,10 @@
       "types": "./dist/pi/pi.d.ts",
       "default": "./dist/pi/pi.js"
     },
+    "./child-host": {
+      "types": "./dist/child-host/child-host.d.ts",
+      "default": "./dist/child-host/child-host.js"
+    },
     "./children": {
       "types": "./dist/pi/children.d.ts",
       "default": "./dist/pi/children.js"
@@ -59,6 +63,7 @@
     "build": "tsc -b",
     "check": "tsc -p tsconfig.check.json && tsc -p tsconfig.conformance.json",
     "test": "vitest run --exclude 'test/integration/**'",
+    "test:integration:claude": "vitest run test/integration/claude.test.ts",
     "test:integration:codex": "vitest run test/integration/codex.test.ts",
     "test:integration:pi": "vitest run test/integration/pi.test.ts"
   },

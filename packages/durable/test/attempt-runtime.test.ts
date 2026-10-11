@@ -4,6 +4,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure, RunawayFailure } from "@usine/core/attempt/failure";
+import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import { Context, Effect, Exit, Fiber, Layer } from "effect";
 import { AttemptRuntime } from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
@@ -42,6 +43,7 @@ describe("durable AttemptRuntime", () => {
         const child = yield* children.next;
         assert.deepStrictEqual(child.request.environment, workerEnvironment);
         assert.strictEqual(child.request.cwd, "/workspace/usine");
+        assert.deepStrictEqual(child.request.host, new LocalProcess());
         assert.match(child.request.prompt, /Fix the flaky test/u);
         assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
         yield* child.reply("Child fixed the test.");
@@ -345,6 +347,30 @@ describe("durable AttemptRuntime", () => {
             database,
             parent: [delegate("Fix the flaky test"), answer("Continued after the release.")],
           }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("gives every child the child host its execute call supplies", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const host = new RemoteShell({
+        ssh: { command: "ssh", args: ["-o", "BatchMode=yes"] },
+        sshEnvironment: { SSH_AUTH_SOCK: "/tmp/agent.sock" },
+        destination: "worker.exe.xyz",
+      });
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/11", 3, host);
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+        const child = yield* (yield* StubChildren).next;
+        assert.deepStrictEqual(child.request.host, host);
+        yield* child.reply("Done.");
+        yield* Fiber.join(execution);
+      }).pipe(
+        Effect.provide(
+          layer({ database, parent: [delegate("Fix the flaky test"), answer("Done.")] }),
         ),
       );
     }).pipe(Effect.scoped),

@@ -12,21 +12,25 @@ import {
   Scope,
   Stream,
 } from "effect";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { homedir } from "node:os";
+import { type ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { AgentSessionId } from "@usine/core/agent/session";
+import { type ChildHost, childPidFile } from "../../child-host/child-host.ts";
+import { hostCommand } from "../../child-host/command.ts";
 import { type WorkingDirectory, SessionOperationError } from "../../runtime.ts";
 
 /** Worker directory and optional session identity for a scoped app-server connection. */
 export interface CodexClient {
+  /** The checkout, on the machine `host` names. */
   readonly cwd: WorkingDirectory;
   /** None during preflight, before a child Session exists. */
   readonly sessionId: Option.Option<AgentSessionId>;
   /**
-   * The complete environment of the app server and every command it runs.
-   * None inherits this process's environment, as preflight in the run host does.
+   * The complete environment of the app server and every command it runs on
+   * this machine, or the variables exported on a remote host's own environment.
    */
-  readonly environment: Option.Option<Readonly<Record<string, string>>>;
+  readonly environment: Readonly<Record<string, string>>;
+  /** Where the app server runs. */
+  readonly host: ChildHost;
 }
 
 export interface CodexNotification {
@@ -108,40 +112,41 @@ const repositoryTrustOverride = (cwd: string): string =>
   `projects.${JSON.stringify(cwd)}.trust_level="untrusted"`;
 const disableRecursiveAgentsOverride = "features.multi_agent=false";
 
+/**
+ * The app-server process for `client`, on the machine its host names. It
+ * starts in the home directory, outside the worktree it receives through its
+ * thread parameters, so process startup cannot read repository-owned config
+ * before thread trust is set.
+ */
 export const codexAppServerCommand = (
-  cwd: string,
-  environment: Option.Option<Readonly<Record<string, string>>>,
+  client: CodexClient,
   stdin?: ChildProcess.CommandOptions["stdin"],
 ): ChildProcess.Command => {
-  const inherited: ChildProcess.CommandOptions = {
-    // Start outside the worktree so process startup cannot read
-    // repository-owned config before thread trust is set.
-    cwd: homedir(),
-    // Stay in the run host's process group so the executor's hard kill reaps
-    // the app server too; the bounded SIGTERM window is the grace-then-force
-    // stop (ADR 0006).
+  const lifetime: ChildProcess.CommandOptions = {
+    // Stay in the launching process's group so its hard kill reaps the app
+    // server too; the bounded SIGTERM window is the grace-then-force stop
+    // (ADR 0006).
     detached: false,
     forceKillAfter: "5 seconds",
   };
-  const options = Option.match(environment, {
-    onNone: () => inherited,
-    onSome: (variables): ChildProcess.CommandOptions => ({
-      ...inherited,
-      env: { ...variables },
-      extendEnv: false,
-    }),
-  });
-  return ChildProcess.make(
-    "codex",
-    [
-      "app-server",
-      "--stdio",
-      "-c",
-      repositoryTrustOverride(cwd),
-      "-c",
-      disableRecursiveAgentsOverride,
-    ],
-    stdin === undefined ? options : { ...options, stdin },
+  return hostCommand(
+    client.host,
+    {
+      environment: client.environment,
+      pidFile: Option.getOrUndefined(
+        Option.map(client.sessionId, (sessionId) => childPidFile(client.cwd, sessionId)),
+      ),
+      command: "codex",
+      args: [
+        "app-server",
+        "--stdio",
+        "-c",
+        repositoryTrustOverride(client.cwd),
+        "-c",
+        disableRecursiveAgentsOverride,
+      ],
+    },
+    stdin === undefined ? lifetime : { ...lifetime, stdin },
   );
 };
 
@@ -166,7 +171,7 @@ const makeCodexAppServer = Effect.gen(function* () {
       const stderrTail = yield* Ref.make<ReadonlyArray<string>>([]);
       const handle = yield* spawner
         .spawn(
-          codexAppServerCommand(request.cwd, request.environment, {
+          codexAppServerCommand(request, {
             stream: Stream.fromQueue(input),
             endOnDone: true,
           }),

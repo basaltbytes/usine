@@ -16,6 +16,7 @@ import {
   InfraFailure,
 } from "@usine/core/attempt/failure";
 import { Context, Effect, Match, Schema, Scope, Stream } from "effect";
+import { ChildHost } from "./child-host/child-host.ts";
 
 /** The checkout directory one Attempt runs in. */
 export const WorkingDirectory = Schema.NonEmptyString.pipe(Schema.brand("AgentWorkingDirectory"));
@@ -30,15 +31,19 @@ export class LaunchRequest extends Schema.Class<LaunchRequest>("@usine/agents/La
 /** Work delegated to one child, with its assigned identity and the checkout it shares with the parent. */
 export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/ChildRequest")({
   session: ChildSession,
+  /** The checkout, on the machine `host` names. */
   cwd: WorkingDirectory,
   prompt: Schema.NonEmptyString,
   /**
    * The complete environment of the child's process and every command it runs:
    * the Worker's allowlisted variables plus the Attempt's credential
    * configuration. Nothing is inherited from the process that launches the
-   * child (ADR 0011).
+   * child (ADR 0011). On a `RemoteShell` host they are exported on top of the
+   * remote machine's own environment, which holds no orchestrator secret.
    */
   environment: Schema.Record(Schema.String, Schema.String),
+  /** Where the child's process runs. */
+  host: ChildHost,
 }) {}
 
 /** The final message a parent or child session returns. */

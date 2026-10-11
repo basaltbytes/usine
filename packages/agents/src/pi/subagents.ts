@@ -16,6 +16,7 @@ import {
 } from "@usine/core/agent/session";
 import { Effect, Exit, Fiber, Result, Stream } from "effect";
 import { Type } from "typebox";
+import { LocalProcess } from "../child-host/child-host.ts";
 import { assembleChildPrompt } from "../prompt.ts";
 import {
   AgentResultError,
@@ -120,6 +121,7 @@ export const createSubagentsExtension = (options: SubagentsExtensionOptions): Ex
       session,
       cwd: options.cwd,
       environment: options.environment,
+      host: new LocalProcess(),
       prompt: assembleChildPrompt({
         agent: options.agent.name,
         persona: options.agent.persona,

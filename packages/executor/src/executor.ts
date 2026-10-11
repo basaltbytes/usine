@@ -25,7 +25,6 @@ export type ExecutorOperation = typeof ExecutorOperation.Type;
 export const WorkerCapability = Schema.Literals([
   "machine",
   "toolchain",
-  "run-host",
   "harness-login",
   "credentials",
 ]);
@@ -85,12 +84,6 @@ export const logPreflightFailure = <A, R>(
         }),
   );
 
-/** Process command for a one-shot run host or its preflight capability probe on a remote Worker. */
-export interface RunHostCommand {
-  readonly command: string;
-  readonly args: ReadonlyArray<string>;
-}
-
 /** The repository, revision, and Agent task assigned to a Worker for one Attempt's checkout. */
 export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   "@usine/executor/CheckoutRequest",
@@ -104,7 +97,7 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   agent: Agent,
   parentModel: Schema.Option(ModelId),
   maxChildren: ChildSessionBudget,
-  /** Maximum minutes of live run-host execution, or none for no timer; preparation and resource cleanup are outside this budget. */
+  /** Maximum minutes of live Attempt execution, or none for no timer; preparation and resource cleanup are outside this budget. */
   maxAttemptMinutes: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
   /** Maximum consumed tokens across the parent and every child, or none for no token ceiling; operator Holds never pause this ceiling. */
   maxAttemptTokens: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
@@ -180,9 +173,9 @@ export class Executor extends Context.Service<
       record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
     ) => Effect.Effect<void, E | ExecutorError>;
     readonly kind: WorkerKind;
-    /** Whether the Attempt's parent task survived an orchestrator restart and can be reattached; always false where the parent runs in a one-shot run host. */
+    /** Whether the Attempt's parent task survived an orchestrator restart and can be reattached. */
     readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
-    /** Verifies Git, the run host where the Worker uses one, and each rostered brain in the Worker environment; never installs tools or logs in. */
+    /** Verifies Git and each rostered brain where the Worker runs children; never installs tools or logs in. */
     readonly preflight: (
       worker: WorkerName,
       brains: ReadonlyArray<BrainSpec>,
@@ -197,9 +190,8 @@ export class Executor extends Context.Service<
       request: CheckoutRequest,
     ) => Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope>;
     /**
-     * Stops preparation and releases partial resources, or stops the live session
-     * (Cancel through the run host's channel, or the parent task's cancellation)
-     * with a grace period before forced termination. A canceled prepared Attempt
+     * Stops preparation and releases partial resources, or cancels the live
+     * parent task with a grace period before forced termination. A canceled prepared Attempt
      * cannot launch. Repeated cancellation after release is a no-op.
      */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;

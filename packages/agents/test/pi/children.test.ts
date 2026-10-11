@@ -3,6 +3,7 @@ import { BrainSpec, Harness, HARNESSES, ModelId } from "@usine/core/agent/brain"
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
 import { Effect, Layer, Stream } from "effect";
+import { LocalProcess } from "../../src/child-host/child-host.ts";
 import {
   ChildBackend,
   type ChildBackendService,
@@ -29,6 +30,7 @@ const request = (harness: Harness) =>
       }),
     }),
     cwd: WorkingDirectory.make("/workspace/repo"),
+    host: new LocalProcess(),
     prompt: "Implement the focused task.",
   });
 

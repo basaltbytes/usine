@@ -1,6 +1,6 @@
 # @usine/executor
 
-Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free package root defines Worker preflight, scoped Attempt preparation, and cancellation. Each prepared Attempt launches its Pi parent (in this process on the local Worker, in a one-shot run host on exe.dev) and releases its resources at completion or when its scope closes. It also owns the credential provider, Worker capability errors, and adapter-neutral request types.
+Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free package root defines Worker preflight, scoped Attempt preparation, and cancellation. Each prepared Attempt runs its Pi parent in this process as a durable task, tells it where the Worker runs its children (as local processes, or over SSH on exe.dev), and releases its resources at completion or when its scope closes. It also owns the credential provider, Worker capability errors, and adapter-neutral request types.
 
 ## Attempt lifetime
 
@@ -53,12 +53,9 @@ record-before-remove salvage order; succeeded Attempts only need checkout remova
 acquisition, repository lock waits, and checkout creation. Cancellation stops
 preparation before releasing acquired resources and prevents a prepared Attempt from
 launching later. Both `cancel` and the canceled `prepare` or `launch` return only after
-those resources are released. Once the Attempt is live, cancellation stops its session
-(the parent task's cancellation locally, the Cancel envelope on exe.dev) and uses the
-configured grace period before forced termination. Repeated cancellation after release
-is a no-op.
-
-On exe.dev, recognizable Effect log lines on run-host stdout are dropped with a warning that records safe shape metadata. Invalid JSON, schema-invalid frames, and protocol sequence violations still fail the Attempt.
+those resources are released. Once the Attempt is live, cancellation cancels its parent
+task and uses the configured grace period before forced termination. Repeated
+cancellation after release is a no-op.
 
 This replaces the 0.x `Executor.launch(prepared, io)` and `Executor.cleanup(prepared)`
 methods. Consumers supply a scope instead of coordinating cleanup. The engine's
@@ -66,9 +63,9 @@ methods. Consumers supply a scope instead of coordinating cleanup. The engine's
 
 ## Worker preflight
 
-Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpec` values before scheduling Attempts. The local adapter probes in its own process with `@usine/agents/preflight` (override with `LocalExecutorOptions.harnessReadiness`); the exe.dev adapter invokes `usine-run-host --preflight '<brain-json>'` on the VM. Both check each selected harness’s executable and authentication; Codex requires supported CLI 0.144.0 or 0.153.4 and a ChatGPT login, Claude requires its CLI and subscription login, and Pi children require API keys for their selected models.
+Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpec` values before scheduling Attempts. Both adapters run the `@usine/agents/preflight` checks where the Worker runs children: the local adapter on this machine (override with `LocalExecutorOptions.harnessReadiness`), the exe.dev adapter over SSH on the VM. They check each selected harness’s executable and authentication; Codex requires supported CLI 0.144.0 or 0.153.4 and a ChatGPT login, Claude requires its CLI and subscription login, and Pi children require API keys for their selected models. Pi children run their tools in the orchestrator process, so an exe.dev Worker reports a Pi brain as unavailable.
 
-`prepare` repeats the assigned brain’s probe before acquiring credentials or creating a checkout. This checks roster changes and logouts after startup. A reported capability gap returns `WorkerCapabilityError` and requires operator action. Transport failures and probe timeouts remain infrastructure failures eligible for retry. Custom run hosts must implement the credential-free `HarnessReadiness` response from `@usine/core/agent/capability`.
+`prepare` repeats the assigned brain’s probe before acquiring credentials or creating a checkout. This checks roster changes and logouts after startup. A reported capability gap returns `WorkerCapabilityError` and requires operator action. Transport failures, including an SSH client that cannot reach the VM, and probe timeouts remain infrastructure failures eligible for retry.
 
 This replaces exe.dev’s `HarnessLoginCheck` and `harnessLoginChecks` options. Pass the roster to `preflight` so readiness follows the agents the instance actually uses.
 
@@ -91,15 +88,21 @@ The local layer requires Effect `FileSystem`, `Path`, and `ChildProcessSpawner` 
 
 ## exe.dev Worker
 
-`@usine/executor/exe-dev` runs the same contract on a persistent exe.dev VM. The configured Worker name must match the VM name. The VM image must already contain Git, Node.js 22 or later, the compatible `usine-run-host` executable, and every coding-agent login used by the instance.
+`@usine/executor/exe-dev` runs the same contract on a persistent exe.dev VM. The configured Worker name must match the VM name. The VM image must already contain Git, the `claude` and `codex` CLIs the roster uses, and every coding-agent login used by the instance.
 
-Preflight creates no checkouts or credential grants. It reads VM metadata through `ssh exe.dev ls --json`, checks Git and Node.js over SSH, compares the run-host protocol version, probes the supplied roster through the remote run host, and asks exe.dev to test each native GitHub integration.
+Preflight creates no checkouts or credential grants. It reads VM metadata through `ssh exe.dev ls --json`, checks Git over SSH, probes the supplied roster on the VM, and asks exe.dev to test each native GitHub integration.
 
-Prepare attaches the repository's integration to the VM with a bounded `--for` grant. It then fetches a bare cached clone from `github.int.exe.xyz` and creates a detached worktree for the Attempt. Launch keeps one SSH process open and exchanges protocol-v7 frames on that process's standard input and output. Cleanup removes the worktree, prunes its cache registration, and detaches the integration after the last concurrent Attempt using it finishes.
+Prepare attaches the repository's integration to the VM with a bounded `--for` grant. It then fetches a bare cached clone from `github.int.exe.xyz` and creates a detached worktree for the Attempt. Launch runs the Attempt's Pi parent in this process as a durable task through `AttemptRuntime`, with a `RemoteShell` child host: every Claude Code or Codex child is one SSH command that changes into the worktree, exports `GH_HOST=github.int.exe.xyz` on top of the VM's own environment, and runs the harness there. Harvesting runs `git` and `gh` in the worktree the same way. Cleanup removes the worktree, prunes its cache registration, and detaches the integration after the last concurrent Attempt using it finishes.
 
-Startup reconciles unsuccessful Attempts before registering their durable workflows. Each existing checkout is snapshotted and pushed, and its salvage is recorded before removal. Failed pushes and unknown crash leftovers remain on disk. Cache sweeps prune registrations for missing directories; they never delete existing checkouts. One-shot lobby and SSH commands carry a ten-minute timeout, and the SSH client sends keepalives so a dead link fails the operation instead of parking it. Cancellation also bounds interrupt persistence and delivery before escalating to a hard kill, so a parked store or remote process cannot stall shutdown; before removing a workspace, cleanup reads the run host's recorded pid on the VM and confirms the process is dead, because killing the local SSH client alone says nothing about the remote side.
+An SSH client that exits does not prove its remote command has stopped, so each remote child records its pid at `<worktree>.child-<n>.pid` while it runs. Before a workspace is removed or kept, cleanup stops every recorded child on the VM and confirms it is dead; cancel, recovery, and reattach do the same.
 
-Concurrent Attempts against different repositories leave their integrations attached to the VM simultaneously; each grant renews at half its lifetime for as long as its Attempt runs, a failed renewal is retried every minute until it succeeds, and the refcounted release detaches an integration only after its last Attempt finishes. The grant length (`credentialGrantMinutes`, 65 by default) is a renewal window, not an Attempt bound: it does not depend on `max_attempt_minutes`, and an Attempt with no ceiling keeps its grant for its whole life. A failed detach is logged and left to lapse with its time-box. If remote termination cannot be confirmed, cleanup retains the checkout and its Git registration for recovery, logs its location, and still releases the credential grant. Partial preparation rolls back without requiring remote-process confirmation because no run host has launched.
+When the orchestrator stops while an Attempt runs, the parent task stays live in durable storage and the worktree stays on the VM. After a restart, `recover` leaves a live open Attempt alone, `isLive` lets the engine reattach it, and `prepare` with `reattach` checks that the parent task's stored request names this worktree and that the worktree still exists on the VM, stops any child left from before the restart, and takes the worktree over with a fresh credential grant. A reattachment whose VM or worktree is gone fails and cancels the parent task, so the engine retries on a new Attempt.
+
+Startup reconciles unsuccessful Attempts before registering their durable workflows. Each existing checkout is snapshotted and pushed, and its salvage is recorded before removal. Failed pushes and unknown crash leftovers remain on disk. Cache sweeps prune registrations for missing directories; they never delete existing checkouts. One-shot lobby and SSH commands carry a ten-minute timeout, and the SSH client sends keepalives so a dead link fails the operation instead of parking it.
+
+Concurrent Attempts against different repositories leave their integrations attached to the VM simultaneously; each grant renews at half its lifetime for as long as its Attempt runs, a failed renewal is retried every minute until it succeeds, and the refcounted release detaches an integration only after its last Attempt finishes. The grant length (`credentialGrantMinutes`, 65 by default) is a renewal window, not an Attempt bound: it does not depend on `max_attempt_minutes`, and an Attempt with no ceiling keeps its grant for its whole life. A failed detach is logged and left to lapse with its time-box. If stopping the remote children cannot be confirmed, cleanup retains the checkout and its Git registration for recovery, logs its location, and still releases the credential grant. Partial preparation rolls back without stopping remote children because none has started.
+
+The exe.dev layer requires a `ChildProcessSpawner` and an `AttemptRuntime`.
 
 ```ts
 import { RepositoryName } from "@usine/core/repository"
@@ -117,6 +120,6 @@ const executorLayer = layer({
 })
 ```
 
-The native integration holds the GitHub credential at exe.dev's network edge. No GitHub token enters the RunSpec, the Attempt channel, the local SSH environment, or the VM. Git pushes from this Worker use `exe-dev-github-integration[bot]`; agent-authored PRs and comments should carry the Agent signature used by the run.
+The native integration holds the GitHub credential at exe.dev's network edge. No GitHub token enters the RunSpec, the Attempt's durable request, the local SSH environment, or the VM. Git pushes from this Worker use `exe-dev-github-integration[bot]`; agent-authored PRs and comments should carry the Agent signature used by the run.
 
 Salvage inspection, staging, or snapshot failures retain the checkout, including uncommitted files. Restart recovery uses freshly issued credentials and records the recovered ref before releasing the worktree.

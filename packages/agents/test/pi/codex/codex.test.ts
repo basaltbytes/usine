@@ -16,6 +16,7 @@ import {
 } from "effect";
 import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
 import { TestClock } from "effect/testing";
+import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
 import {
   AgentResultError,
   ChildRequest,
@@ -35,9 +36,14 @@ import {
 } from "../../../src/pi/codex/app-server.ts";
 import { codexChildBackendLayer } from "../../../src/pi/codex/codex.ts";
 
-const request = (model = "gpt-5.6-terra", effort: Effort = "off") =>
+const request = (
+  model = "gpt-5.6-terra",
+  effort: Effort = "off",
+  host: ChildHost = new LocalProcess(),
+) =>
   new ChildRequest({
     environment: { HOME: "/home/worker", PATH: "/usr/bin:/bin" },
+    host,
     session: new ChildSession({
       id: AgentSessionId.make("codex-child-1"),
       parentId: AgentSessionId.make("parent-1"),
@@ -320,8 +326,8 @@ describe("Codex child backend", () => {
         const backend = yield* CodexChildBackend;
         const running = yield* backend.launch(request());
         assert.deepStrictEqual(
-          clients.map(({ environment }) => environment),
-          [Option.some(request().environment)],
+          clients.map(({ environment, host }) => [environment, host]),
+          [[request().environment, new LocalProcess()]],
         );
         yield* running.steer("Check the test output.");
         yield* running.interrupt;
@@ -358,6 +364,36 @@ describe("Codex child backend", () => {
         assert.strictEqual(turn.effort, "none");
         assert(calls.some(({ method }) => method === "turn/steer"));
         assert(calls.some(({ method }) => method === "turn/interrupt"));
+      }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
+    );
+  });
+
+  it.effect("opens the app server on the child's remote host", () => {
+    const host = new RemoteShell({
+      ssh: { command: "ssh", args: [] },
+      sshEnvironment: {},
+      destination: "worker.exe.xyz",
+    });
+    const clients: Array<CodexClient> = [];
+    const server = connectionLayer(
+      successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+      [
+        {
+          method: "turn/completed",
+          params: { turn: { id: "turn-1", status: "completed", error: null } },
+        },
+      ],
+      [],
+      Effect.void,
+      clients,
+    );
+    return Effect.scoped(
+      Effect.gen(function* () {
+        yield* (yield* CodexChildBackend).launch(request(undefined, undefined, host));
+        assert.deepStrictEqual(
+          clients.map((client) => client.host),
+          [host],
+        );
       }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
     );
   });

@@ -132,7 +132,7 @@ export const subagentTool = (services: ExtensionServices) => {
     }
     if (!(yield* Deferred.isDone(hub.attached))) {
       yield* Effect.logInfo(
-        "Waiting for execute to supply the Attempt's environment before spawning a child",
+        "Waiting for execute to supply the Attempt's child host and environment before spawning a child",
         {
           attemptId: spec.attemptId,
         },
@@ -149,6 +149,7 @@ export const subagentTool = (services: ExtensionServices) => {
       session,
       cwd: WorkingDirectory.make(request.cwd),
       environment: request.environment,
+      host: request.host,
       prompt: assembleChildPrompt({
         agent: spec.agent.name,
         persona: spec.agent.persona,
