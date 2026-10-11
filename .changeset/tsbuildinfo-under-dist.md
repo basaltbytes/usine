@@ -7,7 +7,6 @@
 "@usine/expression": patch
 "@usine/github": patch
 "@usine/orchestrator": patch
-"@usine/run-host": patch
 "@usine/server": patch
 ---
 

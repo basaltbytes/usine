@@ -33,6 +33,8 @@ const agent = new Agent({
 });
 const parentModel = ModelId.make("anthropic/claude-opus-4-6");
 
+const EnvelopeJson = Schema.fromJsonString(AttemptChannel.Envelope);
+
 const spec = new AttemptChannel.RunSpec({
   attemptId: AttemptId.make("attempt-1"),
   repository: RepositoryName.make("basaltbytes/usine"),
@@ -47,8 +49,8 @@ const spec = new AttemptChannel.RunSpec({
   resume: Option.none(),
 });
 
-describe("attempt channel v7", () => {
-  it("round-trips a final envelope through its framed JSON schema", () => {
+describe("attempt channel", () => {
+  it("round-trips a final envelope through JSON", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,
       attemptId: spec.attemptId,
@@ -69,15 +71,15 @@ describe("attempt channel v7", () => {
       }),
     });
 
-    const encoded = Schema.encodeSync(AttemptChannel.EnvelopeFromJson)(envelope);
-    const decoded = Schema.decodeUnknownSync(AttemptChannel.EnvelopeFromJson)(encoded, {
+    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
+    const decoded = Schema.decodeUnknownSync(EnvelopeJson)(encoded, {
       onExcessProperty: "error",
     });
 
     assert.deepStrictEqual(decoded, envelope);
   });
 
-  it("round-trips a child-session budget failure through its framed JSON schema", () => {
+  it("round-trips a child-session budget failure through JSON", () => {
     const envelope = new AttemptChannel.OutboundEnvelope({
       version: AttemptChannel.PROTOCOL_VERSION,
       attemptId: spec.attemptId,
@@ -91,14 +93,14 @@ describe("attempt channel v7", () => {
       }),
     });
 
-    const encoded = Schema.encodeSync(AttemptChannel.EnvelopeFromJson)(envelope);
-    const decoded = Schema.decodeUnknownSync(AttemptChannel.EnvelopeFromJson)(encoded, {
+    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
+    const decoded = Schema.decodeUnknownSync(EnvelopeJson)(encoded, {
       onExcessProperty: "error",
     });
     assert.deepStrictEqual(decoded, envelope);
   });
 
-  it("round-trips a child-addressed operator message through its framed JSON schema", () => {
+  it("round-trips a child-addressed operator message through JSON", () => {
     const envelope = new AttemptChannel.InboundEnvelope({
       operator: "operator",
       version: AttemptChannel.PROTOCOL_VERSION,
@@ -111,8 +113,8 @@ describe("attempt channel v7", () => {
       payload: new AttemptChannel.OperatorMessage({ message: "Rebase onto main before you push." }),
     });
 
-    const encoded = Schema.encodeSync(AttemptChannel.EnvelopeFromJson)(envelope);
-    const decoded = Schema.decodeUnknownSync(AttemptChannel.EnvelopeFromJson)(encoded, {
+    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
+    const decoded = Schema.decodeUnknownSync(EnvelopeJson)(encoded, {
       onExcessProperty: "error",
     });
 
@@ -130,8 +132,8 @@ describe("attempt channel v7", () => {
       payload: new AttemptChannel.Release(),
     });
 
-    const encoded = Schema.encodeSync(AttemptChannel.InputFrameFromJson)(envelope);
-    const decoded = Schema.decodeUnknownSync(AttemptChannel.InputFrameFromJson)(encoded, {
+    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
+    const decoded = Schema.decodeUnknownSync(EnvelopeJson)(encoded, {
       onExcessProperty: "error",
     });
 
@@ -139,9 +141,6 @@ describe("attempt channel v7", () => {
   });
 
   it("rejects superseded protocol versions on the live channel", () => {
-    const start = Schema.encodeSync(AttemptChannel.InputFrame)(
-      new AttemptChannel.Start({ version: AttemptChannel.PROTOCOL_VERSION, spec }),
-    );
     const outbound = Schema.encodeSync(AttemptChannel.Envelope)(
       new AttemptChannel.OutboundEnvelope({
         version: AttemptChannel.PROTOCOL_VERSION,
@@ -154,12 +153,6 @@ describe("attempt channel v7", () => {
 
     for (const version of [3, 4, 5] as const) {
       assert.throws(() =>
-        Schema.decodeUnknownSync(AttemptChannel.InputFrame)(
-          { ...start, version },
-          { onExcessProperty: "error" },
-        ),
-      );
-      assert.throws(() =>
         Schema.decodeUnknownSync(AttemptChannel.Envelope)(
           { ...outbound, version },
           { onExcessProperty: "error" },
@@ -168,7 +161,7 @@ describe("attempt channel v7", () => {
     }
   });
 
-  it("round-trips rate-limit reset dates through its framed JSON schema", () => {
+  it("round-trips rate-limit reset dates through JSON", () => {
     const session = new ParentSession({
       id: AgentSessionId.make("parent-1"),
       agent: agent.name,
@@ -205,25 +198,22 @@ describe("attempt channel v7", () => {
       }),
     });
 
-    const encoded = Schema.encodeSync(AttemptChannel.OutboundEnvelopeFromJson)(envelope);
-    const decoded = Schema.decodeUnknownSync(AttemptChannel.OutboundEnvelopeFromJson)(encoded, {
+    const encoded = Schema.encodeSync(EnvelopeJson)(envelope);
+    const decoded = Schema.decodeUnknownSync(EnvelopeJson)(encoded, {
       onExcessProperty: "error",
     });
 
     assert.deepStrictEqual(decoded, envelope);
   });
 
-  it("rejects credentials smuggled into a RunSpec frame", () => {
-    const encoded = Schema.encodeSync(AttemptChannel.InputFrameFromJson)(
-      new AttemptChannel.Start({ version: AttemptChannel.PROTOCOL_VERSION, spec }),
-    );
-    const raw = JSON.parse(encoded);
-    raw.spec.githubToken = "must-never-cross-the-channel";
+  it("rejects credentials smuggled into a RunSpec", () => {
+    const raw = Schema.encodeSync(AttemptChannel.RunSpec)(spec);
 
     assert.throws(() =>
-      Schema.decodeUnknownSync(AttemptChannel.InputFrameFromJson)(JSON.stringify(raw), {
-        onExcessProperty: "error",
-      }),
+      Schema.decodeUnknownSync(AttemptChannel.RunSpec)(
+        { ...raw, githubToken: "must-never-cross-the-channel" },
+        { onExcessProperty: "error" },
+      ),
     );
   });
 

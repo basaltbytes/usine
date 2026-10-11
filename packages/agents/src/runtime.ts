@@ -22,12 +22,6 @@ import { ChildHost } from "./child-host/child-host.ts";
 export const WorkingDirectory = Schema.NonEmptyString.pipe(Schema.brand("AgentWorkingDirectory"));
 export type WorkingDirectory = typeof WorkingDirectory.Type;
 
-/** The Attempt's task and Agent choices, together with the prepared checkout where its parent starts. */
-export class LaunchRequest extends Schema.Class<LaunchRequest>("@usine/agents/LaunchRequest")({
-  spec: AttemptChannel.RunSpec,
-  cwd: WorkingDirectory,
-}) {}
-
 /** Work delegated to one child, with its assigned identity and the checkout it shares with the parent. */
 export class ChildRequest extends Schema.Class<ChildRequest>("@usine/agents/ChildRequest")({
   session: ChildSession,
@@ -162,17 +156,6 @@ export interface RunningSession {
   ) => Effect.Effect<AttemptChannel.InterventionState, AgentSessionError>;
 }
 
-/**
- * Records each live child session so the run host can route operator input
- * (steer, interrupt, or a takeover message) to one by the id it reports in the
- * normalized event stream. The parent registers no child; it is addressed
- * directly. Registration is scoped: the entry is removed when the child's scope
- * closes, so a returned child is no longer addressable (ADR 0018).
- */
-export interface ChildSessions {
-  readonly register: (session: RunningSession) => Effect.Effect<void, never, Scope.Scope>;
-}
-
 /** Launches coding sessions for tasks delegated by an Attempt's parent. */
 export interface ChildBackendService {
   /** Starts the assigned child and returns its controls; its result is awaited separately. */
@@ -200,19 +183,3 @@ export class CodexChildBackend extends Context.Service<CodexChildBackend, ChildB
 export class PiChildBackend extends Context.Service<PiChildBackend, ChildBackendService>()(
   "@usine/agents/PiChildBackend",
 ) {}
-
-/** Starts the parent that coordinates one Attempt's task and delegates coding work to children. */
-export class AgentRuntime extends Context.Service<
-  AgentRuntime,
-  {
-    /**
-     * Starts work in the prepared checkout and returns controls for observing and
-     * guiding the parent. Each child it spawns registers with `children` so the
-     * run host can address a takeover to it by id.
-     */
-    readonly launch: (
-      request: LaunchRequest,
-      children: ChildSessions,
-    ) => Effect.Effect<RunningSession, AgentSessionError, Scope.Scope>;
-  }
->()("@usine/agents/AgentRuntime") {}

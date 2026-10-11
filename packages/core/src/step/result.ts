@@ -1,7 +1,7 @@
 import { Schema } from "effect";
 import { CommitSha } from "../repository.ts";
 
-/** A commit the run host found between the workspace base and final HEAD. */
+/** A commit the executor found between the workspace base and final HEAD. */
 export class Commit extends Schema.TaggedClass<Commit>("StepResult/Commit")("Commit", {
   sha: CommitSha,
   summary: Schema.NonEmptyString,

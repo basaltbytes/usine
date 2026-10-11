@@ -1,12 +1,12 @@
 import type { InlineExtension } from "@earendil-works/pi-coding-agent";
-import { AgentSession } from "@usine/core/agent/session";
+import { ChildSession } from "@usine/core/agent/session";
 import { Effect, Fiber } from "effect";
 import { type AgentSessionError, type RunningSession } from "../runtime.ts";
 import { sessionConversation } from "./conversation.ts";
 import type { PiSession } from "./sdk.ts";
 import { lastPiMessageText, type SessionChannel } from "./session.ts";
 
-/** Gates Pi tools and provider requests without aborting a parent's still-live children. */
+/** Holds Pi tool calls and provider requests at their next boundary while an operator pause lasts. */
 export const piPauseGate = Effect.gen(function* () {
   const context = yield* Effect.context<never>();
   const scope = yield* Effect.scope;
@@ -31,7 +31,7 @@ export const piPauseGate = Effect.gen(function* () {
 
 /** Runs successive Pi turns in one SDK session while the conversation owns completion. */
 export const piTurns = Effect.fn("PiTurns.start")(function* (options: {
-  readonly session: AgentSession;
+  readonly session: ChildSession;
   readonly sdk: PiSession;
   readonly channel: SessionChannel;
   readonly prompt: string;

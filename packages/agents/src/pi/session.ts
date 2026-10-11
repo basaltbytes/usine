@@ -2,7 +2,6 @@ import {
   AgentSession,
   AgentSessionEvent,
   AgentSessionId,
-  ChildSession,
   SessionFinished,
   SessionTokensUpdated,
   TokenCount,
@@ -39,11 +38,6 @@ export interface SessionChannel {
   /** Queues one event; after the terminal transition the event is logged and dropped. */
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
-  /**
-   * Records a child's blocked report. The first one wins and fails the parent's
-   * ordinary `finish`; the parent's own marker still takes precedence.
-   */
-  readonly childBlocked: (session: ChildSession, error: AgentResultError) => Effect.Effect<void>;
   readonly finish: (session: AgentSession, message: string) => Effect.Effect<void>;
 }
 
@@ -74,7 +68,6 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   const events = yield* Queue.make<AgentSessionEvent, AgentSessionError | Cause.Done>();
   const result = yield* Deferred.make<SessionResult, AgentSessionError>();
   const terminal = yield* Ref.make(false);
-  const childBlocker = yield* Ref.make(Option.none<AgentResultError>());
   const cleanups: Array<() => void> = [];
   const runCleanups = Effect.sync(() => {
     for (const cleanup of cleanups.splice(0)) cleanup();
@@ -105,22 +98,6 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     yield* runCleanups;
   });
 
-  const childBlocked = Effect.fn("SessionChannel.childBlocked")(function* (
-    session: ChildSession,
-    error: AgentResultError,
-  ) {
-    yield* Effect.annotateCurrentSpan({ childSessionId: session.id, sessionId: options.sessionId });
-    const retained = yield* Ref.modify(childBlocker, (held) =>
-      Option.isNone(held) ? [true, Option.some(error)] : [false, held],
-    );
-    yield* Effect.logInfo(
-      retained
-        ? `${options.label} received a child's blocker`
-        : `${options.label} kept its first child blocker ahead of another child's`,
-      { childSessionId: session.id, sessionId: options.sessionId },
-    );
-  });
-
   const finish = Effect.fn("SessionChannel.finish")(function* (
     session: AgentSession,
     message: string,
@@ -128,14 +105,6 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
     const own = reportedBlocker(session, message);
     if (Option.isSome(own)) return yield* fail(own.value);
-    const relayed = yield* Ref.get(childBlocker);
-    if (Option.isSome(relayed)) {
-      yield* Effect.logWarning(`${options.label} finished without relaying its child's blocker`, {
-        childSessionId: Option.getOrUndefined(relayed.value.sessionId),
-        sessionId: session.id,
-      });
-      return yield* fail(relayed.value);
-    }
     if (yield* Ref.getAndSet(terminal, true)) return;
     yield* Queue.offer(events, new SessionFinished({ session }));
     yield* Deferred.succeed(result, new SessionResult({ message }));
@@ -155,7 +124,6 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     },
     emit,
     fail,
-    childBlocked,
     finish,
   } satisfies SessionChannel;
 });
