@@ -18,8 +18,8 @@ The default adapter stores usine's Event ledger and Run records in `<instance>/.
 - Infrastructure failures retry automatically, with a cap of three Attempts. Agent, defect, and guard failures wait for an operator retry.
 - A newer Event supersedes a pending, waiting, or queued Run. A running Attempt finishes first, then the engine opens only the newest queued Event for that Item. Before that Event opens, `TriggerCondition` (`@usine/engine/trigger-condition`, supplied by the deployment) re-evaluates the Loop's trigger against the Item's current state: an Event whose trigger no longer holds is recorded as ignored (revoked) and never opens a Run, so a Run that changes its own Item before it flips the labels gating its trigger does not spawn a second Run.
 - Revoke stops pending, waiting, and queued Runs. Operator cancellation can also stop a running Attempt.
-- Each open Run has one fiber in the engine's process, and the run tables are the only durable state. At startup the engine starts a fiber for every open Run, where a Run waiting for approval stays parked, and opens the newest queued Event of an Item whose Run closed before that Event got its turn. If the process stopped during an Attempt, the engine asks `StepExecutor.isLive` whether the Attempt's parent task outlived the restart. A live Attempt is reattached: it keeps its identity and number, spends no retry, and `StepExecution.reattach` tells the executor to take over its checkout. Otherwise the engine records that Attempt as an infrastructure failure and resumes as N+1.
-- A defect escaping `StepExecutor` is saved as `DefectFailure`, preserving its original cause and requiring an operator retry. If the engine itself fails while driving a Run (a defect, or a write the store could not make), that Run's fiber logs the cause and stops; `RunEngine.reconcile` or a restart starts it again from the tables.
+- Each open Run has one fiber in the engine's process, and the run tables are the only durable state. At startup, and then every `ReconcileInterval` (three minutes unless provided otherwise), the engine starts a fiber for every open Run that has none, except a Run waiting for its approval, and opens the newest queued Event of an Item whose Run closed before that Event got its turn. If the process stopped during an Attempt, the engine asks `StepExecutor.isLive` whether the Attempt's parent task outlived the restart. A live Attempt is reattached: it keeps its identity and number, spends no retry, and `StepExecution.reattach` tells the executor to take over its checkout. When the parent task already finished and `StepExecutor.outcome` returns the result it stored, the engine finishes the Attempt with that result, as if the process had not stopped. Otherwise the engine records that Attempt as an infrastructure failure and resumes as N+1.
+- A defect escaping `StepExecutor` is saved as `DefectFailure`, preserving its original cause and requiring an operator retry. A store operation that fails to persist is repeated four times with exponential backoff before it counts as failed. If the engine itself fails while driving a Run (a defect, or a write the store still could not make), that Run's fiber logs the cause and stops; the next reconcile or a restart starts it again from the tables.
 - Attempt channel envelopes are stored in an append-only transcript. A redelivered envelope (same Attempt, direction, and channel sequence, as a reattached parent may send after a restart) keeps the first stored copy. Stored protocol-v3 through v6 envelopes remain readable after the live channel upgrades to v7. Normalized parent and child session events retain their session identity. `RunEngine.transcript` accepts distinct `TranscriptAllQuery`, `TranscriptTailQuery`, and `TranscriptPageQuery` variants, so full diagnostics, bounded live tails, and bounded backward pages cannot be confused. Tail and page queries require a positive row limit. A protocol-v4 `Started` frame writes the SDK-selected parent model onto the Attempt.
 - The submitted agent, rendered task, payload snapshot, effective parent model, and per-Attempt child brain survive restarts in the run ledger.
 
@@ -30,7 +30,7 @@ The engine's [lifecycle decisions](src/engine/lifecycle.ts) determine Attempt co
 Every subpath is platform-free except the Node local adapter at `@usine/engine/local-sqlite`. Its `layer` supplies local SQLite, the migrations, and startup recovery. Provide a `StepExecutor` implementation at the composition root:
 
 ```ts
-import { Effect, Layer } from "effect"
+import { Effect, Layer, Option } from "effect"
 import { WorkerName } from "@usine/core/worker"
 import { InstanceDirectory } from "@usine/core/instance"
 import { StepResult } from "@usine/core/step/result"
@@ -43,6 +43,7 @@ import { LoopControl } from "@usine/engine/loop-control"
 
 const StepExecutorLive = Layer.succeed(StepExecutor)({
   isLive: () => Effect.succeed(false),
+  outcome: () => Effect.succeed(Option.none()),
   recover: () => Effect.void,
   intervene: () => Effect.void,
   reserve: () => Effect.succeed({

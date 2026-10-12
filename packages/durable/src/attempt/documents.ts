@@ -30,6 +30,14 @@ export type AttemptRecord = {
   relayedEntry: number;
   relayedTokens: number;
   terminalRelayed: boolean;
+  /** The harvested `StepResult` as JSON, once the executor recorded it; absent on records written before it existed. */
+  result?: string;
+  /**
+   * Why the parent conversation could not be read back from storage. Recorded
+   * before the Attempt's task is aborted, so the abort fails the Attempt with
+   * it instead of ending it as canceled.
+   */
+  storageFailure?: string;
 };
 
 export const ATTEMPT_RECORD_KIND = "usine.attempt";

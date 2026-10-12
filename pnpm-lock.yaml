@@ -92,6 +92,9 @@ importers:
       '@usine/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@usine/durable':
+        specifier: workspace:*
+        version: link:../../packages/durable
       '@usine/engine':
         specifier: workspace:*
         version: link:../../packages/engine

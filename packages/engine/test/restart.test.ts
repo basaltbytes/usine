@@ -121,6 +121,7 @@ describe("engine restart", () => {
         const live = yield* Ref.make<ReadonlySet<AttemptId>>(new Set());
         const executor = Layer.succeed(StepExecutor)({
           isLive: (attemptId) => Ref.get(live).pipe(Effect.map((ids) => ids.has(attemptId))),
+          outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
@@ -174,6 +175,90 @@ describe("engine restart", () => {
         yield* Scope.close(secondScope, Exit.void);
       }),
     ),
+  );
+
+  it.live(
+    "finishes an open Attempt with the result its parent task stored before the restart",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const succeeding = submission({ number: 56, item: "stored-success" });
+          const failing = submission({ number: 57, item: "stored-failure" });
+          const executions = yield* Ref.make(0);
+          const stored = yield* Ref.make<
+            ReadonlyMap<AttemptId, Result.Result<ReturnType<typeof stepResult>, AgentFailure>>
+          >(new Map());
+          const executor = Layer.succeed(StepExecutor)({
+            isLive: () => Effect.succeed(false),
+            outcome: (attemptId) =>
+              Ref.get(stored).pipe(
+                Effect.map((results) => Option.fromUndefinedOr(results.get(attemptId))),
+              ),
+            recover: () => Effect.void,
+            intervene: () => Effect.void,
+            interrupt: () => Effect.void,
+            reserve: () =>
+              Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+            // The parent finishes and its result is stored, then the process stops before the Run records it.
+            execute: (execution) =>
+              Ref.update(executions, (count) => count + 1).pipe(
+                Effect.andThen(
+                  Ref.update(stored, (results) =>
+                    new Map(results).set(
+                      execution.attempt.id,
+                      execution.task === succeeding.task
+                        ? Result.succeed(stepResult("finished before the restart"))
+                        : Result.fail(new AgentFailure({ message: "blocked before the restart" })),
+                    ),
+                  ),
+                ),
+                Effect.andThen(Effect.never),
+              ),
+          });
+          const runtime = engineLayer(directory, executor);
+
+          const firstScope = yield* Scope.make();
+          const firstEngine = Context.get(
+            yield* Scope.provide(Layer.build(runtime), firstScope),
+            RunEngine,
+          );
+          const succeeded = yield* firstEngine.submit(succeeding);
+          const failed = yield* firstEngine.submit(failing);
+          assert(succeeded._tag === "Claimed" && failed._tag === "Claimed");
+          yield* Effect.repeat(Ref.get(stored), {
+            until: (results) => results.size === 2,
+            schedule: Schedule.spaced("10 millis"),
+          });
+          yield* Scope.close(firstScope, Exit.void);
+
+          const secondScope = yield* Scope.make();
+          const secondEngine = Context.get(
+            yield* Scope.provide(Layer.build(runtime), secondScope),
+            RunEngine,
+          );
+          const success = yield* waitFor(
+            secondEngine,
+            succeeded.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(success.attempts.length, 1);
+          assert(Option.isSome(success.step.result));
+          assert.strictEqual(success.step.result.value.message, "finished before the restart");
+          const failure = yield* waitFor(
+            secondEngine,
+            failed.runId,
+            ({ run }) => run.state._tag === "Failed",
+          );
+          assert.strictEqual(failure.attempts.length, 1);
+          const outcome = failure.attempts[0]?.outcome;
+          assert(
+            outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed",
+          );
+          assert.strictEqual(outcome.value.failure._tag, "AgentFailure");
+          assert.strictEqual(yield* Ref.get(executions), 2);
+          yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
   );
 
   it.live("drains an admitted Attempt and leaves queued and new work for restart", () =>

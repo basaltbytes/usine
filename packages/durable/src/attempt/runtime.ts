@@ -4,13 +4,16 @@ import { SessionIdle, SessionResumed } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
+import type { StepResult } from "@usine/core/step/result";
 import { Effect, Layer, Option, Result, Schema } from "effect";
-import { type AttemptRequest, AttemptRuntime } from "../attempt-runtime.ts";
+import { type AttemptRequest, AttemptRuntime, type FinishedAttempt } from "../attempt-runtime.ts";
 import { DurableHarness, type DurableHarnessError } from "../harness.ts";
 import { AttemptRecordDoc, type Hold, HoldDoc } from "./documents.ts";
 import { usineExtension } from "./extension.ts";
 import { type AttemptHub, attemptHubs } from "./hubs.ts";
+import { encodeResult, finishedOf } from "./outcome.ts";
 import { parentSessionId } from "./parent.ts";
+import { repairUnreadableConversations } from "./repair.ts";
 import { appendInbound, emitPayload, readRecord, relayAttempt } from "./relay.ts";
 import { readStoredRequest, taskInput } from "./request.ts";
 
@@ -44,7 +47,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
   yield* durable.install(extension);
   yield* durable.subscribe(hubs.listener);
   yield* durable.use("open the root conversation", (harness, context) => harness.root(context));
-  yield* durable.resume;
+  yield* durable.resume(repairUnreadableConversations);
 
   const createOrFind = Effect.fn("AttemptRuntime.createOrFind")(function* (
     request: AttemptRequest,
@@ -96,7 +99,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
       ),
   );
 
-  // An aborted task is never live: only `cancel` aborts one, and every caller of `cancel` has the engine close the Attempt itself.
+  // An aborted task is never live: only `cancel` ends one as aborted, and every caller of `cancel` has the engine close the Attempt itself.
   const isLive = Effect.fn("AttemptRuntime.isLive")(
     function* (attemptId: AttemptId) {
       yield* Effect.annotateCurrentSpan({ attemptId });
@@ -120,6 +123,56 @@ const makeAttemptRuntime = Effect.gen(function* () {
         live,
       });
       return live;
+    },
+    Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),
+  );
+
+  const finished = Effect.fn("AttemptRuntime.finished")(
+    function* (attemptId: AttemptId) {
+      yield* Effect.annotateCurrentSpan({ attemptId });
+      const record = yield* readRecord(durable, attemptId);
+      if (record === undefined || record.taskId === null) return Option.none<FinishedAttempt>();
+      const taskId = record.taskId;
+      const task = yield* durable.use("read the Attempt task", (harness, context) =>
+        harness.getTask(taskId, context),
+      );
+      const found = task === undefined ? Option.none<FinishedAttempt>() : finishedOf(record, task);
+      if (
+        record.result !== undefined &&
+        Option.isSome(found) &&
+        found.value._tag === "ParentReported"
+      ) {
+        yield* Effect.logWarning(
+          "The Attempt's recorded result does not decode; its checkout is harvested again",
+          { attemptId, taskId },
+        );
+      }
+      yield* Effect.logDebug("Read what the Attempt's finished task left", {
+        attemptId,
+        taskId,
+        terminalRelayed: record.terminalRelayed,
+        outcome: task?.state.outcome?.status,
+        finished: Option.match(found, { onNone: () => "none", onSome: ({ _tag }) => _tag }),
+      });
+      return found;
+    },
+    Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),
+  );
+
+  const recordResult = Effect.fn("AttemptRuntime.recordResult")(
+    function* (attemptId: AttemptId, result: StepResult) {
+      yield* Effect.annotateCurrentSpan({ attemptId });
+      const encoded = encodeResult(result);
+      yield* durable.use("record the Attempt's result", (harness, context) =>
+        harness.commit(async (tx) => {
+          const record = await tx.doc(AttemptRecordDoc, attemptId, null);
+          record.result = encoded;
+        }, context),
+      );
+      yield* Effect.logInfo("Recorded the Attempt's harvested result", {
+        attemptId,
+        facts: result.facts.length,
+      });
     },
     Effect.catchTag("DurableHarnessError", (error) => Effect.fail(infra(error))),
   );
@@ -365,7 +418,15 @@ const makeAttemptRuntime = Effect.gen(function* () {
   );
 
   yield* Effect.logInfo("The durable Attempt runtime is ready");
-  return AttemptRuntime.of({ execute, isLive, request, intervene, cancel });
+  return AttemptRuntime.of({
+    execute,
+    isLive,
+    finished,
+    recordResult,
+    request,
+    intervene,
+    cancel,
+  });
 });
 
 /**

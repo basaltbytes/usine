@@ -189,6 +189,7 @@ describe("Board self-writes", () => {
           });
           const executor = Layer.succeed(StepExecutor)({
             isLive: () => Effect.succeed(false),
+            outcome: () => Effect.succeed(Option.none()),
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,

@@ -5,7 +5,18 @@ import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/a
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { StepResult, type StepResultFact } from "@usine/core/step/result";
 import { type AttemptReport, AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Cause, Deferred, Effect, Exit, Fiber, Option, Ref, Result, type Scope } from "effect";
+import {
+  Cause,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Match,
+  Option,
+  Ref,
+  Result,
+  type Scope,
+} from "effect";
 import {
   type AttemptWorkspace,
   type CheckoutRequest,
@@ -34,7 +45,7 @@ export interface DurableCheckout {
   readonly environment: Record<string, string>;
   /** Collects the commits and pull requests the checkout holds. */
   readonly harvest: Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
-  /** Leaves the checkout in place when this process stops while the parent task stays live. */
+  /** Preserves the checkout when a restart needs to reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;
 }
 
@@ -160,6 +171,15 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         attemptId,
         facts: result.facts.length,
       });
+      yield* runtime.recordResult(attemptId, result).pipe(
+        Effect.tapError((error) =>
+          Effect.logWarning(
+            "Could not record the Attempt's result in durable storage; preserving the checkout for reattachment",
+            { attemptId, errorTag: error._tag, message: error.message },
+          ).pipe(Effect.andThen(checkout.keepForReattach)),
+        ),
+        Effect.ignore,
+      );
       return result;
     });
     return yield* Effect.scoped(run).pipe(
@@ -369,17 +389,55 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     yield* stopTask(attemptId, "the Attempt was canceled");
   });
 
+  /**
+   * Whether a restart reattaches the open Attempt: its parent task still runs,
+   * or it reported success and its checkout was not harvested into a recorded result yet.
+   */
   const isLive = Effect.fn("DurableSession.isLive")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    const live = yield* runtime.isLive(attemptId);
-    yield* Effect.logDebug("Read whether the Attempt's parent task is live", { attemptId, live });
-    return live;
+    if (yield* runtime.isLive(attemptId)) {
+      yield* Effect.logDebug("The Attempt's parent task is live", { attemptId });
+      return true;
+    }
+    const finished = yield* runtime.finished(attemptId);
+    const unharvested = Option.exists(finished, ({ _tag }) => _tag === "ParentReported");
+    yield* Effect.logDebug(
+      unharvested
+        ? "The Attempt's parent task finished before its checkout was harvested; it is reattached"
+        : "The Attempt's parent task is not live",
+      { attemptId },
+    );
+    return unharvested;
+  });
+
+  /** The result an Attempt's finished parent task left in durable storage: the recorded harvest, or the parent's failure. */
+  const outcome = Effect.fn("DurableSession.outcome")(function* (attemptId: AttemptId) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    const finished = yield* runtime.finished(attemptId);
+    const stored = Option.flatMap(
+      finished,
+      (found): Option.Option<Result.Result<StepResult, AttemptFailure>> =>
+        Match.valueTags(found, {
+          ParentReported: () => Option.none(),
+          ResultRecorded: ({ result }) => Option.some(Result.succeed(result)),
+          ParentFailed: ({ failure }) => Option.some(Result.fail(failure)),
+        }),
+    );
+    yield* Effect.logDebug("Read the Attempt's stored outcome", {
+      attemptId,
+      stored: Option.match(stored, {
+        onNone: () => "none",
+        onSome: Result.match({ onSuccess: () => "Succeeded", onFailure: ({ _tag }) => _tag }),
+      }),
+    });
+    return stored;
   });
 
   /**
    * Whether startup recovery must leave `attempt`'s checkout for its
-   * reattachment: true when the Attempt is open and its parent task is live.
-   * A closed Attempt's parent task is canceled here, since nothing reattaches it.
+   * reattachment: true when the Attempt is open and `isLive` says a restart
+   * reattaches it. A closed Attempt's parent task is canceled here, since
+   * nothing reattaches it.
    */
   const awaitsReattach = Effect.fn("DurableSession.awaitsReattach")(function* (
     attempt: AttemptRecovery,
@@ -428,5 +486,14 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     return stored.value;
   });
 
-  return { launch, prepare, cancel, intervene, isLive, awaitsReattach, storedRequest } as const;
+  return {
+    launch,
+    prepare,
+    cancel,
+    intervene,
+    isLive,
+    outcome,
+    awaitsReattach,
+    storedRequest,
+  } as const;
 });

@@ -6,9 +6,16 @@ import {
   DefectFailure,
   InfraFailure,
 } from "@usine/core/attempt/failure";
+import { StepResult } from "@usine/core/step/result";
 import { Match, Option, Result, Schema } from "effect";
-import { AttemptReport } from "../attempt-runtime.ts";
-import type { AttemptResult } from "./documents.ts";
+import {
+  AttemptReport,
+  type FinishedAttempt,
+  ParentFailed,
+  ParentReported,
+  ResultRecorded,
+} from "../attempt-runtime.ts";
+import type { AttemptRecord, AttemptResult } from "./documents.ts";
 
 /** How an Attempt ended, as `execute` reports it. */
 export type Settled = Result.Result<AttemptReport, AttemptFailure>;
@@ -88,4 +95,32 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
         }),
       );
   }
+};
+
+const resultJson = Schema.fromJsonString(StepResult);
+
+/** The harvested result as the Attempt's record keeps it. */
+export const encodeResult = Schema.encodeSync(resultJson);
+const decodeResult = Schema.decodeUnknownOption(resultJson);
+
+/**
+ * What a finished Attempt left, read from its record and its task: none until
+ * its terminal envelope is relayed, and none for a canceled task. A recorded
+ * result that does not decode counts as absent, so the checkout is harvested again.
+ */
+export const finishedOf = (
+  record: Readonly<AttemptRecord>,
+  task: TaskRecord<JsonValue, JsonValue, unknown>,
+): Option.Option<FinishedAttempt> => {
+  if (!record.terminalRelayed || task.state.outcome?.status === "aborted") return Option.none();
+  return Option.some(
+    Result.match(settledOf(task), {
+      onFailure: (failure): FinishedAttempt => new ParentFailed({ failure }),
+      onSuccess: (report) =>
+        Option.match(Option.flatMap(Option.fromUndefinedOr(record.result), decodeResult), {
+          onNone: (): FinishedAttempt => new ParentReported({ report }),
+          onSome: (result) => new ResultRecorded({ result }),
+        }),
+    }),
+  );
 };

@@ -19,6 +19,10 @@
       "types": "./dist/attempt-runtime.d.ts",
       "default": "./dist/attempt-runtime.js"
     },
+    "./backup": {
+      "types": "./dist/backup.d.ts",
+      "default": "./dist/backup.js"
+    },
     "./harness": {
       "types": "./dist/harness.d.ts",
       "default": "./dist/harness.js"

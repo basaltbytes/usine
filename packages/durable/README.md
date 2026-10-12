@@ -6,6 +6,7 @@ Runs an Attempt's Pi parent inside the orchestrator on [`@earendil-works/pi-dura
 
 - `@usine/durable/attempt-runtime`: the `AttemptRuntime` contract the executor calls, with `AttemptRequest`, `StoredRequest`, and `AttemptReport`.
 - `@usine/durable/harness`: the `DurableHarness` service, which owns the open pi-durable Harness, and its platform-free `layer(options)`.
+- `@usine/durable/backup`: `backup(instanceDirectory, destination)`, an online copy of the instance's `.usine/durable.sqlite` through SQLite's backup API, hard-linked into place so it never overwrites a file; `usine backup` takes it beside the runtime database.
 - `@usine/durable/live`: the Node composition: the harness on `<instance>/.usine/durable.sqlite`, Pi's configured models and credentials, and the Claude, Codex, and Pi child backends from `@usine/agents`.
 - `@usine/durable/testing`: a scripted parent model and stub children for driving whole Attempts in tests, and a stub `AttemptRuntime` for tests of the executors around it.
 
@@ -21,6 +22,8 @@ Building the layer installs the usine extension and resumes the harness's tasks.
 ## Running an Attempt
 
 `execute(request, io)` creates the Attempt's task, or finds it by Attempt id after a restart, and waits for its outcome. The Attempt id and the task id are committed together, so a crash never leaves a task that a later call cannot find. `isLive(attemptId)` is true from the first `execute` until the terminal envelope has been sent or the task is canceled, so a restarted orchestrator reattaches instead of starting a new Attempt.
+
+After the terminal envelope, `finished(attemptId)` still reads what the parent left: `ParentReported` with its report, `ParentFailed` with its failure, or `ResultRecorded` once the executor has called `recordResult(attemptId, result)` with the result it harvested from the checkout. An orchestrator that stopped before the engine recorded the Attempt's outcome finishes the Attempt with it instead of running the agent again. A canceled task leaves nothing.
 
 Everything reaches `io` as attempt channel envelopes: `Started` with the resolved parent model, `SessionEvent`s for the parent's committed entries and the children's events in the order they happened, `InterventionApplied` or `InterventionRejected` for operator input, and exactly one `Final`, `Failed`, or `Interrupted`. The next sequence is stored with the Attempt, so a reattached `execute` continues the numbering. Progress is committed once per parent entry, after all of its envelopes are appended, and once per other envelope: a crash before the commit relays the same envelopes again with the same sequences, which the transcript keeps once.
 
@@ -40,9 +43,11 @@ A child is not resumed after a restart. Its tool call settles as interrupted wit
 
 ## Recovery from a poisoned Session or a stuck step
 
+Each time the harness opens, before its tasks resume, the Attempt runtime reads the `pi.live`, `pi.inbox`, `pi.usage`, `pi.agent`, and `pi.provider` documents of every live task's conversation. A document that no longer reads back, as when a delta in its chain does not apply, stops every step that needs it. In one commit the runtime retires each unreadable document without reading it, creates it again with its initial value, and records the reason on the record of the Attempt whose `usine.attempt` task owns the conversation. It then aborts that task: the abort reaches the conversation's generation and tool tasks first, and the task's own abort handler fails the Attempt with an `InfraFailure` whose message is that reason, so `execute` and a reattachment report it. Other Attempts in the same storage keep running.
+
 A pi-durable commit that fails after storage admission poisons the whole Session. `DurableHarness` detects it, logs the cause, closes the Session, opens the storage again, and resumes. A `DurableHarness.use` call that failed because of the reopen runs once more on the new harness.
 
-pi-durable reports failures that do not fail their caller through `onReport`. The harness logs the first report of each failure, then the number of repeats at most once every five seconds. One failure reported 1,000 times with no commit adopted in between means pi-durable is retrying a step that cannot succeed. It retries at once, in microtasks, so the process runs no timer and no I/O until the harness closes: the harness closes it from inside the report and reopens the storage, which also clears a scheduler state that no longer matches storage. If the reopened harness gets stuck again within a minute, the harness stops for good. The cause is logged as an error, every later call fails with a `DurableHarnessError` that names it, and each running Attempt fails with an `InfraFailure`. The next orchestrator start opens the storage again.
+pi-durable reports failures that do not fail their caller through `onReport`. The harness logs the first report of each failure, then the number of repeats at most once every five seconds. One failure reported 1,000 times with no commit adopted in between means pi-durable is retrying a step that cannot succeed. It retries at once, in microtasks, so the process runs no timer and no I/O until the harness closes: the harness closes it from inside the report and reopens the storage, which also clears a scheduler state that no longer matches storage and repeats the document check above. If the reopened harness gets stuck again within a minute, the harness stops for good. The cause is logged as an error, every later call fails with a `DurableHarnessError` that names it, and each running Attempt fails with an `InfraFailure`. The next orchestrator start opens the storage again.
 
 One process owns the storage at a time; pi-durable has no cross-process locking, and a second writer leaves tasks and documents that no longer read back. `usine up` holds the instance folder for this reason.
 

@@ -201,6 +201,7 @@ export const stepExecutorLayer = (
         execute,
         interrupt,
         isLive: executor.isLive,
+        outcome: executor.outcome,
         reserve,
         intervene: executor.intervene,
         recover: (attempt, record) =>

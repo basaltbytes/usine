@@ -429,6 +429,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       cancel: session.cancel,
       intervene: session.intervene,
       isLive: session.isLive,
+      outcome: session.outcome,
       preflight,
       prepare,
     });

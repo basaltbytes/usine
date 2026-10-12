@@ -1,15 +1,19 @@
 import { Intervention, OperatorMessage, ParentTarget } from "@usine/core/attempt/channel";
+import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptContext, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { Event, EventId } from "@usine/core/event";
+import type { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { WorkerName } from "@usine/core/worker";
-import { Deferred, Effect, Fiber, Layer, Option, Ref } from "effect";
-import { RunEngine } from "../src/engine/engine.ts";
+import { Deferred, Effect, Fiber, Layer, Logger, Option, Ref } from "effect";
+import { RunDatabase, type RunDatabaseClient } from "../src/database/database.ts";
+import { localSqliteLayer } from "../src/database/local-sqlite.ts";
+import { layerWithDatabase, ReconcileInterval, RunEngine } from "../src/engine/engine.ts";
 import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
@@ -54,6 +58,7 @@ describe("durable run engine", () => {
           });
           const executor = Layer.succeed(StepExecutor)({
             isLive: () => Effect.succeed(false),
+            outcome: () => Effect.succeed(Option.none()),
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
@@ -120,6 +125,7 @@ describe("durable run engine", () => {
         const started = yield* Deferred.make<void>();
         const executor = Layer.succeed(StepExecutor)({
           isLive: () => Effect.succeed(false),
+          outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
@@ -674,6 +680,7 @@ describe("durable run engine", () => {
         // cancel that reaches the parked reservation ends it.
         const executor = Layer.succeed(StepExecutor)({
           isLive: () => Effect.succeed(false),
+          outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
@@ -749,6 +756,126 @@ describe("durable run engine", () => {
           assert.strictEqual(canceled.attempts.length, 0);
           assert.strictEqual((yield* Ref.get(plans)).length, 1);
         }).pipe(Effect.provide(engineLayer(directory, executorLayer(plans))));
+      }),
+    ),
+  );
+});
+
+/** How many of the database's next transactions fail before they start. */
+interface Failures {
+  left: number;
+}
+
+/** The instance's database, whose transactions fail while `failures` has some left, as on a transient SQLite error. */
+const flakyDatabase = (directory: InstanceDirectory, failures: Failures) =>
+  Layer.effect(
+    RunDatabase,
+    Effect.gen(function* () {
+      const database = yield* RunDatabase;
+      const transaction = (...args: Parameters<RunDatabaseClient["transaction"]>) =>
+        Effect.suspend(() => {
+          if (failures.left <= 0) return database.transaction(...args);
+          failures.left -= 1;
+          return Effect.fail(new Error("database is locked"));
+        });
+      return new Proxy(database, {
+        get: (target, property) => {
+          if (property === "transaction") return transaction;
+          // SAFETY: the proxy only forwards members of the database client.
+          const member = target[property as keyof RunDatabaseClient];
+          return member instanceof Function ? member.bind(target) : member;
+        },
+      });
+    }),
+  ).pipe(Layer.provide(localSqliteLayer(directory)));
+
+/** The engine on `flakyDatabase`, with `executor` and every queued Event's trigger holding. */
+const flakyEngineLayer = (
+  directory: InstanceDirectory,
+  failures: Failures,
+  executor: Layer.Layer<StepExecutor>,
+) =>
+  layerWithDatabase(flakyDatabase(directory, failures)).pipe(
+    Layer.provide(executor),
+    Layer.provide(conditionLayer(Effect.succeed(true))),
+    Layer.provide(NodeServices.layer),
+  );
+
+describe("store failures in a Run's fiber", () => {
+  it.live("records an Attempt's outcome once a failed write succeeds on retry", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const failures: Failures = { left: 0 };
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          // The next transaction, which records this Attempt's outcome, fails once.
+          Effect.sync(() => {
+            failures.left = 1;
+          }).pipe(Effect.as(stepResult("recorded on the second try"))),
+        ]);
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(submission({ number: 1, item: "retry" }));
+          assert(accepted._tag === "Claimed");
+          const finished = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(finished.attempts.length, 1);
+          assert.strictEqual(failures.left, 0);
+        }).pipe(Effect.provide(flakyEngineLayer(directory, failures, executorLayer(plans))));
+      }),
+    ),
+  );
+
+  it.live("drives a Run again on the next reconcile after its fiber stopped", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const failures: Failures = { left: 0 };
+        const reserved = yield* Ref.make(0);
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("driven after the reconcile")),
+        ]);
+        // From the first reservation on, writes fail until the fiber gives up.
+        const executor = Layer.effect(
+          StepExecutor,
+          Effect.gen(function* () {
+            const scripted = yield* StepExecutor;
+            return StepExecutor.of({
+              ...scripted,
+              reserve: (request: Submission) =>
+                Ref.getAndUpdate(reserved, (count) => count + 1).pipe(
+                  Effect.tap((count) =>
+                    Effect.sync(() => {
+                      if (count === 0) failures.left = Number.POSITIVE_INFINITY;
+                    }),
+                  ),
+                  Effect.andThen(scripted.reserve(request)),
+                ),
+            });
+          }),
+        ).pipe(Layer.provide(executorLayer(plans)));
+        const recovering = Logger.make(({ message }) => {
+          if (/fiber stopped on an engine failure/u.test(JSON.stringify(message))) {
+            failures.left = 0;
+          }
+        });
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(submission({ number: 2, item: "reconcile" }));
+          assert(accepted._tag === "Claimed");
+          const finished = yield* waitFor(
+            engine,
+            accepted.runId,
+            ({ run }) => run.state._tag === "Succeeded",
+          );
+          assert.strictEqual(finished.attempts.length, 1);
+          assert.strictEqual(yield* Ref.get(reserved), 2);
+        }).pipe(
+          Effect.provide(flakyEngineLayer(directory, failures, executor)),
+          Effect.provideService(ReconcileInterval, "50 millis"),
+          Effect.provide(Logger.layer([recovering])),
+        );
       }),
     ),
   );

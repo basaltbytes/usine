@@ -48,6 +48,9 @@ import {
   AttemptReport,
   type AttemptRequest,
   AttemptRuntime,
+  type FinishedAttempt,
+  ParentReported,
+  ResultRecorded,
   StoredRequest,
 } from "./attempt-runtime.ts";
 import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
@@ -237,9 +240,14 @@ export interface StubParentContext {
 /** A stub parent's work after Started; its result is the parent's final message. */
 export type StubParent = (context: StubParentContext) => Effect.Effect<string, AttemptFailure>;
 
+type StubTaskState =
+  | { readonly _tag: "live" }
+  | { readonly _tag: "finished"; readonly report: AttemptReport; result: Option.Option<StepResult> }
+  | { readonly _tag: "canceled" };
+
 interface StubTask {
   readonly request: AttemptRequest;
-  state: "live" | "finished" | "canceled";
+  state: StubTaskState;
   outbound: number;
   inbound: number;
 }
@@ -271,7 +279,8 @@ export const worksFor =
  * `execute` continues the sequence. Only a completed parent leaves the live
  * state: interrupting `execute` (a stopped process) or a failing parent leaves
  * the task live until someone cancels it, so tests see whether the executor
- * stopped it.
+ * stopped it. A completed task keeps its report, which a later `execute`
+ * returns and `finished` reports until `recordResult` replaces it.
  */
 export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = completes) =>
   Layer.effect(
@@ -298,12 +307,18 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
         Effect.gen(function* () {
           const attemptId = request.spec.attemptId;
           const stored = storage.tasks.get(attemptId);
-          if (stored !== undefined && stored.state !== "live")
+          if (stored?.state._tag === "finished") return stored.state.report;
+          if (stored?.state._tag === "canceled")
             return yield* new InfraFailure({
               message: `Attempt ${attemptId} has no live task`,
-              cause: new Error(stored.state),
+              cause: new Error(stored.state._tag),
             });
-          const task: StubTask = stored ?? { request, state: "live", outbound: 0, inbound: 0 };
+          const task: StubTask = stored ?? {
+            request,
+            state: { _tag: "live" },
+            outbound: 0,
+            inbound: 0,
+          };
           storage.tasks.set(attemptId, task);
           const canceled = yield* Deferred.make<void>();
           attached.set(attemptId, { io, canceled });
@@ -345,13 +360,31 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           );
           yield* event(new SessionFinished({ session }));
           yield* emit(new AttemptChannel.Final({ result: new StepResult({ message, facts: [] }) }));
-          task.state = "finished";
-          return new AttemptReport({ message });
+          const report = new AttemptReport({ message });
+          task.state = { _tag: "finished", report, result: Option.none() };
+          return report;
         }).pipe(Effect.ensuring(Effect.sync(() => attached.delete(request.spec.attemptId))));
 
       return AttemptRuntime.of({
         execute,
-        isLive: (attemptId) => Effect.sync(() => storage.tasks.get(attemptId)?.state === "live"),
+        isLive: (attemptId) =>
+          Effect.sync(() => storage.tasks.get(attemptId)?.state._tag === "live"),
+        finished: (attemptId) =>
+          Effect.sync(() => {
+            const state = storage.tasks.get(attemptId)?.state;
+            if (state?._tag !== "finished") return Option.none<FinishedAttempt>();
+            return Option.some(
+              Option.match(state.result, {
+                onNone: (): FinishedAttempt => new ParentReported({ report: state.report }),
+                onSome: (result) => new ResultRecorded({ result }),
+              }),
+            );
+          }),
+        recordResult: (attemptId, result) =>
+          Effect.sync(() => {
+            const state = storage.tasks.get(attemptId)?.state;
+            if (state?._tag === "finished") state.result = Option.some(result);
+          }),
         request: (attemptId) =>
           Effect.sync(() =>
             Option.map(
@@ -363,8 +396,8 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
         cancel: (attemptId) =>
           Effect.gen(function* () {
             const task = storage.tasks.get(attemptId);
-            if (task === undefined || task.state !== "live") return;
-            task.state = "canceled";
+            if (task === undefined || task.state._tag !== "live") return;
+            task.state = { _tag: "canceled" };
             const active = attached.get(attemptId);
             if (active !== undefined) yield* Deferred.succeed(active.canceled, undefined);
           }),

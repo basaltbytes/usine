@@ -2,9 +2,25 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
+import { backup as backupDurableStorage } from "@usine/durable/backup";
 import { RunEngine } from "@usine/engine/engine";
+import { backup as backupRuntimeStore } from "@usine/engine/local-sqlite";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
-import { Context, Effect, Exit, FileSystem, Layer, Option, Scope } from "effect";
+import { CredentialProvider, WorkerCredential } from "@usine/executor";
+import {
+  Clock,
+  Context,
+  DateTime,
+  Deferred,
+  Effect,
+  Exit,
+  FileSystem,
+  Layer,
+  Option,
+  Redacted,
+  Ref,
+  Scope,
+} from "effect";
 import {
   answer,
   delegate,
@@ -23,6 +39,7 @@ import {
   makeRemote,
   run,
   submission,
+  TOKEN,
   waitFor,
 } from "./support.ts";
 
@@ -32,13 +49,14 @@ const durableRuntime = (
   remote: string,
   database: string,
   steps: ReadonlyArray<ParentStep>,
+  credentials: Layer.Layer<CredentialProvider> = credentialLayer,
 ) =>
   localLayer(instance, config, [], {
     repositoryUrl: () => remote,
     interruptGrace: "1 second",
     harnessReadiness: harnessReady,
   }).pipe(
-    Layer.provide(credentialLayer),
+    Layer.provide(credentials),
     Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
     Layer.provide(alwaysHoldsLayer),
   );
@@ -136,6 +154,155 @@ describe("local worker restart", () => {
           leftover = yield* fileSystem.exists(worktree);
         }
         assert(!leftover, "the reattached Attempt releases its checkout when it ends");
+        yield* Scope.close(secondScope, Exit.void);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "restores both stores from an online backup and reattaches the Attempt that was live",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-backup-restore-" });
+        const instance = InstanceDirectory.make(root);
+        const remote = yield* makeRemote(root);
+        const stores = `${root}/.usine`;
+        const database = `${stores}/durable.sqlite`;
+        const backups = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-backups-" });
+
+        const firstScope = yield* Scope.make();
+        const firstContext = yield* Scope.provide(
+          Layer.build(durableRuntime(instance, remote, database, [delegate("Implement the task")])),
+          firstScope,
+        );
+        const first = Context.get(firstContext, RunEngine);
+        const accepted = yield* first.submit(submission(4));
+        assert(accepted._tag === "Claimed");
+        yield* Context.get(firstContext, StubChildren).next;
+        const [attempt] = (yield* first.inspect(accepted.runId)).attempts;
+        assert(attempt !== undefined);
+        // The same order as `usine backup`: the durable storage first, then the runtime store.
+        assert(yield* backupDurableStorage(instance, `${backups}/backup.durable.sqlite`));
+        yield* backupRuntimeStore(instance, `${backups}/backup.sqlite`);
+        yield* Scope.close(firstScope, Exit.void);
+
+        for (const store of ["runtime.sqlite", "durable.sqlite"]) {
+          for (const suffix of ["", "-wal", "-shm"]) {
+            yield* fileSystem.remove(`${stores}/${store}${suffix}`, { force: true });
+          }
+        }
+        yield* fileSystem.copyFile(`${backups}/backup.sqlite`, `${stores}/runtime.sqlite`);
+        yield* fileSystem.copyFile(`${backups}/backup.durable.sqlite`, database);
+
+        const secondScope = yield* Scope.make();
+        const second = Context.get(
+          yield* Scope.provide(
+            Layer.build(
+              durableRuntime(instance, remote, database, [answer("Finished after the restore")]),
+            ),
+            secondScope,
+          ),
+          RunEngine,
+        );
+        const finished = yield* waitFor(second, accepted.runId, "Succeeded");
+        assert.deepStrictEqual(
+          finished.attempts.map(({ id, number }) => [id, number]),
+          [[attempt.id, 1]],
+        );
+        assert(Option.isSome(finished.step.result));
+        assert.strictEqual(finished.step.result.value.message, "Finished after the restore");
+        yield* Scope.close(secondScope, Exit.void);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "finishes an Attempt whose parent finished before the stop with the parent's result, without running it again",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "usine-durable-harvest-",
+        });
+        const instance = InstanceDirectory.make(root);
+        const remote = yield* makeRemote(root);
+        const database = `${root}/durable.sqlite`;
+        // Credentials close to expiry renew before every harvesting command; once the
+        // child has replied, the first renewal holds the harvest until the process stops.
+        const holdRenewals = yield* Ref.make(false);
+        const harvesting = yield* Deferred.make<void>();
+        const holdingCredentials = Layer.succeed(CredentialProvider)({
+          issue: () =>
+            Effect.gen(function* () {
+              if (yield* Ref.get(holdRenewals)) {
+                yield* Deferred.succeed(harvesting, undefined);
+                return yield* Effect.never;
+              }
+              return new WorkerCredential({
+                value: Redacted.make(TOKEN),
+                expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 60_000),
+              });
+            }),
+        });
+
+        const firstScope = yield* Scope.make();
+        const firstContext = yield* Scope.provide(
+          Layer.build(
+            durableRuntime(
+              instance,
+              remote,
+              database,
+              [delegate("Implement the task"), answer("Finished before the stop")],
+              holdingCredentials,
+            ),
+          ),
+          firstScope,
+        );
+        const first = Context.get(firstContext, RunEngine);
+        const accepted = yield* first.submit(submission(3));
+        assert(accepted._tag === "Claimed");
+        const child = yield* Context.get(firstContext, StubChildren).next;
+        const [attempt] = (yield* first.inspect(accepted.runId)).attempts;
+        assert(attempt !== undefined);
+        const worktree = `${root}/.usine/workers/local/attempts/${safeSegment(attempt.id)}`;
+        yield* commitInWorktree(worktree, "Work before the stop");
+        yield* Ref.set(holdRenewals, true);
+        yield* child.reply("Implemented the task.");
+        yield* Deferred.await(harvesting);
+        const relayed = yield* first.transcript(new TranscriptAllQuery({ attemptId: attempt.id }));
+        assert.strictEqual(relayed.at(-1)?.envelope.payload._tag, "Final");
+        yield* Scope.close(firstScope, Exit.void);
+        assert(yield* fileSystem.exists(worktree), "the unharvested checkout survives the stop");
+
+        const secondScope = yield* Scope.make();
+        const second = Context.get(
+          yield* Scope.provide(
+            Layer.build(durableRuntime(instance, remote, database, [])),
+            secondScope,
+          ),
+          RunEngine,
+        );
+        const finished = yield* waitFor(second, accepted.runId, "Succeeded");
+        assert.deepStrictEqual(
+          finished.attempts.map(({ id, number }) => [id, number]),
+          [[attempt.id, 1]],
+        );
+        assert(Option.isSome(finished.step.result));
+        assert.strictEqual(finished.step.result.value.message, "Finished before the stop");
+        assert.deepStrictEqual(
+          finished.step.result.value.facts.map((fact) =>
+            fact._tag === "Commit" ? fact.summary : fact._tag,
+          ),
+          ["Work before the stop"],
+        );
+        const transcript = yield* second.transcript(
+          new TranscriptAllQuery({ attemptId: attempt.id }),
+        );
+        assert.strictEqual(
+          transcript.filter(({ envelope }) => envelope.payload._tag === "Final").length,
+          1,
+        );
         yield* Scope.close(secondScope, Exit.void);
       }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,

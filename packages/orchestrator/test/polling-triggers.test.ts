@@ -185,6 +185,7 @@ const claimedRun = (cycle: Effect.Success<ReturnType<PollingTriggers["Service"][
 
 const gatedExecutor = Layer.succeed(StepExecutor)({
   isLive: () => Effect.succeed(false),
+  outcome: () => Effect.succeed(Option.none()),
   recover: () => Effect.void,
   intervene: () => Effect.void,
   interrupt: () => Effect.void,
@@ -409,6 +410,7 @@ describe("PollingTriggers", () => {
       let executions = 0;
       const executor = Layer.succeed(StepExecutor)({
         isLive: () => Effect.succeed(false),
+        outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,
         intervene: () => Effect.void,
         interrupt: () => Effect.void,

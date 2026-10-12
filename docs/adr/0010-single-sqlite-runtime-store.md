@@ -31,6 +31,10 @@ The projection-plus-startup-sweep pattern therefore stays for the rows usine kee
 
 Startup order matters: the durable storage is opened and its tasks resumed before the engine reconciles worktrees and recovers Runs. The layers enforce it, since the engine needs the `StepExecutor`, which needs the local executor, which needs the `AttemptRuntime`. Moving or backing up the factory now means copying both files with the orchestrator stopped.
 
+## Amendment (2026-10-12, #183): `usine backup` copies both files
+
+`usine backup <path>` copies the durable storage beside the runtime database (`<name>.durable<ext>`) with the same read-only connection, SQLite backup API, and hard link into place. The two copies are not one snapshot, so the durable storage is copied first: the runtime copy is then the newer one, and any Attempt it shows open either has its parent task in the durable copy or is failed as interrupted and retried. Restore both files together from the same backup.
+
 ## Amendment (2026-10-11, #176): the cluster tables are gone
 
 A migration drops `usine_workflow_commands` and Effect's `cluster_messages`, `cluster_replies`, and `cluster_migrations` with the Effect workflow (ADR 0003 amendment of the same date), so the runtime database holds only usine's own tables and pi-durable's storage is the second file.

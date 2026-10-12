@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
+import { InfraFailure } from "@usine/core/attempt/failure";
 import { type AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
 import { Deferred, Effect, Fiber, Layer, Option } from "effect";
@@ -55,6 +56,58 @@ const stopMidAttempt = (ssh: ReturnType<typeof fakeSsh>, storage: StubStorage) =
   });
 
 describe("exe.dev launch", () => {
+  it.effect("keeps a completed checkout when its harvested result could not be stored", () => {
+    const ssh = fakeSsh();
+    const storage = new StubStorage();
+    const { transcript, sink } = recording();
+    const failingResultWrite = (stub: Layer.Layer<AttemptRuntime>) =>
+      Layer.effect(
+        AttemptRuntime,
+        Effect.map(AttemptRuntime, (runtime) =>
+          AttemptRuntime.of({
+            ...runtime,
+            recordResult: () =>
+              new InfraFailure({ message: "Result write failed", cause: "storage unavailable" }),
+          }),
+        ),
+      ).pipe(Layer.provide(stub));
+    return Effect.gen(function* () {
+      yield* Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const result = yield* prepared.launch(sink);
+        assert.strictEqual(result.message, `Completed: ${request.task}`);
+        assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(ssh.layer, completes, storage, failingResultWrite)),
+      );
+      assert(
+        !ssh.state.commands.map(remoteLine).some((line) => line.includes("'worktree' 'remove'")),
+        "the checkout must survive until its result is durable",
+      );
+      // The process stopped before the engine recorded the returned result.
+      // A new runtime harvests the same checkout using the stored parent report.
+      yield* Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(
+          new CheckoutRequest({ ...request, reattach: true }),
+        );
+        const result = yield* prepared.launch(sink);
+        assert.strictEqual(result.message, `Completed: ${request.task}`);
+        assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        assert(
+          ssh.state.commands.map(remoteLine).some((line) => line.includes("'worktree' 'remove'")),
+          "the recorded result permits checkout cleanup",
+        );
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, fails, storage)));
+      assert.strictEqual(
+        transcript.filter(([, envelope]) => envelope.payload._tag === "Final").length,
+        1,
+      );
+    });
+  });
+
   it.effect(
     "runs the parent in this process with the VM as the child host, then harvests and cleans up over SSH",
     () => {

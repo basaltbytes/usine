@@ -10,6 +10,11 @@ export type AttemptTaskInput = typeof StoredRequest.Encoded;
 
 const encodeStored = Schema.encodeSync(StoredRequest);
 const decodeStored = Schema.decodeUnknownEffect(StoredRequest);
+const decodeStoredOption = Schema.decodeUnknownOption(StoredRequest);
+
+/** The Attempt a task record's input belongs to; none when the input is not a stored request. */
+export const attemptIdOf = (input: JsonValue): Option.Option<AttemptId> =>
+  Option.map(decodeStoredOption(input), ({ spec }) => spec.attemptId);
 
 export const taskInput = (request: AttemptRequest): AttemptTaskInput =>
   encodeStored(new StoredRequest({ spec: request.spec, worker: request.worker, cwd: request.cwd }));

@@ -9,7 +9,7 @@ import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName, WorkerKind } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
-import { Context, Effect, Schema, Scope } from "effect";
+import { Context, Effect, type Option, type Result, Schema, Scope } from "effect";
 
 /** The Worker operation that failed during readiness checks or an Attempt's lifecycle. */
 export const ExecutorOperation = Schema.Literals([
@@ -173,8 +173,19 @@ export class Executor extends Context.Service<
       record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
     ) => Effect.Effect<void, E | ExecutorError>;
     readonly kind: WorkerKind;
-    /** Whether the Attempt's parent task survived an orchestrator restart and can be reattached. */
+    /**
+     * Whether the Attempt's parent task survived an orchestrator restart and can be reattached:
+     * it still runs, or it reported success before its checkout was harvested.
+     */
     readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
+    /**
+     * The result an Attempt's finished parent task left in durable storage before an
+     * orchestrator restart: the harvested result, or the parent's failure. None when
+     * nothing was stored, or when `isLive` says the Attempt is reattached instead.
+     */
+    readonly outcome: (
+      attemptId: AttemptId,
+    ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
     /** Verifies Git and each rostered brain where the Worker runs children; never installs tools or logs in. */
     readonly preflight: (
       worker: WorkerName,

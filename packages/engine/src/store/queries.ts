@@ -626,11 +626,12 @@ export const queriesFor = (database: RunDatabaseClient) => {
     );
   });
 
-  const openRunIds = Effect.fn("RunStoreQueries.openRunIds")(function* () {
+  const runIdsToDrive = Effect.fn("RunStoreQueries.runIdsToDrive")(function* () {
+    const waiting: RunState.RunState["_tag"] = "Waiting";
     const rows = yield* database
       .select({ runId: runs.runId })
       .from(runs)
-      .where(openState)
+      .where(and(openState, ne(storedStateTag, waiting)))
       .execute();
     return (yield* decodeRunIds(rows)).map(({ runId }) => runId);
   });
@@ -747,7 +748,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     nextQueued,
     pendingContinuations,
     recordTriggerEvent,
-    openRunIds,
+    runIdsToDrive,
     recordApproval,
     revision,
     revokeQueued,
