@@ -579,11 +579,11 @@ const makeRunStore = Effect.gen(function* () {
     claimQueued,
     finishAttempt,
     nextQueued: (runId: RunId) => queries.nextQueued(runId).pipe(persistence("find queued Event")),
-    openRunIds: queries.openRunIds().pipe(persistence("list open runs")),
     parkForApproval,
     pendingContinuations: queries
       .pendingContinuations()
       .pipe(persistence("list pending continuations")),
+    runIdsToDrive: queries.runIdsToDrive().pipe(persistence("list the Runs to drive")),
     recordAndClaim,
     salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
     recordSalvage,
@@ -647,12 +647,15 @@ export class RunStore extends Context.Service<
     readonly nextQueued: (
       runId: RunId,
     ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
-    /** Every Run whose state is open: pending, waiting for approval, queued for a Worker, or running. */
-    readonly openRunIds: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     /** Parks a pending Run on its approval gate and returns the Run's state, which is `Waiting` until an approval arrives. */
     readonly parkForApproval: (runId: RunId) => Effect.Effect<RunState.RunState, RunStoreError>;
     /** The closed Runs whose Item still has a queued Event that no continuation has opened or revoked. */
     readonly pendingContinuations: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
+    /**
+     * Every open Run a fiber drives: pending, queued for a Worker, or running. A
+     * Run waiting for its approval is left out; its approval starts its fiber.
+     */
+    readonly runIdsToDrive: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     readonly recordAndClaim: (
       submission: Submission,
       requestedRunId: RunId,

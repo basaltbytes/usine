@@ -4,7 +4,7 @@ import { Intervention } from "@usine/core/attempt/channel";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
-import { Context, Crypto, Effect, Layer, Option, Result } from "effect";
+import { Context, Crypto, type Duration, Effect, Layer, Option, Result } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import {
   AttemptCancellationError,
@@ -28,6 +28,16 @@ import { LoopControl } from "../loop-control/loop-control.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 import { AttemptAdmission } from "./admission.ts";
 import { RunDriver } from "./run-driver.ts";
+
+/**
+ * How long the engine waits between reconciles after the one at startup, so an
+ * open Run whose fiber stopped, as on a store failure that outlasted its
+ * retries, is driven again without a restart. Provide another value to change it.
+ */
+export const ReconcileInterval = Context.Reference<Duration.Input>(
+  "@usine/engine/ReconcileInterval",
+  { defaultValue: () => "3 minutes" },
+);
 
 // Every operation that commits a Run transition also hands it to the Run's
 // fiber. Both happen uninterruptibly, so a caller that goes away cannot leave a
@@ -169,6 +179,18 @@ const makeRunEngine = Effect.gen(function* () {
   });
 
   yield* driver.reconcile();
+  const interval = yield* ReconcileInterval;
+  yield* Effect.sleep(interval).pipe(
+    Effect.andThen(driver.reconcile()),
+    Effect.tapError((error) =>
+      Effect.logError("Periodic Run reconcile failed; the next one tries again", {
+        errorTag: error._tag,
+      }),
+    ),
+    Effect.ignore,
+    Effect.forever,
+    Effect.forkScoped,
+  );
 
   return {
     approve,
@@ -203,7 +225,11 @@ export class RunEngine extends Context.Service<
       attemptId: AttemptId,
       intervention: Intervention,
     ) => Effect.Effect<void, RunEngineError>;
-    /** Starts a fiber for every open Run without one in this process and opens the queued Events no closed Run continued; also runs when the engine starts. */
+    /**
+     * Starts a fiber for every open Run without one in this process, except Runs waiting for their
+     * approval, and opens the queued Events no closed Run continued. Also runs when the engine starts,
+     * then every `ReconcileInterval`.
+     */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     /** Resolves the current failed Attempt's attention without changing its outcome or starting work. */
     readonly resolveFailure: (
