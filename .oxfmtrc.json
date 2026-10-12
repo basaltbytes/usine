@@ -8,6 +8,7 @@
     ".claude/**",
     "docs/**",
     "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
     "**/route-tree.gen.ts"
   ]
 }
