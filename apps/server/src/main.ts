@@ -86,9 +86,12 @@ const main = Effect.gen(function* () {
       exitWith(
         `usine up did not start: could not lock ${directory}/.usine/instance.lock (${reason}). Check that the folder is writable.`,
       ),
-    PortInUseError: ({ port }) =>
+    PortInUseError: ({ port, holder }) =>
       exitWith(
-        `usine up stopped: port ${port} is already in use. Stop the process using it or run usine up --port <port>.`,
+        `usine up stopped: port ${port} is already in use${Option.match(holder, {
+          onNone: () => "",
+          onSome: (pid) => ` (pid ${pid})`,
+        })}. Stop the process using it or run usine up --port <port>.`,
       ),
   }),
 );

@@ -28,6 +28,8 @@ import {
   type Port,
   VolatileInstanceDirectoryError,
   openBrowser,
+  portInUse,
+  refuseTakenPort,
   serverStartError,
   volatileRoot,
   volatileRoots,
@@ -56,6 +58,7 @@ const serve = Effect.fn("Server.serve")(function* (options: {
 }) {
   yield* Layer.build(serverLayer(options.backend, options.webRoot, options.port)).pipe(
     Effect.mapError((error) => serverStartError(options.port, error)),
+    Effect.catchTag("PortInUseError", ({ port }) => portInUse(port)),
   );
   yield* Console.log(
     options.openSetupPage
@@ -107,6 +110,7 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
       );
       // Taken before any store opens and released after every store has closed.
       yield* holdInstance(directory).pipe(Effect.provide(NodeServices.layer));
+      yield* refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer));
       const instance = yield* loadInstance(directory);
       const credentials = yield* loadLocalCredentials(directory).pipe(
         Effect.provide(NodeServices.layer),

@@ -1,13 +1,17 @@
+import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RunId } from "@usine/core/run";
-import { Console, Duration, Effect, FileSystem, Option, Schema } from "effect";
+import { Array as Arr, Console, Duration, Effect, FileSystem, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import type { ServeError } from "effect/unstable/http/HttpServerError";
 
 export const DEFAULT_PORT = 7_331;
+/** The address the HTTP server listens on; the port check probes the same one. */
+export const SERVER_HOST = "127.0.0.1";
 export const BROWSER_OPEN_TIMEOUT = "2 seconds";
+const PORT_HOLDER_TIMEOUT = "2 seconds";
 
 export const Port = Schema.Int.check(
   Schema.isBetween({ minimum: 1, maximum: 65_535 }, { message: "Expected a TCP port" }),
@@ -43,9 +47,14 @@ export class CliVersionError extends Schema.TaggedError<CliVersionError>(
   "@usine/server/CliVersionError",
 )("CliVersionError", { cause: Schema.Defect() }) {}
 
+/** Another process listens on the HTTP port. */
 export class PortInUseError extends Schema.TaggedError<PortInUseError>(
   "@usine/server/PortInUseError",
-)("PortInUseError", { port: Port }) {}
+)("PortInUseError", {
+  port: Port,
+  /** The listening process's id, when lsof could tell. */
+  holder: Schema.Option(Schema.Int),
+}) {}
 
 export class ServerStartError extends Schema.TaggedError<ServerStartError>(
   "@usine/server/ServerStartError",
@@ -249,8 +258,66 @@ const AddressInUse = Schema.Struct({ code: Schema.Literal("EADDRINUSE") });
 /** Maps a bind failure to the CLI's startup error, so an address already in use is reported as such. */
 export const serverStartError = (port: Port, error: ServeError) =>
   Schema.is(AddressInUse)(error.cause)
-    ? new PortInUseError({ port })
+    ? new PortInUseError({ port, holder: Option.none() })
     : new ServerStartError({ port, cause: error.cause });
+
+const ProcessIdFromString = Schema.NumberFromString.pipe(Schema.decodeTo(Schema.Int));
+
+/** The id of the process listening on the port, from lsof where it is installed and can see that process. */
+const portHolder = Effect.fn("Cli.portHolder")(function* (port: Port) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const lines = yield* spawner
+    .lines(
+      ChildProcess.make("lsof", ["-nP", `-iTCP:${port}`, "-sTCP:LISTEN", "-t"], {
+        stdin: "ignore",
+        stderr: "ignore",
+      }),
+    )
+    .pipe(
+      Effect.timeout(PORT_HOLDER_TIMEOUT),
+      Effect.tapError((cause) =>
+        Effect.logDebug("Could not look up the process listening on the port", { port, cause }),
+      ),
+      Effect.orElseSucceed((): ReadonlyArray<string> => []),
+    );
+  return Arr.findFirst(lines, (line) =>
+    Schema.decodeUnknownOption(ProcessIdFromString)(line.trim()),
+  );
+});
+
+/** Fails with `PortInUseError`, naming the process listening on the port when it can be found. */
+export const portInUse = Effect.fn("Cli.portInUse")(function* (port: Port) {
+  const holder = yield* portHolder(port);
+  yield* Effect.logWarning("Another process listens on the HTTP port", {
+    port,
+    holder: Option.getOrUndefined(holder),
+  });
+  return yield* new PortInUseError({ port, holder });
+});
+
+const portTaken = (port: Port) =>
+  Effect.callback<boolean, ServerStartError>((resume) => {
+    const server = createServer();
+    server.once("error", (cause) =>
+      resume(
+        Schema.is(AddressInUse)(cause)
+          ? Effect.succeed(true)
+          : Effect.fail(new ServerStartError({ port, cause })),
+      ),
+    );
+    server.listen({ host: SERVER_HOST, port }, () =>
+      server.close(() => resume(Effect.succeed(false))),
+    );
+    return Effect.sync(() => server.close());
+  });
+
+/**
+ * Refuses a port another process already listens on, before `usine up` builds its runtime.
+ * The probe releases the port at once, so a process that takes it afterwards still fails the server's own bind.
+ */
+export const refuseTakenPort = Effect.fn("Cli.refuseTakenPort")(function* (port: Port) {
+  if (yield* portTaken(port)) return yield* portInUse(port);
+});
 
 const browserCommand = (url: string) => {
   if (process.platform === "darwin") return { command: "open", args: [url] };

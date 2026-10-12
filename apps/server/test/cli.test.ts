@@ -1,5 +1,6 @@
+import { createServer } from "node:net";
 import { NodeServices } from "@effect/platform-node";
-import { Effect, Layer, Option } from "effect";
+import { Effect, Layer, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { ServeError } from "effect/unstable/http/HttpServerError";
 import { assert, describe, it } from "vitest";
@@ -9,9 +10,11 @@ import {
   CliUsageError,
   Port,
   PortInUseError,
+  SERVER_HOST,
   packageVersion,
   openBrowser,
   parseCli,
+  refuseTakenPort,
   serverStartError,
   volatileRoot,
   volatileRoots,
@@ -174,6 +177,21 @@ describe("usine CLI", () => {
 
     assert(error instanceof PortInUseError);
     assert.strictEqual(error.port, port);
+  });
+
+  it("refuses a port another process listens on before startup and names that process", async () => {
+    const listener = createServer();
+    await new Promise<void>((resolve) => listener.listen({ host: SERVER_HOST, port: 0 }, resolve));
+    const { port } = Schema.decodeUnknownSync(Schema.Struct({ port: Port }))(listener.address());
+
+    const refused = await Effect.runPromise(
+      refuseTakenPort(port).pipe(Effect.flip, Effect.provide(NodeServices.layer)),
+    );
+    assert(refused instanceof PortInUseError);
+    assert.deepStrictEqual(refused.holder, Option.some(process.pid));
+
+    await new Promise((resolve) => listener.close(resolve));
+    await Effect.runPromise(refuseTakenPort(port).pipe(Effect.provide(NodeServices.layer)));
   });
 
   it("bounds a browser opener that never exits and configures forced cleanup", async () => {
