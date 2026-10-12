@@ -43,7 +43,7 @@ type Runtime = TaskRuntime<AttemptTaskInput, AttemptCheckpoint, AttemptResult, o
 type NextState = NextTaskState<AttemptCheckpoint, AttemptResult>;
 
 /** The name of the task that runs one Attempt's parent; stored in every task record. */
-const ATTEMPT_TASK = "usine.attempt";
+export const ATTEMPT_TASK = "usine.attempt";
 
 const call = <A>(operation: string, run: (signal: AbortSignal) => PromiseLike<A>) =>
   Effect.tryPromise({ try: run, catch: (cause) => durableError(operation, cause) });
@@ -349,11 +349,37 @@ export const attemptTask = (
     abort: (task, runtime, context) =>
       services.run(
         Effect.gen(function* () {
-          yield* commit(runtime, context, "record the abort", () => ({
-            status: "terminal",
-            outcome: { status: "aborted" },
-          }));
-          yield* Effect.logInfo("Attempt task aborted", { taskId: task.id });
+          const { spec } = yield* storedRequestOf(task.input);
+          const record = yield* call("read the Attempt record", () =>
+            runtime.snapshot(AttemptRecordDoc, spec.attemptId, context),
+          ).pipe(
+            Effect.tapError((error) =>
+              Effect.logWarning(
+                "Could not read the aborted Attempt's record; ending it as canceled",
+                {
+                  attemptId: spec.attemptId,
+                  message: error.message,
+                },
+              ),
+            ),
+            Effect.orElseSucceed(() => undefined),
+          );
+          const storageFailure = Option.fromUndefinedOr(record?.storageFailure);
+          yield* commit(runtime, context, "record the abort", () =>
+            Option.match(storageFailure, {
+              onNone: (): NextState => ({ status: "terminal", outcome: { status: "aborted" } }),
+              onSome: (message) => failedOutcome(new InfraFailure({ message, cause: message })),
+            }),
+          );
+          yield* Option.match(storageFailure, {
+            onNone: () => Effect.logInfo("Attempt task aborted", { taskId: task.id }),
+            onSome: (message) =>
+              Effect.logError("Attempt task failed: its parent conversation could not be read", {
+                taskId: task.id,
+                attemptId: spec.attemptId,
+                cause: message,
+              }),
+          });
         }).pipe(Effect.withSpan("AttemptTask.abort")),
         context.abortSignal,
       ),

@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+import { StorageRejected } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -577,7 +578,8 @@ describe("durable AttemptRuntime", () => {
             yield* Fiber.interrupt(execution);
           }),
         );
-        // The parent's live state no longer reads back, as when a delta in its chain does not apply.
+        // The parent's live state no longer reads back, as when a delta in its chain does not
+        // apply, and the storage refuses the commit that would replace it.
         const openStorage = Effect.tryPromise({
           try: async () => {
             const storage = await openNodeSqliteStorage(database);
@@ -589,6 +591,11 @@ describe("durable AttemptRuntime", () => {
               }
               return stored;
             };
+            const commit = storage.commit.bind(storage);
+            storage.commit = (writes, context) =>
+              writes.some(({ type }) => type === "document.retire")
+                ? Promise.reject(new StorageRejected("the storage is read-only"))
+                : commit(writes, context);
             return storage;
           },
           catch: (cause) => durableError("open the durable storage", cause),
@@ -605,8 +612,95 @@ describe("durable AttemptRuntime", () => {
         }).pipe(Effect.provide(services));
         assert.strictEqual(failure._tag, "InfraFailure");
         assert.match(failure.message, /unresolvable path/u);
+        assert.lengthOf(logs.matching(/Could not repair the durable storage/u), 2);
         assert.lengthOf(logs.matching(/Stopped the durable harness/u), 1);
         assert.isAtMost(logs.matching(REPORTED).length, 20);
+      }).pipe(Effect.scoped, Effect.provide(logs.layer));
+    },
+  );
+
+  it.live(
+    "fails only the Attempt whose parent conversation no longer reads back, and the other one finishes",
+    () => {
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const poisoned = attemptRequest("run/step/14");
+        const healthy = attemptRequest("run/step/15");
+        const recording = recordingSink();
+        const parentOf = yield* Effect.scoped(
+          Effect.gen(function* () {
+            const services = yield* Layer.build(
+              layer({ database, parent: [delegate("First part"), delegate("Second part")] }),
+            );
+            const runtime = Context.get(services, AttemptRuntime);
+            const executions = yield* Effect.forEach([poisoned, healthy], (request) =>
+              Effect.forkChild(runtime.execute(request, recording.sink)),
+            );
+            const children = Context.get(services, StubChildren);
+            yield* children.next;
+            yield* children.next;
+            yield* Effect.forEach(executions, Fiber.interrupt);
+            const record = yield* Context.get(services, DurableHarness).use(
+              "read the poisoned Attempt",
+              (harness, context) =>
+                harness.snapshot(AttemptRecordDoc, poisoned.spec.attemptId, context),
+            );
+            return record?.parentConversation ?? null;
+          }),
+        );
+        assert(parentOf !== null);
+        // The poisoned parent's live state no longer reads back, as when a delta in its chain does not apply.
+        let unreadable: number | undefined;
+        const openStorage = Effect.tryPromise({
+          try: async () => {
+            const storage = await openNodeSqliteStorage(database);
+            const read = storage.document.bind(storage);
+            storage.document = async (id, at, context) => {
+              const stored = await read(id, at, context);
+              const { record } = stored ?? {};
+              if (
+                record?.kind === "pi.live" &&
+                record.scope.kind === "conversation" &&
+                record.scope.conversationId === parentOf
+              ) {
+                unreadable ??= record.id;
+              }
+              if (record !== undefined && record.id === unreadable) {
+                throw new Error('unresolvable path: ["tools",0]');
+              }
+              return stored;
+            };
+            return storage;
+          },
+          catch: (cause) => durableError("open the durable storage", cause),
+        });
+        const services = attemptRuntimeLayer.pipe(
+          Layer.provideMerge(
+            durableHarnessLayer({
+              ...fauxParent([answer("Finished the second part after the restart.")]),
+              openStorage,
+            }),
+          ),
+          Layer.provideMerge(stubChildBackendLayer),
+        );
+        const settled = yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          return yield* Effect.all(
+            [
+              runtime.execute(poisoned, recording.sink).pipe(Effect.flip),
+              runtime.execute(healthy, recording.sink),
+            ],
+            { concurrency: "unbounded" },
+          );
+        }).pipe(Effect.provide(services));
+        const [failure, report] = settled;
+        assert.strictEqual(failure._tag, "InfraFailure");
+        assert.match(failure.message, /pi\.live: unresolvable path/u);
+        assert.strictEqual(report.message, "Finished the second part after the restart.");
+        assert.lengthOf(logs.matching(/Replaced the unreadable documents/u), 1);
+        assert.lengthOf(logs.matching(/Stopped the durable harness/u), 0);
+        assert.lengthOf(logs.matching(/keeps retrying a step/u), 0);
       }).pipe(Effect.scoped, Effect.provide(logs.layer));
     },
   );

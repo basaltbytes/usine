@@ -13,6 +13,7 @@ import { usineExtension } from "./extension.ts";
 import { type AttemptHub, attemptHubs } from "./hubs.ts";
 import { encodeResult, finishedOf } from "./outcome.ts";
 import { parentSessionId } from "./parent.ts";
+import { repairUnreadableConversations } from "./repair.ts";
 import { appendInbound, emitPayload, readRecord, relayAttempt } from "./relay.ts";
 import { readStoredRequest, taskInput } from "./request.ts";
 
@@ -46,7 +47,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
   yield* durable.install(extension);
   yield* durable.subscribe(hubs.listener);
   yield* durable.use("open the root conversation", (harness, context) => harness.root(context));
-  yield* durable.resume;
+  yield* durable.resume(repairUnreadableConversations);
 
   const createOrFind = Effect.fn("AttemptRuntime.createOrFind")(function* (
     request: AttemptRequest,
@@ -98,7 +99,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
       ),
   );
 
-  // An aborted task is never live: only `cancel` aborts one, and every caller of `cancel` has the engine close the Attempt itself.
+  // An aborted task is never live: only `cancel` ends one as aborted, and every caller of `cancel` has the engine close the Attempt itself.
   const isLive = Effect.fn("AttemptRuntime.isLive")(
     function* (attemptId: AttemptId) {
       yield* Effect.annotateCurrentSpan({ attemptId });

@@ -31,6 +31,9 @@ export interface HarnessListener {
   readonly onStop: () => void;
 }
 
+/** Repairs storage through a freshly opened harness before its tasks run; it logs its own failures and never fails. */
+export type BeforeResume = (harness: Harness) => Effect.Effect<void>;
+
 /** What the harness runs on. */
 export interface DurableHarnessOptions {
   /** Opens the storage; run again to reopen after a poisoned or stuck Session. */
@@ -56,11 +59,12 @@ export class DurableHarness extends Context.Service<
     /** Installs or replaces an extension; conversations that select it by name use the new code from their next phase. */
     readonly install: (extension: Extension) => Effect.Effect<void>;
     /**
-     * Starts the task scheduler, also after every reopen. Call it once every
-     * extension is installed: a generation resumed earlier would be prepared
-     * without the tools its conversation selects.
+     * Runs `beforeResume` on the open harness, then starts the task scheduler;
+     * every reopen does both again. Call it once every extension is installed:
+     * a generation resumed earlier would be prepared without the tools its
+     * conversation selects.
      */
-    readonly resume: Effect.Effect<void, DurableHarnessError>;
+    readonly resume: (beforeResume: BeforeResume) => Effect.Effect<void, DurableHarnessError>;
     /**
      * Runs one call against the open harness. A call that fails because the
      * Session was poisoned or replaced runs once more on the reopened harness,
@@ -147,7 +151,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
   const scope = yield* Effect.scope;
   const registry = createRegistry();
   const listeners = new Set<HarnessListener>();
-  let resumed = false;
+  let resumed = Option.none<BeforeResume>();
   let started = false;
   let closed = false;
   let reopening = Option.none<Deferred.Deferred<Opened>>();
@@ -180,8 +184,14 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
       }
       for (const listener of listeners) listener.onCommit(publication);
     });
-    if (resumed) harness.resume();
-    yield* Effect.logInfo("Opened the durable harness", { generation, resumed });
+    if (Option.isSome(resumed)) {
+      yield* resumed.value(harness);
+      harness.resume();
+    }
+    yield* Effect.logInfo("Opened the durable harness", {
+      generation,
+      resumed: Option.isSome(resumed),
+    });
     return {
       generation,
       harness,
@@ -371,14 +381,15 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
           Effect.logDebug("Installed a durable extension", { name: extension.name }),
         ),
       ),
-    resume: Effect.gen(function* () {
+    resume: Effect.fn("DurableHarness.resume")(function* (beforeResume: BeforeResume) {
       yield* unlessStopped("resume");
       const target = yield* opened;
+      yield* beforeResume(target.harness);
       yield* Effect.try({
         try: () => target.harness.resume(),
         catch: (cause) => durableError("resume", cause),
       });
-      resumed = true;
+      resumed = Option.some(beforeResume);
       yield* Effect.logInfo("Resumed durable task scheduling", { generation: target.generation });
     }),
     use,
