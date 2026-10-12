@@ -4,9 +4,16 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure, RunawayFailure } from "@usine/core/attempt/failure";
+import { StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { Context, Effect, Exit, Fiber, Layer, Logger } from "effect";
-import { AttemptRuntime } from "../src/attempt-runtime.ts";
+import { Context, Effect, Exit, Fiber, Layer, Logger, Option } from "effect";
+import {
+  AttemptReport,
+  AttemptRuntime,
+  ParentFailed,
+  ParentReported,
+  ResultRecorded,
+} from "../src/attempt-runtime.ts";
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
 import { layer as attemptRuntimeLayer } from "../src/attempt/runtime.ts";
 import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
@@ -94,6 +101,29 @@ describe("durable AttemptRuntime", () => {
             ],
           }),
         ),
+      );
+      // A restarted orchestrator still reads the report, then the harvested result once recorded.
+      const attemptId = attemptRequest("run/step/1").spec.attemptId;
+      const harvested = new StepResult({ message: "Fixed it.", facts: [] });
+      const finished = yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const reported = yield* runtime.finished(attemptId);
+        yield* runtime.recordResult(attemptId, harvested);
+        return { reported, recorded: yield* runtime.finished(attemptId) };
+      }).pipe(Effect.provide(layer({ database, parent: [] })));
+      assert.deepStrictEqual(
+        finished.reported,
+        Option.some(
+          new ParentReported({
+            report: new AttemptReport({
+              message: "Fixed the flaky test and opened a pull request.",
+            }),
+          }),
+        ),
+      );
+      assert.deepStrictEqual(
+        finished.recorded,
+        Option.some(new ResultRecorded({ result: harvested })),
       );
     }).pipe(Effect.scoped),
   );
@@ -411,6 +441,7 @@ describe("durable AttemptRuntime", () => {
           [["Cancel", "engine"]],
         );
         assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
+        assert.deepStrictEqual(yield* runtime.finished(request.spec.attemptId), Option.none());
       }).pipe(Effect.provide(layer({ database, parent: [delegate("Fix the flaky test")] })));
     }).pipe(Effect.scoped),
   );
@@ -594,6 +625,10 @@ describe("durable AttemptRuntime", () => {
         const outbound = recording.outbound();
         assertAdmitted(request.spec.attemptId, outbound);
         assert.strictEqual(outbound.at(-1)?.payload._tag, "Failed");
+        assert.deepStrictEqual(
+          yield* runtime.finished(request.spec.attemptId),
+          Option.some(new ParentFailed({ failure })),
+        );
       }).pipe(
         Effect.provide(
           layer({ database, parent: [delegate("First part"), delegate("Second part")] }),

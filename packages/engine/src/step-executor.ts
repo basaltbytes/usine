@@ -7,7 +7,7 @@ import { Event } from "@usine/core/event";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run } from "@usine/core/run";
 import { Step } from "@usine/core/step";
-import { Schema, Context, Effect } from "effect";
+import { Schema, Context, Effect, type Option, type Result } from "effect";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import type { AttemptFailure } from "@usine/core/attempt/failure";
 import type { WorkerName } from "@usine/core/worker";
@@ -41,8 +41,20 @@ export interface WorkerLease {
 export class StepExecutor extends Context.Service<
   StepExecutor,
   {
-    /** Whether the Attempt's parent task outlived an orchestrator restart, so its Run reattaches it instead of opening the next Attempt. */
+    /**
+     * Whether the Attempt's parent task outlived an orchestrator restart, so its Run reattaches
+     * it instead of opening the next Attempt: the task still runs, or it finished and its result
+     * still has to be collected from the Worker.
+     */
     readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
+    /**
+     * The result an open Attempt's parent task stored before an orchestrator restart, which its
+     * Run never recorded. The Run finishes the Attempt with it instead of failing it as interrupted;
+     * none when nothing was stored.
+     */
+    readonly outcome: (
+      attemptId: AttemptId,
+    ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
     /** Reconciles an old checkout before new Attempts start; records its salvage before releasing any work. */
     readonly recover: <E>(
       attempt: AttemptRecovery,

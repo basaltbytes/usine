@@ -1,6 +1,7 @@
-import type { AttemptId } from "@usine/core/attempt";
+import type { Attempt } from "@usine/core/attempt";
 import { type AttemptFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { RunId } from "@usine/core/run";
+import type { StepResult } from "@usine/core/step/result";
 import type { WorkerName } from "@usine/core/worker";
 import { Cause, Context, Crypto, Effect, Fiber, FiberMap, Layer, Option, Result } from "effect";
 import { StepExecutor } from "../step-executor.ts";
@@ -30,6 +31,15 @@ const asAttemptFailure = <A, R>(
     RunNotFoundError: (error: RunNotFoundError) => Effect.die(error),
     RunOperationRejectedError: (error: RunOperationRejectedError) => Effect.die(error),
   });
+
+/** What a Run's open Attempt left when this process started driving the Run. */
+type OpenAttempt =
+  | { readonly _tag: "Live"; readonly attempt: Attempt }
+  | {
+      readonly _tag: "Finished";
+      readonly attempt: Attempt;
+      readonly result: Result.Result<StepResult, AttemptFailure>;
+    };
 
 /**
  * Drives open Runs in this process, one fiber per Run, with usine's run
@@ -167,11 +177,13 @@ export class RunDriver extends Context.Service<
       });
 
       /**
-       * The Run's open Attempt when its parent task outlived an orchestrator restart.
-       * A liveness read that fails is logged and treated as not live, so the Run
-       * moves on to a new Attempt as it did before reattachment existed.
+       * What the Run's open Attempt left when this process started driving it:
+       * a parent task to reattach, or a result its parent task stored that the
+       * Run never recorded. A read that fails is logged and treated as finding
+       * nothing, so the Run moves on to a new Attempt as it did before
+       * reattachment existed.
        */
-      const liveAttempt = Effect.fn("RunDriver.liveAttempt")(function* (runId: RunId) {
+      const openAttempt = Effect.fn("RunDriver.openAttempt")(function* (runId: RunId) {
         yield* Effect.annotateCurrentSpan({ runId });
         const current = yield* store.snapshot(runId);
         const open = current.attempts.at(-1);
@@ -180,29 +192,48 @@ export class RunDriver extends Context.Service<
           open === undefined ||
           Option.isSome(open.outcome)
         )
-          return Option.none<AttemptId>();
+          return Option.none<OpenAttempt>();
+        const fields = { runId, attemptId: open.id, worker: open.worker };
         yield* Effect.annotateCurrentSpan({ attemptId: open.id, worker: open.worker });
         const live = yield* executor.isLive(open.id).pipe(Effect.result);
         if (Result.isFailure(live)) {
           yield* Effect.logWarning(
             "Could not read whether the open Attempt is live; opening the next one",
-            {
-              runId,
-              attemptId: open.id,
-              worker: open.worker,
-              errorTag: live.failure._tag,
-              message: live.failure.message,
-            },
+            { ...fields, errorTag: live.failure._tag, message: live.failure.message },
           );
-          return Option.none<AttemptId>();
+          return Option.none<OpenAttempt>();
         }
+        if (live.success) {
+          yield* Effect.logInfo("The open Attempt's parent task is live; reattaching it", fields);
+          return Option.some<OpenAttempt>({ _tag: "Live", attempt: open });
+        }
+        const stored = yield* executor.outcome(open.id).pipe(Effect.result);
+        if (Result.isFailure(stored)) {
+          yield* Effect.logWarning(
+            "Could not read the open Attempt's stored outcome; opening the next one",
+            { ...fields, errorTag: stored.failure._tag, message: stored.failure.message },
+          );
+          return Option.none<OpenAttempt>();
+        }
+        if (Option.isNone(stored.success)) {
+          yield* Effect.logInfo(
+            "The open Attempt's parent task is gone; opening the next Attempt",
+            fields,
+          );
+          return Option.none<OpenAttempt>();
+        }
+        const result = stored.success.value;
         yield* Effect.logInfo(
-          live.success
-            ? "The open Attempt's parent task is live; reattaching it"
-            : "The open Attempt's parent task is gone; opening the next Attempt",
-          { runId, attemptId: open.id, worker: open.worker },
+          "The open Attempt's parent task finished before this process recorded it; finishing the Attempt with its stored result",
+          {
+            ...fields,
+            outcome: Result.match(result, {
+              onSuccess: () => "Succeeded",
+              onFailure: ({ _tag }) => _tag,
+            }),
+          },
         );
-        return live.success ? Option.some(open.id) : Option.none<AttemptId>();
+        return Option.some<OpenAttempt>({ _tag: "Finished", attempt: open, result });
       });
 
       /** Runs one Attempt on the reserved Worker and returns what it did to the Run. */
@@ -211,7 +242,15 @@ export class RunDriver extends Context.Service<
         worker: WorkerName,
       ) {
         yield* Effect.annotateCurrentSpan({ runId, worker });
-        const started = yield* store.beginAttempt(runId, worker, yield* liveAttempt(runId));
+        const open = yield* openAttempt(runId);
+        if (Option.isSome(open) && open.value._tag === "Finished") {
+          const finished = yield* store.finishAttempt(open.value.attempt, open.value.result);
+          if (finished._tag !== "RetryAttempt") return finished._tag;
+        }
+        const live = Option.flatMap(open, (found) =>
+          found._tag === "Live" ? Option.some(found.attempt.id) : Option.none(),
+        );
+        const started = yield* store.beginAttempt(runId, worker, live);
         if (started._tag === "AttemptRecoveryFailed") return "RunFailed";
         if (started._tag === "RunClosed") return "Unchanged";
 

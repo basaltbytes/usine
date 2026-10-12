@@ -54,6 +54,7 @@ describe("durable run engine", () => {
           });
           const executor = Layer.succeed(StepExecutor)({
             isLive: () => Effect.succeed(false),
+            outcome: () => Effect.succeed(Option.none()),
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
@@ -120,6 +121,7 @@ describe("durable run engine", () => {
         const started = yield* Deferred.make<void>();
         const executor = Layer.succeed(StepExecutor)({
           isLive: () => Effect.succeed(false),
+          outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
@@ -674,6 +676,7 @@ describe("durable run engine", () => {
         // cancel that reaches the parked reservation ends it.
         const executor = Layer.succeed(StepExecutor)({
           isLive: () => Effect.succeed(false),
+          outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,

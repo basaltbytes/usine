@@ -837,7 +837,7 @@ describe("local worker", () => {
             const canceled = yield* waitFor(engine, accepted.runId, "Canceled");
             assert.strictEqual(canceled.attempts.length, 1);
             assert.strictEqual(canceled.attempts[0]?.operatorIntervened, true);
-            assert.strictEqual(storage.tasks.get(attempt.id)?.state, "canceled");
+            assert.strictEqual(storage.tasks.get(attempt.id)?.state._tag, "canceled");
 
             const transcript = yield* engine.transcript(
               new TranscriptAllQuery({ attemptId: attempt.id }),

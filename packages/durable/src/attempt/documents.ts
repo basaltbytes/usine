@@ -30,6 +30,8 @@ export type AttemptRecord = {
   relayedEntry: number;
   relayedTokens: number;
   terminalRelayed: boolean;
+  /** The harvested `StepResult` as JSON, once the executor recorded it; absent on records written before it existed. */
+  result?: string;
 };
 
 export const ATTEMPT_RECORD_KIND = "usine.attempt";

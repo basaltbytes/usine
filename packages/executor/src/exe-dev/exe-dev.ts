@@ -396,6 +396,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       cancel: session.cancel,
       intervene: session.intervene,
       isLive: session.isLive,
+      outcome: session.outcome,
       preflight: machines.preflight,
       prepare,
     });

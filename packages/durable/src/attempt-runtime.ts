@@ -1,7 +1,8 @@
 import { ChildHost } from "@usine/agents/child-host";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
-import type { AttemptFailure } from "@usine/core/attempt/failure";
+import { AttemptFailure } from "@usine/core/attempt/failure";
+import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import { Context, type Effect, type Option, Schema } from "effect";
 
@@ -37,6 +38,26 @@ export class AttemptReport extends Schema.Class<AttemptReport>("@usine/durable/A
   message: Schema.NonEmptyString,
 }) {}
 
+/** The parent reported success, and no harvested result was recorded: the Attempt's checkout still has to be harvested. */
+export class ParentReported extends Schema.TaggedClass<ParentReported>(
+  "@usine/durable/ParentReported",
+)("ParentReported", { report: AttemptReport }) {}
+
+/** The executor recorded the Attempt's harvested result with `recordResult`. */
+export class ResultRecorded extends Schema.TaggedClass<ResultRecorded>(
+  "@usine/durable/ResultRecorded",
+)("ResultRecorded", { result: StepResult }) {}
+
+/** The parent task ended with a failure. */
+export class ParentFailed extends Schema.TaggedClass<ParentFailed>("@usine/durable/ParentFailed")(
+  "ParentFailed",
+  { failure: AttemptFailure },
+) {}
+
+/** What durable storage keeps of an Attempt whose parent task finished and relayed its terminal envelope. */
+export const FinishedAttempt = Schema.Union([ParentReported, ResultRecorded, ParentFailed]);
+export type FinishedAttempt = typeof FinishedAttempt.Type;
+
 /**
  * Runs an Attempt's Pi parent as a durable task in the orchestrator process.
  *
@@ -60,6 +81,19 @@ export class AttemptRuntime extends Context.Service<
      * A canceled task is never live.
      */
     readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
+    /**
+     * What the Attempt's parent task left once it finished and `execute` relayed its terminal envelope,
+     * kept after that envelope so an orchestrator that stopped before recording the Attempt's outcome can
+     * still finish it. None while the task runs or before the relay, after `cancel`, and when the Attempt has no task.
+     */
+    readonly finished: (
+      attemptId: AttemptId,
+    ) => Effect.Effect<Option.Option<FinishedAttempt>, AttemptFailure>;
+    /** Keeps the Attempt's harvested result with its durable record, so `finished` returns it once the parent's report is relayed. */
+    readonly recordResult: (
+      attemptId: AttemptId,
+      result: StepResult,
+    ) => Effect.Effect<void, AttemptFailure>;
     /** The request the Attempt's task was created with, read back for a reattachment; none when the Attempt has no task. */
     readonly request: (
       attemptId: AttemptId,

@@ -105,7 +105,7 @@ describe("local worker runaway guard", () => {
           assert.strictEqual(outcome.failure._tag, "RunawayFailure");
           const attemptId = failed.attempts[0]?.id;
           assert(attemptId !== undefined);
-          assert.strictEqual(storage.tasks.get(attemptId)?.state, "canceled");
+          assert.strictEqual(storage.tasks.get(attemptId)?.state._tag, "canceled");
         }).pipe(Effect.provide(runtime));
       }).pipe(Effect.provide(NodeServices.layer));
     },
@@ -149,7 +149,7 @@ describe("local worker runaway guard", () => {
           const failure = yield* Fiber.join(running).pipe(Effect.flip);
           assert(failure._tag === "RunawayFailure");
           assert.strictEqual(failure.ceiling, "wall-clock");
-          assert.strictEqual(storage.tasks.get(attemptId)?.state, "canceled");
+          assert.strictEqual(storage.tasks.get(attemptId)?.state._tag, "canceled");
           assert.deepStrictEqual(
             yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`),
             [],

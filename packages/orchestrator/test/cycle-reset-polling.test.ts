@@ -205,6 +205,7 @@ it.live(
       };
       const executor = Layer.succeed(StepExecutor)({
         isLive: () => Effect.succeed(false),
+        outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,
         intervene: () => Effect.void,
         reserve: () => Effect.succeed({ worker: WorkerName.make("test"), release: Effect.void }),

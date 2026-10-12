@@ -49,6 +49,7 @@ const result = new StepResult({ message: "Evidence retained", facts: [] });
 
 const executor = Layer.succeed(StepExecutor)({
   isLive: () => Effect.succeed(false),
+  outcome: () => Effect.succeed(Option.none()),
   recover: () => Effect.void,
   intervene: () => Effect.void,
   reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
