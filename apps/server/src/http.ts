@@ -12,6 +12,7 @@ import { Effect, Layer, Schema, type Types } from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi";
 import { FactoryBackend, type BackendError } from "./backend.ts";
+import { SERVER_HOST } from "./cli.ts";
 
 const operatorFailure = (error: BackendError) => {
   const message = (() => {
@@ -248,6 +249,6 @@ export const serverLayer = (
     HttpRouter.provideRequest(backend),
   );
   return HttpRouter.serve(routes).pipe(
-    Layer.provide(NodeHttpServer.layer(createServer, { host: "127.0.0.1", port })),
+    Layer.provide(NodeHttpServer.layer(createServer, { host: SERVER_HOST, port })),
   );
 };

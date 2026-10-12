@@ -253,7 +253,7 @@ export const projectTranscript = (
           Interrupted: (): NoticeContent => ({
             kind: "status",
             label: "Interrupted",
-            detail: "The run host acknowledged the interrupt.",
+            detail: "The Attempt's parent acknowledged the interrupt.",
             format: "plain",
             isError: false,
           }),
@@ -267,7 +267,7 @@ export const projectTranscript = (
           Interrupt: (): NoticeContent => ({
             kind: "status",
             label: "Interrupt requested",
-            detail: "The operator asked the run host to stop.",
+            detail: "The operator asked the Attempt to stop.",
             format: "plain",
             isError: false,
           }),

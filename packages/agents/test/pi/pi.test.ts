@@ -2,7 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { fauxAssistantMessage } from "@earendil-works/pi-ai/providers/faux";
+import type { ExtensionToolContext } from "@earendil-works/pi-coding-agent";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
@@ -200,10 +201,7 @@ describe("Pi child backend", () => {
         listener?.({ type: "auto_retry_end", success: true, attempt: 1 });
         listener?.({
           type: "message_end",
-          message: {
-            role: "assistant",
-            content: [{ type: "text", text: "Pi child done." }],
-          },
+          message: fauxAssistantMessage("Pi child done."),
         });
         return Promise.resolve();
       },
@@ -252,7 +250,7 @@ describe("Pi child backend", () => {
         assert.deepStrictEqual(options?.environment, Option.some(childRequest.environment));
         assert.deepStrictEqual(
           events.map((event) => event._tag),
-          ["SessionStarted", "TextOutput", "SessionFinished"],
+          ["SessionStarted", "SessionTokensUpdated", "TextOutput", "SessionFinished"],
         );
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
     );
@@ -350,7 +348,7 @@ describe("Pi child backend", () => {
           undefined,
           undefined,
           // SAFETY: without session variables the bash tool reads only the optional `cwd` of its context.
-          {} as ExtensionContext,
+          {} as ExtensionToolContext,
         ),
       );
       const output = result.content.flatMap((part) => (part.type === "text" ? [part.text] : []));

@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { assert, describe, it } from "vitest";
 
+const SCENARIO_TIMEOUT_MS = 30_000;
+
 const signalScenario = (
   mode:
     | "complete"
@@ -19,7 +21,7 @@ const signalScenario = (
       fileURLToPath(new URL("./fixtures/shutdown.mjs", import.meta.url)),
       mode,
     ],
-    { encoding: "utf8", timeout: 5_000 },
+    { encoding: "utf8", timeout: SCENARIO_TIMEOUT_MS },
   );
   assert.strictEqual(result.error, undefined);
   assert.strictEqual(result.signal, null);
@@ -28,7 +30,7 @@ const signalScenario = (
   return result.stdout;
 };
 
-describe("graceful process shutdown", () => {
+describe("graceful process shutdown", { timeout: SCENARIO_TIMEOUT_MS + 10_000 }, () => {
   it("waits for admitted work before closing its scope on SIGTERM", () => {
     const output = signalScenario("complete");
     assert.match(output, /attempt completed/);

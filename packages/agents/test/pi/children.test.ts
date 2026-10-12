@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Harness, HARNESSES, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
+import * as AttemptChannel from "@usine/core/attempt/channel";
 import { Effect, Layer, Stream } from "effect";
 import { LocalProcess } from "../../src/child-host/child-host.ts";
 import {
@@ -42,6 +43,8 @@ const backend = (selected: Harness): ChildBackendService => ({
       result: Effect.succeed(new SessionResult({ message: selected })),
       steer: () => Effect.void,
       interrupt: Effect.void,
+      intervene: () =>
+        Effect.succeed(new AttemptChannel.InterventionState({ held: false, paused: false })),
     }),
 });
 
