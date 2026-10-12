@@ -1,6 +1,7 @@
 # Self-hosted agent sandboxes in exe.dev's shape
 
-Research for an EU-hosted Worker that usine controls, as a replacement for exe.dev. Snapshot taken
+Research for [issue #223](https://github.com/basaltbytes/usine/issues/223): an EU-hosted Worker that
+usine controls, as a replacement for exe.dev. Snapshot taken
 2026-10-12. Every claim cites a primary source: vendor docs, source repositories, release pages, and
 posts or recorded interviews by the people who built the thing. Where a fact is not documented, the
 note says so. It extends the August study of exe.dev's product surface,
