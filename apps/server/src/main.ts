@@ -12,6 +12,38 @@ const exitWith = (message: string) =>
     ),
   );
 
+/** The operator's message for a failed backup of either store; `openHint` says how to fix an unreadable source. */
+const backupFailure = (
+  failure: {
+    readonly operation: "open" | "stage" | "copy" | "publish";
+    readonly source: string;
+    readonly destination: string;
+    readonly reason: string;
+  },
+  openHint: string,
+) => {
+  const { source, destination, reason } = failure;
+  return Match.value(failure.operation).pipe(
+    Match.when("open", () => `Could not open ${source} (${reason}). ${openHint}`),
+    Match.when(
+      "copy",
+      () =>
+        `Could not copy ${source} to ${destination} (${reason}). Check the source database and the output directory's free space and permissions.`,
+    ),
+    Match.when(
+      "stage",
+      () =>
+        `Could not create a backup at ${destination} (${reason}). Choose an existing writable output directory.`,
+    ),
+    Match.when("publish", () =>
+      reason === "AlreadyExists"
+        ? `Could not save the backup to ${destination} (${reason}). Choose a different filename; the destination already exists.`
+        : `Could not save the backup to ${destination} (${reason}). Check the destination path and permissions; its filesystem must support hard links.`,
+    ),
+    Match.exhaustive,
+  );
+};
+
 const main = Effect.gen(function* () {
   const command = yield* parseCli(process.argv.slice(2), {
     port: Option.fromNullishOr(process.env.USINE_PORT),
@@ -45,31 +77,16 @@ const main = Effect.gen(function* () {
       exitWith(
         `Could not ${operation} evidence for Run ${runId} at ${path} (${reason}). Check the instance database and choose a new writable output path.`,
       ),
-    RuntimeStoreBackupError: ({ operation, source, destination, reason }) =>
+    RuntimeStoreBackupError: (error) =>
       exitWith(
-        Match.value(operation).pipe(
-          Match.when(
-            "open",
-            () =>
-              `Could not open ${source} (${reason}). Run usine backup from the instance folder containing .usine/runtime.sqlite.`,
-          ),
-          Match.when(
-            "copy",
-            () =>
-              `Could not copy ${source} to ${destination} (${reason}). Check the source database and the output directory's free space and permissions.`,
-          ),
-          Match.when(
-            "stage",
-            () =>
-              `Could not create a backup at ${destination} (${reason}). Choose an existing writable output directory.`,
-          ),
-          Match.when("publish", () =>
-            reason === "AlreadyExists"
-              ? `Could not save the backup to ${destination} (${reason}). Choose a different filename; the destination already exists.`
-              : `Could not save the backup to ${destination} (${reason}). Check the destination path and permissions; its filesystem must support hard links.`,
-          ),
-          Match.exhaustive,
+        backupFailure(
+          error,
+          "Run usine backup from the instance folder containing .usine/runtime.sqlite.",
         ),
+      ),
+    DurableStorageBackupError: (error) =>
+      exitWith(
+        backupFailure(error, "Check that the instance's .usine/durable.sqlite is a readable file."),
       ),
     VolatileInstanceDirectoryError: ({ directory, root }) =>
       exitWith(

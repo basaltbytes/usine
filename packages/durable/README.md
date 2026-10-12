@@ -6,6 +6,7 @@ Runs an Attempt's Pi parent inside the orchestrator on [`@earendil-works/pi-dura
 
 - `@usine/durable/attempt-runtime`: the `AttemptRuntime` contract the executor calls, with `AttemptRequest`, `StoredRequest`, and `AttemptReport`.
 - `@usine/durable/harness`: the `DurableHarness` service, which owns the open pi-durable Harness, and its platform-free `layer(options)`.
+- `@usine/durable/backup`: `backup(instanceDirectory, destination)`, an online copy of the instance's `.usine/durable.sqlite` through SQLite's backup API, hard-linked into place so it never overwrites a file; `usine backup` takes it beside the runtime database.
 - `@usine/durable/live`: the Node composition: the harness on `<instance>/.usine/durable.sqlite`, Pi's configured models and credentials, and the Claude, Codex, and Pi child backends from `@usine/agents`.
 - `@usine/durable/testing`: a scripted parent model and stub children for driving whole Attempts in tests, and a stub `AttemptRuntime` for tests of the executors around it.
 

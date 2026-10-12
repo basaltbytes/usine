@@ -14,10 +14,7 @@ import {
   durableError,
   layer as durableHarnessLayer,
 } from "./harness.ts";
-
-/** Where the durable harness keeps its storage: `.usine/durable.sqlite`, next to the runtime store. */
-export const durableStoragePath = (path: Path.Path, instanceDirectory: InstanceDirectory): string =>
-  path.join(instanceDirectory, ".usine", "durable.sqlite");
+import { durableStoragePath } from "./storage-path.ts";
 
 const nodeOptions = Effect.fn("DurableHarness.nodeOptions")(function* (
   instanceDirectory: InstanceDirectory,

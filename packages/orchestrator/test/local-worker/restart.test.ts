@@ -2,7 +2,9 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
 import { safeSegment } from "@usine/core/repository";
+import { backup as backupDurableStorage } from "@usine/durable/backup";
 import { RunEngine } from "@usine/engine/engine";
+import { backup as backupRuntimeStore } from "@usine/engine/local-sqlite";
 import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { CredentialProvider, WorkerCredential } from "@usine/executor";
 import {
@@ -152,6 +154,64 @@ describe("local worker restart", () => {
           leftover = yield* fileSystem.exists(worktree);
         }
         assert(!leftover, "the reattached Attempt releases its checkout when it ends");
+        yield* Scope.close(secondScope, Exit.void);
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "restores both stores from an online backup and reattaches the Attempt that was live",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-backup-restore-" });
+        const instance = InstanceDirectory.make(root);
+        const remote = yield* makeRemote(root);
+        const stores = `${root}/.usine`;
+        const database = `${stores}/durable.sqlite`;
+        const backups = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-backups-" });
+
+        const firstScope = yield* Scope.make();
+        const firstContext = yield* Scope.provide(
+          Layer.build(durableRuntime(instance, remote, database, [delegate("Implement the task")])),
+          firstScope,
+        );
+        const first = Context.get(firstContext, RunEngine);
+        const accepted = yield* first.submit(submission(4));
+        assert(accepted._tag === "Claimed");
+        yield* Context.get(firstContext, StubChildren).next;
+        const [attempt] = (yield* first.inspect(accepted.runId)).attempts;
+        assert(attempt !== undefined);
+        // The same order as `usine backup`: the durable storage first, then the runtime store.
+        assert(yield* backupDurableStorage(instance, `${backups}/backup.durable.sqlite`));
+        yield* backupRuntimeStore(instance, `${backups}/backup.sqlite`);
+        yield* Scope.close(firstScope, Exit.void);
+
+        for (const store of ["runtime.sqlite", "durable.sqlite"]) {
+          for (const suffix of ["", "-wal", "-shm"]) {
+            yield* fileSystem.remove(`${stores}/${store}${suffix}`, { force: true });
+          }
+        }
+        yield* fileSystem.copyFile(`${backups}/backup.sqlite`, `${stores}/runtime.sqlite`);
+        yield* fileSystem.copyFile(`${backups}/backup.durable.sqlite`, database);
+
+        const secondScope = yield* Scope.make();
+        const second = Context.get(
+          yield* Scope.provide(
+            Layer.build(
+              durableRuntime(instance, remote, database, [answer("Finished after the restore")]),
+            ),
+            secondScope,
+          ),
+          RunEngine,
+        );
+        const finished = yield* waitFor(second, accepted.runId, "Succeeded");
+        assert.deepStrictEqual(
+          finished.attempts.map(({ id, number }) => [id, number]),
+          [[attempt.id, 1]],
+        );
+        assert(Option.isSome(finished.step.result));
+        assert.strictEqual(finished.step.result.value.message, "Finished after the restore");
         yield* Scope.close(secondScope, Exit.void);
       }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,

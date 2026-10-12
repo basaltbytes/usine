@@ -26,17 +26,23 @@ The operator API includes `POST /api/cycle-budgets/reset` with an Ask identity. 
 
 ## Runtime backup and Run evidence
 
-From the instance folder, copy the runtime store while the orchestrator runs:
+From the instance folder, copy the runtime store and the durable storage while the orchestrator runs:
 
 ```sh
 usine backup /path/to/runtime-backup.sqlite
 ```
 
-`usine backup` copies all runtime tables, including committed WAL data, while the orchestrator runs. It opens the source read-only and doesn't need GitHub credentials.
+`usine backup` writes two files. The runtime store `.usine/runtime.sqlite` goes to the path you give, and the durable storage `.usine/durable.sqlite`, where each running Attempt keeps its parent task and conversations, goes beside it with `.durable` before the extension: `/path/to/runtime-backup.durable.sqlite`. Both copies include committed WAL data. The command opens each source read-only, copies the durable storage first, and doesn't need GitHub credentials. An instance that has not run an Attempt since it was created has no durable storage; the command then writes only the runtime copy and says so.
 
-Use a new filename in an existing writable directory on a filesystem that supports hard links. The command writes a complete backup with owner-only permissions and won't overwrite existing files. Errors identify the affected path and cause.
+Use a new filename in an existing writable directory on a filesystem that supports hard links. The command writes complete copies with owner-only permissions and won't overwrite existing files. If the runtime copy fails, the durable copy is removed again. Errors identify the affected path and cause.
 
-Keep the backup outside the instance folder to protect it against loss of that folder. Back up the authored instance files and credentials separately. To restore, stop the orchestrator, move the existing `.usine/runtime.sqlite` and any `runtime.sqlite-wal` / `runtime.sqlite-shm` files aside, and copy the backup to `.usine/runtime.sqlite`. Restart with the matching instance configuration and engine version. Restoring an older backup also restores its older deduplication ledger, so work performed after that backup can run again.
+Keep the backup outside the instance folder to protect it against loss of that folder. Back up the authored instance files and credentials separately. To restore, stop the orchestrator and restore both files from the same backup together:
+
+1. Move `.usine/runtime.sqlite` and `.usine/durable.sqlite` aside, with any `-wal` and `-shm` files next to them.
+2. Copy the runtime backup to `.usine/runtime.sqlite` and the `.durable` backup to `.usine/durable.sqlite`.
+3. Restart with the matching instance configuration and engine version.
+
+An Attempt that was running when the backup was taken reattaches to its parent task when its checkout under `.usine/workers` is still there; without its checkout, or without the durable copy, it fails as interrupted and its Run retries on a new Attempt. Restoring an older backup also restores its older deduplication ledger, so work performed after that backup can run again.
 
 From the instance folder, export one Run into a local JSON file:
 

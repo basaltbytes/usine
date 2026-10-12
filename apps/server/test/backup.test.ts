@@ -39,6 +39,23 @@ const runBackup = (directory: string, output: string) =>
 // budget exceeds the spawn budget so a slow CLI fails with the spawn's own diagnostics.
 const slowCli = { timeout: 30_000 };
 
+/** Opens `filename` in WAL mode, as the orchestrator does, and keeps `value` in its WAL. */
+const openWithUncheckpointedRow = (filename: string, value: number) => {
+  const database = new DatabaseSync(filename);
+  database.exec("PRAGMA journal_mode = WAL; PRAGMA wal_autocheckpoint = 0");
+  database.exec(`CREATE TABLE evidence (value); INSERT INTO evidence VALUES (${value})`);
+  return database;
+};
+
+const evidence = (filename: string) => {
+  const database = new DatabaseSync(filename, { readOnly: true });
+  try {
+    return database.prepare("SELECT value FROM evidence").all();
+  } finally {
+    database.close();
+  }
+};
+
 test.for([
   { kind: "missing", reason: /NotFound/ },
   { kind: "corrupt", reason: /not a database/ },
@@ -49,7 +66,11 @@ test.for([
   async ({ kind, reason }, { directory }) => {
     const runtime = join(directory, ".usine");
     const filename = join(runtime, "runtime.sqlite");
-    if (kind !== "missing") await mkdir(runtime);
+    if (kind !== "missing") {
+      await mkdir(runtime);
+      // The durable storage copies first; the failed runtime copy must take it back out.
+      openWithUncheckpointedRow(join(runtime, "durable.sqlite"), 176).close();
+    }
     if (kind === "directory") await mkdir(filename);
     if (kind === "corrupt") await writeFile(filename, "not SQLite");
     const originalEntries = await readdir(directory);
@@ -64,6 +85,34 @@ test.for([
     assert.deepStrictEqual(await readdir(directory), originalEntries);
     if (kind === "missing") await expect(stat(runtime)).rejects.toMatchObject({ code: "ENOENT" });
     if (kind === "corrupt") assert.strictEqual(await readFile(filename, "utf8"), "not SQLite");
+  },
+);
+
+test(
+  "copies the runtime and durable stores while both are open",
+  slowCli,
+  async ({ directory }) => {
+    const runtime = join(directory, ".usine");
+    await mkdir(runtime);
+    const open = [
+      openWithUncheckpointedRow(join(runtime, "runtime.sqlite"), 183),
+      openWithUncheckpointedRow(join(runtime, "durable.sqlite"), 176),
+    ];
+    try {
+      const output = join(directory, "backup.sqlite");
+
+      const result = runBackup(directory, output);
+
+      assert.strictEqual(result.status, 0, result.stderr);
+      const durable = join(directory, "backup.durable.sqlite");
+      assert.include(result.stdout, output);
+      assert.include(result.stdout, durable);
+      assert.deepStrictEqual(evidence(output), [{ value: 183 }]);
+      assert.deepStrictEqual(evidence(durable), [{ value: 176 }]);
+      assert.strictEqual((await stat(durable)).mode & 0o777, 0o600);
+    } finally {
+      for (const database of open) database.close();
+    }
   },
 );
 
