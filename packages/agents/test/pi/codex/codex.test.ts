@@ -122,7 +122,9 @@ describe("Codex child backend", () => {
         const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
         const idle = yield* Queue.make<void>();
         const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
-        const responses = successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]);
+        const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+          { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+        ]);
         let turns = 0;
         let closes = 0;
         let pauseRefused = false;
@@ -349,7 +351,16 @@ describe("Codex child backend", () => {
         );
         assert.strictEqual(events.filter((event) => event._tag === "TextOutput").length, 1);
         const thread = calls.find(({ method }) => method === "thread/start")?.params;
-        assert(Schema.is(Schema.Struct({ approvalPolicy: Schema.String }))(thread));
+        assert(
+          Schema.is(
+            Schema.Struct({
+              approvalPolicy: Schema.String,
+              sandbox: Schema.String,
+              allowProviderModelFallback: Schema.Boolean,
+              ephemeral: Schema.Boolean,
+            }),
+          )(thread),
+        );
         assert.strictEqual(thread.approvalPolicy, "never");
         assert.strictEqual(thread.sandbox, "danger-full-access");
         assert.strictEqual(thread.allowProviderModelFallback, false);
