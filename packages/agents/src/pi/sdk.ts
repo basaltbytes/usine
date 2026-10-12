@@ -1,3 +1,4 @@
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import {
   type BashSpawnHook,
   createAgentSession,
@@ -21,7 +22,6 @@ import {
   resolvePiPool,
   splitPiModel,
 } from "./authentication.ts";
-import { supportedThinkingLevels } from "./thinking.ts";
 
 export type PiSessionEvent = AgentSessionEvent;
 export type PiMessage = Awaited<
@@ -146,7 +146,7 @@ export const piSdkLive = Layer.succeed(PiSdk)({
       const active = session.model;
       if (active === undefined) throw new Error("Pi started without an active model");
       const model = ModelId.make(`${active.provider}/${active.id}`);
-      const supported = supportedThinkingLevels(active);
+      const supported = getSupportedThinkingLevels(active);
       if (!supported.includes(options.thinkingLevel)) {
         return { _tag: "UnsupportedEffort", effort: options.thinkingLevel, model, supported };
       }
