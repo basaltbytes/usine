@@ -45,7 +45,7 @@ export interface DurableCheckout {
   readonly environment: Record<string, string>;
   /** Collects the commits and pull requests the checkout holds. */
   readonly harvest: Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
-  /** Leaves the checkout in place when this process stops while the parent task stays live. */
+  /** Preserves the checkout when a restart needs to reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;
 }
 
@@ -174,9 +174,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       yield* runtime.recordResult(attemptId, result).pipe(
         Effect.tapError((error) =>
           Effect.logWarning(
-            "Could not record the Attempt's result in durable storage; a restart before the Run records it harvests the checkout again",
+            "Could not record the Attempt's result in durable storage; preserving the checkout for reattachment",
             { attemptId, errorTag: error._tag, message: error.message },
-          ),
+          ).pipe(Effect.andThen(checkout.keepForReattach)),
         ),
         Effect.ignore,
       );

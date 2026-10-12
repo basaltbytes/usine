@@ -67,8 +67,8 @@ export interface ProvisionedWorktree {
   /** Installs durable recording before launch; cleanup keeps unrecorded salvage on disk. */
   readonly recordSalvage: (record: AttemptChannel.Sink["salvage"]) => Effect.Effect<void>;
   /**
-   * Leaves the checkout untouched when the scope closes without success: the
-   * Attempt's parent task outlives this process and reattaches to it after a restart.
+   * Leaves the checkout untouched when the scope closes: a restart needs it
+   * to reattach the parent task or repeat a harvest whose result was not stored.
    */
   readonly keepForReattach: Effect.Effect<void>;
 }
@@ -113,7 +113,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
   const recorder = yield* Ref.make(Option.none<AttemptChannel.Sink["salvage"]>());
   const cleanup = cleanupFor(options);
   const kept = yield* Ref.make(false);
-  // The exit is the Attempt's: a success exit means the Attempt delivered its result.
+  // A successful launch can still require its checkout if durable result recording failed.
   yield* Effect.addFinalizer(
     Effect.fn("Executor.releaseWorktree")(function* (exit) {
       yield* Effect.annotateCurrentSpan({
@@ -122,7 +122,7 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
         repository: request.repository,
         host: options.host,
       });
-      if (!Exit.isSuccess(exit) && (yield* Ref.get(kept))) {
+      if (yield* Ref.get(kept)) {
         yield* Deferred.succeed(salvaged, Option.none());
         yield* Effect.logInfo("Leaving the checkout in place for the Attempt's reattachment", {
           attemptId: request.attemptId,
