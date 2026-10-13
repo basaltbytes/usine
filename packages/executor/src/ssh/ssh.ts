@@ -78,7 +78,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       harnessProbe,
       repositoryUrl: (repository) => `https://github.com/${repository}.git`,
       grantFor,
-      reclaim: (worker) => credentials.reclaim(worker),
+      reclaim: credentials.reclaim,
       // The grace covers an SSH round trip plus the agent flushing its final
       // events, not just a local pipe.
       interruptGrace: options.interruptGrace ?? "10 seconds",

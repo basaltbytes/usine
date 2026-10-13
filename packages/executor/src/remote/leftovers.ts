@@ -21,14 +21,14 @@ interface WorkerLeftovers<M extends RemoteMachine> {
 export const workerLeftoversFor = <M extends RemoteMachine, E>(
   commands: RemoteCommands,
   machineFor: (worker: WorkerName) => Effect.Effect<M, E>,
-  reclaim: (worker: WorkerName, machine: M) => Effect.Effect<void>,
+  reclaim: (worker: WorkerName) => Effect.Effect<void>,
 ) =>
   listedOncePerWorker(
     Effect.fn("RemoteExecutor.listWorkerLeftovers")(function* (worker: WorkerName) {
       const machine = yield* machineFor(worker);
       const host = machine.shell.destination;
       yield* Effect.annotateCurrentSpan({ worker, host });
-      yield* reclaim(worker, machine);
+      yield* reclaim(worker);
       const checkouts = new Set(
         yield* attemptPathsOn(
           commands,

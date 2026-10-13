@@ -64,8 +64,8 @@ export interface RemoteWorker<M extends RemoteMachine> {
   readonly grantFor: (
     repository: RepositoryName,
   ) => Effect.Effect<RemoteGrant<M>, CredentialUnavailableError>;
-  /** Removes what earlier processes left on the machine that no Attempt can still use; runs before its checkouts are listed. */
-  readonly reclaim: (worker: WorkerName, machine: M) => Effect.Effect<void>;
+  /** Removes what earlier processes left on the Worker's machine that no Attempt can still use; runs before its checkouts are listed. */
+  readonly reclaim: (worker: WorkerName) => Effect.Effect<void>;
   /** Grace for the parent task's cancellation, then for the Attempt to settle. */
   readonly interruptGrace: Parameters<typeof Effect.timeoutOption>[1];
 }
