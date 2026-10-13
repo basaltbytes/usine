@@ -143,6 +143,18 @@ _Avoid_: log, session history, output
 The executor's verify-only readiness check of a Worker: toolchain, each rostered harness and its login where the Worker runs children, and attached credentials, failing with typed capability errors. It never installs; making a Worker ready is out-of-band.
 _Avoid_: bootstrap, provisioning (that's the out-of-band act), health check
 
+**Gateway**:
+The host in front of Worker VMs that have no public address: their SSH bastion and resolver, the proxy that adds GitHub and LLM credentials to their requests, and the forward proxy to an allowlist of package hosts. A Worker behind it has no token and reaches nothing else (ADR 0027).
+_Avoid_: edge, NAT, firewall (it is one of the gateway's parts)
+
+**Attachment**:
+One Attempt's installation token, given to the Gateway by the executor for one Worker and one repository, in force until the token expires or the Attempt's cleanup detaches it.
+_Avoid_: grant (exe.dev's term for its own), integration, binding
+
+**Caller token**:
+What an Attempt's children send to the Gateway in place of a credential. It names the Worker and the repository and is honored only while that Attachment is in force.
+_Avoid_: API key, placeholder (the role it plays for a harness, not what it is)
+
 **Agent**:
 A named member of the factory's team — a persona with standing instructions plus the brain spec that runs it (harness, model, reasoning effort). Defined as a file in the instance repo, filename as identity; every loop names the agent that owns its runs.
 _Avoid_: profile, bot, teammate, persona (the body text is the persona; the entity is the Agent)

@@ -1,0 +1,36 @@
+# Hosts Worker VMs may reach through the gateway's forward proxy.
+# One rule per line: a host name, or *. and a domain for its subdomains,
+# optionally followed by :port. Without a port a rule permits 443 and 80.
+# github.com is not listed: GitHub is served by git.<domain>, where the
+# gateway decides which repository a Worker may reach.
+
+# npm
+registry.npmjs.org
+
+# PyPI
+pypi.org
+files.pythonhosted.org
+
+# crates.io
+index.crates.io
+static.crates.io
+crates.io
+static.rust-lang.org
+
+# Go module proxy and checksum database
+proxy.golang.org
+sum.golang.org
+
+# GitHub release assets and archives, read only
+objects.githubusercontent.com
+release-assets.githubusercontent.com
+codeload.github.com
+cli.github.com
+
+# Debian packages
+deb.debian.org
+security.debian.org
+mirror.hetzner.com
+
+# Node.js releases
+nodejs.org
