@@ -37,6 +37,6 @@ export interface SshExecutorOptions {
 
 /** An SSH Worker's machine with the child host every command and child reaches it through. */
 export interface SshMachine extends RemoteMachine {
-  readonly worker: WorkerName;
+  /** The Worker's address in `usine.yaml`, for preflight to check its root. */
   readonly address: SshWorkerAddress;
 }

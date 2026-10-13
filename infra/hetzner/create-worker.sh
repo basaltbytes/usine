@@ -81,10 +81,10 @@ address=$(hcloud server ip "$name")
 cat <<EOF
 Created server $name ($server_type, $image, $location) at $address.
 
-cloud-init installs the toolchain in a few minutes. Connect once to record the
+cloud-init installs the toolchain in a minute or two. Connect once to record the
 host key and wait for it to finish:
 
-  ssh usine@$address cloud-init status --wait
+  ssh -i ${public_key_file%.pub} usine@$address cloud-init status --wait
 
 Then log in to the harnesses as the usine user and add the Worker to usine.yaml
 (see infra/hetzner/README.md).

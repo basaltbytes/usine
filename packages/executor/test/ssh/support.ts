@@ -90,7 +90,7 @@ const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
   });
 };
 
-/** The single remote command line an SSH invocation carries after `--`. */
+/** The single remote command line an SSH invocation passes after `--`. */
 const remoteLine = (command: StandardCommand): string => {
   const separator = command.args.indexOf("--");
   return separator < 0 ? "" : (command.args[separator + 1] ?? "");
@@ -204,7 +204,7 @@ export const fakeMachine = () => {
 };
 
 /** Mints a distinct one-hour token on each request, as the GitHub App does. */
-export const mintingProvider = () => {
+export const mintingProvider = (lifetimeMillis = 3_600_000) => {
   const minted: Array<string> = [];
   const layer = Layer.succeed(CredentialProvider)({
     issue: () =>
@@ -213,7 +213,7 @@ export const mintingProvider = () => {
         minted.push(token);
         return new WorkerCredential({
           value: Redacted.make(token),
-          expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + 3_600_000),
+          expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + lifetimeMillis),
         });
       }),
   });
@@ -249,6 +249,8 @@ export const runtime = (
   machine: ReturnType<typeof fakeMachine>,
   credentials: ReturnType<typeof mintingProvider>,
   parent: StubParent = completes,
+  /** Build again on the same storage to simulate an orchestrator restart. */
+  storage: StubStorage = new StubStorage(),
 ) =>
   sshLayer({
     workers: [
@@ -264,5 +266,5 @@ export const runtime = (
   }).pipe(
     Layer.provide(machine.layer),
     Layer.provide(credentials.layer),
-    Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+    Layer.provide(stubAttemptRuntime(storage, parent)),
   );

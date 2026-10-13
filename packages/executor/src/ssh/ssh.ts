@@ -37,7 +37,6 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       options.workers.map((address): [WorkerName, SshMachine] => [
         address.name,
         {
-          worker: address.name,
           address,
           shell: commands.shellFor(sshCommandFor(base, address), address.destination),
           workerDirectory: `${address.root}/workers/${safeSegment(address.name)}`,

@@ -36,7 +36,7 @@ result reaches the engine through `Sink.salvage`. A failed push keeps the worktr
 on disk and reports its path and the failure: git's exit code followed by git's own
 stderr, so a deleted remote reads differently from a revoked App; a push that stalls
 past two minutes is named as such. The local and SSH adapters scrub the Attempt's token
-from that stderr first, and an exe.dev VM never holds one. The startup sweep leaves such a
+from that stderr first, and an exe.dev VM never receives one. The startup sweep leaves such a
 worktree alone. Every later startup retries the salvage with fresh credentials, for
 open and closed Runs alike, and rewrites the record from `Retained` to `Pushed` once
 the push succeeds; until then the record carries the latest failure for the run
@@ -131,7 +131,7 @@ Salvage inspection, staging, or snapshot failures retain the checkout, including
 
 Preflight changes nothing on the machine. It checks that SSH reaches it, that the root is a writable directory, that Git runs, and the roster's harnesses where the children run.
 
-Prepare mints the Attempt's single-repository token through the `CredentialProvider`, writes it into `<root>/workers/<name>/credentials/<attempt>` with a gh `hosts.yml`, and fetches the bare cached clone from `https://github.com/<repository>.git` with git's credential helper reading that token file. The token travels on the standard input of shell builtins, so it never appears in a command line, a process environment, or a log, and git and gh output is scrubbed of it. Children, harvesting, and the salvage push export the same file paths, so the token renewed before each expiry reaches them all. Cleanup stops the Attempt's children, removes the checkout, then removes the credential directory. The first use of a Worker by a process, for an Attempt or for startup reconciliation, removes the credentials an earlier process left; a reattached Attempt receives a fresh one.
+Prepare mints the Attempt's single-repository token through the `CredentialProvider`, writes it into `<root>/workers/<name>/credentials/<attempt>` with a gh `hosts.yml`, and fetches the bare cached clone from `https://github.com/<repository>.git` with git's credential helper reading that token file. The token reaches the machine on the standard input of the command that writes it, so it never appears in a command line, a process environment, or a log, and git and gh output is scrubbed of it. Each git and harvesting command renews the token first when it expires within five minutes, as on the local Worker. Children, harvesting, and the salvage push export the same file paths, so the token renewed before each expiry reaches them all. Cleanup stops the Attempt's children, removes the checkout, then removes the credential directory. The first use of a Worker by a process, for an Attempt or for startup reconciliation, removes the credentials an earlier process left; a reattached Attempt receives a fresh one.
 
 Children, pid files, the kill script, sweeps, salvage, recovery, and reattachment are the exe.dev Worker's, through the same shared code.
 

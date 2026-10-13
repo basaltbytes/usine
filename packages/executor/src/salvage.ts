@@ -39,7 +39,7 @@ const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
  * with code 128` and keeps git's stderr in its cause, which is what tells a
  * deleted remote from a revoked App. The local and SSH adapters scrub the
  * Attempt's token from that stderr before forming the error; an exe.dev VM
- * never holds one.
+ * never receives one.
  */
 const failureMessage = (failure: Error): string => {
   const detail = failure.cause instanceof Error ? failure.cause.message.trim() : "";

@@ -70,6 +70,19 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       });
     });
 
+    /** Runs git on the machine with the Attempt's repository access, renewed first when it is about to expire. */
+    const accessGit =
+      (operation: ExecutorOperation, machine: M, access: RemoteAccess) =>
+      (args: ReadonlyArray<string>) =>
+        access.refresh.pipe(
+          Effect.andThen(
+            commands.run(operation, machine.shell, "git", args, {
+              environment: access.gitEnvironment,
+              scrub: access.scrub,
+            }),
+          ),
+        );
+
     const recover = Effect.fn(span("recover"))(function* <E>(
       attempt: AttemptRecovery,
       record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
@@ -89,7 +102,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           new Error(inspected.stderr),
         );
       const reconcile = (
-        git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorOperationError>,
+        git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorError>,
       ) =>
         recoverWorktree(
           {
@@ -116,24 +129,23 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             "cleanup",
           );
           yield* stopChildren("cleanup", machine, worktree);
-          yield* reconcile((args) =>
-            commands.run("cleanup", machine.shell, "git", args, {
-              environment: access.gitEnvironment,
-              scrub: access.scrub,
-            }),
-          );
+          yield* reconcile(accessGit("cleanup", machine, access));
         }),
       );
     });
 
     const harvest = (workspace: AttemptWorkspace, machine: M, access: RemoteAccess) =>
       harvestFacts(workspace.spec, (command, args) =>
-        commands
-          .run("launch", machine.shell, command, args, {
-            cwd: workspace.worktree,
-            environment: access.environment,
-            scrub: access.scrub,
-          })
+        access.refresh
+          .pipe(
+            Effect.andThen(
+              commands.run("launch", machine.shell, command, args, {
+                cwd: workspace.worktree,
+                environment: access.environment,
+                scrub: access.scrub,
+              }),
+            ),
+          )
           .pipe(
             Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
           ),
@@ -185,7 +197,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       machine: M,
       access: RemoteAccess,
       layout: { readonly cache: string; readonly staging: string },
-    ): WorkspaceOps<ExecutorOperationError> => ({
+    ): WorkspaceOps<ExecutorError> => ({
       ensureRoots: Effect.asVoid(
         commands.run("prepare", machine.shell, "mkdir", [
           "-p",
@@ -210,11 +222,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       promoteStaging: Effect.asVoid(
         commands.run("prepare", machine.shell, "mv", [layout.staging, layout.cache]),
       ),
-      git: (operation, args) =>
-        commands.run(operation, machine.shell, "git", args, {
-          environment: access.gitEnvironment,
-          scrub: access.scrub,
-        }),
+      git: (operation, args) => accessGit(operation, machine, access)(args),
     });
 
     const prepare = Effect.fn(span("prepare"))(function* (request: CheckoutRequest) {

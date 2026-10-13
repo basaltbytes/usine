@@ -91,6 +91,10 @@ export const DEFAULT_SSH: SshCommand = {
 
 const encoder = new TextEncoder();
 
+/**
+ * The command runner every remote Worker kind uses, bound to this process's
+ * spawner and to the allowlisted environment its SSH clients inherit.
+ */
 export const remoteCommandsFor = Effect.gen(function* () {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const environment = yield* allowlistedEnvironment(SSH_ENVIRONMENT_ALLOWLIST);

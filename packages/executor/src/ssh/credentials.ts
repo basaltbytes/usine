@@ -2,7 +2,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { Cache, Effect, Redacted } from "effect";
-import { credentialEnvironment, ghHostsConfig } from "../credential-environment.ts";
+import { credentialEnvironment, GH_CONFIG, ghHostsConfig } from "../credential-environment.ts";
 import { CredentialProvider, type ExecutorError, type ExecutorOperation } from "../executor.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import type { RemoteAccess } from "../remote/machine.ts";
@@ -10,23 +10,24 @@ import { renewableCredential } from "../renewable-credential.ts";
 import type { SshMachine } from "./model.ts";
 
 /**
- * Writes the Attempt's credential directory `$2` inside the credentials root
- * `$1` from standard input: the token on the first line, gh's `hosts.yml`
- * after it. Both directories get mode 700 even when they already exist. Only
- * shell builtins see the token, so it never appears in a process's arguments
- * on the machine, and renames keep readers from seeing a partly written file.
+ * Writes the Attempt's credential directory `$3` inside the credentials root
+ * `$2`: the token from the first line of standard input, gh's `hosts.yml`
+ * from the rest of it, and gh's `config.yml` from `$1`. Both directories get
+ * mode 700 even when they already exist. The token arrives on standard input,
+ * so it never appears in a process's arguments or environment on the machine,
+ * and renames keep readers from seeing a partly written file.
  */
 const WRITE_CREDENTIAL_SCRIPT = String.raw`
 set -e
 umask 077
-mkdir -p "$1" "$2"
-chmod 700 "$1" "$2"
+mkdir -p "$2" "$3"
+chmod 700 "$2" "$3"
 IFS= read -r token
-printf '%s' "$token" > "$2/token.next"
-cat > "$2/hosts.next"
-test -f "$2/config.yml" || printf 'version: "1"\n' > "$2/config.yml"
-mv "$2/token.next" "$2/token"
-mv "$2/hosts.next" "$2/hosts.yml"
+printf '%s' "$token" > "$3/token.next"
+cat > "$3/hosts.next"
+test -f "$3/config.yml" || printf '%s' "$1" > "$3/config.yml"
+mv "$3/token.next" "$3/token"
+mv "$3/hosts.next" "$3/hosts.yml"
 `.trim();
 
 /** Where an SSH Worker keeps the credential directory of each Attempt it runs. */
@@ -92,7 +93,7 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
           operation,
           machine.shell,
           "sh",
-          ["-c", WRITE_CREDENTIAL_SCRIPT, "sh", credentialsRoot(machine), directory],
+          ["-c", WRITE_CREDENTIAL_SCRIPT, "sh", GH_CONFIG, credentialsRoot(machine), directory],
           payload,
         )
         .pipe(Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(payload))));
@@ -138,6 +139,7 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
     return {
       environment,
       gitEnvironment: environment,
+      refresh: credential.refresh(),
       scrub: credential.scrub,
     } satisfies RemoteAccess;
   });

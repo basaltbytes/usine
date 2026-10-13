@@ -22,6 +22,8 @@ export interface RemoteAccess {
   readonly environment: Readonly<Record<string, string>>;
   /** Exported for the executor's own git commands on the Attempt's checkout: clone, fetch, salvage push. */
   readonly gitEnvironment: Readonly<Record<string, string>>;
+  /** Renews the credential on the machine when it expires within minutes; runs before each git and harvesting command. */
+  readonly refresh: Effect.Effect<void, ExecutorError>;
   /** Removes every credential this process issued for the Attempt from a command's output. */
   readonly scrub: (text: string) => string;
 }
@@ -39,11 +41,13 @@ export interface RemoteGrant<M extends RemoteMachine> {
 
 /** What a remote Worker kind supplies to the executor that runs its Attempts over SSH. */
 export interface RemoteWorker<M extends RemoteMachine> {
+  /** The Worker kind the executor reports as `Executor.kind`; the scheduler refuses Workers of any other kind. */
   readonly kind: WorkerKind;
   /** Prefixes the executor's span names, such as `ExeDevExecutor`. */
   readonly spanPrefix: string;
   /** Names the Worker kind in log messages and errors, such as `exe.dev`. */
   readonly label: string;
+  /** Runs every command on the Worker's machines over SSH. */
   readonly commands: RemoteCommands;
   /** Resolves the machine a Worker runs on; a missing or unreachable machine keeps its typed error. */
   readonly machineFor: (worker: WorkerName) => Effect.Effect<M, ExecutorError>;

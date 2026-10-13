@@ -22,6 +22,7 @@ const EDGE_GITHUB_HOST = "github.int.exe.xyz";
 const EDGE_ACCESS: RemoteAccess = {
   environment: { GH_HOST: EDGE_GITHUB_HOST },
   gitEnvironment: {},
+  refresh: Effect.void,
   scrub: (text) => text,
 };
 

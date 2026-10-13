@@ -3,11 +3,11 @@ import { RemoteShell } from "@usine/agents/child-host";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
-import { completes, type StubParent } from "@usine/durable/testing";
-import { Cause, Effect, Exit, Logger } from "effect";
+import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
+import { Cause, Deferred, Effect, Exit, Fiber, Logger } from "effect";
 import { TestClock } from "effect/testing";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../src/remote/commands.ts";
-import { Executor } from "../../src/executor.ts";
+import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
   CREDENTIALS,
   DESTINATION,
@@ -128,13 +128,31 @@ describe("SSH Worker", () => {
       assert.strictEqual(
         machine.state.credentials.get(CREDENTIALS),
         credentials.minted.at(-1),
-        "the machine holds the token minted last",
+        "the machine has the token minted last",
       );
       yield* prepared.launch({ append: () => Effect.void, salvage: () => Effect.void });
       const released = machine.state.calls.length;
       yield* TestClock.adjust("2 hours");
       assert.strictEqual(machine.state.calls.length, released);
       assert.strictEqual(machine.state.credentials.size, 0);
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
+  });
+
+  it.effect("renews a token about to expire before git uses it", () => {
+    const machine = fakeMachine();
+    // Every token expires within the renewal window, so each git command must renew first.
+    const credentials = mintingProvider(60_000);
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.prepare(request);
+      const lines = machine.state.calls.map(({ line }) => line);
+      const clone = lines.findIndex((line) => line.includes("'clone'"));
+      assert(lines.slice(0, clone).filter(writesCredential).length >= 2);
+      assert.strictEqual(
+        machine.state.credentials.get(CREDENTIALS),
+        credentials.minted.at(-1),
+        "git authenticates with the token minted last",
+      );
     }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
   });
 
@@ -197,6 +215,54 @@ describe("SSH Worker", () => {
         assert.strictEqual(machine.state.credentials.size, 0);
         assert.strictEqual(credentials.minted.length, 1);
       }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
+    },
+  );
+
+  it.effect(
+    "reattaches after a restart with a fresh credential, removing the earlier one first",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const storage = new StubStorage();
+      const sink = { append: () => Effect.void, salvage: () => Effect.void };
+      return Effect.gen(function* () {
+        const started = yield* Deferred.make<void>();
+        const working: StubParent = () =>
+          Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const launch = yield* (yield* executor.prepare(request))
+            .launch(sink)
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(started);
+          yield* Fiber.interrupt(launch);
+        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, working, storage)));
+        assert.strictEqual(
+          machine.state.credentials.size,
+          0,
+          "a stopping process keeps the checkout but removes the credential",
+        );
+        // A process that crashed instead would have left its token behind.
+        machine.state.credentials.set(CREDENTIALS, credentials.minted[0] ?? "");
+
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          assert.isTrue(yield* executor.isLive(request.attemptId));
+          const before = machine.state.calls.length;
+          const prepared = yield* executor.prepare(
+            new CheckoutRequest({ ...request, reattach: true }),
+          );
+          const lines = machine.state.calls.slice(before).map(({ line }) => line);
+          const stale = lines.indexOf(`exec 'rm' '-rf' '${WORKER_ROOT}/credentials'`);
+          assert(stale >= 0 && stale < lines.findIndex(writesCredential));
+          assert(
+            !lines.some((line) => line.includes("'clone'") || line.includes("'worktree' 'add'")),
+          );
+          assert.strictEqual(machine.state.credentials.get(CREDENTIALS), `${TOKEN_PREFIX}2`);
+          yield* prepared.launch(sink);
+        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, completes, storage)));
+        assert.strictEqual(machine.state.credentials.size, 0);
+      });
     },
   );
 
