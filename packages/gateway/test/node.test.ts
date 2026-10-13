@@ -1,10 +1,12 @@
-import { request } from "node:http";
+import { createServer, request } from "node:http";
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Effect, Layer, Redacted } from "effect";
+import { DateTime, Deferred, Effect, Layer, Logger, Predicate, Redacted } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { AttachRequest, GatewayAdminApi } from "../src/admin/api.ts";
 import { AnonymousCredential } from "../src/attachment/attachment.ts";
+import { CallerTokens } from "../src/caller/caller.ts";
+import { serveEgressProxy } from "../src/node/egress-proxy.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../src/node/node.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
 
@@ -141,6 +143,58 @@ describe("the Node gateway", () => {
           reason: "host-not-allowed",
         });
       }).pipe(Effect.provide(gateway)),
+  );
+
+  it.live("closes the downstream and logs a failure when an upstream body is truncated", () =>
+    Effect.gen(function* () {
+      const failed = yield* Deferred.make<void>();
+      const logs = Logger.layer([
+        Logger.make(({ message }) => {
+          if (JSON.stringify(message).includes('"error":"Unreachable"'))
+            Deferred.doneUnsafe(failed, Effect.void);
+        }),
+      ]);
+      const upstream = createServer((_request, response) => {
+        response.writeHead(200, { "content-length": "100" });
+        response.write("partial", () => response.destroy());
+      });
+      yield* Effect.acquireRelease(
+        Effect.callback<void>((resume) => {
+          upstream.listen(0, "127.0.0.1", () => resume(Effect.void));
+        }),
+        () =>
+          Effect.sync(() => {
+            upstream.closeAllConnections();
+            upstream.close();
+          }),
+      );
+      const address = upstream.address();
+      assert(address !== null && !Predicate.isString(address));
+      const proxy = yield* serveEgressProxy(LOOPBACK, {
+        host: "127.0.0.1",
+        port: address.port,
+      }).pipe(Effect.provide(logs));
+      const completed = yield* Effect.callback<boolean>((resume) => {
+        const outgoing = request(
+          { host: proxy.host, port: proxy.port, path: "http://git.gw.test/partial" },
+          (response) => {
+            // A truncated response emits an error before close; assert the incomplete body below.
+            response.on("error", () => {});
+            response.once("close", () => resume(Effect.succeed(response.complete)));
+            response.resume();
+          },
+        );
+        outgoing.once("error", (error) => resume(Effect.die(error)));
+        outgoing.end();
+        return Effect.sync(() => outgoing.destroy());
+      }).pipe(Effect.timeout("1 second"));
+      assert.isFalse(completed);
+      yield* Deferred.await(failed).pipe(Effect.timeout("1 second"));
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(CallerTokens.layer),
+      Effect.provide(settingsLayer(NO_PROVIDERS)),
+    ),
   );
 
   it.live(

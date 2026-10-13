@@ -59,7 +59,7 @@ export class EgressProxyListenError extends Schema.TaggedError<EgressProxyListen
   { host: Schema.String, port: Schema.Int, message: Schema.String },
 ) {}
 
-/** The upstream connection could not be opened. */
+/** The upstream connection could not be opened or its response did not finish. */
 class Unreachable extends Schema.TaggedError<Unreachable>()("Unreachable", {
   host: Schema.String,
   port: Schema.Int,
@@ -314,6 +314,14 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
       ),
       Effect.flatMap(({ target, headers }) =>
         Effect.callback<number, Unreachable>((resume) => {
+          const fail = (error: Error) => {
+            if (response.headersSent) response.destroy();
+            else {
+              response.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+              response.end();
+            }
+            resume(Effect.fail(new Unreachable({ host, port, message: error.message })));
+          };
           const outgoing = httpRequest(
             {
               host: target.address,
@@ -328,16 +336,15 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
               response.writeHead(status, {
                 ...endToEndHeaders(Headers.fromInput(incoming.headers)),
               });
-              incoming.pipe(response);
+              incoming.once("error", fail);
+              incoming.once("close", () => {
+                if (!incoming.complete) fail(new Error("The upstream response ended prematurely"));
+              });
               incoming.once("end", () => resume(Effect.succeed(status)));
+              incoming.pipe(response);
             },
           );
-          outgoing.once("error", (error) => {
-            if (!response.headersSent)
-              response.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
-            response.end();
-            resume(Effect.fail(new Unreachable({ host, port, message: error.message })));
-          });
+          outgoing.once("error", fail);
           request.pipe(outgoing);
           return Effect.sync(() => outgoing.destroy());
         }).pipe(Effect.map((status) => ({ status, kind: target.kind }))),
