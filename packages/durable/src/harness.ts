@@ -90,12 +90,14 @@ const isPoisoned = (cause: unknown): boolean =>
 const REPORT_LOG_INTERVAL_MILLIS = 5_000;
 
 /**
- * Reports of one failure with no commit adopted between them that mean
+ * How many reports of one failure, with no commit adopted between them, mean
  * pi-durable keeps retrying a step that cannot succeed. Its scheduler retries
  * such a step at once, in microtasks, so until the harness closes the process
- * runs no timer and no I/O.
+ * runs no timer and no I/O. Provide another value to change it.
  */
-const STUCK_REPORTS = 1_000;
+export const StuckStepReports = Context.Reference<number>("@usine/durable/StuckStepReports", {
+  defaultValue: () => 1_000,
+});
 
 /** A harness opened in place of a stuck one that gets stuck within this time is stopped instead of reopened. */
 const STUCK_AGAIN_MILLIS = 60_000;
@@ -148,6 +150,7 @@ type ReopenReason = "poisoned" | "stuck";
 const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarnessOptions) {
   const services = yield* Effect.context<never>();
   const fork = Effect.runForkWith(services);
+  const stuckStepReports = yield* StuckStepReports;
   const scope = yield* Effect.scope;
   const registry = createRegistry();
   const listeners = new Set<HarnessListener>();
@@ -319,7 +322,7 @@ const make = Effect.fn("DurableHarness.make")(function* (options: DurableHarness
       }
     }
     if (isPoisoned(cause)) requestReopen(generation, cause, "poisoned");
-    else if ((repeats?.count ?? 1) >= STUCK_REPORTS) stuck(generation, cause);
+    else if ((repeats?.count ?? 1) >= stuckStepReports) stuck(generation, cause);
   }
 
   /** Fails with the reason the harness stopped, if it has. */
