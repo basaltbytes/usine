@@ -10,21 +10,23 @@ import { renewableCredential } from "../renewable-credential.ts";
 import type { SshMachine } from "./model.ts";
 
 /**
- * Writes the Attempt's credential directory `$1` from standard input: the
- * token on the first line, gh's `hosts.yml` after it. Only shell builtins see
- * the token, so it never appears in a process's arguments on the machine, and
- * renames keep readers from seeing a partly written file.
+ * Writes the Attempt's credential directory `$2` inside the credentials root
+ * `$1` from standard input: the token on the first line, gh's `hosts.yml`
+ * after it. Both directories get mode 700 even when they already exist. Only
+ * shell builtins see the token, so it never appears in a process's arguments
+ * on the machine, and renames keep readers from seeing a partly written file.
  */
 const WRITE_CREDENTIAL_SCRIPT = String.raw`
 set -e
 umask 077
-mkdir -p "$1"
+mkdir -p "$1" "$2"
+chmod 700 "$1" "$2"
 IFS= read -r token
-printf '%s' "$token" > "$1/token.next"
-cat > "$1/hosts.next"
-test -f "$1/config.yml" || printf 'version: "1"\n' > "$1/config.yml"
-mv "$1/token.next" "$1/token"
-mv "$1/hosts.next" "$1/hosts.yml"
+printf '%s' "$token" > "$2/token.next"
+cat > "$2/hosts.next"
+test -f "$2/config.yml" || printf 'version: "1"\n' > "$2/config.yml"
+mv "$2/token.next" "$2/token"
+mv "$2/hosts.next" "$2/hosts.yml"
 `.trim();
 
 /** Where an SSH Worker keeps the credential directory of each Attempt it runs. */
@@ -32,11 +34,12 @@ const credentialsRoot = (machine: SshMachine): string => `${machine.workerDirect
 
 /**
  * Gives each Attempt the single-repository token the orchestrator mints, in a
- * private directory on the Worker's machine beside its checkouts, renewed
- * before it expires and removed when the Attempt's scope closes. The first use
- * of each Worker in this process removes every credential an earlier process
- * left there: no Attempt can still use one, because a reattached Attempt is
- * given a fresh credential.
+ * directory beside the Worker's checkouts that only the SSH user can read,
+ * renewed before it expires and removed when the Attempt's scope closes.
+ * Every Attempt on the Worker runs as that user, so each can read the others'
+ * tokens while they run (ADR 0026). The first use of each Worker in this
+ * process removes every credential an earlier process left there: no Attempt
+ * can still use one, because a reattached Attempt is given a fresh credential.
  */
 export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(function* (
   commands: RemoteCommands,
@@ -89,7 +92,7 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
           operation,
           machine.shell,
           "sh",
-          ["-c", WRITE_CREDENTIAL_SCRIPT, "sh", directory],
+          ["-c", WRITE_CREDENTIAL_SCRIPT, "sh", credentialsRoot(machine), directory],
           payload,
         )
         .pipe(Effect.ensuring(Effect.sync(() => Redacted.wipeUnsafe(payload))));

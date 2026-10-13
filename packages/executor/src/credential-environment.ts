@@ -9,7 +9,7 @@ export const GH_CONFIG = 'version: "1"\n';
  * The variables that give an Attempt's processes its repository credential,
  * kept in `directory` outside its checkout: git asks the credential helper,
  * which reads the `token` file on each authentication, and gh reads the
- * `hosts.yml` in its private `GH_CONFIG_DIR` on each invocation. Renewing the
+ * `hosts.yml` in its own `GH_CONFIG_DIR` on each invocation. Renewing the
  * files is enough; no expiring token is frozen in a child's environment.
  */
 export const credentialEnvironment = (directory: string) =>

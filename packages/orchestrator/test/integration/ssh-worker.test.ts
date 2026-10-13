@@ -181,7 +181,14 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
             const credentials = request.environment.GH_CONFIG_DIR ?? "";
             observed.credentialModes = yield* succeeds(host, {
               command: "stat",
-              args: ["-c", "%a", credentials, `${credentials}/token`, `${credentials}/hosts.yml`],
+              args: [
+                "-c",
+                "%a",
+                `${credentials}/..`,
+                credentials,
+                `${credentials}/token`,
+                `${credentials}/hosts.yml`,
+              ],
             });
             observed.ghRepository = yield* succeeds(host, {
               ...inWorktree,
@@ -288,7 +295,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           assert.match(observed.childPid ?? "", /^[0-9]+$/u);
           assert.strictEqual(
             observed.credentialModes,
-            "700\n600\n600",
+            "700\n700\n600\n600",
             "only the SSH user can read the Attempt's credential",
           );
           const facts = Option.match(finished.step.result, {
