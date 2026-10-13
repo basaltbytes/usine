@@ -12,11 +12,12 @@ const MAX_RECORD_LENGTH = 1 << 14;
 
 /**
  * What the first bytes of a tunnel say about the TLS connection inside it:
- * not enough bytes yet, not a TLS ClientHello, or a ClientHello with the
- * server name it asks for and whether it encrypts the real one (ECH).
+ * not enough bytes yet, with how many the reader needs before it can say
+ * more; not a TLS ClientHello; or a ClientHello with the server name it asks
+ * for and whether it encrypts the real one (ECH).
  */
 export type ClientHelloRead = Data.TaggedEnum<{
-  Incomplete: {};
+  Incomplete: { readonly needed: number };
   NotTls: { readonly detail: string };
   ClientHello: {
     readonly serverName: Option.Option<string>;
@@ -79,8 +80,10 @@ const clientHelloBody = (body: Uint8Array): ClientHelloRead => {
 
 /**
  * Reads the TLS ClientHello at the start of `bytes`, joining it across
- * handshake records if the client split it. Call it again with more bytes
- * while it answers `Incomplete`; the caller bounds how many it buffers.
+ * handshake records if the client split it. While it answers `Incomplete`,
+ * `needed` is the least number of bytes that can change the answer: the end
+ * of the next record header or record, or, once the handshake header is
+ * known, the rest of the ClientHello in one more record.
  */
 export const readClientHello = (bytes: Uint8Array): ClientHelloRead => {
   const chunks: Array<Uint8Array> = [];
@@ -89,11 +92,12 @@ export const readClientHello = (bytes: Uint8Array): ClientHelloRead => {
   for (;;) {
     if (bytes.length > at && bytes[at] !== HANDSHAKE_RECORD)
       return notTls("the first bytes are not a TLS handshake record");
-    if (bytes.length < at + 5) return ClientHelloRead.Incomplete();
+    if (bytes.length < at + 5) return ClientHelloRead.Incomplete({ needed: at + 5 });
     if (bytes[at + 1] !== 0x03) return notTls("the record version is not TLS");
     const length = u16(bytes, at + 3);
     if (length === 0 || length > MAX_RECORD_LENGTH) return notTls("the record length is invalid");
-    if (bytes.length < at + 5 + length) return ClientHelloRead.Incomplete();
+    if (bytes.length < at + 5 + length)
+      return ClientHelloRead.Incomplete({ needed: at + 5 + length });
     chunks.push(bytes.subarray(at + 5, at + 5 + length));
     handshakeLength += length;
     at += 5 + length;
@@ -109,8 +113,55 @@ export const readClientHello = (bytes: Uint8Array): ClientHelloRead => {
     if (messageLength > CLIENT_HELLO_LIMIT) return notTls("the ClientHello is too large");
     if (handshakeLength >= 4 + messageLength)
       return clientHelloBody(handshake.subarray(4, 4 + messageLength));
+    const rest = at + 5 + (4 + messageLength - handshakeLength);
+    if (bytes.length < rest) return ClientHelloRead.Incomplete({ needed: rest });
   }
 };
+
+/**
+ * Collects a tunnel's first bytes and parses them only once they reach the
+ * count the last parse needed, so a client that sends one byte at a time
+ * costs a few parses rather than one per byte. A ClientHello that needs more
+ * than 16 KiB is refused as `NotTls`.
+ */
+export class ClientHelloReader {
+  #chunks: Array<Uint8Array> = [];
+  #length = 0;
+  #needed = 1;
+  #parses = 0;
+
+  /** Adds bytes from the client and answers what they say so far. */
+  push(chunk: Uint8Array): ClientHelloRead {
+    this.#chunks.push(chunk);
+    this.#length += chunk.length;
+    if (this.#length < this.#needed) return ClientHelloRead.Incomplete({ needed: this.#needed });
+    this.#parses += 1;
+    const read = readClientHello(this.bytes);
+    if (read._tag !== "Incomplete") return read;
+    if (read.needed > CLIENT_HELLO_LIMIT) return notTls("the ClientHello is larger than 16 KiB");
+    this.#needed = read.needed;
+    return read;
+  }
+
+  /** Every byte collected so far, in order: what the proxy writes upstream once the tunnel opens. */
+  get bytes(): Uint8Array {
+    if (this.#chunks.length !== 1) {
+      const joined = new Uint8Array(this.#length);
+      let at = 0;
+      for (const chunk of this.#chunks) {
+        joined.set(chunk, at);
+        at += chunk.length;
+      }
+      this.#chunks = [joined];
+    }
+    return this.#chunks[0] ?? new Uint8Array(0);
+  }
+
+  /** How many times the bytes were parsed. */
+  get parses(): number {
+    return this.#parses;
+  }
+}
 
 /** A host name as TLS and CONNECT compare it: lowercase, without a trailing dot. */
 export const comparableHost = (host: string): string => host.toLowerCase().replace(/\.$/u, "");

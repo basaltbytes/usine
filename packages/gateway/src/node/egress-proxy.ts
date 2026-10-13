@@ -11,7 +11,7 @@ import type { WorkerName } from "@usine/core/worker";
 import { Data, Effect, Fiber, Option, Predicate, Schema } from "effect";
 import { Headers } from "effect/unstable/http";
 import { tokenFromAuthorization, CallerTokens } from "../caller/caller.ts";
-import { CLIENT_HELLO_LIMIT, comparableHost, readClientHello } from "../egress/client-hello.ts";
+import { ClientHelloReader, comparableHost } from "../egress/client-hello.ts";
 import { type EgressPermitted, EgressRefused } from "../egress/egress.ts";
 import { endToEndHeaders } from "../proxy/forward.ts";
 import { REFUSAL_HEADER } from "../proxy/proxy.ts";
@@ -89,8 +89,9 @@ const notTls = (detail: string) =>
 
 /**
  * Buffers a tunnel's first bytes, `head` included, until they contain a whole
- * TLS ClientHello, at most 16 KiB and five seconds, then pauses the client so
- * nothing more is read before the upstream connection exists.
+ * TLS ClientHello, at most 16 KiB and five seconds, parsing only when enough
+ * bytes have arrived, then pauses the client so nothing more is read before
+ * the upstream connection exists.
  */
 const clientHello = (client: Duplex, head: Buffer) =>
   Effect.callback<
@@ -101,31 +102,25 @@ const clientHello = (client: Duplex, head: Buffer) =>
     },
     TunnelRefused
   >((resume) => {
-    let buffered = head;
+    const reader = new ClientHelloReader();
     const stop = () => {
       client.off("data", onData);
       client.off("end", onEnd);
       client.off("close", onEnd);
     };
-    const settle = () => {
-      const read = readClientHello(buffered);
-      if (read._tag === "Incomplete" && buffered.length <= CLIENT_HELLO_LIMIT) return;
+    function onData(chunk: Buffer) {
+      const read = reader.push(chunk);
+      if (read._tag === "Incomplete") return;
       stop();
       client.pause();
-      if (read._tag === "Incomplete")
-        return resume(Effect.fail(notTls("the ClientHello is larger than 16 KiB")));
       if (read._tag === "NotTls") return resume(Effect.fail(notTls(read.detail)));
       resume(
         Effect.succeed({
-          buffered,
+          buffered: Buffer.from(reader.bytes),
           serverName: read.serverName,
           encryptedClientHello: read.encryptedClientHello,
         }),
       );
-    };
-    function onData(chunk: Buffer) {
-      buffered = Buffer.concat([buffered, chunk]);
-      settle();
     }
     function onEnd() {
       stop();
@@ -134,7 +129,7 @@ const clientHello = (client: Duplex, head: Buffer) =>
     client.on("data", onData);
     client.once("end", onEnd);
     client.once("close", onEnd);
-    settle();
+    if (head.length > 0) onData(head);
     return Effect.sync(stop);
   }).pipe(
     Effect.timeoutOrElse({

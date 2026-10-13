@@ -2,7 +2,12 @@ import { createServer } from "node:net";
 import { connect } from "node:tls";
 import { assert, describe, it } from "@effect/vitest";
 import { Effect, Option, Predicate } from "effect";
-import { comparableHost, readClientHello } from "../src/egress/client-hello.ts";
+import {
+  CLIENT_HELLO_LIMIT,
+  ClientHelloReader,
+  comparableHost,
+  readClientHello,
+} from "../src/egress/client-hello.ts";
 
 const u16 = (value: number) => [(value >> 8) & 0xff, value & 0xff];
 const u24 = (value: number) => [(value >> 16) & 0xff, ...u16(value)];
@@ -105,6 +110,40 @@ describe("readClientHello", () => {
       ),
     );
     assert.isTrue(encrypted.encryptedClientHello);
+  });
+
+  it("parses a ClientHello sent one byte at a time a few times, not once per byte", () => {
+    const handshake = clientHello([serverNameExtension("registry.npmjs.org"), SUPPORTED_VERSIONS]);
+    const feed = (wire: Uint8Array) => {
+      const reader = new ClientHelloReader();
+      const reads = [...wire].map((byte) => reader.push(Uint8Array.of(byte)));
+      const read = reads.at(-1);
+      assert(read?._tag === "ClientHello", `expected a ClientHello, got ${read?._tag}`);
+      assert.deepStrictEqual(read.serverName, Option.some("registry.npmjs.org"));
+      assert.deepStrictEqual(reader.bytes, wire);
+      return reader.parses;
+    };
+    // The first byte, the record header, the whole record.
+    assert.strictEqual(feed(records(handshake)), 3);
+    const split = records(handshake, 16);
+    const recordCount = Math.ceil(handshake.length / 16);
+    assert.isAtMost(feed(split), 2 * recordCount + 1);
+  });
+
+  it("refuses a ClientHello that would need more than 16 KiB", () => {
+    const reader = new ClientHelloReader();
+    const header = Uint8Array.from([
+      0x16,
+      0x03,
+      0x01,
+      ...u16(16_000),
+      0x01,
+      ...u24(CLIENT_HELLO_LIMIT),
+    ]);
+    assert.strictEqual(reader.push(header)._tag, "Incomplete");
+    const next = new Uint8Array(16_000 - 4);
+    const read = reader.push(next);
+    assert.strictEqual(read._tag, "NotTls");
   });
 
   it("refuses bytes that are not a TLS ClientHello", () => {
