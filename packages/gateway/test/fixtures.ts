@@ -1,5 +1,6 @@
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
+import { AttachmentId } from "../src/attachment/attachment.ts";
 import { Layer, Option, Redacted, Result, Schema } from "effect";
 import { parseEgressAllowlist } from "../src/egress/egress.ts";
 import { GITHUB_ORIGINS, type GitHubOrigins } from "../src/github/github.ts";
@@ -11,6 +12,8 @@ export const WORKER = WorkerName.make("worker-one");
 export const OTHER_WORKER = WorkerName.make("worker-two");
 export const REPOSITORY = RepositoryName.make("acme/demo");
 export const OTHER_REPOSITORY = RepositoryName.make("acme/other");
+export const ATTACHMENT = AttachmentId.make("attachment-one-0000000");
+export const OTHER_ATTACHMENT = AttachmentId.make("attachment-two-0000000");
 export const ADMIN_TOKEN_VALUE = "admin-token-for-tests-0123456789abcdef";
 const CALLER_KEY_VALUE = "caller-key-for-tests-0123456789abcdef";
 

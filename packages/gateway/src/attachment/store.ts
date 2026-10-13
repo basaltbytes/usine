@@ -1,9 +1,10 @@
-import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
-import type { WorkerName } from "@usine/core/worker";
+import { canonicalRepositoryName } from "@usine/core/repository";
 import { Context, DateTime, Effect, Layer, Ref } from "effect";
 import {
   type Attachment,
   AttachmentAlreadyExpired,
+  AttachmentConflict,
+  type AttachmentId,
   type AttachmentLookup,
   ExpiredAttachment,
   LiveAttachment,
@@ -12,28 +13,32 @@ import {
 
 const SWEEP_INTERVAL = "1 minute";
 
-const keyOf = (worker: WorkerName, repository: RepositoryName): string =>
-  `${worker} ${canonicalRepositoryName(repository)}`;
+const samePair = (left: Attachment, right: Attachment): boolean =>
+  left.worker === right.worker &&
+  canonicalRepositoryName(left.repository) === canonicalRepositoryName(right.repository);
 
 /**
- * The attachments the executor has made, kept in memory only. A gateway
- * restart forgets them, and the executor attaches again when it renews or
- * restarts. Repository names compare without case, as on GitHub.
+ * The attachments the executor has made, keyed by attachment id and kept in
+ * memory only. A gateway restart forgets them, and the executor attaches
+ * again, with the same ids, when it renews or restarts.
  */
 export class Attachments extends Context.Service<
   Attachments,
   {
-    /** Attaches a credential, replacing any earlier one for the same Worker and repository. */
-    readonly attach: (attachment: Attachment) => Effect.Effect<void, AttachmentAlreadyExpired>;
+    /**
+     * Stores an attachment, or renews the one with the same id: the new
+     * credential and expiry replace the old ones. An id already used for
+     * another Worker or repository is refused.
+     */
+    readonly attach: (
+      attachment: Attachment,
+    ) => Effect.Effect<void, AttachmentAlreadyExpired | AttachmentConflict>;
     /** Removes the attachment; `false` when there was none. */
-    readonly detach: (worker: WorkerName, repository: RepositoryName) => Effect.Effect<boolean>;
+    readonly detach: (id: AttachmentId) => Effect.Effect<boolean>;
     /** Every attachment still in force, oldest expiry first. */
     readonly list: () => Effect.Effect<ReadonlyArray<Attachment>>;
-    /** Whether the Worker has an attachment in force for the repository, and if not, why. */
-    readonly find: (
-      worker: WorkerName,
-      repository: RepositoryName,
-    ) => Effect.Effect<AttachmentLookup>;
+    /** Whether the attachment is in force, and if not, why. */
+    readonly find: (id: AttachmentId) => Effect.Effect<AttachmentLookup>;
     /** Forgets expired attachments and returns how many it removed. */
     readonly sweep: () => Effect.Effect<number>;
   }
@@ -42,22 +47,29 @@ export class Attachments extends Context.Service<
   static readonly layer = Layer.effect(
     Attachments,
     Effect.gen(function* () {
-      const entries = yield* Ref.make<ReadonlyMap<string, Attachment>>(new Map());
+      const entries = yield* Ref.make<ReadonlyMap<AttachmentId, Attachment>>(new Map());
 
       const attach = Effect.fn("Attachments.attach")(function* (attachment: Attachment) {
-        const { worker, repository, expiresAt } = attachment;
-        yield* Effect.annotateCurrentSpan({ worker, repository });
+        const { id, worker, repository, expiresAt } = attachment;
+        yield* Effect.annotateCurrentSpan({ attachment: id, worker, repository });
         const now = yield* DateTime.now;
         if (!attachment.isLiveAt(now))
           return yield* new AttachmentAlreadyExpired({ worker, repository, expiresAt });
-        const key = keyOf(worker, repository);
-        const previous = yield* Ref.modify(entries, (current) => [
-          current.get(key),
-          new Map(current).set(key, attachment),
-        ]);
+        const outcome = yield* Ref.modify(entries, (current) => {
+          const previous = current.get(id);
+          if (previous !== undefined && !samePair(previous, attachment))
+            return ["conflict" as const, current];
+          return [
+            previous === undefined ? ("attached" as const) : ("renewed" as const),
+            new Map(current).set(id, attachment),
+          ];
+        });
+        if (outcome === "conflict")
+          return yield* new AttachmentConflict({ id, worker, repository });
         yield* Effect.logInfo(
-          previous === undefined ? "Attached a GitHub credential" : "Replaced a GitHub credential",
+          outcome === "attached" ? "Attached a GitHub credential" : "Renewed a GitHub credential",
           {
+            attachment: id,
             worker,
             repository,
             credential: attachment.credential._tag,
@@ -66,22 +78,25 @@ export class Attachments extends Context.Service<
         );
       });
 
-      const detach = Effect.fn("Attachments.detach")(function* (
-        worker: WorkerName,
-        repository: RepositoryName,
-      ) {
-        yield* Effect.annotateCurrentSpan({ worker, repository });
-        const key = keyOf(worker, repository);
+      const detach = Effect.fn("Attachments.detach")(function* (id: AttachmentId) {
+        yield* Effect.annotateCurrentSpan({ attachment: id });
         const removed = yield* Ref.modify(entries, (current) => {
-          if (!current.has(key)) return [false, current];
+          const attachment = current.get(id);
+          if (attachment === undefined) return [attachment, current];
           const next = new Map(current);
-          next.delete(key);
-          return [true, next];
+          next.delete(id);
+          return [attachment, next];
         });
-        yield* removed
-          ? Effect.logInfo("Detached a GitHub credential", { worker, repository })
-          : Effect.logInfo("Nothing to detach", { worker, repository });
-        return removed;
+        if (removed === undefined) {
+          yield* Effect.logInfo("Nothing to detach", { attachment: id });
+          return false;
+        }
+        yield* Effect.logInfo("Detached a GitHub credential", {
+          attachment: id,
+          worker: removed.worker,
+          repository: removed.repository,
+        });
+        return true;
       });
 
       const list = Effect.fn("Attachments.list")(function* () {
@@ -95,12 +110,9 @@ export class Attachments extends Context.Service<
           );
       });
 
-      const find = Effect.fn("Attachments.find")(function* (
-        worker: WorkerName,
-        repository: RepositoryName,
-      ) {
+      const find = Effect.fn("Attachments.find")(function* (id: AttachmentId) {
         const now = yield* DateTime.now;
-        const attachment = (yield* Ref.get(entries)).get(keyOf(worker, repository));
+        const attachment = (yield* Ref.get(entries)).get(id);
         if (attachment === undefined) return new MissingAttachment();
         return attachment.isLiveAt(now)
           ? new LiveAttachment({ attachment })
@@ -110,14 +122,15 @@ export class Attachments extends Context.Service<
       const sweep = Effect.fn("Attachments.sweep")(function* () {
         const now = yield* DateTime.now;
         const expired = yield* Ref.modify(entries, (current) => {
-          const gone = [...current.entries()].filter(([, attachment]) => !attachment.isLiveAt(now));
-          if (gone.length === 0) return [[], current];
+          const gone = [...current.values()].filter((attachment) => !attachment.isLiveAt(now));
+          if (gone.length === 0) return [gone, current];
           const next = new Map(current);
-          for (const [key] of gone) next.delete(key);
-          return [gone.map(([, attachment]) => attachment), next];
+          for (const { id } of gone) next.delete(id);
+          return [gone, next];
         });
-        for (const { worker, repository, expiresAt } of expired)
+        for (const { id, worker, repository, expiresAt } of expired)
           yield* Effect.logInfo("Forgot an expired GitHub credential", {
+            attachment: id,
             worker,
             repository,
             expiredAt: DateTime.formatIso(expiresAt),

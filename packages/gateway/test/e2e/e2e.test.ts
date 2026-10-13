@@ -10,8 +10,8 @@ import { RepositoryName } from "@usine/core/repository";
 import { DateTime, Effect, Layer, Redacted } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
-import { GatewayAdminApi } from "../../src/admin/api.ts";
-import { AnonymousCredential, Attachment } from "../../src/attachment/attachment.ts";
+import { AttachRequest, GatewayAdminApi } from "../../src/admin/api.ts";
+import { AnonymousCredential } from "../../src/attachment/attachment.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../../src/node/node.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, WORKER, settingsLayer } from "../fixtures.ts";
 
@@ -58,7 +58,7 @@ const attachPublicRepository = Effect.gen(function* () {
     transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE)),
   });
   const attached = yield* client.attachments.attach({
-    payload: new Attachment({
+    payload: new AttachRequest({
       worker: WORKER,
       repository: PUBLIC_REPOSITORY,
       credential: new AnonymousCredential(),

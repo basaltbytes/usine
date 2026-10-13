@@ -2,10 +2,17 @@ import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { Context, Effect, Encoding, Layer, Option, Redacted, Result, Schema } from "effect";
 import { Headers } from "effect/unstable/http";
+import { AttachmentId } from "../attachment/attachment.ts";
 import { GatewaySettings } from "../settings.ts";
 
-/** What a caller token proves: the Worker VM that has it and the repository it was issued for. */
+/**
+ * What a caller token proves: the attachment it was issued with, and that
+ * attachment's Worker and repository. Binding the attachment id means a token
+ * from an earlier attachment is refused once a new one is made for the same
+ * Worker and repository.
+ */
 export class CallerClaims extends Schema.Class<CallerClaims>("@usine/gateway/CallerClaims")({
+  attachment: AttachmentId,
   worker: WorkerName,
   repository: RepositoryName,
 }) {}
@@ -60,6 +67,13 @@ export class CallerTokens extends Context.Service<
   {
     readonly issue: (claims: CallerClaims) => Effect.Effect<CallerToken>;
     readonly verify: (token: CallerToken) => Effect.Effect<CallerClaims, CallerTokenRejected>;
+    /**
+     * Removes caller tokens from headers bound for a host outside the
+     * gateway: the gateway header always, and an `Authorization` or
+     * `x-api-key` value only when it verifies as a caller token, so a
+     * Worker's own credential for a registry still goes through.
+     */
+    readonly withoutCallerTokens: (headers: Headers.Headers) => Effect.Effect<Headers.Headers>;
   }
 >()("@usine/gateway/CallerTokens") {
   static readonly layer = Layer.effect(
@@ -77,7 +91,11 @@ export class CallerTokens extends Context.Service<
       );
 
       const issue = Effect.fn("CallerTokens.issue")(function* (claims: CallerClaims) {
-        yield* Effect.annotateCurrentSpan({ worker: claims.worker, repository: claims.repository });
+        yield* Effect.annotateCurrentSpan({
+          attachment: claims.attachment,
+          worker: claims.worker,
+          repository: claims.repository,
+        });
         const signed = `ugw1.${Encoding.encodeBase64Url(encodeClaims(claims))}`;
         const mac = yield* Effect.promise(() =>
           crypto.subtle.sign("HMAC", key, toArrayBuffer(encoder.encode(signed))),
@@ -107,13 +125,42 @@ export class CallerTokens extends Context.Service<
         );
         if (Option.isNone(claims)) return yield* new CallerTokenRejected({ reason: "malformed" });
         yield* Effect.annotateCurrentSpan({
+          attachment: claims.value.attachment,
           worker: claims.value.worker,
           repository: claims.value.repository,
         });
         return claims.value;
       });
 
-      return { issue, verify };
+      const isCallerToken = (token: Option.Option<CallerToken>) =>
+        Option.match(token, {
+          onNone: () => Effect.succeed(false),
+          onSome: (candidate) =>
+            verify(candidate).pipe(
+              Effect.as(true),
+              Effect.orElseSucceed(() => false),
+            ),
+        });
+
+      const withoutCallerTokens = Effect.fn("CallerTokens.withoutCallerTokens")(function* (
+        headers: Headers.Headers,
+      ) {
+        const remaining = Headers.remove(headers, GATEWAY_TOKEN_HEADER);
+        const authorization = Headers.get(remaining, "authorization").pipe(
+          Option.flatMap(tokenFromAuthorization),
+        );
+        const apiKey = Headers.get(remaining, "x-api-key").pipe(
+          Option.map((value) => Redacted.make(value.trim())),
+        );
+        const withoutAuthorization = (yield* isCallerToken(authorization))
+          ? Headers.remove(remaining, "authorization")
+          : remaining;
+        return (yield* isCallerToken(apiKey))
+          ? Headers.remove(withoutAuthorization, "x-api-key")
+          : withoutAuthorization;
+      });
+
+      return { issue, verify, withoutCallerTokens };
     }),
   );
 }

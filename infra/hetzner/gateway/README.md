@@ -23,7 +23,9 @@ git and gh on a Worker talk to `git.<domain>` over plain HTTP on the private net
 
 Claude Code and Codex talk to `llm.<domain>` over plain HTTP. The gateway checks the caller token, replaces it with its own API key, and sends the request to the provider over HTTPS. Responses stream back unchanged.
 
-Package managers use the forward proxy at `<gateway>:3128` through `HTTPS_PROXY` and `HTTP_PROXY`, and apt through its own proxy setting. The proxy opens a tunnel only to a host on `egress-allowlist`, and only when the name resolves to a public address. Every other host is refused and logged. github.com is not on the list: a Worker reaches GitHub through `git.<domain>`, where the gateway decides which repository it may reach, and a tunnel to github.com would let a Worker push with any credential it was handed.
+Package managers use the forward proxy at `<gateway>:3128` through `HTTPS_PROXY` and `HTTP_PROXY`, and apt through its own proxy setting. The proxy opens a tunnel only to a host on `egress-allowlist`, and only when the name resolves to a public address. Every other host is refused and logged. A plain HTTP request loses its caller token before it leaves; a `CONNECT` tunnel is opaque, so the proxy cannot remove anything from what goes through it.
+
+Never allowlist github.com or an LLM provider's host such as api.anthropic.com or api.openai.com. A Worker reaches them through `git.<domain>` and `llm.<domain>`, where the gateway decides what it may reach and replaces the caller token; a tunnel to github.com would let a Worker push with any credential it was handed, and Claude Code opens connections to api.anthropic.com outside `ANTHROPIC_BASE_URL`, which would carry whatever credential it has.
 
 The gateway itself reaches the internet directly over its public interface. It forwards no packets for Workers.
 

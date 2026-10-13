@@ -152,7 +152,7 @@ One Attempt's installation token, given to the Gateway by the executor for one W
 _Avoid_: grant (exe.dev's term for its own), integration, binding
 
 **Caller token**:
-What an Attempt's children send to the Gateway in place of a credential. It names the Worker and the repository and is honored only while that Attachment is in force.
+What an Attempt's children send to the Gateway in place of a credential. It names its Attachment, the Worker, and the repository, and is honored only while that Attachment is in force.
 _Avoid_: API key, placeholder (the role it plays for a harness, not what it is)
 
 **Agent**:

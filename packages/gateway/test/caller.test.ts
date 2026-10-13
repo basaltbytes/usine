@@ -8,7 +8,9 @@ import {
   withoutCallerCredentials,
 } from "../src/caller/caller.ts";
 import {
+  ATTACHMENT,
   NO_PROVIDERS,
+  OTHER_ATTACHMENT,
   OTHER_REPOSITORY,
   OTHER_WORKER,
   REPOSITORY,
@@ -20,7 +22,7 @@ import {
 const tokens = <A, E>(effect: Effect.Effect<A, E, CallerTokens>) =>
   effect.pipe(Effect.provide(CallerTokens.layer), Effect.provide(settingsLayer(NO_PROVIDERS)));
 
-const claims = new CallerClaims({ worker: WORKER, repository: REPOSITORY });
+const claims = new CallerClaims({ attachment: ATTACHMENT, worker: WORKER, repository: REPOSITORY });
 
 describe("CallerTokens", () => {
   it.effect("a token issued for an attachment verifies to the same Worker and repository", () =>
@@ -38,25 +40,40 @@ describe("CallerTokens", () => {
     ),
   );
 
-  it.effect("a VM cannot rewrite its token to claim another Worker or repository", () =>
-    tokens(
-      Effect.gen(function* () {
-        const callers = yield* CallerTokens;
-        const mac = Redacted.value(yield* callers.issue(claims)).split(".")[2];
-        for (const forged of [
-          new CallerClaims({ worker: OTHER_WORKER, repository: REPOSITORY }),
-          new CallerClaims({ worker: WORKER, repository: OTHER_REPOSITORY }),
-        ]) {
-          const payload = Encoding.encodeBase64Url(
-            Schema.encodeSync(Schema.fromJsonString(CallerClaims))(forged),
-          );
-          const error = yield* Effect.flip(callers.verify(secret(`ugw1.${payload}.${mac}`)));
-          assert.strictEqual(error.reason, "bad-signature");
-        }
-        const garbage = yield* Effect.flip(callers.verify(secret("ghp_notOurs")));
-        assert.strictEqual(garbage.reason, "malformed");
-      }),
-    ),
+  it.effect(
+    "a VM cannot rewrite its token to claim another attachment, Worker, or repository",
+    () =>
+      tokens(
+        Effect.gen(function* () {
+          const callers = yield* CallerTokens;
+          const mac = Redacted.value(yield* callers.issue(claims)).split(".")[2];
+          for (const forged of [
+            new CallerClaims({
+              attachment: OTHER_ATTACHMENT,
+              worker: WORKER,
+              repository: REPOSITORY,
+            }),
+            new CallerClaims({
+              attachment: ATTACHMENT,
+              worker: OTHER_WORKER,
+              repository: REPOSITORY,
+            }),
+            new CallerClaims({
+              attachment: ATTACHMENT,
+              worker: WORKER,
+              repository: OTHER_REPOSITORY,
+            }),
+          ]) {
+            const payload = Encoding.encodeBase64Url(
+              Schema.encodeSync(Schema.fromJsonString(CallerClaims))(forged),
+            );
+            const error = yield* Effect.flip(callers.verify(secret(`ugw1.${payload}.${mac}`)));
+            assert.strictEqual(error.reason, "bad-signature");
+          }
+          const garbage = yield* Effect.flip(callers.verify(secret("ghp_notOurs")));
+          assert.strictEqual(garbage.reason, "malformed");
+        }),
+      ),
   );
 
   it.effect("a token signed with another gateway's key is rejected", () =>
@@ -70,6 +87,40 @@ describe("CallerTokens", () => {
       );
       assert.strictEqual(error.reason, "bad-signature");
     }),
+  );
+
+  it.effect(
+    "a request to a host outside the gateway loses caller tokens but keeps other credentials",
+    () =>
+      tokens(
+        Effect.gen(function* () {
+          const callers = yield* CallerTokens;
+          const caller = Redacted.value(yield* callers.issue(claims));
+          const strip = (input: Record<string, string>) =>
+            Effect.map(callers.withoutCallerTokens(Headers.fromInput(input)), (headers) =>
+              Object.fromEntries(Object.entries(headers)),
+            );
+          assert.deepStrictEqual(
+            yield* strip({
+              "x-usine-gateway-token": caller,
+              authorization: `Bearer ${caller}`,
+              "x-api-key": "registry-key",
+              accept: "*/*",
+            }),
+            { "x-api-key": "registry-key", accept: "*/*" },
+          );
+          assert.deepStrictEqual(
+            yield* strip({
+              authorization: `Basic ${Encoding.encodeBase64(`x-access-token:${caller}`)}`,
+              "x-api-key": caller,
+            }),
+            {},
+          );
+          assert.deepStrictEqual(yield* strip({ authorization: "Bearer npm_registryToken" }), {
+            authorization: "Bearer npm_registryToken",
+          });
+        }),
+      ),
   );
 });
 

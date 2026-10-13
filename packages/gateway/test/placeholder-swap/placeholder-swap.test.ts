@@ -8,8 +8,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Effect, Layer, Logger, Option, Predicate, Redacted } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
-import { GatewayAdminApi } from "../../src/admin/api.ts";
-import { AnonymousCredential, Attachment } from "../../src/attachment/attachment.ts";
+import { AttachRequest, GatewayAdminApi } from "../../src/admin/api.ts";
+import { AnonymousCredential } from "../../src/attachment/attachment.ts";
 import {
   AnthropicProvider,
   AnthropicSubscriptionToken,
@@ -162,7 +162,7 @@ const swap = (providers: LlmProviders) =>
       transformClient: HttpClient.mapRequest(HttpClientRequest.bearerToken(ADMIN_TOKEN_VALUE)),
     });
     const attached = yield* client.attachments.attach({
-      payload: new Attachment({
+      payload: new AttachRequest({
         worker: WORKER,
         repository: REPOSITORY,
         credential: new AnonymousCredential(),

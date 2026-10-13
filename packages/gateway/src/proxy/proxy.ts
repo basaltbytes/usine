@@ -15,7 +15,6 @@ import {
   presentedToken,
   withoutCallerCredentials,
 } from "../caller/caller.ts";
-import { EgressRefusalReason } from "../egress/egress.ts";
 import {
   GITHUB_HOSTS,
   type GitHubHost,
@@ -36,11 +35,10 @@ export const RefusalReason = Schema.Literals([
   "unsupported-path",
   "missing-caller-token",
   "invalid-caller-token",
-  "no-attachment",
+  "stale-caller-token",
   "attachment-expired",
   "repository-mismatch",
   "provider-not-configured",
-  ...EgressRefusalReason.literals,
 ]);
 export type RefusalReason = typeof RefusalReason.Type;
 
@@ -52,14 +50,10 @@ const REFUSAL_STATUS = {
   "unsupported-path": 404,
   "missing-caller-token": 401,
   "invalid-caller-token": 401,
-  "no-attachment": 403,
+  "stale-caller-token": 403,
   "attachment-expired": 403,
   "repository-mismatch": 403,
   "provider-not-configured": 503,
-  "host-not-allowed": 403,
-  "port-not-allowed": 403,
-  "address-literal": 403,
-  "private-address": 403,
 } as const satisfies Record<RefusalReason, number>;
 
 /** A refusal, with the caller's claims once its token has been verified. */
@@ -103,11 +97,10 @@ const requestTarget = (
 
 /**
  * The reverse proxy Worker VMs reach on the private network. `git.<domain>`
- * serves GitHub with the attached installation token, `llm.<domain>` serves
- * the LLM providers with the gateway's API keys, and a request for any other
- * host the egress allowlist permits is sent on over HTTPS without a
- * credential. Every request to GitHub or an LLM provider presents a caller
- * token whose attachment is in force.
+ * serves GitHub with the attached installation token and `llm.<domain>`
+ * serves the LLM providers with the gateway's API keys; every request
+ * presents a caller token whose attachment is in force. Any other host is
+ * refused: the forward proxy serves the allowlisted ones.
  */
 export class GatewayProxy extends Context.Service<
   GatewayProxy,
@@ -145,10 +138,24 @@ export class GatewayProxy extends Context.Service<
               ),
             ),
           );
-        yield* Effect.annotateCurrentSpan({ worker: claims.worker, repository: claims.repository });
-        const lookup = yield* attachments.find(claims.worker, claims.repository);
+        yield* Effect.annotateCurrentSpan({
+          attachment: claims.attachment,
+          worker: claims.worker,
+          repository: claims.repository,
+        });
+        const stale = refusedCaller(
+          claims,
+          "stale-caller-token",
+          `The caller token belongs to attachment ${claims.attachment} of ${claims.repository} on Worker ${claims.worker}, which is no longer attached.`,
+        );
+        const lookup = yield* attachments.find(claims.attachment);
         return yield* Match.valueTags(lookup, {
-          LiveAttachment: ({ attachment }) => Effect.succeed({ claims, attachment }),
+          LiveAttachment: ({ attachment }) =>
+            attachment.worker === claims.worker &&
+            canonicalRepositoryName(attachment.repository) ===
+              canonicalRepositoryName(claims.repository)
+              ? Effect.succeed({ claims, attachment })
+              : Effect.fail(stale),
           ExpiredAttachment: () =>
             Effect.fail(
               refusedCaller(
@@ -157,14 +164,7 @@ export class GatewayProxy extends Context.Service<
                 `The attachment of ${claims.repository} to Worker ${claims.worker} has expired.`,
               ),
             ),
-          MissingAttachment: () =>
-            Effect.fail(
-              refusedCaller(
-                claims,
-                "no-attachment",
-                `Worker ${claims.worker} has no attachment for ${claims.repository}.`,
-              ),
-            ),
+          MissingAttachment: () => Effect.fail(stale),
         });
       });
 
@@ -234,38 +234,17 @@ export class GatewayProxy extends Context.Service<
         return response;
       });
 
-      const allowed = Effect.fn("GatewayProxy.allowed")(function* (
-        request: HttpServerRequest.HttpServerRequest,
-        target: RequestTarget,
-      ) {
-        const decision = settings.egress.decide(target.host, 443);
-        if (decision._tag === "EgressRefused")
-          return yield* refused(
-            decision.reason,
-            `The gateway does not serve ${target.host}, and the egress allowlist does not permit it.`,
-          );
-        const upstream = `https://${decision.host}${target.pathname}${target.search}`;
-        const response = yield* forwardRequest(
-          client,
-          request,
-          upstream,
-          withoutCallerCredentials(endToEndHeaders(request.headers)),
-        );
-        yield* Effect.logInfo("Forwarded a request to an allowed host", {
-          host: decision.host,
-          method: request.method,
-          path: target.pathname,
-          status: response.status,
-        });
-        return response;
-      });
-
       const route = (request: HttpServerRequest.HttpServerRequest, target: RequestTarget) => {
         if (target.host === hosts.git) return github(request, target, "gateway");
         const githubHost = GITHUB_HOSTS.get(target.host);
         if (githubHost !== undefined) return github(request, target, githubHost);
         if (target.host === hosts.llm) return llm(request, target);
-        return allowed(request, target);
+        return Effect.fail(
+          refused(
+            "unknown-host",
+            `The gateway serves ${hosts.git} and ${hosts.llm}, not ${target.host}; other hosts go through the forward proxy.`,
+          ),
+        );
       };
 
       const handle = Effect.gen(function* () {

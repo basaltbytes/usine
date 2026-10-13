@@ -303,8 +303,16 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     const port = url.value.port === "" ? 80 : Number(url.value.port);
     const host = url.value.hostname.replace(/^\[(.*)\]$/u, "$1");
     yield* Effect.annotateCurrentSpan({ host, port });
+    const forwarded = endToEndHeaders(Headers.fromInput(request.headers));
     const relayed = yield* destination(host, port).pipe(
       Effect.flatMap((target) =>
+        // The reverse proxy needs the caller token; a host outside the gateway must never see it.
+        (target.kind === "gateway"
+          ? Effect.succeed(forwarded)
+          : callers.withoutCallerTokens(forwarded)
+        ).pipe(Effect.map((headers) => ({ target, headers }))),
+      ),
+      Effect.flatMap(({ target, headers }) =>
         Effect.callback<number, Unreachable>((resume) => {
           const outgoing = httpRequest(
             {
@@ -312,10 +320,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
               port: target.port,
               method: request.method,
               path: `${url.value.pathname}${url.value.search}`,
-              headers: {
-                ...endToEndHeaders(Headers.fromInput(request.headers)),
-                host: url.value.host,
-              },
+              headers: { ...headers, host: url.value.host },
               setHost: false,
             },
             (incoming) => {

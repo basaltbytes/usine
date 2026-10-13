@@ -22,6 +22,7 @@ import {
   AnonymousCredential,
   Attachment,
   type AttachmentCredential,
+  type AttachmentId,
   InstallationCredential,
 } from "../src/attachment/attachment.ts";
 import { Attachments } from "../src/attachment/store.ts";
@@ -36,7 +37,15 @@ import {
 } from "../src/llm/llm.ts";
 import { GatewayProxy, REFUSAL_HEADER } from "../src/proxy/proxy.ts";
 import { UpstreamBase } from "../src/upstream.ts";
-import { NO_PROVIDERS, REPOSITORY, WORKER, secret, settingsLayer } from "./fixtures.ts";
+import {
+  ATTACHMENT,
+  NO_PROVIDERS,
+  OTHER_ATTACHMENT,
+  REPOSITORY,
+  WORKER,
+  secret,
+  settingsLayer,
+} from "./fixtures.ts";
 
 const INSTALLATION_TOKEN = "ghs_installationTokenForTests0123456789";
 const ANTHROPIC_KEY = "sk-ant-api03-keyForTests0123456789";
@@ -99,13 +108,14 @@ const gateway = (providers: LlmProviders) =>
     Layer.provideMerge(captureLogs),
   );
 
-/** Attaches a credential for the test Worker and repository and returns the caller token for it. */
-const attach = (credential: AttachmentCredential) =>
+/** Attaches a credential for the test Worker and repository under `id` and returns the caller token for it. */
+const attachAs = (id: AttachmentId, credential: AttachmentCredential) =>
   Effect.gen(function* () {
     const attachments = yield* Attachments;
     const callers = yield* CallerTokens;
     yield* attachments.attach(
       new Attachment({
+        id,
         worker: WORKER,
         repository: REPOSITORY,
         credential,
@@ -113,9 +123,13 @@ const attach = (credential: AttachmentCredential) =>
       }),
     );
     return Redacted.value(
-      yield* callers.issue(new CallerClaims({ worker: WORKER, repository: REPOSITORY })),
+      yield* callers.issue(
+        new CallerClaims({ attachment: id, worker: WORKER, repository: REPOSITORY }),
+      ),
     );
   });
+
+const attach = (credential: AttachmentCredential) => attachAs(ATTACHMENT, credential);
 
 const installation = new InstallationCredential({ token: secret(INSTALLATION_TOKEN) });
 
@@ -247,16 +261,39 @@ describe("GatewayProxy", () => {
           ),
           [404, "unsupported-path"],
         );
-        yield* Effect.flatMap(Attachments, (attachments) => attachments.detach(WORKER, REPOSITORY));
+        yield* Effect.flatMap(Attachments, (attachments) => attachments.detach(ATTACHMENT));
         assert.deepStrictEqual(
           refusal(
             yield* send("http://git.gw.test/acme/demo.git/info/refs", {
               "x-usine-gateway-token": caller,
             }),
           ),
-          [403, "no-attachment"],
+          [403, "stale-caller-token"],
         );
         assert.deepStrictEqual(yield* sent, []);
+      }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
+  );
+
+  it.effect(
+    "a token from a detached attachment stays refused after a fresh attach for the same Worker and repository",
+    () =>
+      Effect.gen(function* () {
+        const earlier = yield* attach(installation);
+        yield* Effect.flatMap(Attachments, (attachments) => attachments.detach(ATTACHMENT));
+        const current = yield* attachAs(OTHER_ATTACHMENT, installation);
+        const replayed = yield* send("http://git.gw.test/acme/demo.git/info/refs", {
+          "x-usine-gateway-token": earlier,
+        });
+        assert.deepStrictEqual(
+          [replayed.status, replayed.headers.get(REFUSAL_HEADER)],
+          [403, "stale-caller-token"],
+        );
+        assert.include(replayed.body, ATTACHMENT);
+        const fresh = yield* send("http://git.gw.test/acme/demo.git/info/refs", {
+          "x-usine-gateway-token": current,
+        });
+        assert.strictEqual(fresh.status, 200);
+        assert.strictEqual((yield* sent).length, 1);
       }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
   );
 
@@ -362,24 +399,21 @@ describe("GatewayProxy", () => {
       ),
   );
 
-  it.effect(
-    "a request for an allowlisted host goes on over HTTPS without credentials; others are refused",
-    () =>
-      Effect.gen(function* () {
-        const allowed = yield* send("http://objects.githubusercontent.com/release/asset", {
-          authorization: "token ugw1.not.used",
-        });
-        assert.strictEqual(allowed.status, 200);
-        const [request] = yield* sent;
-        assert(request !== undefined);
-        assert.strictEqual(request.url, "https://objects.githubusercontent.com/release/asset");
-        assert.isTrue(Option.isNone(Headers.get(request.headers, "authorization")));
-        const refused = yield* send("http://example.com/", {});
+  it.effect("the reverse proxy forwards nothing for other hosts, allowlisted ones included", () =>
+    Effect.gen(function* () {
+      const caller = yield* attach(installation);
+      for (const url of [
+        "http://objects.githubusercontent.com/release/asset",
+        "http://example.com/",
+      ]) {
+        const refused = yield* send(url, { authorization: `token ${caller}` });
         assert.deepStrictEqual(
           [refused.status, refused.headers.get(REFUSAL_HEADER)],
-          [403, "host-not-allowed"],
+          [404, "unknown-host"],
         );
-      }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
+      }
+      assert.deepStrictEqual(yield* sent, []);
+    }).pipe(Effect.provide(gateway(NO_PROVIDERS))),
   );
 
   it.effect(

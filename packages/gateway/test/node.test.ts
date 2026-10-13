@@ -3,8 +3,8 @@ import { assert, describe, it } from "@effect/vitest";
 import { DateTime, Effect, Layer, Redacted } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
-import { GatewayAdminApi } from "../src/admin/api.ts";
-import { AnonymousCredential, Attachment } from "../src/attachment/attachment.ts";
+import { AttachRequest, GatewayAdminApi } from "../src/admin/api.ts";
+import { AnonymousCredential } from "../src/attachment/attachment.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../src/node/node.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
 
@@ -61,7 +61,7 @@ const attachment = (minutes: number) =>
   Effect.map(
     DateTime.now,
     (now) =>
-      new Attachment({
+      new AttachRequest({
         worker: WORKER,
         repository: REPOSITORY,
         credential: new AnonymousCredential(),
@@ -70,26 +70,40 @@ const attachment = (minutes: number) =>
   );
 
 describe("the Node gateway", () => {
-  it.live("the executor attaches, lists, and detaches; the list never contains a token", () =>
-    Effect.gen(function* () {
-      const client = yield* admin(ADMIN_TOKEN_VALUE);
-      const attached = yield* client.attachments.attach({ payload: yield* attachment(60) });
-      assert.match(Redacted.value(attached.callerToken), /^ugw1\./u);
-      const listed = yield* client.attachments.list();
-      assert.deepStrictEqual(
-        listed.attachments.map(({ worker, repository, credential }) => ({
-          worker,
-          repository,
-          credential,
-        })),
-        [{ worker: WORKER, repository: REPOSITORY, credential: "AnonymousCredential" }],
-      );
-      const detached = yield* client.attachments.detach({
-        query: { worker: WORKER, repository: REPOSITORY },
-      });
-      assert.isTrue(detached.detached);
-      assert.deepStrictEqual((yield* client.attachments.list()).attachments, []);
-    }).pipe(Effect.provide(gateway)),
+  it.live(
+    "the executor attaches, renews with the same token, lists without tokens, and detaches",
+    () =>
+      Effect.gen(function* () {
+        const client = yield* admin(ADMIN_TOKEN_VALUE);
+        const attached = yield* client.attachments.attach({ payload: yield* attachment(60) });
+        assert.match(Redacted.value(attached.callerToken), /^ugw1\./u);
+        const { id } = attached.attachment;
+        const renewed = yield* client.attachments.renew({
+          params: { id },
+          payload: yield* attachment(120),
+        });
+        assert.strictEqual(
+          Redacted.value(renewed.callerToken),
+          Redacted.value(attached.callerToken),
+        );
+        const listed = yield* client.attachments.list();
+        assert.deepStrictEqual(
+          listed.attachments.map(({ worker, repository, credential }) => ({
+            worker,
+            repository,
+            credential,
+          })),
+          [{ worker: WORKER, repository: REPOSITORY, credential: "AnonymousCredential" }],
+        );
+        assert.isTrue((yield* client.attachments.detach({ params: { id } })).detached);
+        assert.deepStrictEqual((yield* client.attachments.list()).attachments, []);
+        const fresh = yield* client.attachments.attach({ payload: yield* attachment(60) });
+        assert.notStrictEqual(fresh.attachment.id, id);
+        assert.notStrictEqual(
+          Redacted.value(fresh.callerToken),
+          Redacted.value(attached.callerToken),
+        );
+      }).pipe(Effect.provide(gateway)),
   );
 
   it.live("the admin API refuses a wrong admin token and an expired attachment", () =>

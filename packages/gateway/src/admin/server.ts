@@ -1,11 +1,12 @@
 import { Effect, Layer, Redacted } from "effect";
 import { HttpApiBuilder, HttpApiError } from "effect/unstable/httpapi";
-import type { Attachment } from "../attachment/attachment.ts";
+import { Attachment, type AttachmentId, newAttachmentId } from "../attachment/attachment.ts";
 import { Attachments } from "../attachment/store.ts";
 import { CallerClaims, CallerTokens } from "../caller/caller.ts";
 import { GatewaySettings } from "../settings.ts";
 import {
   AdminAuthorization,
+  type AttachRequest,
   Attached,
   AttachmentList,
   AttachmentSummary,
@@ -50,32 +51,38 @@ const authorization = Layer.effect(
   }),
 );
 
+/** Stores the attachment under `id` and answers with the caller token bound to it. */
+const store = Effect.fn("GatewayAdmin.store")(function* (id: AttachmentId, request: AttachRequest) {
+  yield* Effect.annotateCurrentSpan({
+    attachment: id,
+    worker: request.worker,
+    repository: request.repository,
+  });
+  const attachments = yield* Attachments;
+  const callers = yield* CallerTokens;
+  const attachment = new Attachment({ id, ...request });
+  yield* attachments.attach(attachment);
+  const callerToken = yield* callers.issue(
+    new CallerClaims({ attachment: id, worker: request.worker, repository: request.repository }),
+  );
+  return new Attached({ attachment: AttachmentSummary.fromAttachment(attachment), callerToken });
+});
+
 const handlers = HttpApiBuilder.group(GatewayAdminApi, "attachments", (routes) =>
   routes
-    .handle(
-      "attach",
-      Effect.fn("GatewayAdmin.attach")(function* ({ payload }: { readonly payload: Attachment }) {
-        yield* Effect.annotateCurrentSpan({
-          worker: payload.worker,
-          repository: payload.repository,
-        });
-        const attachments = yield* Attachments;
-        const callers = yield* CallerTokens;
-        yield* attachments.attach(payload);
-        const callerToken = yield* callers.issue(
-          new CallerClaims({ worker: payload.worker, repository: payload.repository }),
-        );
-        return new Attached({ attachment: AttachmentSummary.fromAttachment(payload), callerToken });
-      }),
+    .handle("attach", ({ payload }) =>
+      Effect.flatMap(newAttachmentId, (id) => store(id, payload)).pipe(
+        // A fresh 128-bit id cannot already belong to another attachment.
+        Effect.catchTag("AttachmentConflict", Effect.die),
+      ),
     )
+    .handle("renew", ({ params, payload }) => store(params.id, payload))
     .handle(
       "detach",
-      Effect.fn("GatewayAdmin.detach")(function* ({ query }) {
-        yield* Effect.annotateCurrentSpan({ worker: query.worker, repository: query.repository });
+      Effect.fn("GatewayAdmin.detach")(function* ({ params }) {
+        yield* Effect.annotateCurrentSpan({ attachment: params.id });
         const attachments = yield* Attachments;
-        return new Detached({
-          detached: yield* attachments.detach(query.worker, query.repository),
-        });
+        return new Detached({ detached: yield* attachments.detach(params.id) });
       }),
     )
     .handle(
