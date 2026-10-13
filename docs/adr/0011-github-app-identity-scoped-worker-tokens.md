@@ -22,3 +22,5 @@ The factory authenticates to GitHub as a single operator-owned **GitHub App**, c
 - Per-loop permission-subset minting (e.g. read-only tokens for review loops) stays additive: the token-mint API already accepts permission subsets; nothing in the seam precludes it.
 
 [ADR 0022](./0022-item-cycle-budgets-and-comment-reviews.md) extends this decision with durable Item cycle budgets, operator reset Asks, and comment-only reviews under the shared App identity.
+
+[ADR 0026](./0026-eu-ssh-worker.md) gives SSH Workers the local Worker's per-attempt token, written on the machine for the Attempt.

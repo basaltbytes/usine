@@ -1,7 +1,7 @@
 {
   "name": "@usine/executor",
   "version": "0.2.1",
-  "description": "The usine scoped Worker contract with local and exe.dev adapters.",
+  "description": "The usine scoped Worker contract with local, exe.dev, and SSH adapters.",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -26,6 +26,10 @@
     "./local": {
       "types": "./dist/local/local.d.ts",
       "default": "./dist/local/local.js"
+    },
+    "./ssh": {
+      "types": "./dist/ssh/ssh.d.ts",
+      "default": "./dist/ssh/ssh.js"
     }
   },
   "publishConfig": {

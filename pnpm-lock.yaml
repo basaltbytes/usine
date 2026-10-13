@@ -531,6 +531,9 @@ importers:
       '@effect/vitest':
         specifier: 'catalog:'
         version: 4.0.0-rc.111(effect@4.0.0-rc.111)(vitest@4.1.11)
+      '@usine/agents':
+        specifier: workspace:*
+        version: link:../agents
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig

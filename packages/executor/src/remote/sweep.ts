@@ -1,10 +1,10 @@
+import type { RemoteShell } from "@usine/agents/child-host";
 import { AttemptId } from "@usine/core/attempt";
 import { WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
 import { type ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
-import type { ExeDevCommands } from "./commands.ts";
-import type { VmState } from "./model.ts";
+import type { RemoteCommands } from "./commands.ts";
 
 const SWEEP_CONCURRENCY = 4;
 
@@ -50,15 +50,15 @@ const directChildren = (
  * directory first so a Worker that never ran an Attempt lists as empty. Every
  * returned path is verified to be a direct child of `attemptsRoot`.
  */
-export const attemptPathsOn = Effect.fn("ExeDevExecutor.attemptPathsOn")(function* (
-  commands: ExeDevCommands,
+export const attemptPathsOn = Effect.fn("RemoteExecutor.attemptPathsOn")(function* (
+  commands: RemoteCommands,
   operation: ExecutorOperation,
-  vm: VmState,
+  shell: RemoteShell,
   attemptsRoot: string,
 ) {
-  yield* Effect.annotateCurrentSpan({ host: vm.sshDest, operation, attemptsRoot });
-  yield* commands.remote(operation, vm.sshDest, "mkdir", ["-p", attemptsRoot]);
-  const output = yield* commands.remote(operation, vm.sshDest, "find", [
+  yield* Effect.annotateCurrentSpan({ host: shell.destination, operation, attemptsRoot });
+  yield* commands.run(operation, shell, "mkdir", ["-p", attemptsRoot]);
+  const output = yield* commands.run(operation, shell, "find", [
     attemptsRoot,
     "-mindepth",
     "1",
@@ -73,25 +73,26 @@ export const attemptPathsOn = Effect.fn("ExeDevExecutor.attemptPathsOn")(functio
  * Preserves crash leftovers and prunes stale cache registrations once per Worker.
  * Only durable Attempt recovery may authorize removing an existing checkout.
  */
-export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWorktreeSweepFor")(
-  function* (commands: ExeDevCommands) {
+export const abandonedWorktreeSweepFor = Effect.fn("RemoteExecutor.abandonedWorktreeSweepFor")(
+  function* (commands: RemoteCommands) {
     const locks = yield* keyedLockFor<WorkerName>();
     const swept = yield* Ref.make(new Set<WorkerName>());
 
-    const sweep = Effect.fn("ExeDevExecutor.sweepAbandonedWorktrees")(function* (
+    const sweep = Effect.fn("RemoteExecutor.sweepAbandonedWorktrees")(function* (
       attemptId: AttemptId,
       worker: WorkerName,
-      vm: VmState,
-      root: string,
+      shell: RemoteShell,
+      workerDirectory: string,
     ) {
-      yield* Effect.annotateCurrentSpan({ attemptId, worker, host: vm.sshDest });
+      const host = shell.destination;
+      yield* Effect.annotateCurrentSpan({ attemptId, worker, host });
       yield* locks.withLock(worker)(
         Effect.gen(function* () {
           if ((yield* Ref.get(swept)).has(worker)) {
-            yield* Effect.logDebug("exe.dev abandoned-worktree sweep was already complete", {
+            yield* Effect.logDebug("Remote abandoned-worktree sweep was already complete", {
               attemptId,
               worker,
-              host: vm.sshDest,
+              host,
             });
             return;
           }
@@ -99,32 +100,32 @@ export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWork
           // front of every prepare; the next process start reclaims what failed.
           yield* Ref.update(swept, (current) => new Set(current).add(worker));
 
-          const attemptsRoot = `${root}/attempts`;
-          const reposRoot = `${root}/repos`;
-          yield* Effect.logInfo("Sweeping abandoned exe.dev Attempt worktrees", {
+          const attemptsRoot = `${workerDirectory}/attempts`;
+          const reposRoot = `${workerDirectory}/repos`;
+          yield* Effect.logInfo("Sweeping abandoned Attempt worktrees on the remote Worker", {
             attemptId,
             worker,
-            host: vm.sshDest,
+            host,
           });
-          yield* commands.remote("prepare", vm.sshDest, "mkdir", ["-p", reposRoot]);
+          yield* commands.run("prepare", shell, "mkdir", ["-p", reposRoot]);
 
-          const attempts = yield* attemptPathsOn(commands, "prepare", vm, attemptsRoot);
+          const attempts = yield* attemptPathsOn(commands, "prepare", shell, attemptsRoot);
           // An unrecognized path can contain unsalvaged work from a crash. Only
           // recovery from the durable Attempt record may authorize its removal.
           yield* Effect.forEach(
             attempts,
             (worktree) =>
-              Effect.logWarning("Preserving abandoned exe.dev path for salvage reconciliation", {
+              Effect.logWarning("Preserving abandoned remote path for salvage reconciliation", {
                 attemptId,
                 worker,
-                host: vm.sshDest,
+                host,
                 worktree,
               }),
             { discard: true },
           );
 
           const caches = yield* commands
-            .remote("prepare", vm.sshDest, "find", [
+            .run("prepare", shell, "find", [
               reposRoot,
               "-mindepth",
               "1",
@@ -140,36 +141,34 @@ export const abandonedWorktreeSweepFor = Effect.fn("ExeDevExecutor.abandonedWork
           yield* Effect.forEach(
             caches,
             (cache) =>
-              commands
-                .remote("prepare", vm.sshDest, "git", ["--git-dir", cache, "worktree", "prune"])
-                .pipe(
-                  Effect.tapError((error) =>
-                    Effect.logWarning("Could not prune an exe.dev cache during the sweep", {
-                      attemptId,
-                      worker,
-                      host: vm.sshDest,
-                      cache,
-                      message: error.message,
-                    }),
-                  ),
-                  Effect.ignore,
+              commands.run("prepare", shell, "git", ["--git-dir", cache, "worktree", "prune"]).pipe(
+                Effect.tapError((error) =>
+                  Effect.logWarning("Could not prune a remote cache during the sweep", {
+                    attemptId,
+                    worker,
+                    host,
+                    cache,
+                    message: error.message,
+                  }),
                 ),
+                Effect.ignore,
+              ),
             { concurrency: SWEEP_CONCURRENCY, discard: true },
           );
 
-          yield* Effect.logInfo("exe.dev abandoned-worktree sweep completed", {
+          yield* Effect.logInfo("Remote abandoned-worktree sweep completed", {
             attemptId,
             worker,
-            host: vm.sshDest,
+            host,
             retained: attempts.length,
             caches: caches.length,
           });
         }).pipe(
           Effect.tapError((error) =>
-            Effect.logWarning("exe.dev abandoned-worktree sweep failed; continuing", {
+            Effect.logWarning("Remote abandoned-worktree sweep failed; continuing", {
               attemptId,
               worker,
-              host: vm.sshDest,
+              host,
               message: error.message,
             }),
           ),
