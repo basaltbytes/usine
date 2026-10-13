@@ -617,6 +617,9 @@ describe("durable AttemptRuntime", () => {
         assert.isAtMost(logs.matching(REPORTED).length, 20);
       }).pipe(Effect.scoped, Effect.provide(logs.layer));
     },
+    // Exercises 1,000 failed scheduler steps on each of two real SQLite harnesses.
+    // Keep a bound while allowing slower CI runners to exhaust both retry cycles.
+    30_000,
   );
 
   it.live(
