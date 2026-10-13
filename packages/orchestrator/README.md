@@ -89,7 +89,27 @@ const EngineLive = localLayer(instanceDirectory, config, brains, {
 
 Provide `CredentialProvider` to `EngineLive`, then request `RunEngine` from the resulting Effect layer. The local composition caches repositories under `<instance>/.usine/workers/<worker>/repos` and removes Attempt worktrees after completion or cancellation.
 
-For the whole local application, `runtimeLayer(instanceDirectory, instance, options)` additionally composes GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It derives worker preflight requirements from `instance.agents` and requires only `GitHubCredentials`; the server or another host owns how those credentials are loaded. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance surfaces: it reads durable Runs and Loop runtime state while trigger execution remains idle.
+For the whole application, `@usine/orchestrator/runtime`'s `runtimeLayer(instanceDirectory, instance)` additionally composes GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It selects the Worker composition from the kind of the Workers in `usine.yaml`: the SSH one when every Worker is `ssh`, the local one otherwise, which refuses any other kind at startup. It derives worker preflight requirements from `instance.agents` and requires only `GitHubCredentials`; the server or another host owns how those credentials are loaded. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance surfaces: it reads durable Runs and Loop runtime state while trigger execution remains idle.
+
+For SSH Workers, `@usine/orchestrator/ssh` composes the scheduler with the SSH executor. Like the local composition it requires a `CredentialProvider`, which mints the token each Attempt writes on its Worker's machine; `sshWorkersOf(config)` returns the SSH Workers `usine.yaml` declares:
+
+```ts
+import { layer as sshLayer, sshWorkersOf } from "@usine/orchestrator/ssh"
+
+const EngineLive = sshLayer(instanceDirectory, config, brains, { workers: sshWorkersOf(config) })
+```
+
+The live SSH check runs one Attempt end to end on a real machine, with a scripted parent whose commands use the machine's gh and git with the minted token, and preflights Claude Code and Codex there. It skips unless `USINE_SSH_INTEGRATION_DESTINATION` is set, and needs a GitHub App instance directory whose installation covers the repository:
+
+```sh
+export USINE_SSH_INTEGRATION_DESTINATION=usine@203.0.113.7
+export USINE_SSH_INTEGRATION_IDENTITY_FILE=~/.ssh/usine_worker   # optional
+export USINE_SSH_INTEGRATION_KNOWN_HOSTS=/path/to/known_hosts    # optional
+export USINE_SSH_INTEGRATION_ROOT=/home/usine/.usine             # the default
+export USINE_SSH_INTEGRATION_REPO=owner/repo
+export USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY=/path/to/instance
+pnpm --filter @usine/orchestrator test:ssh
+```
 
 For an exe.dev Worker, use the `@usine/orchestrator/exe-dev` composition. It keeps the engine and SQLite runtime local while the unchanged Worker contract runs on the named VM:
 
@@ -150,6 +170,6 @@ Item cycle exhaustion appears as a `CycleBudgetNeed` in the overview and marks t
 
 The operator HTTP API exposes `POST /api/cycle-budgets/reset` with `{ "askId": "…" }`. A stale or differently answered Ask returns HTTP 409.
 
-Local and exe.dev Workers both run each Attempt's Pi parent in the orchestrator process as a durable task (`@usine/durable`); `layer` requires the `AttemptRuntime` and builds it before the engine, so durable storage is open and its tasks resumed before Run recovery. An orchestrator restart reattaches a live Attempt instead of failing it. Stored v3–v6 transcripts remain readable.
+Local, exe.dev, and SSH Workers all run each Attempt's Pi parent in the orchestrator process as a durable task (`@usine/durable`); `layer` requires the `AttemptRuntime` and builds it before the engine, so durable storage is open and its tasks resumed before Run recovery. An orchestrator restart reattaches a live Attempt instead of failing it. Stored v3–v6 transcripts remain readable.
 
 `Operator.resolveFailure(runId, attemptId)` clears attention for the current failed Attempt. The operator API exposes it as `POST /api/runs/:runId/resolve-failure` with `{ "attemptId": "..." }`. Resolved failures remain in Run history with retry available. Needs you, Project status, and Board attention reflect resolution; a later failed Attempt requests attention again.

@@ -1,4 +1,5 @@
 import { RepositoryName } from "@usine/core/repository";
+import type { SshDestination } from "@usine/core/worker";
 import { Schema, type Effect } from "effect";
 import type { SshCommand } from "@usine/agents/child-host";
 
@@ -9,17 +10,6 @@ export const IntegrationName = Schema.String.check(
   }),
 ).pipe(Schema.brand("ExeDevIntegrationName"));
 export type IntegrationName = typeof IntegrationName.Type;
-
-/**
- * An SSH destination handed to the local `ssh` client as argv, so anything
- * that could read as an option (`-oProxyCommand=...`) is unrepresentable.
- */
-export const SshDestination = Schema.String.check(
-  Schema.isPattern(/^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/u, {
-    message: "Expected an exe.dev SSH hostname, optionally prefixed by a user",
-  }),
-).pipe(Schema.brand("ExeDevSshDestination"));
-export type SshDestination = typeof SshDestination.Type;
 
 /** An absolute remote home directory that cannot smuggle bytes past shell quoting. */
 export const HomePath = Schema.String.check(

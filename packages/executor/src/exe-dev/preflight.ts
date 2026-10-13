@@ -1,5 +1,6 @@
+import type { RemoteShell } from "@usine/agents/child-host";
 import type { BrainSpec } from "@usine/core/agent/brain";
-import { WorkerName } from "@usine/core/worker";
+import { SshDestination, WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import {
@@ -10,7 +11,7 @@ import {
 } from "../executor.ts";
 import { agentsHarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
 import type { ExeDevCommands } from "./commands.ts";
-import { HomePath, SshDestination, type ExeDevExecutorOptions, type VmState } from "./model.ts";
+import { HomePath, type ExeDevExecutorOptions, type VmState } from "./model.ts";
 
 const Vm = Schema.Struct({
   vmName: Schema.NonEmptyString,
@@ -36,8 +37,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   const workers = yield* Ref.make(new Map<WorkerName, VmState>());
 
   /** Checks a brain on the VM, where the Attempt's children run; the checks export nothing there. */
-  const harnessProbe = (vm: VmState) =>
-    agentsHarnessProbe(spawner, commands.childHost(vm.sshDest), {});
+  const harnessProbe = (shell: RemoteShell) => agentsHarnessProbe(spawner, shell, {});
 
   const resolveVm = Effect.fn("ExeDevExecutor.resolveVm")(function* (worker: WorkerName) {
     const response = yield* commands.lobbyJson("preflight", ["ls", worker]);
@@ -115,7 +115,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       );
     }
 
-    yield* verifyHarnessReadiness(worker, brains, harnessProbe(vm));
+    yield* verifyHarnessReadiness(worker, brains, harnessProbe(commands.childHost(vm.sshDest)));
 
     for (const integration of options.githubIntegrations) {
       yield* asCapability(

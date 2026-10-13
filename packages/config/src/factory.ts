@@ -1,7 +1,13 @@
 import { Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { RepositoryName } from "@usine/core/repository";
-import { WorkerName, WorkerKind } from "@usine/core/worker";
+import {
+  SshDestination,
+  SshIdentityFile,
+  SshPort,
+  WorkerName,
+  WorkerRoot,
+} from "@usine/core/worker";
 import { Effect, Schema } from "effect";
 import { nonBlankString } from "./checks.ts";
 import { LaneSource, Lane } from "./board.ts";
@@ -59,12 +65,41 @@ export class ManagedRepo extends Schema.Class<ManagedRepo>("@usine/config/Manage
   lanes: Lanes.pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
 }) {}
 
-/** A named place to execute Attempts, with the number it may run at the same time. */
-export class Worker extends Schema.Class<Worker>("@usine/config/Worker")({
+const MaxConcurrentAttempts = PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(1)));
+
+/** The orchestrator's own machine as a Worker, with the number of Attempts it may run at the same time. */
+export class LocalWorker extends Schema.Class<LocalWorker>("@usine/config/LocalWorker")({
   name: WorkerName,
-  kind: WorkerKind,
-  maxConcurrentAttempts: PositiveInt.pipe(Schema.withDecodingDefaultKey(Effect.succeed(1))),
+  kind: Schema.Literal("local"),
+  maxConcurrentAttempts: MaxConcurrentAttempts,
 }) {}
+
+/** An exe.dev VM named after the Worker, with the number of Attempts it may run at the same time. */
+export class ExeDevWorker extends Schema.Class<ExeDevWorker>("@usine/config/ExeDevWorker")({
+  name: WorkerName,
+  kind: Schema.Literal("exe.dev"),
+  maxConcurrentAttempts: MaxConcurrentAttempts,
+}) {}
+
+/**
+ * A Linux machine the orchestrator connects to over SSH, with the number of
+ * Attempts it may run at the same time. The orchestrator's `ssh` client
+ * connects to `destination`, on `port` and with `identityFile` when given,
+ * and the Worker keeps its state under `<root>/workers/<name>` on the machine.
+ */
+export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker")({
+  name: WorkerName,
+  kind: Schema.Literal("ssh"),
+  maxConcurrentAttempts: MaxConcurrentAttempts,
+  destination: SshDestination,
+  identityFile: Schema.OptionFromOptionalKey(SshIdentityFile),
+  port: Schema.OptionFromOptionalKey(SshPort),
+  root: WorkerRoot,
+}) {}
+
+/** A named place to execute Attempts; its kind selects the Worker adapter and the settings that adapter needs. */
+export const Worker = Schema.Union([LocalWorker, ExeDevWorker, SshWorker]);
+export type Worker = typeof Worker.Type;
 
 /** Factory-wide polling, Attempt limits, and defaults for the coordinating parent. */
 export class Settings extends Schema.Class<Settings>("@usine/config/Settings")({
@@ -106,9 +141,16 @@ const SettingsFromYaml = Settings.pipe(
   }),
 );
 
-const WorkerFromYaml = Worker.pipe(
-  Schema.encodeKeys({ maxConcurrentAttempts: "max_concurrent_attempts" }),
-);
+const WorkerFromYaml = Schema.Union([
+  LocalWorker.pipe(Schema.encodeKeys({ maxConcurrentAttempts: "max_concurrent_attempts" })),
+  ExeDevWorker.pipe(Schema.encodeKeys({ maxConcurrentAttempts: "max_concurrent_attempts" })),
+  SshWorker.pipe(
+    Schema.encodeKeys({
+      maxConcurrentAttempts: "max_concurrent_attempts",
+      identityFile: "identity_file",
+    }),
+  ),
+]);
 
 const ManagedRepos = Schema.Array(ManagedRepo).check(uniqueNames);
 
