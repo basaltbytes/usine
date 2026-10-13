@@ -8,6 +8,8 @@ The gateway decides with a caller token, not with the caller's address. Provider
 
 Traffic between a Worker and the gateway is plain HTTP on the private network, and the gateway speaks HTTPS to the upstream. A certificate authority for the gateway's own names would have to be generated, distributed to every Worker, and renewed; the only client that insists on HTTPS is `gh`, and `gh` speaks plain HTTP over the Unix socket its `http_unix_socket` setting names, which systemd forwards to the gateway. What crosses the private network in the clear is caller tokens, which are useless outside it, and repository contents, which are already on the provider's disks.
 
+The forward proxy pins each tunnel to its name. A `CONNECT` tunnel is opaque, and package registries sit on shared CDN addresses, so a tunnel opened to an allowed name could carry a TLS connection to any other tenant of that address. Before it opens the upstream connection, the proxy reads the client's TLS ClientHello and requires its server name to be the CONNECT host; a ClientHello that names no server, hides it with encrypted ClientHello, names another one, or is not TLS ends the tunnel. Tunnels are for port 443 only, and plain HTTP goes through the proxy's absolute-form relay, which sees the host it sends to. The name is read rather than intercepted because reading it needs nothing on the Worker: interception would need a certificate authority on every Worker that can impersonate any host, which is what this decision rules out below. Package managers and the harnesses send the server name in every ClientHello and do not use encrypted ClientHello, so pinning changes nothing for them.
+
 ## Considered Options
 
 - **Envoy with `credential_injector`**: the filter is alpha and its credential is static per route, while usine's rule is per Worker, per repository, and per Attempt window, and changes at every attach and detach.
@@ -18,9 +20,10 @@ Traffic between a Worker and the gateway is plain HTTP on the private network, a
 
 ## Consequences
 
-- The executor's credential step for a gateway Worker changes from writing a token to attaching it, and its cleanup detaches it; a renewal is another attach before the token expires.
+- The executor's credential step for a gateway Worker changes from writing a token to attaching it, and its cleanup detaches it; a renewal attaches the new token under the same attachment id before the old one expires.
 - Attachments are in memory. After a gateway restart, requests are refused until the executor attaches again, which its next renewal does.
 - An LLM request also needs a live attachment, so a Worker spends no API credit outside an Attempt.
 - A Worker reaches github.com and the LLM providers only through the gateway. The forward proxy never lists them, because a tunnel is opaque: the gateway could not remove a caller token from it, and a tunnel to github.com would let a Worker push with a credential it was handed in a prompt. Plain HTTP requests the forward proxy relays lose their caller tokens before they leave.
 - Package registries on the allowlist can still receive uploads made with a credential an agent was handed; the allowlist keeps that path to registries, which is the residual risk the research note accepts when no secret is reachable from the Worker.
+- Inside a tunnel whose ClientHello named the allowed host, an HTTP/2 client may reuse the connection for another name the same certificate covers (connection coalescing, RFC 9113, section 9.1.1), and a CDN that routes by the HTTP `Host` rather than the server name lets a client front another tenant. The operator weighs both when listing a host on a CDN: the names on its certificate and how its CDN routes ([#240](https://github.com/basaltbytes/usine/issues/240)).
 - API keys and an OpenAI-compatible key move to the gateway. The Claude subscription login stays on the Worker: Anthropic documents gateways that forward the login from the machine, not one that keeps it ([LLM gateways](https://code.claude.com/docs/en/llm-gateway)). The gateway can send a subscription token, and `test/placeholder-swap` in `@usine/gateway` checks the swap with Claude Code.

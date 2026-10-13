@@ -51,13 +51,19 @@ export class EgressPermitted extends Schema.TaggedClass<EgressPermitted>()("Egre
 /**
  * Why a destination is refused: its host is not listed, its port is not, it
  * is an IP address, or its name resolves to a private, loopback, or
- * link-local address (checked by a proxy that resolves names itself).
+ * link-local address (checked by a proxy that resolves names itself). For a
+ * tunnel, also when the client's first bytes are not a TLS ClientHello, when
+ * the ClientHello names no server or hides it with ECH, or when it names
+ * another server than the CONNECT host.
  */
 export const EgressRefusalReason = Schema.Literals([
   "host-not-allowed",
   "port-not-allowed",
   "address-literal",
   "private-address",
+  "not-tls",
+  "server-name-missing",
+  "server-name-mismatch",
 ]);
 export type EgressRefusalReason = typeof EgressRefusalReason.Type;
 

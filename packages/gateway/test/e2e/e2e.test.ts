@@ -1,19 +1,19 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
-import { request } from "node:http";
 import { connect, createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
-import { DateTime, Effect, Layer, Redacted } from "effect";
+import { DateTime, Effect, Layer, Option, Redacted } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { AttachRequest, GatewayAdminApi } from "../../src/admin/api.ts";
 import { AnonymousCredential } from "../../src/attachment/attachment.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../../src/node/node.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, WORKER, settingsLayer } from "../fixtures.ts";
+import { tlsThroughTunnel } from "../tunnel.ts";
 
 // These tests reach github.com and registry.npmjs.org, anonymously, so CI needs no secret.
 
@@ -152,25 +152,18 @@ describe("the gateway against GitHub", () => {
   );
 
   it.live(
-    "the forward proxy opens a tunnel to an allowlisted registry",
+    "the forward proxy tunnels TLS to an allowlisted registry when the ClientHello names it",
     () =>
       Effect.gen(function* () {
         const { egress } = yield* GatewayAddresses;
-        const status = yield* Effect.callback<number>((resume) => {
-          const outgoing = request({
-            host: egress.host,
-            port: egress.port,
-            method: "CONNECT",
-            path: "registry.npmjs.org:443",
-          });
-          outgoing.once("connect", (response, socket) => {
-            socket.destroy();
-            resume(Effect.succeed(response.statusCode ?? 0));
-          });
-          outgoing.once("error", (error) => resume(Effect.die(error)));
-          outgoing.end();
-        });
-        assert.strictEqual(status, 200);
+        assert.strictEqual(
+          yield* tlsThroughTunnel(
+            egress,
+            "registry.npmjs.org:443",
+            Option.some("registry.npmjs.org"),
+          ),
+          "connected",
+        );
       }).pipe(Effect.provide(gateway)),
     90_000,
   );

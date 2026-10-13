@@ -1,6 +1,16 @@
 import { createServer, request } from "node:http";
 import { assert, describe, it } from "@effect/vitest";
-import { DateTime, Deferred, Effect, Layer, Logger, Predicate, Redacted } from "effect";
+import {
+  DateTime,
+  Deferred,
+  Effect,
+  Layer,
+  Logger,
+  Option,
+  Predicate,
+  Redacted,
+  Schedule,
+} from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { AttachRequest, GatewayAdminApi } from "../src/admin/api.ts";
@@ -9,6 +19,7 @@ import { CallerTokens } from "../src/caller/caller.ts";
 import { serveEgressProxy } from "../src/node/egress-proxy.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../src/node/node.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
+import { rawThroughTunnel, tlsThroughTunnel } from "./tunnel.ts";
 
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
@@ -16,6 +27,31 @@ const gateway = gatewayLayer({ proxy: LOOPBACK, egress: LOOPBACK, admin: LOOPBAC
   Layer.provide(settingsLayer(NO_PROVIDERS)),
   Layer.provideMerge(FetchHttpClient.layer),
 );
+
+const refusals: Array<string> = [];
+
+const gatewayRecordingRefusals = gateway.pipe(
+  Layer.provide(
+    Logger.layer(
+      [
+        Logger.make(({ message }) => {
+          const line = JSON.stringify(message);
+          if (line.includes("Gateway refused a request")) refusals.push(line);
+        }),
+      ],
+      { mergeWithExisting: true },
+    ),
+  ),
+);
+
+/** The refusal logged with `reason`, waiting for it briefly since the proxy logs after it closes the tunnel. */
+const refusalLogged = (reason: string) =>
+  Effect.suspend(() => {
+    const line = refusals.find((logged) => logged.includes(`"reason":"${reason}"`));
+    return line === undefined
+      ? Effect.fail(new Error(`no ${reason} refusal was logged`))
+      : Effect.succeed(line);
+  }).pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }));
 
 const admin = (token: string) =>
   Effect.gen(function* () {
@@ -122,7 +158,7 @@ describe("the Node gateway", () => {
   );
 
   it.live(
-    "the forward proxy refuses unlisted hosts and listed names that resolve to private addresses",
+    "the forward proxy refuses unlisted hosts, IP addresses, and tunnels to a port other than 443",
     () =>
       Effect.gen(function* () {
         const { egress } = yield* GatewayAddresses;
@@ -130,9 +166,9 @@ describe("the Node gateway", () => {
           status: 403,
           reason: "host-not-allowed",
         });
-        assert.deepStrictEqual(yield* connect(egress, "localhost:443"), {
+        assert.deepStrictEqual(yield* connect(egress, "registry.npmjs.org:80"), {
           status: 403,
-          reason: "private-address",
+          reason: "port-not-allowed",
         });
         assert.deepStrictEqual(yield* connect(egress, "127.0.0.1:443"), {
           status: 403,
@@ -143,6 +179,41 @@ describe("the Node gateway", () => {
           reason: "host-not-allowed",
         });
       }).pipe(Effect.provide(gateway)),
+  );
+
+  it.live("a tunnel carries only a TLS connection that asks for the CONNECT host itself", () =>
+    Effect.gen(function* () {
+      refusals.length = 0;
+      const { egress } = yield* GatewayAddresses;
+      // An allowed CONNECT host, then a ClientHello for another tenant of its CDN address.
+      assert.strictEqual(
+        yield* tlsThroughTunnel(egress, "registry.npmjs.org:443", Option.some("example.com")),
+        "refused",
+      );
+      const mismatch = yield* refusalLogged("server-name-mismatch");
+      assert.include(mismatch, '"host":"registry.npmjs.org"');
+      assert.include(mismatch, '"serverName":"example.com"');
+      assert.strictEqual(
+        yield* tlsThroughTunnel(egress, "registry.npmjs.org:443", Option.none()),
+        "refused",
+      );
+      yield* refusalLogged("server-name-missing");
+      assert.strictEqual(
+        yield* rawThroughTunnel(
+          egress,
+          "registry.npmjs.org:443",
+          "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n",
+        ),
+        "closed",
+      );
+      yield* refusalLogged("not-tls");
+      // A listed name that resolves to loopback is refused once its ClientHello has been checked.
+      assert.strictEqual(
+        yield* tlsThroughTunnel(egress, "localhost:443", Option.some("localhost")),
+        "refused",
+      );
+      yield* refusalLogged("private-address");
+    }).pipe(Effect.provide(gatewayRecordingRefusals)),
   );
 
   it.live("closes the downstream and logs a failure when an upstream body is truncated", () =>

@@ -27,7 +27,7 @@ import {
 } from "../fixtures.ts";
 
 /*
- * Checks whether Claude Code works when the Worker holds only a placeholder
+ * Checks whether Claude Code works when the Worker has only a placeholder
  * subscription token and the gateway swaps in the real one. Run it with
  * `pnpm --filter @usine/gateway test:placeholder-swap`; it needs `claude` on
  * PATH. The stub check runs Claude Code against a local Anthropic stub and
