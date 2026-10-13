@@ -304,7 +304,7 @@ describe("SSH Worker", () => {
       assert(unreachable._tag === "WorkerCapabilityError");
       assert.strictEqual(
         unreachable.message,
-        `Could not reach SSH Worker eu-one at ${DESTINATION}`,
+        `Could not connect to SSH Worker eu-one at ${DESTINATION}`,
       );
 
       const unknown = yield* executor.preflight(WorkerName.make("eu-two"), []).pipe(Effect.flip);

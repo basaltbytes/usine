@@ -10,7 +10,7 @@ import type { Effect, Option } from "effect";
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteMachine } from "../remote/machine.ts";
 
-/** How the orchestrator reaches one SSH Worker's machine, and where the Worker keeps its state there. */
+/** How the orchestrator connects to one SSH Worker's machine, and where the Worker keeps its state there. */
 export interface SshWorkerAddress {
   readonly name: WorkerName;
   /** What the local `ssh` client connects to: `user@host`, or a Host alias from the SSH configuration. */
@@ -35,7 +35,7 @@ export interface SshExecutorOptions {
   readonly harnessReadiness?: (machine: SshMachine) => HarnessProbe;
 }
 
-/** An SSH Worker's machine with the child host every command and child reaches it through. */
+/** An SSH Worker's machine with the child host that every command and child on it runs through. */
 export interface SshMachine extends RemoteMachine {
   /** The Worker's address in `usine.yaml`, for preflight to check its root. */
   readonly address: SshWorkerAddress;

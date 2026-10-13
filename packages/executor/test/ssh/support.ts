@@ -113,7 +113,7 @@ const standardInput = (command: StandardCommand): Effect.Effect<string> => {
   );
 };
 
-/** Fakes the local SSH client and the Linux machine every SSH Worker command reaches. */
+/** Fakes the local SSH client and the Linux machine every SSH Worker command runs on. */
 export const fakeMachine = () => {
   const state: FakeMachineState = {
     calls: [],

@@ -125,7 +125,7 @@ The long-running headless server that evaluates triggers, schedules work, holds 
 _Avoid_: daemon, app, backend
 
 **Worker**:
-The place an Attempt's children run: a machine with the Attempt's checkout. Local processes first; remote Workers (an exe.dev VM, or any Linux machine the orchestrator reaches over SSH) behind the same seam. Every Attempt's Pi parent runs in the orchestrator, whatever the Worker.
+The place an Attempt's children run: a machine with the Attempt's checkout. Local processes first; remote Workers (an exe.dev VM, or any Linux machine the orchestrator connects to over SSH) behind the same seam. Every Attempt's Pi parent runs in the orchestrator, whatever the Worker.
 _Avoid_: runner, sandbox, executor (the seam may be named executor in code, but the concept is Worker)
 
 **Run host**:

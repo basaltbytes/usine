@@ -8,7 +8,7 @@ import type { CredentialUnavailableError, ExecutorError, ExecutorOperation } fro
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteCommands } from "./commands.ts";
 
-/** A Worker's machine as the remote executor reaches it. */
+/** A Worker's machine and how the remote executor connects to it. */
 export interface RemoteMachine {
   /** The SSH client and destination that every command and child on the machine runs through. */
   readonly shell: RemoteShell;
@@ -49,7 +49,7 @@ export interface RemoteWorker<M extends RemoteMachine> {
   readonly label: string;
   /** Runs every command on the Worker's machines over SSH. */
   readonly commands: RemoteCommands;
-  /** Resolves the machine a Worker runs on; a missing or unreachable machine keeps its typed error. */
+  /** Resolves the machine a Worker runs on; fails with a typed error when the machine is missing or does not answer. */
   readonly machineFor: (worker: WorkerName) => Effect.Effect<M, ExecutorError>;
   /** Verifies a Worker without changing it, as `Executor.preflight` documents. */
   readonly preflight: (
@@ -60,7 +60,7 @@ export interface RemoteWorker<M extends RemoteMachine> {
   readonly harnessProbe: (machine: M) => HarnessProbe;
   /** The URL the Worker's cached clone fetches `repository` from. */
   readonly repositoryUrl: (repository: RepositoryName) => string;
-  /** Finds how the Worker reaches `repository`; fails when no access is configured for it. */
+  /** Finds how the Worker gets access to `repository`; fails when no access is configured for it. */
   readonly grantFor: (
     repository: RepositoryName,
   ) => Effect.Effect<RemoteGrant<M>, CredentialUnavailableError>;

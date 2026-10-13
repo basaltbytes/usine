@@ -34,7 +34,7 @@ const executorError = (message: string, cause: unknown): ExecutorOperationError 
   new ExecutorOperationError({ operation: "prepare", message, cause });
 
 /**
- * The Executor for a Worker whose machine the orchestrator reaches over SSH:
+ * The Executor for a Worker whose machine the orchestrator connects to over SSH:
  * each Attempt's Pi parent is a durable task in this process, and its children
  * run on the machine as one SSH command each, with a pid file beside the
  * worktree. `worker` supplies the machine, its preflight, and the Attempt's

@@ -22,9 +22,9 @@ const capabilityError = (
 ): WorkerCapabilityError => new WorkerCapabilityError({ worker, capability, message, cause });
 
 /**
- * Verifies an SSH Worker without changing its machine: the SSH client reaches
- * it, the configured root is a writable directory, Git runs, and each rostered
- * brain is ready where the Attempt's children run.
+ * Verifies an SSH Worker without changing its machine: the SSH client connects
+ * to it, the configured root is a writable directory, Git runs, and each
+ * rostered brain is ready where the Attempt's children run.
  */
 export const sshPreflightFor = (
   commands: RemoteCommands,
@@ -39,24 +39,24 @@ export const sshPreflightFor = (
     const host = machine.shell.destination;
     const root = machine.address.root;
     yield* Effect.annotateCurrentSpan({ worker, host });
-    const reached = yield* commands
+    const connected = yield* commands
       .inspect("preflight", machine.shell, "true", [])
       .pipe(
         Effect.mapError((cause) =>
           capabilityError(
             worker,
             "machine",
-            `Could not reach SSH Worker ${worker} at ${host}`,
+            `Could not connect to SSH Worker ${worker} at ${host}`,
             cause,
           ),
         ),
       );
-    if (reached.exitCode !== 0)
+    if (connected.exitCode !== 0)
       return yield* capabilityError(
         worker,
         "machine",
-        `Could not reach SSH Worker ${worker} at ${host}`,
-        new Error(reached.stderr.trim() || `ssh exited with code ${String(reached.exitCode)}`),
+        `Could not connect to SSH Worker ${worker} at ${host}`,
+        new Error(connected.stderr.trim() || `ssh exited with code ${String(connected.exitCode)}`),
       );
     const rootChecked = yield* commands
       .inspect("preflight", machine.shell, "sh", ["-c", WRITABLE_DIRECTORY_SCRIPT, "sh", root])

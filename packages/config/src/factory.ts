@@ -82,7 +82,7 @@ export class ExeDevWorker extends Schema.Class<ExeDevWorker>("@usine/config/ExeD
 }) {}
 
 /**
- * A Linux machine the orchestrator reaches over SSH, with the number of
+ * A Linux machine the orchestrator connects to over SSH, with the number of
  * Attempts it may run at the same time. The orchestrator's `ssh` client
  * connects to `destination`, on `port` and with `identityFile` when given,
  * and the Worker keeps its state under `<root>/workers/<name>` on the machine.

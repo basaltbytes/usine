@@ -1,6 +1,6 @@
 # SSH Workers on Hetzner Cloud
 
-An `ssh` Worker is any Linux machine the orchestrator reaches over SSH. This folder creates one on
+An `ssh` Worker is any Linux machine the orchestrator connects to over SSH. This folder creates one on
 Hetzner Cloud in Falkenstein (`fsn1`), Nuremberg (`nbg1`), or Helsinki (`hel1`):
 
 - `cloud-init.yaml` builds the machine on Debian 13: the `usine` user, Git, gh, Node.js 24, pnpm,

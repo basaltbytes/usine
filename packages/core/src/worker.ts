@@ -9,7 +9,7 @@ export const WorkerName = Schema.String.check(
 
 export type WorkerName = typeof WorkerName.Type;
 
-/** The Worker adapters the engine ships. */
+/** The Worker kinds the engine has an adapter for. */
 export const WORKER_KINDS = ["local", "exe.dev", "ssh"] as const;
 export const WorkerKind = Schema.Literals(WORKER_KINDS);
 export type WorkerKind = typeof WorkerKind.Type;

@@ -18,7 +18,7 @@ import type { ExecutorOperation, ExecutorOperationError } from "../executor.ts";
 /**
  * Where a remote command starts, what it exports on top of the machine's own
  * environment, and how its output is cleaned before it is kept: a credential
- * that git or gh echoes never reaches an error, a log, or a parsed result.
+ * that git or gh echoes is not written to any error, log, or parsed result.
  */
 export interface RemoteContext extends Pick<HostInvocation, "cwd" | "environment"> {
   readonly scrub?: (text: string) => string;
@@ -51,8 +51,8 @@ export interface RemoteCommands {
     context?: RemoteContext,
   ) => Effect.Effect<string, ExecutorOperationError>;
   /**
-   * Runs a remote command with `input` as its standard input, so a secret
-   * reaches the machine without appearing in any command line or log.
+   * Runs a remote command with `input` sent on its standard input, so a
+   * secret appears in no command line and is not written to any log.
    */
   readonly runWithInput: (
     operation: ExecutorOperation,
@@ -65,7 +65,7 @@ export interface RemoteCommands {
 
 /**
  * The local SSH client inherits only what SSH itself needs; GitHub and factory
- * credentials from the orchestrator environment never reach it or the machine.
+ * credentials from the orchestrator environment are passed neither to it nor to the machine.
  */
 export const SSH_ENVIRONMENT_ALLOWLIST = [
   "HOME",

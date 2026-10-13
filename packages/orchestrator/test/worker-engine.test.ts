@@ -37,7 +37,10 @@ describe("Worker engine selection", () => {
     Effect.gen(function* () {
       const failure = yield* startupFailure([unreachable]);
       assert(failure._tag === "WorkerCapabilityError", failure._tag);
-      assert.strictEqual(failure.message, "Could not reach SSH Worker eu-one at usine@127.0.0.1");
+      assert.strictEqual(
+        failure.message,
+        "Could not connect to SSH Worker eu-one at usine@127.0.0.1",
+      );
     }),
   );
 

@@ -86,7 +86,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
   });
 
 /**
- * Runs Attempts on Linux machines the orchestrator reaches over SSH: each
+ * Runs Attempts on Linux machines the orchestrator connects to over SSH: each
  * Attempt's Pi parent is a durable task in this process (`AttemptRuntime`),
  * and its children run on the Worker's machine, one SSH command each, with
  * the Attempt's single-repository GitHub token written beside its checkout
