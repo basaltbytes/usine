@@ -74,6 +74,53 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("parses an ssh Worker's address and refuses it on other kinds", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const parse = (workers: ReadonlyArray<string>) =>
+        parser.parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          ["version: 1", "repos: []", "workers:", ...workers].join("\n"),
+        );
+      const configured = yield* parse([
+        "  - name: eu-one",
+        "    kind: ssh",
+        "    destination: usine@203.0.113.7",
+        "    identity_file: ~/.ssh/usine_worker",
+        "    port: 2222",
+        "    root: /home/usine/.usine",
+        "    max_concurrent_attempts: 2",
+        "  - name: eu-two",
+        "    kind: ssh",
+        "    destination: eu-two",
+        "    root: /srv/usine",
+      ]);
+      const [first, second] = configured.workers;
+      expect(first?.kind).toBe("ssh");
+      expect(second?.kind).toBe("ssh");
+      if (first?.kind !== "ssh" || second?.kind !== "ssh") return;
+      expect(first.destination).toBe("usine@203.0.113.7");
+      expect(Option.getOrNull(first.identityFile)).toBe("~/.ssh/usine_worker");
+      expect(Option.getOrNull(first.port)).toBe(2222);
+      expect(first.root).toBe("/home/usine/.usine");
+      expect(first.maxConcurrentAttempts).toBe(2);
+      expect(Option.isNone(second.identityFile) && Option.isNone(second.port)).toBe(true);
+
+      for (const workers of [
+        ["  - name: here", "    kind: local", "    root: /srv/usine"],
+        ["  - name: eu", "    kind: ssh", "    root: /srv/usine"],
+        ["  - name: eu", "    kind: ssh", "    destination: -oProxyCommand=sh", "    root: /srv"],
+        ["  - name: eu", "    kind: ssh", "    destination: eu", "    root: srv/usine"],
+        ["  - name: eu", "    kind: ssh", "    destination: eu", "    root: /srv/usine/"],
+        ["  - name: eu", "    kind: ssh", "    destination: eu", "    root: /srv", "    port: 0"],
+        ["  - name: eu", "    kind: ssh", "    destination: eu", "    root: /srv", "    user: x"],
+      ]) {
+        const failure = yield* parse(workers).pipe(Effect.flip);
+        expect(failure.stage).toBe("schema");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("parses declared labels and rejects invalid label declarations", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

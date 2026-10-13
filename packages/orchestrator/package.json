@@ -47,6 +47,10 @@
       "types": "./dist/polling-triggers.d.ts",
       "default": "./dist/polling-triggers.js"
     },
+    "./runtime": {
+      "types": "./dist/runtime.d.ts",
+      "default": "./dist/runtime.js"
+    },
     "./schedule-triggers": {
       "types": "./dist/schedule-triggers.d.ts",
       "default": "./dist/schedule-triggers.js"
@@ -54,6 +58,10 @@
     "./scheduler": {
       "types": "./dist/scheduler.d.ts",
       "default": "./dist/scheduler.js"
+    },
+    "./ssh": {
+      "types": "./dist/ssh.d.ts",
+      "default": "./dist/ssh.js"
     },
     "./operator": {
       "types": "./dist/operator/operator.d.ts",
@@ -73,7 +81,8 @@
     "test": "vitest run --exclude 'test/integration/**'",
     "test:integration": "vitest run test/integration/polling-triggers.test.ts",
     "test:integration:agent": "vitest run test/integration/agent-run.test.ts",
-    "test:exe-dev": "vitest run test/integration/exe-dev-worker.test.ts"
+    "test:exe-dev": "vitest run test/integration/exe-dev-worker.test.ts",
+    "test:ssh": "vitest run test/integration/ssh-worker.test.ts"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",
@@ -87,6 +96,7 @@
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",
+    "@usine/agents": "workspace:*",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:",

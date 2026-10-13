@@ -37,8 +37,9 @@ const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
  * The failure as the line an operator reads in the run drawer: its message, then
  * the diagnostic underneath it. A failed executor command says only `git exited
  * with code 128` and keeps git's stderr in its cause, which is what tells a
- * deleted remote from a revoked App. The local adapter scrubs the Attempt's
- * token from that stderr before forming the error; an exe.dev VM never holds one.
+ * deleted remote from a revoked App. The local and SSH adapters scrub the
+ * Attempt's token from that stderr before forming the error; an exe.dev VM
+ * never receives one.
  */
 const failureMessage = (failure: Error): string => {
   const detail = failure.cause instanceof Error ? failure.cause.message.trim() : "";

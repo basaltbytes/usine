@@ -1,24 +1,18 @@
-import {
-  type HostInvocation,
-  RemoteShell,
-  type SshCommand,
-  sshArguments,
-} from "@usine/agents/child-host";
+import type { RemoteShell, SshCommand } from "@usine/agents/child-host";
+import type { SshDestination } from "@usine/core/worker";
 import { Effect } from "effect";
-import { ChildProcessSpawner } from "effect/unstable/process";
-import {
-  allowlistedEnvironment,
-  collectCommand,
-  requireSuccess,
-  type CommandResult,
-} from "../child-command.ts";
+import type { CommandResult } from "../child-command.ts";
 import type { ExecutorOperation, ExecutorOperationError } from "../executor.ts";
-import type { SshDestination } from "./model.ts";
-
-/** Where a remote command starts and what it exports on top of the VM's own environment. */
-type RemoteContext = Pick<HostInvocation, "cwd" | "environment">;
+import {
+  DEFAULT_SSH,
+  type RemoteCommands,
+  type RemoteContext,
+  remoteCommandsFor,
+} from "../remote/commands.ts";
 
 export interface ExeDevCommands {
+  /** The shared remote command runner every VM command goes through. */
+  readonly shared: RemoteCommands;
   /** The child host that runs an Attempt's children on this VM through the same SSH client. */
   readonly childHost: (sshDest: SshDestination) => RemoteShell;
   readonly lobby: (
@@ -44,59 +38,12 @@ export interface ExeDevCommands {
   ) => Effect.Effect<string, ExecutorOperationError>;
 }
 
-/**
- * The local SSH client inherits only what SSH itself needs; GitHub and factory
- * credentials from the orchestrator environment never reach it or the VM.
- */
-const SSH_ENVIRONMENT_ALLOWLIST = [
-  "HOME",
-  "LANG",
-  "LC_ALL",
-  "PATH",
-  "SHELL",
-  "SSH_AGENT_PID",
-  "SSH_AUTH_SOCK",
-  "TMPDIR",
-  "USER",
-] as const;
-
 export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
   configuredSsh?: SshCommand,
 ) {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const environment = yield* allowlistedEnvironment(SSH_ENVIRONMENT_ALLOWLIST);
-  const ssh = configuredSsh ?? {
-    command: "ssh",
-    // The keepalive pair turns a dead TCP link into a non-zero SSH exit instead
-    // of a silent park, so a lost VM fails the operation.
-    args: ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4"],
-  };
-
-  const childHost = (sshDest: SshDestination) =>
-    new RemoteShell({ ssh, sshEnvironment: environment, destination: sshDest });
-
-  const executeRaw = Effect.fn("ExeDevExecutor.executeRaw")(function* (
-    operation: ExecutorOperation,
-    host: string,
-    command: string,
-    args: ReadonlyArray<string>,
-  ) {
-    yield* Effect.annotateCurrentSpan({ host, operation });
-    return yield* collectCommand(spawner, operation, command, args, {
-      env: environment,
-      extendEnv: false,
-    });
-  });
-
-  const executeChecked = Effect.fn("ExeDevExecutor.executeChecked")(function* (
-    operation: ExecutorOperation,
-    host: string,
-    command: string,
-    args: ReadonlyArray<string>,
-  ) {
-    const result = yield* executeRaw(operation, host, command, args);
-    return yield* requireSuccess(operation, host, command, args, result);
-  });
+  const shared = yield* remoteCommandsFor;
+  const ssh = configuredSsh ?? DEFAULT_SSH;
+  const childHost = (sshDest: SshDestination) => shared.shellFor(ssh, sshDest);
 
   // Lobby arguments pass unquoted through OpenSSH's argv join, so every value
   // must be a brand-validated token (WorkerName, IntegrationName,
@@ -105,39 +52,21 @@ export const commandsFor = Effect.fn("ExeDevExecutor.commandsFor")(function* (
     operation: ExecutorOperation,
     args: ReadonlyArray<string>,
   ): Effect.Effect<string, ExecutorOperationError> =>
-    executeChecked(operation, "exe.dev", ssh.command, [...ssh.args, "exe.dev", ...args]);
+    shared.local(operation, "exe.dev", ssh.command, [...ssh.args, "exe.dev", ...args]);
 
   const lobbyJson = (
     operation: ExecutorOperation,
     args: ReadonlyArray<string>,
   ): Effect.Effect<string, ExecutorOperationError> => lobby(operation, [...args, "--json"]);
 
-  const remoteRaw = (
-    operation: ExecutorOperation,
-    sshDest: SshDestination,
-    command: string,
-    args: ReadonlyArray<string>,
-  ): Effect.Effect<CommandResult, ExecutorOperationError> =>
-    executeRaw(
-      operation,
-      sshDest,
-      ssh.command,
-      sshArguments(childHost(sshDest), { command, args }),
-    );
-
-  const remote = (
-    operation: ExecutorOperation,
-    sshDest: SshDestination,
-    command: string,
-    args: ReadonlyArray<string>,
-    context: RemoteContext = {},
-  ): Effect.Effect<string, ExecutorOperationError> =>
-    executeChecked(
-      operation,
-      sshDest,
-      ssh.command,
-      sshArguments(childHost(sshDest), { ...context, command, args }),
-    );
-
-  return { childHost, lobby, lobbyJson, remote, remoteRaw } satisfies ExeDevCommands;
+  return {
+    shared,
+    childHost,
+    lobby,
+    lobbyJson,
+    remoteRaw: (operation, sshDest, command, args) =>
+      shared.inspect(operation, childHost(sshDest), command, args),
+    remote: (operation, sshDest, command, args, context) =>
+      shared.run(operation, childHost(sshDest), command, args, context),
+  } satisfies ExeDevCommands;
 });

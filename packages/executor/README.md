@@ -1,6 +1,6 @@
 # @usine/executor
 
-Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free package root defines Worker preflight, scoped Attempt preparation, and cancellation. Each prepared Attempt runs its Pi parent in this process as a durable task, tells it where the Worker runs its children (as local processes, or over SSH on exe.dev), and releases its resources at completion or when its scope closes. It also owns the credential provider, Worker capability errors, and adapter-neutral request types.
+Worker execution for [usine](https://github.com/basaltbytes/usine). The platform-free package root defines Worker preflight, scoped Attempt preparation, and cancellation. Each prepared Attempt runs its Pi parent in this process as a durable task, tells it where the Worker runs its children (as local processes, or over SSH on an exe.dev VM or any Linux machine), and releases its resources at completion or when its scope closes. It also owns the credential provider, Worker capability errors, and adapter-neutral request types.
 
 ## Attempt lifetime
 
@@ -35,8 +35,8 @@ HEAD is pushed to `CheckoutRequest.salvageRef` with the Worker's credentials. Th
 result reaches the engine through `Sink.salvage`. A failed push keeps the worktree
 on disk and reports its path and the failure: git's exit code followed by git's own
 stderr, so a deleted remote reads differently from a revoked App; a push that stalls
-past two minutes is named as such. The local adapter scrubs the Attempt's token from
-that stderr first, and an exe.dev VM never holds one. The startup sweep leaves such a
+past two minutes is named as such. The local and SSH adapters scrub the Attempt's token
+from that stderr first, and an exe.dev VM never receives one. The startup sweep leaves such a
 worktree alone. Every later startup retries the salvage with fresh credentials, for
 open and closed Runs alike, and rewrites the record from `Retained` to `Pushed` once
 the push succeeds; until then the record carries the latest failure for the run
@@ -44,8 +44,8 @@ drawer. A request whose `resume` names a pushed salvage checks that ref out inst
 of the bare revision; a missing ref falls back to the revision.
 
 Startup reconciliation lists each Worker's `attempts/` directory once per executor
-instance. Both local and exe.dev adapters skip historical Attempts absent from that
-listing without inspecting individual checkout paths. Failed listings remain cached
+instance. Every adapter skips historical Attempts absent from that listing without
+inspecting individual checkout paths. Failed listings remain cached
 for that startup and are retried after restart. Existing checkouts still follow the
 record-before-remove salvage order; succeeded Attempts only need checkout removal.
 
@@ -64,7 +64,7 @@ methods. Consumers supply a scope instead of coordinating cleanup. The engine's
 
 ## Worker preflight
 
-Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpec` values before scheduling Attempts. Both adapters run the `@usine/agents/preflight` checks where the Worker runs children: the local adapter on this machine (override with `LocalExecutorOptions.harnessReadiness`), the exe.dev adapter over SSH on the VM. They check each selected harness’s executable and authentication; Codex requires supported CLI 0.144.0 or 0.153.4 and a ChatGPT login, Claude requires its CLI and subscription login, and Pi children require API keys for their selected models. Pi children run their tools in the orchestrator process, so an exe.dev Worker reports a Pi brain as unavailable.
+Call `executor.preflight(worker, brains)` with the instance roster’s `BrainSpec` values before scheduling Attempts. Every adapter runs the `@usine/agents/preflight` checks where the Worker runs children: the local adapter on this machine (override with `LocalExecutorOptions.harnessReadiness`), the exe.dev and SSH adapters over SSH on the Worker's machine (override with `SshExecutorOptions.harnessReadiness`). They check each selected harness’s executable and authentication; Codex requires supported CLI 0.144.0 or 0.153.4 and a ChatGPT login, Claude requires its CLI and subscription login, and Pi children require API keys for their selected models. Pi children run their tools in the orchestrator process, so exe.dev and SSH Workers report a Pi brain as unavailable.
 
 `prepare` repeats the assigned brain’s probe before acquiring credentials or creating a checkout. This checks roster changes and logouts after startup. A reported capability gap returns `WorkerCapabilityError` and requires operator action. Transport failures, including an SSH client that cannot reach the VM, and probe timeouts remain infrastructure failures eligible for retry.
 
@@ -124,3 +124,33 @@ const executorLayer = layer({
 The native integration holds the GitHub credential at exe.dev's network edge. No GitHub token enters the RunSpec, the Attempt's durable request, the local SSH environment, or the VM. Git pushes from this Worker use `exe-dev-github-integration[bot]`; agent-authored PRs and comments should carry the Agent signature used by the run.
 
 Salvage inspection, staging, or snapshot failures retain the checkout, including uncommitted files. Restart recovery uses freshly issued credentials and records the recovered ref before releasing the worktree.
+
+## SSH Worker
+
+`@usine/executor/ssh` runs the same contract on any Linux machine the orchestrator connects to over SSH ([ADR 0026](../../docs/adr/0026-eu-ssh-worker.md)); `infra/hetzner` creates one on Hetzner Cloud. Each Worker names its machine: an SSH destination, an optional identity file and port, and a root directory under which it keeps `workers/<name>/repos`, `attempts`, and `credentials`. The machine must already contain Git, gh, the `claude` and `codex` CLIs the roster uses, and their logins for the SSH user.
+
+Preflight changes nothing on the machine. It checks that SSH connects to it, that the root is a writable directory, that Git runs, and the roster's harnesses where the children run.
+
+Prepare mints the Attempt's single-repository token through the `CredentialProvider`, writes it into `<root>/workers/<name>/credentials/<attempt>` with a gh `hosts.yml`, and fetches the bare cached clone from `https://github.com/<repository>.git` with git's credential helper reading that token file. The token is sent on the standard input of the command that writes it, so it never appears in a command line or a process environment and is not written to any log, and git and gh output is scrubbed of it. Each git and harvesting command renews the token first when it expires within five minutes, as on the local Worker. Children, harvesting, and the salvage push export the same file paths, so they all read the token renewed last. Cleanup stops the Attempt's children, removes the checkout, then removes the credential directory. The first use of a Worker by a process, for an Attempt or for startup reconciliation, removes the credentials an earlier process left; a reattached Attempt receives a fresh one.
+
+Children, pid files, the kill script, sweeps, salvage, recovery, and reattachment are the exe.dev Worker's, through the same shared code.
+
+The SSH layer requires a `ChildProcessSpawner`, a `CredentialProvider`, and an `AttemptRuntime`.
+
+```ts
+import { SshDestination, SshIdentityFile, WorkerName, WorkerRoot } from "@usine/core/worker"
+import { layer } from "@usine/executor/ssh"
+import { Option } from "effect"
+
+const executorLayer = layer({
+  workers: [
+    {
+      name: WorkerName.make("eu-one"),
+      destination: SshDestination.make("usine@203.0.113.7"),
+      identityFile: Option.some(SshIdentityFile.make("~/.ssh/usine_worker")),
+      port: Option.none(),
+      root: WorkerRoot.make("/home/usine/.usine"),
+    },
+  ],
+})
+```

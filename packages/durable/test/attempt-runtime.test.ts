@@ -18,7 +18,12 @@ import {
 import { AttemptRecordDoc } from "../src/attempt/documents.ts";
 import { layer as attemptRuntimeLayer } from "../src/attempt/runtime.ts";
 import { SUBAGENT_TOOL } from "../src/attempt/subagent.ts";
-import { DurableHarness, durableError, layer as durableHarnessLayer } from "../src/harness.ts";
+import {
+  DurableHarness,
+  durableError,
+  layer as durableHarnessLayer,
+  StuckStepReports,
+} from "../src/harness.ts";
 import {
   answer,
   delegate,
@@ -609,17 +614,14 @@ describe("durable AttemptRuntime", () => {
         const failure = yield* Effect.gen(function* () {
           const runtime = yield* AttemptRuntime;
           return yield* runtime.execute(request, recording.sink).pipe(Effect.flip);
-        }).pipe(Effect.provide(services));
+        }).pipe(Effect.provide(services), Effect.provideService(StuckStepReports, 20));
         assert.strictEqual(failure._tag, "InfraFailure");
         assert.match(failure.message, /unresolvable path/u);
         assert.lengthOf(logs.matching(/Could not repair the durable storage/u), 2);
         assert.lengthOf(logs.matching(/Stopped the durable harness/u), 1);
-        assert.isAtMost(logs.matching(REPORTED).length, 20);
+        assert.isAtMost(logs.matching(REPORTED).length, 4);
       }).pipe(Effect.scoped, Effect.provide(logs.layer));
     },
-    // Exercises 1,000 failed scheduler steps on each of two real SQLite harnesses.
-    // Keep a bound while allowing slower CI runners to exhaust both retry cycles.
-    30_000,
   );
 
   it.live(

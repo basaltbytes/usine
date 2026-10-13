@@ -10,7 +10,7 @@ import { GitHubCredentials } from "@usine/github/github-app";
 import { loadLocalCredentials } from "@usine/github/local-secrets";
 import { Operator, OperatorObservation } from "@usine/orchestrator/operator";
 import { Orchestrator } from "@usine/orchestrator/orchestrator";
-import { operatorObservationLayer, runtimeLayer } from "@usine/orchestrator/local";
+import { operatorObservationLayer, runtimeLayer } from "@usine/orchestrator/runtime";
 import {
   Cause,
   Console,
@@ -137,7 +137,7 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
 
       const shutdown = yield* Deferred.make<void>();
       const startup = Effect.gen(function* () {
-        const runtime = runtimeLayer(directory, instance, {}).pipe(
+        const runtime = runtimeLayer(directory, instance).pipe(
           Layer.provide(Layer.succeed(GitHubCredentials, credentials.success)),
         );
         const context = yield* Layer.build(runtime).pipe(
