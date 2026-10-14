@@ -1,7 +1,14 @@
 import { createServer } from "node:http";
-import { NodeHttpClient, NodeHttpServer } from "@effect/platform-node";
-import { Context, Effect, Layer } from "effect";
-import { HttpRouter, HttpServer } from "effect/unstable/http";
+import { NodeHttpClient, NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node";
+import { Context, Effect, Layer, Stream } from "effect";
+import {
+  HttpMiddleware,
+  HttpBody,
+  HttpRouter,
+  HttpServer,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
 import { adminRoutes } from "../admin/server.ts";
 import { Attachments } from "../attachment/store.ts";
 import { CallerTokens } from "../caller/caller.ts";
@@ -43,7 +50,32 @@ const serveProxy = Effect.fn("GatewayNode.serveProxy")(function* (listener: List
   const proxy = yield* GatewayProxy;
   // A git push or a long model response may take longer than Node's default request timeout.
   const server = yield* NodeHttpServer.make(() => createServer({ requestTimeout: 0 }), listener);
-  yield* server.serve(proxy.handle);
+  yield* server.serve(
+    Effect.gen(function* () {
+      const request = yield* HttpServerRequest.HttpServerRequest;
+      const response = yield* proxy.handle;
+      if (response.body._tag !== "Stream") return response;
+      // rc.111 ends failed streams normally after sending headers. Destroy first so
+      // a partial download or model response cannot appear complete to the Worker.
+      const body = response.body.stream.pipe(
+        Stream.onError(() =>
+          Effect.gen(function* () {
+            yield* Effect.logError("The reverse proxy response body failed", {
+              host: request.headers.host,
+              method: request.method,
+              path: request.url.split("?")[0],
+              error: "UpstreamBodyFailure",
+            });
+            NodeHttpServerRequest.toServerResponse(request).destroy();
+          }).pipe(Effect.uninterruptible),
+        ),
+      );
+      return HttpServerResponse.setBody(
+        response,
+        HttpBody.stream(body, response.body.contentType, response.body.contentLength),
+      );
+    }),
+  );
   const bound = boundTo(server.address, listener);
   yield* Effect.logInfo("The gateway proxy is listening", bound);
   return bound;
@@ -81,6 +113,10 @@ export const gatewayLayer = (listeners: GatewayListeners) =>
     Layer.provide(GatewayProxy.layer),
     Layer.provideMerge(Layer.mergeAll(Attachments.layer, CallerTokens.layer)),
     Layer.provide(NodeHttpClient.layerUndici),
+    // rc.111 reads header redaction settings after the request fiber may have
+    // cleared its context. Disable automatic HTTP spans; named gateway spans
+    // still record safe domain fields without capturing incoming credentials.
+    Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
 /** The gateway configured from the environment and its allowlist file, as the `usine-gateway` command runs it. */

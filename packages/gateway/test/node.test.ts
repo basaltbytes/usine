@@ -10,6 +10,7 @@ import {
   Predicate,
   Redacted,
   Schedule,
+  Tracer,
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
@@ -18,6 +19,7 @@ import { AnonymousCredential } from "../src/attachment/attachment.ts";
 import { CallerTokens } from "../src/caller/caller.ts";
 import { serveEgressProxy } from "../src/node/egress-proxy.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../src/node/node.ts";
+import { UpstreamBase } from "../src/upstream.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
 import { rawThroughTunnel, tlsThroughTunnel } from "./tunnel.ts";
 
@@ -108,6 +110,113 @@ const attachment = (minutes: number) =>
   );
 
 describe("the Node gateway", () => {
+  it.live("keeps caller credentials out of incoming proxy and admin traces", () => {
+    const spans: Array<Tracer.NativeSpan> = [];
+    const tracer = Tracer.make({
+      span(options) {
+        const span = new Tracer.NativeSpan(options);
+        spans.push(span);
+        return span;
+      },
+    });
+    return Effect.gen(function* () {
+      const { proxy, admin } = yield* GatewayAddresses;
+      for (const listener of [proxy, admin]) {
+        yield* Effect.promise(async () => {
+          const response = await fetch(`http://${listener.host}:${listener.port}/`, {
+            headers: {
+              host: "git.gw.test",
+              "x-usine-gateway-token": "synthetic-caller-secret",
+              authorization: "Bearer synthetic-authorization-secret",
+              "x-api-key": "synthetic-api-secret",
+              cookie: "synthetic-cookie-secret",
+            },
+          });
+          await response.text();
+        });
+      }
+      assert.isTrue(spans.some((span) => span.name === "GatewayProxy.handle"));
+      for (const span of spans)
+        assert.isFalse(
+          [...span.attributes.keys()].some((name) => name.startsWith("http.request.header.")),
+        );
+      assert.notInclude(JSON.stringify(spans.map((span) => [...span.attributes])), "synthetic-");
+    }).pipe(Effect.provide(gateway), Effect.provideService(Tracer.Tracer, tracer));
+  });
+
+  it.live("fails a truncated chunked reverse-proxy response and logs safe failure fields", () =>
+    Effect.gen(function* () {
+      const failed = yield* Deferred.make<void>();
+      const messages: Array<string> = [];
+      const logs = Logger.layer([
+        Logger.make(({ message }) => {
+          const line = JSON.stringify(message);
+          messages.push(line);
+          if (line.includes('"error":"UpstreamBodyFailure"'))
+            Deferred.doneUnsafe(failed, Effect.void);
+        }),
+      ]);
+      const upstream = createServer((_request, response) => {
+        response.writeHead(200);
+        // Wait until the Worker has received the first chunk before truncating.
+        response.write("partial");
+      });
+      yield* Effect.acquireRelease(
+        Effect.callback<void>((resume) => {
+          upstream.listen(0, "127.0.0.1", () => resume(Effect.void));
+        }),
+        () =>
+          Effect.sync(() => {
+            upstream.closeAllConnections();
+            upstream.close();
+          }),
+      );
+      const address = upstream.address();
+      assert(address !== null && !Predicate.isString(address));
+      const origin = UpstreamBase.make(`http://127.0.0.1:${address.port}`);
+      const localGateway = gatewayLayer({
+        proxy: LOOPBACK,
+        egress: LOOPBACK,
+        admin: LOOPBACK,
+      }).pipe(
+        Layer.provide(
+          settingsLayer(NO_PROVIDERS, undefined, { web: origin, api: origin, uploads: origin }),
+        ),
+        Layer.provideMerge(FetchHttpClient.layer),
+        Layer.provide(logs),
+      );
+      yield* Effect.gen(function* () {
+        const client = yield* admin(ADMIN_TOKEN_VALUE);
+        const attached = yield* client.attachments.attach({ payload: yield* attachment(60) });
+        const token = Redacted.value(attached.callerToken);
+        const { proxy } = yield* GatewayAddresses;
+        const completed = yield* Effect.callback<boolean>((resume) => {
+          const outgoing = request(
+            {
+              host: proxy.host,
+              port: proxy.port,
+              path: "/api/v3/repos/acme/demo",
+              headers: { host: "git.gw.test", "x-usine-gateway-token": token },
+            },
+            (response) => {
+              assert.strictEqual(response.statusCode, 200);
+              response.on("data", () => upstream.closeAllConnections());
+              response.on("error", () => {});
+              response.once("close", () => resume(Effect.succeed(response.complete)));
+            },
+          );
+          outgoing.once("error", (error) => resume(Effect.die(error)));
+          outgoing.end();
+          return Effect.sync(() => outgoing.destroy());
+        }).pipe(Effect.timeout("2 seconds"));
+        assert.isFalse(completed);
+        yield* Deferred.await(failed).pipe(Effect.timeout("2 seconds"));
+        assert.notInclude(messages.join("\n"), token);
+        assert.include(messages.join("\n"), '"host":"git.gw.test"');
+      }).pipe(Effect.provide(localGateway));
+    }).pipe(Effect.scoped),
+  );
+
   it.live(
     "the executor attaches, renews with the same token, lists without tokens, and detaches",
     () =>
