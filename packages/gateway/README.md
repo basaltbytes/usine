@@ -47,7 +47,7 @@ A Worker child presents its caller token wherever its tool sends a credential: t
 | Tool | Setting |
 | --- | --- |
 | git | remote `http://git.<domain>/OWNER/REPO.git`; `GIT_CONFIG_KEY_0=http.http://git.<domain>/.extraHeader`, `GIT_CONFIG_VALUE_0="X-Usine-Gateway-Token: <caller token>"`, and `url.http://git.<domain>/.insteadOf` for `https://github.com/` and `https://git.<domain>/` |
-| gh | `GH_HOST=git.<domain>`, `GH_ENTERPRISE_TOKEN=<caller token>`; gh's config sets `http_unix_socket: /run/usine-gateway/http.sock`, forwarded to the gateway by `systemd-socket-proxyd`, because gh speaks only HTTPS to a custom host and over that socket it speaks plain HTTP instead |
+| gh | `GH_HOST=git.<domain>`, `GH_ENTERPRISE_TOKEN=<caller token>`, `GH_TOKEN=<caller token>`; gh's config sets `http_unix_socket: /run/usine-gateway/http.sock`, forwarded to the gateway by `systemd-socket-proxyd`, because gh speaks only HTTPS to a custom host and over that socket it speaks plain HTTP instead |
 | Claude Code | `ANTHROPIC_BASE_URL=http://llm.<domain>/anthropic`, `ANTHROPIC_AUTH_TOKEN=<caller token>` |
 | Codex | a `model_provider` with `base_url = "http://llm.<domain>/openai/v1"`, `env_key` naming a variable that contains the caller token, `wire_api = "responses"` |
 | package managers | `HTTPS_PROXY` and `HTTP_PROXY` set to `http://<gateway>:3128`, `NO_PROXY=<domain>` |

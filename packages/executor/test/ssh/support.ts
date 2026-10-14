@@ -74,6 +74,7 @@ interface FakeMachineState {
   claudeLoggedIn: boolean;
   /** Whether sshd accepts the variables the SSH client sends (`AcceptEnv`). */
   acceptsSentVariables: boolean;
+  readonly droppedSentVariables: Set<string>;
   /** Whether `git.<domain>` resolves and answers from the machine. */
   gatewayReachable: boolean;
   /** gh's configuration files written on the machine, by path. */
@@ -147,6 +148,7 @@ export const fakeMachine = () => {
     salvageCommitted: false,
     claudeLoggedIn: true,
     acceptsSentVariables: true,
+    droppedSentVariables: new Set(),
     gatewayReachable: true,
     files: new Map(),
   };
@@ -159,7 +161,9 @@ export const fakeMachine = () => {
       );
     if (line === "exec 'true'") return oneShotHandle("", 0);
     if (line.includes("printenv")) {
-      const received = state.acceptsSentVariables ? sentVariables(command) : [];
+      const received = state.acceptsSentVariables
+        ? sentVariables(command).filter((name) => !state.droppedSentVariables.has(name))
+        : [];
       const expected = remoteWords(line).slice(4);
       const dropped = expected.filter((word, index) => index % 2 === 0 && !received.includes(word));
       return oneShotHandle(dropped.map((name) => `${name}\n`).join(""), 0);

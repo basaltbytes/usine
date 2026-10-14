@@ -48,6 +48,7 @@ describe("An Attempt's environment behind a Gateway", () => {
     assert.deepStrictEqual(sent, {
       GIT_CONFIG_VALUE_0: `x-usine-gateway-token: ${CALLER_TOKEN}`,
       GH_ENTERPRISE_TOKEN: CALLER_TOKEN,
+      GH_TOKEN: CALLER_TOKEN,
     });
     assert.notInclude(JSON.stringify(exported), CALLER_TOKEN);
   });
@@ -61,6 +62,7 @@ describe("An Attempt's environment behind a Gateway", () => {
     assert.deepStrictEqual(sent, {
       GIT_CONFIG_VALUE_0: `x-usine-gateway-token: ${CALLER_TOKEN}`,
       GH_ENTERPRISE_TOKEN: CALLER_TOKEN,
+      GH_TOKEN: CALLER_TOKEN,
       ANTHROPIC_AUTH_TOKEN: CALLER_TOKEN,
     });
     assert.deepStrictEqual(Object.keys(sent), [...GATEWAY_SENT_VARIABLES]);

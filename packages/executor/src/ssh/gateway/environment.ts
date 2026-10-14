@@ -21,6 +21,7 @@ const FORWARD_PROXY_PORT = 3128;
 export const GATEWAY_SENT_VARIABLES = [
   "GIT_CONFIG_VALUE_0",
   "GH_ENTERPRISE_TOKEN",
+  "GH_TOKEN",
   "ANTHROPIC_AUTH_TOKEN",
 ] as const;
 
@@ -32,7 +33,7 @@ export const gatewayRepositoryUrl = (domain: GatewayDomain, repository: Reposito
  * The files of gh's configuration directory on a Worker behind the Gateway
  * at `domain`: requests go through the Gateway's socket, and `git.<domain>`
  * is a known host. Neither file contains a token; gh reads the caller token
- * from `GH_ENTERPRISE_TOKEN`.
+ * from `GH_ENTERPRISE_TOKEN` and `GH_TOKEN`.
  */
 export const ghGatewayConfig = (domain: GatewayDomain) =>
   ({
@@ -70,7 +71,8 @@ export interface GatewayEnvironment {
  *   there too. The header value is configuration entry 0, so it travels in
  *   `GIT_CONFIG_VALUE_0`.
  * - gh uses `git.<domain>` as its host through the Gateway's socket, with
- *   the caller token as its enterprise token.
+ *   the caller token as both its enterprise and GitHub token, so absolute
+ *   pagination links and github.com URLs authenticate through the socket too.
  * - Package managers use the forward proxy at `<domain>:3128`; local
  *   addresses and the Gateway's own names go direct.
  * - Claude Code calls `llm.<domain>/anthropic` with the caller token when
@@ -102,6 +104,7 @@ export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayE
   const sent = {
     GIT_CONFIG_VALUE_0: Redacted.make(`${GATEWAY_TOKEN_HEADER}: ${Redacted.value(callerToken)}`),
     GH_ENTERPRISE_TOKEN: callerToken,
+    GH_TOKEN: callerToken,
   };
   if (!options.llmProviders.includes("anthropic")) return { exported, sent };
   return {

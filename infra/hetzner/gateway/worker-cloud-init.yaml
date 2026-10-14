@@ -70,7 +70,7 @@ write_files:
   - path: /etc/ssh/sshd_config.d/40-usine-gateway.conf
     permissions: "0644"
     content: |
-      AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN ANTHROPIC_AUTH_TOKEN
+      AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN
 
   - path: /etc/skel/.config/gh/config.yml
     permissions: "0644"

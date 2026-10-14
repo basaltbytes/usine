@@ -100,8 +100,9 @@ describe("SSH Worker behind a Gateway", () => {
         assert(given?.host instanceof RemoteShell);
         assert.include(
           given.host.ssh.args,
-          "SendEnv=GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN ANTHROPIC_AUTH_TOKEN",
+          "SendEnv=GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN",
         );
+        assert.strictEqual(given.host.sshEnvironment.GH_TOKEN, callerToken);
         assert.strictEqual(given.host.sshEnvironment.ANTHROPIC_AUTH_TOKEN, callerToken);
         assert.strictEqual(given.environment.GH_HOST, "git.gw.test");
         assert.strictEqual(given.environment.GH_CONFIG_DIR, `${WORKER_ROOT}/gh`);
@@ -388,13 +389,19 @@ describe("SSH Worker behind a Gateway", () => {
           for (const mutating of ["mkdir", "rm", "mv", "clone", "find", "http_unix_socket"])
             assert.notInclude(line, mutating, `preflight ran ${mutating}`);
 
+        machine.state.droppedSentVariables.add("GH_TOKEN");
+        const missingGitHubToken = yield* executor.preflight(WORKER, []).pipe(Effect.flip);
+        assert(missingGitHubToken._tag === "WorkerCapabilityError");
+        assert.include(missingGitHubToken.message, "sshd drops GH_TOKEN;");
+        machine.state.droppedSentVariables.clear();
+
         machine.state.acceptsSentVariables = false;
         const dropped = yield* executor.preflight(WORKER, []).pipe(Effect.flip);
         assert(dropped._tag === "WorkerCapabilityError");
         assert.strictEqual(dropped.capability, "gateway");
         assert.include(
           dropped.message,
-          "AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN ANTHROPIC_AUTH_TOKEN",
+          "AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN",
         );
 
         machine.state.acceptsSentVariables = true;

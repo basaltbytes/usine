@@ -63,7 +63,7 @@ hcloud server create --name worker-one --type cx23 --image debian-13 --location 
 
 The Worker installs its packages through the gateway's proxy, so the gateway must be ready first. Its address on the private network is in `hcloud server describe worker-one`. The file does not create the SSH user or install Node.js and the harnesses; the Worker file of `../cloud-init.yaml` does, but cannot run behind the gateway as it is ([#250](https://github.com/basaltbytes/usine/issues/250)).
 
-The Worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, and `ANTHROPIC_AUTH_TOKEN` from the orchestrator (`AcceptEnv`): the executor sends each Attempt's caller token in them through the SSH connection, so it is in no command line. A Worker whose sshd drops them fails preflight with a message that names them.
+The Worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, and `ANTHROPIC_AUTH_TOKEN` from the orchestrator (`AcceptEnv`): the executor sends each Attempt's caller token in them through the SSH connection, so it is in no command line. A Worker whose sshd drops them fails preflight with a message that names them. Existing Workers must add `GH_TOKEN` to `/etc/ssh/sshd_config.d/40-usine-gateway.conf` and reload sshd. Both gh token variables are required: gh uses `GH_TOKEN` for absolute GitHub pagination links and explicit github.com URLs.
 
 ## Add the Worker to `usine.yaml`
 
