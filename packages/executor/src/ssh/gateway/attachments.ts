@@ -182,6 +182,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
 
     const publish = Effect.fn("SshExecutor.publishAttachment")(
       function* (credential: WorkerCredential) {
+        yield* Effect.annotateCurrentSpan(fields);
         const current = yield* Ref.get(attached);
         const answer = yield* Option.match(current, {
           onNone: () => admin.attach(requestFor(credential)),
@@ -193,6 +194,7 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
           ),
         );
         yield* Ref.set(attached, Option.some({ id: answer.attachment.id, credential }));
+        yield* Effect.annotateCurrentSpan({ attachment: answer.attachment.id });
         yield* Effect.logInfo(
           Option.isNone(current)
             ? "Attached the Attempt's token to the Gateway"
@@ -215,9 +217,11 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     // the Attempt's attachment back under the same id with the current token.
     const restore = Effect.fn("SshExecutor.restoreAttachment")(
       function* () {
+        yield* Effect.annotateCurrentSpan(fields);
         const current = yield* Ref.get(attached);
         if (Option.isNone(current)) return;
         const { id, credential } = current.value;
+        yield* Effect.annotateCurrentSpan({ attachment: id });
         yield* admin.renew(id, requestFor(credential));
         yield* Effect.logDebug("Confirmed the Attempt's attachment on the Gateway", {
           ...fields,

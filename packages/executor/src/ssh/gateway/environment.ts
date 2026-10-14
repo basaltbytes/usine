@@ -76,8 +76,10 @@ export interface GatewayEnvironment {
  * - Package managers use the forward proxy at `<domain>:3128`; local
  *   addresses and the Gateway's own names go direct.
  * - Claude Code calls `llm.<domain>/anthropic` with the caller token when
- *   the Gateway holds the Anthropic credential, and keeps its own login
- *   otherwise. Codex always keeps its own login.
+ *   the Gateway holds the Anthropic credential. Without it, and for Codex
+ *   (#244), nothing is set here: preflight refuses the brain, since the
+ *   harness would have no route to its provider from behind the Gateway
+ *   (`gatewayHarnessProbe`).
  */
 export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayEnvironment => {
   const { domain, callerToken } = options;
