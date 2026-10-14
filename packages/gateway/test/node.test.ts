@@ -1,4 +1,4 @@
-import { createServer, request } from "node:http";
+import { createServer, request, type RequestListener } from "node:http";
 import { assert, describe, it } from "@effect/vitest";
 import {
   DateTime,
@@ -46,14 +46,56 @@ const gatewayRecordingRefusals = gateway.pipe(
   ),
 );
 
-/** The refusal logged with `reason`, waiting for it briefly since the proxy logs after it closes the tunnel. */
-const refusalLogged = (reason: string) =>
+/** The first of `lines` containing `needle`, waiting for it briefly since the proxy logs after it closes a connection. */
+const logged = (lines: ReadonlyArray<string>, needle: string) =>
   Effect.suspend(() => {
-    const line = refusals.find((logged) => logged.includes(`"reason":"${reason}"`));
+    const line = lines.find((candidate) => candidate.includes(needle));
     return line === undefined
-      ? Effect.fail(new Error(`no ${reason} refusal was logged`))
+      ? Effect.fail(new Error(`no log line contains ${needle}`))
       : Effect.succeed(line);
   }).pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }));
+
+/** The refusal logged with `reason`. */
+const refusalLogged = (reason: string) => logged(refusals, `"reason":"${reason}"`);
+
+/** What the forward proxy needs on its own, without the reverse proxy and admin API. */
+const egressServices = CallerTokens.layer.pipe(Layer.provideMerge(settingsLayer(NO_PROVIDERS)));
+
+/**
+ * A local upstream answering with `handler`, and a forward proxy whose
+ * gateway destination is that upstream, so a request for
+ * `http://git.gw.test/...` relays to it. `messages` collects the proxy's log
+ * lines.
+ */
+const relayToUpstream = (handler: RequestListener) =>
+  Effect.gen(function* () {
+    const messages: Array<string> = [];
+    const logs = Logger.layer([
+      Logger.make(({ message }) => {
+        messages.push(JSON.stringify(message));
+      }),
+    ]);
+    const upstream = createServer(handler);
+    yield* Effect.acquireRelease(
+      Effect.callback<void>((resume) => {
+        upstream.listen(0, "127.0.0.1", () => resume(Effect.void));
+      }),
+      () =>
+        Effect.sync(() => {
+          upstream.closeAllConnections();
+          upstream.close();
+        }),
+    );
+    const address = upstream.address();
+    assert(address !== null && !Predicate.isString(address));
+    const proxy = yield* serveEgressProxy(LOOPBACK, { host: "127.0.0.1", port: address.port }).pipe(
+      Effect.provide(logs),
+    );
+    return { proxy, messages };
+  });
+
+/** A body chunk an upstream keeps sending until its connection is destroyed. */
+const CHUNK = Buffer.alloc(64 * 1024);
 
 const admin = (token: string) =>
   Effect.gen(function* () {
@@ -327,33 +369,10 @@ describe("the Node gateway", () => {
 
   it.live("closes the downstream and logs a failure when an upstream body is truncated", () =>
     Effect.gen(function* () {
-      const failed = yield* Deferred.make<void>();
-      const logs = Logger.layer([
-        Logger.make(({ message }) => {
-          if (JSON.stringify(message).includes('"error":"Unreachable"'))
-            Deferred.doneUnsafe(failed, Effect.void);
-        }),
-      ]);
-      const upstream = createServer((_request, response) => {
+      const { proxy, messages } = yield* relayToUpstream((_request, response) => {
         response.writeHead(200, { "content-length": "100" });
         response.write("partial", () => response.destroy());
       });
-      yield* Effect.acquireRelease(
-        Effect.callback<void>((resume) => {
-          upstream.listen(0, "127.0.0.1", () => resume(Effect.void));
-        }),
-        () =>
-          Effect.sync(() => {
-            upstream.closeAllConnections();
-            upstream.close();
-          }),
-      );
-      const address = upstream.address();
-      assert(address !== null && !Predicate.isString(address));
-      const proxy = yield* serveEgressProxy(LOOPBACK, {
-        host: "127.0.0.1",
-        port: address.port,
-      }).pipe(Effect.provide(logs));
       const completed = yield* Effect.callback<boolean>((resume) => {
         const outgoing = request(
           { host: proxy.host, port: proxy.port, path: "http://git.gw.test/partial" },
@@ -369,12 +388,78 @@ describe("the Node gateway", () => {
         return Effect.sync(() => outgoing.destroy());
       }).pipe(Effect.timeout("1 second"));
       assert.isFalse(completed);
-      yield* Deferred.await(failed).pipe(Effect.timeout("1 second"));
-    }).pipe(
-      Effect.scoped,
-      Effect.provide(CallerTokens.layer),
-      Effect.provide(settingsLayer(NO_PROVIDERS)),
-    ),
+      yield* logged(messages, '"error":"Unreachable"');
+    }).pipe(Effect.scoped, Effect.provide(egressServices)),
+  );
+
+  it.live("destroys the upstream connection and logs when the client abandons a download", () =>
+    Effect.gen(function* () {
+      const upstreamClosed = yield* Deferred.make<void>();
+      const { proxy, messages } = yield* relayToUpstream((_request, response) => {
+        response.writeHead(200);
+        response.once("close", () => Deferred.doneUnsafe(upstreamClosed, Effect.void));
+        // Only the connection's destruction ends this body; a paused relay stalls it on backpressure instead.
+        const fill = (): void => {
+          if (response.write(CHUNK)) setImmediate(fill);
+          else response.once("drain", fill);
+        };
+        fill();
+      });
+      // The Worker reads the first bytes, then drops its connection.
+      yield* Effect.callback<void>((resume) => {
+        const outgoing = request(
+          { host: proxy.host, port: proxy.port, path: "http://git.gw.test/download" },
+          (response) => {
+            response.on("error", () => {});
+            response.once("data", () => {
+              outgoing.destroy();
+              resume(Effect.void);
+            });
+          },
+        );
+        outgoing.once("error", (error) => resume(Effect.die(error)));
+        outgoing.end();
+      });
+      yield* Deferred.await(upstreamClosed).pipe(Effect.timeout("2 seconds"));
+      assert.include(
+        yield* logged(messages, "The client abandoned a relayed request"),
+        '"status":200',
+      );
+    }).pipe(Effect.scoped, Effect.provide(egressServices)),
+  );
+
+  it.live("destroys the upstream request and logs when the client abandons an upload", () =>
+    Effect.gen(function* () {
+      const arrived = yield* Deferred.make<void>();
+      const upstreamComplete = yield* Deferred.make<boolean>();
+      const { proxy, messages } = yield* relayToUpstream((request) => {
+        request.once("close", () =>
+          Deferred.doneUnsafe(upstreamComplete, Effect.succeed(request.complete)),
+        );
+        request.resume();
+        Deferred.doneUnsafe(arrived, Effect.void);
+      });
+      // The Worker declares 1,000 bytes, sends a few, and drops its connection once the upstream has the request.
+      const outgoing = yield* Effect.sync(() => {
+        const outgoing = request({
+          host: proxy.host,
+          port: proxy.port,
+          method: "POST",
+          path: "http://git.gw.test/upload",
+          headers: { "content-length": "1000" },
+        });
+        outgoing.on("error", () => {});
+        outgoing.write("partial");
+        return outgoing;
+      });
+      yield* Deferred.await(arrived).pipe(Effect.timeout("2 seconds"));
+      yield* Effect.sync(() => outgoing.destroy());
+      assert.isFalse(yield* Deferred.await(upstreamComplete).pipe(Effect.timeout("2 seconds")));
+      assert.include(
+        yield* logged(messages, "The client abandoned a relayed request"),
+        '"status":"none"',
+      );
+    }).pipe(Effect.scoped, Effect.provide(egressServices)),
   );
 
   it.live(

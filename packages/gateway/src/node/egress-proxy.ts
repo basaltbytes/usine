@@ -8,7 +8,7 @@ import {
 import { BlockList, connect, type Socket } from "node:net";
 import type { Duplex } from "node:stream";
 import type { WorkerName } from "@usine/core/worker";
-import { Data, Effect, Fiber, Option, Predicate, Schema } from "effect";
+import { Data, Effect, Fiber, Match, Option, Predicate, Schema } from "effect";
 import { Headers } from "effect/unstable/http";
 import { tokenFromAuthorization, CallerTokens } from "../caller/caller.ts";
 import { ClientHelloReader, comparableHost } from "../egress/client-hello.ts";
@@ -188,6 +188,17 @@ interface Destination {
   readonly port: number;
   readonly kind: "gateway" | "egress";
 }
+
+/**
+ * How a plain HTTP relay ended: the upstream response was copied whole, or
+ * the client closed its connection first, with the upstream status if the
+ * response had begun.
+ */
+type RelayEnd = Data.TaggedEnum<{
+  Relayed: { readonly status: number };
+  Abandoned: { readonly status: Option.Option<number> };
+}>;
+const RelayEnd = Data.taggedEnum<RelayEnd>();
 
 const AUTHORITY = /^(?:\[([0-9a-fA-F:.]+)\]|([^:[\]]+)):(\d{1,5})$/u;
 
@@ -482,6 +493,71 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     const host = url.value.hostname.replace(/^\[(.*)\]$/u, "$1");
     yield* Effect.annotateCurrentSpan({ host, port });
     const forwarded = endToEndHeaders(Headers.fromInput(request.headers));
+
+    /**
+     * Sends the request to `target` and copies the response back, until the
+     * upstream response ends or the client closes its connection. A client
+     * that leaves mid-download or mid-upload has its upstream connection
+     * destroyed at once, so no upstream waits on a response nobody reads or
+     * on request bytes that will never arrive. An upstream that cannot be
+     * reached, or whose response ends early, fails as `Unreachable` once the
+     * client's response is destroyed or answered 502.
+     */
+    const copy = (target: Destination, headers: Headers.Headers) =>
+      Effect.callback<RelayEnd, Unreachable>((resume) => {
+        let settled = false;
+        const settle = (end: Effect.Effect<RelayEnd, Unreachable>) => {
+          settled = true;
+          resume(end);
+        };
+        const fail = (error: Error) => {
+          if (settled) return;
+          if (response.headersSent) response.destroy();
+          else {
+            response.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
+            response.end();
+          }
+          settle(Effect.fail(new Unreachable({ host, port, message: error.message })));
+        };
+        const outgoing = httpRequest(
+          {
+            host: target.address,
+            port: target.port,
+            method: request.method,
+            path: `${url.value.pathname}${url.value.search}`,
+            headers: { ...headers, host: url.value.host },
+            setHost: false,
+          },
+          (incoming) => {
+            const status = incoming.statusCode ?? 502;
+            response.writeHead(status, {
+              ...endToEndHeaders(Headers.fromInput(incoming.headers)),
+            });
+            incoming.once("error", fail);
+            incoming.once("close", () => {
+              if (!incoming.complete) fail(new Error("The upstream response ended prematurely"));
+            });
+            incoming.once("end", () => settle(Effect.succeed(RelayEnd.Relayed({ status }))));
+            incoming.pipe(response);
+          },
+        );
+        // `close` also follows a finished response, which has settled the relay already; before that, it means the client left.
+        response.once("close", () => {
+          if (settled) return;
+          outgoing.destroy();
+          settle(
+            Effect.succeed(
+              RelayEnd.Abandoned({
+                status: response.headersSent ? Option.some(response.statusCode) : Option.none(),
+              }),
+            ),
+          );
+        });
+        outgoing.once("error", fail);
+        request.pipe(outgoing);
+        return Effect.sync(() => outgoing.destroy());
+      });
+
     const relayed = yield* destination(host, port).pipe(
       Effect.flatMap((target) =>
         // The reverse proxy needs the caller token; a host outside the gateway must never see it.
@@ -491,54 +567,29 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
         ).pipe(Effect.map((headers) => ({ target, headers }))),
       ),
       Effect.flatMap(({ target, headers }) =>
-        Effect.callback<number, Unreachable>((resume) => {
-          const fail = (error: Error) => {
-            if (response.headersSent) response.destroy();
-            else {
-              response.writeHead(502, { "content-type": "text/plain; charset=utf-8" });
-              response.end();
-            }
-            resume(Effect.fail(new Unreachable({ host, port, message: error.message })));
-          };
-          const outgoing = httpRequest(
-            {
-              host: target.address,
-              port: target.port,
-              method: request.method,
-              path: `${url.value.pathname}${url.value.search}`,
-              headers: { ...headers, host: url.value.host },
-              setHost: false,
-            },
-            (incoming) => {
-              const status = incoming.statusCode ?? 502;
-              response.writeHead(status, {
-                ...endToEndHeaders(Headers.fromInput(incoming.headers)),
-              });
-              incoming.once("error", fail);
-              incoming.once("close", () => {
-                if (!incoming.complete) fail(new Error("The upstream response ended prematurely"));
-              });
-              incoming.once("end", () => resume(Effect.succeed(status)));
-              incoming.pipe(response);
-            },
-          );
-          outgoing.once("error", fail);
-          request.pipe(outgoing);
-          return Effect.sync(() => outgoing.destroy());
-        }).pipe(Effect.map((status) => ({ status, kind: target.kind }))),
+        copy(target, headers).pipe(Effect.map((end) => ({ end, kind: target.kind }))),
       ),
       Effect.result,
     );
-    if (relayed._tag === "Success")
-      return yield* Effect.logInfo("Relayed a plain HTTP request", {
+    if (relayed._tag === "Success") {
+      const fields = {
         host,
         port,
         destination: relayed.success.kind,
         method: request.method ?? "GET",
-        status: relayed.success.status,
         client: from,
         ...who,
+      };
+      return yield* Match.valueTags(relayed.success.end, {
+        Relayed: ({ status }) =>
+          Effect.logInfo("Relayed a plain HTTP request", { ...fields, status }),
+        Abandoned: ({ status }) =>
+          Effect.logInfo("The client abandoned a relayed request", {
+            ...fields,
+            status: Option.getOrElse(status, () => "none"),
+          }),
       });
+    }
     const failure = relayed.failure;
     if (failure._tag === "EgressRefused") {
       response.writeHead(403, {
