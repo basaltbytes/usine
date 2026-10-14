@@ -92,6 +92,32 @@ export const DEFAULT_SSH: SshCommand = {
 const encoder = new TextEncoder();
 
 /**
+ * `shell` with `variables` set on the machine through the SSH connection
+ * (OpenSSH `SendEnv`) rather than in the command line: each value is in the
+ * local SSH client's own environment, which only this user and root can
+ * read, and in no argument, log, or process listing. The machine's sshd
+ * drops every name its `AcceptEnv` does not list.
+ */
+export const sendingShell = (
+  shell: RemoteShell,
+  variables: Readonly<Record<string, Redacted.Redacted<string>>>,
+): RemoteShell => {
+  const entries = Object.entries(variables);
+  if (entries.length === 0) return shell;
+  return new RemoteShell({
+    ssh: {
+      command: shell.ssh.command,
+      args: [...shell.ssh.args, "-o", `SendEnv=${entries.map(([name]) => name).join(" ")}`],
+    },
+    sshEnvironment: {
+      ...shell.sshEnvironment,
+      ...Object.fromEntries(entries.map(([name, value]) => [name, Redacted.value(value)])),
+    },
+    destination: shell.destination,
+  });
+};
+
+/**
  * The command runner every remote Worker kind uses, bound to this process's
  * spawner and to the allowlisted environment its SSH clients inherit.
  */
@@ -107,10 +133,11 @@ export const remoteCommandsFor = Effect.gen(function* () {
     host: string,
     command: string,
     args: ReadonlyArray<string>,
+    clientEnvironment: Readonly<Record<string, string>>,
   ) {
     yield* Effect.annotateCurrentSpan({ host, operation });
     return yield* collectCommand(spawner, operation, command, args, {
-      env: environment,
+      env: { ...clientEnvironment },
       extendEnv: false,
     });
   });
@@ -121,7 +148,7 @@ export const remoteCommandsFor = Effect.gen(function* () {
     command: string,
     args: ReadonlyArray<string>,
   ) {
-    const result = yield* executeRaw(operation, host, command, args);
+    const result = yield* executeRaw(operation, host, command, args, environment);
     return yield* requireSuccess(operation, host, command, args, result);
   });
 
@@ -136,6 +163,7 @@ export const remoteCommandsFor = Effect.gen(function* () {
       shell.destination,
       shell.ssh.command,
       sshArguments(shell, { command, args }),
+      shell.sshEnvironment,
     );
 
   const run = Effect.fn("RemoteExecutor.run")(function* (
@@ -151,7 +179,13 @@ export const remoteCommandsFor = Effect.gen(function* () {
       command,
       args,
     });
-    const result = yield* executeRaw(operation, shell.destination, shell.ssh.command, sshArgs);
+    const result = yield* executeRaw(
+      operation,
+      shell.destination,
+      shell.ssh.command,
+      sshArgs,
+      shell.sshEnvironment,
+    );
     const scrub = context.scrub ?? ((text: string) => text);
     return yield* requireSuccess(operation, shell.destination, shell.ssh.command, sshArgs, {
       ...result,
@@ -170,7 +204,7 @@ export const remoteCommandsFor = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ host: shell.destination, operation });
     const sshArgs = sshArguments(shell, { command, args });
     const result = yield* collectCommand(spawner, operation, shell.ssh.command, sshArgs, {
-      env: environment,
+      env: { ...shell.sshEnvironment },
       extendEnv: false,
       stdin: Stream.make(encoder.encode(Redacted.value(input))),
     });

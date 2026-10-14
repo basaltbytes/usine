@@ -2,7 +2,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import type { RepositoryName } from "@usine/core/repository";
 import { Effect, FileSystem, Redacted } from "effect";
 import { credentialEnvironment, GH_CONFIG, ghHostsConfig } from "../credential-environment.ts";
-import { CredentialProvider, ExecutorOperationError } from "../executor.ts";
+import { CredentialProvider, ExecutorOperationError, type WorkerCredential } from "../executor.ts";
 import { renewableCredential } from "../renewable-credential.ts";
 
 /**
@@ -22,19 +22,19 @@ export const localCredentialsFor = Effect.gen(function* () {
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-credentials-" });
       yield* fs.chmod(directory, 0o700);
       yield* fs.writeFileString(`${directory}/config.yml`, GH_CONFIG, { mode: 0o600 });
-      const credential = yield* renewableCredential(
+      const { refresh, scrub } = yield* renewableCredential(
         provider.issue,
         repository,
         attemptId,
-        Effect.fn("LocalExecutor.writeCredential")(function* (token: Redacted.Redacted<string>) {
+        Effect.fn("LocalExecutor.writeCredential")(function* ({ value }: WorkerCredential) {
           // Rename prevents readers observing truncated credentials during renewal.
-          yield* fs.writeFileString(`${directory}/token.next`, Redacted.value(token), {
+          yield* fs.writeFileString(`${directory}/token.next`, Redacted.value(value), {
             mode: 0o600,
           });
           yield* fs.rename(`${directory}/token.next`, `${directory}/token`);
           yield* fs.writeFileString(
             `${directory}/hosts.next`,
-            ghHostsConfig(Redacted.value(token)),
+            ghHostsConfig(Redacted.value(value)),
             {
               mode: 0o600,
             },
@@ -43,7 +43,8 @@ export const localCredentialsFor = Effect.gen(function* () {
         }),
       );
       return {
-        ...credential,
+        refresh,
+        scrub,
         environment: { ...baseEnvironment, ...credentialEnvironment(directory) },
       };
     },

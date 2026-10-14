@@ -19,12 +19,13 @@ const EDGE_GITHUB_HOST = "github.int.exe.xyz";
  * passes through this process: the VM's own environment and exe.dev's edge
  * supply the credential (ADR 0011), so there is nothing to scrub either.
  */
-const EDGE_ACCESS: RemoteAccess = {
+const edgeAccess = (machine: RemoteMachine): RemoteAccess => ({
+  shell: machine.shell,
   environment: { GH_HOST: EDGE_GITHUB_HOST },
   gitEnvironment: {},
   refresh: Effect.void,
   scrub: (text) => text,
-};
+});
 
 const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
   Effect.gen(function* () {
@@ -65,10 +66,10 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
           cause: new Error("repository integration missing"),
         });
       return {
-        acquire: (attemptId, worker) =>
+        acquire: (attemptId, worker, machine) =>
           credentialGrants
             .acquire(attemptId, worker, repository, integration)
-            .pipe(Effect.as(EDGE_ACCESS)),
+            .pipe(Effect.as(edgeAccess(machine))),
       } satisfies RemoteGrant<RemoteMachine>;
     });
 
@@ -80,7 +81,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       machineFor,
       preflight: machines.preflight,
       harnessProbe: (machine) => machines.harnessProbe(machine.shell),
-      repositoryUrl: (repository) => `https://${EDGE_GITHUB_HOST}/${repository}.git`,
+      repositoryUrl: (_machine, repository) => `https://${EDGE_GITHUB_HOST}/${repository}.git`,
       grantFor,
       reclaim: () => Effect.void,
       // The grace covers an SSH round trip plus the agent flushing its final

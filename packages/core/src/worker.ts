@@ -55,3 +55,25 @@ export const WorkerRoot = Schema.String.check(
   }),
 ).pipe(Schema.brand("WorkerRoot"));
 export type WorkerRoot = typeof WorkerRoot.Type;
+
+/**
+ * The private DNS domain of the Gateway in front of a Worker's machine
+ * ([ADR 0027](../../../docs/adr/0027-gateway-credential-proxy.md)). The
+ * machine resolves `git.<domain>` for GitHub, `llm.<domain>` for the LLM
+ * providers, and `<domain>` itself for the forward proxy.
+ */
+export const GatewayDomain = Schema.String.check(
+  Schema.isPattern(
+    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u,
+    { message: "Expected a lowercase DNS domain" },
+  ),
+).pipe(Schema.brand("GatewayDomain"));
+export type GatewayDomain = typeof GatewayDomain.Type;
+
+/**
+ * An LLM provider whose credential the Gateway holds, so the harness that
+ * uses it calls the Gateway with the Attempt's caller token instead of a
+ * login on the machine: `anthropic` for Claude Code.
+ */
+export const GatewayLlmProvider = Schema.Literals(["anthropic"]);
+export type GatewayLlmProvider = typeof GatewayLlmProvider.Type;

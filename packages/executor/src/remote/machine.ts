@@ -18,9 +18,15 @@ export interface RemoteMachine {
 
 /** What an Attempt's repository access gives the commands it runs on the machine. */
 export interface RemoteAccess {
-  /** Exported on top of the machine's own environment for the Attempt's children and harvesting commands. */
+  /**
+   * The child host for the Attempt's children, harvesting commands, and git
+   * commands: the machine's own, or one that also sends the Attempt's
+   * secrets to the machine through the SSH connection (`sendingShell`).
+   */
+  readonly shell: RemoteShell;
+  /** Exported on top of the machine's own environment for the Attempt's children and harvesting commands. Each value is in the command line, so none is secret. */
   readonly environment: Readonly<Record<string, string>>;
-  /** Exported for the executor's own git commands on the Attempt's checkout: clone, fetch, salvage push. */
+  /** Exported for the executor's own git commands on the Attempt's checkout: clone, fetch, salvage push. Each value is in the command line, so none is secret. */
   readonly gitEnvironment: Readonly<Record<string, string>>;
   /** Renews the credential on the machine when it expires within minutes; runs before each git and harvesting command. */
   readonly refresh: Effect.Effect<void, ExecutorError>;
@@ -58,8 +64,8 @@ export interface RemoteWorker<M extends RemoteMachine> {
   ) => Effect.Effect<void, ExecutorError>;
   /** Checks one brain where the machine runs the Attempt's children. */
   readonly harnessProbe: (machine: M) => HarnessProbe;
-  /** The URL the Worker's cached clone fetches `repository` from. */
-  readonly repositoryUrl: (repository: RepositoryName) => string;
+  /** The URL the cached clone on `machine` fetches `repository` from. */
+  readonly repositoryUrl: (machine: M, repository: RepositoryName) => string;
   /** Finds how the Worker gets access to `repository`; fails when no access is configured for it. */
   readonly grantFor: (
     repository: RepositoryName,

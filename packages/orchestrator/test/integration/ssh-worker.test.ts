@@ -18,13 +18,15 @@ import { type StubParent, stubAttemptRuntime, StubStorage } from "@usine/durable
 import { RunEngine, Submission } from "@usine/engine/engine";
 import { CredentialProvider, CredentialUnavailableError, Executor } from "@usine/executor";
 import { layer as sshExecutorLayer } from "@usine/executor/ssh";
+import { GatewayAdminApi } from "@usine/gateway/admin";
 import { GitHubApp } from "@usine/github/github-app";
 import { localSecretsLayer } from "@usine/github/local-secrets";
 import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema, Stream } from "effect";
-import { FetchHttpClient } from "effect/unstable/http";
+import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
+import { HttpApiClient } from "effect/unstable/httpapi";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { gitHubCredentialLayer } from "../../src/credentials.ts";
-import { layer as sshLayer, sshWorkersOf } from "../../src/ssh.ts";
+import { layer as sshLayer, sshWorkerAddressesOf } from "../../src/ssh.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
 // The machine is named by the environment; without it there is nothing to run against.
@@ -247,7 +249,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           Layer.provide(FetchHttpClient.layer),
         );
         const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
-          workers: sshWorkersOf(config),
+          workers: yield* sshWorkerAddressesOf(config),
           ssh: sshFor(values),
           // Logins are the operator's; this test needs none, the preflight test checks them.
           harnessReadiness: () => (brain) =>
@@ -363,12 +365,13 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
             ),
         });
         const executor = sshExecutorLayer({
-          workers: sshWorkersOf(config),
+          workers: yield* sshWorkerAddressesOf(config),
           ssh: sshFor(values),
         }).pipe(
           Layer.provide(unused),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(NodeServices.layer),
+          Layer.provide(FetchHttpClient.layer),
         );
         yield* Effect.gen(function* () {
           const ssh = yield* Executor;
@@ -395,5 +398,241 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         }).pipe(Effect.provide(executor));
       }),
     { timeout: 120_000 },
+  );
+});
+
+// A Worker behind a Gateway is named by these; without them the Gateway case is skipped.
+const gatewayDestination = process.env.USINE_GATEWAY_INTEGRATION_DESTINATION;
+const GATEWAY_WORKER = WorkerName.make("gateway-integration");
+
+const gatewaySettings = Effect.all({
+  destination: Config.string("USINE_GATEWAY_INTEGRATION_DESTINATION"),
+  sshConfig: Config.option(Config.string("USINE_GATEWAY_INTEGRATION_SSH_CONFIG")),
+  root: Config.string("USINE_GATEWAY_INTEGRATION_ROOT").pipe(
+    Config.withDefault("/home/usine/.usine"),
+  ),
+  domain: Config.string("USINE_GATEWAY_INTEGRATION_DOMAIN").pipe(Config.withDefault("gw.internal")),
+  adminUrl: Config.string("USINE_GATEWAY_INTEGRATION_ADMIN_URL").pipe(
+    Config.withDefault("http://127.0.0.1:7070"),
+  ),
+  repository: Config.string("USINE_GATEWAY_INTEGRATION_REPO"),
+  revision: Config.string("USINE_GATEWAY_INTEGRATION_REVISION").pipe(Config.withDefault("main")),
+  credentialsDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
+});
+
+/** What the scripted parent saw on a Worker behind a Gateway. */
+interface ObservedBehindGateway {
+  host?: RemoteShell;
+  callerTokenFormat?: string;
+  advertisedHead?: string;
+  ghRepository?: string;
+  pushedBranch?: string;
+  deletedThroughGitHubUrl?: string;
+  registryStatus?: string;
+  tokensOnMachine?: string;
+}
+
+describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gateway", () => {
+  it.live(
+    "runs one Attempt with only a caller token on the machine: git and gh reach GitHub through the Gateway, and the attachment is gone afterwards",
+    () =>
+      Effect.gen(function* () {
+        const values = yield* gatewaySettings;
+        const config = Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [{ name: values.repository }],
+          workers: [
+            {
+              name: GATEWAY_WORKER,
+              kind: "ssh",
+              destination: values.destination,
+              root: values.root,
+              gateway: {
+                domain: values.domain,
+                admin_url: values.adminUrl,
+                admin_token_env: "USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN",
+              },
+            },
+          ],
+        });
+        const repository = RepositoryName.make(values.repository);
+        const branch = `usine-gateway-test/${globalThis.crypto.randomUUID()}`;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const instanceDirectory = InstanceDirectory.make(
+          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-gateway-integration-" }),
+        );
+        const observed: ObservedBehindGateway = {};
+        // Does what a child does on the machine, with only the Attempt's
+        // child host and environment: git through the Gateway (fetch, push to
+        // the gateway remote, delete through a github.com URL), gh through
+        // its socket, a package registry through the forward proxy, and a
+        // scan of the machine for GitHub tokens.
+        const parent: StubParent = ({ request }) =>
+          Effect.gen(function* () {
+            const host = request.host;
+            if (host._tag !== "RemoteShell")
+              return yield* Effect.die("expected a remote child host");
+            observed.host = host;
+            const inWorktree = { cwd: request.cwd, environment: request.environment };
+            observed.callerTokenFormat = yield* succeeds(host, {
+              ...inWorktree,
+              command: "sh",
+              args: ["-c", 'printf %s "${GH_ENTERPRISE_TOKEN%%.*}"'],
+            });
+            observed.advertisedHead = yield* succeeds(host, {
+              ...inWorktree,
+              command: "git",
+              args: ["ls-remote", "origin", "HEAD"],
+            });
+            observed.ghRepository = yield* succeeds(host, {
+              ...inWorktree,
+              command: "gh",
+              args: ["api", `repos/${repository}`, "--jq", ".full_name"],
+            });
+            yield* succeeds(host, {
+              ...inWorktree,
+              command: "git",
+              args: [
+                "-c",
+                "user.name=usine",
+                "-c",
+                "user.email=usine@basaltbytes.dev",
+                "commit",
+                "--allow-empty",
+                "-m",
+                "gateway worker integration",
+              ],
+            });
+            yield* succeeds(host, {
+              ...inWorktree,
+              command: "git",
+              args: ["push", "origin", `HEAD:refs/heads/${branch}`],
+            });
+            observed.pushedBranch = yield* succeeds(host, {
+              ...inWorktree,
+              command: "git",
+              args: ["ls-remote", "origin", `refs/heads/${branch}`],
+            });
+            yield* succeeds(host, {
+              ...inWorktree,
+              command: "git",
+              args: ["push", `https://github.com/${repository}.git`, "--delete", branch],
+            });
+            observed.deletedThroughGitHubUrl = yield* succeeds(host, {
+              ...inWorktree,
+              command: "git",
+              args: ["ls-remote", "origin", `refs/heads/${branch}`],
+            });
+            observed.registryStatus = yield* succeeds(host, {
+              ...inWorktree,
+              command: "curl",
+              args: ["-sS", "-o", "/dev/null", "-w", "%{http_code}", "https://registry.npmjs.org/"],
+            });
+            observed.tokensOnMachine = yield* succeeds(host, {
+              ...inWorktree,
+              command: "sh",
+              // Checkouts and cached clones are left out: the repository's own text may contain "ghs_".
+              args: [
+                "-c",
+                'grep -rIl --exclude-dir=repos --exclude-dir=attempts "ghs_" "$HOME" /tmp 2>/dev/null; env | grep -c "ghs_"; true',
+              ],
+            });
+            return "The Worker reached GitHub through its Gateway";
+          }).pipe(Effect.provide(NodeServices.layer), Effect.orDie);
+
+        const app = GitHubApp.layer.pipe(
+          Layer.provide(
+            localSecretsLayer(InstanceDirectory.make(values.credentialsDirectory)).pipe(
+              Layer.provide(NodeServices.layer),
+            ),
+          ),
+          Layer.provide(FetchHttpClient.layer),
+        );
+        const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
+          workers: yield* sshWorkerAddressesOf(config),
+          ssh: {
+            command: "ssh",
+            args: [
+              ...PLAIN_SSH,
+              ...Option.match(values.sshConfig, {
+                onNone: () => [],
+                onSome: (file) => ["-F", file],
+              }),
+            ],
+          },
+          harnessReadiness: () => (brain) =>
+            Effect.succeed(new HarnessReady({ harness: brain.harness })),
+        }).pipe(
+          Layer.provide(gitHubCredentialLayer(config).pipe(Layer.provide(app))),
+          Layer.provide(alwaysHoldsLayer),
+          Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+        );
+
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const accepted = yield* engine.submit(
+            new Submission({
+              event: new Event({
+                id: EventId.make(`gateway-${globalThis.crypto.randomUUID()}`),
+                dedupKey: DedupKey.make(`gateway/${repository}/${globalThis.crypto.randomUUID()}`),
+                payload: { integration: "gateway" },
+                receivedAt: yield* DateTime.now,
+              }),
+              itemKey: ItemKey.make("gateway-integration"),
+              loop: LoopName.make("gateway-integration"),
+              step: StepName.make("execute"),
+              approval: "none",
+              repository,
+              revision: RepositoryRevision.make(values.revision),
+              task: AttemptTask.make("Verify the Worker reaches GitHub through its Gateway"),
+              agent,
+              parentModel: Option.none(),
+            }),
+          );
+          assert.strictEqual(accepted._tag, "Claimed");
+          if (accepted._tag !== "Claimed") return;
+          const finished = yield* waitForTerminal(engine, accepted.runId);
+          const attempt = finished.attempts[0];
+          assert(attempt !== undefined);
+          assert.strictEqual(
+            finished.run.state._tag,
+            "Succeeded",
+            JSON.stringify(Option.getOrNull(attempt.outcome)),
+          );
+          assert.strictEqual(observed.callerTokenFormat, "ugw1", "the child has a caller token");
+          assert.match(observed.advertisedHead ?? "", /^[0-9a-f]{40}\tHEAD$/u);
+          assert.strictEqual(observed.ghRepository, repository);
+          assert.match(
+            observed.pushedBranch ?? "",
+            new RegExp(`^[0-9a-f]{40}\trefs/heads/${branch}$`, "u"),
+          );
+          assert.strictEqual(
+            observed.deletedThroughGitHubUrl,
+            "",
+            "the github.com push went through the Gateway",
+          );
+          assert.strictEqual(observed.registryStatus, "200");
+          assert.strictEqual(observed.tokensOnMachine, "0", "no GitHub token on the machine");
+          const host = observed.host;
+          assert(host !== undefined);
+          assert.notInclude(host.ssh.args.join(" "), "ugw1.");
+
+          const admin = yield* HttpApiClient.make(GatewayAdminApi, {
+            baseUrl: values.adminUrl,
+            transformClient: HttpClient.mapRequest(
+              HttpClientRequest.bearerToken(
+                yield* Config.redacted("USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN"),
+              ),
+            ),
+          });
+          const { attachments } = yield* admin.attachments.list();
+          assert.deepStrictEqual(
+            attachments.filter(({ worker }) => worker === GATEWAY_WORKER),
+            [],
+            "the Attempt's attachment is detached",
+          );
+        }).pipe(Effect.provide(runtime), Effect.provide(FetchHttpClient.layer));
+      }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
+    { timeout: 300_000 },
   );
 });

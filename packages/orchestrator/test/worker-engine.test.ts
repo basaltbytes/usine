@@ -44,6 +44,27 @@ describe("Worker engine selection", () => {
     }),
   );
 
+  it.live("names the variable when a Gateway's admin token is not set", () =>
+    Effect.gen(function* () {
+      const failure = yield* startupFailure([
+        {
+          ...unreachable,
+          gateway: {
+            domain: "gw.internal",
+            admin_url: "http://127.0.0.1:1",
+            admin_token_env: "USINE_TEST_UNSET_GATEWAY_ADMIN_TOKEN",
+          },
+        },
+      ]);
+      assert(failure._tag === "WorkerCapabilityError", failure._tag);
+      assert.strictEqual(failure.capability, "gateway");
+      assert.strictEqual(
+        failure.message,
+        "SSH Worker eu-one's Gateway admin token is missing: set USINE_TEST_UNSET_GATEWAY_ADMIN_TOKEN in the orchestrator's environment",
+      );
+    }),
+  );
+
   it.live("refuses a mix of local and SSH Workers at startup", () =>
     Effect.gen(function* () {
       const failure = yield* startupFailure([{ name: "local", kind: "local" }, unreachable]);

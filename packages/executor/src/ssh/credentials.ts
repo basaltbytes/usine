@@ -3,7 +3,12 @@ import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { Cache, Effect, Redacted } from "effect";
 import { credentialEnvironment, GH_CONFIG, ghHostsConfig } from "../credential-environment.ts";
-import { CredentialProvider, type ExecutorError, type ExecutorOperation } from "../executor.ts";
+import {
+  CredentialProvider,
+  type ExecutorError,
+  type ExecutorOperation,
+  type WorkerCredential,
+} from "../executor.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import type { RemoteAccess } from "../remote/machine.ts";
 import { renewableCredential } from "../renewable-credential.ts";
@@ -38,9 +43,10 @@ const credentialsRoot = (machine: SshMachine): string => `${machine.workerDirect
  * directory beside the Worker's checkouts that only the SSH user can read,
  * renewed before it expires and removed when the Attempt's scope closes.
  * Every Attempt on the Worker runs as that user, so each can read the others'
- * tokens while they run (ADR 0026). The first use of each Worker in this
- * process removes every credential an earlier process left there: no Attempt
- * can still use one, because a reattached Attempt is given a fresh credential.
+ * tokens while they run (ADR 0026). `reclaim` removes every credential an
+ * earlier process left on the Worker, once per process, and runs before the
+ * Worker's first Attempt: no Attempt can still use one, because a reattached
+ * Attempt is given a fresh credential.
  */
 export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(function* (
   commands: RemoteCommands,
@@ -82,11 +88,11 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
       operation: ExecutorOperation,
       machine: SshMachine,
       directory: string,
-      token: Redacted.Redacted<string>,
+      { value }: WorkerCredential,
     ) {
       yield* Effect.annotateCurrentSpan({ host: machine.shell.destination, directory });
       const payload = Redacted.make(
-        `${Redacted.value(token)}\n${ghHostsConfig(Redacted.value(token))}`,
+        `${Redacted.value(value)}\n${ghHostsConfig(Redacted.value(value))}`,
       );
       yield* commands
         .runWithInput(
@@ -112,7 +118,6 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
   ) {
     const host = machine.shell.destination;
     yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, host });
-    yield* reclaim(worker);
     const directory = `${credentialsRoot(machine)}/${safeSegment(attemptId)}`;
     yield* Effect.addFinalizer(() =>
       commands.run("cleanup", machine.shell, "rm", ["-rf", directory]).pipe(
@@ -132,13 +137,14 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
         Effect.ignore,
       ),
     );
-    const credential = yield* renewableCredential(provider.issue, repository, attemptId, (token) =>
-      write(operation, machine, directory, token),
+    const credential = yield* renewableCredential(provider.issue, repository, attemptId, (issued) =>
+      write(operation, machine, directory, issued),
     );
     const environment = credentialEnvironment(directory);
     return {
       environment,
       gitEnvironment: environment,
+      shell: machine.shell,
       refresh: credential.refresh(),
       scrub: credential.scrub,
     } satisfies RemoteAccess;

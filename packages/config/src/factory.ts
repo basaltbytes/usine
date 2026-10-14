@@ -2,6 +2,8 @@ import { Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { RepositoryName } from "@usine/core/repository";
 import {
+  GatewayDomain,
+  GatewayLlmProvider,
   SshDestination,
   SshIdentityFile,
   SshPort,
@@ -81,11 +83,49 @@ export class ExeDevWorker extends Schema.Class<ExeDevWorker>("@usine/config/ExeD
   maxConcurrentAttempts: MaxConcurrentAttempts,
 }) {}
 
+/** The name of an environment variable of the orchestrator's process. */
+const EnvironmentVariableName = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z_][A-Za-z0-9_]*$/u, {
+    message: "Expected an environment variable name",
+  }),
+).pipe(Schema.brand("EnvironmentVariableName"));
+
+// A user name or password in the URL would be a credential in the file and in every message that names the URL.
+const isHttpUrlWithoutCredentials = Schema.makeFilter<URL>(
+  (url) =>
+    (url.protocol === "http:" || url.protocol === "https:") &&
+    url.username === "" &&
+    url.password === "",
+  { message: "Expected an http or https URL without a user name or password" },
+);
+
+/**
+ * The Gateway in front of an SSH Worker's machine on a private network
+ * (ADR 0027). `domain` is the Gateway's private DNS domain. `adminUrl` is its
+ * admin API as the orchestrator reaches it, usually a local forward through
+ * the SSH connection to the Gateway. The admin token is read at startup from
+ * the orchestrator's environment variable `adminTokenEnv`, so it is never in
+ * the file. `llmProviders` names the providers whose credential the Gateway
+ * holds. A harness whose provider is not listed has no route to it from
+ * behind the Gateway, so preflight refuses its brain on the Worker: Claude
+ * Code without `anthropic`, and Codex on any Worker behind a Gateway (#244).
+ */
+export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/WorkerGateway")({
+  domain: GatewayDomain,
+  adminUrl: Schema.URLFromString.check(isHttpUrlWithoutCredentials),
+  adminTokenEnv: EnvironmentVariableName,
+  llmProviders: Schema.Array(GatewayLlmProvider)
+    .check(Schema.isUnique())
+    .pipe(Schema.withDecodingDefaultKey(Effect.succeed([]))),
+}) {}
+
 /**
  * A Linux machine the orchestrator connects to over SSH, with the number of
  * Attempts it may run at the same time. The orchestrator's `ssh` client
  * connects to `destination`, on `port` and with `identityFile` when given,
  * and the Worker keeps its state under `<root>/workers/<name>` on the machine.
+ * A Worker behind a `gateway` has no GitHub token on its machine: the
+ * executor attaches each Attempt's token to the Gateway instead.
  */
 export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker")({
   name: WorkerName,
@@ -95,6 +135,15 @@ export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker"
   identityFile: Schema.OptionFromOptionalKey(SshIdentityFile),
   port: Schema.OptionFromOptionalKey(SshPort),
   root: WorkerRoot,
+  gateway: Schema.OptionFromOptionalKey(
+    WorkerGateway.pipe(
+      Schema.encodeKeys({
+        adminUrl: "admin_url",
+        adminTokenEnv: "admin_token_env",
+        llmProviders: "llm_providers",
+      }),
+    ),
+  ),
 }) {}
 
 /** A named place to execute Attempts; its kind selects the Worker adapter and the settings that adapter needs. */

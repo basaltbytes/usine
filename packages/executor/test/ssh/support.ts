@@ -19,11 +19,12 @@ import {
   stubAttemptRuntime,
   StubStorage,
 } from "@usine/durable/testing";
-import { Clock, DateTime, Effect, Layer, Option, Redacted, Sink, Stream } from "effect";
+import { Clock, DateTime, Effect, Layer, Logger, Option, Redacted, Sink, Stream } from "effect";
+import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type { StandardCommand } from "effect/unstable/process/ChildProcess";
 import { CheckoutRequest, CredentialProvider, WorkerCredential } from "../../src/executor.ts";
-import { layer as sshLayer } from "../../src/ssh/ssh.ts";
+import { layer as sshLayer, type SshWorkerAddress } from "../../src/ssh/ssh.ts";
 
 const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
 export const WORKER = WorkerName.make("eu-one");
@@ -70,6 +71,14 @@ interface FakeMachineState {
   cloneEchoesToken: boolean;
   salvage: "clean" | "dirty";
   salvageCommitted: boolean;
+  claudeLoggedIn: boolean;
+  /** Whether sshd accepts the variables the SSH client sends (`AcceptEnv`). */
+  acceptsSentVariables: boolean;
+  readonly droppedSentVariables: Set<string>;
+  /** Whether `git.<domain>` resolves and answers from the machine. */
+  gatewayReachable: boolean;
+  /** gh's configuration files written on the machine, by path. */
+  readonly files: Map<string, string>;
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -98,6 +107,19 @@ const remoteLine = (command: StandardCommand): string => {
 
 const quote = (value: string): string => `'${value.replaceAll("'", `'"'"'`)}'`;
 
+/** The quoted words of a remote command line, unquoted: `exec 'sh' '-c' ...` gives `sh`, `-c`, .... */
+const remoteWords = (line: string): Array<string> =>
+  [...line.matchAll(/'((?:[^']|'"'"')*)'/gu)].map(([, word]) =>
+    (word ?? "").replaceAll(`'"'"'`, "'"),
+  );
+
+/** The variables an SSH invocation sends to the machine and has a value for in its own environment. */
+export const sentVariables = (command: StandardCommand): Array<string> => {
+  const option = command.args.find((arg) => arg.startsWith("SendEnv="));
+  const names = option === undefined ? [] : option.slice("SendEnv=".length).split(" ");
+  return names.filter((name) => command.options.env?.[name] !== undefined);
+};
+
 /** The remote line that stops the Attempt's children before its checkout is kept or removed. */
 export const KILL_CHILDREN = `exec 'sh' '-c' ${quote(CHILD_KILL_SCRIPT)} 'sh' '${WORKTREE}'`;
 
@@ -124,8 +146,13 @@ export const fakeMachine = () => {
     cloneEchoesToken: false,
     salvage: "clean",
     salvageCommitted: false,
+    claudeLoggedIn: true,
+    acceptsSentVariables: true,
+    droppedSentVariables: new Set(),
+    gatewayReachable: true,
+    files: new Map(),
   };
-  const respond = (line: string, input: string) => {
+  const respond = (command: StandardCommand, line: string, input: string) => {
     if (!state.reachable)
       return oneShotHandle(
         "",
@@ -133,6 +160,27 @@ export const fakeMachine = () => {
         "ssh: connect to host 203.0.113.7 port 2222: Connection refused",
       );
     if (line === "exec 'true'") return oneShotHandle("", 0);
+    if (line.includes("printenv")) {
+      const received = state.acceptsSentVariables
+        ? sentVariables(command).filter((name) => !state.droppedSentVariables.has(name))
+        : [];
+      const expected = remoteWords(line).slice(4);
+      const dropped = expected.filter((word, index) => index % 2 === 0 && !received.includes(word));
+      return oneShotHandle(dropped.map((name) => `${name}\n`).join(""), 0);
+    }
+    if (line.startsWith("exec 'curl'"))
+      return state.gatewayReachable
+        ? oneShotHandle(
+            "HTTP/1.1 401 Unauthorized\r\nx-usine-gateway-refusal: missing-caller-token\r\n\r\n",
+            0,
+          )
+        : oneShotHandle("", 6, "curl: (6) Could not resolve host: git.gw.test");
+    if (line.includes("http_unix_socket")) {
+      const [directory, config, hosts] = remoteWords(line).slice(-3);
+      state.files.set(`${directory}/config.yml`, config ?? "");
+      state.files.set(`${directory}/hosts.yml`, hosts ?? "");
+      return oneShotHandle("", 0);
+    }
     if (line.includes("IFS= read -r token")) {
       const directory = line.slice(line.lastIndexOf(" '") + 2, -1);
       state.credentials.set(directory, input.split("\n")[0] ?? "");
@@ -152,7 +200,11 @@ export const fakeMachine = () => {
     if (line === "exec 'claude' '--version'") return oneShotHandle("2.1.296 (Claude Code)\n", 0);
     if (line === "exec 'claude' 'auth' 'status' '--json'")
       return oneShotHandle(
-        JSON.stringify({ loggedIn: true, authMethod: "claude.ai", apiProvider: "firstParty" }),
+        JSON.stringify({
+          loggedIn: state.claudeLoggedIn,
+          authMethod: "claude.ai",
+          apiProvider: "firstParty",
+        }),
         0,
       );
     if (line.startsWith("exec 'mv' ")) {
@@ -197,7 +249,7 @@ export const fakeMachine = () => {
       const line = remoteLine(command);
       const input = yield* standardInput(command);
       state.calls.push({ command, line, input });
-      return respond(line, input);
+      return respond(command, line, input);
     }),
   );
   return { state, layer: Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, service) };
@@ -241,9 +293,57 @@ export const request = new CheckoutRequest({
 export const fails: StubParent = () =>
   Effect.fail(new InfraFailure({ message: "The parent stopped", cause: new Error("crash") }));
 
+/** Whether a remote command line writes an Attempt's token on the machine. */
+export const writesCredential = (line: string) => line.includes("IFS= read -r token");
+
+/** Collects every log message and its fields as text. */
+export const capturedLogs = () => {
+  const lines: Array<string> = [];
+  const logger = Logger.make<unknown, void>(({ message }) => {
+    lines.push(JSON.stringify(message));
+  });
+  return { lines, layer: Logger.layer([logger]) };
+};
+
+/** The test Worker's address, without a Gateway. */
+export const ADDRESS: SshWorkerAddress = {
+  name: WORKER,
+  destination: DESTINATION,
+  identityFile: Option.some(SshIdentityFile.make("~/.ssh/usine_worker")),
+  port: Option.some(SshPort.make(2222)),
+  root: WorkerRoot.make("/srv/usine"),
+  gateway: Option.none(),
+};
+
+/** An HTTP client for a Worker without a Gateway, which never calls one. */
+const noGateway = Layer.succeed(
+  HttpClient.HttpClient,
+  HttpClient.make(() => Effect.die(new Error("A Worker without a Gateway made an HTTP request"))),
+);
+
 /**
- * The SSH executor for one Worker on the fake machine, with each Attempt's
- * parent scripted by `parent` and its tokens minted by `credentials`.
+ * The SSH executor for `address` on the fake machine, with each Attempt's
+ * parent scripted by `parent` and its tokens minted by `credentials`; the
+ * caller provides the HTTP client its Gateway's admin API is reached with.
+ */
+export const executorLayer = (
+  machine: ReturnType<typeof fakeMachine>,
+  credentials: ReturnType<typeof mintingProvider>,
+  address: SshWorkerAddress,
+  parent: StubParent = completes,
+  /** Build again on the same storage to simulate an orchestrator restart. */
+  storage: StubStorage = new StubStorage(),
+) =>
+  sshLayer({ workers: [address], interruptGrace: "2 seconds" }).pipe(
+    Layer.provide(machine.layer),
+    Layer.provide(credentials.layer),
+    Layer.provide(stubAttemptRuntime(storage, parent)),
+  );
+
+/**
+ * The SSH executor for one Worker without a Gateway on the fake machine, with
+ * each Attempt's parent scripted by `parent` and its tokens minted by
+ * `credentials`.
  */
 export const runtime = (
   machine: ReturnType<typeof fakeMachine>,
@@ -251,20 +351,4 @@ export const runtime = (
   parent: StubParent = completes,
   /** Build again on the same storage to simulate an orchestrator restart. */
   storage: StubStorage = new StubStorage(),
-) =>
-  sshLayer({
-    workers: [
-      {
-        name: WORKER,
-        destination: DESTINATION,
-        identityFile: Option.some(SshIdentityFile.make("~/.ssh/usine_worker")),
-        port: Option.some(SshPort.make(2222)),
-        root: WorkerRoot.make("/srv/usine"),
-      },
-    ],
-    interruptGrace: "2 seconds",
-  }).pipe(
-    Layer.provide(machine.layer),
-    Layer.provide(credentials.layer),
-    Layer.provide(stubAttemptRuntime(storage, parent)),
-  );
+) => executorLayer(machine, credentials, ADDRESS, parent, storage).pipe(Layer.provide(noGateway));

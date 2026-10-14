@@ -97,6 +97,7 @@
   "devDependencies": {
     "@effect/vitest": "catalog:",
     "@usine/agents": "workspace:*",
+    "@usine/gateway": "workspace:*",
     "@usine/tsconfig": "workspace:*",
     "effect": "catalog:",
     "typescript": "catalog:",

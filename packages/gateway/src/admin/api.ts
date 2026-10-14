@@ -18,6 +18,9 @@ import {
 } from "../attachment/attachment.ts";
 import { CallerToken } from "../caller/caller.ts";
 
+export { AttachmentId, InstallationCredential } from "../attachment/attachment.ts";
+export { CallerToken, GATEWAY_TOKEN_HEADER } from "../caller/caller.ts";
+
 /** What the executor attaches: one Attempt's credential for one Worker and repository, until it expires. */
 export class AttachRequest extends Schema.Class<AttachRequest>("@usine/gateway/AttachRequest")({
   worker: WorkerName,

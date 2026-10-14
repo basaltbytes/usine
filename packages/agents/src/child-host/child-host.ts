@@ -20,9 +20,11 @@ export class RemoteShell extends Schema.TaggedClass<RemoteShell>("@usine/agents/
   {
     ssh: SshCommand,
     /**
-     * The SSH client's own process environment: only what SSH needs to reach
-     * the machine, never the orchestrator's secrets (ADR 0011). None of it
-     * reaches the child.
+     * The SSH client's own process environment: what SSH needs to reach the
+     * machine, never the orchestrator's secrets (ADR 0011), and the variables
+     * an `-o SendEnv=` option in `ssh` names. Only those reach the child, so a
+     * value that must stay out of the command line, such as a Gateway caller
+     * token, travels here; never log this field.
      */
     sshEnvironment: Schema.Record(Schema.String, Schema.String),
     /** The SSH destination, passed to the client as one argument. */

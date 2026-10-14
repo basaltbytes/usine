@@ -440,6 +440,9 @@ importers:
       '@usine/durable':
         specifier: workspace:*
         version: link:../durable
+      '@usine/gateway':
+        specifier: workspace:*
+        version: link:../gateway
     devDependencies:
       '@effect/vitest':
         specifier: 'catalog:'
@@ -565,6 +568,9 @@ importers:
       '@usine/agents':
         specifier: workspace:*
         version: link:../agents
+      '@usine/gateway':
+        specifier: workspace:*
+        version: link:../gateway
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
