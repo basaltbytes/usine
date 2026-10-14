@@ -91,12 +91,17 @@ Provide `CredentialProvider` to `EngineLive`, then request `RunEngine` from the 
 
 For the whole application, `@usine/orchestrator/runtime`'s `runtimeLayer(instanceDirectory, instance)` additionally composes GitHub polling, schedule triggers, CEL parsing, `Orchestrator`, and `Operator`. It selects the Worker composition from the kind of the Workers in `usine.yaml`: the SSH one when every Worker is `ssh`, the local one otherwise, which refuses any other kind at startup. It derives worker preflight requirements from `instance.agents` and requires only `GitHubCredentials`; the server or another host owns how those credentials are loaded. `operatorObservationLayer(instanceDirectory)` is the read-only Node composition for setup and maintenance surfaces: it reads durable Runs and Loop runtime state while trigger execution remains idle.
 
-For SSH Workers, `@usine/orchestrator/ssh` composes the scheduler with the SSH executor. Like the local composition it requires a `CredentialProvider`, which mints the token each Attempt writes on its Worker's machine; `sshWorkersOf(config)` returns the SSH Workers `usine.yaml` declares:
+For SSH Workers, `@usine/orchestrator/ssh` composes the scheduler with the SSH executor. Like the local composition it requires a `CredentialProvider`, which mints the token each Attempt writes on its Worker's machine or attaches to its Worker's Gateway. `sshWorkersOf(config)` returns the SSH Workers `usine.yaml` declares, and `sshWorkerAddressesOf(config)` turns them into the executor's addresses, reading each Gateway's admin token from the environment variable its `admin_token_env` names; an unset variable fails with a `gateway` capability error that names it. Gateway admin APIs are called with `fetch`.
 
 ```ts
-import { layer as sshLayer, sshWorkersOf } from "@usine/orchestrator/ssh"
+import { layer as sshLayer, sshWorkerAddressesOf } from "@usine/orchestrator/ssh"
+import { Effect, Layer } from "effect"
 
-const EngineLive = sshLayer(instanceDirectory, config, brains, { workers: sshWorkersOf(config) })
+const EngineLive = Layer.unwrap(
+  Effect.map(sshWorkerAddressesOf(config), (workers) =>
+    sshLayer(instanceDirectory, config, brains, { workers }),
+  ),
+)
 ```
 
 The live SSH check runs one Attempt end to end on a real machine, with a scripted parent whose commands use the machine's gh and git with the minted token, and preflights Claude Code and Codex there. It skips unless `USINE_SSH_INTEGRATION_DESTINATION` is set, and needs a GitHub App instance directory whose installation covers the repository:
@@ -107,6 +112,20 @@ export USINE_SSH_INTEGRATION_IDENTITY_FILE=~/.ssh/usine_worker   # optional
 export USINE_SSH_INTEGRATION_KNOWN_HOSTS=/path/to/known_hosts    # optional
 export USINE_SSH_INTEGRATION_ROOT=/home/usine/.usine             # the default
 export USINE_SSH_INTEGRATION_REPO=owner/repo
+export USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY=/path/to/instance
+pnpm --filter @usine/orchestrator test:ssh
+```
+
+The same file has a live check for a Worker behind a Gateway (`infra/hetzner/gateway`). It runs one Attempt whose scripted child fetches through the Gateway, calls `gh api`, pushes a branch named `usine-gateway-test/<uuid>` and deletes it again through a `https://github.com/` URL, reaches the npm registry through the forward proxy, and looks for GitHub tokens on the machine; afterwards it checks that the Gateway holds no attachment for the Worker. The repository must accept pushes from the App. It skips unless `USINE_GATEWAY_INTEGRATION_DESTINATION` is set, and expects the admin API forward to be open:
+
+```sh
+export USINE_GATEWAY_INTEGRATION_DESTINATION=worker-one                # a Host with ProxyJump through the gateway
+export USINE_GATEWAY_INTEGRATION_SSH_CONFIG=/path/to/ssh_config        # optional
+export USINE_GATEWAY_INTEGRATION_ROOT=/home/usine/.usine               # the default
+export USINE_GATEWAY_INTEGRATION_DOMAIN=gw.internal                    # the default
+export USINE_GATEWAY_INTEGRATION_ADMIN_URL=http://127.0.0.1:7070       # the default
+export USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN=...                       # from /etc/usine-gateway/secrets.env
+export USINE_GATEWAY_INTEGRATION_REPO=owner/repo
 export USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY=/path/to/instance
 pnpm --filter @usine/orchestrator test:ssh
 ```

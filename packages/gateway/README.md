@@ -15,7 +15,7 @@ Every refused request is logged at warning level as `Gateway refused a request` 
 | Import | Contents |
 | --- | --- |
 | `@usine/gateway` | The platform-free core: `GatewaySettings`, `Attachments`, `CallerTokens`, `GatewayProxy` (the reverse proxy as an `HttpServerRequest` handler), `adminRoutes` (the admin API for an `HttpRouter`), `gatewayServices`, the egress allowlist parser, and the domain records. It needs an `HttpClient` that leaves `content-encoding` alone. |
-| `@usine/gateway/admin` | `GatewayAdminApi`, the admin API contract, for `HttpApiClient.make` in the executor. |
+| `@usine/gateway/admin` | `GatewayAdminApi`, the admin API contract, for `HttpApiClient.make` in the executor, with the records a client sends and reads: `AttachRequest`, `InstallationCredential`, `Attached`, `AttachmentId`, `CallerToken`, `Detached`, and `AttachmentList`, and `GATEWAY_TOKEN_HEADER`. |
 | `@usine/gateway/node` | `gatewayLayer` (the three servers on Node, with undici upstream), `gatewayFromEnvironment`, `settingsFromEnvironment`, and `GatewayAddresses`. |
 | `usine-gateway` | The command the gateway VM runs; it reads the environment below and logs one JSON object per line. |
 
@@ -42,11 +42,11 @@ A Worker child presents its caller token wherever its tool sends a credential: t
 
 ## A Worker's environment
 
-`infra/hetzner/gateway/worker-cloud-init.yaml` sets up the machine. Per Attempt, the executor adds the caller token:
+`infra/hetzner/gateway/worker-cloud-init.yaml` sets up the machine. Per Attempt, the executor adds the caller token, sending each variable that contains it through the SSH connection rather than the command line (the Worker's sshd accepts them with `AcceptEnv`). The Codex row is what a Codex child would need; the executor does not set it yet ([#244](https://github.com/basaltbytes/usine/issues/244)).
 
 | Tool | Setting |
 | --- | --- |
-| git | remote `http://git.<domain>/OWNER/REPO.git`; `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=http.extraHeader`, `GIT_CONFIG_VALUE_0="X-Usine-Gateway-Token: <caller token>"` |
+| git | remote `http://git.<domain>/OWNER/REPO.git`; `GIT_CONFIG_KEY_0=http.http://git.<domain>/.extraHeader`, `GIT_CONFIG_VALUE_0="X-Usine-Gateway-Token: <caller token>"`, and `url.http://git.<domain>/.insteadOf` for `https://github.com/` and `https://git.<domain>/` |
 | gh | `GH_HOST=git.<domain>`, `GH_ENTERPRISE_TOKEN=<caller token>`; gh's config sets `http_unix_socket: /run/usine-gateway/http.sock`, forwarded to the gateway by `systemd-socket-proxyd`, because gh speaks only HTTPS to a custom host and over that socket it speaks plain HTTP instead |
 | Claude Code | `ANTHROPIC_BASE_URL=http://llm.<domain>/anthropic`, `ANTHROPIC_AUTH_TOKEN=<caller token>` |
 | Codex | a `model_provider` with `base_url = "http://llm.<domain>/openai/v1"`, `env_key` naming a variable that contains the caller token, `wire_api = "responses"` |

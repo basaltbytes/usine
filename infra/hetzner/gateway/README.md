@@ -15,7 +15,7 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 
 The orchestrator reaches a Worker with SSH through the gateway: `ssh -J root@<gateway> <user>@10.42.0.x`. The Hetzner firewall lets only the orchestrator's address reach the gateway's port 22. The gateway's sshd allows local forwarding only, and its nftables rules refuse outbound SSH to anything outside the private network, so the bastion leads to Workers and nowhere else.
 
-The executor reaches the admin API on the gateway's loopback port 7070 through the same SSH connection, for example with `ssh -L 7070:127.0.0.1:7070 root@<gateway>`. It attaches the Attempt's installation token for the Worker and repository there, and passes the caller token it gets back to the Attempt's children.
+The executor reaches the admin API on the gateway's loopback port 7070 through the same SSH connection, for example with `ssh -L 7070:127.0.0.1:7070 root@<gateway>`. It attaches the Attempt's installation token for the Worker and repository there, and passes the caller token it gets back to the Attempt's children through the SSH connection to the Worker.
 
 A Worker resolves names with the gateway's dnsmasq, which answers `git.<domain>` and `llm.<domain>` with the gateway's private address and refuses every other name. The Worker has no default route and no public address, so it cannot open a connection to the internet even with an address in hand; its nftables rules also allow connections to the gateway only.
 
@@ -61,7 +61,49 @@ hcloud server create --name worker-one --type cx23 --image debian-13 --location 
   --user-data-from-file worker.yaml
 ```
 
-The Worker installs its packages through the gateway's proxy, so the gateway must be ready first. Its address on the private network is in `hcloud server describe worker-one`.
+The Worker installs its packages through the gateway's proxy, so the gateway must be ready first. Its address on the private network is in `hcloud server describe worker-one`. The file does not create the SSH user or install Node.js and the harnesses; the Worker file of `../cloud-init.yaml` does, but cannot run behind the gateway as it is ([#250](https://github.com/basaltbytes/usine/issues/250)).
+
+The Worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, and `ANTHROPIC_AUTH_TOKEN` from the orchestrator (`AcceptEnv`): the executor sends each Attempt's caller token in them through the SSH connection, so it is in no command line. A Worker whose sshd drops them fails preflight with a message that names them.
+
+## Add the Worker to `usine.yaml`
+
+The orchestrator reaches the Worker through the gateway as its SSH bastion, and the gateway's admin API through a local forward on the same connection. Both go in the orchestrator user's SSH configuration:
+
+```
+Host usine-gateway
+  HostName 203.0.113.7
+  User root
+  IdentityFile ~/.ssh/usine_worker
+  LocalForward 7070 127.0.0.1:7070
+
+Host worker-one
+  HostName 10.42.0.3
+  User usine
+  ProxyJump usine-gateway
+  IdentityFile ~/.ssh/usine_worker
+```
+
+Keep the forward open while `usine up` runs, for example with `ssh -N usine-gateway` under a service manager. Then give the Worker a `gateway`:
+
+```yaml
+workers:
+  - name: worker-one
+    kind: ssh
+    destination: worker-one
+    root: /home/usine/.usine
+    gateway:
+      domain: gw.internal
+      admin_url: http://127.0.0.1:7070
+      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
+      llm_providers: [anthropic]
+```
+
+- `domain` is the gateway's `DOMAIN`.
+- `admin_url` is the admin API as the orchestrator reaches it, here the local forward.
+- `admin_token_env` names the orchestrator's environment variable that contains the admin token from `/etc/usine-gateway/secrets.env`; the token itself never goes in the file. `usine up` stops with the variable's name when it is not set.
+- `llm_providers` lists the providers whose credential the gateway holds. With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token, and preflight checks only the `claude` binary on the Worker. Without it, Claude Code would have no route to Anthropic from behind the gateway, so preflight refuses a Claude brain on the Worker. Preflight refuses a Codex brain on any Worker behind a gateway for the same reason ([#244](https://github.com/basaltbytes/usine/issues/244)).
+
+Preflight checks that the admin API answers with the token, that the Worker's sshd accepts the caller token's variables, and that the Worker reaches `git.<domain>`, without attaching anything. While an Attempt runs, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, has them back within two minutes.
 
 ## Delete
 

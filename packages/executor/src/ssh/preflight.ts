@@ -1,6 +1,6 @@
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
-import { Effect } from "effect";
+import { Effect, Option } from "effect";
 import {
   type ExecutorError,
   logPreflightFailure,
@@ -9,6 +9,7 @@ import {
 } from "../executor.ts";
 import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
+import { verifyGateway } from "./gateway/preflight.ts";
 import type { SshMachine } from "./model.ts";
 
 /** Succeeds when `$1` is a directory the SSH user can write to. */
@@ -23,7 +24,8 @@ const capabilityError = (
 
 /**
  * Verifies an SSH Worker without changing its machine: the SSH client connects
- * to it, the configured root is a writable directory, Git runs, and each
+ * to it, the configured root is a writable directory, Git runs, the Gateway
+ * in front of it answers and is reachable from it when it has one, and each
  * rostered brain is ready where the Attempt's children run.
  */
 export const sshPreflightFor = (
@@ -87,6 +89,8 @@ export const sshPreflightFor = (
         new Error(gitVersion),
       );
 
+    if (Option.isSome(machine.gateway))
+      yield* verifyGateway(commands, worker, machine, machine.gateway.value);
     yield* verifyHarnessReadiness(worker, brains, harnessProbe(machine));
     yield* Effect.logInfo("SSH Worker preflight verified", {
       worker,

@@ -74,6 +74,9 @@ Every Worker in one `usine.yaml` must have the same kind. Each Attempt clones fr
 one-hour token the factory's GitHub App mints for the Attempt's repository; the token is written to
 `<root>/workers/<name>/credentials/<attempt>` on the machine and removed when the Attempt ends.
 
+A Worker on a private network behind the gateway of `gateway/` takes a `gateway` setting instead,
+and no token is written on its machine: see [`gateway/README.md`](gateway/README.md).
+
 ## Remove a Worker
 
 Remove it from `usine.yaml` first, then delete the server and its firewall:

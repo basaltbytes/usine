@@ -43,7 +43,8 @@
   "dependencies": {
     "@usine/agents": "workspace:*",
     "@usine/core": "workspace:*",
-    "@usine/durable": "workspace:*"
+    "@usine/durable": "workspace:*",
+    "@usine/gateway": "workspace:*"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

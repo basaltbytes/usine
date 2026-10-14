@@ -21,12 +21,17 @@ export const ExecutorOperation = Schema.Literals([
 ]);
 export type ExecutorOperation = typeof ExecutorOperation.Type;
 
-/** A prerequisite a Worker must satisfy before it can accept Attempts. */
+/**
+ * A prerequisite a Worker must satisfy before it can accept Attempts.
+ * `gateway` is the Gateway in front of the Worker's machine: its admin API
+ * answers the orchestrator, and the machine reaches it.
+ */
 export const WorkerCapability = Schema.Literals([
   "machine",
   "toolchain",
   "harness-login",
   "credentials",
+  "gateway",
 ]);
 export type WorkerCapability = typeof WorkerCapability.Type;
 

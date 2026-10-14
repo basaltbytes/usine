@@ -4,7 +4,7 @@ import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Cause, Deferred, Effect, Exit, Fiber, Logger } from "effect";
+import { Cause, Deferred, Effect, Exit, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../src/remote/commands.ts";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
@@ -17,24 +17,16 @@ import {
   WORKER,
   WORKER_ROOT,
   WORKTREE,
+  capturedLogs,
   fails,
   fakeMachine,
   mintingProvider,
   request,
   runtime,
+  writesCredential,
 } from "./support.ts";
 
 const allowlisted = new Set<string>(SSH_ENVIRONMENT_ALLOWLIST);
-const writesCredential = (line: string) => line.includes("IFS= read -r token");
-
-/** Collects every log message and its fields as text. */
-const capturedLogs = () => {
-  const lines: Array<string> = [];
-  const logger = Logger.make<unknown, void>(({ message }) => {
-    lines.push(JSON.stringify(message));
-  });
-  return { lines, layer: Logger.layer([logger]) };
-};
 
 describe("SSH Worker", () => {
   it.effect(
