@@ -28,6 +28,9 @@
       "ignoreIssues": {
         "src/route-tree.gen.ts": ["types"]
       }
+    },
+    "packages/gateway": {
+      "ignoreDependencies": ["@effect/platform-node-shared"]
     }
   }
 }

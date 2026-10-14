@@ -19,6 +19,7 @@ catalog:
   "@changesets/cli": 3.0.1
   "@effect/language-service": 0.87.2
   "@effect/platform-node": 4.0.0-rc.111
+  "@effect/platform-node-shared": 4.0.0-rc.111
   "@effect/sql-sqlite-node": 4.0.0-rc.111
   "@oxlint/plugins": 1.79.0
   "@effect/vitest": 4.0.0-rc.111

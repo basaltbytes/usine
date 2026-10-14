@@ -1,0 +1,82 @@
+#cloud-config
+# Puts a Worker VM without public addresses behind the gateway: the gateway
+# as resolver and package proxy, gh's HTTP socket forwarded to the gateway,
+# and nftables that allow only the gateway. A Worker's own provisioning
+# (harnesses, logins, users) is separate; merge this into it. `gateway.sh
+# worker-user-data` replaces the @@NAME@@ placeholders.
+
+bootcmd:
+  # The private network's DHCP offers no resolver, and nothing else may answer.
+  - [sh, -c, 'rm -f /etc/resolv.conf && printf "nameserver @@GATEWAY_IP@@\n" > /etc/resolv.conf']
+
+apt:
+  http_proxy: http://@@GATEWAY_IP@@:3128
+  https_proxy: http://@@GATEWAY_IP@@:3128
+
+package_update: true
+packages:
+  - curl
+  - gh
+  - git
+  - nftables
+
+write_files:
+  - path: /etc/nftables.conf
+    permissions: "0644"
+    encoding: b64
+    content: "@@WORKER_NFTABLES_B64@@"
+
+  - path: /etc/environment
+    append: true
+    content: |
+      GH_HOST=git.@@DOMAIN@@
+      HTTPS_PROXY=http://@@GATEWAY_IP@@:3128
+      HTTP_PROXY=http://@@GATEWAY_IP@@:3128
+      https_proxy=http://@@GATEWAY_IP@@:3128
+      http_proxy=http://@@GATEWAY_IP@@:3128
+      NO_PROXY=@@DOMAIN@@
+      no_proxy=@@DOMAIN@@
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
+  # gh speaks HTTPS to GH_HOST; through this socket it speaks plain HTTP to the gateway instead, so no certificate is needed.
+  - path: /etc/systemd/system/usine-gateway-http.socket
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Socket for gh to reach the usine gateway
+
+      [Socket]
+      ListenStream=/run/usine-gateway/http.sock
+      SocketMode=0666
+      DirectoryMode=0755
+
+      [Install]
+      WantedBy=sockets.target
+
+  - path: /etc/systemd/system/usine-gateway-http.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Forwards gh's socket to the usine gateway
+      Requires=usine-gateway-http.socket
+      After=usine-gateway-http.socket
+
+      [Service]
+      ExecStart=/usr/lib/systemd/systemd-socket-proxyd @@GATEWAY_IP@@:80
+      DynamicUser=yes
+      PrivateTmp=yes
+
+  - path: /etc/skel/.config/gh/config.yml
+    permissions: "0644"
+    content: |
+      http_unix_socket: /run/usine-gateway/http.sock
+
+  - path: /root/.config/gh/config.yml
+    permissions: "0644"
+    content: |
+      http_unix_socket: /run/usine-gateway/http.sock
+
+runcmd:
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, usine-gateway-http.socket]
+  - [systemctl, enable, --now, nftables]

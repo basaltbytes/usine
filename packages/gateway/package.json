@@ -1,0 +1,61 @@
+{
+  "name": "@usine/gateway",
+  "version": "0.0.0",
+  "description": "The usine gateway: a credential-injecting proxy for GitHub and LLM providers, and an egress allowlist, in front of Worker VMs.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/basaltbytes/usine.git",
+    "directory": "packages/gateway"
+  },
+  "bin": {
+    "usine-gateway": "./dist/node/main.js"
+  },
+  "files": [
+    "dist",
+    "!dist/tsconfig.tsbuildinfo"
+  ],
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/gateway.d.ts",
+      "default": "./dist/gateway.js"
+    },
+    "./admin": {
+      "types": "./dist/admin/api.d.ts",
+      "default": "./dist/admin/api.js"
+    },
+    "./node": {
+      "types": "./dist/node/node.d.ts",
+      "default": "./dist/node/node.js"
+    }
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "check": "tsc -p tsconfig.check.json",
+    "test": "vitest run --exclude 'test/placeholder-swap/**'",
+    "test:placeholder-swap": "vitest run test/placeholder-swap"
+  },
+  "dependencies": {
+    "@effect/platform-node": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
+    "@usine/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@effect/vitest": "catalog:",
+    "@usine/tsconfig": "workspace:*",
+    "effect": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  },
+  "peerDependencies": {
+    "effect": "catalog:"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

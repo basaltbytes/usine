@@ -1,0 +1,146 @@
+#cloud-config
+# The usine gateway VM: SSH bastion, DNS resolver for Workers, the gateway
+# service (credential-injecting reverse proxy, forward proxy, admin API), and
+# nftables. gateway.sh replaces the @@NAME@@ placeholders before the VM is
+# created. No secret is in this file: the VM generates its own admin token and
+# caller key, and API keys are copied in over SSH.
+
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - dnsmasq
+  - nftables
+  - openssl
+  - xz-utils
+
+write_files:
+  - path: /etc/nftables.conf
+    permissions: "0644"
+    encoding: b64
+    content: "@@GATEWAY_NFTABLES_B64@@"
+
+  - path: /etc/usine-gateway/egress-allowlist
+    permissions: "0644"
+    encoding: b64
+    content: "@@EGRESS_ALLOWLIST_B64@@"
+
+  - path: /etc/usine-gateway/settings.env
+    permissions: "0644"
+    content: |
+      USINE_GATEWAY_DOMAIN=@@DOMAIN@@
+      USINE_GATEWAY_PROXY_HOST=@@GATEWAY_IP@@
+      USINE_GATEWAY_PROXY_PORT=80
+      USINE_GATEWAY_EGRESS_HOST=@@GATEWAY_IP@@
+      USINE_GATEWAY_EGRESS_PORT=3128
+      USINE_GATEWAY_ADMIN_HOST=127.0.0.1
+      USINE_GATEWAY_ADMIN_PORT=7070
+      USINE_GATEWAY_EGRESS_ALLOWLIST=/etc/usine-gateway/egress-allowlist
+
+  # Workers resolve the gateway's names here and nothing else: with no upstream server, every other name is refused, and each query is in the journal.
+  - path: /etc/dnsmasq.d/usine-gateway.conf
+    permissions: "0644"
+    content: |
+      bind-dynamic
+      listen-address=@@GATEWAY_IP@@
+      no-resolv
+      no-hosts
+      log-queries
+      address=/@@DOMAIN@@/@@GATEWAY_IP@@
+
+  # Written before the package is installed, so dnsmasq never becomes the gateway's own resolver through resolvconf.
+  - path: /etc/default/dnsmasq
+    permissions: "0644"
+    content: |
+      DNSMASQ_EXCEPT="lo"
+      CONFIG_DIR=/etc/dnsmasq.d,.dpkg-dist,.dpkg-old,.dpkg-new
+
+  - path: /etc/ssh/sshd_config.d/50-usine-gateway.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+      AllowTcpForwarding local
+      AllowAgentForwarding no
+      AllowStreamLocalForwarding no
+      GatewayPorts no
+      PermitTunnel no
+      X11Forwarding no
+
+  - path: /etc/sysctl.d/90-usine-gateway.conf
+    permissions: "0644"
+    content: |
+      net.ipv4.ip_forward = 0
+      net.ipv6.conf.all.forwarding = 0
+
+  - path: /etc/systemd/system/usine-gateway.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=usine gateway
+      Wants=network-online.target
+      After=network-online.target
+
+      [Service]
+      User=usine-gateway
+      Group=usine-gateway
+      EnvironmentFile=/etc/usine-gateway/settings.env
+      EnvironmentFile=/etc/usine-gateway/secrets.env
+      ExecStart=/usr/local/bin/usine-gateway
+      AmbientCapabilities=CAP_NET_BIND_SERVICE
+      CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+      NoNewPrivileges=yes
+      ProtectSystem=strict
+      ProtectHome=yes
+      PrivateTmp=yes
+      Restart=always
+      RestartSec=2
+
+      [Install]
+      WantedBy=multi-user.target
+
+  - path: /usr/local/sbin/usine-gateway-install
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Installs or upgrades the gateway from an npm package spec or a packed tarball, then restarts it.
+      set -eu
+      npm install --global --omit=dev "$1"
+      systemctl restart usine-gateway
+
+  # One script with set -e, so a failed step marks cloud-init as failed instead of being skipped over.
+  - path: /usr/local/sbin/usine-gateway-setup
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      set -eu
+      id usine-gateway > /dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin usine-gateway
+      umask 077
+      if [ ! -f /etc/usine-gateway/secrets.env ]; then
+        printf 'USINE_GATEWAY_ADMIN_TOKEN=%s\nUSINE_GATEWAY_CALLER_KEY=%s\n' \
+          "$(openssl rand -hex 32)" "$(openssl rand -hex 32)" > /etc/usine-gateway/secrets.env
+      fi
+      umask 022
+      sysctl --system > /dev/null
+      systemctl enable --now nftables
+      systemctl restart dnsmasq
+      if [ -e /run/resolvconf/interface/lo.dnsmasq ]; then resolvconf -d lo.dnsmasq; fi
+      systemctl reload ssh
+      version=v22.23.2
+      case "$(uname -m)" in
+        x86_64) arch=x64 sum=d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307 ;;
+        aarch64) arch=arm64 sum=fff4078c5def658577f92c88db7db3bc0072924bfb93fe52c1e744a54e94abb8 ;;
+        *) echo "unsupported architecture $(uname -m)" >&2; exit 1 ;;
+      esac
+      archive=$(mktemp)
+      curl -fsSL -o "$archive" "https://nodejs.org/dist/$version/node-$version-linux-$arch.tar.xz"
+      echo "$sum  $archive" | sha256sum -c -
+      tar -xJf "$archive" -C /usr/local --strip-components=1 --exclude=CHANGELOG.md --exclude=README.md --exclude=LICENSE
+      rm -f "$archive"
+      systemctl daemon-reload
+      systemctl enable usine-gateway
+      if [ "$1" != none ]; then /usr/local/sbin/usine-gateway-install "$1"; fi
+
+runcmd:
+  - [/usr/local/sbin/usine-gateway-setup, "@@GATEWAY_PACKAGE@@"]
