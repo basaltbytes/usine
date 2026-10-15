@@ -71,15 +71,14 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
 
     // The checks export nothing on the machine: a child's harness login lives
     // there, or at the Gateway in front of it.
-    const harnessProbe =
-      options.harnessReadiness ??
-      ((machine: SshMachine) => {
-        const probe = agentsHarnessProbe(spawner, machine.shell, {});
-        return Option.match(machine.gateway, {
-          onNone: () => probe,
-          onSome: (gateway) => gatewayHarnessProbe(commands, machine, gateway, probe),
-        });
+    const harnessProbe = (machine: SshMachine) => {
+      const probe =
+        options.harnessReadiness?.(machine) ?? agentsHarnessProbe(spawner, machine.shell, {});
+      return Option.match(machine.gateway, {
+        onNone: () => probe,
+        onSome: (gateway) => gatewayHarnessProbe(commands, machine, gateway, probe),
       });
+    };
     const credentials = yield* sshCredentialsFor(commands, machineFor);
     const attachments = yield* gatewayAttachmentsFor(commands, machineFor);
 

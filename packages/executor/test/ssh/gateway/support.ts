@@ -20,7 +20,7 @@ import {
   HttpServerResponse,
 } from "effect/unstable/http";
 import type { StubParent, StubStorage } from "@usine/durable/testing";
-import type { SshWorkerAddress } from "../../../src/ssh/ssh.ts";
+import type { SshExecutorOptions, SshWorkerAddress } from "../../../src/ssh/ssh.ts";
 import { ADDRESS, executorLayer, type fakeMachine, type mintingProvider } from "../support.ts";
 
 const DOMAIN = GatewayDomain.make("gw.test");
@@ -140,6 +140,8 @@ export const gatewayRuntime = (
     readonly address?: SshWorkerAddress;
     readonly parent?: StubParent;
     readonly storage?: StubStorage;
+    /** Replaces the executor's own login and binary checks; the Gateway's checks still run. */
+    readonly probes?: Pick<SshExecutorOptions, "harnessReadiness">;
   } = {},
 ) =>
   executorLayer(
@@ -148,6 +150,7 @@ export const gatewayRuntime = (
     options.address ?? gatewayAddress(),
     options.parent,
     options.storage,
+    options.probes,
   ).pipe(Layer.provideMerge(gateway.layer));
 
 /**

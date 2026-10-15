@@ -1,3 +1,4 @@
+import type { BrainSpec, Harness } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { WorkerName } from "@usine/core/worker";
 import { Effect, Redacted } from "effect";
@@ -6,7 +7,7 @@ import { ExecutorOperationError, WorkerCapabilityError } from "../../executor.ts
 import type { HarnessProbe } from "../../harness-preflight.ts";
 import { type RemoteCommands, sendingShell } from "../../remote/commands.ts";
 import type { MachineGateway, SshMachine } from "../model.ts";
-import { GATEWAY_SENT_VARIABLES, gatewayEnvironment } from "./environment.ts";
+import { forwardProxyUrl, GATEWAY_SENT_VARIABLES, gatewayEnvironment } from "./environment.ts";
 
 /** A stand-in caller token, so preflight can check what reaches the machine without attaching anything. */
 const PROBE_TOKEN = Redacted.make("usine-preflight");
@@ -116,11 +117,47 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
 });
 
 /**
- * Checks a brain on a Worker behind a Gateway, where a harness reaches its
- * provider only through the Gateway (ADR 0027). Claude Code needs the
- * Gateway's Anthropic credential, and then only its binary is checked, since
- * its login is the Gateway's. Codex has no route yet (#244). Pi goes to
- * `probe`, which refuses it on any remote machine.
+ * The harnesses that can use the operator's login on the Worker's machine,
+ * and the hosts that login calls through the Gateway's forward proxy: the
+ * model API, and the OAuth endpoint that the login and its token refreshes
+ * call. `infra/hetzner/gateway/egress-allowlist` lists them.
+ */
+const LOGINS = {
+  claude: { label: "Claude Code", hosts: ["api.anthropic.com", "platform.claude.com"] },
+  codex: { label: "Codex", hosts: ["chatgpt.com", "auth.openai.com"] },
+} as const satisfies Partial<
+  Record<Harness, { readonly label: string; readonly hosts: ReadonlyArray<string> }>
+>;
+
+type LoginHarness = keyof typeof LOGINS;
+
+/**
+ * Takes the forward proxy's URL and host names, and prints one line per
+ * host: the host, curl's exit code, the proxy's answer to CONNECT, and the
+ * host's HTTP status, which is 000 when the host did not answer.
+ */
+const LOGIN_HOSTS_SCRIPT = `
+proxy=$1
+shift
+for host in "$@"; do
+  codes=$(curl -s -o /dev/null --max-time 10 --proxy "$proxy" -w '%{http_connect} %{http_code}' "https://$host/")
+  echo "$host $? $codes"
+done
+`.trim();
+
+const LOGIN_HOST_ANSWER = /^(\S+) (\d+) (\d{3}) (\d{3})$/u;
+
+/** The status the forward proxy answers a CONNECT with when its allowlist does not list the host. */
+const PROXY_REFUSED = "403";
+
+/**
+ * Checks a brain on a Worker behind a Gateway (ADR 0027). When the Gateway
+ * holds the Anthropic credential, Claude Code calls it at `llm.<domain>`
+ * and only its binary is checked. Otherwise Claude Code, and Codex always,
+ * use the operator's login on the machine, as on a Worker without a Gateway
+ * (ADR 0026): `probe` checks the login, then the machine must reach the
+ * login's hosts through the forward proxy. Pi goes to `probe`, which refuses
+ * it on any remote machine.
  */
 export const gatewayHarnessProbe = (
   commands: RemoteCommands,
@@ -128,9 +165,13 @@ export const gatewayHarnessProbe = (
   gateway: MachineGateway,
   probe: HarnessProbe,
 ): HarnessProbe => {
+  const worker = machine.address.name;
+  const host = machine.shell.destination;
+  const { domain } = gateway.settings;
+  const proxy = forwardProxyUrl(domain);
+
   const claudeBinary = Effect.fn("SshExecutor.probeClaudeBehindGateway")(function* () {
-    const host = machine.shell.destination;
-    yield* Effect.annotateCurrentSpan({ host, domain: gateway.settings.domain });
+    yield* Effect.annotateCurrentSpan({ host, domain });
     const result = yield* commands.inspect("preflight", machine.shell, "claude", ["--version"]);
     if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, "claude", result);
     if (result.exitCode !== 0)
@@ -145,28 +186,71 @@ export const gatewayHarnessProbe = (
     );
     return new HarnessReady({ harness: "claude" });
   });
+
+  const loginHostsReachable = Effect.fn("SshExecutor.probeLoginHostsBehindGateway")(function* (
+    harness: LoginHarness,
+  ) {
+    const { label, hosts } = LOGINS[harness];
+    yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
+    const result = yield* commands.inspect("preflight", machine.shell, "sh", [
+      "-c",
+      LOGIN_HOSTS_SCRIPT,
+      "sh",
+      proxy,
+      ...hosts,
+    ]);
+    if (result.exitCode === SSH_FAILURE) return yield* unreachable(host, "curl", result);
+    const answers = new Map(
+      result.stdout.split("\n").flatMap((line) => {
+        const match = LOGIN_HOST_ANSWER.exec(line.trim());
+        return match === null
+          ? []
+          : [[match[1], { exitCode: match[2], connect: match[3], status: match[4] }] as const];
+      }),
+    );
+    for (const loginHost of hosts) {
+      const answer = answers.get(loginHost);
+      if (answer !== undefined && answer.status !== "000") continue;
+      const cause = new Error(
+        answer === undefined
+          ? `no answer for ${loginHost}: ${result.stderr.trim() || `sh exited with code ${String(result.exitCode)}`}`
+          : `curl exited with code ${answer.exitCode}; the proxy answered CONNECT with ${answer.connect}`,
+      );
+      return yield* gatewayGap(
+        worker,
+        answer?.connect === PROXY_REFUSED
+          ? `${label} uses its login on SSH Worker ${worker}, and the Gateway's forward proxy refuses ${loginHost}; add ${loginHost} to the Gateway's egress allowlist`
+          : `${label} uses its login on SSH Worker ${worker}, which cannot reach ${loginHost} through the Gateway's forward proxy at ${proxy}`,
+        cause,
+      );
+    }
+    yield* Effect.logInfo("SSH Worker reaches its harness login's hosts through the Gateway", {
+      worker,
+      harness,
+      domain,
+      hosts: hosts.join(","),
+    });
+  });
+
+  const loginOnMachine = Effect.fn("SshExecutor.probeLoginBehindGateway")(function* (
+    brain: BrainSpec,
+    harness: LoginHarness,
+  ) {
+    yield* Effect.annotateCurrentSpan({ worker, host, domain, harness });
+    const readiness = yield* probe(brain);
+    if (readiness._tag === "HarnessUnavailableError") return readiness;
+    yield* loginHostsReachable(harness);
+    return readiness;
+  });
+
   return (brain) => {
     switch (brain.harness) {
       case "claude":
         return gateway.settings.llmProviders.includes("anthropic")
           ? claudeBinary()
-          : Effect.succeed(
-              new HarnessUnavailableError({
-                harness: "claude",
-                capability: "login",
-                message:
-                  "Claude Code has no route to Anthropic from behind a Gateway that does not hold the Anthropic credential; list anthropic under the Worker's gateway llm_providers",
-              }),
-            );
+          : loginOnMachine(brain, "claude");
       case "codex":
-        return Effect.succeed(
-          new HarnessUnavailableError({
-            harness: "codex",
-            capability: "login",
-            message:
-              "Codex children have no route to OpenAI from behind a Gateway yet (https://github.com/basaltbytes/usine/issues/244)",
-          }),
-        );
+        return loginOnMachine(brain, "codex");
       case "pi":
         return probe(brain);
     }

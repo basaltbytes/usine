@@ -106,9 +106,9 @@ const isHttpUrlWithoutCredentials = Schema.makeFilter<URL>(
  * the SSH connection to the Gateway. The admin token is read at startup from
  * the orchestrator's environment variable `adminTokenEnv`, so it is never in
  * the file. `llmProviders` names the providers whose credential the Gateway
- * holds. A harness whose provider is not listed has no route to it from
- * behind the Gateway, so preflight refuses its brain on the Worker: Claude
- * Code without `anthropic`, and Codex on any Worker behind a Gateway (#244).
+ * holds. A harness whose provider is not listed uses the operator's login on
+ * the Worker and reaches the provider through the Gateway's forward proxy;
+ * Codex always does.
  */
 export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/WorkerGateway")({
   domain: GatewayDomain,

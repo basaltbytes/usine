@@ -5,7 +5,8 @@ Hetzner Cloud in Falkenstein (`fsn1`), Nuremberg (`nbg1`), or Helsinki (`hel1`):
 
 - `cloud-init.yaml` builds the machine on Debian 13: the `usine` user, Git, gh, Node.js 24, pnpm,
   Claude Code, and Codex, with SSH open to the `usine` user by key only. Codex is pinned to a
-  version usine supports.
+  version usine supports. The same file builds a Worker behind the gateway of `gateway/`, where
+  `gateway/gateway.sh worker-user-data` adds the gateway's Worker settings to it.
 - `create-worker.sh` creates the server with that file, labels it `usine=worker`, and attaches a
   Hetzner firewall that admits SSH from the orchestrator's address only.
 

@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
@@ -448,12 +449,71 @@ describe("SSH Worker behind a Gateway", () => {
         const lines = machine.state.calls.map(({ line }) => line);
         assert.include(lines, "exec 'claude' '--version'");
         assert(!lines.some((line) => line.includes("'auth' 'status'")));
+        assert(!lines.some((line) => line.includes("http_connect")), "no provider host is checked");
       }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway)));
     },
   );
 
   it.effect(
-    "refuses Claude Code without the Gateway's Anthropic credential, and Codex behind any Gateway",
+    "checks Claude Code's login on the machine, then its hosts through the forward proxy, when the Gateway holds no Anthropic credential",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine);
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        const lines = machine.state.calls.map(({ line }) => line);
+        assert.include(lines, "exec 'claude' 'auth' 'status' '--json'");
+        const hostCheck = lines.find((line) => line.includes("http_connect"));
+        assert(
+          hostCheck?.endsWith(
+            "'sh' 'http://gw.test:3128' 'api.anthropic.com' 'platform.claude.com'",
+          ),
+          "the login's hosts are checked through the proxy the children use",
+        );
+
+        machine.state.refusedHosts.add("platform.claude.com");
+        const refused = yield* executor.preflight(WORKER, [TEST_AGENT.brain]).pipe(Effect.flip);
+        assert(refused._tag === "WorkerCapabilityError");
+        assert.strictEqual(refused.capability, "gateway");
+        assert.strictEqual(
+          refused.message,
+          "Claude Code uses its login on SSH Worker eu-one, and the Gateway's forward proxy refuses platform.claude.com; add platform.claude.com to the Gateway's egress allowlist",
+        );
+        machine.state.refusedHosts.clear();
+
+        machine.state.forwardProxyReachable = false;
+        const unreachable = yield* executor.preflight(WORKER, [TEST_AGENT.brain]).pipe(Effect.flip);
+        assert(unreachable._tag === "WorkerCapabilityError");
+        assert.strictEqual(unreachable.capability, "gateway");
+        assert.strictEqual(
+          unreachable.message,
+          "Claude Code uses its login on SSH Worker eu-one, which cannot reach api.anthropic.com through the Gateway's forward proxy at http://gw.test:3128",
+        );
+        machine.state.forwardProxyReachable = true;
+
+        machine.state.claudeLoggedIn = false;
+        const checked = machine.state.calls.length;
+        const loggedOut = yield* executor.preflight(WORKER, [TEST_AGENT.brain]).pipe(Effect.flip);
+        assert(loggedOut._tag === "WorkerCapabilityError");
+        assert.strictEqual(loggedOut.capability, "harness-login");
+        assert.include(loggedOut.message, "run claude auth login on the Worker");
+        assert(
+          !machine.state.calls.slice(checked).some(({ line }) => line.includes("http_connect")),
+          "a missing login is reported before any host is checked",
+        );
+      }).pipe(
+        Effect.provide(
+          gatewayRuntime(machine, mintingProvider(), gateway, {
+            address: gatewayAddress({ llmProviders: [] }),
+          }),
+        ),
+      );
+    },
+  );
+
+  it.effect(
+    "checks Codex's login on the machine, then the ChatGPT hosts through the forward proxy",
     () => {
       const machine = fakeMachine();
       const gateway = fakeGateway(machine);
@@ -462,21 +522,45 @@ describe("SSH Worker behind a Gateway", () => {
         model: ModelId.make("gpt-5.6-sol"),
         effort: "low",
       });
+      // The fake machine cannot run Codex's app server, so the login check is scripted.
+      const login = { present: true, probes: 0 };
+      const harnessReadiness = () => (brain: BrainSpec) =>
+        Effect.sync(() => {
+          login.probes += 1;
+          return login.present
+            ? new HarnessReady({ harness: brain.harness })
+            : new HarnessUnavailableError({
+                harness: brain.harness,
+                capability: "login",
+                message: "Codex children require a ChatGPT login; run codex login on the Worker",
+              });
+        });
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        const claude = yield* executor.preflight(WORKER, [TEST_AGENT.brain]).pipe(Effect.flip);
-        assert(claude._tag === "WorkerCapabilityError");
-        assert.strictEqual(claude.capability, "harness-login");
-        assert.include(claude.message, "llm_providers");
+        yield* executor.preflight(WORKER, [codex]);
+        assert.strictEqual(login.probes, 1, "the login on the machine is checked");
+        const hostCheck = machine.state.calls
+          .map(({ line }) => line)
+          .find((line) => line.includes("http_connect"));
+        assert(hostCheck?.endsWith("'sh' 'http://gw.test:3128' 'chatgpt.com' 'auth.openai.com'"));
+
+        machine.state.refusedHosts.add("chatgpt.com");
         const refused = yield* executor.preflight(WORKER, [codex]).pipe(Effect.flip);
         assert(refused._tag === "WorkerCapabilityError");
-        assert.strictEqual(refused.capability, "harness-login");
-        assert.include(refused.message, "issues/244");
+        assert.strictEqual(refused.capability, "gateway");
+        assert.strictEqual(
+          refused.message,
+          "Codex uses its login on SSH Worker eu-one, and the Gateway's forward proxy refuses chatgpt.com; add chatgpt.com to the Gateway's egress allowlist",
+        );
+
+        login.present = false;
+        const loggedOut = yield* executor.preflight(WORKER, [codex]).pipe(Effect.flip);
+        assert(loggedOut._tag === "WorkerCapabilityError");
+        assert.strictEqual(loggedOut.capability, "harness-login");
+        assert.include(loggedOut.message, "run codex login on the Worker");
       }).pipe(
         Effect.provide(
-          gatewayRuntime(machine, mintingProvider(), gateway, {
-            address: gatewayAddress({ llmProviders: [] }),
-          }),
+          gatewayRuntime(machine, mintingProvider(), gateway, { probes: { harnessReadiness } }),
         ),
       );
     },

@@ -25,6 +25,10 @@ export const GATEWAY_SENT_VARIABLES = [
   "ANTHROPIC_AUTH_TOKEN",
 ] as const;
 
+/** The Gateway's forward proxy as a Worker behind the Gateway at `domain` reaches it; an Attempt's children get it as `HTTPS_PROXY`. */
+export const forwardProxyUrl = (domain: GatewayDomain): string =>
+  `http://${domain}:${FORWARD_PROXY_PORT}`;
+
 /** Where a Worker behind the Gateway at `domain` clones and fetches `repository`. */
 export const gatewayRepositoryUrl = (domain: GatewayDomain, repository: RepositoryName): string =>
   `http://git.${domain}/${repository}.git`;
@@ -76,15 +80,15 @@ export interface GatewayEnvironment {
  * - Package managers use the forward proxy at `<domain>:3128`; local
  *   addresses and the Gateway's own names go direct.
  * - Claude Code calls `llm.<domain>/anthropic` with the caller token when
- *   the Gateway holds the Anthropic credential. Without it, and for Codex
- *   (#244), nothing is set here: preflight refuses the brain, since the
- *   harness would have no route to its provider from behind the Gateway
- *   (`gatewayHarnessProbe`).
+ *   the Gateway holds the Anthropic credential. Otherwise, and for Codex,
+ *   nothing is set here: the harness uses its login on the machine and
+ *   reaches its provider through the forward proxy, whose allowlist must
+ *   list the login's hosts (`gatewayHarnessProbe` checks that it does).
  */
 export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayEnvironment => {
   const { domain, callerToken } = options;
   const gitBase = `http://git.${domain}/`;
-  const proxy = `http://${domain}:${FORWARD_PROXY_PORT}`;
+  const proxy = forwardProxyUrl(domain);
   const direct = `localhost,127.0.0.1,::1,${domain}`;
   const exported = {
     GIT_CONFIG_COUNT: "3",

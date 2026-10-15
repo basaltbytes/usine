@@ -7,8 +7,8 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 | `gateway.sh` | Creates and deletes the network, the gateway VM, and its firewall with `hcloud`; installs a packed build; renders a Worker's cloud-init. |
 | `gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, sshd settings for a bastion, Node.js, and the `usine-gateway` service. |
 | `gateway-nftables.conf` | The gateway's firewall rules. |
-| `egress-allowlist` | The hosts Workers may reach through the forward proxy. |
-| `worker-cloud-init.yaml` | What a Worker VM needs to work behind the gateway; merge it into the Worker's own cloud-init. |
+| `egress-allowlist` | The hosts Workers may reach through the forward proxy: package hosts and the harness logins' hosts. |
+| `worker-cloud-init.yaml` | What a Worker VM needs to work behind the gateway; `gateway.sh worker-user-data` sends it after the Worker file of `../cloud-init.yaml`. |
 | `worker-nftables.conf` | A Worker's firewall rules: the gateway only. |
 
 ## Traffic paths
@@ -21,27 +21,42 @@ A Worker resolves names with the gateway's dnsmasq, which answers `git.<domain>`
 
 git and gh on a Worker talk to `git.<domain>` over plain HTTP on the private network. The gateway checks the caller token, replaces it with the attached installation token, and sends the request to github.com, api.github.com, or uploads.github.com over HTTPS. gh reaches the gateway through `/run/usine-gateway/http.sock`, which systemd forwards to the gateway's port 80, because gh speaks only HTTPS to a custom `GH_HOST` and over a Unix socket it speaks plain HTTP. No certificate is needed on either side.
 
-Claude Code and Codex talk to `llm.<domain>` over plain HTTP. The gateway checks the caller token, replaces it with its own API key, and sends the request to the provider over HTTPS. Responses stream back unchanged.
+Claude Code and Codex use the operator's logins on the Worker, a Claude subscription and a ChatGPT plan, as on a Worker without a gateway, and reach their providers through the forward proxy below. When the gateway holds a provider's credential instead (`llm_providers` in `usine.yaml`), Claude Code talks to `llm.<domain>` over plain HTTP: the gateway checks the caller token, replaces it with its own API key, and sends the request to the provider over HTTPS. Responses stream back unchanged.
 
-Package managers use the forward proxy at `<gateway>:3128` through `HTTPS_PROXY` and `HTTP_PROXY`, and apt through its own proxy setting. The proxy opens a tunnel only to a host on `egress-allowlist`, only on port 443, only when the client's TLS ClientHello names that same host, and only when the name resolves to a public address. Every other request is refused and logged. Checking the ClientHello keeps one allowed name on a shared CDN address from carrying a connection to another tenant of that address. Before listing a host on a CDN, look at the names its certificate covers and how its CDN routes requests: an HTTP/2 client may reuse an allowed connection for another name on the same certificate ([#240](https://github.com/basaltbytes/usine/issues/240)). A plain HTTP request loses its caller token before it leaves; a `CONNECT` tunnel is opaque, so the proxy cannot remove anything from what goes through it.
+Package managers and the harness logins use the forward proxy at `<gateway>:3128` through `HTTPS_PROXY` and `HTTP_PROXY`, and apt through its own proxy setting. The proxy opens a tunnel only to a host on `egress-allowlist`, only on port 443, only when the client's TLS ClientHello names that same host, and only when the name resolves to a public address. Every other request is refused and logged. Checking the ClientHello keeps one allowed name on a shared CDN address from carrying a connection to another tenant of that address. Before listing a host on a CDN, look at the names its certificate covers and how its CDN routes requests: an HTTP/2 client may reuse an allowed connection for another name on the same certificate ([#240](https://github.com/basaltbytes/usine/issues/240)). A plain HTTP request loses its caller token before it leaves; a `CONNECT` tunnel is opaque, so the proxy cannot remove anything from what goes through it.
 
-Never allowlist github.com or an LLM provider's host such as api.anthropic.com or api.openai.com. A Worker reaches them through `git.<domain>` and `llm.<domain>`, where the gateway decides what it may reach and replaces the caller token; a tunnel to github.com would let a Worker push with any credential it was handed, and Claude Code opens connections to api.anthropic.com outside `ANTHROPIC_BASE_URL`, which would carry whatever credential it has.
+Never allowlist github.com, and never a provider whose credential the gateway holds. A Worker reaches them through `git.<domain>` and `llm.<domain>`, where the gateway decides what it may reach and replaces the caller token; a tunnel to github.com would let a Worker push with any credential it was handed, and Claude Code opens connections to api.anthropic.com outside `ANTHROPIC_BASE_URL`, which would carry the caller token. So when the gateway holds the Anthropic credential, remove the Claude Code hosts from `egress-allowlist`.
 
 The gateway itself reaches the internet directly over its public interface. It forwards no packets for Workers.
 
+### The harness logins' hosts
+
+`egress-allowlist` lists these hosts in its harness logins section. They were found on a Debian 13 Worker behind the gateway with Claude Code 2.1.296 and Codex 0.153.4, in the gateway's journal, while each login command ran up to its code and while each harness sent a prompt with a made-up login; no other host was asked for. No login was completed, so the calls that follow a successful login are known from the URLs in Claude Code's binary: they go to `api.anthropic.com`.
+
+| Harness and login | Host | What calls it |
+| --- | --- | --- |
+| Claude Code, `claude auth login` | `api.anthropic.com` | Model requests, and the account's profile and roles after the login. |
+| | `platform.claude.com` | The OAuth token exchange when the login's code is pasted, and every token refresh. |
+| Codex, `codex login --device-auth` | `chatgpt.com` | Model requests: the Responses API over a WebSocket at `wss://chatgpt.com/backend-api/codex/responses`, which the proxy tunnels like any HTTPS connection. |
+| | `auth.openai.com` | The device code, the token exchange once the code is entered, and every token refresh. |
+
+The URL each login prints opens in the operator's browser, not on the Worker: `claude.com/cai/oauth/authorize` and `auth.openai.com/codex/device`. Preflight checks that the Worker reaches each host through the forward proxy (see below).
+
+About [#240](https://github.com/basaltbytes/usine/issues/240): all four hosts are behind Cloudflare. The certificate of `api.anthropic.com` and of `platform.claude.com` covers that name only; `chatgpt.com` also covers `amb-staging.chatgpt.com` and its subdomains, and `auth.openai.com` covers `*.auth.openai.com`, so a client that reuses an HTTP/2 connection for another name on the certificate reaches only the same provider. Through a tunnel to each host, a request with the `Host` header of another site (`claude.ai`, `claude.com`, `www.cloudflare.com`, `api.openai.com`) got `403 Forbidden` from Cloudflare (checked on 2026-10-15). Claude Code opens one tunnel to `api.anthropic.com` per prompt and closes it before its ClientHello; the gateway logs that as a `not-tls` refusal ([#255](https://github.com/basaltbytes/usine/issues/255)).
+
 ## Create a gateway
 
-You need `hcloud` with an active context, an SSH key in the project, and the address the orchestrator connects from.
+You need `hcloud` with an active context, an SSH key in the project, and the address the orchestrator connects from. `SSH_KEY` takes several key names or ids separated by commas.
 
 ```sh
 ORCHESTRATOR_CIDR=203.0.113.7/32 SSH_KEY=my-key ./gateway.sh create
 ssh root@<gateway> cloud-init status --wait
 ```
 
-`create` installs `@usine/gateway` from npm. For a build that is not published, set `GATEWAY_PACKAGE=none` and install a tarball made with `pnpm --filter @usine/gateway pack`:
+`create` installs `@usine/gateway` from npm into `/opt/usine-gateway`. For a build that is not published, set `GATEWAY_PACKAGE=none` and install the tarballs of `@usine/gateway` and of the `@usine/core` it depends on, made with `pnpm --filter @usine/core --filter @usine/gateway pack`:
 
 ```sh
-./gateway.sh install ./usine-gateway-0.1.0.tgz
+./gateway.sh install ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
 ```
 
 The VM generates its admin token and caller key at first boot in `/etc/usine-gateway/secrets.env`, readable by root only. Add API keys to the same file and restart the service:
@@ -54,16 +69,32 @@ ssh root@<gateway> 'echo ANTHROPIC_API_KEY=sk-ant-... >> /etc/usine-gateway/secr
 
 ## Create a Worker behind it
 
+`worker-user-data` takes a file of public keys, one per line, to authorize for the `usine` user:
+
 ```sh
-./gateway.sh worker-user-data > worker.yaml
+./gateway.sh worker-user-data ~/.ssh/usine_worker.pub > worker.mime
 hcloud server create --name worker-one --type cx23 --image debian-13 --location fsn1 \
   --ssh-key my-key --network usine-gateway --without-ipv4 --without-ipv6 \
-  --user-data-from-file worker.yaml
+  --label usine=worker --user-data-from-file worker.mime
 ```
 
-The Worker installs its packages through the gateway's proxy, so the gateway must be ready first. Its address on the private network is in `hcloud server describe worker-one`. The file does not create the SSH user or install Node.js and the harnesses; the Worker file of `../cloud-init.yaml` does, but cannot run behind the gateway as it is ([#250](https://github.com/basaltbytes/usine/issues/250)).
+The output is a MIME multipart cloud-init of two files. The first is the Worker file of `../cloud-init.yaml`, the same one a Worker without a gateway gets: the `usine` user, Git, gh, Node.js 24, pnpm, Claude Code, and Codex. The second is `worker-cloud-init.yaml`. cloud-init merges them, appending the second file's lists (packages, files, commands) to the first's, as its `Merge-Type` header says. The second file points the resolver, apt, and `/etc/environment` at the gateway, and the first file's setup script reads `/etc/environment`, so the toolchain installs through the forward proxy: Debian packages from `deb.debian.org` and `mirror.hetzner.com`, gh from `cli.github.com`, Node.js from `deb.nodesource.com`, and pnpm and the harnesses from `registry.npmjs.org`.
+
+The gateway must be ready first. The Worker takes about four minutes on a `cx23`; follow it with `ssh -J root@<gateway> usine@<worker> cloud-init status --wait`. Its address on the private network is in `hcloud server describe worker-one`. The Worker has no time server it can reach ([#254](https://github.com/basaltbytes/usine/issues/254)).
 
 The Worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, and `ANTHROPIC_AUTH_TOKEN` from the orchestrator (`AcceptEnv`): the executor sends each Attempt's caller token in them through the SSH connection, so it is in no command line. A Worker whose sshd drops them fails preflight with a message that names them. Existing Workers must add `GH_TOKEN` to `/etc/ssh/sshd_config.d/40-usine-gateway.conf` and reload sshd. Both gh token variables are required: gh uses `GH_TOKEN` for absolute GitHub pagination links and explicit github.com URLs.
+
+## Log in to the harnesses on the Worker
+
+The logins are the operator's and stay on the Worker. Connect through the gateway as the `usine` user and log in to each harness the roster uses:
+
+```sh
+ssh -t -J root@<gateway> usine@<worker>
+claude auth login          # Claude subscription: open the URL it prints, then paste the code back
+codex login --device-auth  # ChatGPT plan: open the URL it prints and enter the code it prints
+```
+
+Both commands reach their providers through the forward proxy, since `/etc/environment` on the Worker sets `HTTPS_PROXY`. `claude auth status` and `codex login status` show the result.
 
 ## Add the Worker to `usine.yaml`
 
@@ -95,15 +126,20 @@ workers:
       domain: gw.internal
       admin_url: http://127.0.0.1:7070
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
-      llm_providers: [anthropic]
 ```
 
 - `domain` is the gateway's `DOMAIN`.
 - `admin_url` is the admin API as the orchestrator reaches it, here the local forward.
-- `admin_token_env` names the orchestrator's environment variable that contains the admin token from `/etc/usine-gateway/secrets.env`; the token itself never goes in the file. `usine up` stops with the variable's name when it is not set.
-- `llm_providers` lists the providers whose credential the gateway holds. With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token, and preflight checks only the `claude` binary on the Worker. Without it, Claude Code would have no route to Anthropic from behind the gateway, so preflight refuses a Claude brain on the Worker. Preflight refuses a Codex brain on any Worker behind a gateway for the same reason ([#244](https://github.com/basaltbytes/usine/issues/244)).
+- `admin_token_env` names the orchestrator's environment variable that contains the admin token from `/etc/usine-gateway/secrets.env`; the token itself never goes in the file. `usine up` stops with the variable's name when it is not set. One way to keep it is a file only the orchestrator user can read:
 
-Preflight checks that the admin API answers with the token, that the Worker's sshd accepts the caller token's variables, and that the Worker reaches `git.<domain>`, without attaching anything. While an Attempt runs, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, has them back within two minutes.
+  ```sh
+  (umask 077; ssh root@<gateway> "sed -n 's/^USINE_GATEWAY_ADMIN_TOKEN=//p' /etc/usine-gateway/secrets.env" > .usine/gateway-admin-token)
+  USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
+  ```
+
+- `llm_providers` lists the providers whose credential the gateway holds, and is empty when left out. Without a provider, its harness uses the login on the Worker. With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token instead, preflight checks only the `claude` binary on the Worker, and the Claude Code hosts must come off `egress-allowlist`. Codex always uses its login on the Worker.
+
+Preflight checks that the admin API answers with the token, that the Worker's sshd accepts the caller token's variables, and that the Worker reaches `git.<domain>`, without attaching anything. For each rostered harness that uses its login on the Worker, it checks the login as on a Worker without a gateway, then that the Worker gets an answer from each of the login's hosts through the forward proxy. A host the proxy refuses fails preflight with the host to add to `egress-allowlist`. While an Attempt runs, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, has them back within two minutes.
 
 ## Delete
 

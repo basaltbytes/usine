@@ -3,8 +3,8 @@
 # the gateway VM, and its firewall, all labeled $LABEL.
 #
 #   ORCHESTRATOR_CIDR=203.0.113.7/32 SSH_KEY=my-key ./gateway.sh create
-#   ./gateway.sh install ./usine-gateway-0.1.0.tgz   # an unpublished build
-#   ./gateway.sh worker-user-data > worker.yaml      # cloud-init for a Worker behind it
+#   ./gateway.sh install ./usine-core-0.3.0.tgz ./usine-gateway-0.1.0.tgz   # an unpublished build
+#   ./gateway.sh worker-user-data ~/.ssh/id_ed25519.pub > worker.mime        # cloud-init for a Worker behind it
 #   ./gateway.sh delete
 set -eu
 
@@ -40,7 +40,7 @@ render() {
 
 create() {
   : "${ORCHESTRATOR_CIDR:?Set ORCHESTRATOR_CIDR to the address the orchestrator connects from, such as 203.0.113.7/32}"
-  : "${SSH_KEY:?Set SSH_KEY to the name of an SSH key in the hcloud project}"
+  : "${SSH_KEY:?Set SSH_KEY to the names or ids of SSH keys in the hcloud project, separated by commas}"
   work=$(mktemp -d)
   trap 'rm -rf "$work"' EXIT
   render "$here/gateway-cloud-init.yaml" > "$work/user-data.yaml"
@@ -53,9 +53,14 @@ EOF
   hcloud network create --name "$NAME" --ip-range "$NETWORK_CIDR" --label "$LABEL"
   hcloud network add-subnet "$NAME" --type cloud --network-zone "$NETWORK_ZONE" --ip-range "$SUBNET_CIDR"
   hcloud firewall create --name "$NAME" --label "$LABEL" --rules-file "$work/rules.json"
+  keys=$(printf '%s' "$SSH_KEY" | tr ',' '\n')
+  set --
+  while IFS= read -r key; do set -- "$@" --ssh-key "$key"; done <<EOF
+$keys
+EOF
   # Created stopped, so the private address is attached before cloud-init runs.
   hcloud server create --name "$NAME" --type "$SERVER_TYPE" --image "$IMAGE" --location "$LOCATION" \
-    --ssh-key "$SSH_KEY" --firewall "$NAME" --label "$LABEL" \
+    "$@" --firewall "$NAME" --label "$LABEL" \
     --user-data-from-file "$work/user-data.yaml" --start-after-create=false
   hcloud server attach-to-network "$NAME" --network "$NAME" --ip "$GATEWAY_IP"
   hcloud server poweron "$NAME"
@@ -63,11 +68,34 @@ EOF
   echo "Wait for it with: ssh root@$(hcloud server ip "$NAME") cloud-init status --wait"
 }
 
-install_package() {
-  : "${1:?Pass the path of a tarball made with pnpm pack}"
+install_packages() {
+  [ "$#" -gt 0 ] || { echo "Pass the paths of tarballs made with pnpm pack" >&2; exit 2; }
   address=$(hcloud server ip "$NAME")
-  scp "$1" "root@$address:/root/usine-gateway.tgz"
-  ssh "root@$address" /usr/local/sbin/usine-gateway-install /root/usine-gateway.tgz
+  scp "$@" "root@$address:/root/"
+  remote=""
+  for tarball in "$@"; do remote="$remote /root/$(basename "$tarball")"; done
+  ssh "root@$address" "/usr/local/sbin/usine-gateway-install$remote"
+}
+
+# Prints a MIME multipart cloud-init for a Worker behind the gateway: the
+# Worker file of ../cloud-init.yaml with the keys of $1 authorized for the
+# usine user, then worker-cloud-init.yaml, whose lists cloud-init appends to
+# the first file's.
+worker_user_data() {
+  [ -f "${1:-}" ] || { echo "Pass a file with the public keys to authorize for the usine user" >&2; exit 2; }
+  keys=$(jq -Rsc 'split("\n") | map(select(length > 0 and (startswith("#") | not)))' < "$1")
+  [ "$keys" != "[]" ] || { echo "No public key in $1" >&2; exit 2; }
+  boundary=usine-worker-user-data
+  printf 'Content-Type: multipart/mixed; boundary="%s"\nMIME-Version: 1.0\n\n' "$boundary"
+  printf -- '--%s\nContent-Type: text/cloud-config; charset="utf-8"\nContent-Disposition: attachment; filename="cloud-init.yaml"\n\n' "$boundary"
+  AUTHORIZED_KEYS=$keys awk '
+    BEGIN { placeholder = "\"@AUTHORIZED_KEYS@\"" }
+    (at = index($0, placeholder)) { $0 = substr($0, 1, at - 1) ENVIRON["AUTHORIZED_KEYS"] substr($0, at + length(placeholder)) }
+    { print }
+  ' "$here/../cloud-init.yaml"
+  printf -- '--%s\nContent-Type: text/cloud-config; charset="utf-8"\nContent-Disposition: attachment; filename="worker-cloud-init.yaml"\nMerge-Type: list(append)+dict(no_replace,recurse_list)+str()\n\n' "$boundary"
+  render "$here/worker-cloud-init.yaml"
+  printf -- '--%s--\n' "$boundary"
 }
 
 delete() {
@@ -76,13 +104,15 @@ delete() {
   if hcloud network describe "$NAME" > /dev/null 2>&1; then hcloud network delete "$NAME"; fi
 }
 
-case "${1:-}" in
+command=${1:-}
+[ "$#" -eq 0 ] || shift
+case "$command" in
   create) create ;;
-  install) install_package "${2:-}" ;;
-  worker-user-data) render "$here/worker-cloud-init.yaml" ;;
+  install) install_packages "$@" ;;
+  worker-user-data) worker_user_data "${1:-}" ;;
   delete) delete ;;
   *)
-    echo "usage: $0 create | install <tarball> | worker-user-data | delete" >&2
+    echo "usage: $0 create | install <tarball>... | worker-user-data <public-key-file> | delete" >&2
     exit 2
     ;;
 esac
