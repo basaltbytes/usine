@@ -461,6 +461,7 @@ interface ObservedBehindGateway {
   pushedBranch?: string;
   deletedThroughGitHubUrl?: string;
   registryStatus?: string;
+  proxyHostAaaa?: string;
   tokensOnMachine?: string;
 }
 
@@ -481,8 +482,9 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         // Does what a child does on the machine, with only the Attempt's
         // child host and environment: git through the Gateway (fetch, push to
         // the gateway remote, delete through a github.com URL), gh through
-        // its socket, a package registry through the forward proxy, and a
-        // scan of the machine for GitHub tokens.
+        // its socket, a package registry through the forward proxy, an AAAA
+        // lookup of the proxy's name, and a scan of the machine for GitHub
+        // tokens.
         const parent: StubParent = ({ request }) =>
           Effect.gen(function* () {
             const host = request.host;
@@ -543,6 +545,16 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
               ...inWorktree,
               command: "curl",
               args: ["-sS", "-o", "/dev/null", "-w", "%{http_code}", "https://registry.npmjs.org/"],
+            });
+            // musl's resolver, which Codex uses, fails the whole lookup of the proxy's name when its AAAA query is refused (#260).
+            observed.proxyHostAaaa = yield* succeeds(host, {
+              ...inWorktree,
+              command: "node",
+              args: [
+                "-e",
+                "require('node:dns').promises.resolve6(process.argv[1]).then(() => console.log('answered'), (error) => console.log(error.code))",
+                values.domain,
+              ],
             });
             observed.tokensOnMachine = yield* succeeds(host, {
               ...inWorktree,
@@ -620,6 +632,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
             "the github.com push went through the Gateway",
           );
           assert.strictEqual(observed.registryStatus, "200");
+          assert.include(["answered", "ENODATA"], observed.proxyHostAaaa?.trim());
           assert.strictEqual(observed.tokensOnMachine, "0", "no GitHub token on the machine");
           const host = observed.host;
           assert(host !== undefined);

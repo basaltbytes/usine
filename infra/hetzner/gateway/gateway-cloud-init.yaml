@@ -38,6 +38,7 @@ write_files:
       USINE_GATEWAY_EGRESS_ALLOWLIST=/etc/usine-gateway/egress-allowlist
 
   # Workers resolve the gateway's names here and nothing else: with no upstream server, every other name is refused, and each query is in the journal.
+  # local= answers an AAAA query for the gateway's names with no address instead of refusing it: musl's resolver, which Codex uses, fails the whole lookup on a refusal.
   - path: /etc/dnsmasq.d/usine-gateway.conf
     permissions: "0644"
     content: |
@@ -47,6 +48,7 @@ write_files:
       no-hosts
       log-queries
       address=/@@DOMAIN@@/@@GATEWAY_IP@@
+      local=/@@DOMAIN@@/
 
   # Written before the package is installed, so dnsmasq never becomes the gateway's own resolver through resolvconf.
   - path: /etc/default/dnsmasq
