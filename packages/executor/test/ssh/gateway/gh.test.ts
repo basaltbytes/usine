@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process";
+import { execFile, spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { join } from "node:path";
@@ -9,8 +9,13 @@ import { Redacted } from "effect";
 import { gatewayEnvironment, ghGatewayConfig } from "../../../src/ssh/gateway/environment.ts";
 
 const run = promisify(execFile);
+const ghOnPath = spawnSync("gh", ["--version"]).error === undefined;
 
-it("authenticates gh pagination and GitHub URLs through the Gateway socket", async () => {
+it("authenticates gh pagination and GitHub URLs through the Gateway socket", async (context) => {
+  context.skip(
+    !ghOnPath,
+    "gh is not on PATH; this test runs the real gh binary, version 2.83.2 or later",
+  );
   // A short socket path also fits macOS's Unix socket limit. No real credentials
   // or external requests: the socket serves synthetic GitHub responses only.
   const directory = await mkdtemp("/tmp/usine-gh-");
