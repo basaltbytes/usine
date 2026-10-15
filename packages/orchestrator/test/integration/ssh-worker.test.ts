@@ -632,9 +632,9 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
             "the github.com push went through the Gateway",
           );
           assert.strictEqual(observed.registryStatus, "200");
-          assert.include(
-            ["answered", "ENODATA"],
+          assert.oneOf(
             observed.proxyHostAaaa,
+            ["answered", "ENODATA"],
             "the Gateway's DNS does not refuse an AAAA query for the proxy's name",
           );
           assert.strictEqual(observed.tokensOnMachine, "0", "no GitHub token on the machine");
