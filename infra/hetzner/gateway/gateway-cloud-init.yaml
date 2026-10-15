@@ -104,9 +104,11 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/sh
-      # Installs or upgrades the gateway from an npm package spec or a packed tarball, then restarts it.
+      # Installs or upgrades the gateway from npm package specs or packed tarballs, then restarts it.
+      # One tree for all of them, so @usine/gateway and @usine/core share one copy of effect.
       set -eu
-      npm install --global --omit=dev "$1"
+      npm install --prefix /opt/usine-gateway --omit=dev "$@"
+      ln -sf /opt/usine-gateway/node_modules/.bin/usine-gateway /usr/local/bin/usine-gateway
       systemctl restart usine-gateway
 
   # One script with set -e, so a failed step marks cloud-init as failed instead of being skipped over.

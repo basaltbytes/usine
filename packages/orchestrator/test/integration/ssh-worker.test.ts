@@ -420,6 +420,38 @@ const gatewaySettings = Effect.all({
   credentialsDirectory: Config.string("USINE_GITHUB_INTEGRATION_INSTANCE_DIRECTORY"),
 });
 
+/** The Worker behind the Gateway, with no `llm_providers`: its harnesses use their logins on the machine. */
+const gatewayConfigFor = (values: Effect.Success<typeof gatewaySettings>) =>
+  Schema.decodeUnknownSync(UsineConfig)({
+    version: 1,
+    repos: [{ name: values.repository }],
+    workers: [
+      {
+        name: GATEWAY_WORKER,
+        kind: "ssh",
+        destination: values.destination,
+        root: values.root,
+        gateway: {
+          domain: values.domain,
+          admin_url: values.adminUrl,
+          admin_token_env: "USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN",
+        },
+      },
+    ],
+  });
+
+/** The shared SSH options, with the SSH configuration that names the Worker and its bastion when one is given. */
+const gatewaySshFor = (values: Effect.Success<typeof gatewaySettings>) => ({
+  command: "ssh",
+  args: [
+    ...PLAIN_SSH,
+    ...Option.match(values.sshConfig, {
+      onNone: () => [],
+      onSome: (file) => ["-F", file],
+    }),
+  ],
+});
+
 /** What the scripted parent saw on a Worker behind a Gateway. */
 interface ObservedBehindGateway {
   host?: RemoteShell;
@@ -438,23 +470,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
     () =>
       Effect.gen(function* () {
         const values = yield* gatewaySettings;
-        const config = Schema.decodeUnknownSync(UsineConfig)({
-          version: 1,
-          repos: [{ name: values.repository }],
-          workers: [
-            {
-              name: GATEWAY_WORKER,
-              kind: "ssh",
-              destination: values.destination,
-              root: values.root,
-              gateway: {
-                domain: values.domain,
-                admin_url: values.adminUrl,
-                admin_token_env: "USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN",
-              },
-            },
-          ],
-        });
+        const config = gatewayConfigFor(values);
         const repository = RepositoryName.make(values.repository);
         const branch = `usine-gateway-test/${globalThis.crypto.randomUUID()}`;
         const fileSystem = yield* FileSystem.FileSystem;
@@ -550,16 +566,8 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         );
         const runtime = sshLayer(instanceDirectory, config, [agent.brain], {
           workers: yield* sshWorkerAddressesOf(config),
-          ssh: {
-            command: "ssh",
-            args: [
-              ...PLAIN_SSH,
-              ...Option.match(values.sshConfig, {
-                onNone: () => [],
-                onSome: (file) => ["-F", file],
-              }),
-            ],
-          },
+          ssh: gatewaySshFor(values),
+          // The logins are the operator's; the Gateway's check of their hosts still runs.
           harnessReadiness: () => (brain) =>
             Effect.succeed(new HarnessReady({ harness: brain.harness })),
         }).pipe(
@@ -634,5 +642,56 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         }).pipe(Effect.provide(runtime), Effect.provide(FetchHttpClient.layer));
       }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
     { timeout: 300_000 },
+  );
+
+  it.live(
+    "preflight checks both harness logins on the machine, and with a login, its hosts through the forward proxy",
+    () =>
+      Effect.gen(function* () {
+        const values = yield* gatewaySettings;
+        const config = gatewayConfigFor(values);
+        const unused = Layer.succeed(CredentialProvider)({
+          issue: (repository) =>
+            Effect.fail(
+              new CredentialUnavailableError({
+                repository,
+                message: "Preflight issues no credential",
+                cause: new Error("unused"),
+              }),
+            ),
+        });
+        const executor = sshExecutorLayer({
+          workers: yield* sshWorkerAddressesOf(config),
+          ssh: gatewaySshFor(values),
+        }).pipe(
+          Layer.provide(unused),
+          Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(NodeServices.layer),
+          Layer.provide(FetchHttpClient.layer),
+        );
+        yield* Effect.gen(function* () {
+          const ssh = yield* Executor;
+          for (const checked of [
+            brain("claude", "claude-sonnet-4-6"),
+            brain("codex", "gpt-5.6-sol"),
+          ]) {
+            const outcome = yield* ssh.preflight(GATEWAY_WORKER, [checked]).pipe(Effect.result);
+            // A Worker nobody logged in to yet has the harness but not its login.
+            if (outcome._tag === "Failure") {
+              assert(outcome.failure._tag === "WorkerCapabilityError", outcome.failure.message);
+              assert.strictEqual(
+                outcome.failure.capability,
+                "harness-login",
+                outcome.failure.message,
+              );
+            }
+            yield* Effect.logInfo("SSH Worker behind a Gateway harness preflight", {
+              harness: checked.harness,
+              outcome: outcome._tag === "Success" ? "ready" : outcome.failure.message,
+            });
+          }
+        }).pipe(Effect.provide(executor));
+      }),
+    { timeout: 120_000 },
   );
 });

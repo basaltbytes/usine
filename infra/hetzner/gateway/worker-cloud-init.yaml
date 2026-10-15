@@ -1,9 +1,10 @@
 #cloud-config
 # Puts a Worker VM without public addresses behind the gateway: the gateway
-# as resolver and package proxy, gh's HTTP socket forwarded to the gateway,
-# and nftables that allow only the gateway. A Worker's own provisioning
-# (harnesses, logins, users) is separate; merge this into it. `gateway.sh
-# worker-user-data` replaces the @@NAME@@ placeholders.
+# as resolver and forward proxy, gh's HTTP socket forwarded to the gateway,
+# and nftables that allow only the gateway. `gateway.sh worker-user-data`
+# replaces the @@NAME@@ placeholders and sends this file after the Worker file
+# of ../cloud-init.yaml, which creates the usine user and installs the
+# toolchain and harnesses through the proxy set here.
 
 bootcmd:
   # The private network's DHCP offers no resolver, and nothing else may answer.
@@ -15,9 +16,6 @@ apt:
 
 package_update: true
 packages:
-  - curl
-  - gh
-  - git
   - nftables
 
 write_files:
@@ -26,6 +24,7 @@ write_files:
     encoding: b64
     content: "@@WORKER_NFTABLES_B64@@"
 
+  # Read by every SSH session, the harness logins included, and by the setup script of ../cloud-init.yaml.
   - path: /etc/environment
     append: true
     content: |

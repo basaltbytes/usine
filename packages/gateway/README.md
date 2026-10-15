@@ -1,6 +1,6 @@
 # @usine/gateway
 
-`@usine/gateway` is the service on the gateway host in front of usine's Worker VMs ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md), [#223](https://github.com/basaltbytes/usine/issues/223)). Worker VMs have no public address and no GitHub token or API key. They reach GitHub and the LLM providers through the gateway, which adds the credential, and they reach package registries through its forward proxy, which permits only the hosts on its allowlist.
+`@usine/gateway` is the service on the gateway host in front of usine's Worker VMs ([ADR 0027](../../docs/adr/0027-gateway-credential-proxy.md), [#223](https://github.com/basaltbytes/usine/issues/223)). Worker VMs have no public address and no GitHub token or API key. They reach GitHub through the gateway, which adds the credential, and an LLM provider either the same way, when the gateway holds that provider's API key, or with the harness's own login on the Worker through the gateway's forward proxy. The forward proxy permits only the hosts on its allowlist: package registries and the hosts of the harness logins.
 
 The gateway serves three things:
 
@@ -42,7 +42,7 @@ A Worker child presents its caller token wherever its tool sends a credential: t
 
 ## A Worker's environment
 
-`infra/hetzner/gateway/worker-cloud-init.yaml` sets up the machine. Per Attempt, the executor adds the caller token, sending each variable that contains it through the SSH connection rather than the command line (the Worker's sshd accepts them with `AcceptEnv`). The Codex row is what a Codex child would need; the executor does not set it yet ([#244](https://github.com/basaltbytes/usine/issues/244)).
+`infra/hetzner/gateway/worker-cloud-init.yaml` sets up the machine. Per Attempt, the executor adds the caller token, sending each variable that contains it through the SSH connection rather than the command line (the Worker's sshd accepts them with `AcceptEnv`). The Claude Code row applies when the gateway holds the Anthropic credential; otherwise Claude Code, like Codex, uses its login on the Worker and `HTTPS_PROXY`. The Codex row is what a Codex child would need to use the gateway's OpenAI route; the executor does not set it ([#235](https://github.com/basaltbytes/usine/issues/235)).
 
 | Tool | Setting |
 | --- | --- |
@@ -50,7 +50,7 @@ A Worker child presents its caller token wherever its tool sends a credential: t
 | gh | `GH_HOST=git.<domain>`, `GH_ENTERPRISE_TOKEN=<caller token>`, `GH_TOKEN=<caller token>`; gh's config sets `http_unix_socket: /run/usine-gateway/http.sock`, forwarded to the gateway by `systemd-socket-proxyd`, because gh speaks only HTTPS to a custom host and over that socket it speaks plain HTTP instead |
 | Claude Code | `ANTHROPIC_BASE_URL=http://llm.<domain>/anthropic`, `ANTHROPIC_AUTH_TOKEN=<caller token>` |
 | Codex | a `model_provider` with `base_url = "http://llm.<domain>/openai/v1"`, `env_key` naming a variable that contains the caller token, `wire_api = "responses"` |
-| package managers | `HTTPS_PROXY` and `HTTP_PROXY` set to `http://<gateway>:3128`, `NO_PROXY=<domain>` |
+| package managers, harness logins | `HTTPS_PROXY` and `HTTP_PROXY` set to `http://<gateway>:3128`, `NO_PROXY=<domain>` |
 
 A client that sends every request through `HTTPS_PROXY`, as Claude Code does, still reaches `git.<domain>` and `llm.<domain>`: the forward proxy sends port 80 requests for them to the reverse proxy.
 

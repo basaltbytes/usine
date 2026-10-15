@@ -24,7 +24,11 @@ import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type { StandardCommand } from "effect/unstable/process/ChildProcess";
 import { CheckoutRequest, CredentialProvider, WorkerCredential } from "../../src/executor.ts";
-import { layer as sshLayer, type SshWorkerAddress } from "../../src/ssh/ssh.ts";
+import {
+  layer as sshLayer,
+  type SshExecutorOptions,
+  type SshWorkerAddress,
+} from "../../src/ssh/ssh.ts";
 
 const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
 export const WORKER = WorkerName.make("eu-one");
@@ -77,6 +81,10 @@ interface FakeMachineState {
   readonly droppedSentVariables: Set<string>;
   /** Whether `git.<domain>` resolves and answers from the machine. */
   gatewayReachable: boolean;
+  /** Whether the Gateway's forward proxy answers the machine at all. */
+  forwardProxyReachable: boolean;
+  /** Hosts the Gateway's forward proxy refuses to open a tunnel to. */
+  readonly refusedHosts: Set<string>;
   /** gh's configuration files written on the machine, by path. */
   readonly files: Map<string, string>;
 }
@@ -150,6 +158,8 @@ export const fakeMachine = () => {
     acceptsSentVariables: true,
     droppedSentVariables: new Set(),
     gatewayReachable: true,
+    forwardProxyReachable: true,
+    refusedHosts: new Set(),
     files: new Map(),
   };
   const respond = (command: StandardCommand, line: string, input: string) => {
@@ -167,6 +177,15 @@ export const fakeMachine = () => {
       const expected = remoteWords(line).slice(4);
       const dropped = expected.filter((word, index) => index % 2 === 0 && !received.includes(word));
       return oneShotHandle(dropped.map((name) => `${name}\n`).join(""), 0);
+    }
+    // Answers the login host check as curl through the forward proxy does: the CONNECT status, then the host's own.
+    if (line.includes("http_connect")) {
+      const answer = (host: string) => {
+        if (!state.forwardProxyReachable) return `${host} 28 000 000\n`;
+        if (state.refusedHosts.has(host)) return `${host} 56 403 000\n`;
+        return `${host} 0 200 404\n`;
+      };
+      return oneShotHandle(remoteWords(line).slice(5).map(answer).join(""), 0);
     }
     if (line.startsWith("exec 'curl'"))
       return state.gatewayReachable
@@ -333,8 +352,10 @@ export const executorLayer = (
   parent: StubParent = completes,
   /** Build again on the same storage to simulate an orchestrator restart. */
   storage: StubStorage = new StubStorage(),
+  /** Replaces the executor's own login and binary checks. */
+  probes: Pick<SshExecutorOptions, "harnessReadiness"> = {},
 ) =>
-  sshLayer({ workers: [address], interruptGrace: "2 seconds" }).pipe(
+  sshLayer({ workers: [address], interruptGrace: "2 seconds", ...probes }).pipe(
     Layer.provide(machine.layer),
     Layer.provide(credentials.layer),
     Layer.provide(stubAttemptRuntime(storage, parent)),

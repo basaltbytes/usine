@@ -25,7 +25,7 @@ export interface SshWorkerGateway {
   readonly adminUrl: URL;
   /** The admin API's bearer token. */
   readonly adminToken: Redacted.Redacted<string>;
-  /** The LLM providers whose credential the Gateway holds; preflight refuses a brain whose harness has no provider listed, since it would have no route from behind the Gateway. */
+  /** The LLM providers whose credential the Gateway holds. A harness whose provider is not listed uses its login on the machine and reaches the provider through the forward proxy. */
   readonly llmProviders: ReadonlyArray<GatewayLlmProvider>;
 }
 
@@ -52,7 +52,7 @@ export interface SshExecutorOptions {
   readonly ssh?: SshCommand;
   /** Grace for the parent task's cancellation, then for the Attempt to settle; each wait is bounded separately. Defaults to 10 seconds. */
   readonly interruptGrace?: Parameters<typeof Effect.timeoutOption>[1];
-  /** Probes one rostered brain on a Worker's machine; defaults to the `@usine/agents/preflight` checks over SSH, which start no prompt. */
+  /** Probes one rostered brain's binary and login on a Worker's machine; defaults to the `@usine/agents/preflight` checks over SSH, which start no prompt. Behind a Gateway, the Gateway's checks for the brain still apply. */
   readonly harnessReadiness?: (machine: SshMachine) => HarnessProbe;
 }
 
