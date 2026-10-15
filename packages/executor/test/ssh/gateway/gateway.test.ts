@@ -513,7 +513,7 @@ describe("SSH Worker behind a Gateway", () => {
   );
 
   it.effect(
-    "checks Codex's login on the machine, then the ChatGPT hosts through the forward proxy",
+    "checks Codex's login on the machine, then the ChatGPT hosts through the forward proxy and the transparent listener",
     () => {
       const machine = fakeMachine();
       const gateway = fakeGateway(machine);
@@ -552,6 +552,18 @@ describe("SSH Worker behind a Gateway", () => {
           refused.message,
           "Codex uses its login on SSH Worker eu-one, and the Gateway's forward proxy refuses chatgpt.com; add chatgpt.com to the Gateway's egress allowlist",
         );
+        machine.state.refusedHosts.clear();
+
+        // A Gateway whose DNS does not answer chatgpt.com leaves a client that ignores HTTPS_PROXY with no way out.
+        machine.state.unresolvedHosts.add("chatgpt.com");
+        const unresolved = yield* executor.preflight(WORKER, [codex]).pipe(Effect.flip);
+        assert(unresolved._tag === "WorkerCapabilityError");
+        assert.strictEqual(unresolved.capability, "gateway");
+        assert.strictEqual(
+          unresolved.message,
+          "Codex uses its login on SSH Worker eu-one, which cannot reach chatgpt.com through the Gateway's transparent listener: the Gateway's DNS does not answer the name",
+        );
+        machine.state.unresolvedHosts.clear();
 
         login.present = false;
         const loggedOut = yield* executor.preflight(WORKER, [codex]).pipe(Effect.flip);

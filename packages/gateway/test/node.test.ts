@@ -17,18 +17,20 @@ import { HttpApiClient } from "effect/unstable/httpapi";
 import { AttachRequest, GatewayAdminApi } from "../src/admin/api.ts";
 import { AnonymousCredential } from "../src/attachment/attachment.ts";
 import { CallerTokens } from "../src/caller/caller.ts";
-import { serveEgressProxy } from "../src/node/egress-proxy.ts";
+import { serveEgressProxy } from "../src/node/egress/proxy.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../src/node/node.ts";
 import { UpstreamBase } from "../src/upstream.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
-import { rawThroughTunnel, tlsThroughTunnel } from "./tunnel.ts";
+import { rawDirect, rawThroughTunnel, tlsDirect, tlsThroughTunnel } from "./tunnel.ts";
 
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
-const gateway = gatewayLayer({ proxy: LOOPBACK, egress: LOOPBACK, admin: LOOPBACK }).pipe(
-  Layer.provide(settingsLayer(NO_PROVIDERS)),
-  Layer.provideMerge(FetchHttpClient.layer),
-);
+const gateway = gatewayLayer({
+  proxy: LOOPBACK,
+  egress: LOOPBACK,
+  transparent: LOOPBACK,
+  admin: LOOPBACK,
+}).pipe(Layer.provide(settingsLayer(NO_PROVIDERS)), Layer.provideMerge(FetchHttpClient.layer));
 
 const refusals: Array<string> = [];
 
@@ -219,6 +221,7 @@ describe("the Node gateway", () => {
       const localGateway = gatewayLayer({
         proxy: LOOPBACK,
         egress: LOOPBACK,
+        transparent: LOOPBACK,
         admin: LOOPBACK,
       }).pipe(
         Layer.provide(
@@ -365,6 +368,30 @@ describe("the Node gateway", () => {
       );
       yield* refusalLogged("private-address");
     }).pipe(Effect.provide(gatewayRecordingRefusals)),
+  );
+
+  it.live(
+    "the transparent listener relays only a TLS connection whose server name the allowlist permits",
+    () =>
+      Effect.gen(function* () {
+        refusals.length = 0;
+        const { transparent } = yield* GatewayAddresses;
+        // A client that ignores proxy variables, sent here by DNS, asking for a host the allowlist does not list.
+        assert.strictEqual(yield* tlsDirect(transparent, Option.some("example.com")), "refused");
+        const unlisted = yield* refusalLogged("host-not-allowed");
+        assert.include(unlisted, '"host":"example.com"');
+        assert.include(unlisted, '"serverName":"example.com"');
+        assert.include(unlisted, '"via":"transparent"');
+        assert.strictEqual(yield* tlsDirect(transparent, Option.none()), "refused");
+        yield* refusalLogged("server-name-missing");
+        assert.strictEqual(
+          yield* rawDirect(transparent, "GET / HTTP/1.1\r\nHost: registry.npmjs.org\r\n\r\n"),
+          "closed",
+        );
+        yield* refusalLogged("not-tls");
+        assert.strictEqual(yield* tlsDirect(transparent, Option.some("localhost")), "refused");
+        assert.include(yield* refusalLogged("private-address"), '"via":"transparent"');
+      }).pipe(Effect.provide(gatewayRecordingRefusals)),
   );
 
   it.live("closes the downstream and logs a failure when an upstream body is truncated", () =>

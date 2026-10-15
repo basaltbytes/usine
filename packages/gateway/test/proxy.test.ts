@@ -402,15 +402,17 @@ describe("GatewayProxy", () => {
   it.effect("the reverse proxy forwards nothing for other hosts, allowlisted ones included", () =>
     Effect.gen(function* () {
       const caller = yield* attach(installation);
-      for (const url of [
-        "http://objects.githubusercontent.com/release/asset",
-        "http://example.com/",
-      ]) {
+      // dnsmasq sends an allowlisted name here too, when a client ignores HTTP_PROXY; the refusal says where plain HTTP goes.
+      for (const [url, status, reason] of [
+        ["http://objects.githubusercontent.com/release/asset", 403, "plain-http-egress"],
+        ["http://example.com/", 404, "unknown-host"],
+      ] as const) {
         const refused = yield* send(url, { authorization: `token ${caller}` });
         assert.deepStrictEqual(
           [refused.status, refused.headers.get(REFUSAL_HEADER)],
-          [404, "unknown-host"],
+          [status, reason],
         );
+        if (reason === "plain-http-egress") assert.include(refused.body, "HTTP_PROXY");
       }
       assert.deepStrictEqual(yield* sent, []);
     }).pipe(Effect.provide(gateway(NO_PROVIDERS))),

@@ -118,9 +118,9 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
 
 /**
  * The harnesses that can use the operator's login on the Worker's machine,
- * and the hosts that login calls through the Gateway's forward proxy: the
- * model API, and the OAuth endpoint that the login and its token refreshes
- * call. `infra/hetzner/gateway/egress-allowlist` lists them.
+ * and the hosts that login calls through the Gateway: the model API, and
+ * the OAuth endpoint that the login and its token refreshes call.
+ * `infra/hetzner/gateway/egress-allowlist` lists them.
  */
 const LOGINS = {
   claude: { label: "Claude Code", hosts: ["api.anthropic.com", "platform.claude.com"] },
@@ -133,22 +133,43 @@ type LoginHarness = keyof typeof LOGINS;
 
 /**
  * Takes the forward proxy's URL and host names, and prints one line per
- * host: the host, curl's exit code, the proxy's answer to CONNECT, and the
- * host's HTTP status, which is 000 when the host did not answer.
+ * host: the host; through the forward proxy, curl's exit code, the proxy's
+ * answer to CONNECT, and the host's HTTP status; then without the proxy, as
+ * a client that ignores `HTTPS_PROXY` connects through the Gateway's
+ * transparent listener, curl's exit code and the host's HTTP status. A
+ * status is 000 when the host did not answer.
  */
 const LOGIN_HOSTS_SCRIPT = `
 proxy=$1
 shift
 for host in "$@"; do
   codes=$(curl -s -o /dev/null --max-time 10 --proxy "$proxy" -w '%{http_connect} %{http_code}' "https://$host/")
-  echo "$host $? $codes"
+  proxied=$?
+  status=$(curl -s -o /dev/null --max-time 10 --noproxy '*' -w '%{http_code}' "https://$host/")
+  echo "$host $proxied $codes $? $status"
 done
 `.trim();
 
-const LOGIN_HOST_ANSWER = /^(\S+) (\d+) (\d{3}) (\d{3})$/u;
+const LOGIN_HOST_ANSWER = /^(\S+) (\d+) (\d{3}) (\d{3}) (\d+) (\d{3})$/u;
 
 /** The status the forward proxy answers a CONNECT with when its allowlist does not list the host. */
 const PROXY_REFUSED = "403";
+
+/** What a curl exit code means when the machine connects to a login host through the transparent listener. */
+const transparentFailure = (exitCode: string): string => {
+  switch (exitCode) {
+    case "6":
+      return "the Gateway's DNS does not answer the name";
+    case "7":
+      return "the machine cannot connect to port 443 of the Gateway";
+    case "28":
+      return "the connection timed out";
+    case "35":
+      return "the Gateway ended the TLS handshake";
+    default:
+      return `curl exited with code ${exitCode}`;
+  }
+};
 
 /**
  * Checks a brain on a Worker behind a Gateway (ADR 0027). When the Gateway
@@ -156,8 +177,9 @@ const PROXY_REFUSED = "403";
  * and only its binary is checked. Otherwise Claude Code, and Codex always,
  * use the operator's login on the machine, as on a Worker without a Gateway
  * (ADR 0026): `probe` checks the login, then the machine must reach the
- * login's hosts through the forward proxy. Pi goes to `probe`, which refuses
- * it on any remote machine.
+ * login's hosts through the forward proxy, and without it through the
+ * Gateway's transparent listener, as a client that ignores `HTTPS_PROXY`
+ * would. Pi goes to `probe`, which refuses it on any remote machine.
  */
 export const gatewayHarnessProbe = (
   commands: RemoteCommands,
@@ -205,24 +227,42 @@ export const gatewayHarnessProbe = (
         const match = LOGIN_HOST_ANSWER.exec(line.trim());
         return match === null
           ? []
-          : [[match[1], { exitCode: match[2], connect: match[3], status: match[4] }] as const];
+          : [
+              [
+                match[1],
+                {
+                  exitCode: match[2],
+                  connect: match[3],
+                  status: match[4],
+                  directExitCode: match[5] ?? "",
+                  directStatus: match[6],
+                },
+              ] as const,
+            ];
       }),
     );
     for (const loginHost of hosts) {
       const answer = answers.get(loginHost);
-      if (answer !== undefined && answer.status !== "000") continue;
-      const cause = new Error(
-        answer === undefined
-          ? `no answer for ${loginHost}: ${result.stderr.trim() || `sh exited with code ${String(result.exitCode)}`}`
-          : `curl exited with code ${answer.exitCode}; the proxy answered CONNECT with ${answer.connect}`,
-      );
-      return yield* gatewayGap(
-        worker,
-        answer?.connect === PROXY_REFUSED
-          ? `${label} uses its login on SSH Worker ${worker}, and the Gateway's forward proxy refuses ${loginHost}; add ${loginHost} to the Gateway's egress allowlist`
-          : `${label} uses its login on SSH Worker ${worker}, which cannot reach ${loginHost} through the Gateway's forward proxy at ${proxy}`,
-        cause,
-      );
+      if (answer === undefined || answer.status === "000")
+        return yield* gatewayGap(
+          worker,
+          answer?.connect === PROXY_REFUSED
+            ? `${label} uses its login on SSH Worker ${worker}, and the Gateway's forward proxy refuses ${loginHost}; add ${loginHost} to the Gateway's egress allowlist`
+            : `${label} uses its login on SSH Worker ${worker}, which cannot reach ${loginHost} through the Gateway's forward proxy at ${proxy}`,
+          new Error(
+            answer === undefined
+              ? `no answer for ${loginHost}: ${result.stderr.trim() || `sh exited with code ${String(result.exitCode)}`}`
+              : `curl exited with code ${answer.exitCode}; the proxy answered CONNECT with ${answer.connect}`,
+          ),
+        );
+      if (answer.directStatus === "000")
+        return yield* gatewayGap(
+          worker,
+          `${label} uses its login on SSH Worker ${worker}, which cannot reach ${loginHost} through the Gateway's transparent listener: ${transparentFailure(answer.directExitCode)}`,
+          new Error(
+            `curl --noproxy '*' https://${loginHost}/ exited with code ${answer.directExitCode}`,
+          ),
+        );
     }
     yield* Effect.logInfo("SSH Worker reaches its harness login's hosts through the Gateway", {
       worker,

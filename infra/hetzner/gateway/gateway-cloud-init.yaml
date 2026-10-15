@@ -1,7 +1,7 @@
 #cloud-config
 # The usine gateway VM: SSH bastion, DNS resolver for Workers, the gateway
-# service (credential-injecting reverse proxy, forward proxy, admin API), and
-# nftables. gateway.sh replaces the @@NAME@@ placeholders before the VM is
+# service (credential-injecting reverse proxy, forward proxy, transparent
+# listener, admin API), and nftables. gateway.sh replaces the @@NAME@@ placeholders before the VM is
 # created. No secret is in this file: the VM generates its own admin token and
 # caller key, and API keys are copied in over SSH.
 
@@ -33,11 +33,13 @@ write_files:
       USINE_GATEWAY_PROXY_PORT=80
       USINE_GATEWAY_EGRESS_HOST=@@GATEWAY_IP@@
       USINE_GATEWAY_EGRESS_PORT=3128
+      USINE_GATEWAY_TRANSPARENT_HOST=@@GATEWAY_IP@@
+      USINE_GATEWAY_TRANSPARENT_PORT=443
       USINE_GATEWAY_ADMIN_HOST=127.0.0.1
       USINE_GATEWAY_ADMIN_PORT=7070
       USINE_GATEWAY_EGRESS_ALLOWLIST=/etc/usine-gateway/egress-allowlist
 
-  # Workers resolve the gateway's names here and nothing else: with no upstream server, every other name is refused, and each query is in the journal.
+  # Workers resolve the gateway's names here, and the allowlisted names that usine-gateway-dns writes to usine-gateway-egress.conf. With no upstream server, every other name is refused, and each query is in the journal.
   # local= answers an AAAA query for the gateway's names with no address instead of refusing it: musl's resolver, which Codex uses, fails the whole lookup on a refusal.
   - path: /etc/dnsmasq.d/usine-gateway.conf
     permissions: "0644"
@@ -89,6 +91,7 @@ write_files:
       Group=usine-gateway
       EnvironmentFile=/etc/usine-gateway/settings.env
       EnvironmentFile=/etc/usine-gateway/secrets.env
+      ExecStartPre=+/usr/local/sbin/usine-gateway-dns
       ExecStart=/usr/local/bin/usine-gateway
       AmbientCapabilities=CAP_NET_BIND_SERVICE
       CapabilityBoundingSet=CAP_NET_BIND_SERVICE
@@ -112,6 +115,20 @@ write_files:
       npm install --prefix /opt/usine-gateway --omit=dev "$@"
       ln -sf /opt/usine-gateway/node_modules/.bin/usine-gateway /usr/local/bin/usine-gateway
       systemctl restart usine-gateway
+
+  # Run as root before each start of the gateway, with its settings: dnsmasq answers the names from the same allowlist file the gateway reads.
+  - path: /usr/local/sbin/usine-gateway-dns
+    permissions: "0755"
+    content: |
+      #!/bin/sh
+      # Writes dnsmasq's answers for the egress allowlist and restarts dnsmasq when they changed.
+      set -eu
+      answers=/etc/dnsmasq.d/usine-gateway-egress.conf
+      next=/etc/usine-gateway/dnsmasq-egress.conf
+      /opt/usine-gateway/node_modules/.bin/usine-gateway-dnsmasq > "$next"
+      if cmp -s "$next" "$answers"; then rm "$next"; exit 0; fi
+      mv "$next" "$answers"
+      systemctl restart dnsmasq
 
   # One script with set -e, so a failed step marks cloud-init as failed instead of being skipped over.
   - path: /usr/local/sbin/usine-gateway-setup

@@ -107,8 +107,9 @@ const isHttpUrlWithoutCredentials = Schema.makeFilter<URL>(
  * the orchestrator's environment variable `adminTokenEnv`, so it is never in
  * the file. `llmProviders` names the providers whose credential the Gateway
  * holds. A harness whose provider is not listed uses the operator's login on
- * the Worker and reaches the provider through the Gateway's forward proxy;
- * Codex always does.
+ * the Worker and reaches the provider through the Gateway, by its forward
+ * proxy or, for a client that ignores proxy variables, its transparent
+ * listener; Codex always does.
  */
 export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/WorkerGateway")({
   domain: GatewayDomain,

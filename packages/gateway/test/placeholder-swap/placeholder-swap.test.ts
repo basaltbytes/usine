@@ -189,10 +189,12 @@ const swap = (providers: LlmProviders) =>
     }).pipe(Effect.map((result) => ({ ...result, placeholder })));
   }).pipe(
     Effect.provide(
-      gatewayLayer({ proxy: LOOPBACK, egress: LOOPBACK, admin: LOOPBACK }).pipe(
-        Layer.provide(settingsLayer(providers)),
-        Layer.provideMerge(FetchHttpClient.layer),
-      ),
+      gatewayLayer({
+        proxy: LOOPBACK,
+        egress: LOOPBACK,
+        transparent: LOOPBACK,
+        admin: LOOPBACK,
+      }).pipe(Layer.provide(settingsLayer(providers)), Layer.provideMerge(FetchHttpClient.layer)),
     ),
   );
 

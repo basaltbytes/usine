@@ -85,6 +85,8 @@ interface FakeMachineState {
   forwardProxyReachable: boolean;
   /** Hosts the Gateway's forward proxy refuses to open a tunnel to. */
   readonly refusedHosts: Set<string>;
+  /** Hosts the Gateway's DNS does not answer, so the transparent listener is out of reach for them. */
+  readonly unresolvedHosts: Set<string>;
   /** gh's configuration files written on the machine, by path. */
   readonly files: Map<string, string>;
 }
@@ -160,6 +162,7 @@ export const fakeMachine = () => {
     gatewayReachable: true,
     forwardProxyReachable: true,
     refusedHosts: new Set(),
+    unresolvedHosts: new Set(),
     files: new Map(),
   };
   const respond = (command: StandardCommand, line: string, input: string) => {
@@ -178,12 +181,13 @@ export const fakeMachine = () => {
       const dropped = expected.filter((word, index) => index % 2 === 0 && !received.includes(word));
       return oneShotHandle(dropped.map((name) => `${name}\n`).join(""), 0);
     }
-    // Answers the login host check as curl through the forward proxy does: the CONNECT status, then the host's own.
+    // Answers the login host check as curl does: through the forward proxy, the CONNECT status and the host's own; then without it.
     if (line.includes("http_connect")) {
       const answer = (host: string) => {
-        if (!state.forwardProxyReachable) return `${host} 28 000 000\n`;
-        if (state.refusedHosts.has(host)) return `${host} 56 403 000\n`;
-        return `${host} 0 200 404\n`;
+        const direct = state.unresolvedHosts.has(host) ? "6 000" : "0 404";
+        if (!state.forwardProxyReachable) return `${host} 28 000 000 ${direct}\n`;
+        if (state.refusedHosts.has(host)) return `${host} 56 403 000 ${direct}\n`;
+        return `${host} 0 200 404 ${direct}\n`;
       };
       return oneShotHandle(remoteWords(line).slice(5).map(answer).join(""), 0);
     }

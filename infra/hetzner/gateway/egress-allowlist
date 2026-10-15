@@ -1,13 +1,17 @@
-# Hosts Worker VMs may reach through the gateway's forward proxy.
+# Hosts Worker VMs may reach through the gateway: through its forward proxy,
+# and, for a client that ignores proxy variables, through its transparent
+# listener on port 443, since the gateway's dnsmasq answers each name listed
+# for port 443 with the gateway's address. Restart usine-gateway after an
+# edit; it rewrites dnsmasq's answers before it starts.
 # One rule per line: a host name, or *. and a domain for its subdomains,
 # optionally followed by :port. Without a port a rule permits 443 and 80.
 # Never list github.com, or the hosts of an LLM provider whose credential the
-# gateway holds: a CONNECT tunnel cannot remove a caller token or any other
+# gateway holds: a tunnel cannot remove a caller token or any other
 # credential, and the gateway serves them at git.<domain> and llm.<domain>.
 
 # Harness logins on the Worker. Claude Code and Codex use the operator's
 # subscription logins on the Worker's machine and reach their providers
-# through this proxy. Remove a harness's hosts when the gateway holds that
+# through the gateway. Remove a harness's hosts when the gateway holds that
 # provider's credential (llm_providers in usine.yaml).
 
 # Claude Code with a Claude subscription: the API, and the OAuth token

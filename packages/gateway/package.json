@@ -9,7 +9,8 @@
     "directory": "packages/gateway"
   },
   "bin": {
-    "usine-gateway": "./dist/node/main.js"
+    "usine-gateway": "./dist/node/main.js",
+    "usine-gateway-dnsmasq": "./dist/node/dnsmasq.js"
   },
   "files": [
     "dist",

@@ -4,6 +4,7 @@
 #
 #   ORCHESTRATOR_CIDR=203.0.113.7/32 SSH_KEY=my-key ./gateway.sh create
 #   ./gateway.sh install ./usine-core-0.3.0.tgz ./usine-gateway-0.1.0.tgz   # an unpublished build
+#   ./gateway.sh allowlist                                                   # after editing egress-allowlist
 #   ./gateway.sh worker-user-data ~/.ssh/id_ed25519.pub > worker.mime        # cloud-init for a Worker behind it
 #   ./gateway.sh delete
 set -eu
@@ -77,6 +78,14 @@ install_packages() {
   ssh "root@$address" "/usr/local/sbin/usine-gateway-install$remote"
 }
 
+# Copies egress-allowlist to the gateway and restarts the service, which
+# reads it again and, before it starts, rewrites dnsmasq's answers from it.
+push_allowlist() {
+  address=$(hcloud server ip "$NAME")
+  scp "$here/egress-allowlist" "root@$address:/etc/usine-gateway/egress-allowlist"
+  ssh "root@$address" systemctl restart usine-gateway
+}
+
 # Prints a MIME multipart cloud-init for a Worker behind the gateway: the
 # Worker file of ../cloud-init.yaml with the keys of $1 authorized for the
 # usine user, then worker-cloud-init.yaml, whose lists cloud-init appends to
@@ -109,10 +118,11 @@ command=${1:-}
 case "$command" in
   create) create ;;
   install) install_packages "$@" ;;
+  allowlist) push_allowlist ;;
   worker-user-data) worker_user_data "${1:-}" ;;
   delete) delete ;;
   *)
-    echo "usage: $0 create | install <tarball>... | worker-user-data <public-key-file> | delete" >&2
+    echo "usage: $0 create | install <tarball>... | allowlist | worker-user-data <public-key-file> | delete" >&2
     exit 2
     ;;
 esac

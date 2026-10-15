@@ -144,7 +144,7 @@ The executor's verify-only readiness check of a Worker: toolchain, each rostered
 _Avoid_: bootstrap, provisioning (that's the out-of-band act), health check
 
 **Gateway**:
-The host in front of Worker VMs that have no public address: their SSH bastion and resolver, the proxy that adds the GitHub credential, and any LLM credential it holds, to their requests, and the forward proxy to an allowlist of package hosts and the hosts of the harness logins on the Workers. A Worker behind it has no GitHub token and reaches nothing else (ADR 0027).
+The host in front of Worker VMs that have no public address: their SSH bastion and resolver, the proxy that adds the GitHub credential, and any LLM credential it holds, to their requests, and the way out to an allowlist of package hosts and the hosts of the harness logins on the Workers: a forward proxy, and a transparent listener for clients that ignore proxy variables. A Worker behind it has no GitHub token and reaches nothing else (ADR 0027).
 _Avoid_: edge, NAT, firewall (it is one of the gateway's parts)
 
 **Attachment**:

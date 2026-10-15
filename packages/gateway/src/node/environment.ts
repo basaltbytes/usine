@@ -55,6 +55,22 @@ const providers = Effect.gen(function* () {
 });
 
 /**
+ * Reads the egress allowlist from the file `USINE_GATEWAY_EGRESS_ALLOWLIST`
+ * names, the one file the forward proxy, the transparent listener, and
+ * dnsmasq's answers all come from.
+ */
+export const allowlistFromEnvironment = Effect.gen(function* () {
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Config.string("USINE_GATEWAY_EGRESS_ALLOWLIST").pipe(
+    Config.withDefault(DEFAULT_EGRESS_ALLOWLIST_PATH),
+  );
+  const egress = yield* fs
+    .readFileString(path)
+    .pipe(Effect.flatMap((text) => Effect.fromResult(parseEgressAllowlist(text))));
+  return { path, egress };
+});
+
+/**
  * Reads the gateway's settings once at startup: the domain and secrets from
  * the environment, and the egress allowlist from its file. A missing secret,
  * an invalid value, or an unreadable allowlist stops the gateway before it
@@ -63,20 +79,11 @@ const providers = Effect.gen(function* () {
 export const settingsFromEnvironment = Layer.effect(
   GatewaySettings,
   Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
     const domain = yield* Config.schema(GatewayDomain, "USINE_GATEWAY_DOMAIN");
     const adminToken = yield* Config.schema(AdminToken, "USINE_GATEWAY_ADMIN_TOKEN");
     const callerKey = yield* Config.schema(CallerKey, "USINE_GATEWAY_CALLER_KEY");
-    const allowlistPath = yield* Config.string("USINE_GATEWAY_EGRESS_ALLOWLIST").pipe(
-      Config.withDefault(DEFAULT_EGRESS_ALLOWLIST_PATH),
-    );
-    const egress = yield* fs
-      .readFileString(allowlistPath)
-      .pipe(Effect.flatMap((text) => Effect.fromResult(parseEgressAllowlist(text))));
-    yield* Effect.logInfo("Loaded the egress allowlist", {
-      path: allowlistPath,
-      rules: egress.rules.length,
-    });
+    const { path, egress } = yield* allowlistFromEnvironment;
+    yield* Effect.logInfo("Loaded the egress allowlist", { path, rules: egress.rules.length });
     const llm = yield* providers;
     yield* Effect.logInfo("Configured LLM providers", {
       anthropic: Option.match(llm.anthropic, {
@@ -96,13 +103,15 @@ export interface Listener {
 }
 
 /**
- * The three listeners: the reverse proxy Workers reach for GitHub and the
- * LLMs, the forward proxy for allowlisted hosts, and the admin API for the
- * executor.
+ * The four listeners: the reverse proxy Workers reach for GitHub and the
+ * LLMs, the forward proxy for allowlisted hosts, the transparent listener on
+ * port 443 for clients that ignore proxy variables, and the admin API for
+ * the executor.
  */
 export interface GatewayListeners {
   readonly proxy: Listener;
   readonly egress: Listener;
+  readonly transparent: Listener;
   readonly admin: Listener;
 }
 
@@ -120,5 +129,6 @@ const listener = (prefix: string, host: string, port: number) =>
 export const listenersFromEnvironment = Config.all({
   proxy: listener("USINE_GATEWAY_PROXY", "127.0.0.1", 80),
   egress: listener("USINE_GATEWAY_EGRESS", "127.0.0.1", 3128),
+  transparent: listener("USINE_GATEWAY_TRANSPARENT", "127.0.0.1", 443),
   admin: listener("USINE_GATEWAY_ADMIN", "127.0.0.1", 7070),
 });

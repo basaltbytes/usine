@@ -6,24 +6,26 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
-import { DateTime, Effect, Layer, Option, Redacted } from "effect";
+import { DateTime, Effect, Layer, Logger, Option, Redacted, Schedule } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { AttachRequest, GatewayAdminApi } from "../../src/admin/api.ts";
 import { AnonymousCredential } from "../../src/attachment/attachment.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../../src/node/node.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, WORKER, settingsLayer } from "../fixtures.ts";
-import { tlsThroughTunnel } from "../tunnel.ts";
+import { tlsDirect, tlsThroughTunnel } from "../tunnel.ts";
 
 // These tests reach github.com and registry.npmjs.org, anonymously, so CI needs no secret.
 
 const PUBLIC_REPOSITORY = RepositoryName.make("octocat/Hello-World");
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
-const gateway = gatewayLayer({ proxy: LOOPBACK, egress: LOOPBACK, admin: LOOPBACK }).pipe(
-  Layer.provide(settingsLayer(NO_PROVIDERS)),
-  Layer.provideMerge(FetchHttpClient.layer),
-);
+const gateway = gatewayLayer({
+  proxy: LOOPBACK,
+  egress: LOOPBACK,
+  transparent: LOOPBACK,
+  admin: LOOPBACK,
+}).pipe(Layer.provide(settingsLayer(NO_PROVIDERS)), Layer.provideMerge(FetchHttpClient.layer));
 
 interface Ran {
   readonly code: number;
@@ -165,6 +167,42 @@ describe("the gateway against GitHub", () => {
           "connected",
         );
       }).pipe(Effect.provide(gateway)),
+    90_000,
+  );
+
+  it.live(
+    "the transparent listener relays TLS to an allowlisted registry by its server name, and closes the upstream when the client leaves mid-tunnel",
+    () => {
+      const messages: Array<string> = [];
+      const logs = Logger.layer(
+        [Logger.make(({ message }) => void messages.push(JSON.stringify(message)))],
+        { mergeWithExisting: true },
+      );
+      return Effect.gen(function* () {
+        const { transparent } = yield* GatewayAddresses;
+        // As a client that ignores HTTPS_PROXY does once the gateway's DNS sent it here: TLS straight to port 443, the certificate checked.
+        const outcome = yield* tlsDirect(
+          transparent,
+          Option.some("registry.npmjs.org"),
+          (secure) => {
+            secure.write("GET /-/ping HTTP/1.1\r\nHost: registry.npmjs.org\r\n\r\n");
+            secure.once("data", () => secure.destroy());
+          },
+        );
+        assert.strictEqual(outcome, "connected");
+        const closed = yield* Effect.suspend(() => {
+          const line = messages.find((candidate) => candidate.includes("Closed an egress tunnel"));
+          return line === undefined
+            ? Effect.fail(new Error("the tunnel is still open"))
+            : Effect.succeed(line);
+        }).pipe(Effect.retry({ schedule: Schedule.spaced("50 millis"), times: 100 }));
+        // The relay closes the upstream as soon as the client leaves, not when the registry gets around to it.
+        assert.include(closed, '"closedBy":"client"');
+        assert.include(closed, '"via":"transparent"');
+        assert.include(closed, '"serverName":"registry.npmjs.org"');
+        assert.notInclude(closed, '"received":0');
+      }).pipe(Effect.provide(gateway.pipe(Layer.provide(logs))));
+    },
     90_000,
   );
 });

@@ -32,6 +32,7 @@ import { endToEndHeaders, forwardRequest } from "./forward.ts";
  */
 export const RefusalReason = Schema.Literals([
   "unknown-host",
+  "plain-http-egress",
   "unsupported-path",
   "missing-caller-token",
   "invalid-caller-token",
@@ -47,6 +48,7 @@ export const REFUSAL_HEADER = "x-usine-gateway-refusal";
 
 const REFUSAL_STATUS = {
   "unknown-host": 404,
+  "plain-http-egress": 403,
   "unsupported-path": 404,
   "missing-caller-token": 401,
   "invalid-caller-token": 401,
@@ -239,6 +241,14 @@ export class GatewayProxy extends Context.Service<
         const githubHost = GITHUB_HOSTS.get(target.host);
         if (githubHost !== undefined) return github(request, target, githubHost);
         if (target.host === hosts.llm) return llm(request, target);
+        // The gateway's dnsmasq answers these names with its own address, so a client that ignores HTTP_PROXY lands here.
+        if (settings.egress.decide(target.host, 443)._tag === "EgressPermitted")
+          return Effect.fail(
+            refused(
+              "plain-http-egress",
+              `${target.host} is on the egress allowlist: the gateway relays HTTPS to it on port 443, and plain HTTP only through its forward proxy (HTTP_PROXY).`,
+            ),
+          );
         return Effect.fail(
           refused(
             "unknown-host",

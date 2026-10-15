@@ -13,7 +13,8 @@ import { adminRoutes } from "../admin/server.ts";
 import { Attachments } from "../attachment/store.ts";
 import { CallerTokens } from "../caller/caller.ts";
 import { GatewayProxy } from "../proxy/proxy.ts";
-import { serveEgressProxy } from "./egress-proxy.ts";
+import { serveEgressProxy } from "./egress/proxy.ts";
+import { serveTransparent } from "./egress/transparent.ts";
 import {
   type GatewayListeners,
   type Listener,
@@ -29,12 +30,18 @@ export {
   listenersFromEnvironment,
   settingsFromEnvironment,
 } from "./environment.ts";
-export { EgressProxyListenError } from "./egress-proxy.ts";
+export { EgressProxyListenError } from "./egress/proxy.ts";
+export { TransparentListenError } from "./egress/transparent.ts";
 
-/** The addresses the gateway's three servers are bound to, with any port 0 replaced by the port the system chose. */
+/** The addresses the gateway's four servers are bound to, with any port 0 replaced by the port the system chose. */
 export class GatewayAddresses extends Context.Service<
   GatewayAddresses,
-  { readonly proxy: Listener; readonly egress: Listener; readonly admin: Listener }
+  {
+    readonly proxy: Listener;
+    readonly egress: Listener;
+    readonly transparent: Listener;
+    readonly admin: Listener;
+  }
 >()("@usine/gateway/node/GatewayAddresses") {}
 
 const boundTo = (address: HttpServer.Address, requested: Listener): Listener =>
@@ -95,9 +102,9 @@ const serveAdmin = Effect.fn("GatewayNode.serveAdmin")(function* (listener: List
 });
 
 /**
- * The gateway on Node: the reverse proxy, the forward proxy, and the admin
- * API on their listeners, sharing one attachment store and caller token
- * signer. Upstream requests use undici, which leaves `content-encoding`
+ * The gateway on Node: the reverse proxy, the forward proxy, the transparent
+ * listener, and the admin API on their listeners, sharing one attachment
+ * store and caller token signer. Upstream requests use undici, which leaves `content-encoding`
  * alone, so compressed bodies pass through byte for byte.
  */
 export const gatewayLayer = (listeners: GatewayListeners) =>
@@ -106,8 +113,9 @@ export const gatewayLayer = (listeners: GatewayListeners) =>
     Effect.gen(function* () {
       const proxy = yield* serveProxy(listeners.proxy);
       const egress = yield* serveEgressProxy(listeners.egress, reachable(proxy));
+      const transparent = yield* serveTransparent(listeners.transparent);
       const admin = yield* serveAdmin(listeners.admin);
-      return { proxy, egress, admin };
+      return { proxy, egress, transparent, admin };
     }),
   ).pipe(
     Layer.provide(GatewayProxy.layer),

@@ -25,7 +25,7 @@ export interface SshWorkerGateway {
   readonly adminUrl: URL;
   /** The admin API's bearer token. */
   readonly adminToken: Redacted.Redacted<string>;
-  /** The LLM providers whose credential the Gateway holds. A harness whose provider is not listed uses its login on the machine and reaches the provider through the forward proxy. */
+  /** The LLM providers whose credential the Gateway holds. A harness whose provider is not listed uses its login on the machine and reaches the provider through the Gateway's forward proxy or its transparent listener. */
   readonly llmProviders: ReadonlyArray<GatewayLlmProvider>;
 }
 

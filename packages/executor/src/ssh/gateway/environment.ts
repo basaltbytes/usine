@@ -82,8 +82,10 @@ export interface GatewayEnvironment {
  * - Claude Code calls `llm.<domain>/anthropic` with the caller token when
  *   the Gateway holds the Anthropic credential. Otherwise, and for Codex,
  *   nothing is set here: the harness uses its login on the machine and
- *   reaches its provider through the forward proxy, whose allowlist must
- *   list the login's hosts (`gatewayHarnessProbe` checks that it does).
+ *   reaches its provider through the forward proxy, or through the
+ *   Gateway's transparent listener for a client that ignores `HTTPS_PROXY`;
+ *   the Gateway's allowlist must list the login's hosts
+ *   (`gatewayHarnessProbe` checks both paths).
  */
 export const gatewayEnvironment = (options: GatewayEnvironmentOptions): GatewayEnvironment => {
   const { domain, callerToken } = options;
