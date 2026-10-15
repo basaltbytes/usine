@@ -84,6 +84,8 @@ ssh root@<gateway> 'echo ANTHROPIC_API_KEY=sk-ant-... >> /etc/usine-gateway/secr
 
 `NAME`, `LOCATION`, `SERVER_TYPE`, `IMAGE`, `NETWORK_CIDR`, `SUBNET_CIDR`, `GATEWAY_IP`, `DOMAIN`, and `LABEL` override the defaults at the top of `gateway.sh`. Logs are in the journal, one JSON object per line: `journalctl -u usine-gateway -o cat`.
 
+An existing gateway whose `/etc/dnsmasq.d/usine-gateway.conf` has no `local=/<domain>/` line needs it, then `systemctl restart dnsmasq`; without it Codex on a Worker cannot resolve the forward proxy ([#260](https://github.com/basaltbytes/usine/issues/260)).
+
 ## Create a Worker behind it
 
 `worker-user-data` takes a file of public keys, one per line, to authorize for the `usine` user:
