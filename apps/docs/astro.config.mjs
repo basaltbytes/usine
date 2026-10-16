@@ -3,6 +3,8 @@ import starlight from "@astrojs/starlight";
 import { defineConfig } from "astro/config";
 import mermaid from "astro-mermaid";
 import lucode from "lucode-starlight";
+import starlightLinksValidator from "starlight-links-validator";
+import { apiReference, apiSidebarGroup } from "./api-reference.mjs";
 
 export default defineConfig({
   integrations: [
@@ -32,11 +34,23 @@ export default defineConfig({
           footerText:
             "usine is MIT licensed. The source is on [GitHub](https://github.com/basaltbytes/usine).",
         }),
+        apiReference,
+        starlightLinksValidator(),
       ],
       sidebar: [
         { label: "Guides", items: [{ autogenerate: { directory: "guides" } }] },
         { label: "Architecture", items: [{ autogenerate: { directory: "architecture" } }] },
-        { label: "Reference", items: [{ autogenerate: { directory: "reference" } }] },
+        {
+          label: "Reference",
+          items: [
+            { label: "Overview", slug: "reference" },
+            {
+              label: "Configuration",
+              items: [{ autogenerate: { directory: "reference/configuration" } }],
+            },
+            apiSidebarGroup,
+          ],
+        },
       ],
     }),
   ],

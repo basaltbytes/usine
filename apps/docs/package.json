@@ -17,10 +17,24 @@
     "astro": "7.4.0",
     "astro-mermaid": "2.1.0",
     "lucode-starlight": "1.0.0",
-    "mermaid": "11.17.2"
+    "mermaid": "11.17.2",
+    "starlight-links-validator": "0.27.0",
+    "starlight-typedoc": "0.23.1",
+    "typedoc": "0.28.20",
+    "typedoc-plugin-markdown": "4.14.0"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.10",
+    "@usine/agents": "workspace:*",
+    "@usine/config": "workspace:*",
+    "@usine/core": "workspace:*",
+    "@usine/durable": "workspace:*",
+    "@usine/engine": "workspace:*",
+    "@usine/executor": "workspace:*",
+    "@usine/expression": "workspace:*",
+    "@usine/gateway": "workspace:*",
+    "@usine/github": "workspace:*",
+    "@usine/orchestrator": "workspace:*",
     "typescript": "6.0.3"
   },
   "engines": {
