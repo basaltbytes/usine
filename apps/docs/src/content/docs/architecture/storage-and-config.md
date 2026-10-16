@@ -1,7 +1,13 @@
+---
+title: "Storage and configuration"
+description: "The SQLite runtime store and its tables, the durable storage, usine.yaml, Loop and Agent files, files on disk."
+sidebar:
+  order: 4
+---
+
+:::note
 This page describes commit `c56246f` of basaltbytes/usine as it was on 2026-10-16.
-
-# Storage and configuration
-
+:::
 The instance folder is the whole factory: authored files at its top, runtime state in `.usine/`. `usine up` uses its working directory as the instance folder (`apps/server/src/up.ts:107`).
 
 ## Files on disk
@@ -23,7 +29,7 @@ The environment variables `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY` t
 
 ## The runtime store
 
-The engine uses Drizzle ORM 1.0.0-rc.4 over `@effect/sql-sqlite-node` ([ADR 0020](../adr/0020-drizzle-portable-sqlite-projection.md)). The schema is `packages/engine/src/database/schema.ts`. Sixteen generated migrations are in `packages/engine/drizzle/` and run at startup into the table `usine_migrations`, with foreign keys turned off during the run (`local-sqlite.ts:55`). JSON columns have `json_valid` checks, and Effect Schema decodes every row at the boundary (`packages/engine/src/store/codec.ts`). No code deletes a row ([ADR 0010](../adr/0010-single-sqlite-runtime-store.md)): Events, Runs, Attempts, and transcript rows are kept, and states, outcomes, projections, and cursors are updated in place.
+The engine uses Drizzle ORM 1.0.0-rc.4 over `@effect/sql-sqlite-node` ([ADR 0020](https://github.com/basaltbytes/usine/blob/main/docs/adr/0020-drizzle-portable-sqlite-projection.md)). The schema is `packages/engine/src/database/schema.ts`. Sixteen generated migrations are in `packages/engine/drizzle/` and run at startup into the table `usine_migrations`, with foreign keys turned off during the run (`local-sqlite.ts:55`). JSON columns have `json_valid` checks, and Effect Schema decodes every row at the boundary (`packages/engine/src/store/codec.ts`). No code deletes a row ([ADR 0010](https://github.com/basaltbytes/usine/blob/main/docs/adr/0010-single-sqlite-runtime-store.md)): Events, Runs, Attempts, and transcript rows are kept, and states, outcomes, projections, and cursors are updated in place.
 
 | Table | One row is | Line |
 | --- | --- | --- |
@@ -69,7 +75,7 @@ pi-durable opens `.usine/durable.sqlite` through its own connection and owns its
 | `settings.max_attempt_tokens` | token ceiling across parent and children | none |
 | `settings.parent_model` | Pi parent model when the Agent has none | none: Pi's default |
 | `settings.parent_effort` | parent effort when the Agent has none | the child brain's effort |
-| `workers` | see [`workers-and-gateway.md`](workers-and-gateway.md) | one `local` Worker |
+| `workers` | see [`workers-and-gateway.md`](/architecture/workers-and-gateway/) | one `local` Worker |
 | `webhooks.mode` | `off`, `deliveries`, or `endpoint` with `public_url` | `off` |
 | `operator` | the operator's GitHub login, used to attribute interventions | none: `local operator` |
 

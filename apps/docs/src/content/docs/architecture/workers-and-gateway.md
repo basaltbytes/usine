@@ -1,8 +1,14 @@
+---
+title: "Workers and the Gateway"
+description: "Worker kinds in usine.yaml, preflight, the Hetzner Gateway VM, how credentials move, cloud-init."
+sidebar:
+  order: 3
+---
+
+:::note
 This page describes commit `c56246f` of basaltbytes/usine as it was on 2026-10-16.
-
-# Workers and the Gateway
-
-A Worker is the machine where an Attempt's checkout is and where its children run. The Pi parent always runs in the orchestrator. The operating recipes (creating machines, logging in to the harnesses, the SSH configuration, deleting) are in [`infra/hetzner/README.md`](../../infra/hetzner/README.md) and [`infra/hetzner/gateway/README.md`](../../infra/hetzner/gateway/README.md); this page explains what the code does.
+:::
+A Worker is the machine where an Attempt's checkout is and where its children run. The Pi parent always runs in the orchestrator. The operating recipes (creating machines, logging in to the harnesses, the SSH configuration, deleting) are in [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) and [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md); this page explains what the code does.
 
 ## Worker kinds in `usine.yaml`
 
@@ -27,7 +33,7 @@ State is under `<instance>/.usine/workers/<worker>/`: `repos/` for bare caches, 
 
 Every command is `ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 [-p port] [-i key -o IdentitiesOnly=yes] <destination> -- <quoted command>` (`packages/executor/src/remote/commands.ts:87`, `ssh.ts:22`). The SSH client inherits only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `SSH_AGENT_PID`, `SSH_AUTH_SOCK`, `TMPDIR`, and `USER` (`commands.ts:70`). The Worker directory on the machine is `<root>/workers/<name>`.
 
-The token is written to `<root>/workers/<name>/credentials/<attempt>` by a shell script that reads it from standard input, so it is in no command line (`packages/executor/src/ssh/credentials.ts:25`). The directories are mode 700 and the files 600. The first Attempt of each Worker in a process removes every credential directory an earlier process left. All Attempts on one machine run as the same user and can read each other's tokens ([ADR 0026](../adr/0026-eu-ssh-worker.md), #231).
+The token is written to `<root>/workers/<name>/credentials/<attempt>` by a shell script that reads it from standard input, so it is in no command line (`packages/executor/src/ssh/credentials.ts:25`). The directories are mode 700 and the files 600. The first Attempt of each Worker in a process removes every credential directory an earlier process left. All Attempts on one machine run as the same user and can read each other's tokens ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md), #231).
 
 ### ssh behind a Gateway
 
@@ -70,7 +76,7 @@ Local and direct SSH preflight do not check the GitHub credential. Only the exe.
 | nftables | | Input: SSH, plus DNS, 80, and 3128 from the private network. No forwarding. Outbound SSH only into the private network | `infra/hetzner/gateway/gateway-nftables.conf` |
 | sshd | port 22 | Bastion with `AllowTcpForwarding local`, for `ssh -J` to Workers and the admin API forward | `gateway-cloud-init.yaml:66` |
 
-The caller token is HMAC-signed with the caller key and contains its attachment id, Worker, and repository (`packages/gateway/src/caller/caller.ts:93`). A token from a detached attachment is refused even when a new attachment exists for the same Worker and repository. Refusals have a reason in the `x-usine-gateway-refusal` header (`proxy.ts:33`); the forward proxy has its own reasons, such as `host-not-allowed` and `server-name-mismatch` (`packages/gateway/src/egress/egress.ts:59`). The service reads its settings once at start (`packages/gateway/src/node/environment.ts:63`): `USINE_GATEWAY_DOMAIN`, `USINE_GATEWAY_ADMIN_TOKEN`, `USINE_GATEWAY_CALLER_KEY`, the allowlist file (default `/etc/usine-gateway/egress-allowlist`), and optionally `ANTHROPIC_API_KEY` or `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` (not both) and `OPENAI_API_KEY`. It logs one JSON object per line to journald (`packages/gateway/src/node/main.ts:7`). [ADR 0027](../adr/0027-gateway-credential-proxy.md) records why usine wrote its own proxy instead of a TLS-intercepting one.
+The caller token is HMAC-signed with the caller key and contains its attachment id, Worker, and repository (`packages/gateway/src/caller/caller.ts:93`). A token from a detached attachment is refused even when a new attachment exists for the same Worker and repository. Refusals have a reason in the `x-usine-gateway-refusal` header (`proxy.ts:33`); the forward proxy has its own reasons, such as `host-not-allowed` and `server-name-mismatch` (`packages/gateway/src/egress/egress.ts:59`). The service reads its settings once at start (`packages/gateway/src/node/environment.ts:63`): `USINE_GATEWAY_DOMAIN`, `USINE_GATEWAY_ADMIN_TOKEN`, `USINE_GATEWAY_CALLER_KEY`, the allowlist file (default `/etc/usine-gateway/egress-allowlist`), and optionally `ANTHROPIC_API_KEY` or `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` (not both) and `OPENAI_API_KEY`. It logs one JSON object per line to journald (`packages/gateway/src/node/main.ts:7`). [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md) records why usine wrote its own proxy instead of a TLS-intercepting one.
 
 ## Credential flow
 
@@ -102,7 +108,7 @@ The orchestrator reads the admin token once at startup from the environment vari
 
 ## Harness logins on the Worker
 
-The Claude Code and Codex logins are the operator's, made on the Worker as the `usine` user with `claude auth login` and `codex login --device-auth`. Behind a Gateway the logins call their providers through the forward proxy, so `infra/hetzner/gateway/egress-allowlist` lists `api.anthropic.com`, `platform.claude.com`, `chatgpt.com`, and `auth.openai.com`. With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthropic` instead and the Gateway sends its own key; its swap of a Claude subscription token is not verified against Anthropic (#234), and the Gateway has no ChatGPT login (#235). [ADR 0027](../adr/0027-gateway-credential-proxy.md), amendment of 2026-10-15, explains why the logins stay on the Worker.
+The Claude Code and Codex logins are the operator's, made on the Worker as the `usine` user with `claude auth login` and `codex login --device-auth`. Behind a Gateway the logins call their providers through the forward proxy, so `infra/hetzner/gateway/egress-allowlist` lists `api.anthropic.com`, `platform.claude.com`, `chatgpt.com`, and `auth.openai.com`. With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthropic` instead and the Gateway sends its own key; its swap of a Claude subscription token is not verified against Anthropic (#234), and the Gateway has no ChatGPT login (#235). [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md), amendment of 2026-10-15, explains why the logins stay on the Worker.
 
 ## cloud-init files
 

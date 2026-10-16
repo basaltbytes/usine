@@ -1,7 +1,13 @@
+---
+title: "Gaps"
+description: "What the code does not do yet, grouped by area, with the open issues."
+sidebar:
+  order: 7
+---
+
+:::note
 This page describes commit `c56246f` of basaltbytes/usine and its open issues as they were on 2026-10-16.
-
-# Gaps
-
+:::
 What the code does not do yet, or does badly, grouped by area. The issue numbers come from `gh issue list --repo basaltbytes/usine --state open --limit 200` on 2026-10-16; 58 issues were open. A line marked "no open issue found" is a gap seen in the code that no open issue title describes.
 
 ## Onboarding, distribution, CLI

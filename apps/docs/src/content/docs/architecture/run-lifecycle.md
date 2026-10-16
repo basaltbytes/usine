@@ -1,7 +1,13 @@
+---
+title: "Run lifecycle"
+description: "Polling and content-hashed Events, Run and Attempt states, approval, retry, cancel, revoke, cycle budgets, drain, one Run from trigger to pull request."
+sidebar:
+  order: 1
+---
+
+:::note
 This page describes commit `c56246f` of basaltbytes/usine as it was on 2026-10-16.
-
-# Run lifecycle
-
+:::
 A GitHub change becomes work in four steps: polling fetches the changed Item and hashes its payload, a Loop whose `if:` matches turns that hash into an Event, the engine gives the Event a Run, and the Run's fiber tries the Run's one Step as Attempts until the Run closes. Paths are relative to the repository root.
 
 ## From a GitHub change to an Event
@@ -11,8 +17,8 @@ A GitHub change becomes work in four steps: polling fetches the changed Item and
 `pollRepository` (`polling.ts:191`) does this for one repository:
 
 1. Label preflight first: `synchronizeLabels` (`packages/orchestrator/src/polling/repository-sync.ts:162`) reads the label catalog under its ETag and creates the labels `usine.yaml` declares that the repository lacks.
-2. Change detection: `GitHubPolling.changes` (`packages/github/src/polling/polling.ts:333`) sends `GET /repos/{owner}/{repo}/issues?state=all&sort=updated&direction=asc&since=<watermark - 5 s>` with `If-None-Match`; [ADR 0007](../adr/0007-polling-triggers-content-hashed-events.md) relies on GitHub not counting an authenticated 304 against the rate limit. The walk stops after ten pages (`:48`) and the next cycle continues from the watermark.
-3. Every open pull request the stored cursor knows is fetched again on every cycle, changed or not, because mergeability can change without an `updated_at` change ([ADR 0007](../adr/0007-polling-triggers-content-hashed-events.md), #155).
+2. Change detection: `GitHubPolling.changes` (`packages/github/src/polling/polling.ts:333`) sends `GET /repos/{owner}/{repo}/issues?state=all&sort=updated&direction=asc&since=<watermark - 5 s>` with `If-None-Match`; [ADR 0007](https://github.com/basaltbytes/usine/blob/main/docs/adr/0007-polling-triggers-content-hashed-events.md) relies on GitHub not counting an authenticated 304 against the rate limit. The walk stops after ten pages (`:48`) and the next cycle continues from the watermark.
+3. Every open pull request the stored cursor knows is fetched again on every cycle, changed or not, because mergeability can change without an `updated_at` change ([ADR 0007](https://github.com/basaltbytes/usine/blob/main/docs/adr/0007-polling-triggers-content-hashed-events.md), #155).
 4. `observeItem` (`repository-sync.ts:215`) reads the Item's cycle generation, fetches its GraphQL payload slice (`GitHubPolling.snapshot`, `packages/github/src/polling/polling.ts:442`), and stores it as the Item's projection. The content hash is the SHA-256 of the payload as canonical JSON with `createdAt`, `updatedAt`, `closedAt`, `mergedAt`, and `submittedAt` removed (`packages/github/src/polling/content.ts:7`, `polling.ts:549`).
 5. `evaluateItem` (`packages/orchestrator/src/polling/loop-evaluation.ts:52`) evaluates each Loop of the Item's stream. When `if:` is false it calls `RunEngine.revoke` (`:109`). When it is true it renders the prompt (`:128`) and submits (`:148`).
 6. The cursor is written only after every Item of the cycle finished (`polling.ts:265`). A failure of the repository poll itself, in change detection, an Item fetch, an `if:` evaluation, or a submission, leaves the old cursor, so the next cycle sees the same Items again. A prompt that fails to render is scoped to its Loop (`loop-evaluation.ts:125`): it is reported as a poll failure in Needs you, and the sibling Loops and the cursor still advance.
@@ -90,16 +96,16 @@ A store write that fails is retried four times with exponential backoff from 100
 
 ## Operator actions
 
-Each action is an HTTP endpoint ([`operator-surfaces.md`](operator-surfaces.md)) that calls `Operator`, then `RunEngine`.
+Each action is an HTTP endpoint ([`operator-surfaces.md`](/architecture/operator-surfaces/)) that calls `Operator`, then `RunEngine`.
 
 | Action | Code | Effect |
 | --- | --- | --- |
 | Approve | `operator.ts:411`, `store.ts:414` | Records the approval Event in `usine_approvals`, moves `Waiting` to `Queued`, starts the fiber. Any other state is rejected with 409. |
 | Retry | `operator.ts:439`, `store.ts:435` | Moves `Failed` to `Running` with no limit on the Attempt count. The next Attempt starts from the newest pushed salvage, if there is one. |
-| Edit and retry | `operator.ts:445`, `packages/engine/src/store/queries.ts:400` | The same retry, after replacing the Run's task text, Agent, and parent model. Every later Attempt uses the amendment ([ADR 0018](../adr/0018-takeover-and-edit-and-retry.md)). |
+| Edit and retry | `operator.ts:445`, `packages/engine/src/store/queries.ts:400` | The same retry, after replacing the Run's task text, Agent, and parent model. Every later Attempt uses the amendment ([ADR 0018](https://github.com/basaltbytes/usine/blob/main/docs/adr/0018-takeover-and-edit-and-retry.md)). |
 | Cancel | `engine.ts:92`, `store.ts:471` | Any open state becomes `Canceled`; an open Attempt closes as `Canceled`. Then the executor stops the Attempt, the fiber stops, and the queued Events get their turn. |
 | Resolve failure | `store.ts:378` | Marks the latest failed Attempt as handled in `resolved_failure_attempt_id`. The state does not change. |
-| Intervene | `engine.ts:120` | Requires a `Running` Run whose latest Attempt is the one addressed; the action goes to the live session ([`execution.md`](execution.md)). |
+| Intervene | `engine.ts:120` | Requires a `Running` Run whose latest Attempt is the one addressed; the action goes to the live session ([`execution.md`](/architecture/execution/)). |
 | Pause, unpause | `operator.ts:498` | Writes `usine_loop_runtime`. A paused Loop opens no Run; existing Runs continue. |
 | Reset cycle budget | `operator.ts:583`, `packages/engine/src/cycle-budget/cycle-budget.ts:83` | See below. |
 
@@ -109,15 +115,15 @@ The engine revokes on its own: when an Item stops matching a Loop's `if:`, `revo
 
 A Loop may open `max_cycles` Runs on one Item between operator resets, three by default (`packages/core/src/cycle-budget.ts:20`). Schedule Loops have no budget (`trigger-submission.ts:111`). `admit` (`cycle-budget/queries.ts:84`) counts the Loop's reserved Runs in the current generation. When the count is at the limit, it stores a `CycleBudgetAsk` in `usine_item_cycle_budgets.ask_json`, and from then on every Loop's submission on that Item returns `CycleBlocked`. A Run canceled before its first Attempt gives its reservation back.
 
-The Ask appears only in the UI's Needs you list; nothing is posted to GitHub (#36). The reset (`cycle-budget.ts:83`) records the answer Event, increments the generation, clears the Ask, moves unstarted Runs' reservations into the new generation, and sets `reset_pending`. The next poll of that repository starts from an empty cursor (`polling.ts:195`), so current state produces fresh Events whose dedup key includes the new generation. [ADR 0022](../adr/0022-item-cycle-budgets-and-comment-reviews.md) explains why the budget is per Item.
+The Ask appears only in the UI's Needs you list; nothing is posted to GitHub (#36). The reset (`cycle-budget.ts:83`) records the answer Event, increments the generation, clears the Ask, moves unstarted Runs' reservations into the new generation, and sets `reset_pending`. The next poll of that repository starts from an empty cursor (`polling.ts:195`), so current state produces fresh Events whose dedup key includes the new generation. [ADR 0022](https://github.com/basaltbytes/usine/blob/main/docs/adr/0022-item-cycle-budgets-and-comment-reviews.md) explains why the budget is per Item.
 
 ## Drain
 
-The first SIGINT or SIGTERM completes the `RunEngineShutdown` latch (`apps/server/src/shutdown.ts:5`), which closes Attempt admission at once. The process then waits for admitted Attempts to record their outcome, bounded by `max_attempt_minutes` when set and unbounded otherwise (`apps/server/src/up.ts:171`). A second signal ends the wait. An Attempt interrupted this way keeps its parent task live in durable storage, and the next `usine up` reattaches it (`packages/executor/src/durable-session.ts:193`). [ADR 0023](../adr/0023-graceful-attempt-drain.md) records why admission belongs to the engine.
+The first SIGINT or SIGTERM completes the `RunEngineShutdown` latch (`apps/server/src/shutdown.ts:5`), which closes Attempt admission at once. The process then waits for admitted Attempts to record their outcome, bounded by `max_attempt_minutes` when set and unbounded otherwise (`apps/server/src/up.ts:171`). A second signal ends the wait. An Attempt interrupted this way keeps its parent task live in durable storage, and the next `usine up` reattaches it (`packages/executor/src/durable-session.ts:193`). [ADR 0023](https://github.com/basaltbytes/usine/blob/main/docs/adr/0023-graceful-attempt-drain.md) records why admission belongs to the engine.
 
 ## One Run from trigger to pull request
 
-The `start-dev` Loop of the dogfood instance ([`loops-shipped.md`](loops-shipped.md)), on an SSH Worker behind a Gateway:
+The `start-dev` Loop of the dogfood instance ([`loops-shipped.md`](/architecture/loops-shipped/)), on an SSH Worker behind a Gateway:
 
 ```
 GitHub             PollingTriggers        RunEngine, RunDriver    Executor, durable, Worker

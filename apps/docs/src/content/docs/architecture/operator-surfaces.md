@@ -1,7 +1,13 @@
+---
+title: "Operator surfaces"
+description: "Every HTTP endpoint, the web UI pages, the CLI, logs and spans."
+sidebar:
+  order: 5
+---
+
+:::note
 This page describes commit `c56246f` of basaltbytes/usine as it was on 2026-10-16.
-
-# Operator surfaces
-
+:::
 The operator works with usine through four things: a local HTTP API, the web UI built on it, the `usine` CLI, and the process logs. Apart from what the agents write, usine writes to a repository in three cases: it creates the labels `usine.yaml` declares, it applies Board moves, and it pushes salvage branches `usine/salvage/<run>/<number>`.
 
 ## The HTTP server
@@ -28,7 +34,7 @@ The contract is `OperatorApi` (`packages/orchestrator/src/operator/http.ts:149`)
 | POST | `/api/runs/:runId/edit-and-retry` | `{ task, agent }` | Replaces the Run's task text and Agent, then retries. 404 for an Agent outside the roster. |
 | POST | `/api/runs/:runId/cancel` | | Cancels an open Run and stops its Attempt. |
 | POST | `/api/runs/:runId/resolve-failure` | `{ attemptId }` | Marks the latest failed Attempt as handled, which removes it from Needs you. |
-| POST | `/api/runs/:runId/intervene` | `{ attemptId, target, action }` | Sends `Steer`, `Interrupt`, `OperatorMessage`, or `Release` to the parent or a child ([`execution.md`](execution.md)). |
+| POST | `/api/runs/:runId/intervene` | `{ attemptId, target, action }` | Sends `Steer`, `Interrupt`, `OperatorMessage`, or `Release` to the parent or a child ([`execution.md`](/architecture/execution/)). |
 | POST | `/api/cycle-budgets/reset` | `{ askId }` | Answers a cycle-budget Ask and grants the Item a new allowance. |
 | POST | `/api/projects/:owner/:repository/items/:item/lane` | `{ toLane }` | Writes the label swap of a Board move to GitHub, then queues a Hint for that Item. 409 for a read-only lane. |
 | POST | `/api/loops/:loop/pause` | | Sets the Loop's paused flag. |
@@ -66,7 +72,7 @@ The Needs you list contains seven kinds (`packages/orchestrator/src/operator/nee
 | `/configuration/loops` | Loops with their trigger, Agent, and a pause toggle (`apps/web/src/routes/configuration/loops.tsx`). |
 | any route with `?run=<runId>` | The Run drawer over the current page (`apps/web/src/open-run.ts`). |
 
-The root layout (`apps/web/src/routes/__root.tsx`) has the sidebar, the Needs you strip, and, in setup mode, a notice that lists the credential variables to set and says to restart `usine up`. The drawer has the conversation, plus Task, Event, and Attempts tabs. Its actions are Approve, Retry, Cancel Run (with a confirmation), Edit and retry, and resolve failure (`apps/web/src/run-drawer.tsx:93`). Its message box sends `OperatorMessage` to the parent or a child, Pause session sends `Interrupt`, and Release child sends `Release` (`apps/web/src/run-intervention/session-composer.tsx`). The drawer keeps each reader's position in browser storage ([ADR 0025](../adr/0025-run-conversation-reader-bookmarks.md)).
+The root layout (`apps/web/src/routes/__root.tsx`) has the sidebar, the Needs you strip, and, in setup mode, a notice that lists the credential variables to set and says to restart `usine up`. The drawer has the conversation, plus Task, Event, and Attempts tabs. Its actions are Approve, Retry, Cancel Run (with a confirmation), Edit and retry, and resolve failure (`apps/web/src/run-drawer.tsx:93`). Its message box sends `OperatorMessage` to the parent or a child, Pause session sends `Interrupt`, and Release child sends `Release` (`apps/web/src/run-intervention/session-composer.tsx`). The drawer keeps each reader's position in browser storage ([ADR 0025](https://github.com/basaltbytes/usine/blob/main/docs/adr/0025-run-conversation-reader-bookmarks.md)).
 
 The UI polls. The overview refreshes every 2 seconds while a Run can be canceled and every 15 seconds otherwise, and stops in setup mode (`apps/web/src/overview.ts:12`). An open drawer refreshes every second while its Run can be canceled (`run-drawer.tsx:91`). The Board refreshes every second while a move is pending (`apps/web/src/board/moves.ts:61`).
 
@@ -79,7 +85,7 @@ There is no page for editing configuration, for usage and cost, for Worker prefl
 | Command | Does |
 | --- | --- |
 | `usine up [--port <port>] [--allow-volatile-instance]` | Runs the orchestrator in the foreground from the instance folder. |
-| `usine backup <path>` | Copies the durable storage, then the runtime store, to new files ([`storage-and-config.md`](storage-and-config.md)). |
+| `usine backup <path>` | Copies the durable storage, then the runtime store, to new files ([`storage-and-config.md`](/architecture/storage-and-config/)). |
 | `usine export-run <runId> [--output <path>]` | Writes the Run's snapshot and its whole transcript as JSON, by default to `run-<encoded runId>.json` (`apps/server/src/export-run.ts`). |
 | `usine --help`, `usine --version` | Usage, and the installed `@usine/server` version. |
 
@@ -92,7 +98,7 @@ There is no page for editing configuration, for usage and cost, for Worker prefl
 5. Load the GitHub App credentials. When they are missing, start in setup mode and open the browser.
 6. Otherwise build the runtime and run the HTTP server and the trigger streams together under graceful shutdown.
 
-`@usine/gateway` publishes a second binary, `usine-gateway`, which runs on the Gateway VM ([`workers-and-gateway.md`](workers-and-gateway.md)).
+`@usine/gateway` publishes a second binary, `usine-gateway`, which runs on the Gateway VM ([`workers-and-gateway.md`](/architecture/workers-and-gateway/)).
 
 ## Logs and spans
 

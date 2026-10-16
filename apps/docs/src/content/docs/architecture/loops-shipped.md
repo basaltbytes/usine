@@ -1,8 +1,14 @@
+---
+title: "The dogfood instance's Loops"
+description: "The five Loops and three Agents of the dogfood instance, with their labels."
+sidebar:
+  order: 6
+---
+
+:::note
 This page describes commit `c56246f` of basaltbytes/usine and the dogfood instance as they were on 2026-10-16.
-
-# The dogfood instance's Loops
-
-usine has no built-in Loop. The engine runs whatever `loops/*.md` the instance folder contains ([ADR 0001](../adr/0001-loops-live-in-the-instance-repo.md)). This repository has Loop files only as parser test fixtures (`packages/config/test/fixtures/acceptance/loops/`) and as an example in [`docs/guides/review-fix-loops.md`](../guides/review-fix-loops.md). The Loops below are those of the dogfood instance at `~/Code/usine-factory`, read on 2026-10-16 and not changed. That folder is outside this repository, so its files can differ from this page after that date.
+:::
+usine has no built-in Loop. The engine runs whatever `loops/*.md` the instance folder contains ([ADR 0001](https://github.com/basaltbytes/usine/blob/main/docs/adr/0001-loops-live-in-the-instance-repo.md)). This repository has Loop files only as parser test fixtures (`packages/config/test/fixtures/acceptance/loops/`) and as an example in [`docs/guides/review-fix-loops.md`](https://github.com/basaltbytes/usine/blob/main/docs/guides/review-fix-loops.md). The Loops below are those of the dogfood instance at `~/Code/usine-factory`, read on 2026-10-16 and not changed. That folder is outside this repository, so its files can differ from this page after that date.
 
 ## The instance
 
@@ -18,7 +24,7 @@ Settings: `poll_interval: 60`, `parent_model: openai-codex/gpt-5.6-terra` (the C
 
 ## The Loops
 
-Every Loop has `selector: { repos: [basaltbytes/usine] }` and no `max_cycles`, so each may open three Runs per Item between resets ([`run-lifecycle.md`](run-lifecycle.md)). The engine changes no label itself: every label change below is an instruction in the Loop's prompt, which the agent performs with `gh`.
+Every Loop has `selector: { repos: [basaltbytes/usine] }` and no `max_cycles`, so each may open three Runs per Item between resets ([`run-lifecycle.md`](/architecture/run-lifecycle/)). The engine changes no label itself: every label change below is an instruction in the Loop's prompt, which the agent performs with `gh`.
 
 | Loop | Stream | Fires when | Approval | Step | Agent |
 | --- | --- | --- | --- | --- | --- |
@@ -108,4 +114,4 @@ PR: ready-for-review <----------------------------+
 
 ## Where the Loops differ from the guide
 
-The guide and [ADR 0022](../adr/0022-item-cycle-budgets-and-comment-reviews.md) say to drop the CEL review counts from fix and finishing Loops, since the cycle budget bounds the rounds. `act-on-findings` (`< 3`) and `finish-pr` (`>= 3`) still count reviewer reviews in `if:`. The count reads the `reviews(last: 20)` connection of the payload slice (`packages/github/src/polling/queries.ts:84`), and matches the signature line, ending in `usine agent: reviewer`, that `githubSignature` asks every agent to add (`packages/agents/src/prompt.ts:28`).
+The guide and [ADR 0022](https://github.com/basaltbytes/usine/blob/main/docs/adr/0022-item-cycle-budgets-and-comment-reviews.md) say to drop the CEL review counts from fix and finishing Loops, since the cycle budget bounds the rounds. `act-on-findings` (`< 3`) and `finish-pr` (`>= 3`) still count reviewer reviews in `if:`. The count reads the `reviews(last: 20)` connection of the payload slice (`packages/github/src/polling/queries.ts:84`), and matches the signature line, ending in `usine agent: reviewer`, that `githubSignature` asks every agent to add (`packages/agents/src/prompt.ts:28`).

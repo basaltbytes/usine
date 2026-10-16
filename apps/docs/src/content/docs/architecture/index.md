@@ -1,10 +1,16 @@
+---
+title: "Architecture overview"
+description: "The map of what is built: packages, processes, storage, Workers, and gaps, with how one change moves through the tree."
+sidebar:
+  order: 0
+---
+
+:::note
 This page describes commit `c56246f` of basaltbytes/usine as it was on 2026-10-16.
-
-# usine architecture
-
+:::
 usine is one long-running Node process, the orchestrator, that watches the GitHub issues and pull requests of the repositories an operator registers. When an issue or pull request matches a Loop, the orchestrator opens a Run and has a coding agent work on it. Loops and Agents are Markdown files in the operator's instance folder, and the engine contains no built-in Loop. The operator follows the work, approves it, and steers it in a web UI that the same process serves on `127.0.0.1`.
 
-Each try of a Run is an Attempt. The Attempt's Pi parent runs inside the orchestrator as a pi-durable task and delegates the coding to Claude Code, Codex, or Pi children. The children run on a Worker: the orchestrator's own machine, or a Linux machine the orchestrator connects to over SSH. An SSH Worker can be on a private network behind a Gateway VM, which adds the GitHub token to the Worker's requests so that no token is on the Worker. [`CONTEXT.md`](../../CONTEXT.md) defines the vocabulary, and [`docs/adr/`](../adr) records why the design is what it is.
+Each try of a Run is an Attempt. The Attempt's Pi parent runs inside the orchestrator as a pi-durable task and delegates the coding to Claude Code, Codex, or Pi children. The children run on a Worker: the orchestrator's own machine, or a Linux machine the orchestrator connects to over SSH. An SSH Worker can be on a private network behind a Gateway VM, which adds the GitHub token to the Worker's requests so that no token is on the Worker. [`CONTEXT.md`](https://github.com/basaltbytes/usine/blob/main/CONTEXT.md) defines the vocabulary, and [`docs/adr/`](https://github.com/basaltbytes/usine/tree/main/docs/adr) records why the design is what it is.
 
 ## The system in one picture
 
@@ -58,9 +64,9 @@ Each try of a Run is an Attempt. The Attempt's Pi parent runs inside the orchest
 +---------------------------------------------------------------+
 ```
 
-Three paths are left out of the picture. The executor calls the Gateway's admin API on `127.0.0.1:7070` through an SSH local forward that the operator keeps open. The Gateway's `llm.<domain>` host forwards to Anthropic or OpenAI when the Gateway has that provider's key. The forward proxy on port 3128 opens tunnels to package hosts and to the hosts of the harness logins. [`workers-and-gateway.md`](workers-and-gateway.md) describes each path.
+Three paths are left out of the picture. The executor calls the Gateway's admin API on `127.0.0.1:7070` through an SSH local forward that the operator keeps open. The Gateway's `llm.<domain>` host forwards to Anthropic or OpenAI when the Gateway has that provider's key. The forward proxy on port 3128 opens tunnels to package hosts and to the hosts of the harness logins. [`workers-and-gateway.md`](/architecture/workers-and-gateway/) describes each path.
 
-The run host of ADR 0006 no longer exists. The `@usine/run-host` package and its byte protocol were deleted in #176 ([ADR 0006](../adr/0006-executor-contract-run-host-attempt-channel.md), amendment of 2026-10-11), so no usine package is installed on a Worker. The Attempt channel envelopes remain as the transcript format.
+The run host of ADR 0006 no longer exists. The `@usine/run-host` package and its byte protocol were deleted in #176 ([ADR 0006](https://github.com/basaltbytes/usine/blob/main/docs/adr/0006-executor-contract-run-host-attempt-channel.md), amendment of 2026-10-11), so no usine package is installed on a Worker. The Attempt channel envelopes remain as the transcript format.
 
 ## Packages and apps
 
@@ -97,10 +103,10 @@ The last column lists workspace dependencies only. `effect` is a peer dependency
 
 | Page | Contents |
 | --- | --- |
-| [`run-lifecycle.md`](run-lifecycle.md) | Polling and content-hashed Events, Run and Attempt states, approval, retry, cancel, revoke, cycle budgets, drain, one Run from trigger to pull request. |
-| [`execution.md`](execution.md) | How an Attempt runs: the executor contract, the durable layer, the live channel for interventions, transcripts, the three harnesses. |
-| [`workers-and-gateway.md`](workers-and-gateway.md) | Worker kinds in `usine.yaml`, preflight, the Hetzner Gateway VM, how credentials move, cloud-init. |
-| [`storage-and-config.md`](storage-and-config.md) | The SQLite runtime store and its tables, the durable storage, `usine.yaml`, Loop and Agent files, files on disk. |
-| [`operator-surfaces.md`](operator-surfaces.md) | Every HTTP endpoint, the web UI pages, the CLI, logs and spans. |
-| [`loops-shipped.md`](loops-shipped.md) | The five Loops and three Agents of the dogfood instance, with their labels. |
-| [`gaps.md`](gaps.md) | What the code does not do yet, grouped by area, with the open issues. |
+| [`run-lifecycle.md`](/architecture/run-lifecycle/) | Polling and content-hashed Events, Run and Attempt states, approval, retry, cancel, revoke, cycle budgets, drain, one Run from trigger to pull request. |
+| [`execution.md`](/architecture/execution/) | How an Attempt runs: the executor contract, the durable layer, the live channel for interventions, transcripts, the three harnesses. |
+| [`workers-and-gateway.md`](/architecture/workers-and-gateway/) | Worker kinds in `usine.yaml`, preflight, the Hetzner Gateway VM, how credentials move, cloud-init. |
+| [`storage-and-config.md`](/architecture/storage-and-config/) | The SQLite runtime store and its tables, the durable storage, `usine.yaml`, Loop and Agent files, files on disk. |
+| [`operator-surfaces.md`](/architecture/operator-surfaces/) | Every HTTP endpoint, the web UI pages, the CLI, logs and spans. |
+| [`loops-shipped.md`](/architecture/loops-shipped/) | The five Loops and three Agents of the dogfood instance, with their labels. |
+| [`gaps.md`](/architecture/gaps/) | What the code does not do yet, grouped by area, with the open issues. |

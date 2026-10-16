@@ -1,7 +1,13 @@
+---
+title: "How an Attempt runs"
+description: "The executor contract, the durable layer, the live channel for interventions, transcripts, the three harnesses."
+sidebar:
+  order: 2
+---
+
+:::note
 This page describes commit `c56246f` of basaltbytes/usine as it was on 2026-10-16.
-
-# How an Attempt runs
-
+:::
 An Attempt passes through six layers. All of them run inside the orchestrator process except the children, and the table lists them from the engine down.
 
 | Layer | Code | Does |
@@ -13,11 +19,11 @@ An Attempt passes through six layers. All of them run inside the orchestrator pr
 | `AttemptRuntime` | `packages/durable/src/attempt-runtime.ts:70` | The Pi parent as a pi-durable task, its `subagent` tool, the envelope relay. |
 | Child backends | `packages/agents/src/pi/children.ts` | Claude Code, Codex, or Pi, on the Worker the executor chose. |
 
-The Effect workflow and cluster modules of [ADR 0003](../adr/0003-durable-execution-on-effect-workflow.md) are gone. A migration dropped their tables (`packages/engine/drizzle/20261011153856_drop_workflow_tables`), and the Run lifecycle is the fiber described in [`run-lifecycle.md`](run-lifecycle.md).
+The Effect workflow and cluster modules of [ADR 0003](https://github.com/basaltbytes/usine/blob/main/docs/adr/0003-durable-execution-on-effect-workflow.md) are gone. A migration dropped their tables (`packages/engine/drizzle/20261011153856_drop_workflow_tables`), and the Run lifecycle is the fiber described in [`run-lifecycle.md`](/architecture/run-lifecycle/).
 
 ## The executor contract
 
-`Executor` (`packages/executor/src/executor.ts:172`) is the seam of [ADR 0006](../adr/0006-executor-contract-run-host-attempt-channel.md):
+`Executor` (`packages/executor/src/executor.ts:172`) is the seam of [ADR 0006](https://github.com/basaltbytes/usine/blob/main/docs/adr/0006-executor-contract-run-host-attempt-channel.md):
 
 | Operation | Does |
 | --- | --- |
@@ -40,7 +46,7 @@ The Effect workflow and cluster modules of [ADR 0003](../adr/0003-durable-execut
 
 When the parent reports success, the executor harvests the checkout with `harvestFacts` (`packages/core/src/step/harvest.ts:135`): the commits from the base commit to `HEAD`, then the pull requests whose head is the final commit, from `gh api repos/<repo>/commits/<head>/pulls`. Pull request discovery has a ten-second timeout and never fails the Attempt. `StepResult` also allows a `Comment` fact (`packages/core/src/step/result.ts:20`), but no code produces one.
 
-Any end other than success runs `salvageWorktree` (`packages/executor/src/salvage.ts:56`) before the worktree is removed. Uncommitted changes become a `wip(usine): salvage attempt <id>` commit, and `git push --force` sends HEAD to `usine/salvage/<run>/<number>`. A failed push keeps the worktree on the Worker and records its path as `Retained`. The next Attempt of the Run checks out the newest pushed salvage ([ADR 0013](../adr/0013-cost-accounting-native-meters-guardrails.md), amendment of 2026-09-18).
+Any end other than success runs `salvageWorktree` (`packages/executor/src/salvage.ts:56`) before the worktree is removed. Uncommitted changes become a `wip(usine): salvage attempt <id>` commit, and `git push --force` sends HEAD to `usine/salvage/<run>/<number>`. A failed push keeps the worktree on the Worker and records its path as `Retained`. The next Attempt of the Run checks out the newest pushed salvage ([ADR 0013](https://github.com/basaltbytes/usine/blob/main/docs/adr/0013-cost-accounting-native-meters-guardrails.md), amendment of 2026-09-18).
 
 ## The durable layer
 
@@ -55,11 +61,11 @@ Any end other than success runs `salvageWorktree` (`packages/executor/src/salvag
 | `intervene` | Applies an operator action to the parent or a child. |
 | `cancel` | Aborts children, then the parent conversation. |
 
-The stored request contains the RunSpec, the Worker, and the worktree path (`attempt-runtime.ts:14`). The child host and the environment are not stored. Every `execute` call supplies them again, because the environment contains the Attempt's credential configuration ([ADR 0011](../adr/0011-github-app-identity-scoped-worker-tokens.md)).
+The stored request contains the RunSpec, the Worker, and the worktree path (`attempt-runtime.ts:14`). The child host and the environment are not stored. Every `execute` call supplies them again, because the environment contains the Attempt's credential configuration ([ADR 0011](https://github.com/basaltbytes/usine/blob/main/docs/adr/0011-github-app-identity-scoped-worker-tokens.md)).
 
 The parent's first turn is the prompt from `assemblePrompt` (`packages/agents/src/prompt.ts`): the repository, the salvage it resumes from, the Event payload as JSON, the Agent persona, the task text, completion rules, and GitHub rules (review with `COMMENT` only, and end every comment, issue, pull request, and review with the signature line from `githubSignature`, which ends in `usine agent: <name>`). The parent's only tool is `subagent` (`packages/durable/src/attempt/subagent.ts:31`). Each call starts one child of the Agent's harness in the checkout. The tool is declared `replay: "unsafe"` (`subagent.ts:271`): after a restart the interrupted call settles with the output committed so far, and the parent decides whether to delegate again. A final answer that starts with `[usine:blocked]` fails the Attempt with `AgentFailure` (`task.ts:58`). The `children` count in the Attempt record enforces `max_children`; one more spawn fails the Attempt with `ChildSessionBudgetFailure`.
 
-The parent's billing pool follows its provider: a model from `openai-codex` uses the ChatGPT plan and every other model uses API keys (`packages/agents/src/pi/authentication.ts:30`, [ADR 0021](../adr/0021-pi-parent-pool-follows-authentication.md)).
+The parent's billing pool follows its provider: a model from `openai-codex` uses the ChatGPT plan and every other model uses API keys (`packages/agents/src/pi/authentication.ts:30`, [ADR 0021](https://github.com/basaltbytes/usine/blob/main/docs/adr/0021-pi-parent-pool-follows-authentication.md)).
 
 ### Reattach after a restart
 
@@ -97,7 +103,7 @@ The operator's first read returns the newest 500 rows of each Attempt (`packages
 
 ## The live channel for interventions
 
-Operator input never becomes an Event ([ADR 0018](../adr/0018-takeover-and-edit-and-retry.md)). It takes this path:
+Operator input never becomes an Event ([ADR 0018](https://github.com/basaltbytes/usine/blob/main/docs/adr/0018-takeover-and-edit-and-retry.md)). It takes this path:
 
 1. `POST /api/runs/:runId/intervene` with the Attempt id, the target, and the action.
 2. `Operator.intervene` (`packages/orchestrator/src/operator/operator.ts:471`) attributes it to `operator` from `usine.yaml`, or to `local operator`.
