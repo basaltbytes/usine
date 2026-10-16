@@ -19,11 +19,17 @@ package_update: true
 package_upgrade: true
 packages:
   - build-essential
+  - bubblewrap
   - ca-certificates
   - curl
   - git
   - gnupg
   - jq
+
+# Swap lets the OOM killer end one process instead of the whole machine thrashing when an Attempt's gates run out of memory (#270).
+swap:
+  filename: /swapfile
+  size: 2G
 
 write_files:
   - path: /etc/ssh/sshd_config.d/10-usine.conf
@@ -38,6 +44,12 @@ write_files:
     append: true
     content: |
       DISABLE_AUTOUPDATER=1
+
+  # Oxc reserves a 6 GiB virtual buffer at start, which the kernel's heuristic refuses on a machine with less memory plus swap (#270).
+  - path: /etc/sysctl.d/90-usine-worker.conf
+    permissions: "0644"
+    content: |
+      vm.overcommit_memory = 1
 
   # One script with set -e, so a failed step marks cloud-init as failed instead of being skipped over.
   - path: /usr/local/sbin/usine-worker-setup
@@ -59,6 +71,8 @@ write_files:
       DEBIAN_FRONTEND=noninteractive apt-get install -y gh nodejs
       # Codex is pinned to a version usine's protocol conformance gate supports.
       npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.296 @openai/codex@0.153.4
+      # Applies the overcommit setting of /etc/sysctl.d now, not at the next boot.
+      sysctl --system
       install -d -o usine -g usine -m 0700 /home/usine/.usine
       systemctl restart ssh
 

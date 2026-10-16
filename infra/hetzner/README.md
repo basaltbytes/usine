@@ -25,9 +25,11 @@ ssh-keygen -t ed25519 -f ~/.ssh/usine_worker -C usine-worker
 
 The arguments are the Worker name, the location, the IPv4 address the orchestrator connects from,
 and the public key to authorize. `HCLOUD_SERVER_TYPE` selects the server type (default `cpx32`,
-4 vCPU and 8 GB); the cost-optimized `cx` types are often out of stock, so check
-`hcloud server-type list` first. The script registers the public key with Hetzner once (otherwise
-Hetzner emails a root password), creates the firewall `usine-<name>`, and creates the server.
+4 vCPU and 8 GB). A Worker needs 8 GB: the repository's lint and knip gates reserve a 6 GiB
+virtual buffer ([#270](https://github.com/basaltbytes/usine/issues/270)). The cost-optimized `cx`
+types are often out of stock, so check `hcloud server-type list` first. The script registers the
+public key with Hetzner once (otherwise Hetzner emails a root password), creates the firewall
+`usine-<name>`, and creates the server.
 
 cloud-init takes a minute or two after the server starts. Connect once from the orchestrator
 machine to record the server's host key, and wait for cloud-init to finish:

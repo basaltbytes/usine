@@ -92,14 +92,14 @@ An existing gateway whose `/etc/dnsmasq.d/usine-gateway.conf` has no `local=/<do
 
 ```sh
 ./gateway.sh worker-user-data ~/.ssh/usine_worker.pub > worker.mime
-hcloud server create --name worker-one --type cx23 --image debian-13 --location fsn1 \
+hcloud server create --name worker-one --type cx33 --image debian-13 --location fsn1 \
   --ssh-key my-key --network usine-gateway --without-ipv4 --without-ipv6 \
   --label usine=worker --user-data-from-file worker.mime
 ```
 
 The output is a MIME multipart cloud-init of two files. The first is the Worker file of `../cloud-init.yaml`, the same one a Worker without a gateway gets: the `usine` user, Git, gh, Node.js 24, pnpm, Claude Code, and Codex. The second is `worker-cloud-init.yaml`. cloud-init merges them, appending the second file's lists (packages, files, commands) to the first's, as its `Merge-Type` header says. The second file points the resolver, apt, and `/etc/environment` at the gateway, and the first file's setup script reads `/etc/environment`, so the toolchain installs through the forward proxy: Debian packages from `deb.debian.org` and `mirror.hetzner.com`, gh from `cli.github.com`, Node.js from `deb.nodesource.com`, and pnpm and the harnesses from `registry.npmjs.org`.
 
-The gateway must be ready first. The Worker takes about four minutes on a `cx23`; follow it with `ssh -J root@<gateway> usine@<worker> cloud-init status --wait`. Its address on the private network is in `hcloud server describe worker-one`. The Worker has no time server it can reach ([#254](https://github.com/basaltbytes/usine/issues/254)).
+A Worker needs 8 GB of memory: the repository's lint and knip gates reserve a 6 GiB virtual buffer, which the kernel refuses on a 4 GB machine, and two Attempts' installs and checks at once thrash it ([#270](https://github.com/basaltbytes/usine/issues/270)). cloud-init sets `vm.overcommit_memory=1` and a 2 GB swap file, and installs bubblewrap for Codex's sandbox ([#269](https://github.com/basaltbytes/usine/issues/269)). The gateway must be ready first. The Worker takes about four minutes on a `cx33`; follow it with `ssh -J root@<gateway> usine@<worker> cloud-init status --wait`. Its address on the private network is in `hcloud server describe worker-one`. The Worker has no time server it can reach ([#254](https://github.com/basaltbytes/usine/issues/254)).
 
 The Worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, and `ANTHROPIC_AUTH_TOKEN` from the orchestrator (`AcceptEnv`): the executor sends each Attempt's caller token in them through the SSH connection, so it is in no command line. A Worker whose sshd drops them fails preflight with a message that names them. Existing Workers must add `GH_TOKEN` to `/etc/ssh/sshd_config.d/40-usine-gateway.conf` and reload sshd. Both gh token variables are required: gh uses `GH_TOKEN` for absolute GitHub pagination links and explicit github.com URLs.
 
