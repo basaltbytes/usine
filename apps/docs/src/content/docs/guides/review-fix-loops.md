@@ -1,4 +1,9 @@
-# Bounded review and fix Loops
+---
+title: Bounded review and fix Loops
+description: Write review, fix, and finishing Loops whose rounds on one Item stop at the cycle budget until you reset it.
+sidebar:
+  order: 4
+---
 
 Each issue or pull request has a durable cycle budget. A Loop's `max_cycles`
 limits how many Runs it may open on that Item between operator resets; the default
@@ -97,6 +102,6 @@ that starts finishing when the count reaches three: exhaustion now stops for an
 operator decision. Existing completed Runs count toward the initial allowance after the database
 upgrade; queued Item Events are subject to the same limit when admitted.
 
-See [ADR 0022](../adr/0022-item-cycle-budgets-and-comment-reviews.md) for persistence
+See [ADR 0022](https://github.com/basaltbytes/usine/blob/main/docs/adr/0022-item-cycle-budgets-and-comment-reviews.md) for persistence
 and identity decisions, and [GitHub's review rules](https://docs.github.com/en/pull-requests/how-tos/review-pull-requests/approving-a-pull-request-with-required-reviews)
 for required approvals.

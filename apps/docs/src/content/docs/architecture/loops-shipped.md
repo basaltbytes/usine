@@ -9,7 +9,7 @@ sidebar:
 This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine and the dogfood instance as they were on 2026-10-16.
 :::
 
-usine has no built-in Loop. The engine runs whatever `loops/*.md` the instance folder contains ([ADR 0001](https://github.com/basaltbytes/usine/blob/main/docs/adr/0001-loops-live-in-the-instance-repo.md)). This repository has Loop files only as parser test fixtures ([`packages/config/test/fixtures/acceptance/loops/`][fixtures]) and as an example in [`docs/guides/review-fix-loops.md`](https://github.com/basaltbytes/usine/blob/main/docs/guides/review-fix-loops.md). The Loops below are those of the dogfood instance at `~/Code/usine-factory`, read on 2026-10-16 and not changed. That folder is outside this repository, so its files can differ from this page after that date.
+usine has no built-in Loop. The engine runs whatever `loops/*.md` the instance folder contains ([ADR 0001](https://github.com/basaltbytes/usine/blob/main/docs/adr/0001-loops-live-in-the-instance-repo.md)). This repository has Loop files only as parser test fixtures ([`packages/config/test/fixtures/acceptance/loops/`][fixtures]) and as an example in [Bounded review and fix Loops](/guides/review-fix-loops/). The Loops below are those of the dogfood instance at `~/Code/usine-factory`, read on 2026-10-16 and not changed. That folder is outside this repository, so its files can differ from this page after that date.
 
 ## The instance
 
