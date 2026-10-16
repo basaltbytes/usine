@@ -17,7 +17,7 @@ The orchestrator reaches a Worker with SSH through the gateway: `ssh -J root@<ga
 
 The executor reaches the admin API on the gateway's loopback port 7070 through the same SSH connection, for example with `ssh -L 7070:127.0.0.1:7070 root@<gateway>`. It attaches the Attempt's installation token for the Worker and repository there, and passes the caller token it gets back to the Attempt's children through the SSH connection to the Worker.
 
-A Worker resolves names with the gateway's dnsmasq, which answers `git.<domain>` and `llm.<domain>` with the gateway's private address and refuses every other name. The Worker has no default route and no public address, so it cannot open a connection to the internet even with an address in hand; its nftables rules also allow connections to the gateway only.
+A Worker resolves names with the gateway's dnsmasq, which answers `git.<domain>` and `llm.<domain>` with the gateway's private address and refuses every other name. It answers an AAAA query for the gateway's own names with no address rather than a refusal: musl's resolver, which the Codex binary uses, asks for A and AAAA together and fails the whole lookup when either is refused, so Codex could not resolve the forward proxy at `<domain>:3128` ([#260](https://github.com/basaltbytes/usine/issues/260)). The Worker has no default route and no public address, so it cannot open a connection to the internet even with an address in hand; its nftables rules also allow connections to the gateway only.
 
 git and gh on a Worker talk to `git.<domain>` over plain HTTP on the private network. The gateway checks the caller token, replaces it with the attached installation token, and sends the request to github.com, api.github.com, or uploads.github.com over HTTPS. gh reaches the gateway through `/run/usine-gateway/http.sock`, which systemd forwards to the gateway's port 80, because gh speaks only HTTPS to a custom `GH_HOST` and over a Unix socket it speaks plain HTTP. No certificate is needed on either side.
 
@@ -28,6 +28,21 @@ Package managers and the harness logins use the forward proxy at `<gateway>:3128
 Never allowlist github.com, and never a provider whose credential the gateway holds. A Worker reaches them through `git.<domain>` and `llm.<domain>`, where the gateway decides what it may reach and replaces the caller token; a tunnel to github.com would let a Worker push with any credential it was handed, and Claude Code opens connections to api.anthropic.com outside `ANTHROPIC_BASE_URL`, which would carry the caller token. So when the gateway holds the Anthropic credential, remove the Claude Code hosts from `egress-allowlist`.
 
 The gateway itself reaches the internet directly over its public interface. It forwards no packets for Workers.
+
+### Which path each client takes
+
+Seen in the gateway's journal and dnsmasq's query log on 2026-10-15, with the environment the executor gives an Attempt's children (`HTTPS_PROXY=http://<domain>:3128`):
+
+| Client | Path | Names it resolves on the Worker |
+| --- | --- | --- |
+| git | `git.<domain>` over plain HTTP; `NO_PROXY` lists the domain | `git.<domain>` |
+| gh | `/run/usine-gateway/http.sock`, which systemd forwards to the gateway's port 80 | none |
+| curl, npm, pnpm | the forward proxy, through `HTTPS_PROXY` and `HTTP_PROXY` | `<domain>` |
+| apt | the forward proxy, through its own proxy setting with the gateway's address | none |
+| Claude Code 2.1.296 | the forward proxy, for the model API and the login | `<domain>` |
+| Codex 0.153.4 | the forward proxy, for the Responses API WebSocket, its HTTPS fallback, the plugin-sync MCP client at `chatgpt.com/backend-api/ps/mcp`, and the login | `<domain>`, A and AAAA |
+
+No client resolved a provider's or a registry's name itself.
 
 ### The harness logins' hosts
 
@@ -41,6 +56,8 @@ The gateway itself reaches the internet directly over its public interface. It f
 | | `auth.openai.com` | The device code, the token exchange once the code is entered, and every token refresh. |
 
 The URL each login prints opens in the operator's browser, not on the Worker: `claude.com/cai/oauth/authorize` and `auth.openai.com/codex/device`. Preflight checks that the Worker reaches each host through the forward proxy (see below).
+
+With both logins completed, a one-prompt turn of each harness also asks for hosts the allowlist does not list, and completes without them: Claude Code for `mcp-proxy.anthropic.com`, the claude.ai connectors, and Codex for `ab.chatgpt.com` and `sdmntpr<region>.oaiusercontent.com` ([#261](https://github.com/basaltbytes/usine/issues/261)).
 
 About [#240](https://github.com/basaltbytes/usine/issues/240): all four hosts are behind Cloudflare. The certificate of `api.anthropic.com` and of `platform.claude.com` covers that name only; `chatgpt.com` also covers `amb-staging.chatgpt.com` and its subdomains, and `auth.openai.com` covers `*.auth.openai.com`, so a client that reuses an HTTP/2 connection for another name on the certificate reaches only the same provider. Through a tunnel to each host, a request with the `Host` header of another site (`claude.ai`, `claude.com`, `www.cloudflare.com`, `api.openai.com`) got `403 Forbidden` from Cloudflare (checked on 2026-10-15). Claude Code opens one tunnel to `api.anthropic.com` per prompt and closes it before its ClientHello; the gateway logs that as a `not-tls` refusal ([#255](https://github.com/basaltbytes/usine/issues/255)).
 
@@ -66,6 +83,8 @@ ssh root@<gateway> 'echo ANTHROPIC_API_KEY=sk-ant-... >> /etc/usine-gateway/secr
 ```
 
 `NAME`, `LOCATION`, `SERVER_TYPE`, `IMAGE`, `NETWORK_CIDR`, `SUBNET_CIDR`, `GATEWAY_IP`, `DOMAIN`, and `LABEL` override the defaults at the top of `gateway.sh`. Logs are in the journal, one JSON object per line: `journalctl -u usine-gateway -o cat`.
+
+An existing gateway whose `/etc/dnsmasq.d/usine-gateway.conf` has no `local=/<domain>/` line needs it, then `systemctl restart dnsmasq`; without it Codex on a Worker cannot resolve the forward proxy ([#260](https://github.com/basaltbytes/usine/issues/260)).
 
 ## Create a Worker behind it
 
