@@ -12,7 +12,8 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "inputs": ["$TURBO_DEFAULT$", "!README.md", "!CHANGELOG.md"]
+      "inputs": ["$TURBO_DEFAULT$", "!README.md", "!CHANGELOG.md"],
+      "env": ["PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH"]
     }
   }
 }

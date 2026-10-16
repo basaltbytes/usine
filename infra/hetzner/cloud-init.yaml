@@ -1,6 +1,6 @@
 #cloud-config
 # A usine SSH Worker on Debian: the `usine` user with Git, gh, Node.js, pnpm,
-# Claude Code, and Codex, and SSH that admits only that user by key.
+# Claude Code, Codex, and Chromium, and SSH that admits only that user by key.
 # create-worker.sh and `gateway/gateway.sh worker-user-data` replace
 # "@AUTHORIZED_KEYS@" with the public keys to authorize, as a list. Behind the
 # gateway, `worker-user-data` adds gateway/worker-cloud-init.yaml, which puts
@@ -21,6 +21,7 @@ packages:
   - build-essential
   - bubblewrap
   - ca-certificates
+  - chromium
   - curl
   - git
   - gnupg
@@ -40,10 +41,12 @@ write_files:
       PermitRootLogin no
       AllowUsers usine
   # Children run over non-interactive SSH, which reads this file and no shell profile.
+  # Playwright does not read PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH; a project's test config passes it on, as usine's apps/web does.
   - path: /etc/environment
     append: true
     content: |
       DISABLE_AUTOUPDATER=1
+      PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium
 
   # Oxc reserves a 6 GiB virtual buffer at start, which the kernel's heuristic refuses on a machine with less memory plus swap (#270).
   - path: /etc/sysctl.d/90-usine-worker.conf

@@ -3,6 +3,8 @@ import { configDefaults, defineConfig, mergeConfig } from "vitest/config";
 import type { Page, Route } from "playwright";
 import vite from "./vite.config.ts";
 
+// Set on Workers built by infra/hetzner/cloud-init.yaml, which have Debian's Chromium instead of Playwright's.
+const executablePath = process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH;
 const delayedMoves = new WeakMap<Page, Promise<Route>>();
 const interventionRequests = new WeakMap<Page, Array<{ url: string; body: unknown }>>();
 
@@ -27,7 +29,9 @@ export default mergeConfig(
               enabled: true,
               headless: true,
               screenshotDirectory: "./node_modules/.cache/vitest/screenshots",
-              provider: playwright(),
+              provider: playwright(
+                executablePath === undefined ? {} : { launchOptions: { executablePath } },
+              ),
               commands: {
                 failureResolutionResponses: async (
                   { page },
