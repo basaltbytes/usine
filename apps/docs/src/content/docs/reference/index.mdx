@@ -1,8 +1,29 @@
 ---
-title: API reference
-description: The public API of the usine packages.
+title: Reference
+description: The files an instance repository holds, the usine command, and the public API of the @usine packages.
 ---
 
-:::caution
-This page is being written.
-:::
+The configuration reference lists every field of the files usine reads from an instance repository, and the commands of the `usine` CLI. The API reference is generated from the TSDoc comments of the published `@usine/*` packages when the site is built.
+
+## Configuration
+
+- [`usine.yaml`](/reference/configuration/usine-yaml/): the instance settings.
+- [Loop files](/reference/configuration/loop-files/): the files under `loops/`, one Loop each.
+- [Agent files](/reference/configuration/agent-files/): the files under `agents/`, one Agent each.
+- [Expressions](/reference/configuration/expressions/): the CEL used by Loop conditions and prompt templates.
+- [CLI](/reference/configuration/cli/): the `usine` commands, their flags, and the environment variables they read.
+
+## API
+
+A package's public API is the set of subpaths in its `exports` map, such as `@usine/core/run`. Each package page lists those subpaths; modules that no subpath exports are internal and not documented.
+
+- [`@usine/core`](/reference/api/core/): the domain model, from Event to Run, Step, and Attempt, with the typed failures.
+- [`@usine/expression`](/reference/api/expression/): checks and evaluates the CEL expressions in Loop files.
+- [`@usine/config`](/reference/api/config/): parses, validates, and rewrites `usine.yaml`, Loop files, and Agent files.
+- [`@usine/github`](/reference/api/github/): GitHub App authentication, polling, and item and label writes.
+- [`@usine/engine`](/reference/api/engine/): the event ledger, Run scheduling, restart recovery, and the SQLite store.
+- [`@usine/agents`](/reference/api/agents/): the Claude Code, Codex, and Pi child backends, Attempt prompts, and preflight.
+- [`@usine/durable`](/reference/api/durable/): the Pi parent of each Attempt, on durable storage that survives a restart.
+- [`@usine/executor`](/reference/api/executor/): the Worker contract and its local, exe.dev, and SSH adapters.
+- [`@usine/gateway`](/reference/api/gateway/): the proxy that adds credentials to Worker traffic and enforces the egress allowlist.
+- [`@usine/orchestrator`](/reference/api/orchestrator/): the full engine as one Effect layer that can run in-process.
