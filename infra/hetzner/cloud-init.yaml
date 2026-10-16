@@ -26,6 +26,11 @@ packages:
   - gnupg
   - jq
 
+# Swap lets the OOM killer end one process instead of the whole machine thrashing when an Attempt's gates run out of memory (#270).
+swap:
+  filename: /swapfile
+  size: 2G
+
 write_files:
   - path: /etc/ssh/sshd_config.d/10-usine.conf
     permissions: "0644"
@@ -66,13 +71,8 @@ write_files:
       DEBIAN_FRONTEND=noninteractive apt-get install -y gh nodejs
       # Codex is pinned to a version usine's protocol conformance gate supports.
       npm install -g pnpm@11.20.0 @anthropic-ai/claude-code@2.1.296 @openai/codex@0.153.4
+      # Applies the overcommit setting of /etc/sysctl.d now, not at the next boot.
       sysctl --system
-      # Swap lets the OOM killer end one process instead of the whole machine thrashing when an Attempt's gates run out of memory (#270).
-      fallocate -l 2G /swapfile
-      chmod 0600 /swapfile
-      mkswap /swapfile
-      swapon /swapfile
-      echo "/swapfile none swap sw 0 0" >> /etc/fstab
       install -d -o usine -g usine -m 0700 /home/usine/.usine
       systemctl restart ssh
 
