@@ -1,11 +1,11 @@
 import { RepositoryName } from "@usine/core/repository";
-import { WorkerName } from "@usine/core/worker";
+import { GatewayDomain, WorkerName } from "@usine/core/worker";
 import { AttachmentId } from "../src/attachment/attachment.ts";
 import { Layer, Option, Redacted, Result, Schema } from "effect";
 import { parseEgressAllowlist } from "../src/egress/egress.ts";
 import { GITHUB_ORIGINS, type GitHubOrigins } from "../src/github/github.ts";
 import type { LlmProviders } from "../src/llm/llm.ts";
-import { AdminToken, CallerKey, GatewayDomain, GatewaySettings } from "../src/settings.ts";
+import { AdminToken, CallerKey, GatewaySettings } from "../src/settings.ts";
 
 const DOMAIN = GatewayDomain.make("gw.test");
 export const WORKER = WorkerName.make("worker-one");

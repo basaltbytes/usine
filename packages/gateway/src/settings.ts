@@ -1,21 +1,8 @@
+import type { GatewayDomain } from "@usine/core/worker";
 import { Context, Schema } from "effect";
 import type { EgressAllowlist } from "./egress/egress.ts";
 import type { GitHubOrigins } from "./github/github.ts";
 import type { LlmProviders } from "./llm/llm.ts";
-
-/**
- * The private DNS domain the gateway answers for. Workers reach GitHub at
- * `git.<domain>` and the LLM providers at `llm.<domain>`.
- */
-export const GatewayDomain = Schema.String.check(
-  Schema.isPattern(
-    /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u,
-    {
-      message: "Expected a lowercase DNS domain",
-    },
-  ),
-).pipe(Schema.brand("GatewayDomain"));
-export type GatewayDomain = typeof GatewayDomain.Type;
 
 /** The HMAC key caller tokens are signed with, decoded from its raw value: at least 32 characters, held only by the gateway. */
 export const CallerKey = Schema.RedactedFromValue(

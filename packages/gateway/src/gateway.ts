@@ -48,7 +48,8 @@ export {
 } from "./llm/llm.ts";
 export { endToEndHeaders } from "./proxy/forward.ts";
 export { GatewayProxy, REFUSAL_HEADER, RefusalReason } from "./proxy/proxy.ts";
-export { AdminToken, CallerKey, GatewayDomain, GatewaySettings, gatewayHosts } from "./settings.ts";
+export { GatewayDomain } from "@usine/core/worker";
+export { AdminToken, CallerKey, GatewaySettings, gatewayHosts } from "./settings.ts";
 export { UpstreamBase } from "./upstream.ts";
 
 /**
