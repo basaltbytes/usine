@@ -19,6 +19,8 @@ Every refused request is logged at warning level as `Gateway refused a request` 
 | `@usine/gateway/node` | `gatewayLayer` (the three servers on Node, with undici upstream), `gatewayFromEnvironment`, `settingsFromEnvironment`, and `GatewayAddresses`. |
 | `usine-gateway` | The command the gateway VM runs; it reads the environment below and logs one JSON object per line. |
 
+`GatewayDomain` is re-exported from `@usine/core/worker`. Gateway environment settings and Worker configuration use the same lowercase DNS domain schema.
+
 ## Attachments and caller tokens
 
 At the start of an Attempt the executor attaches the Attempt's installation token for the Worker and the repository, with the token's expiry:

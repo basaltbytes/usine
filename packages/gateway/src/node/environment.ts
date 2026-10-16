@@ -1,3 +1,4 @@
+import { GatewayDomain } from "@usine/core/worker";
 import { Config, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { parseEgressAllowlist } from "../egress/egress.ts";
 import { GITHUB_ORIGINS } from "../github/github.ts";
@@ -8,7 +9,7 @@ import {
   type LlmProviders,
   OpenAiProvider,
 } from "../llm/llm.ts";
-import { AdminToken, CallerKey, GatewayDomain, GatewaySettings } from "../settings.ts";
+import { AdminToken, CallerKey, GatewaySettings } from "../settings.ts";
 import { UpstreamBase } from "../upstream.ts";
 
 /** Where the gateway reads its egress allowlist when `USINE_GATEWAY_EGRESS_ALLOWLIST` is not set. */
