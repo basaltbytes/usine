@@ -73,7 +73,7 @@ How one piece of work moves through the engine — a deduplicated Event opens a 
 _Avoid_: run model (ADR 0002's name for the same arc), workflow, state machine (the closing mechanism, not the journey)
 
 **Run**:
-The work a loop owes one Event — at most one open per dedup key, ever. Open states: pending, waiting, running; closed: succeeded, failed, canceled.
+The work a loop owes one Event — at most one open per dedup key, ever. Open states: pending, waiting, queued, running; closed: succeeded, failed, canceled.
 _Avoid_: execution, job, workflow run
 
 **Step**:

@@ -16,6 +16,7 @@ The spec lives in [CONTEXT.md](./CONTEXT.md) (domain glossary) and [docs/adr/](.
 | [`@usine/agents`](./packages/agents)             | Claude Code, Codex, and Pi child backends, Attempt prompts, and harness preflight                                               |
 | [`@usine/durable`](./packages/durable)           | Each Attempt's Pi parent as a pi-durable task in the orchestrator, resumed after a restart                                      |
 | [`@usine/executor`](./packages/executor)         | Scoped Attempt resources, with local, exe.dev, and SSH executors                                                      |
+| [`@usine/gateway`](./packages/gateway)           | The Gateway service for Workers on a private network: GitHub and LLM reverse proxies, forward proxy with an allowlist, admin API   |
 | [`@usine/orchestrator`](./packages/orchestrator) | The embeddable composition: the full engine as an Effect layer, startable in-process                                            |
 | [`@usine/server`](./apps/server)                 | Thin `usine up` CLI that runs the orchestrator in the foreground and serves the local web UI                                   |
 | `apps/web`                                       | The web UI (never published)                                                                                                    |
