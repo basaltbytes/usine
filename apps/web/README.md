@@ -30,7 +30,7 @@ Bookmarks expire after 30 days. This browser origin retains up to 20 Runs, the m
 
 ## Conversation browser tests
 
-Install the pinned Chromium browser once with `pnpm --filter @usine/web exec playwright install chromium`, then run `pnpm --filter @usine/web test`. The suite runs unit tests in Node and interaction tests in Chromium using the real MessageScroller, Base UI disclosures, sidebar, and browser layout. Board move tests use the actual HTTP client with controlled HTTP responses to replay stale refreshes, failures, concurrent card moves, and navigation during a request. CI installs Chromium and its operating-system dependencies before running the suite.
+Install the pinned Chromium browser once with `pnpm --filter @usine/web exec playwright install chromium`, then run `pnpm --filter @usine/web test`. The suite runs unit tests in Node and interaction tests in Chromium using the real MessageScroller, Base UI disclosures, sidebar, and browser layout. Board move tests use the actual HTTP client with controlled HTTP responses to replay stale refreshes, failures, concurrent card moves, and navigation during a request. CI installs Chromium and its operating-system dependencies before running the suite. A machine with its own Chromium, such as a Worker built by [`infra/hetzner/cloud-init.yaml`](../../infra/hetzner/cloud-init.yaml), sets `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to the browser's path instead; `vitest.config.ts` passes it to Playwright as `executablePath`, and `turbo.json` lists it in the `test` task's `env` so that `pnpm test` from the repository root sees it.
 
 ## How to add UI
 
