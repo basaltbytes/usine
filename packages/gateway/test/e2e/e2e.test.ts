@@ -16,6 +16,20 @@ import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, WORKER, settingsLayer } from "../fixtu
 import { tlsThroughTunnel } from "../tunnel.ts";
 
 // These tests reach github.com and registry.npmjs.org, anonymously, so CI needs no secret.
+// They are skipped where the machine has no direct route to the internet, such as a Worker behind a Gateway (#273).
+const directEgress = await new Promise<boolean>((resolve) => {
+  const socket = connect({ host: "api.github.com", port: 443 });
+  socket.setTimeout(3_000);
+  socket.once("connect", () => {
+    socket.destroy();
+    resolve(true);
+  });
+  socket.once("error", () => resolve(false));
+  socket.once("timeout", () => {
+    socket.destroy();
+    resolve(false);
+  });
+});
 
 const PUBLIC_REPOSITORY = RepositoryName.make("octocat/Hello-World");
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
@@ -93,7 +107,7 @@ const socketForwarder = (path: string, proxy: Listener) =>
     (server) => Effect.callback<void>((resume) => void server.close(() => resume(Effect.void))),
   );
 
-describe("the gateway against GitHub", () => {
+describe.skipIf(!directEgress)("the gateway against GitHub", () => {
   it.live(
     "git clones a public repository through git.<domain>, and only the attached one",
     () =>
