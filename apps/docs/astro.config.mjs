@@ -6,9 +6,19 @@ import lucode from "lucode-starlight";
 
 export default defineConfig({
   integrations: [
-    mermaid({ autoTheme: true, enableLog: false }),
+    mermaid({
+      autoTheme: true,
+      enableLog: false,
+      mermaidConfig: {
+        flowchart: { useMaxWidth: false },
+        sequence: { useMaxWidth: false, width: 120, actorMargin: 30 },
+        state: { useMaxWidth: false },
+        er: { useMaxWidth: false },
+      },
+    }),
     starlight({
       title: "usine",
+      customCss: ["./src/styles/diagrams.css"],
       description:
         "usine runs coding agents on the GitHub issues and pull requests of the repositories an operator registers.",
       plugins: [

@@ -1,0 +1,303 @@
+/*
+ * Mermaid diagrams in Lucode's neutral palette.
+ *
+ * astro-mermaid renders with mermaid's `default` theme in light mode and `dark` in dark mode.
+ * Mermaid scopes its rules to the SVG's id. `svg:not(#_)` gives a selector the same id weight,
+ * and `pre.mermaid > svg` adds a class and two elements on top, so these rules win without
+ * `!important`. It remains where mermaid writes inline styles or marks its own rule important.
+ */
+
+:root[data-theme="light"] {
+  --diagram-surface: var(--background);
+  --diagram-frame: var(--border);
+  --diagram-text: var(--foreground);
+  --diagram-text-muted: var(--muted-foreground);
+  --diagram-line: var(--gray-4);
+  --diagram-node: var(--code-background);
+  --diagram-node-border: var(--gray-4);
+  --diagram-group-border: var(--gray-5);
+  --diagram-note: var(--secondary);
+  --diagram-band: var(--muted);
+}
+
+:root[data-theme="dark"] {
+  --diagram-surface: var(--background);
+  --diagram-frame: var(--border);
+  --diagram-text: var(--foreground);
+  --diagram-text-muted: var(--muted-foreground);
+  --diagram-line: var(--gray-4);
+  --diagram-node: var(--code-background);
+  --diagram-node-border: var(--gray-4);
+  --diagram-group-border: var(--gray-5);
+  --diagram-note: var(--muted);
+  --diagram-band: var(--muted);
+}
+
+/* Frame. A diagram wider than the column scrolls inside its own box. */
+
+:root[data-theme] .sl-markdown-content pre.mermaid {
+  display: block;
+  padding: 1.25rem;
+  overflow-x: auto;
+  border: 1px solid var(--diagram-frame);
+  border-radius: var(--radius);
+  background: var(--diagram-surface);
+}
+
+:root[data-theme] .sl-markdown-content pre.mermaid > svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin-inline: auto;
+}
+
+@media (max-width: 50rem) {
+  :root[data-theme] .sl-markdown-content pre.mermaid > svg {
+    max-width: none;
+  }
+}
+
+/*
+ * Type. Mermaid measures labels outside the page column, so text inside a diagram must not
+ * pick up content styles. This unlayered rule undoes Lucode's `.sl-markdown-content *`
+ * font size and loses to every mermaid rule that sets a size.
+ */
+
+.sl-markdown-content pre.mermaid svg * {
+  font-size: inherit;
+}
+
+svg[id^="mermaid-"]:not(#_) {
+  font-family: var(--sl-font, var(--sl-font-system));
+}
+
+svg[id^="mermaid-"]:not(#_) :where(.label, .nodeLabel, .edgeLabel, span, p) {
+  font-family: var(--sl-font, var(--sl-font-system));
+}
+
+svg[id^="mermaid-"]:not(#_) text {
+  font-family: var(--sl-font, var(--sl-font-system)) !important;
+}
+
+/* Text, lines, arrowheads, and edge labels shared by every diagram type. */
+
+pre.mermaid > svg:not(#_) text {
+  fill: var(--diagram-text);
+}
+
+pre.mermaid > svg:not(#_) :where(.label, .nodeLabel, span) {
+  color: var(--diagram-text);
+}
+
+pre.mermaid > svg:not(#_) .label text {
+  fill: var(--diagram-text);
+}
+
+pre.mermaid > svg:not(#_) .flowchart-link,
+pre.mermaid > svg:not(#_) .edgePaths .path,
+pre.mermaid > svg:not(#_) .transition,
+pre.mermaid > svg:not(#_) .relationshipLine {
+  stroke: var(--diagram-line);
+}
+
+pre.mermaid > svg:not(#_) .marker,
+pre.mermaid > svg:not(#_) .arrowheadPath,
+pre.mermaid > svg:not(#_) [id$="-barbEnd"] {
+  fill: var(--diagram-line);
+  stroke: var(--diagram-line);
+}
+
+pre.mermaid > svg:not(#_) .edgeLabel,
+pre.mermaid > svg:not(#_) .edgeLabel p,
+pre.mermaid > svg:not(#_) .labelBkg {
+  background-color: var(--diagram-surface);
+  color: var(--diagram-text-muted);
+}
+
+pre.mermaid > svg:not(#_) .edgeLabel rect,
+pre.mermaid > svg:not(#_) .edgeLabel .label rect {
+  fill: var(--diagram-surface);
+  opacity: 1;
+}
+
+pre.mermaid > svg:not(#_) .edgeLabel .label text {
+  fill: var(--diagram-text-muted);
+}
+
+pre.mermaid > svg:not(#_) .label div .edgeLabel {
+  color: var(--diagram-text-muted);
+}
+
+/* Flowchart nodes and subgraphs. */
+
+pre.mermaid > svg:not(#_) .node rect,
+pre.mermaid > svg:not(#_) .node circle,
+pre.mermaid > svg:not(#_) .node ellipse,
+pre.mermaid > svg:not(#_) .node polygon,
+pre.mermaid > svg:not(#_) .node path {
+  fill: var(--diagram-node);
+  stroke: var(--diagram-node-border);
+}
+
+pre.mermaid > svg:not(#_) .cluster rect {
+  fill: transparent;
+  stroke: var(--diagram-group-border);
+  stroke-dasharray: 4 3;
+}
+
+pre.mermaid > svg:not(#_) .cluster-label text,
+pre.mermaid > svg:not(#_) .cluster-label span,
+pre.mermaid > svg:not(#_) .cluster text,
+pre.mermaid > svg:not(#_) .cluster span {
+  fill: var(--diagram-text-muted);
+  color: var(--diagram-text-muted);
+}
+
+/* Sequence diagrams. */
+
+pre.mermaid > svg:not(#_) .actor,
+pre.mermaid > svg:not(#_) .actor-man circle,
+pre.mermaid > svg:not(#_) .actor-man line {
+  fill: var(--diagram-node);
+  stroke: var(--diagram-node-border);
+}
+
+pre.mermaid > svg:not(#_) text.actor > tspan {
+  fill: var(--diagram-text);
+}
+
+pre.mermaid > svg:not(#_) .actor-line {
+  stroke: var(--diagram-group-border);
+}
+
+pre.mermaid > svg:not(#_) .messageLine0,
+pre.mermaid > svg:not(#_) .messageLine1 {
+  stroke: var(--diagram-line);
+}
+
+pre.mermaid > svg:not(#_) [id$="-arrowhead"] path,
+pre.mermaid > svg:not(#_) [id$="-crosshead"] path {
+  fill: var(--diagram-line);
+  stroke: var(--diagram-line);
+}
+
+pre.mermaid > svg:not(#_) [id$="-sequencenumber"] {
+  fill: var(--diagram-text);
+}
+
+pre.mermaid > svg:not(#_) text.sequenceNumber {
+  fill: var(--diagram-surface);
+}
+
+pre.mermaid > svg:not(#_) .note {
+  fill: var(--diagram-note);
+  stroke: var(--diagram-group-border);
+}
+
+pre.mermaid > svg:not(#_) .noteText > tspan {
+  fill: var(--diagram-text);
+}
+
+pre.mermaid > svg:not(#_) .activation0,
+pre.mermaid > svg:not(#_) .activation1,
+pre.mermaid > svg:not(#_) .activation2 {
+  fill: var(--diagram-band);
+  stroke: var(--diagram-node-border);
+}
+
+pre.mermaid > svg:not(#_) .labelBox {
+  fill: var(--diagram-band);
+  stroke: var(--diagram-group-border);
+}
+
+pre.mermaid > svg:not(#_) .labelText > tspan {
+  fill: var(--diagram-text);
+}
+
+pre.mermaid > svg:not(#_) text.loopText,
+pre.mermaid > svg:not(#_) .loopText > tspan,
+pre.mermaid > svg:not(#_) .sectionTitle > tspan {
+  fill: var(--diagram-text-muted);
+}
+
+pre.mermaid > svg:not(#_) .loopLine {
+  stroke: var(--diagram-group-border);
+  fill: var(--diagram-group-border);
+}
+
+/* State diagrams. */
+
+pre.mermaid > svg:not(#_) .node circle.state-start,
+pre.mermaid > svg:not(#_) .node .fork-join {
+  fill: var(--diagram-text);
+  stroke: var(--diagram-text);
+}
+
+pre.mermaid > svg:not(#_) .node circle.state-end {
+  fill: var(--diagram-text);
+  stroke: var(--diagram-surface);
+}
+
+pre.mermaid > svg:not(#_) .node .end-state-inner {
+  fill: var(--diagram-surface);
+}
+
+pre.mermaid > svg:not(#_) .statediagram-cluster rect {
+  fill: var(--diagram-node);
+  stroke: var(--diagram-node-border);
+}
+
+pre.mermaid > svg:not(#_) .statediagram-cluster.statediagram-cluster .inner {
+  fill: var(--diagram-surface);
+}
+
+pre.mermaid > svg:not(#_) .statediagram-note rect {
+  fill: var(--diagram-note);
+  stroke: var(--diagram-group-border);
+}
+
+pre.mermaid > svg:not(#_) .statediagram-note .nodeLabel {
+  color: var(--diagram-text);
+}
+
+/* Entity relationship diagrams: rough.js draws each box as a fill path and an outline path. */
+
+pre.mermaid > svg[aria-roledescription="er"]:not(#_) .node path {
+  fill: var(--diagram-surface);
+  stroke: var(--diagram-node-border);
+}
+
+pre.mermaid > svg[aria-roledescription="er"]:not(#_) .node path[fill="none"] {
+  fill: none;
+}
+
+pre.mermaid > svg[aria-roledescription="er"]:not(#_) .node path[stroke="none"] {
+  stroke: none;
+}
+
+pre.mermaid > svg[aria-roledescription="er"]:not(#_) .outer-path path[stroke="none"] {
+  fill: var(--diagram-band);
+}
+
+pre.mermaid > svg[aria-roledescription="er"]:not(#_) .row-rect-even path[stroke="none"] {
+  fill: var(--diagram-node);
+}
+
+pre.mermaid > svg[aria-roledescription="er"]:not(#_) .attribute-type span,
+pre.mermaid > svg[aria-roledescription="er"]:not(#_) .attribute-keys span {
+  color: var(--diagram-text-muted);
+}
+
+pre.mermaid > svg[aria-roledescription="er"]:not(#_) .relationshipLabelBox {
+  fill: var(--diagram-surface);
+  opacity: 1;
+}
+
+pre.mermaid > svg[aria-roledescription="er"]:not(#_) .marker {
+  fill: none !important;
+  stroke: var(--diagram-line) !important;
+}
+
+pre.mermaid > svg[aria-roledescription="er"]:not(#_) .marker circle {
+  fill: var(--diagram-surface);
+}
