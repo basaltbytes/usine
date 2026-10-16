@@ -22,7 +22,7 @@ The contract is `OperatorApi` (`packages/orchestrator/src/operator/http.ts:149`)
 | --- | --- | --- | --- |
 | GET | `/api/overview` | | `Ready` or `NeedsSetup` overview: each Project's status, Runs, Board, labels, and label preflight findings; each Loop's trigger, Agent, and paused flag; the Needs you list. |
 | GET | `/api/agents` | | The roster's Agent names. |
-| GET | `/api/runs/:runId` | none, `after=<seq>`, or `before=<seq>&attempt=<id>` | The Run with its Attempts, Event dedup key and payload, and a transcript window: the newest 500 rows, the rows after a sequence, or one earlier page of an Attempt (`packages/orchestrator/src/operator/projection.ts:37`). |
+| GET | `/api/runs/:runId` | none, `after=<seq>`, or `before=<seq>&attempt=<id>` | The Run with its Attempts, Event dedup key and payload, and a transcript window: the newest 500 rows of each Attempt, the rows after a sequence (at most 500 across all Attempts), or one earlier page of an Attempt (`packages/orchestrator/src/operator/projection.ts:37`). |
 | POST | `/api/runs/:runId/approve` | | Records the approval Event; `Waiting` becomes `Queued`. 409 in any other state. |
 | POST | `/api/runs/:runId/retry` | | `Failed` becomes `Running`; a new Attempt starts when a Worker slot is free. |
 | POST | `/api/runs/:runId/edit-and-retry` | `{ task, agent }` | Replaces the Run's task text and Agent, then retries. 404 for an Agent outside the roster. |

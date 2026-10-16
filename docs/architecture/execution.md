@@ -88,12 +88,12 @@ runaway guard sink (executor/src/guard.ts) --- meters tokens, tracks Holds
    v
 RunStore.appendTranscript --- usine_attempt_transcripts in .usine/runtime.sqlite
    v
-RunReader.transcript --- GET /api/runs/:runId (newest 500 rows, tail, earlier pages)
+RunReader.transcript --- GET /api/runs/:runId (newest 500 rows per Attempt, tail, earlier pages)
    v
 Run drawer (apps/web/src/run-drawer.tsx) --- polls every second while the Run can be canceled
 ```
 
-The operator's first read returns the newest 500 rows, later reads return rows after a sequence, and the drawer loads earlier pages on request (`packages/orchestrator/src/operator/projection.ts:37`).
+The operator's first read returns the newest 500 rows of each Attempt (`packages/orchestrator/src/operator/projection.ts:37`, `:192`), later reads return the rows after a sequence, at most 500 rows across all Attempts (`:39`), and the drawer loads earlier pages of one Attempt on request.
 
 ## The live channel for interventions
 

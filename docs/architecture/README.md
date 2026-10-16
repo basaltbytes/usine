@@ -81,7 +81,7 @@ The last column lists workspace dependencies only. `effect` is a peer dependency
 | `@usine/server` 0.2.1, `apps/server` | The `usine` CLI (`up`, `backup`, `export-run`); serves the operator API and the web build. | none, binary `usine` | config, core, durable, engine, expression, github, orchestrator |
 | `@usine/web`, `apps/web`, private | The React web UI: projects, Boards, the Run drawer, Loop pause controls. | none | core, orchestrator |
 
-`packages/run-host` does not exist at this commit. The root [`README.md`](../../README.md) table does not list `@usine/gateway`.
+`packages/run-host` does not exist at this commit.
 
 ## How one change moves through the tree
 
