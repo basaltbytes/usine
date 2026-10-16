@@ -1,8 +1,237 @@
 ---
 title: Run a factory
-description: How to run usine against your repositories.
+description: Prepare an instance folder, connect a GitHub App, and start the orchestrator with usine up.
+sidebar:
+  order: 0
 ---
 
-:::caution
-This page is being written.
-:::
+import { CardGrid, FileTree, LinkCard, Steps } from "@astrojs/starlight/components";
+
+A factory is one orchestrator process that you start with `usine up` from an instance folder. The folder contains the configuration you write, which you keep in git, and the runtime state that the orchestrator writes under `.usine/`, which stays out of git. The orchestrator polls the GitHub repositories the folder registers, opens a Run when an issue or pull request matches a Loop, and serves a web UI on `127.0.0.1` where you follow and steer the work.
+
+## What you need
+
+- Node.js 22 or later, pnpm 11, and Git on the machine that runs the orchestrator.
+- A GitHub account or organization that owns the repositories, where you can create and install a GitHub App.
+- The coding harnesses your Agents use, installed and logged in where the Agents' children run: Claude Code with a Claude subscription, Codex CLI 0.144.0 or 0.153.4 with a ChatGPT login. With the default local Worker, that is this machine and the user who runs `usine up`.
+- A model credential in Pi's configuration for the Pi parent that runs each Attempt. [Write an Agent](/guides/write-an-agent/) explains which one.
+
+## Install usine
+
+usine runs from a checkout of its repository:
+
+```sh title="Orchestrator machine"
+git clone https://github.com/basaltbytes/usine.git
+cd usine
+pnpm install --frozen-lockfile
+pnpm build
+```
+
+The build writes the CLI to `apps/server/dist/main.js` and copies the web UI into `apps/server/dist/web`, where the server reads it. This site writes `usine` for `node /path/to/usine/apps/server/dist/main.js`; an alias gives you the same command:
+
+```sh title="~/.zshrc"
+alias usine="node /path/to/usine/apps/server/dist/main.js"
+```
+
+The `@usine/server` package is on npm, but installing it with npm fails at this commit because of a dependency range ([#233](https://github.com/basaltbytes/usine/issues/233)).
+
+To update, pull, run `pnpm install --frozen-lockfile` and `pnpm build` again, then restart `usine up`. A rebuilt web UI alone needs only a page reload, because the server reads its files on every request.
+
+## Create the instance folder
+
+<FileTree>
+
+- my-factory/
+  - usine.yaml registry, labels, settings, and Workers
+  - agents/
+    - developer.md one Agent per file
+  - loops/
+    - start-dev.md one Loop per file
+  - .gitignore
+  - .usine/ runtime state that usine up writes
+    - runtime.sqlite
+    - durable.sqlite
+    - github-app.json
+    - instance.lock
+    - instance.pid
+    - workers/
+
+</FileTree>
+
+<Steps>
+
+1. Create the folder with a `usine.yaml` file and two folders, `agents/` and `loops/`. `usine up` stops when either folder is missing, even if it would be empty.
+
+2. Register the repositories in `usine.yaml`. This is the smallest valid file:
+
+   ```yaml title="usine.yaml"
+   version: 1
+   repos:
+     - name: acme/widgets
+   ```
+
+   Without a `workers` key the factory has one Worker named `local`, which runs one Attempt at a time on this machine. Without `settings`, the orchestrator polls every 60 seconds. A fuller file declares the labels your Loops use, the Board lanes of each repository, and the GitHub login that interventions are attributed to:
+
+   ```yaml title="usine.yaml"
+   version: 1
+   labels:
+     - name: ready-for-agent
+       color: 0e8a16
+       description: The developer Agent may start this issue
+     - name: ready-for-review
+   repos:
+     - name: acme/widgets
+       tags: [backend]
+       lanes:
+         - name: Ready
+           sources: [{ label: ready-for-agent }]
+         - name: Review
+           sources: [{ label: ready-for-review }]
+         - name: Done
+           sources: [{ state: pr-merged }, { state: issue-closed }]
+   settings:
+     poll_interval: 60
+   workers:
+     - name: local
+       kind: local
+       max_concurrent_attempts: 2
+   operator: your-github-login
+   ```
+
+   [`usine.yaml`](/reference/configuration/usine-yaml/) lists every key. An unknown key or an invalid value stops `usine up`, and the error gives the file and the problem.
+
+3. Add at least one Agent and one Loop. [Write an Agent](/guides/write-an-agent/) and [Write a Loop](/guides/write-a-loop/) explain both files.
+
+4. Keep the runtime state out of git:
+
+   ```text title=".gitignore"
+   .usine/
+   ```
+
+</Steps>
+
+## Connect a GitHub App
+
+usine acts on GitHub as one GitHub App. The orchestrator calls GitHub with an installation token for polling and label writes, and each Attempt gets its own token for its one repository, valid for at most one hour. The App's private key stays on the orchestrator's machine.
+
+<Steps>
+
+1. In the settings of the account or organization that owns the repositories, open **Developer settings**, then **GitHub Apps**, and select **New GitHub App**. Set **Where can this GitHub App be installed?** to **Only on this account**.
+
+2. Clear **Active** under **Webhook**. usine polls GitHub and reads no webhook delivery, so the App subscribes to no event.
+
+3. Set these repository permissions, and leave every other repository, organization, and account permission at **No access**:
+
+   | Permission    | Access         |
+   | ------------- | -------------- |
+   | Checks        | Read-only      |
+   | Contents      | Read and write |
+   | Issues        | Read and write |
+   | Metadata      | Read-only      |
+   | Pull requests | Read and write |
+
+   usine requests exactly these five for every token and refuses an installation that lacks one of them. With **Workflows** at **No access**, Attempt tokens cannot change files under `.github/workflows/`.
+
+4. Create the App, generate a private key, and note the numeric App ID on the App's page.
+
+5. On the App's **Install App** page, install it on the account that owns the repositories and select every repository listed in `usine.yaml`. usine expects exactly one installation of the App and refuses a suspended one.
+
+6. Give the credentials to usine, either as a file in the instance folder or as environment variables. The file must be a regular file with mode `0600`; usine refuses any other mode, `0400` included:
+
+   ```sh title="Instance folder"
+   mkdir -p .usine
+   install -m 600 /dev/null .usine/github-app.json
+   jq -n --argjson app_id "$APP_ID" --rawfile private_key factory.private-key.pem \
+     '{app_id: $app_id, private_key: $private_key}' > .usine/github-app.json
+   ```
+
+   The environment variables are `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, the second with the PEM text of the key. A variable that is set replaces the matching field of the file, and usine does not read the file when both are set. usine accepts the PKCS#1 key that GitHub downloads (`BEGIN RSA PRIVATE KEY`) and PKCS#8 keys.
+
+</Steps>
+
+## Start the orchestrator
+
+Run `usine up` from the instance folder, which is the current directory:
+
+```sh title="Instance folder"
+usine up
+```
+
+The process stays in the foreground and prints `usine is running at http://127.0.0.1:7331`.
+
+| Option                       | Environment variable              | Effect                                                          |
+| ---------------------------- | --------------------------------- | --------------------------------------------------------------- |
+| `--port <port>`, `-p <port>` | `USINE_PORT`                      | Listens on another port. The default is 7331.                   |
+| `--allow-volatile-instance`  | `USINE_ALLOW_VOLATILE_INSTANCE=1` | Starts even when the instance folder is under a temporary path. |
+
+`usine up` checks these in order, and each failure stops it with a message that says what to fix:
+
+1. The instance folder is not under `/tmp`, `/private/tmp`, `/var/folders`, or `$TMPDIR`, since `.usine/runtime.sqlite` is the only copy of the Run history.
+2. No other `usine up` runs in the same folder. A second one exits and prints the process id from `.usine/instance.pid`.
+3. No other process listens on the port. usine prints that process's id when `lsof` can find it.
+4. `usine.yaml` is valid. An invalid Loop or Agent file does not stop startup: the file is left out and its siblings load ([Write a Loop](/guides/write-a-loop/#when-a-loop-does-not-load)).
+5. The GitHub App credentials load. Without them usine starts in setup mode instead of stopping.
+6. Every Worker passes preflight for every Agent's harness, and the Gateway admin token of every Worker behind a Gateway is set. [Add a Worker](/guides/add-a-worker/) covers both.
+
+After these checks the orchestrator serves the web UI, starts polling, and reattaches the Attempts that an earlier process left running.
+
+## Setup mode
+
+When the credentials are missing or invalid, `usine up` still starts. It logs `GitHub App credentials are absent; pollers are idle`, prints `usine is waiting for GitHub App setup at http://127.0.0.1:7331`, and opens that address in your default browser. The page shows **GitHub App credentials are missing** with the error and the two ways to supply them.
+
+In setup mode nothing polls GitHub and no schedule fires. Projects, Runs, and their transcripts remain readable, while every action (approve, retry, cancel, pause, a Board move) is refused with the error `BackendUnavailableError`. usine reads the credentials only at startup: once they are in place, stop the process with Ctrl+C and run `usine up` again.
+
+## Open the web UI
+
+The UI is at `http://127.0.0.1:7331`, or the port you chose. The server listens on the loopback interface only and has no login. It refuses requests that a browser sends from a page on any origin other than a loopback host, so another website cannot drive it through your browser. To use it from another computer, forward the port over SSH and open the same address there:
+
+```sh title="Your computer"
+ssh -N -L 7331:127.0.0.1:7331 orchestrator.example.com
+```
+
+The sidebar lists **Projects**, with one Board per registered repository, and **Configuration**, where you pause and unpause Loops on the **Loops** page. **Needs you** at the top of every page lists what waits for you. [Operate Runs](/guides/operate-runs/) describes each screen.
+
+## Runtime state
+
+usine writes everything it needs to remember under `.usine/` in the instance folder:
+
+| Path                                          | Contents                                                                                                              |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| `.usine/runtime.sqlite`                       | Events, Runs, Attempts, transcripts, Board projections, poll cursors, and Loop pause flags. No row is ever deleted.   |
+| `.usine/durable.sqlite`                       | Each Attempt's Pi parent task and conversation, which a restart resumes.                                              |
+| `.usine/github-app.json`                      | The App credentials, if you chose the file.                                                                           |
+| `.usine/instance.lock`, `.usine/instance.pid` | The lock that refuses a second `usine up`, and the process id of the running one.                                     |
+| `.usine/workers/<worker>/`                    | For a local Worker: cached clones in `repos/`, Attempt worktrees in `attempts/`, and the Turborepo cache in `turbo/`. |
+
+The runtime store also records every Event the factory has seen, which is what stops a Loop from acting twice on the same Item content. Deleting it loses that record along with the Run history, so back it up with `usine backup` instead ([Operate Runs](/guides/operate-runs/#back-up-and-export)).
+
+## Change the configuration
+
+`usine up` reads the instance folder once, at startup, and nothing watches the files. After you edit `usine.yaml`, a Loop, or an Agent, stop the orchestrator and start it again. When the set of Loops that watch a repository changes, through a new Loop, a removed one, or a changed `on` or `if:`, the next poll goes over that repository's Items from the start.
+
+Press Ctrl+C once, or send SIGTERM, to stop: the orchestrator stops starting Attempts and waits for the running ones to end. A second Ctrl+C stops the wait ([Operate Runs](/guides/operate-runs/#stop-the-orchestrator)).
+
+## Next
+
+<CardGrid>
+  <LinkCard
+    title="Write a Loop"
+    description="Select issues, pull requests, or schedule ticks and hand them to an Agent."
+    href="/guides/write-a-loop/"
+  />
+  <LinkCard
+    title="Write an Agent"
+    description="Choose the harness, model, and persona that do a Loop's work."
+    href="/guides/write-an-agent/"
+  />
+  <LinkCard
+    title="Operate Runs"
+    description="Approve, follow, steer, retry, and cancel Runs in the web UI."
+    href="/guides/operate-runs/"
+  />
+  <LinkCard
+    title="Add a Worker"
+    description="Run children on a Linux machine over SSH, with or without a Gateway."
+    href="/guides/add-a-worker/"
+  />
+</CardGrid>
