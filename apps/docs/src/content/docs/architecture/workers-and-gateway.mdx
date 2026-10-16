@@ -1,0 +1,635 @@
+---
+title: "Workers and the Gateway"
+description: "Worker kinds in usine.yaml, preflight, the Hetzner Gateway VM, how a GitHub token reaches a request on each kind of Worker, and the cloud-init files."
+sidebar:
+  order: 3
+---
+
+import { FileTree, Steps, TabItem, Tabs } from "@astrojs/starlight/components";
+
+:::note
+This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16.
+:::
+
+A Worker is the machine where an Attempt's checkout is and where its children run. The Pi parent always runs in the orchestrator. The operating recipes (creating machines, logging in to the harnesses, the SSH configuration, deleting) are in [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) and [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md); this page explains what the code does.
+
+## Worker kinds in `usine.yaml`
+
+`Worker` is a union of three classes ([factory.ts:150][]). Without a `workers` key the factory has one Worker named `local` ([factory.ts:214][]).
+
+| `kind`               | Fields                                                                                                                | Executor              | Children run                                                                                          | GitHub credential on the machine                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `local`              | `name`, `max_concurrent_attempts` (default 1)                                                                         | [local.ts][]          | as processes of the orchestrator's machine                                                            | token file in a private temporary directory           |
+| `ssh`                | `name`, `destination`, `root`, optional `identity_file`, `port`, `max_concurrent_attempts`, `gateway`                 | [ssh/ssh.ts][]        | one SSH command each                                                                                  | token file under `<root>/workers/<name>/credentials/` |
+| `ssh` with `gateway` | `gateway.domain`, `gateway.admin_url`, `gateway.admin_token_env`, optional `gateway.llm_providers` (only `anthropic`) | the same SSH executor | one SSH command each; the operator's SSH configuration routes it through the Gateway with `ProxyJump` | none; a caller token in the SSH session's environment |
+| `exe.dev`            | `name`, `max_concurrent_attempts`                                                                                     | [exe-dev.ts][]        | one SSH command each on the VM                                                                        | none; exe.dev's edge adds it                          |
+
+The two `ssh` forms, as the Hetzner READMEs write them:
+
+<Tabs>
+  <TabItem label="ssh">
+
+```yaml title="usine.yaml"
+workers:
+  - name: eu-one
+    kind: ssh
+    destination: usine@203.0.113.7
+    identity_file: ~/.ssh/usine_worker
+    root: /home/usine/.usine
+    max_concurrent_attempts: 2
+```
+
+  </TabItem>
+  <TabItem label="ssh behind a Gateway">
+
+```yaml title="usine.yaml"
+workers:
+  - name: worker-one
+    kind: ssh
+    destination: worker-one
+    root: /home/usine/.usine
+    gateway:
+      domain: gw.internal
+      admin_url: http://127.0.0.1:7070
+      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
+```
+
+`destination` is a `Host` alias. The orchestrator user's SSH configuration reaches the Worker through the Gateway and holds the forward to the admin API:
+
+```ssh-config title="~/.ssh/config"
+Host usine-gateway
+  HostName 203.0.113.7
+  User root
+  IdentityFile ~/.ssh/usine_worker
+  LocalForward 7070 127.0.0.1:7070
+
+Host worker-one
+  HostName 10.42.0.3
+  User usine
+  ProxyJump usine-gateway
+  IdentityFile ~/.ssh/usine_worker
+```
+
+  </TabItem>
+</Tabs>
+
+`usine up` uses one executor for all Workers. `workerEngineLayer` ([worker-engine.ts:13][]) picks the SSH executor when every Worker is `ssh` and the local executor otherwise. `stepExecutorLayer` then refuses any Worker whose kind differs from the executor's with `UnsupportedWorkerError` ([scheduler.ts:76][]). A mix of kinds, or any `exe.dev` Worker, therefore stops startup. The exe.dev executor also needs `githubIntegrations` options that `usine.yaml` cannot express ([exe-dev.ts:34][]), so it runs only from the integration test (`pnpm --filter @usine/orchestrator test:exe-dev`). [#228][] tracks both.
+
+```mermaid
+flowchart TD
+  workers["Workers in usine.yaml"] --> all{"every Worker<br/>has kind ssh?"}
+  all -->|yes| ssh["SSH executor"]
+  all -->|no| local["local executor"]
+  ssh --> same{"every Worker has<br/>the executor's kind?"}
+  local --> same
+  same -->|no| refused(["UnsupportedWorkerError:<br/>usine up stops"])
+  same -->|yes| preflight(["preflight every Worker"])
+```
+
+## What the executor does for each kind
+
+### local
+
+State is under `<instance>/.usine/workers/<worker>/`: `repos/` for bare caches, `attempts/` for worktrees, `turbo/` for `TURBO_CACHE_DIR` ([local.ts:103][], [local.ts:290][]). Credentials go to a `usine-credentials-*` directory in the OS temporary folder, mode 700, with the token in `token` and gh's `hosts.yml` and `config.yml` beside it ([local/credentials.ts:22][]). Git reads the token through a credential helper and gh through `GH_CONFIG_DIR` ([credential-environment.ts:15][]), so a renewed file takes effect without restarting a child. Git output is scrubbed of every issued token before it goes into an error or a log ([local.ts:133][]).
+
+### ssh without a Gateway
+
+Every command is `ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 [-p port] [-i key -o IdentitiesOnly=yes] <destination> -- <quoted command>` ([commands.ts:87][], [ssh/ssh.ts:22][], [child-host.ts:85][]). The SSH client inherits only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `SSH_AGENT_PID`, `SSH_AUTH_SOCK`, `TMPDIR`, and `USER` ([commands.ts:70][]). The Worker directory on the machine is `<root>/workers/<name>`.
+
+The token is written to `<root>/workers/<name>/credentials/<attempt>` by a shell script that reads it from standard input, so it is in no command line ([ssh/credentials.ts:25][]). The directories are mode 700 and the files 600. The first Attempt of each Worker in a process removes every credential directory an earlier process left. All Attempts on one machine run as the same user and can read each other's tokens ([ADR 0026](https://github.com/basaltbytes/usine/blob/main/docs/adr/0026-eu-ssh-worker.md), [#231][]).
+
+### ssh behind a Gateway
+
+`gatewayAttachmentsFor` ([attachments.ts:58][]) gives the Attempt repository access with no token on the machine:
+
+<Steps>
+
+1. Write gh's configuration to `<worker directory>/gh`: `http_unix_socket: /run/usine-gateway/http.sock` and the host `git.<domain>`. Neither file contains a token ([gateway/environment.ts:42][]).
+2. Mint the Attempt's token and `POST /v1/attachments` on the Gateway's admin API. The answer has the attachment id and a caller token.
+3. Renew the same attachment id with `PUT` before the token expires, and store it again every two minutes ([attachments.ts:35][]), because the Gateway keeps attachments in memory and forgets them on restart. The caller token stays the same.
+4. `DELETE` the attachment when the Attempt's scope closes.
+5. Once per process and Worker, detach the attachments an earlier process left for that Worker ([attachments.ts:64][]).
+
+</Steps>
+
+The children's environment has two parts ([gateway/environment.ts:88][]). The exported part is written into each command line and contains no secret. The sent part travels with OpenSSH `SendEnv` ([commands.ts:101][]), so the caller token is in no command line; the Worker's sshd must accept each sent name with `AcceptEnv`.
+
+| Variable                                                 | Value                                                                           | Part     |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------- | -------- |
+| `GIT_CONFIG_COUNT`                                       | `3`                                                                             | exported |
+| `GIT_CONFIG_KEY_0`                                       | `http.http://git.<domain>/.extraHeader`                                         | exported |
+| `GIT_CONFIG_VALUE_0`                                     | `x-usine-gateway-token: <caller token>`                                         | sent     |
+| `GIT_CONFIG_KEY_1`, `GIT_CONFIG_KEY_2`                   | `url.http://git.<domain>/.insteadOf`                                            | exported |
+| `GIT_CONFIG_VALUE_1`, `GIT_CONFIG_VALUE_2`               | `https://github.com/`, `https://git.<domain>/`                                  | exported |
+| `GH_HOST`                                                | `git.<domain>`                                                                  | exported |
+| `GH_CONFIG_DIR`                                          | `<worker directory>/gh`                                                         | exported |
+| `GH_PROMPT_DISABLED`                                     | `1`                                                                             | exported |
+| `HTTPS_PROXY`, `HTTP_PROXY`, `https_proxy`, `http_proxy` | `http://<domain>:3128`                                                          | exported |
+| `NO_PROXY`, `no_proxy`                                   | `localhost,127.0.0.1,::1,<domain>`                                              | exported |
+| `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`                        | the caller token                                                                | sent     |
+| `ANTHROPIC_BASE_URL`                                     | `http://llm.<domain>/anthropic`, only when `llm_providers` contains `anthropic` | exported |
+| `ANTHROPIC_AUTH_TOKEN`                                   | the caller token, only when `llm_providers` contains `anthropic`                | sent     |
+
+The clone URL is `http://git.<domain>/<owner>/<repo>.git` ([gateway/environment.ts:33][]).
+
+### Shared by every remote kind
+
+`remoteExecutorFor` ([remote.ts:44][]) has the checkout, salvage, recovery, and reattach code that SSH and exe.dev share. Each Claude Code or Codex child is one SSH command with a pid file `<worktree>.child-<n>.pid` ([child-host.ts:96][]). `CHILD_KILL_SCRIPT` sends TERM, waits up to five seconds, then KILL, before the worktree is kept or removed ([child-host.ts:106][]).
+
+## Preflight
+
+`stepExecutorLayer` runs `Executor.preflight` for every configured Worker with every rostered brain while the runtime layer is built ([scheduler.ts:96][]). A failure stops `usine up`. `prepare` repeats the check for the Attempt's brain only ([local.ts:331][], [remote.ts:236][]). A capability gap found there fails the Attempt with `AgentFailure`, and a transport failure or a timeout stays a retryable `InfraFailure` ([scheduler.ts:51][]).
+
+```mermaid
+flowchart TD
+  kind{"Worker kind"} -->|local| lgit["git --version"]
+  lgit --> lbrain["each brain, with the<br/>child's environment"]
+  kind -->|ssh| connect["ssh destination true"]
+  connect --> root["root is a<br/>writable directory"]
+  root --> sgit["git --version"]
+  sgit --> gw{"gateway?"}
+  gw -->|no| sbrain["each brain over SSH"]
+  gw -->|yes| admin["the admin API answers<br/>the admin token"]
+  admin --> sent["sshd keeps the<br/>sent variables"]
+  sent --> curl["curl to git.domain answers<br/>missing-caller-token"]
+  curl --> gbrain["each brain behind<br/>the Gateway"]
+  lbrain --> ok(["Worker preflight verified"])
+  sbrain --> ok
+  gbrain --> ok
+```
+
+Behind a Gateway, each brain is checked according to where its harness gets its model credential ([gateway/preflight.ts:162][]):
+
+```mermaid
+flowchart TD
+  harness{"brain's harness"} -->|"claude, with anthropic<br/>in llm_providers"| binary["claude --version only"]
+  harness -->|"claude without it,<br/>or codex"| login["login check, as on a<br/>Worker without a Gateway"]
+  login --> hosts["each login host answers<br/>through the forward proxy"]
+  harness -->|pi| refused["refused: Pi children<br/>do not run remotely"]
+```
+
+| Worker             | Checks                                                                                                                                                                                                                                                                                                                                                                                                  | Code                                                      |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| local              | `git --version`; each brain where children run, with the child's environment                                                                                                                                                                                                                                                                                                                            | [local.ts:256][], [agents/src/preflight/preflight.ts][]   |
+| ssh                | SSH connects (`true`); `root` is a writable directory; `git --version`; each brain over SSH; Pi is refused on a remote machine                                                                                                                                                                                                                                                                          | [ssh/preflight.ts:31][]                                   |
+| ssh with a Gateway | The checks above, plus: the admin API answers the admin token; sshd accepts the variables that contain the caller token; `curl http://git.<domain>/` from the machine is refused for want of a caller token; for each harness that uses its login on the machine, the login's hosts answer through the forward proxy; Claude Code is checked for its binary only when the Gateway has the Anthropic key | [gateway/preflight.ts:47][], [gateway/preflight.ts:162][] |
+
+Local and direct SSH preflight do not check the GitHub credential. Only the exe.dev preflight raises the `credentials` capability ([exe-dev/preflight.ts:123][], [#278][]).
+
+## The Hetzner Gateway VM
+
+`infra/hetzner/gateway/gateway.sh create` creates a private network (`10.42.0.0/16`), the Gateway VM with a public address, and a Hetzner firewall that admits SSH from the orchestrator's address. `gateway-cloud-init.yaml` installs the parts below and generates the admin token and the caller key with `openssl rand -hex 32` into `/etc/usine-gateway/secrets.env` on first boot.
+
+The orchestrator reaches the Worker and the admin API through the Gateway's sshd. The diagrams use the defaults of `gateway.sh`: the domain `gw.internal` and the Gateway's private address `10.42.0.2`.
+
+```mermaid
+flowchart LR
+  subgraph orchestrator["Orchestrator machine"]
+    executor["executor"]
+    forward["local forward<br/>127.0.0.1:7070"]
+  end
+  subgraph gateway["Gateway VM"]
+    sshd["sshd :22"]
+    adminapi["admin API<br/>127.0.0.1:7070"]
+  end
+  subgraph private["Private network 10.42.0.0/16"]
+    worker["Worker VM<br/>sshd :22"]
+  end
+  executor -->|"attach, renew, detach,<br/>list: bearer admin token"| forward
+  forward -->|"ssh -L, kept open<br/>by the operator"| sshd
+  sshd --> adminapi
+  executor -->|"ssh -J, caller token<br/>in SendEnv"| sshd
+  sshd -->|"SSH into the private<br/>network only"| worker
+```
+
+A Worker has no public address and no default route. Everything it sends leaves through the Gateway:
+
+```mermaid
+flowchart LR
+  subgraph worker["Worker VM"]
+    git["git"]
+    gh["gh"]
+    socket["/run/usine-gateway/<br/>http.sock"]
+    claude["Claude Code, with<br/>anthropic in llm_providers"]
+    tools["package managers,<br/>harness logins, apt"]
+  end
+  subgraph gateway["Gateway VM 10.42.0.2"]
+    dns["dnsmasq :53"]
+    reverse["reverse proxy :80"]
+    egress["forward proxy :3128"]
+  end
+  gh --> socket
+  socket -->|"systemd socket proxy"| reverse
+  git -->|"git.gw.internal"| reverse
+  claude -->|"llm.gw.internal"| reverse
+  tools -->|"HTTPS_PROXY, HTTP_PROXY,<br/>apt's proxy setting"| egress
+  worker -.->|"name lookups"| dns
+  reverse -->|"HTTPS, installation token"| github["github.com<br/>api.github.com<br/>uploads.github.com"]
+  reverse -->|"HTTPS, the Gateway's key"| llm["Anthropic, OpenAI"]
+  egress -->|"allowlisted hosts only"| hosts["package hosts,<br/>login hosts"]
+```
+
+| Part                            | Listens on                                                              | Does                                                                                                                                                                                                                                                                                                                            | Code                                            |
+| ------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| Reverse proxy (`usine-gateway`) | port 80 on the private address (the binary's default is `127.0.0.1:80`) | `git.<domain>` forwards to github.com, api.github.com (paths under `/api/`), and uploads.github.com with the attached installation token; `llm.<domain>` forwards to Anthropic or OpenAI with the Gateway's own credential. Every request needs a caller token whose attachment is in force; any other host is refused with 404 | [proxy.ts][], [github.ts:15][]                  |
+| Forward proxy                   | port 3128 on the private address                                        | `CONNECT` to port 443 of an allowlisted host only, after checking that the TLS ClientHello's server name is that host and that the name resolves to public addresses only; plain HTTP is relayed with caller tokens removed                                                                                                     | [egress-proxy.ts:241][], [client-hello.ts:88][] |
+| Admin API                       | `127.0.0.1:7070`                                                        | `POST /v1/attachments`, `PUT /v1/attachments/:id`, `DELETE /v1/attachments/:id`, `GET /v1/attachments`, bearer admin token                                                                                                                                                                                                      | [api.ts:92][]                                   |
+| dnsmasq                         | port 53 on the private address                                          | Answers `<domain>` and its subdomains with the Gateway's address and refuses other names; `local=/<domain>/` answers AAAA with no address, for Codex's musl resolver ([#260][])                                                                                                                                                 | [gateway-cloud-init.yaml:42][]                  |
+| nftables                        |                                                                         | Input: SSH, plus DNS, 80, and 3128 from the private network. No forwarding. Outbound SSH only into the private network                                                                                                                                                                                                          | [gateway-nftables.conf][]                       |
+| sshd                            | port 22                                                                 | Bastion with `AllowTcpForwarding local`, for `ssh -J` to Workers and the admin API forward                                                                                                                                                                                                                                      | [gateway-cloud-init.yaml:66][]                  |
+
+`gateway.sh` replaces the `@@NAME@@` placeholders before the VM is created. The service, DNS, and SSH settings from `gateway-cloud-init.yaml`, and the firewall rules:
+
+<Tabs>
+  <TabItem label="settings.env">
+
+```yaml title="infra/hetzner/gateway/gateway-cloud-init.yaml"
+write_files:
+  # ...
+  - path: /etc/usine-gateway/settings.env
+    permissions: "0644"
+    content: |
+      USINE_GATEWAY_DOMAIN=@@DOMAIN@@
+      USINE_GATEWAY_PROXY_HOST=@@GATEWAY_IP@@
+      USINE_GATEWAY_PROXY_PORT=80
+      USINE_GATEWAY_EGRESS_HOST=@@GATEWAY_IP@@
+      USINE_GATEWAY_EGRESS_PORT=3128
+      USINE_GATEWAY_ADMIN_HOST=127.0.0.1
+      USINE_GATEWAY_ADMIN_PORT=7070
+      USINE_GATEWAY_EGRESS_ALLOWLIST=/etc/usine-gateway/egress-allowlist
+```
+
+  </TabItem>
+  <TabItem label="dnsmasq">
+
+```yaml title="infra/hetzner/gateway/gateway-cloud-init.yaml"
+write_files:
+  # ...
+  # Workers resolve the gateway's names here and nothing else: with no upstream server, every other name is refused, and each query is in the journal.
+  # local= answers an AAAA query for the gateway's names with no address instead of refusing it: musl's resolver, which Codex uses, fails the whole lookup on a refusal.
+  - path: /etc/dnsmasq.d/usine-gateway.conf
+    permissions: "0644"
+    content: |
+      bind-dynamic
+      listen-address=@@GATEWAY_IP@@
+      no-resolv
+      no-hosts
+      log-queries
+      address=/@@DOMAIN@@/@@GATEWAY_IP@@
+      local=/@@DOMAIN@@/
+```
+
+  </TabItem>
+  <TabItem label="sshd">
+
+```yaml title="infra/hetzner/gateway/gateway-cloud-init.yaml"
+write_files:
+  # ...
+  - path: /etc/ssh/sshd_config.d/50-usine-gateway.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin prohibit-password
+      AllowTcpForwarding local
+      AllowAgentForwarding no
+      AllowStreamLocalForwarding no
+      GatewayPorts no
+      PermitTunnel no
+      X11Forwarding no
+```
+
+  </TabItem>
+  <TabItem label="nftables">
+
+```txt title="infra/hetzner/gateway/gateway-nftables.conf"
+define network = 10.42.0.0/16
+
+flush ruleset
+
+table inet usine_gateway {
+	chain input {
+		type filter hook input priority filter; policy drop;
+		iif lo accept
+		ct state established,related accept
+		ct state invalid drop
+		meta l4proto { icmp, ipv6-icmp } accept
+		tcp dport 22 accept
+		# DHCP renewals for the private network address.
+		udp sport 67 udp dport 68 accept
+		ip saddr $network udp dport 53 accept
+		ip saddr $network tcp dport { 53, 80, 3128 } accept
+	}
+
+	chain forward {
+		type filter hook forward priority filter; policy drop;
+	}
+
+	chain output {
+		type filter hook output priority filter; policy accept;
+		# The bastion only opens SSH connections into the private network.
+		tcp dport 22 ip daddr != $network reject
+	}
+}
+```
+
+  </TabItem>
+</Tabs>
+
+The admin API is an Effect `HttpApi` that the executor's client and the Gateway's server share:
+
+```ts title="packages/gateway/src/admin/api.ts"
+export const GatewayAdminApi = HttpApi.make("GatewayAdminApi").add(
+  HttpApiGroup.make("attachments")
+    .add(
+      HttpApiEndpoint.post("attach", "/v1/attachments", {
+        payload: AttachRequest.annotate(strict),
+        success: Attached,
+        error: AttachmentAlreadyExpired.annotate({ httpApiStatus: 422 }),
+      }),
+      HttpApiEndpoint.put("renew", "/v1/attachments/:id", {
+        params: { id: AttachmentId },
+        payload: AttachRequest.annotate(strict),
+        success: Attached,
+        error: [
+          AttachmentAlreadyExpired.annotate({ httpApiStatus: 422 }),
+          AttachmentConflict.annotate({ httpApiStatus: 409 }),
+        ],
+      }),
+      HttpApiEndpoint.delete("detach", "/v1/attachments/:id", {
+        params: { id: AttachmentId },
+        success: Detached,
+      }),
+      HttpApiEndpoint.get("list", "/v1/attachments", { success: AttachmentList }),
+    )
+    .middleware(AdminAuthorization),
+);
+```
+
+The caller token is HMAC-signed with the caller key and contains its attachment id, Worker, and repository ([caller.ts:93][]). The reverse proxy reads it from the `x-usine-gateway-token` header, an `Authorization` header, or `x-api-key`, and removes it before the request leaves. A token from a detached attachment is refused even when a new attachment exists for the same Worker and repository. Refusals have a reason in the `x-usine-gateway-refusal` header ([proxy.ts:33][]):
+
+| Reason                                                            | Status |
+| ----------------------------------------------------------------- | ------ |
+| `unknown-host`, `unsupported-path`                                | 404    |
+| `missing-caller-token`, `invalid-caller-token`                    | 401    |
+| `stale-caller-token`, `attachment-expired`, `repository-mismatch` | 403    |
+| `provider-not-configured`                                         | 503    |
+
+The forward proxy has its own reasons: `host-not-allowed`, `port-not-allowed`, `address-literal`, `private-address`, `not-tls`, `server-name-missing`, and `server-name-mismatch` ([egress.ts:59][]). The service reads its settings once at start ([node/environment.ts:64][]): `USINE_GATEWAY_DOMAIN`, `USINE_GATEWAY_ADMIN_TOKEN`, `USINE_GATEWAY_CALLER_KEY`, the allowlist file (default `/etc/usine-gateway/egress-allowlist`), and optionally `ANTHROPIC_API_KEY` or `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN` (not both) and `OPENAI_API_KEY`. It logs one JSON object per line to journald ([node/main.ts:7][]). [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md) records why usine wrote its own proxy instead of a TLS-intercepting one.
+
+## Credential flow
+
+The GitHub App's private key is only in the orchestrator, from the environment variable `USINE_GITHUB_PRIVATE_KEY` or from `.usine/github-app.json`. For each Attempt, `CredentialProvider.issue` ([orchestrator/src/credentials.ts:79][]) calls `GitHubApp.workerToken` ([github-app.ts:294][]), which sends `POST /app/installations/:id/access_tokens` with one repository id and gets a token that lives at most one hour. `renewableCredential` issues a new token when less than five minutes remain, and checks every 30 seconds ([renewable-credential.ts:11][], [renewable-credential.ts:69][]). What happens to the token then depends on the Worker kind:
+
+<Tabs>
+  <TabItem label="local">
+
+```mermaid
+sequenceDiagram
+  participant O as Orchestrator
+  participant D as Temporary directory
+  participant C as git or gh child
+  participant G as GitHub
+  O->>G: mint a one-repository token
+  G-->>O: token, valid at most one hour
+  O->>D: write token, hosts.yml, config.yml
+  C->>D: read the token through the credential helper or GH_CONFIG_DIR
+  C->>G: HTTPS with the token
+  loop every 30 seconds
+    O->>G: mint again when less than 5 minutes remain
+    O->>D: rename the new files into place
+  end
+  Note over O,D: the directory is deleted when the Attempt's scope closes
+```
+
+  </TabItem>
+  <TabItem label="ssh">
+
+```mermaid
+sequenceDiagram
+  participant O as Orchestrator
+  participant W as Worker machine
+  participant C as git or gh child
+  participant G as GitHub
+  O->>G: mint a one-repository token
+  G-->>O: token, valid at most one hour
+  O->>W: ssh sh -c script, token on standard input
+  Note over W: credentials directory of the Attempt, mode 700
+  O->>W: ssh child command with GH_CONFIG_DIR and the credential helper
+  C->>G: HTTPS with the token from the file
+  loop every 30 seconds
+    O->>W: write a new token when less than 5 minutes remain
+  end
+  O->>W: rm -rf the Attempt's credentials directory
+```
+
+  </TabItem>
+  <TabItem label="ssh behind a Gateway">
+
+```mermaid
+sequenceDiagram
+  participant O as Orchestrator
+  participant A as Gateway admin API
+  participant C as child on the Worker
+  participant P as Gateway reverse proxy
+  participant G as GitHub
+  O->>G: mint a one-repository token
+  G-->>O: installation token
+  O->>A: POST /v1/attachments with Worker, repository, token, expiry
+  A-->>O: attachment id and caller token
+  O->>C: ssh with SendEnv: GIT_CONFIG_VALUE_0, GH_TOKEN, GH_ENTERPRISE_TOKEN
+  C->>P: http://git.gw.internal/ with x-usine-gateway-token
+  P->>P: verify the caller token and its attachment
+  P->>G: HTTPS with the installation token
+  G-->>P: response
+  P-->>C: response
+  loop before the token expires, and every 2 minutes
+    O->>A: PUT /v1/attachments/id
+  end
+  O->>A: DELETE /v1/attachments/id when the Attempt's scope closes
+```
+
+The orchestrator reaches the admin API through the SSH forward the operator keeps open.
+
+  </TabItem>
+  <TabItem label="exe.dev">
+
+```mermaid
+sequenceDiagram
+  participant O as Orchestrator
+  participant L as exe.dev lobby
+  participant C as child on the VM
+  participant E as exe.dev edge
+  participant G as GitHub
+  O->>L: attach the repository's integration to the VM, 65 minutes by default
+  C->>E: https://github.int.exe.xyz/owner/repo.git
+  E->>G: request with the integration's credential
+  loop at half the time-box
+    O->>L: attach again
+  end
+  O->>L: detach after the VM's last Attempt with that integration
+```
+
+No token passes through the orchestrator: each repository needs a standing exe.dev GitHub integration ([exe-dev.ts:34][]).
+
+  </TabItem>
+</Tabs>
+
+The orchestrator reads the Gateway's admin token once at startup from the environment variable that `admin_token_env` gives; an unset variable stops startup with a `gateway` capability error ([orchestrator/src/ssh.ts:27][]). The orchestrator does not open the SSH forward to the admin API itself ([#249][]).
+
+## Harness logins on the Worker
+
+The Claude Code and Codex logins are the operator's, made on the Worker as the `usine` user with `claude auth login` and `codex login --device-auth`. Behind a Gateway the logins call their providers through the forward proxy, so the allowlist lists their hosts:
+
+```txt title="infra/hetzner/gateway/egress-allowlist"
+# Claude Code with a Claude subscription: the API, and the OAuth token
+# endpoint that claude auth login and token refreshes call.
+api.anthropic.com
+platform.claude.com
+
+# Codex with a ChatGPT plan: the ChatGPT API, and the device-code login and
+# token refreshes.
+chatgpt.com
+auth.openai.com
+```
+
+With `llm_providers: [anthropic]`, Claude Code children call `llm.<domain>/anthropic` instead and the Gateway sends its own key; its swap of a Claude subscription token is not verified against Anthropic ([#234][]), and the Gateway has no ChatGPT login ([#235][]). [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md), amendment of 2026-10-15, explains why the logins stay on the Worker.
+
+## cloud-init files
+
+<FileTree>
+
+- infra/hetzner/
+  - cloud-init.yaml the Worker machine
+  - create-worker.sh
+  - gateway/
+    - egress-allowlist
+    - gateway-cloud-init.yaml the Gateway VM
+    - gateway-nftables.conf
+    - gateway.sh
+    - worker-cloud-init.yaml added for a Worker behind the Gateway
+    - worker-nftables.conf
+
+</FileTree>
+
+| File                                            | Adds                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `infra/hetzner/cloud-init.yaml`                 | Debian 13 with the `usine` user, key-only SSH (`AllowUsers usine`). Packages `build-essential`, `bubblewrap` for Codex's sandbox ([#269][]), `ca-certificates`, `chromium`, `curl`, `git`, `gnupg`, `jq`. A 2 GB swap file and `vm.overcommit_memory = 1` for the 6 GiB virtual buffer of the lint gates ([#270][]). `/etc/environment` gets `DISABLE_AUTOUPDATER=1` and `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`. A setup script installs gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.296, Codex 0.153.4, and creates `/home/usine/.usine`. |
+| `infra/hetzner/gateway/worker-cloud-init.yaml`  | Appended for a Worker behind the Gateway: the Gateway as the only resolver, apt through the forward proxy, Worker nftables (gateway only), `/etc/environment` with `GH_HOST`, the proxy variables, `NO_PROXY`, and `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1`, a systemd socket that forwards `/run/usine-gateway/http.sock` to the Gateway's port 80, and `AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN`.                                                                                                                |
+| `infra/hetzner/gateway/gateway-cloud-init.yaml` | The Gateway VM: nftables, dnsmasq, the bastion sshd settings, Node.js, the `usine-gateway` systemd service, the secrets file.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| `infra/hetzner/create-worker.sh`                | Creates a server from `cloud-init.yaml`, labels it `usine=worker`, attaches a firewall that admits SSH from one address.                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `infra/hetzner/gateway/gateway.sh`              | `create`, `delete`, `install <tarballs>`, and `worker-user-data`, which renders the two Worker files as one MIME cloud-init.                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+
+The parts of `worker-cloud-init.yaml` that every SSH session reads:
+
+```yaml title="infra/hetzner/gateway/worker-cloud-init.yaml"
+write_files:
+  # ...
+  # Read by every SSH session, the harness logins included, and by the setup script of ../cloud-init.yaml.
+  - path: /etc/environment
+    append: true
+    content: |
+      GH_HOST=git.@@DOMAIN@@
+      HTTPS_PROXY=http://@@GATEWAY_IP@@:3128
+      HTTP_PROXY=http://@@GATEWAY_IP@@:3128
+      https_proxy=http://@@GATEWAY_IP@@:3128
+      http_proxy=http://@@GATEWAY_IP@@:3128
+      NO_PROXY=@@DOMAIN@@
+      no_proxy=@@DOMAIN@@
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+  # ...
+  # The executor sends each Attempt's caller token in these variables through the SSH connection, so it is in no command line.
+  - path: /etc/ssh/sshd_config.d/40-usine-gateway.conf
+    permissions: "0644"
+    content: |
+      AcceptEnv GIT_CONFIG_VALUE_0 GH_ENTERPRISE_TOKEN GH_TOKEN ANTHROPIC_AUTH_TOKEN
+```
+
+These proxy variables name the Gateway's address and serve SSH sessions such as the harness logins. An Attempt's children get the executor's exported values on top, which name the domain: `http://<domain>:3128`.
+
+`gateway.sh` writes the Gateway's private address into the Worker nftables file and the domain into the Worker cloud-init; the defaults are `10.42.0.2` and `gw.internal` ([gateway.sh:19][]):
+
+```sh title="infra/hetzner/gateway/gateway.sh"
+NAME=${NAME:-usine-gateway}
+LOCATION=${LOCATION:-fsn1}
+SERVER_TYPE=${SERVER_TYPE:-cx23}
+IMAGE=${IMAGE:-debian-13}
+NETWORK_ZONE=${NETWORK_ZONE:-eu-central}
+NETWORK_CIDR=${NETWORK_CIDR:-10.42.0.0/16}
+SUBNET_CIDR=${SUBNET_CIDR:-10.42.0.0/24}
+GATEWAY_IP=${GATEWAY_IP:-10.42.0.2}
+DOMAIN=${DOMAIN:-gw.internal}
+LABEL=${LABEL:-usine=gateway}
+GATEWAY_PACKAGE=${GATEWAY_PACKAGE:-@usine/gateway}
+```
+
+A Worker behind the Gateway has no time source ([#254][]), and infrastructure changes are applied to running machines only by hand ([#264][]).
+
+[factory.ts:150]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L150
+[factory.ts:214]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L214
+[local.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/local/local.ts
+[local.ts:103]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/local/local.ts#L103
+[local.ts:133]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/local/local.ts#L133
+[local.ts:256]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/local/local.ts#L256
+[local.ts:290]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/local/local.ts#L290
+[local.ts:331]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/local/local.ts#L331
+[local/credentials.ts:22]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/local/credentials.ts#L22
+[credential-environment.ts:15]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/credential-environment.ts#L15
+[ssh/ssh.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/ssh.ts
+[ssh/ssh.ts:22]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/ssh.ts#L22
+[ssh/credentials.ts:25]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/credentials.ts#L25
+[ssh/preflight.ts:31]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/preflight.ts#L31
+[commands.ts:70]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/commands.ts#L70
+[commands.ts:87]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/commands.ts#L87
+[commands.ts:101]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/commands.ts#L101
+[remote.ts:44]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/remote.ts#L44
+[remote.ts:236]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/remote/remote.ts#L236
+[child-host.ts:85]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/child-host/child-host.ts#L85
+[child-host.ts:96]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/child-host/child-host.ts#L96
+[child-host.ts:106]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/child-host/child-host.ts#L106
+[agents/src/preflight/preflight.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/preflight/preflight.ts
+[attachments.ts:35]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/attachments.ts#L35
+[attachments.ts:58]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/attachments.ts#L58
+[attachments.ts:64]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/attachments.ts#L64
+[gateway/environment.ts:33]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L33
+[gateway/environment.ts:42]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L42
+[gateway/environment.ts:88]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L88
+[gateway/preflight.ts:47]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/preflight.ts#L47
+[gateway/preflight.ts:162]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/preflight.ts#L162
+[exe-dev.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/exe-dev/exe-dev.ts
+[exe-dev.ts:34]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/exe-dev/exe-dev.ts#L34
+[exe-dev/preflight.ts:123]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/exe-dev/preflight.ts#L123
+[renewable-credential.ts:11]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/renewable-credential.ts#L11
+[renewable-credential.ts:69]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/renewable-credential.ts#L69
+[worker-engine.ts:13]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/worker-engine.ts#L13
+[scheduler.ts:51]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/scheduler.ts#L51
+[scheduler.ts:76]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/scheduler.ts#L76
+[scheduler.ts:96]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/scheduler.ts#L96
+[orchestrator/src/credentials.ts:79]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/credentials.ts#L79
+[orchestrator/src/ssh.ts:27]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/ssh.ts#L27
+[github-app.ts:294]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/github-app.ts#L294
+[proxy.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/proxy/proxy.ts
+[proxy.ts:33]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/proxy/proxy.ts#L33
+[github.ts:15]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/github/github.ts#L15
+[egress-proxy.ts:241]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/node/egress-proxy.ts#L241
+[client-hello.ts:88]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/egress/client-hello.ts#L88
+[egress.ts:59]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/egress/egress.ts#L59
+[api.ts:92]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/admin/api.ts#L92
+[caller.ts:93]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/caller/caller.ts#L93
+[node/environment.ts:64]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/node/environment.ts#L64
+[node/main.ts:7]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/node/main.ts#L7
+[gateway-cloud-init.yaml:42]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/infra/hetzner/gateway/gateway-cloud-init.yaml#L42
+[gateway-cloud-init.yaml:66]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/infra/hetzner/gateway/gateway-cloud-init.yaml#L66
+[gateway-nftables.conf]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/infra/hetzner/gateway/gateway-nftables.conf
+[gateway.sh:19]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/infra/hetzner/gateway/gateway.sh#L19
+[#228]: https://github.com/basaltbytes/usine/issues/228
+[#231]: https://github.com/basaltbytes/usine/issues/231
+[#234]: https://github.com/basaltbytes/usine/issues/234
+[#235]: https://github.com/basaltbytes/usine/issues/235
+[#249]: https://github.com/basaltbytes/usine/issues/249
+[#254]: https://github.com/basaltbytes/usine/issues/254
+[#260]: https://github.com/basaltbytes/usine/issues/260
+[#264]: https://github.com/basaltbytes/usine/issues/264
+[#269]: https://github.com/basaltbytes/usine/issues/269
+[#270]: https://github.com/basaltbytes/usine/issues/270
+[#278]: https://github.com/basaltbytes/usine/issues/278
