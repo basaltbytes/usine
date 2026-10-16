@@ -82,6 +82,7 @@
   ],
   "ignorePatterns": [
     "**/dist/**",
+    "**/.astro/**",
     ".agent-sources/**",
     ".agents/**",
     ".claude/**",

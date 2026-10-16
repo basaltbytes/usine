@@ -1,0 +1,33 @@
+// @ts-check
+import starlight from "@astrojs/starlight";
+import { defineConfig } from "astro/config";
+import mermaid from "astro-mermaid";
+import lucode from "lucode-starlight";
+
+export default defineConfig({
+  integrations: [
+    mermaid({ autoTheme: true, enableLog: false }),
+    starlight({
+      title: "usine",
+      description:
+        "usine runs coding agents on the GitHub issues and pull requests of the repositories an operator registers.",
+      plugins: [
+        lucode({
+          navLinks: [
+            { label: "Guides", link: "/guides/" },
+            { label: "Architecture", link: "/architecture/" },
+            { label: "Reference", link: "/reference/" },
+            { label: "GitHub", link: "https://github.com/basaltbytes/usine" },
+          ],
+          footerText:
+            "usine is MIT licensed. The source is on [GitHub](https://github.com/basaltbytes/usine).",
+        }),
+      ],
+      sidebar: [
+        { label: "Guides", items: [{ autogenerate: { directory: "guides" } }] },
+        { label: "Architecture", items: [{ autogenerate: { directory: "architecture" } }] },
+        { label: "Reference", items: [{ autogenerate: { directory: "reference" } }] },
+      ],
+    }),
+  ],
+});
