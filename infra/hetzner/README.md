@@ -4,9 +4,14 @@ An `ssh` Worker is any Linux machine the orchestrator connects to over SSH. This
 Hetzner Cloud in Falkenstein (`fsn1`), Nuremberg (`nbg1`), or Helsinki (`hel1`):
 
 - `cloud-init.yaml` builds the machine on Debian 13: the `usine` user, Git, gh, Node.js 24, pnpm,
-  Claude Code, and Codex, with SSH open to the `usine` user by key only. Codex is pinned to a
-  version usine supports. The same file builds a Worker behind the gateway of `gateway/`, where
-  `gateway/gateway.sh worker-user-data` adds the gateway's Worker settings to it.
+  Claude Code, Codex, and Chromium, with SSH open to the `usine` user by key only. Codex is pinned
+  to a version usine supports. Chromium is Debian's package, for Playwright: `/etc/environment`
+  sets `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`, which Playwright does not read
+  itself, so a project's test config passes it to Playwright as `executablePath`, as
+  `apps/web/vitest.config.ts` does. A Turborepo task sees the variable only when it lists it in
+  `env`, as the `test` task in `turbo.json` does. The same file builds a Worker behind the gateway
+  of `gateway/`, where `gateway/gateway.sh worker-user-data` adds the gateway's Worker settings to
+  it.
 - `create-worker.sh` creates the server with that file, labels it `usine=worker`, and attaches a
   Hetzner firewall that admits SSH from the orchestrator's address only.
 
