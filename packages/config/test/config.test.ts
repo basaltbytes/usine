@@ -1,6 +1,7 @@
 import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
+import { type Environment, ExpressionEngine, Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Effect, Layer, Logger, Option, Schema } from "effect";
 import { InstanceFolder } from "../src/instance-folder.ts";
@@ -9,6 +10,7 @@ import { LoadedInstance } from "../src/instance/instance.ts";
 import { loopReferenceFailure, referenceIndex } from "../src/instance/references.ts";
 import { ManagedRepo } from "../src/factory.ts";
 import { ConfigParser } from "../src/parser.ts";
+import { issueEnvironment, pullRequestEnvironment } from "../src/payload-slices.ts";
 import { matchesSelector } from "../src/selector.ts";
 import { updateFrontmatter, updateYaml, YamlEdit } from "../src/yaml/writer.ts";
 
@@ -469,6 +471,97 @@ describe("ConfigParser", () => {
       expect(issueFailure.stage).toBe("expression");
       expect(issueFailure.message).toContain("No such key: mergeable");
     }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("reads an unquoted boolean if: as the CEL literal and explains other values", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const parse = (trigger: string) =>
+        parser.parseLoopFile(
+          InstancePath.make("loops/always.md"),
+          `---\ntrigger:\n${trigger}agent: developer\n---\nDo the work.`,
+        );
+      expect((yield* parse("  on: issue\n  if: true\n")).trigger.if).toBe("true");
+      expect((yield* parse("  on: pr\n  if: false\n")).trigger.if).toBe("false");
+      const schedule = yield* parse("  on: schedule\n  if: true\n  cron: '0 9 * * 1'\n");
+      expect(schedule.trigger.if).toBe("true");
+      for (const value of ["3", "[ready]", "", "{ state: OPEN }"]) {
+        const failure = yield* parse(`  on: issue\n  if: ${value}\n`).pipe(Effect.flip);
+        expect(failure.stage).toBe("schema");
+        expect(failure.message).toContain(
+          "Expected a CEL expression: quote the value so YAML reads it as a string",
+        );
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("declares the GitHub payload fields that can be null as nullable", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const holds = (environment: Environment, item: Schema.JsonObject, expression: string) =>
+        engine.evaluateBoolean(Source.make(expression), environment, {
+          repo: { name: "basaltbytes/usine", owner: "basaltbytes", url: "https://example.test" },
+          item,
+        });
+      const issue = {
+        stateReason: null,
+        closedAt: null,
+        author: null,
+        issueType: null,
+        milestone: null,
+        comments: { totalCount: 1, nodes: [{ author: null, body: "", createdAt: "" }] },
+      };
+      expect(
+        yield* holds(
+          issueEnvironment,
+          issue,
+          "item.stateReason == null && item.closedAt == null && item.author == null && " +
+            "item.issueType == null && item.milestone == null && !has(item.milestone.title) && " +
+            "item.comments.nodes.all(comment, comment.author == null)",
+        ),
+      ).toBe(true);
+      const pullRequest = {
+        mergedAt: null,
+        author: null,
+        reviewDecision: null,
+        statusCheckRollup: null,
+        // A team review request has no `login`; a deleted reviewer is null.
+        reviewRequests: {
+          totalCount: 2,
+          nodes: [{ requestedReviewer: {} }, { requestedReviewer: null }],
+        },
+        reviews: {
+          totalCount: 1,
+          nodes: [{ author: null, state: "COMMENTED", body: "", submittedAt: null, commit: null }],
+        },
+        reviewThreads: {
+          totalCount: 1,
+          nodes: [
+            {
+              isResolved: false,
+              isOutdated: false,
+              path: "a.ts",
+              comments: { totalCount: 1, nodes: [{ author: null, body: "" }] },
+            },
+          ],
+        },
+        comments: { totalCount: 1, nodes: [{ author: null, body: "", createdAt: "" }] },
+      };
+      expect(
+        yield* holds(
+          pullRequestEnvironment,
+          pullRequest,
+          'item.mergedAt == null && item.author == null && item.reviewDecision != "APPROVED" && ' +
+            "item.statusCheckRollup == null && " +
+            "item.reviewRequests.nodes.all(request, request.requestedReviewer == null || " +
+            "request.requestedReviewer.login == null) && " +
+            "item.reviews.nodes.all(review, review.author == null && review.submittedAt == null && " +
+            "review.commit == null) && " +
+            "item.reviewThreads.nodes.all(thread, thread.comments.nodes.all(comment, comment.author == null)) && " +
+            "item.comments.nodes.all(comment, comment.author == null)",
+        ),
+      ).toBe(true);
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
   );
 
   it.effect("rejects enabled in loop frontmatter instead of silently accepting it", () =>

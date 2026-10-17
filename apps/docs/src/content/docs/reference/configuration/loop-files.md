@@ -65,7 +65,7 @@ Keys are snake_case. An unknown key at any level is an error, as are duplicate k
 
 The trigger classes are [`IssueTrigger`, `PullRequestTrigger`, and `ScheduleTrigger`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/trigger.ts#L27).
 
-`if` is a string. YAML reads an unquoted `true` as a boolean, which the parser rejects with `Expected string`. Write `if: "true"` for a Loop that selects every Item. Use a folded block scalar (`>-`) to split a long condition over several lines.
+`if` is a string. YAML reads an unquoted `true` or `false` as a boolean, and usine reads it as the same CEL literal, so `if: true` selects every Item. Quote any other value that YAML would not read as a string, such as a number; the parser rejects it with `Expected a CEL expression: quote the value so YAML reads it as a string`. Use a folded block scalar (`>-`) to split a long condition over several lines.
 
 #### `on: issue` and `on: pr`
 
@@ -178,7 +178,7 @@ Labels on this issue: {{ item.labels.nodes.map(label, label.name).join(", ") }}
 
 usine type-checks every interpolation when the file loads, but a value can still fail at render time, for example a field that is `null` on this Item (see [null fields](/reference/configuration/expressions/#fields-that-can-be-null)).
 
-- For `issue` and `pr` Loops, usine logs `Loop prompt rendering failed`, submits no Event for that Loop and Item, and continues with the other Loops. The poll cursor still advances, so usine doesn't evaluate the Item again until it changes.
+- For `issue` and `pr` Loops, usine submits no Event for that Loop and Item and continues with the other Loops and Items; the poll cursor still advances. **Needs you** shows the failure with the Loop, the Item, and the interpolation for as long as it lasts, and usine logs `Loop evaluation failed on an Item` once per Loop, Item, and content hash. usine evaluates the Item again when it changes, and on the first poll after a restart, so a fixed template renders without waiting for a change.
 - For `schedule` Loops, the Tick fails for that repository, and usine evaluates it again at the next wake.
 
 ### What the Agent receives

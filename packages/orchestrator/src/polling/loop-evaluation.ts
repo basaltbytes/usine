@@ -9,21 +9,20 @@ import { RunEngine, type SubmissionResult } from "@usine/engine/engine";
 import type { ObservedItem } from "./repository-sync.ts";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
-import { DateTime, Effect, Result, Schema } from "effect";
+import { DateTime, Effect, Option, Result, Schema } from "effect";
 import {
-  configFileErrorLogFields,
   DEFAULT_BRANCH_REVISION,
   type ResolvedLoop,
   submissionLogFields,
   triggerSubmission,
 } from "../trigger-submission.ts";
-import { RepositoryPollFailure } from "./cycle.ts";
+import { LoopEvaluationFailure } from "./evaluation-failures.ts";
 
 interface ItemCycle {
   readonly submissions: ReadonlyArray<SubmissionResult>;
   readonly revokedRuns: number;
-  /** Failures scoped to one loop; the cursor still advances past them. */
-  readonly failures: ReadonlyArray<RepositoryPollFailure>;
+  /** Loops that could not evaluate the Item; the Item's other Loops still ran. */
+  readonly failures: ReadonlyArray<LoopEvaluationFailure>;
 }
 
 const eventKey = (
@@ -45,9 +44,10 @@ const eventKey = (
 
 /**
  * Evaluates an already projected Item against its repository's active Loops,
- * renders matching prompts, and submits or revokes Runs. Prompt-render failures
- * are reported per Loop; expression and Run failures stop the repository before
- * its cursor commits. Schedule Ticks have separate evaluation semantics.
+ * renders matching prompts, and submits or revokes Runs. A Loop whose `if:` or
+ * prompt fails comes back as a failure while the other Loops still run; the
+ * caller logs and records it. Run failures stop the repository before its
+ * cursor commits. Schedule Ticks have separate evaluation semantics.
  */
 export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* (
   repository: ManagedRepo,
@@ -90,16 +90,28 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
           ),
         )
       : DEFAULT_BRANCH_REVISION;
-  const failures: Array<RepositoryPollFailure> = [];
+  const failures: Array<LoopEvaluationFailure> = [];
   let revokedRuns = 0;
   for (const { agent, loop, parentModel } of loops) {
     yield* Effect.annotateCurrentSpan({ loop: loop.name, agent: agent.name });
-    const matches = yield* expressions.evaluateBoolean(
-      loop.trigger.if,
-      environmentFor(loop.trigger.on),
-      context,
+    const matches = yield* Effect.result(
+      expressions.evaluateBoolean(loop.trigger.if, environmentFor(loop.trigger.on), context),
     );
-    if (!matches) {
+    // A failed `if:` says nothing about whether the Item matches, so its queued
+    // Runs stay as they are.
+    if (Result.isFailure(matches)) {
+      failures.push(
+        new LoopEvaluationFailure({
+          loop: loop.name,
+          stage: "if",
+          expression: Option.some(matches.failure.source),
+          errorTag: matches.failure._tag,
+          message: matches.failure.message,
+        }),
+      );
+      continue;
+    }
+    if (!matches.success) {
       yield* Effect.logDebug("Item did not match its loop expression", {
         repository: repository.name,
         loop: loop.name,
@@ -122,23 +134,13 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
 
     const dedupKey = eventKey(loop, repository, observed);
     const receivedAt = yield* DateTime.now;
-    // A render failure comes from the loop's authoring, not transport, so
-    // re-polling would fail the same way. It is scoped to this loop so the
-    // sibling loops and the cursor still advance.
     const rendered = yield* Effect.result(config.renderPrompt(loop, context));
     if (Result.isFailure(rendered)) {
-      yield* Effect.logError("Loop prompt rendering failed; sibling loops were unaffected", {
-        loop: loop.name,
-        repository: repository.name,
-        agent: agent.name,
-        item: item.number,
-        errorTag: rendered.failure._tag,
-        message: rendered.failure.message,
-        ...configFileErrorLogFields(rendered.failure),
-      });
       failures.push(
-        new RepositoryPollFailure({
-          repository: repository.name,
+        new LoopEvaluationFailure({
+          loop: loop.name,
+          stage: "prompt",
+          expression: rendered.failure.expression,
           errorTag: rendered.failure._tag,
           message: rendered.failure.message,
         }),

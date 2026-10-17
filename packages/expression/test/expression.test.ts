@@ -37,7 +37,100 @@ const issueEnvironment = new Environment({
   variables: [new Variable({ name: "item", type: typeReference("Issue") })],
 });
 
+const nullableEnvironment = new Environment({
+  types: [
+    new ObjectType({
+      name: "Milestone",
+      fields: [new ObjectField({ name: "title", type: typeReference("string") })],
+    }),
+    new ObjectType({
+      name: "Reviewer",
+      fields: [new ObjectField({ name: "login", type: typeReference("string"), nullable: true })],
+    }),
+    new ObjectType({
+      name: "PullRequest",
+      fields: [
+        new ObjectField({ name: "number", type: typeReference("int") }),
+        new ObjectField({ name: "reviewDecision", type: typeReference("string"), nullable: true }),
+        new ObjectField({ name: "milestone", type: typeReference("Milestone"), nullable: true }),
+        new ObjectField({ name: "reviewers", type: typeReference("list<Reviewer>") }),
+      ],
+    }),
+  ],
+  variables: [new Variable({ name: "item", type: typeReference("PullRequest") })],
+});
+
+const withNulls = { item: { number: 7, reviewDecision: null, milestone: null, reviewers: [{}] } };
+const withValues = {
+  item: {
+    number: 7,
+    reviewDecision: "APPROVED",
+    milestone: { title: "v1" },
+    reviewers: [{ login: "octocat" }],
+  },
+};
+
 describe("ExpressionEngine", () => {
+  it.effect("compares nullable fields with null and evaluates reads of them on null", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const cases = [
+        ['item.reviewDecision == "APPROVED"', false, true],
+        ["item.reviewDecision != null", false, true],
+        ["null == item.milestone", true, false],
+        ['item.milestone != null && item.milestone.title == "v1"', false, true],
+        ["has(item.milestone.title)", false, true],
+        ["item.reviewers.exists(reviewer, reviewer.login == null)", true, false],
+      ] as const;
+      for (const [expression, onNulls, onValues] of cases) {
+        expect(
+          [
+            yield* engine.evaluateBoolean(source(expression), nullableEnvironment, withNulls),
+            yield* engine.evaluateBoolean(source(expression), nullableEnvironment, withValues),
+          ],
+          expression,
+        ).toEqual([onNulls, onValues]);
+      }
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
+  it.effect("keeps reads below a nullable field typed and fails them on null", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      const typo = yield* engine
+        .checkBoolean(source('item.milestone.titel == "v1"'), nullableEnvironment)
+        .pipe(Effect.flip);
+      const mismatch = yield* engine
+        .checkBoolean(source("item.reviewDecision + 1 == 2"), nullableEnvironment)
+        .pipe(Effect.flip);
+      const belowNull = yield* engine
+        .evaluateBoolean(source('item.milestone.title == "v1"'), nullableEnvironment, withNulls)
+        .pipe(Effect.flip);
+
+      expect(typo.code).toBe("type_error");
+      expect(typo.message).toContain("No such key: titel");
+      expect(mismatch.code).toBe("type_error");
+      expect(belowNull._tag).toBe("ExpressionEvaluationError");
+      expect(belowNull.message).toContain("No such key: title");
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
+  it.effect("interpolates null and nullable scalars but not a nullable object", () =>
+    Effect.gen(function* () {
+      const engine = yield* ExpressionEngine;
+      yield* engine.checkScalar(source("null"), nullableEnvironment);
+      const decision = source("item.reviewDecision");
+      expect(yield* engine.evaluateScalar(decision, nullableEnvironment, withNulls)).toBeNull();
+      expect(yield* engine.evaluateScalar(decision, nullableEnvironment, withValues)).toBe(
+        "APPROVED",
+      );
+      const object = yield* engine
+        .checkScalar(source("item.milestone"), nullableEnvironment)
+        .pipe(Effect.flip);
+      expect(object.message).toBe("Expected a scalar value, got Milestone");
+    }).pipe(Effect.provide(MarcbachmannCelLayer)),
+  );
+
   it.effect("checks and evaluates a typed expression over plain JSON", () =>
     Effect.gen(function* () {
       const engine = yield* ExpressionEngine;

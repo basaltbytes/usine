@@ -44,7 +44,7 @@ Every `settings.poll_interval` seconds (60 by default), the orchestrator asks Gi
 
 A Loop acts once for each version of an Item's content. usine identifies the Event that opens a Run by the Loop, the repository, the Item number, and a hash of the Item's payload without its timestamps. If the same content matches again, no new Run opens; a new Run needs a change in the payload, such as a label, a comment, or a new commit on the pull request. When `if:` becomes false, usine cancels the Loop's Runs on that Item that haven't started an Attempt, with the reason revoked. A running Attempt always finishes.
 
-A schedule trigger adds two keys: `cron`, a five-field cron expression, and `tz`, an IANA time zone that defaults to `UTC`. When the orchestrator starts after being down, only the latest missed tick fires. Schedule Loops still need `if:`. To fire on every tick, write `if: "true"` in quotes: an unquoted `true` is a YAML boolean, not an expression, and the Loop doesn't load.
+A schedule trigger adds two keys: `cron`, a five-field cron expression, and `tz`, an IANA time zone that defaults to `UTC`. When the orchestrator starts after being down, only the latest missed tick fires. Schedule Loops still need `if:`. To fire on every tick, write `if: true`; usine reads the YAML boolean as the CEL literal.
 
 ## The `if:` expression
 
@@ -65,7 +65,7 @@ Lists are GraphQL connections with `totalCount` and `nodes`, so CEL's list macro
 
 The orchestrator type-checks `if:` and every `{{ }}` expression of the body when it loads the Loop. If an expression reads a field that the payload doesn't have, or `if:` isn't a boolean, the Loop doesn't load.
 
-Some fields are null when GitHub has no value for them: `milestone`, `issueType`, `stateReason`, `closedAt`, and `author` on an issue; `mergedAt`, `reviewDecision`, `statusCheckRollup`, and `author` on a pull request; and the `author` of a comment or review written by a deleted account. Reading a null field makes the evaluation fail, and at this commit you can't test for null with `has()` or with a comparison to `null`. When a field can be null, combine the read with `&&` and a condition that is false in that case, as in `item.merged && item.mergedAt >= "2026-10-01T00:00:00Z"`. CEL's `&&` is false when either side is false, even if the other side fails. An `if:` that fails stops the poll of that repository before its cursor advances. The orchestrator then fetches the same Items again on every poll, and the failure appears in **Needs you** until you fix the Loop and restart.
+Some fields are null when GitHub has no value for them: `milestone`, `issueType`, `stateReason`, `closedAt`, and `author` on an issue; `mergedAt`, `reviewDecision`, `statusCheckRollup`, and `author` on a pull request; and the `author` of a comment or review written by a deleted account. A comparison such as `item.reviewDecision == "APPROVED"` is false on a null field, and `item.milestone != null` tests for a value. Reading below a null object, as in `item.milestone.title`, makes the evaluation fail, so test the object first: `item.milestone != null && item.milestone.title == "v1"`. An `if:` that fails affects only that Loop on that Item: **Needs you** shows the failure until the Loop evaluates, and the poll goes on with the other Loops and Items.
 
 ## Narrow the repositories
 
@@ -99,7 +99,7 @@ The task is one part of what the Agent's first session receives. The full prompt
 
 The task doesn't need to repeat the payload or these rules; it only needs what is specific to the Loop. A pull request Run starts detached at the head commit, so a task that pushes must tell the Agent to check out `{{ item.headRefName }}` first. usine removes the worktree when the Attempt ends, and when the Attempt succeeds, commits that weren't pushed are lost.
 
-If a `{{ }}` expression fails, for example because it reads a null field, **Needs you** reports the failure for that Loop only. The repository's other Loops still run and the poll continues; the failure appears again each time usine evaluates the Item.
+If a `{{ }}` expression fails, for example because it reads below a null field, **Needs you** reports the failure for that Loop and Item only, until the template renders. The repository's other Loops still run and the poll continues. After you fix the Loop and restart, the first poll evaluates the Item again.
 
 ## Pass an Item to the next Loop
 

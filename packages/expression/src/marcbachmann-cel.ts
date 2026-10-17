@@ -36,7 +36,7 @@ const acceptedScalarTypes: ReadonlySet<string> = new Set([
   "bool",
   "double",
   "int",
-  "null_type",
+  "null",
   "string",
   "uint",
 ]);
@@ -242,12 +242,32 @@ const relatedStringLiterals = Effect.fn("ExpressionEngine.relatedStringLiterals"
   return [...new Set(scanRelatedLiterals(ast, memberPath, new Map()))];
 });
 
-const makeEnvironment = (descriptor: Environment): CelEnvironment => {
+type EnvironmentPurpose = "check" | "evaluate";
+
+/**
+ * cel-js rejects `null` in a typed field and cannot index `dyn<T>`, so checking
+ * keeps a nullable field's type and evaluation declares it `dyn`. Both register
+ * `T == null`, from which cel-js derives `!=` and the reversed operand order.
+ */
+const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): CelEnvironment => {
   const environment = new CelEnvironment({ unlistedVariablesAreDyn: false });
+  const nullableTypes = new Set<TypeReference>();
   for (const objectType of descriptor.types) {
     environment.registerType(objectType.name, {
-      fields: Object.fromEntries(objectType.fields.map((field) => [field.name, field.type])),
+      fields: Object.fromEntries(
+        objectType.fields.map((field) => {
+          if (!field.nullable) return [field.name, field.type];
+          nullableTypes.add(field.type);
+          return [field.name, purpose === "check" ? field.type : "dyn"];
+        }),
+      ),
     });
+  }
+  for (const type of nullableTypes) {
+    environment.registerOperator(
+      `${type} == null`,
+      (left: RuntimeValue, right: null) => left === right,
+    );
   }
   for (const variable of descriptor.variables) {
     environment.registerVariable(variable.name, variable.type);
@@ -273,15 +293,19 @@ const normalizeValue = (
   }
   const objectType = objectTypes.get(type);
   if (objectType !== undefined && Schema.is(Schema.JsonObject)(value)) {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, fieldValue]) => {
+    const absentNullable = objectType.fields
+      .filter((field) => field.nullable && !Object.hasOwn(value, field.name))
+      .map((field) => [field.name, null] as const);
+    return Object.fromEntries([
+      ...Object.entries(value).map(([key, fieldValue]) => {
         const field = objectType.fields.find(({ name }) => name === key);
         return [
           key,
           field === undefined ? fieldValue : normalizeValue(fieldValue, field.type, objectTypes),
-        ];
+        ] as const;
       }),
-    );
+      ...absentNullable,
+    ]);
   }
   return value;
 };
@@ -307,7 +331,7 @@ const checkExpected = (
 ): Effect.Effect<void, ExpressionCheckError> =>
   Effect.gen(function* () {
     const result = yield* Effect.try({
-      try: () => makeEnvironment(environment).check(source),
+      try: () => makeEnvironment(environment, "check").check(source),
       catch: (cause) =>
         new ExpressionCheckError({
           source,
@@ -337,7 +361,7 @@ const evaluateRaw = (
     try: () =>
       // SAFETY: CEL evaluates to the same value vocabulary the context is built
       // from, and every caller decodes the expected result type before use.
-      makeEnvironment(environment).evaluate(
+      makeEnvironment(environment, "evaluate").evaluate(
         source,
         normalizeContext(context, environment),
       ) as RuntimeValue,
