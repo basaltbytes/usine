@@ -14,7 +14,7 @@ Issues live in GitHub Issues on `basaltbytes/usine` (via the `gh` CLI). See `doc
 
 Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
 
-`docs/architecture/README.md` is the map of what is built: packages, processes, storage, Workers, and gaps, each page dated to the commit it describes.
+`apps/docs/src/content/docs/architecture/index.mdx` is the map of what is built: packages, processes, storage, Workers, and gaps, each page dated to the commit it describes.
 
 ### Coding
 

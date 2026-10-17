@@ -4,3 +4,5 @@ dist/
 *.tsbuildinfo
 coverage/
 .usine/
+.astro/
+apps/docs/src/content/docs/reference/api/

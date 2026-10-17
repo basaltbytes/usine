@@ -15,6 +15,9 @@
       "entry": [],
       "project": []
     },
+    "apps/docs": {
+      "ignoreDependencies": ["^@usine/"]
+    },
     "apps/server": {
       "ignoreDependencies": ["@usine/web"]
     },

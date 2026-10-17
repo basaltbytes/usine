@@ -6,7 +6,7 @@ How the engineering skills should consume this repo's domain documentation when 
 
 - **`CONTEXT.md`** at the repo root — the domain glossary.
 - **`docs/adr/`** — read ADRs that touch the area you're about to work in.
-- **`docs/architecture/README.md`**: the map of what is built today and where each piece is in the tree.
+- **`apps/docs/src/content/docs/architecture/index.mdx`**: the map of what is built today and where each piece is in the tree.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill creates them lazily when terms or decisions actually get resolved.
 

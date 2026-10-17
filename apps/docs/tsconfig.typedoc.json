@@ -1,0 +1,12 @@
+{
+  "include": ["../../packages/*/dist/**/*.d.ts"],
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "strict": true,
+    "exactOptionalPropertyTypes": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "types": []
+  }
+}

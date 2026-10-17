@@ -64,4 +64,4 @@ tokens do not change the App's author identity.
   Fresh polling produces a new Event with the current task, Agent, and limit;
   previously queued Events are never promoted into the new allowance.
 - Old CEL review-count workarounds should be removed from fix and finishing Loops;
-  the [migration guide](../guides/review-fix-loops.md) shows the replacement.
+  the [migration guide](../../apps/docs/src/content/docs/guides/review-fix-loops.md) shows the replacement.
