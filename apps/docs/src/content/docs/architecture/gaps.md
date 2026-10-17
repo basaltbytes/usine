@@ -1,6 +1,6 @@
 ---
 title: "Gaps"
-description: "What the code does not do yet, grouped by area, with the open issue for each gap."
+description: "What the code doesn't do yet, grouped by area, with the open issue for each gap."
 sidebar:
   order: 7
 ---
@@ -9,14 +9,14 @@ sidebar:
 This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine and its open issues as they were on 2026-10-16.
 :::
 
-What the code does not do yet, or does badly, grouped by area. The issue numbers come from `gh issue list --repo basaltbytes/usine --state open --limit 200` on 2026-10-16; 63 issues were open, and every gap below has one of them.
+What the code doesn't do yet, or does badly, grouped by area. The issue numbers come from `gh issue list --repo basaltbytes/usine --state open --limit 200` on 2026-10-16; 63 issues were open, and each gap below links to one of them.
 
 ## Onboarding, distribution, CLI
 
 - [#41][]: there is no `create-usine` scaffolder, no GitHub App manifest flow, and no Workers page with preflight on demand; without credentials `usine up` only shows a notice ([up.ts:122][]).
 - [#154][]: the CLI has `up`, `backup`, and `export-run` only, with no `status`, `stop`, `restart`, or `upgrade` ([cli.ts:23][]).
 - [#233][]: npm installs of usine packages pull `@effect/platform-node-shared` 4.0.4, which needs `effect` ^4.0.4.
-- [#280][]: the instance is read once at startup and nothing watches it, so every configuration edit needs a restart ([up.ts:114][]).
+- [#280][]: usine reads the instance once at startup and doesn't watch it for changes, so every configuration edit needs a restart ([up.ts:114][]).
 
 ## Configuration
 
@@ -25,14 +25,14 @@ What the code does not do yet, or does badly, grouped by area. The issue numbers
 
 ## Triggers and polling
 
-- [#37][]: `webhooks.mode` is parsed and never read, there is no `POST /webhooks/github`, and Board moves are the only Hint source ([operator.ts:556][]).
-- [#158][]: every poll fetches every known open pull request again, instead of only after the base branch moves ([polling.ts:222][]).
-- [#267][]: a canceled Run keeps its Event, so relabeling an Item back to the same content opens nothing ([store.ts:117][]).
-- [#152][]: the Run drawer cannot run again a completed Run whose outcome left the Item unresolved.
+- [#37][]: usine parses `webhooks.mode` but never reads it, there is no `POST /webhooks/github`, and Board moves are the only Hint source ([operator.ts:556][]).
+- [#158][]: every poll fetches every known open pull request again, instead of only after the base branch changes ([polling.ts:222][]).
+- [#267][]: a canceled Run keeps its Event, so changing an Item's labels back to the same content opens no Run ([store.ts:117][]).
+- [#152][]: the Run drawer can't rerun a completed Run whose outcome left the Item unresolved.
 
 ## Asks and notifications
 
-- [#36][]: no Ask is posted on GitHub; approvals, failures, and cycle-budget Asks are visible in the UI only, and there is no question tool that parks an Attempt.
+- [#36][]: usine posts no Ask on GitHub; approvals, failures, and cycle-budget Asks are visible in the UI only, and there is no question tool that pauses an Attempt.
 
 ## Cost accounting
 
@@ -43,28 +43,28 @@ What the code does not do yet, or does badly, grouped by area. The issue numbers
 
 - [#159][]: an operator message to a Pi parent that is waiting on a child waits for the child, then ends the Attempt as `Succeeded`.
 - [#177][]: a reattached Attempt keeps its own Worker while the scheduler reserved a slot on another one ([store.ts:284][]).
-- [#178][]: the runaway guard forgets an Attempt's elapsed time and its finished sessions' tokens across a reattach.
-- [#180][]: the checkout of an Attempt closed between a restart and its reattach waits for the next startup to be reconciled.
+- [#178][]: the runaway guard loses an Attempt's elapsed time and its finished sessions' tokens across a reattach.
+- [#180][]: the checkout of an Attempt closed between a restart and its reattach isn't reconciled until the next startup.
 - [#211][]: startup recovery calls `Executor.recover` four times for the same open Attempt.
 - [#268][]: salvage reconciliation fails at every start for Attempts retained on a Worker that `usine.yaml` no longer lists.
 - [#282][]: a retried Attempt resumes from the previous Attempt's salvage branch and never fetches the default branch again, so it keeps the base of the first Attempt ([provision.ts:485][]).
 
 ## Durable layer
 
-- [#179][]: a poisoned pi-durable session is detected by wrapping storage and matching an error message.
+- [#179][]: usine detects a poisoned pi-durable session by wrapping storage and matching an error message.
 - [#181][]: a Pi child's grep and find tools inherit the orchestrator's environment.
 - [#182][]: the durable Pi parent runs without Pi's HTTP dispatcher settings.
 - [#185][]: the durable Pi parent's system prompt is only the usine section.
-- [#187][]: a crash between an append and the progress commit can lose one envelope that is not derived from a parent entry.
-- [#195][]: a task that settles at the moment its relay fails stays live after `stopTask` cancels it.
+- [#187][]: a crash between an append and the progress commit can lose one envelope that isn't derived from a parent entry.
+- [#195][]: a task that finishes at the moment its relay fails stays live after `stopTask` cancels it.
 - [#217][]: `DurableHarness` must handle pi-durable's `SessionFailed` before upgrading past 1.1.0.
 
 ## Harnesses
 
 - [#227][]: pull request harvest logs a warning whenever an Attempt's final commit was never pushed.
-- [#256][]: Claude preflight on a logged-out Worker does not say to run `claude auth login`.
-- [#258][]: the Codex app-server asks for github.com and api.github.com on a Worker behind the Gateway.
-- [#266][]: a Codex child that cannot connect to its provider reconnects silently for as long as the Attempt runs.
+- [#256][]: Claude preflight on a logged-out Worker doesn't tell you to run `claude auth login`.
+- [#258][]: the Codex app-server requests github.com and api.github.com on a Worker behind the Gateway.
+- [#266][]: a Codex child that can't connect to its provider reconnects silently for as long as the Attempt runs.
 - [#277][]: `StepResult` allows a `Comment` fact, but `harvestFacts` never records one ([harvest.ts:135][]).
 
 ## Workers
@@ -73,30 +73,30 @@ See [Workers and the Gateway](/architecture/workers-and-gateway/) for how each W
 
 - [#223][]: the umbrella issue for replacing exe.dev with EU Workers that usine controls, in three stages.
 - [#228][]: `usine up` refuses `exe.dev` Workers and mixed Worker kinds ([worker-engine.ts:13][], [scheduler.ts:76][]).
-- [#196][]: exe.dev Workers cannot run Pi children.
+- [#196][]: exe.dev Workers can't run Pi children.
 - [#199][]: canceling an unlaunched live Attempt on exe.dev leaves its remote children running.
 - [#200][]: exe.dev recovery no longer stops a run host left by an earlier usine version.
-- [#201][]: the exe.dev Worker with SSH children has not run on a real VM.
-- [#230][]: an SSH Worker has not run with real Claude Code and Codex children in the tests.
+- [#201][]: the exe.dev Worker with SSH children hasn't run on a real VM.
+- [#230][]: the tests haven't run an SSH Worker with real Claude Code and Codex children.
 - [#231][]: Attempts on one SSH Worker without a Gateway can read each other's GitHub token.
-- [#229][]: the harness versions pinned in `infra/hetzner/cloud-init.yaml` must follow the versions usine supports by hand.
-- [#257][]: the live SSH preflight test cases do not show each harness's outcome.
-- [#270][]: two Attempts at once thrash a 4 GB Worker until sshd stops answering.
-- [#278][]: local and direct SSH preflight do not check the GitHub credential; only the exe.dev preflight raises the `credentials` capability ([exe-dev/preflight.ts:123][]).
+- [#229][]: the harness versions pinned in `infra/hetzner/cloud-init.yaml` must be updated by hand to match the versions usine supports.
+- [#257][]: the live SSH preflight test cases don't show each harness's outcome.
+- [#270][]: two Attempts at once thrash a 4 GB Worker until sshd stops responding.
+- [#278][]: local and direct SSH preflight don't check the GitHub credential; only the exe.dev preflight raises the `credentials` capability ([exe-dev/preflight.ts:123][]).
 
 ## Gateway
 
-- [#234][]: the Gateway's swap of a Claude subscription token has not been checked against Anthropic.
-- [#235][]: the Gateway cannot hold a Codex ChatGPT login with token refresh.
+- [#234][]: the Gateway's use of a Claude subscription token hasn't been tested against Anthropic.
+- [#235][]: the Gateway can't store a Codex ChatGPT login with token refresh.
 - [#236][]: reloading the egress allowlist or the secrets drops the in-memory attachments.
-- [#237][]: the Gateway does not serve GitHub release download URLs or follow repository rename redirects.
+- [#237][]: the Gateway doesn't serve GitHub release download URLs or follow repository rename redirects.
 - [#240][]: a tunnel opened to an allowed name can be reused for other names on the same certificate (HTTP/2 coalescing, domain fronting).
 - [#243][]: Attempts on one machine behind the Gateway can read each other's caller tokens.
-- [#249][]: the executor does not open or keep the SSH forward to a Gateway's admin API; the operator must.
+- [#249][]: the executor doesn't open or maintain the SSH forward to a Gateway's admin API; the operator must do it.
 - [#251][]: a refused admin request logs its endpoint as `HttpApiEndpoint`.
 - [#254][]: Workers behind the Gateway have no time source.
 - [#255][]: a tunnel that the client closes before its ClientHello is logged as a `not-tls` refusal.
-- [#261][]: harness turns behind the Gateway ask for hosts outside the egress allowlist.
+- [#261][]: harness turns behind the Gateway request hosts outside the egress allowlist.
 - [#262][]: `usine-gateway` exits with status 130 when systemd stops it.
 - [#264][]: infrastructure changes are applied to a running Gateway only by hand, and never to a running Worker.
 
@@ -105,12 +105,12 @@ See [Workers and the Gateway](/architecture/workers-and-gateway/) for how each W
 See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop files.
 
 - [#226][]: the reviewer Agent pushed a fix commit to a pull request branch although `review-pr` forbids branch edits.
-- [#241][]: `act-on-findings` repeats an Attempt that ended with an operator question until the cycle budget is spent.
-- [#242][]: a `finish-pr` commit on the local Worker is authored as the operator, not the factory's App.
+- [#241][]: `act-on-findings` repeats an Attempt that ended with an operator question until the cycle budget is used up.
+- [#242][]: a `finish-pr` commit on the local Worker has the operator as its author instead of the factory's App.
 
 ## Observability
 
-- [#279][]: `apps/server` installs no tracer, so the `Effect.fn` spans are not exported anywhere; only console logs remain.
+- [#279][]: `apps/server` installs no tracer, so the `Effect.fn` spans aren't exported anywhere, and only console logs are available.
 
 ## Later and other
 

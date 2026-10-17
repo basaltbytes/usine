@@ -1,6 +1,6 @@
 ---
 title: "The dogfood instance's Loops"
-description: "The five Loops and three Agents of the dogfood instance, the labels that hand an Item from one Loop to the next, and each Loop file."
+description: "The five Loops and three Agents of the dogfood instance, the labels that pass an Item from one Loop to the next, and each Loop file."
 sidebar:
   order: 6
 ---
@@ -9,7 +9,7 @@ sidebar:
 This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine and the dogfood instance as they were on 2026-10-16.
 :::
 
-usine has no built-in Loop. The engine runs whatever `loops/*.md` the instance folder contains ([ADR 0001](https://github.com/basaltbytes/usine/blob/main/docs/adr/0001-loops-live-in-the-instance-repo.md)). This repository has Loop files only as parser test fixtures ([`packages/config/test/fixtures/acceptance/loops/`][fixtures]) and as an example in [Bounded review and fix Loops](/guides/review-fix-loops/). The Loops below are those of the dogfood instance at `~/Code/usine-factory`, read on 2026-10-16 and not changed. That folder is outside this repository, so its files can differ from this page after that date.
+usine has no built-in Loop. The engine runs whatever `loops/*.md` the instance folder contains ([ADR 0001](https://github.com/basaltbytes/usine/blob/main/docs/adr/0001-loops-live-in-the-instance-repo.md)). This repository has Loop files only as parser test fixtures ([`packages/config/test/fixtures/acceptance/loops/`][fixtures]) and as an example in [Bounded review and fix Loops](/guides/review-fix-loops/). The Loops below are from the dogfood instance at `~/Code/usine-factory`, copied unchanged on 2026-10-16. That folder is outside this repository, so its files can differ from this page after that date.
 
 ## The instance
 
@@ -26,7 +26,7 @@ usine has no built-in Loop. The engine runs whatever `loops/*.md` the instance f
 | Pull requests | state `pr-open` |
 | Done | states `pr-merged`, `pr-closed`, `issue-closed` |
 
-It has no `labels` list, so the orchestrator creates no label and logs a warning for each lane and trigger label it does not declare ([parser.ts:256][]).
+It has no `labels` list, so the orchestrator creates no labels, and it logs a warning for every lane label and trigger label because none of them is declared ([parser.ts:256][]).
 
 Settings: `poll_interval: 60`, `parent_model: openai-codex/gpt-5.6-terra` (the ChatGPT plan pool), `parent_effort: medium`, no ceilings. One Worker, `usine-worker-1`, of kind `ssh` with `max_concurrent_attempts: 1`, behind the Gateway with domain `gw.internal` and the admin API on the local forward `http://127.0.0.1:7070`. Webhooks are off and the operator login is `PhilDL`.
 
@@ -36,9 +36,9 @@ Settings: `poll_interval: 60`, `parent_model: openai-codex/gpt-5.6-terra` (the C
 | `reviewer` | codex | `gpt-6-astra` | high | Delegate the whole review to one child; grade each observation P0 to P3; only P0, P1, and P2 are findings, with file and line references; P3 goes in one ungraded comment. |
 | `finisher` | claude | `claude-fable-5-1` | xhigh | Finish one pull request with the repository's `finish-pr` skill, inside the PR's scope, without merging; delegate the whole task to one child. |
 
-## How the Loops hand work on
+## How the Loops pass work to each other
 
-The engine changes no label itself: every label change below is an instruction in a Loop's prompt, which the agent performs with `gh`. Each Loop's trigger reads the labels the previous one left, so the labels carry an Item from one Loop to the next.
+The engine doesn't change labels itself: every label change below is an instruction in a Loop's prompt, which the agent performs with `gh`. Each Loop's trigger checks the labels that the previous Loop set, so the labels pass an Item from one Loop to the next.
 
 ```mermaid
 flowchart TD
@@ -54,11 +54,11 @@ flowchart TD
   merge -.->|"the operator merges;<br/>no Loop merges"| merged(["merged"])
 ```
 
-`start-dev` moves the issue's labels and puts `ready-for-review` on the pull request it opens, so the rest of the flow happens on the pull request. A `finish-pr` or `rebase-pr` Attempt that meets a blocker records it; `finish-pr` then leaves the labels as they are.
+`start-dev` changes the issue's labels and adds `ready-for-review` to the pull request it opens, so the rest of the flow happens on the pull request. A `finish-pr` or `rebase-pr` Attempt that hits a blocker records it; `finish-pr` then leaves the labels as they are.
 
 ## The Loops
 
-Every Loop has `selector: { repos: [basaltbytes/usine] }` and no `max_cycles`, so each may open three Runs per Item between resets ([Run lifecycle](/architecture/run-lifecycle/)).
+Every Loop has `selector: { repos: [basaltbytes/usine] }` and no `max_cycles`, so each can open three Runs per Item between resets ([Run lifecycle](/architecture/run-lifecycle/)).
 
 | Loop | Stream | Fires when | Approval | Step | Agent |
 | --- | --- | --- | --- | --- | --- |
@@ -70,7 +70,7 @@ Every Loop has `selector: { repos: [basaltbytes/usine] }` and no `max_cycles`, s
 
 ### start-dev
 
-The task asks the developer to complete issue #N with the repository's `tackle-issue` skill. Before editing, it removes `ready-for-agent` from the issue and adds `agent-in-progress`. It opens a non-draft pull request whose body closes the issue and does not merge it. When the pull request is ready, it removes `agent-in-progress` and adds `ready-for-review` to the pull request. A blocker becomes a comment on the issue. This is the only Loop with `approval: required`: each Run waits in `Waiting` until the operator approves it in the Run drawer, which is how the instance's README says to start work.
+The task asks the developer to complete issue #N with the repository's `tackle-issue` skill. Before editing, it removes `ready-for-agent` from the issue and adds `agent-in-progress`. It opens a non-draft pull request whose body closes the issue and does not merge it. When the pull request is ready, it removes `agent-in-progress` and adds `ready-for-review` to the pull request. It reports a blocker as a comment on the issue. This is the only Loop with `approval: required`: each Run stays in `Waiting` until the operator approves it in the Run drawer. The instance's README describes this approval as the way to start work.
 
 ```markdown title="loops/start-dev.md"
 ---
@@ -95,9 +95,9 @@ If work cannot continue, add a comment to the issue that states the exact blocke
 
 ### review-pr
 
-The reviewer removes `ready-for-review`, reviews the pull request with the repository's `code-review` skill, and posts the review. With actionable findings it adds `agent-review-findings`. Without, it makes sure `agent-review-findings` is absent and adds `review-passed`. It must not edit the branch; [#226][] records one review Run that pushed a commit anyway.
+The reviewer removes `ready-for-review`, reviews the pull request with the repository's `code-review` skill, and posts the review. If there are actionable findings, it adds `agent-review-findings`. If there are none, it makes sure `agent-review-findings` is absent and adds `review-passed`. It must not edit the branch; [#226][] reports a review Run that pushed a commit anyway.
 
-The prompt says the Attempt starts from the default branch, and `act-on-findings` has the same sentence. In the code, the checkout of a pr Run is the pull request's head commit ([loop-evaluation.ts:78][]), so the prompt's fetch of `refs/pull/<n>/head` and its check against `headRefOid` end at the commit already checked out.
+The prompt says the Attempt starts from the default branch, and `act-on-findings` has the same sentence. In the code, the checkout of a pr Run is the pull request's head commit ([loop-evaluation.ts:78][]), so the prompt's fetch of `refs/pull/<n>/head` and its check against `headRefOid` resolve to the commit that is already checked out.
 
 ```markdown title="loops/review-pr.md"
 ---
@@ -124,7 +124,7 @@ Post the review on GitHub. If you find any actionable issue, explain it with fil
 
 ### act-on-findings
 
-The developer removes `agent-review-findings`, checks out the pull request branch after the same head check, and fixes each finding graded P0, P1, or P2 in reviews signed `usine agent: reviewer`. It runs the checks, pushes to the branch, replies to each finding, and adds `ready-for-review`, which sends the pull request back to `review-pr`. [#241][] records that an Attempt that ends on an operator question is repeated until the cycle budget is spent.
+The developer removes `agent-review-findings`, checks out the pull request branch after the same head check, and fixes each finding graded P0, P1, or P2 in reviews signed `usine agent: reviewer`. It runs the checks, pushes to the branch, replies to each finding, and adds `ready-for-review`, which sends the pull request back to `review-pr`. [#241][] reports that usine repeats an Attempt that ends with a question for the operator until the cycle budget is used up.
 
 ```markdown title="loops/act-on-findings.md"
 ---
@@ -149,7 +149,7 @@ Read every review comment signed `usine agent: reviewer`. Act only on findings g
 
 ### finish-pr
 
-The finisher runs the repository's `finish-pr` skill on the current head. When the branch is green and pushed and the outcome is recorded, it removes `review-passed` and `agent-review-findings` and adds `ready-to-merge`. On a blocker it records the blocker and leaves the labels. [#242][] records that a `finish-pr` commit on the local Worker was authored as the operator rather than the App.
+The finisher runs the repository's `finish-pr` skill on the current head. When the branch is green and pushed and the outcome is recorded, it removes `review-passed` and `agent-review-findings` and adds `ready-to-merge`. If it hits a blocker, it records the blocker and leaves the labels. [#242][] reports that a `finish-pr` commit on the local Worker was authored as the operator rather than the App.
 
 ```markdown title="loops/finish-pr.md"
 ---
@@ -182,7 +182,7 @@ When the final branch is green and pushed and the outcome is recorded, remove `r
 
 ### rebase-pr
 
-When GitHub reports a `ready-to-merge` pull request as conflicting, the finisher merges `origin/<base>` into the branch and resolves the conflicts within the pull request's scope. It then runs `pnpm check && pnpm test && pnpm format:check && pnpm lint && pnpm knip`, pushes, and posts a `COMMENT` review that says what conflicted. It leaves `ready-to-merge`, unless a conflict needs a design decision, in which case it records the blocker and removes `ready-to-merge`.
+When GitHub reports a `ready-to-merge` pull request as conflicting, the finisher merges `origin/<base>` into the branch and resolves the conflicts within the pull request's scope. It then runs `pnpm check && pnpm test && pnpm format:check && pnpm lint && pnpm knip`, pushes, and posts a `COMMENT` review that says what conflicted. It leaves `ready-to-merge` in place. If a conflict needs a design decision, it records the blocker and removes `ready-to-merge` instead.
 
 ```markdown title="loops/rebase-pr.md"
 ---
@@ -209,7 +209,7 @@ Once the branch merges cleanly, run the repository gate from the root (`pnpm che
 
 ## Where the Loops differ from the guide
 
-The guide and [ADR 0022](https://github.com/basaltbytes/usine/blob/main/docs/adr/0022-item-cycle-budgets-and-comment-reviews.md) say to drop the CEL review counts from fix and finishing Loops, since the cycle budget bounds the rounds. `act-on-findings` (`< 3`) and `finish-pr` (`>= 3`) still count reviewer reviews in `if:`. The count reads the `reviews(last: 20)` connection of the payload slice ([queries.ts:84][]), and matches the signature line, ending in `usine agent: reviewer`, that `githubSignature` asks every agent to add ([prompt.ts:28][]).
+The guide and [ADR 0022](https://github.com/basaltbytes/usine/blob/main/docs/adr/0022-item-cycle-budgets-and-comment-reviews.md) say to drop the CEL review counts from fix and finishing Loops, because the cycle budget limits the rounds. `act-on-findings` (`< 3`) and `finish-pr` (`>= 3`) still count reviewer reviews in `if:`. The count uses the `reviews(last: 20)` connection of the payload slice ([queries.ts:84][]). It matches the signature line that `githubSignature` asks every agent to add, which ends in `usine agent: reviewer` ([prompt.ts:28][]).
 
 [fixtures]: https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/test/fixtures/acceptance/loops
 [parser.ts:256]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L256

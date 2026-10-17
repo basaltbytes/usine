@@ -11,7 +11,7 @@ import { Steps } from "@astrojs/starlight/components";
 This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16.
 :::
 
-The operator works with usine through four things: a local HTTP API, the web UI built on it, the `usine` CLI, and the process logs. Apart from what the agents write, usine writes to a repository in three cases: it creates the labels `usine.yaml` declares, it applies Board moves, and it pushes salvage branches `usine/salvage/<run>/<number>`.
+The operator works with usine through a local HTTP API, the web UI built on it, the `usine` CLI, and the process logs. Apart from what the agents write, usine writes to a repository only to create the labels that `usine.yaml` declares, to apply Board moves, and to push salvage branches `usine/salvage/<run>/<number>`.
 
 ## The HTTP server
 
@@ -21,7 +21,7 @@ The operator works with usine through four things: a local HTTP API, the web UI 
 - `GET /` and `GET /assets/*`: the built web UI, from the `web` folder next to the server's `main.js`.
 - Any other `GET` path without a file extension and outside `/api` and `/assets`: `index.html`, so client routes load on refresh ([http.ts:220][]).
 
-There is no authentication. A request whose `Origin` header is present and not a loopback host is refused with 403 `CrossSiteRequestError` before its handler runs ([http.ts:68][]). JSON bodies are accepted whatever the `Content-Type`. Without GitHub App credentials the server runs in setup mode: the overview, the roster, and Run detail work, and every action answers 503 `BackendUnavailableError` ([backend.ts:77][]).
+There is no authentication. If a request has an `Origin` header that isn't a loopback host, the server refuses it with 403 `CrossSiteRequestError` before its handler runs ([http.ts:68][]). The server accepts JSON bodies with any `Content-Type`. Without GitHub App credentials, the server runs in setup mode: the overview, the roster, and Run detail work, and every action returns 503 `BackendUnavailableError` ([backend.ts:77][]).
 
 A request from the web UI goes through the same layers for every action. Approving a Run, for example:
 
@@ -56,7 +56,7 @@ The browser and the server share one contract. `OperatorApi` ([operator/http.ts:
 
 ## Endpoints
 
-Every action answers `{ "ok": true }` once accepted; the result appears in later reads. Request bodies refuse unknown properties. The definitions, trimmed:
+Every action returns `{ "ok": true }` once accepted; the result appears in later reads. The API refuses request bodies with unknown properties. The definitions, trimmed:
 
 ```ts title="packages/orchestrator/src/operator/http.ts"
 export const OperatorApi = HttpApi.make("OperatorApi").add(
@@ -88,7 +88,7 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
 
 ### Reads
 
-| Method | Path               | Query                                               | Answers                                                                                                                                                                                                                                      |
+| Method | Path               | Query                                               | Returns                                                                                                                                                                                                                                      |
 | ------ | ------------------ | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/api/overview`    |                                                     | `Ready` or `NeedsSetup` overview: each Project's status, Runs, Board, labels, and label preflight findings; each Loop's trigger, Agent, and paused flag; the Needs you list ([overview.ts:35][]).                                            |
 | GET    | `/api/agents`      |                                                     | The roster's Agent names.                                                                                                                                                                                                                    |
@@ -111,10 +111,10 @@ Each action calls the `Operator` service, which calls `RunEngine` ([operator.ts:
 
 | Method | Path                                                | Body         | Does                                                                                                                                                          |
 | ------ | --------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/projects/:owner/:repository/items/:item/lane` | `{ toLane }` | Writes the label swap of a Board move to GitHub, then queues a Hint for that Item, also when the write fails ([operator.ts:556][]). 409 for a read-only lane. |
+| POST   | `/api/projects/:owner/:repository/items/:item/lane` | `{ toLane }` | Writes the label swap of a Board move to GitHub, then queues a Hint for that Item, even when the write fails ([operator.ts:556][]). 409 for a read-only lane. |
 | POST   | `/api/loops/:loop/pause`                            |              | Sets the Loop's paused flag; its existing Runs continue.                                                                                                      |
 | POST   | `/api/loops/:loop/unpause`                          |              | Clears it.                                                                                                                                                    |
-| POST   | `/api/cycle-budgets/reset`                          | `{ askId }`  | Answers a cycle-budget Ask and grants the Item a new allowance.                                                                                               |
+| POST   | `/api/cycle-budgets/reset`                          | `{ askId }`  | Answers a cycle-budget Ask and gives the Item a new allowance.                                                                                                |
 
 ### Errors
 
@@ -122,17 +122,17 @@ Failures return `{ error, message }`, where `error` is the domain error's tag ([
 
 | Status | `error`                                                                                                                                                           |
 | ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `SchemaError`, `InvalidRequestError`: the request did not decode                                                                                                  |
+| 400    | `SchemaError`, `InvalidRequestError`: the request didn't decode                                                                                                   |
 | 403    | `CrossSiteRequestError`                                                                                                                                           |
 | 404    | `RunNotFoundError`, `TranscriptAttemptNotFoundError`, `BoardProjectNotFoundError`, `BoardItemNotFoundError`, `BoardLaneNotFoundError`, `RosterAgentNotFoundError` |
 | 409    | `RunOperationRejectedError`, `RunInterventionRejectedError`, `CycleBudgetResetRejectedError`, `BoardLaneReadOnlyError`                                            |
-| 500    | `EnginePersistenceError`, `AttemptCancellationError`, `HttpBodyError` (the response did not encode)                                                               |
+| 500    | `EnginePersistenceError`, `AttemptCancellationError`, `HttpBodyError` (the response didn't encode)                                                                |
 | 502    | `GitHubApiError`, `InvalidGitHubResponseError`                                                                                                                    |
 | 503    | `BackendUnavailableError` (setup mode), `InstallationDiscoveryError`, `AppPermissionError`, `GitHubRateLimitError`                                                |
 
 ### Calling the API by hand
 
-`curl` sends no `Origin` header, so the cross-site guard lets it through. The bodies below follow the request schemas ([run.ts:20][]); they were not run against a live server for this page.
+`curl` sends no `Origin` header, so the cross-site check allows it. The bodies below follow the request schemas ([run.ts:20][]); they weren't tested against a live server for this page.
 
 ```sh
 curl -s http://127.0.0.1:7331/api/overview
@@ -142,11 +142,11 @@ curl -s -X POST http://127.0.0.1:7331/api/runs/<runId>/intervene \
   -d '{"attemptId":"<runId>/<step>/<n>","action":{"_tag":"OperatorMessage","message":"Stop after the tests pass."}}'
 ```
 
-Without `target`, an intervention goes to the parent ([run.ts:30][]); a child is `{"_tag":"Child","sessionId":"<id>"}`.
+Without `target`, an intervention goes to the parent ([run.ts:30][]); to send it to a child, set `target` to `{"_tag":"Child","sessionId":"<id>"}`.
 
 ### Needs you
 
-The Needs you list contains seven kinds ([need.ts][]): `ApprovalNeed`, `RunFailureNeed`, `PollFailureNeed`, `PreflightFindingNeed`, `BoardProjectionNeed`, `ScheduleFailureNeed`, and `CycleBudgetNeed`.
+The Needs you list has seven kinds of entries ([need.ts][]): `ApprovalNeed`, `RunFailureNeed`, `PollFailureNeed`, `PreflightFindingNeed`, `BoardProjectionNeed`, `ScheduleFailureNeed`, and `CycleBudgetNeed`.
 
 ## The web UI
 
@@ -168,7 +168,7 @@ There is no page for editing configuration, for usage and cost, for Worker prefl
 
 ## The CLI
 
-`apps/server` publishes the `usine` binary ([main.ts][]). Its usage text:
+`apps/server` provides the `usine` binary ([main.ts][]). Its usage text:
 
 ```txt title="apps/server/src/cli.ts"
 Usage:
@@ -190,12 +190,12 @@ Environment:
   USINE_ALLOW_VOLATILE_INSTANCE  Same as --allow-volatile-instance when set to 1
 ```
 
-| Command                           | Does                                                                                                                                                                                                                                                                  |
-| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `usine up`                        | Runs the orchestrator in the foreground from the instance folder. `--port` also takes the form `--port=<port>`.                                                                                                                                                       |
-| `usine backup <path>`             | Copies the durable storage, then the runtime store, to new files: the runtime store to `<path>` and the durable storage beside it, `backup.sqlite` giving `backup.durable.sqlite` ([backup.ts:19][], [Storage and configuration](/architecture/storage-and-config/)). |
-| `usine export-run <runId>`        | Writes the Run's snapshot and its whole transcript as JSON, by default to `run-<encoded runId>.json` ([export-run.ts][]).                                                                                                                                             |
-| `usine --help`, `usine --version` | Usage, and the installed `@usine/server` version. `usine up --help`, `usine backup --help`, and `usine export-run --help` print the same usage.                                                                                                                       |
+| Command                           | Does                                                                                                                                                                                                                                                                   |
+| --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `usine up`                        | Runs the orchestrator in the foreground from the instance folder. `--port` also takes the form `--port=<port>`.                                                                                                                                                        |
+| `usine backup <path>`             | Copies the durable storage, then the runtime store, to new files: the runtime store to `<path>` and the durable storage next to it (`backup.sqlite` gives `backup.durable.sqlite`) ([backup.ts:19][], [Storage and configuration](/architecture/storage-and-config/)). |
+| `usine export-run <runId>`        | Writes the Run's snapshot and its whole transcript as JSON, by default to `run-<encoded runId>.json` ([export-run.ts][]).                                                                                                                                              |
+| `usine --help`, `usine --version` | Usage, and the installed `@usine/server` version. `usine up --help`, `usine backup --help`, and `usine export-run --help` print the same usage.                                                                                                                        |
 
 `usine up` ([up.ts:104][]) runs these steps in order:
 
@@ -203,27 +203,27 @@ Environment:
 
 1. Refuse a volatile instance folder.
 2. Take the instance lock: an exclusive SQLite transaction on `.usine/instance.lock`, which the OS releases when the process exits ([instance-lock.ts:44][]).
-3. Refuse a port that another process listens on, and print that process's pid when `lsof` can find it ([cli.ts:318][]).
+3. Refuse a port that another process listens on, and print that process's pid when `lsof` finds it ([cli.ts:318][]).
 4. Load the instance folder.
 5. Load the GitHub App credentials. When they are missing, start in setup mode and open the browser ([up.ts:122][]).
-6. Otherwise build the runtime and run the HTTP server and the trigger streams together under graceful shutdown. The first SIGINT or SIGTERM drains the open Attempts, for at most `max_attempt_minutes` when it is set; a second signal ends the drain ([shutdown.ts:25][]).
+6. Otherwise, build the runtime and run the HTTP server and the trigger streams together under graceful shutdown. The first SIGINT or SIGTERM drains the open Attempts, for at most `max_attempt_minutes` when it is set; a second signal ends the drain ([shutdown.ts:25][]).
 
 </Steps>
 
-`@usine/gateway` publishes a second binary, `usine-gateway`, which runs on the Gateway VM ([Workers and the Gateway](/architecture/workers-and-gateway/)).
+`@usine/gateway` provides a second binary, `usine-gateway`, which runs on the Gateway VM ([Workers and the Gateway](/architecture/workers-and-gateway/)).
 
 ## Logs and spans
 
-Every service method is an `Effect.fn` span annotated with its domain ids (`runId`, `attemptId`, `repository`, `loop`, `worker`), and decision points log with `Effect.logInfo`, `logWarning`, or `logError` and structured fields. `apps/server` installs no logger or tracer layer, so logs go to the console through Effect's default logger and spans are not exported anywhere ([#279][]). The console format is not verified here. The Gateway installs `Logger.consoleJson`, one JSON object per line for journald ([node/main.ts:7][]).
+Every service method is an `Effect.fn` span annotated with its domain ids (`runId`, `attemptId`, `repository`, `loop`, `worker`), and decision points log with `Effect.logInfo`, `logWarning`, or `logError` and structured fields. `apps/server` installs no logger or tracer layer, so logs go to the console through Effect's default logger and spans aren't exported anywhere ([#279][]). This page doesn't verify the console format. The Gateway installs `Logger.consoleJson`, one JSON object per line for journald ([node/main.ts:7][]).
 
-These messages answer the usual questions:
+These log messages answer common questions:
 
 | Question                               | Message                                                                                                               | Code                                                             |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | Did the poll run?                      | `Poll cycle complete`                                                                                                 | [polling.ts:491][]                                               |
 | Did an Item match a Loop?              | `Submitted matching item state`                                                                                       | [loop-evaluation.ts:163][]                                       |
 | What did the engine do with the Event? | `Event claim decided`, `Event joined its existing Run`, `Event remains ignored`                                       | [store.ts:152][], [store.ts:119][], [store.ts:130][]             |
-| Why does a Run not start?              | `Run waits for a worker slot`, `Run waits for its approval`, `Attempt deferred until restart; the engine is draining` | [scheduler.ts:142][], [run-driver.ts:356][], [admission.ts:37][] |
+| Why doesn't a Run start?               | `Run waits for a worker slot`, `Run waits for its approval`, `Attempt deferred until restart; the engine is draining` | [scheduler.ts:142][], [run-driver.ts:356][], [admission.ts:37][] |
 | Did an Attempt start and end?          | `Attempt started`, `Attempt completion decided`                                                                       | [store.ts:326][], [store.ts:204][]                               |
 | Is a Worker ready?                     | `Worker preflight verified`, `SSH Worker preflight verified`, `Worker preflight failed`                               | [local.ts:271][], [ssh/preflight.ts:95][], [executor.ts:80][]    |
 | Did operator input arrive?             | `Operator input applied`, `Session refused operator input`                                                            | [runtime.ts:363][], [runtime.ts:339][]                           |
