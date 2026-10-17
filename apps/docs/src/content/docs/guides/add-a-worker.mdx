@@ -7,7 +7,7 @@ sidebar:
 
 import { Steps } from "@astrojs/starlight/components";
 
-A Worker is the machine where an Attempt's checkout is and where its Claude Code or Codex children run. The Pi parent of every Attempt runs in the orchestrator, whatever the Worker. The `workers` list of `usine.yaml` declares the Workers; without it, the factory has one local Worker named `local` that runs one Attempt at a time.
+A Worker is the machine where an Attempt's checkout is and where its Claude Code or Codex children run. The Pi parent of every Attempt runs in the orchestrator, whichever Worker the Attempt uses. The `workers` list of `usine.yaml` declares the Workers; without it, the factory has one local Worker named `local` that runs one Attempt at a time.
 
 ## Worker kinds
 
@@ -18,7 +18,7 @@ A Worker is the machine where an Attempt's checkout is and where its Claude Code
 | `ssh` with `gateway` | on a Linux machine with no public address, through a Gateway | none: the Gateway adds the token to the machine's GitHub requests    |
 | `exe.dev`            | not available: `usine up` refuses this kind at this commit   |                                                                      |
 
-All Workers of one `usine.yaml` must have the same kind. When every Worker is `ssh`, `usine up` runs the SSH executor; otherwise it runs the local executor, which refuses any Worker that is not `local`. A mix of kinds, or any `exe.dev` Worker, stops startup with `UnsupportedWorkerError` ([#228](https://github.com/basaltbytes/usine/issues/228)).
+All Workers of one `usine.yaml` must have the same kind. When every Worker is `ssh`, `usine up` runs the SSH executor; otherwise it runs the local executor, which refuses any Worker that isn't `local`. A mix of kinds, or any `exe.dev` Worker, stops startup with `UnsupportedWorkerError` ([#228](https://github.com/basaltbytes/usine/issues/228)).
 
 Each Worker has a `name` (kebab-case) and `max_concurrent_attempts`, the number of Attempts it runs at the same time, 1 by default. Runs take free slots in the order their Events arrived. [`usine.yaml`](/reference/configuration/usine-yaml/) lists every Worker field.
 
@@ -35,19 +35,19 @@ A local Worker's state is under `.usine/workers/<name>/` in the instance folder:
 
 ## Preflight
 
-usine checks each Worker without changing it. At startup it checks every Worker for the harness of every Agent in the roster, and a failure stops `usine up` with the Worker and what is missing. Before each Attempt it checks the Attempt's Agent again on the chosen Worker; a missing harness or login then fails the Attempt with `AgentFailure`, and the Run waits for you to fix the Worker and retry.
+usine checks each Worker without changing it. At startup it checks every Worker for the harness of every Agent in the roster. If a check fails, `usine up` stops with an error that gives the Worker and what is missing. Before each Attempt it checks the Attempt's Agent again on the chosen Worker; a missing harness or login then fails the Attempt with `AgentFailure`, and the Run waits for you to fix the Worker and retry.
 
-| Worker               | Checks                                                                                                                                                                                                                                                              |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `local`              | `git --version`, and each harness with the children's environment ([Write an Agent](/guides/write-an-agent/#preflight)).                                                                                                                                            |
-| `ssh`                | The SSH connection, a writable `root`, `git --version`, and each harness over SSH. A Pi Agent in the roster fails this check.                                                                                                                                       |
-| `ssh` with `gateway` | The `ssh` checks, then: the admin API accepts the admin token, the Worker's sshd accepts the caller token variables, the Worker reaches `git.<domain>`, and for each harness that uses its login on the Worker, the login's hosts answer through the forward proxy. |
+| Worker               | Checks                                                                                                                                                                                                                                                                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `local`              | `git --version`, and each harness with the children's environment ([Write an Agent](/guides/write-an-agent/#preflight)).                                                                                                                                                    |
+| `ssh`                | The SSH connection, a writable `root`, `git --version`, and each harness over SSH. A Pi Agent in the roster fails this check.                                                                                                                                               |
+| `ssh` with `gateway` | The `ssh` checks, then: the admin API accepts the admin token, the Worker's sshd accepts the caller token variables, the Worker can connect to `git.<domain>`, and for each harness that uses its login on the Worker, the login's hosts respond through the forward proxy. |
 
-Preflight never installs anything or logs in. Making a Worker ready is your job; on Hetzner Cloud, the scripts below install the toolchain for you.
+Preflight never installs anything or logs in. You prepare the Worker yourself; on Hetzner Cloud, the scripts below install the toolchain.
 
 ## SSH Workers
 
-An SSH Worker is any Linux machine that the orchestrator's `ssh` client can reach. The machine needs Git, the harnesses your Agents use on the `PATH` of a non-interactive SSH session, their logins under the SSH user, and a directory the SSH user can write to.
+An SSH Worker is any Linux machine that the orchestrator's `ssh` client can connect to. The machine needs Git, the harnesses your Agents use on the `PATH` of a non-interactive SSH session, their logins under the SSH user, and a directory the SSH user can write to.
 
 ```yaml title="usine.yaml"
 workers:
@@ -63,20 +63,20 @@ workers:
 | --------------- | ------------------------------------------------------------------------------------------------------------------------ |
 | `destination`   | `user@host`, a host, or a `Host` alias of the SSH configuration of the user who runs `usine up`.                         |
 | `root`          | An absolute directory on the machine. The Worker's clones, worktrees, and credentials are under `<root>/workers/<name>`. |
-| `identity_file` | Optional. A private key, absolute or under `~/`. Without it, the SSH agent and configuration decide.                     |
+| `identity_file` | Optional. A private key, absolute or under `~/`. Without it, the SSH agent and configuration choose the key.             |
 | `port`          | Optional. The SSH port.                                                                                                  |
 
-The orchestrator runs `ssh` in batch mode, so the machine's host key must already be in `known_hosts`: connect once by hand before you start `usine up`. The `ssh` client sees only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `SSH_AGENT_PID`, `SSH_AUTH_SOCK`, `TMPDIR`, and `USER` from the orchestrator's environment, so an SSH agent works.
+The orchestrator runs `ssh` in batch mode, so the machine's host key must already be in `known_hosts`: connect once by hand before you start `usine up`. The `ssh` client gets only `HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `SSH_AGENT_PID`, `SSH_AUTH_SOCK`, `TMPDIR`, and `USER` from the orchestrator's environment, so an SSH agent works.
 
-Each Attempt's token is written to `<root>/workers/<name>/credentials/<attempt>`, from standard input so that it is in no command line, and removed when the Attempt ends. Attempts on one machine run as the same user and can read each other's tokens ([#231](https://github.com/basaltbytes/usine/issues/231)); a Gateway removes the token from the machine.
+usine writes each Attempt's token to `<root>/workers/<name>/credentials/<attempt>` through standard input, so the token doesn't appear on any command line, and removes it when the Attempt ends. Attempts on one machine run as the same user and can read each other's tokens ([#231](https://github.com/basaltbytes/usine/issues/231)); with a Gateway, the token isn't on the machine at all.
 
 ### A Worker on Hetzner Cloud
 
-`infra/hetzner/` in the usine repository creates SSH Workers on Hetzner Cloud with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` builds a Debian 13 machine with a `usine` user that accepts SSH by key only, installs Git, gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.296, Codex 0.153.4, and Chromium, and creates `/home/usine/.usine` for the Worker's root. It also adds a 2 GB swap file, because a Worker needs 8 GB of memory: two Attempts at once thrash a 4 GB machine ([#270](https://github.com/basaltbytes/usine/issues/270)).
+`infra/hetzner/` in the usine repository creates SSH Workers on Hetzner Cloud with the `hcloud` CLI. `infra/hetzner/cloud-init.yaml` sets up a Debian 13 machine with a `usine` user that accepts SSH by key only, installs Git, gh, Node.js 24, pnpm 11.20.0, Claude Code 2.1.296, Codex 0.153.4, and Chromium, and creates `/home/usine/.usine` for the Worker's root. It also adds a 2 GB swap file, because a Worker needs 8 GB of memory: two Attempts at once thrash a 4 GB machine ([#270](https://github.com/basaltbytes/usine/issues/270)).
 
 <Steps>
 
-1. Create a key pair for the Worker on the orchestrator's machine, then create the server. The arguments are the Worker name, the location (`fsn1`, `nbg1`, or `hel1`), the IPv4 address the orchestrator connects from, and the public key. The script registers the key with Hetzner, creates a firewall `usine-<name>` that admits SSH from that address only, and prints the server's address. `HCLOUD_SERVER_TYPE` changes the server type, `cpx32` by default.
+1. Create a key pair for the Worker on the orchestrator's machine, then create the server. The arguments are the Worker name, the location (`fsn1`, `nbg1`, or `hel1`), the IPv4 address the orchestrator connects from, and the public key. The script registers the key with Hetzner, creates a firewall `usine-<name>` that allows SSH only from that address, and prints the server's address. `HCLOUD_SERVER_TYPE` sets the server type, which is `cpx32` by default.
 
    ```sh title="usine checkout"
    ssh-keygen -t ed25519 -f ~/.ssh/usine_worker -C usine-worker
@@ -103,9 +103,9 @@ Each Attempt's token is written to `<root>/workers/<name>/credentials/<attempt>`
 
 ## SSH Workers behind a Gateway
 
-A Gateway is a VM in front of Workers that have no public address. It is their SSH bastion and their DNS resolver. It is also the proxy that adds the Attempt's GitHub token, and optionally an LLM provider's key, to their requests, and the forward proxy to an allowlist of package hosts and harness login hosts. A Worker behind it has no GitHub token on disk and can reach nothing else. [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md) records why.
+A Gateway is a VM in front of Workers that have no public address. It's their SSH bastion and their DNS resolver. It's also the proxy that adds the Attempt's GitHub token, and optionally an LLM provider's key, to their requests, and the forward proxy to an allowlist of package hosts and harness login hosts. A Worker behind it has no GitHub token on disk and can't connect to any other host. [ADR 0027](https://github.com/basaltbytes/usine/blob/main/docs/adr/0027-gateway-credential-proxy.md) explains why.
 
-For each Attempt, the executor attaches the Attempt's installation token to the Gateway through the admin API and gets back a caller token. The children receive the caller token through the SSH connection, in environment variables that the Worker's sshd accepts, and send it with every request to `git.<domain>` or `llm.<domain>`. The Gateway checks it, replaces it with the real credential, and forwards the request over HTTPS.
+For each Attempt, the executor attaches the Attempt's installation token to the Gateway through the admin API and receives a caller token. The children receive the caller token through the SSH connection, in environment variables that the Worker's sshd accepts, and send it with every request to `git.<domain>` or `llm.<domain>`. The Gateway checks it, replaces it with the real credential, and forwards the request over HTTPS.
 
 ```mermaid
 flowchart LR
@@ -137,7 +137,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
 
 <Steps>
 
-1. Pack the Gateway service. `gateway.sh create` installs `@usine/gateway` from npm by default, but that package is not published, so build it from your checkout:
+1. Pack the Gateway service. `gateway.sh create` installs `@usine/gateway` from npm by default, but that package isn't published, so build it from your checkout:
 
    ```sh title="usine checkout"
    pnpm build
@@ -146,7 +146,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
 
    This writes `usine-core-0.3.0.tgz` and `usine-gateway-0.0.0.tgz` at this commit.
 
-2. Create the private network, the Gateway VM, and its firewall. `ORCHESTRATOR_CIDR` is the only address allowed to reach the Gateway's SSH port. `SSH_KEY` is the name of an SSH key of the Hetzner project; register the Worker key under the name `usine-worker` if the project does not have it yet. `GATEWAY_PACKAGE=none` skips the npm install. The scripts and the commands below connect as `root@<gateway>` without naming a key, so load the key into your SSH agent first:
+2. Create the private network, the Gateway VM, and its firewall. `ORCHESTRATOR_CIDR` is the only address that can connect to the Gateway's SSH port. `SSH_KEY` is the name of an SSH key of the Hetzner project; register the Worker key under the name `usine-worker` if the project doesn't have it yet. `GATEWAY_PACKAGE=none` skips the npm install. The scripts and the commands below connect as `root@<gateway>` without specifying a key, so load the key into your SSH agent first:
 
    ```sh title="usine checkout"
    ssh-add ~/.ssh/usine_worker
@@ -162,9 +162,9 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    ./infra/hetzner/gateway/gateway.sh install ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
    ```
 
-   On first boot the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root only. To let the Gateway call Anthropic with its own key, add `ANTHROPIC_API_KEY` to that file and restart the service with `systemctl restart usine-gateway`. A restarted Gateway forgets its attachments; the executor stores each running Attempt's attachment again within two minutes.
+   On first boot the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root only. To let the Gateway call Anthropic with its own key, add `ANTHROPIC_API_KEY` to that file and restart the service with `systemctl restart usine-gateway`. A restarted Gateway loses its attachments; the executor stores each running Attempt's attachment again within two minutes.
 
-4. Create the Worker on the private network, without public addresses. `worker-user-data` combines `infra/hetzner/cloud-init.yaml` with `infra/hetzner/gateway/worker-cloud-init.yaml`, which points the Worker's resolver, apt, and environment at the Gateway, forwards gh's socket to it, accepts the caller token variables in sshd, and allows connections to the Gateway only. The type `cx33` has the 8 GB a Worker needs.
+4. Create the Worker on the private network, without public addresses. `worker-user-data` combines `infra/hetzner/cloud-init.yaml` with `infra/hetzner/gateway/worker-cloud-init.yaml`, which configures the Worker's resolver, apt, and environment to use the Gateway, forwards gh's socket to it, configures sshd to accept the caller token variables, and allows connections only to the Gateway. The type `cx33` has the 8 GB a Worker needs.
 
    ```sh title="usine checkout"
    ./infra/hetzner/gateway/gateway.sh worker-user-data ~/.ssh/usine_worker.pub > worker.mime
@@ -173,7 +173,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
      --label usine=worker --user-data-from-file worker.mime
    ```
 
-   `hcloud server describe worker-one` shows its private address, here `10.42.0.3`. The Worker takes about four minutes; follow it through the Gateway, which also records its host key:
+   `hcloud server describe worker-one` shows its private address, here `10.42.0.3`. The Worker takes about four minutes to set up. Follow its progress through the Gateway; this connection also records its host key:
 
    ```sh title="Orchestrator machine"
    ssh -J root@203.0.113.30 usine@10.42.0.3 cloud-init status --wait
@@ -187,7 +187,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    codex login --device-auth
    ```
 
-6. Add both hosts to the SSH configuration of the user who runs `usine up`. The executor reaches the Worker through the Gateway as a jump host, and the admin API through a local forward that you keep open: usine does not open it ([#249](https://github.com/basaltbytes/usine/issues/249)).
+6. Add both hosts to the SSH configuration of the user who runs `usine up`. The executor connects to the Worker through the Gateway as a jump host, and to the admin API through a local forward that you keep open; usine doesn't open it ([#249](https://github.com/basaltbytes/usine/issues/249)).
 
    ```text title="~/.ssh/config"
    Host usine-gateway
@@ -213,7 +213,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    (umask 077; ssh root@203.0.113.30 "sed -n 's/^USINE_GATEWAY_ADMIN_TOKEN=//p' /etc/usine-gateway/secrets.env" > .usine/gateway-admin-token)
    ```
 
-8. Give the Worker a `gateway` in `usine.yaml`. `destination` is the `Host` alias, `domain` the Gateway's `DOMAIN`, `admin_url` the local forward, and `admin_token_env` the name of the orchestrator's environment variable that contains the admin token; the token itself never goes in the file.
+8. Give the Worker a `gateway` in `usine.yaml`. `destination` is the `Host` alias, `domain` the Gateway's `DOMAIN`, `admin_url` the local forward, and `admin_token_env` the name of the orchestrator's environment variable that contains the admin token. Don't put the token itself in the file.
 
    ```yaml title="usine.yaml"
    workers:
@@ -235,11 +235,11 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
    ```
 
-   Without the variable, `usine up` stops with an error that gives its name. A login host that the forward proxy refuses fails preflight with the host to add to `/etc/usine-gateway/egress-allowlist`.
+   If the variable isn't set, `usine up` stops with an error that gives the variable's name. If the forward proxy refuses a login host, preflight fails with an error that gives the host to add to `/etc/usine-gateway/egress-allowlist`.
 
 </Steps>
 
-The Gateway logs one JSON object per line to the journal: `ssh root@203.0.113.30 journalctl -u usine-gateway -o cat`. The response to a refused request gives the reason in its `x-usine-gateway-refusal` header, and the log records it. Changes to the infra files apply to a running Gateway or Worker only when you make them there by hand ([#264](https://github.com/basaltbytes/usine/issues/264)).
+The Gateway logs one JSON object per line to the journal: `ssh root@203.0.113.30 journalctl -u usine-gateway -o cat`. The response to a refused request gives the reason in its `x-usine-gateway-refusal` header, and the log records it. Changes to the infra files don't affect a running Gateway or Worker until you make the same changes on that machine by hand ([#264](https://github.com/basaltbytes/usine/issues/264)).
 
 ## Remove a Worker
 
