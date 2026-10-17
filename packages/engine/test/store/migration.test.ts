@@ -175,3 +175,79 @@ describe("Run driver migration", () => {
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
+
+describe("Attempt salvage check migration", () => {
+  it.live(
+    "keeps stored salvage, rejects invalid salvage JSON, and drops the duplicate Item index",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = InstanceDirectory.make(
+          yield* fs.makeTempDirectoryScoped({ prefix: "usine-salvage-check-upgrade-" }),
+        );
+        const historical = yield* fs.makeTempDirectoryScoped({
+          prefix: "usine-salvage-check-migrations-",
+        });
+        const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
+        for (const name of yield* fs.readDirectory(source)) {
+          if (name >= "20261017155043_attempt_salvage_check") continue;
+          yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
+        }
+        yield* fs.makeDirectory(`${directory}/.usine`);
+        const previousDatabase = Layer.effect(
+          RunDatabase,
+          Effect.gen(function* () {
+            const database = yield* SQLiteDrizzle.makeWithDefaults();
+            yield* migrate(database, {
+              migrationsFolder: historical,
+              migrationsTable: "usine_migrations",
+            });
+            return database;
+          }),
+        ).pipe(
+          Layer.provideMerge(
+            SqliteClient.layer({ filename: `${directory}/.usine/runtime.sqlite` }),
+          ),
+        );
+        const runId = RunId.make("salvage-check-run");
+        const id = "salvage-check-attempt";
+        const salvage = JSON.stringify({
+          _tag: "Pushed",
+          ref: "usine/salvage/salvage-check-run/1",
+          commit: "0123456789abcdef0123456789abcdef01234567",
+        });
+        const brain = JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain));
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const store = yield* RunStore;
+            yield* store.recordAndClaim(lifecycleSubmission, runId);
+            const sql = yield* SqlClient.SqlClient;
+            yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, task, agent, started_at, outcome_json, salvage_json)
+            VALUES (${id}, ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${brain}, ${lifecycleSubmission.task}, ${testAgent.name}, '2026-10-17T00:00:00.000Z', '{"_tag":"Canceled"}', ${salvage})`;
+          }).pipe(Effect.provide(RunStore.layer), Effect.provide(previousDatabase)),
+        );
+        yield* Effect.gen(function* () {
+          const store = yield* RunStore;
+          const attempt = (yield* store.snapshot(runId)).attempts[0];
+          assert(attempt !== undefined && Option.isSome(attempt.salvage));
+          assert.strictEqual(attempt.salvage.value._tag, "Pushed");
+          const sql = yield* SqlClient.SqlClient;
+          assert.deepStrictEqual(
+            yield* sql`SELECT name FROM sqlite_master WHERE name = 'usine_item_projection_repository'`,
+            [],
+          );
+          const rejected =
+            yield* sql`UPDATE usine_attempts SET salvage_json = 'not json' WHERE attempt_id = ${id}`.pipe(
+              Effect.flip,
+            );
+          assert.include(String(rejected.reason.cause), "CHECK constraint failed");
+          assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+          const before = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
+          yield* sql`UPDATE usine_attempts SET salvage_json = NULL WHERE attempt_id = ${id}`;
+          const after = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
+          assert(Schema.is(Schema.Int)(before));
+          assert.strictEqual(after, before + 1);
+        }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
