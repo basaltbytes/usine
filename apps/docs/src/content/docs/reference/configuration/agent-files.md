@@ -46,7 +46,7 @@ An unknown key is an error, as are duplicate keys.
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `harness` | `claude`, `codex`, `pi` | required | The coding runtime of the Agent's child sessions: Claude Code, Codex CLI, or Pi. |
-| `model` | string | required | The model the harness runs, as the harness names it. Non-blank; the harness checks that the model exists when a session starts. |
+| `model` | string | required | The model the harness runs, in the harness's own model ID format. Non-blank; the harness checks that the model exists when a session starts. |
 | `effort` | effort | required | Reasoning effort of the child sessions. |
 | `parent_model` | string | `settings.parent_model` | Model of the Attempt's Pi parent, as `provider/model`. |
 | `parent_effort` | effort | `settings.parent_effort`, then `effort` | Reasoning effort of the Attempt's Pi parent. |
@@ -55,21 +55,21 @@ The effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `m
 
 ### The Pi parent
 
-Every Attempt runs a Pi parent session inside the orchestrator, whatever the Agent's harness. The parent receives the rendered task and delegates work to child sessions that run the Agent's harness, model, and effort on the Worker.
+Every Attempt runs a Pi parent session inside the orchestrator, whatever harness the Agent uses. The parent receives the rendered task and delegates work to child sessions that run the Agent's harness, model, and effort on the Worker.
 
-The parent's model resolves from the Agent's `parent_model`, then `settings.parent_model` in `usine.yaml`, then Pi's configured default model, then the first Pi model with a configured credential ([`resolveParent`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/durable/src/attempt/parent.ts#L101)). The parent's effort resolves from the Agent's `parent_effort`, then `settings.parent_effort`, then the Agent's own `effort` ([`resolveParentEffort`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/agent.ts#L39)).
+usine picks the parent's model in this order: the Agent's `parent_model`, then `settings.parent_model` in `usine.yaml`, then Pi's configured default model, then the first Pi model with a configured credential ([`resolveParent`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/durable/src/attempt/parent.ts#L101)). It picks the parent's effort from the Agent's `parent_effort`, then `settings.parent_effort`, then the Agent's own `effort` ([`resolveParentEffort`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/agent.ts#L39)).
 
-An Attempt fails before its conversation starts when Pi does not expose the parent model, when the model does not support the parent effort, or when no credential is available for the model's provider.
+An Attempt fails before its conversation starts when Pi doesn't provide the parent model, when the model doesn't support the parent effort, or when no credential is available for the model's provider.
 
 ## The body: persona
 
 Everything after the closing `---` line is the persona. It must contain at least one non-whitespace character. usine inserts it, unchanged, under an `# Agent persona` heading in the instructions of the Attempt's Pi parent and of every child session the parent spawns ([`assemblePrompt` and `assembleChildPrompt`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/prompt.ts#L58)).
 
-The persona holds what stays true across every Loop that names the Agent: how it works, what it never does, how it reports. The Loop body holds the task for one Item.
+Use the persona for instructions that apply to every Loop that uses the Agent: how it works, what it never does, and how it reports. The Loop body contains the task for one Item.
 
-usine appends its own instructions after the persona and the task, and they are not configurable:
+usine adds its own instructions after the persona and the task. You can't change them:
 
-- Run checks in the foreground and push work that must survive before returning.
+- Run checks in the foreground, and push every commit to keep before returning.
 - Start the final answer with a reserved blocked marker to report a blocker; that answer fails the Attempt.
 - Submit pull request reviews as comments, never approvals.
 - End every GitHub comment, issue, pull request, and review with `— usine agent: <name>`, where `<name>` is the Agent's name.
@@ -78,7 +78,7 @@ Loops can rely on the signature. The `act-on-findings` example in [Loop files](/
 
 ## The roster
 
-Every Agent file that validates joins the roster. A file that fails validation is left out, and every Loop that names it is quarantined with `Unknown agent: <name>`. As with Loops, `usine up` does not log or display an invalid Agent file at this commit.
+Every valid Agent file is added to the roster. usine leaves out a file that fails validation and quarantines every Loop that references it, with the message `Unknown agent: <name>`. As with Loops, `usine up` doesn't log or display an invalid Agent file at this commit.
 
 | Stage | Checks |
 | --- | --- |

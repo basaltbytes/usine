@@ -8,15 +8,15 @@ sidebar:
 Loop files use expressions in two places:
 
 - `trigger.if` selects Items. It must produce a `bool`.
-- Each `{{ ... }}` in the Loop body inserts a value into the task. It must produce a scalar: `string`, `int`, `uint`, `double`, or `bool`.
+- Each `{{ ... }}` in the Loop body inserts a value into the task. It must produce a scalar: `string`, `int`, `uint`, `double`, `bool`, or `null`.
 
-Expressions are written in [CEL](https://github.com/google/cel-spec), the Common Expression Language, and run on [`@marcbachmann/cel-js`](https://www.npmjs.com/package/@marcbachmann/cel-js) 8.0.0 behind the `@usine/expression` package ([`marcbachmann-cel.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L245)).
+Expressions use [CEL](https://github.com/google/cel-spec), the Common Expression Language. The `@usine/expression` package evaluates them with [`@marcbachmann/cel-js`](https://www.npmjs.com/package/@marcbachmann/cel-js) 8.0.0 ([`marcbachmann-cel.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L245)).
 
-The environment is typed. When a Loop file loads, every expression is type-checked against the variables of its trigger's Stream: an unknown field, a type mismatch, or a wrong result type quarantines the Loop. Evaluation happens later, against each Item's payload or each Tick.
+The environment is typed. When a Loop file loads, usine type-checks every expression against the variables of its trigger's Stream, and quarantines the Loop on an unknown field, a type mismatch, or a wrong result type. Evaluation happens later, against each Item's payload or each Tick.
 
 ## Variables
 
-Every expression sees two variables, `repo` and `item`. Their types come from the payload slices in [`payload-slices.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/payload-slices.ts#L173), and the values come from GitHub's GraphQL API with GitHub's field names ([`queries.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/polling/queries.ts#L1)).
+Every expression can use two variables, `repo` and `item`. Their types come from the payload slices in [`payload-slices.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/payload-slices.ts#L173), and the values come from GitHub's GraphQL API with GitHub's field names ([`queries.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/polling/queries.ts#L1)).
 
 ### `repo`
 
@@ -79,7 +79,7 @@ The pull-request payload slice ([`PullRequestPayload`](https://github.com/basalt
 | `deletions` | int | | |
 | `changedFiles` | int | | |
 | `reviewDecision` | string | yes | `APPROVED`, `CHANGES_REQUESTED`, or `REVIEW_REQUIRED`; null when the branch requires no review. |
-| `mergeable` | string | | `MERGEABLE`, `CONFLICTING`, or `UNKNOWN`. GitHub computes it lazily, so the first poll after the base moves can read `UNKNOWN`. |
+| `mergeable` | string | | `MERGEABLE`, `CONFLICTING`, or `UNKNOWN`. GitHub computes it lazily, so the first poll after the base branch changes can return `UNKNOWN`. |
 | `mergeStateStatus` | string | | GitHub's merge state, such as `CLEAN`, `BLOCKED`, `BEHIND`, or `DIRTY`. |
 | `statusCheckRollup.state` | string | `statusCheckRollup` | The combined check state, such as `SUCCESS`, `FAILURE`, or `PENDING`. `statusCheckRollup` is null when the head commit has no checks. |
 | `labels.totalCount` | int | | |
@@ -99,7 +99,7 @@ The pull-request payload slice ([`PullRequestPayload`](https://github.com/basalt
 
 ### `item` for `on: schedule`
 
-A schedule has no GitHub Item. `item` holds the Tick ([`tickPayload`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/schedule-triggers.ts#L193)).
+A schedule has no GitHub Item. `item` contains the Tick ([`tickPayload`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/schedule-triggers.ts#L193)).
 
 | Field | Type | Description |
 | --- | --- | --- |
@@ -124,14 +124,14 @@ trigger:
   if: item.merged && timestamp(item.mergedAt) > timestamp("2026-10-01T00:00:00Z")
 ```
 
-A field such as `reviewDecision` or `milestone` has no such companion condition. Expressions that read it fail on every Item where it is null.
+Fields such as `reviewDecision` and `milestone` have no such companion condition, so an expression that reads one fails on every Item where it's null.
 
 ## What happens when evaluation fails
 
-A failure at evaluation time does not quarantine the Loop, because the file already passed its checks:
+A failure at evaluation time doesn't quarantine the Loop, because the file already passed its checks:
 
-- **`if` of an `issue` or `pr` Loop.** The repository's poll cycle stops for that cycle and the poll cursor does not advance ([`polling.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/polling.ts#L262)). The next cycle fetches the same changes and meets the same error, until the Item or the Loop changes. Other changed Items of that repository may go unevaluated meanwhile.
-- **`if` of a `schedule` Loop.** The Tick fails for that repository and is evaluated again at the next wake.
+- **`if` of an `issue` or `pr` Loop.** usine stops the repository's poll cycle for that cycle, and the poll cursor doesn't advance ([`polling.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/polling.ts#L262)). The next cycle fetches the same changes and gets the same error, until the Item or the Loop changes. Meanwhile, usine might not evaluate other changed Items of that repository.
+- **`if` of a `schedule` Loop.** The Tick fails for that repository, and usine evaluates it again at the next wake.
 - **The re-check before a queued Run opens.** usine logs a warning and the Run opens as if the check had passed ([`TriggerCondition.holds`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-condition.ts#L87)).
 - **A `{{ ... }}` interpolation.** See [when rendering fails](/reference/configuration/loop-files/#when-rendering-fails).
 
@@ -141,11 +141,11 @@ The environment registers only the types and variables above. It enables no opti
 
 ### Operators
 
-- Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`. An `int` compares with a `double`.
+- Comparison: `==`, `!=`, `<`, `<=`, `>`, `>=`. You can compare an `int` with a `double`.
 - Logic: `&&`, `||`, `!`, and the conditional `condition ? a : b`.
 - Arithmetic: `+`, `-`, `*`, `/`, `%`. `+` also concatenates strings and lists.
 - Membership: `value in list`.
-- Literals: integers, doubles, strings in `"..."` or `'...'`, `true`, `false`, `null`, lists `[...]`, and maps `{...}`. A list or map literal must hold values of one type.
+- Literals: integers, doubles, strings in `"..."` or `'...'`, `true`, `false`, `null`, lists `[...]`, and maps `{...}`. A list or map literal must contain values of one type.
 
 ### Macros
 
@@ -166,7 +166,7 @@ The environment registers only the types and variables above. It enables no opti
 | --- | --- |
 | `size(x)`, `x.size()` | Length of a string, list, or map. |
 | `s.contains(t)`, `s.startsWith(t)`, `s.endsWith(t)` | Substring tests. |
-| `s.matches(re)` | Regular expression test, in JavaScript `RegExp` syntax. Inline flags such as `(?i)` are rejected; write `[Cc][Ss][Vv]` or lowercase first. |
+| `s.matches(re)` | Regular expression test, in JavaScript `RegExp` syntax. Inline flags such as `(?i)` aren't supported; write `[Cc][Ss][Vv]` or lowercase first. |
 | `s.lowerAscii()`, `s.upperAscii()`, `s.trim()` | Case and whitespace. |
 | `s.indexOf(t)`, `s.lastIndexOf(t)`, `s.substring(start, end)` | Positions and slices; indexes start at 0. |
 | `s.split(separator)` | List of strings. |
@@ -178,11 +178,11 @@ The environment registers only the types and variables above. It enables no opti
 | `t.getFullYear()`, `t.getMonth()`, `t.getDate()`, `t.getDayOfMonth()`, `t.getDayOfWeek()`, `t.getDayOfYear()`, `t.getHours()`, `t.getMinutes()`, `t.getSeconds()`, `t.getMilliseconds()` | Parts of a timestamp, in UTC, or in the time zone passed as argument. `getMonth` and `getDayOfMonth` start at 0, `getDate` at 1, and `getDayOfWeek` is 0 on Sunday. |
 | `d.getHours()`, `d.getMinutes()`, `d.getSeconds()`, `d.getMilliseconds()` | Parts of a duration. |
 
-Subtracting two timestamps gives a duration, and durations compare with each other. No function returns the current time. A schedule Loop can use `item.tick.scheduledAt` instead.
+Subtracting two timestamps gives a duration, and you can compare two durations. No function returns the current time. A schedule Loop can use `item.tick.scheduledAt` instead.
 
 ## Label declarations
 
-When an instance loads, usine collects the string literals that a Loop's `if` compares with the `name` of a value reached from `item.labels`, through `==`, `!=`, `in`, and the `exists`, `all`, `exists_one`, `filter`, and `map` macros ([`relatedStringLiterals`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L225)). A literal that is not declared under `labels` in `usine.yaml` produces the warning `Loop trigger references an undeclared GitHub label`. The Loop still loads.
+When an instance loads, usine collects the string literals that a Loop's `if` compares with the `name` of a value under `item.labels`, through `==`, `!=`, `in`, and the `exists`, `all`, `exists_one`, `filter`, and `map` macros ([`relatedStringLiterals`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/expression/src/marcbachmann-cel.ts#L225)). A literal that isn't declared under `labels` in `usine.yaml` produces the warning `Loop trigger references an undeclared GitHub label`, and the Loop still loads.
 
 ## Examples from real Loops
 
@@ -206,7 +206,7 @@ if: >-
   !item.labels.nodes.exists(label, label.name == "ready-to-merge")
 ```
 
-Fewer than three reviews carry the reviewer Agent's signature:
+Fewer than three reviews contain the reviewer Agent's signature:
 
 ```yaml title="loops/act-on-findings.md"
 if: >-
@@ -215,7 +215,7 @@ if: >-
   size(item.reviews.nodes.filter(review, review.body.contains("usine agent: reviewer"))) < 3
 ```
 
-Review passed, or three review rounds did not converge:
+Review passed, or three review rounds didn't converge:
 
 ```yaml title="loops/finish-pr.md"
 if: >-

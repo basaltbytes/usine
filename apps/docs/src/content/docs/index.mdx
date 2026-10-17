@@ -23,7 +23,7 @@ import { ContainerSection } from "lucode-starlight/components";
 
 ## Loop files
 
-Loops and Agents are Markdown files in the operator's instance folder, and the engine contains no built-in Loop. A Loop's frontmatter says which issues or pull requests open a Run, whether the operator approves each Run before it starts, and which Agent does the work. Its body is the task the Agent receives.
+Loops and Agents are Markdown files in the operator's instance folder; the engine has no built-in Loop. A Loop's frontmatter sets which issues or pull requests open a Run, whether the operator approves each Run before it starts, and which Agent does the work. Its body is the task the Agent receives.
 
 This is `loops/start-dev.md` from the dogfood instance, which runs usine on its own repository:
 
@@ -49,7 +49,7 @@ Before editing, remove `ready-for-agent` from the issue and add `agent-in-progre
 If work cannot continue, add a comment to the issue that states the exact blocker. Do not add a workaround that changes the issue's scope.
 ```
 
-The operator follows the work, approves it, and steers it in a web UI that the same process serves on `127.0.0.1`.
+The same process serves a web UI on `127.0.0.1`, where the operator approves and steers the work and follows its progress.
 
 </ContainerSection>
 
@@ -75,7 +75,7 @@ The operator follows the work, approves it, and steers it in a web UI that the s
   />
   <LinkCard
     title="Architecture overview"
-    description="The packages, processes, storage, and Workers, and how one change moves through them."
+    description="The packages, processes, storage, and Workers, and the path of one change through them."
     href="/architecture/"
   />
 </CardGrid>

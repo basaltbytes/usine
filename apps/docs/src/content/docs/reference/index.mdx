@@ -1,9 +1,9 @@
 ---
 title: Reference
-description: The files an instance repository holds, the usine command, and the public API of the @usine packages.
+description: The files in an instance repository, the usine command, and the public API of the @usine packages.
 ---
 
-The configuration reference lists every field of the files usine reads from an instance repository, and the commands of the `usine` CLI. The API reference is generated from the TSDoc comments of the published `@usine/*` packages when the site is built.
+The configuration reference lists every field of the files usine reads from an instance repository, and the commands of the `usine` CLI. The site build generates the API reference from the TSDoc comments of the published `@usine/*` packages.
 
 ## Configuration
 
@@ -15,7 +15,7 @@ The configuration reference lists every field of the files usine reads from an i
 
 ## API
 
-A package's public API is the set of subpaths in its `exports` map, such as `@usine/core/run`. Each package page lists those subpaths; modules that no subpath exports are internal and not documented.
+A package's public API is the set of subpaths in its `exports` map, such as `@usine/core/run`. Each package page lists those subpaths; modules that no subpath exports are internal, and this reference doesn't document them.
 
 - [`@usine/core`](/reference/api/core/): the domain model, from Event to Run, Step, and Attempt, with the typed failures.
 - [`@usine/expression`](/reference/api/expression/): checks and evaluates the CEL expressions in Loop files.
@@ -23,7 +23,7 @@ A package's public API is the set of subpaths in its `exports` map, such as `@us
 - [`@usine/github`](/reference/api/github/): GitHub App authentication, polling, and item and label writes.
 - [`@usine/engine`](/reference/api/engine/): the event ledger, Run scheduling, restart recovery, and the SQLite store.
 - [`@usine/agents`](/reference/api/agents/): the Claude Code, Codex, and Pi child backends, Attempt prompts, and preflight.
-- [`@usine/durable`](/reference/api/durable/): the Pi parent of each Attempt, on durable storage that survives a restart.
+- [`@usine/durable`](/reference/api/durable/): the Pi parent of each Attempt, on durable storage that persists across restarts.
 - [`@usine/executor`](/reference/api/executor/): the Worker contract and its local, exe.dev, and SSH adapters.
 - [`@usine/gateway`](/reference/api/gateway/): the proxy that adds credentials to Worker traffic and enforces the egress allowlist.
 - [`@usine/orchestrator`](/reference/api/orchestrator/): the full engine as one Effect layer that can run in-process.

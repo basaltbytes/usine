@@ -5,16 +5,16 @@ sidebar:
   order: 1
 ---
 
-`usine.yaml` sits at the top of the instance folder, beside the `loops/` and `agents/` folders. It holds the registry of managed repositories, the labels usine creates, the Board lanes, factory-wide settings, and the Workers that run Attempts.
+`usine.yaml` is at the top of the instance folder, next to the `loops/` and `agents/` folders. It contains the registry of managed repositories, the labels usine creates, the Board lanes, factory-wide settings, and the Workers that run Attempts.
 
 The orchestrator reads it once, when `usine up` starts. A change takes effect at the next start.
 
 The parser is strict:
 
-- Keys are snake_case in the file. The parse boundary renames them to camelCase domain fields ([`Schema.encodeKeys`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L182)), so `poll_interval` in the file is `pollInterval` in code.
+- Keys are snake_case in the file. The parser renames them to camelCase domain fields ([`Schema.encodeKeys`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L182)), so `poll_interval` in the file is `pollInterval` in code.
 - An unknown key at any level is an error ([`onExcessProperty: "error"`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L186)).
 - Duplicate keys and YAML parser warnings are errors ([`parseYamlDocument`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/yaml/document.ts#L18)).
-- An invalid `usine.yaml` stops the whole instance from loading: `usine up` logs a `FactoryConfigError` and exits with status 1. Loop and Agent files fail one at a time instead; see [Loop files](/reference/configuration/loop-files/#validation-and-quarantine).
+- An invalid `usine.yaml` stops the whole instance from loading: `usine up` logs a `FactoryConfigError` and exits with status 1. An invalid Loop or Agent file affects only that file; see [Loop files](/reference/configuration/loop-files/#validation-and-quarantine).
 
 The schema is [`UsineConfig`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L209) in `packages/config/src/factory.ts`.
 
@@ -27,7 +27,7 @@ version: 1
 # GitHub login recorded on operator interventions (steer, interrupt, messages).
 operator: octocat
 
-# Labels usine creates in every managed repository that lacks them.
+# Labels usine creates in every managed repository that doesn't have them.
 labels:
   - name: ready-for-agent
     color: "0e8a16"
@@ -93,7 +93,7 @@ webhooks:
   mode: off
 ```
 
-The smallest valid file names the version and an empty or filled registry. Every other key has a default:
+The smallest valid file sets `version` and `repos`, and `repos` can be an empty list. Every other key has a default:
 
 ```yaml title="usine.yaml"
 version: 1
@@ -103,7 +103,7 @@ repos:
 
 ## How the instance files reference each other
 
-Loop files name an Agent file and select repositories from the registry. Label names in Lanes and in Loop conditions are checked against the declared labels.
+A Loop file references an Agent file and selects repositories from the registry. usine checks the label names in Lanes and in Loop conditions against the declared labels.
 
 ```mermaid
 flowchart LR
@@ -120,7 +120,7 @@ flowchart LR
   lanes -. "label" .-> labels
 ```
 
-A solid arrow is a reference that must resolve: a Loop whose Agent, selected repository, or selected tag does not exist is quarantined. A dotted arrow only produces a warning in the log when the label is not declared ([`configWarnings`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L256)).
+A solid arrow is a reference that must resolve: usine quarantines a Loop whose Agent, selected repository, or selected tag doesn't exist. A dotted arrow only logs a warning when the label isn't declared ([`configWarnings`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L256)).
 
 ## Top-level keys
 
@@ -148,7 +148,7 @@ Each entry declares one GitHub label ([`DeclaredLabel`](https://github.com/basal
 | `color` | string | none | Six hex digits without `#`, such as `"0e8a16"`. |
 | `description` | string | none | At most 100 characters. |
 
-During each poll cycle, usine compares the declared labels with each managed repository's labels, case-insensitively. It creates a declared label that the repository lacks, with the declared color and description ([`LabelReconciler`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/label-reconciler.ts#L80)). When an existing label's color or description differs from the declaration, usine logs a warning and leaves the label unchanged. usine never edits or deletes a label.
+During each poll cycle, usine compares the declared labels with each managed repository's labels, case-insensitively. It creates a declared label that the repository doesn't have, with the declared color and description ([`LabelReconciler`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/label-reconciler.ts#L80)). When an existing label's color or description differs from the declaration, usine logs a warning and leaves the label unchanged. usine never edits or deletes a label.
 
 Quote colors. YAML reads `123456` as a number and `0e8016` as a float, and the parser rejects both with `Expected string`.
 
@@ -182,20 +182,20 @@ Each lane is one Board column ([`Lane`](https://github.com/basaltbytes/usine/blo
 
 | Source | Valid values | Description |
 | --- | --- | --- |
-| `label` | a GitHub label name | Places Items carrying this label in the lane. A Board move into the lane writes the label. |
-| `state` | `issue-open`, `issue-closed`, `pr-open`, `pr-closed`, `pr-merged` | Places Items in this GitHub state in the lane. A Board move cannot change a state. |
+| `label` | a GitHub label name | Places Items that have this label in the lane. A Board move into the lane adds the label. |
+| `state` | `issue-open`, `issue-closed`, `pr-open`, `pr-closed`, `pr-merged` | Places Items in this GitHub state in the lane. A Board move can't change a state. |
 
 A source may appear in only one lane of a repository. The Board places each Task as follows ([`laneFor`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L78)):
 
 1. A Task whose current Item is a merged or closed pull request, or a closed issue, goes to the first lane with a matching `state` source.
-2. Any other Task goes to the first lane, in file order, with a `label` source the Item carries, and otherwise to the first lane with a matching `state` source.
+2. Any other Task goes to the first lane, in file order, that has a `label` source matching one of the Item's labels. If no lane matches, it goes to the first lane with a matching `state` source.
 3. A Task that matches no lane goes to the `Unmapped` column.
 
 A lane with at least one `label` source accepts Board moves. Moving a card adds the target lane's labels and removes the labels of every other authored lane ([`labelMutationForBoardMove`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L160)).
 
 When `lanes` is empty, the Board proposes one read-only lane per label in the repository, sorted by name ([`effectiveLanes`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L50)).
 
-A `label` source that is not declared under `labels` loads, and the load logs `Board Lane references an undeclared GitHub label`.
+A `label` source that isn't declared under `labels` still loads, and usine logs `Board Lane references an undeclared GitHub label`.
 
 ```yaml title="usine.yaml"
 repos:
@@ -215,14 +215,14 @@ Factory-wide values ([`Settings`](https://github.com/basaltbytes/usine/blob/7c0c
 | --- | --- | --- | --- |
 | `poll_interval` | integer ≥ 1 | `60` | Seconds between the starts of two GitHub poll cycles. A GitHub rate limit can push the next cycle later. |
 | `max_children` | integer ≥ 1 | `4` | The Child-session budget: child sessions one Attempt may spawn over its lifetime, sequential and concurrent together. The next spawn fails the Attempt. |
-| `max_attempt_minutes` | integer ≥ 1 | none | Wall-clock ceiling per Attempt, in minutes. Time while the operator holds a child does not count. Also the drain deadline when `usine up` stops. |
+| `max_attempt_minutes` | integer ≥ 1 | none | Wall-clock ceiling per Attempt, in minutes. Time while the operator holds a child doesn't count. Also the drain deadline when `usine up` stops. |
 | `max_attempt_tokens` | integer ≥ 1 | none | Token ceiling per Attempt, summed over the parent and every child. |
 | `parent_model` | string | none | Model of each Attempt's Pi parent, as `provider/model`, when the Agent sets no `parent_model`. |
 | `parent_effort` | effort | none | Reasoning effort of the Pi parent when the Agent sets no `parent_effort`. |
 
-`max_attempt_minutes` and `max_attempt_tokens` arm the runaway guard ([`attemptGuard`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/guard.ts#L139)). Each armed ceiling sends the parent one warning at 80% of its limit and fails the Attempt at the limit. A runaway failure does not retry on its own.
+`max_attempt_minutes` and `max_attempt_tokens` arm the runaway guard ([`attemptGuard`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/guard.ts#L139)). Each armed ceiling sends the parent one warning at 80% of its limit and fails the Attempt at the limit. usine doesn't retry a runaway failure automatically.
 
-The effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. The parent's model resolves in this order: the Agent's `parent_model`, then `settings.parent_model`, then Pi's configured default model, then the first Pi model with a configured credential. The parent's effort resolves from the Agent's `parent_effort`, then `settings.parent_effort`, then the Agent's own `effort` ([`resolveParentEffort`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/agent.ts#L39)). An Attempt fails before its conversation starts when Pi does not know the model or the model does not support the effort.
+The effort values are `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, and `max`. usine picks the parent's model in this order: the Agent's `parent_model`, then `settings.parent_model`, then Pi's configured default model, then the first Pi model with a configured credential. It picks the parent's effort from the Agent's `parent_effort`, then `settings.parent_effort`, then the Agent's own `effort` ([`resolveParentEffort`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/agent/agent.ts#L39)). An Attempt fails before its conversation starts when Pi doesn't know the model or the model doesn't support the effort.
 
 ## `workers`
 
@@ -239,12 +239,12 @@ Every kind takes these keys:
 Runs wait for a free Worker slot in the order their Events arrived ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/scheduler.ts#L87)). At startup, `usine up` runs Preflight on every Worker for every harness in the Agent roster. A failed Preflight stops startup.
 
 :::caution
-`usine up` drives every Worker through one executor. It runs the instance when all Workers are `local` or all are `ssh` ([`workerEngineLayer`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/worker-engine.ts#L13)). Any other combination, and any `exe.dev` Worker, parses but fails startup with `UnsupportedWorkerError`.
+`usine up` uses one executor for every Worker. It starts the instance only when all Workers are `local` or all are `ssh` ([`workerEngineLayer`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/worker-engine.ts#L13)). Any other combination, and any `exe.dev` Worker, parses but fails startup with `UnsupportedWorkerError`.
 :::
 
 ### `kind: local`
 
-The orchestrator's own machine. It accepts only the common keys. It keeps cached clones, Attempt worktrees, and a Turbo cache under `.usine/workers/<name>/` in the instance folder.
+The machine the orchestrator runs on. It accepts only the common keys. It keeps cached clones, Attempt worktrees, and a Turbo cache under `.usine/workers/<name>/` in the instance folder.
 
 ```yaml title="usine.yaml"
 workers:
@@ -255,7 +255,7 @@ workers:
 
 ### `kind: ssh`
 
-A Linux machine the orchestrator reaches with its local `ssh` client ([`SshWorker`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L130)). The client runs with `BatchMode=yes`, so the key must work without a prompt.
+A Linux machine that the orchestrator connects to with its local `ssh` client ([`SshWorker`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L130)). The client runs with `BatchMode=yes`, so the key must work without a prompt.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -282,13 +282,13 @@ A Worker behind a Gateway has no GitHub token on its machine. The executor attac
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `domain` | string | required | The Gateway's private DNS domain, in lowercase. The machine resolves `git.<domain>` for GitHub, `llm.<domain>` for LLM providers, and `<domain>` for the forward proxy. |
-| `admin_url` | URL | required | The Gateway's admin API as the orchestrator reaches it, often a local forward. `http` or `https`, without a user name or password. |
-| `admin_token_env` | string | required | Name of the orchestrator's environment variable that holds the admin token. The token itself never appears in the file. |
-| `llm_providers` | list | `[]` | Providers whose credential the Gateway holds. The only value is `anthropic` (Claude Code). |
+| `admin_url` | URL | required | The URL the orchestrator uses for the Gateway's admin API, often a local port forward. `http` or `https`, without a user name or password. |
+| `admin_token_env` | string | required | Name of the orchestrator's environment variable that contains the admin token. The file never contains the token itself. |
+| `llm_providers` | list | `[]` | Providers whose credential is stored on the Gateway. The only value is `anthropic` (Claude Code). |
 
-`usine up` reads the variable named by `admin_token_env` at startup. When it is unset, startup fails with a `gateway` capability error that names the Worker and the variable ([`sshWorkerAddressesOf`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/ssh.ts#L27)).
+`usine up` reads the variable named by `admin_token_env` at startup. When it's unset, startup fails with a `gateway` capability error that includes the Worker and variable names ([`sshWorkerAddressesOf`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/ssh.ts#L27)).
 
-A harness whose provider is not in `llm_providers` uses the operator's login on the Worker and reaches its provider through the Gateway's forward proxy. Codex always does.
+A harness whose provider isn't in `llm_providers` uses the operator's login on the Worker and connects to its provider through the Gateway's forward proxy. Codex always works this way.
 
 ```yaml title="usine.yaml"
 workers:
@@ -305,11 +305,11 @@ workers:
 
 ### `kind: exe.dev`
 
-An exe.dev VM named after the Worker ([`ExeDevWorker`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L80)). It accepts only the common keys. The parser accepts this kind, but `usine up` does not run it at this commit; see the caution above.
+An exe.dev VM named after the Worker ([`ExeDevWorker`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L80)). It accepts only the common keys. The parser accepts this kind, but `usine up` doesn't run it at this commit; see the caution above.
 
 ## `webhooks`
 
-How GitHub hints would reach the factory ([`Webhooks`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L170)). The parser validates the key, but no part of the orchestrator reads it at this commit: polling is the only way usine sees GitHub changes.
+Sets where GitHub hints would come from ([`Webhooks`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L170)). The parser validates the key, but the orchestrator doesn't read it at this commit; usine detects GitHub changes only by polling.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
