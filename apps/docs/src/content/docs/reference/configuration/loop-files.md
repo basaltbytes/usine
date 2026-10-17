@@ -123,7 +123,7 @@ Limits the Loop to a subset of the managed repositories ([`Selector`](https://gi
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
-| `repos` | list of `owner/name` | none | Repositories by name. Each must be in the registry. |
+| `repos` | list of `owner/name` | none | Repositories by name. Each must be in the registry. Names match case-insensitively, as on GitHub. |
 | `tags` | list of strings | none | Repositories that have any of these tags. At least one registry repository must have each tag. |
 
 A selector sets `repos`, `tags`, or both; an empty mapping is an error. Each list must be non-empty and free of duplicates. With both keys, a repository must be listed in `repos` and have one of the `tags` ([`matchesSelector`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/selector.ts#L23)).

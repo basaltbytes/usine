@@ -1,4 +1,4 @@
-import { GitHubLabelName } from "@usine/config/label";
+import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import {
   LabelLaneSource,
   Lane,
@@ -63,11 +63,16 @@ const SETTLED_STATES: ReadonlyArray<LaneItemState> = ["pr-merged", "pr-closed", 
 const isSettled = (item: Pick<ProjectedItem, "state" | "labels">): boolean =>
   SETTLED_STATES.includes(item.state);
 
+// GitHub matches label names ignoring case, as the label declarations do.
 const labelLaneFor = (
   item: Pick<ProjectedItem, "state" | "labels">,
   lanes: ReadonlyArray<LaneDefinition>,
-): LaneDefinition | undefined =>
-  lanes.find(({ lane }) => labelSources(lane.sources).some((label) => item.labels.includes(label)));
+): LaneDefinition | undefined => {
+  const itemLabels = new Set(item.labels.map(canonicalLabelName));
+  return lanes.find(({ lane }) =>
+    labelSources(lane.sources).some((label) => itemLabels.has(canonicalLabelName(label))),
+  );
+};
 
 const stateLaneFor = (
   item: Pick<ProjectedItem, "state" | "labels">,

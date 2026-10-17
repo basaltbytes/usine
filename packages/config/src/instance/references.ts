@@ -1,5 +1,5 @@
 import { AgentName } from "@usine/core/agent";
-import { RepositoryName } from "@usine/core/repository";
+import { canonicalRepositoryName } from "@usine/core/repository";
 import { Option } from "effect";
 import { InstancePath, ConfigFileError } from "../file.ts";
 import { RegistryTag, UsineConfig } from "../factory.ts";
@@ -10,7 +10,8 @@ import type { AgentFile } from "../agent.ts";
 export interface ReferenceIndex {
   readonly agentNames: ReadonlySet<AgentName>;
   readonly registryTags: ReadonlySet<RegistryTag>;
-  readonly repoNames: ReadonlySet<RepositoryName>;
+  /** Registry repository names through `canonicalRepositoryName`, since GitHub ignores case. */
+  readonly repoNames: ReadonlySet<string>;
 }
 
 export const referenceIndex = (
@@ -19,7 +20,7 @@ export const referenceIndex = (
 ): ReferenceIndex => ({
   agentNames: new Set(agents.map(({ name }) => name)),
   registryTags: new Set(config.repos.flatMap(({ tags }) => tags)),
-  repoNames: new Set(config.repos.map(({ name }) => name)),
+  repoNames: new Set(config.repos.map(({ name }) => canonicalRepositoryName(name))),
 });
 
 /**
@@ -43,7 +44,7 @@ export const loopReferenceFailure = (
   if (Option.isNone(loop.selector)) return Option.none();
   if (Option.isSome(loop.selector.value.repos)) {
     const missing = loop.selector.value.repos.value.filter(
-      (name) => !references.repoNames.has(name),
+      (name) => !references.repoNames.has(canonicalRepositoryName(name)),
     );
     if (missing.length > 0) {
       return referenceError(`Unknown selector repos: ${missing.join(", ")}`);
