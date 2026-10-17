@@ -95,7 +95,7 @@ The pull-request payload slice ([`PullRequestPayload`](https://github.com/basalt
 | `closingIssuesReferences.totalCount` | int | | |
 | `closingIssuesReferences.nodes[]` | list | | The first 10 issues the pull request closes: `number`, `state`. |
 
-`requestedReviewer` is null when the reviewer is a deleted account. For a team review request it is an empty object without `login`, and reading `login` fails evaluation.
+`requestedReviewer` is null when the reviewer is a deleted account. A team review request has no `login`, so `login` reads as `null`.
 
 ### `item` for `on: schedule`
 
@@ -110,27 +110,28 @@ A schedule has no GitHub Item. `item` contains the Tick ([`tickPayload`](https:/
 
 ## Fields that can be null
 
-The CEL environment declares every field with a non-null type, but GitHub returns `null` for the nullable fields listed above. On an Item where such a field is null:
+The CEL environment declares the fields marked nullable above as nullable ([`payload-slices.ts`](https://github.com/basaltbytes/usine/blob/main/packages/config/src/payload-slices.ts)). On an Item where such a field is null:
 
-- Reading the field, or any field below it, fails evaluation: `item.milestone.title == "v1"` fails with `Field 'milestone' is not of type 'Milestone', got 'null'`.
-- Comparing it with `null` fails the type check when the file loads: `item.milestone != null` gives `no such overload: Milestone != null`.
-- `has(item.milestone)` fails evaluation too.
+- Comparing it with a value gives `false`: `item.reviewDecision == "APPROVED"` is `false` when the branch requires no review.
+- Comparing it with `null` tells whether GitHub has a value, in either order: `item.milestone != null`, `null == item.author`.
+- Reading a field below a null object fails evaluation: `item.milestone.title == "v1"` fails with `No such key: title` on an issue without a milestone. Test the object first: `item.milestone != null && item.milestone.title == "v1"`. CEL's `&&` returns `false` when either side is `false`, even if the other side fails.
+- `has(item.milestone.title)` is `false`. `has(item.milestone)` is `true`, because the field exists even when its value is null; test the value with `!= null`.
 
-The only guard is evaluation order. CEL's `&&` returns `false` when either side is `false`, even if the other side fails, and `||` returns `true` when either side is `true`. Pair a nullable field with a condition that is false on every Item where the field is null:
+Fields below a nullable object keep their types, so a misspelled `item.milestone.titel` still stops the Loop from loading.
 
-```yaml title="loops/merged-follow-up.md"
+```yaml title="loops/plan-milestone.md"
 trigger:
-  on: pr
-  if: item.merged && timestamp(item.mergedAt) > timestamp("2026-10-01T00:00:00Z")
+  on: issue
+  if: item.milestone != null && item.milestone.title == "v1"
 ```
 
-Fields such as `reviewDecision` and `milestone` have no such companion condition, so an expression that reads one fails on every Item where it's null.
+In the body, `{{ item.milestone != null ? item.milestone.title : "no milestone" }}` renders on every issue. A null value renders as `null`.
 
 ## What happens when evaluation fails
 
 A failure at evaluation time doesn't quarantine the Loop, because the file already passed its checks:
 
-- **`if` of an `issue` or `pr` Loop.** usine stops the repository's poll cycle for that cycle, and the poll cursor doesn't advance ([`polling.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/polling.ts#L262)). The next cycle fetches the same changes and gets the same error, until the Item or the Loop changes. Meanwhile, usine might not evaluate other changed Items of that repository.
+- **`if` of an `issue` or `pr` Loop.** The failure applies to that Loop on that Item only. usine opens no Run for them and leaves the Item's queued Runs as they are; the Item's other Loops, the repository's other Items, and the poll cursor go on. **Needs you** shows the failure with the Loop and the Item for as long as the Loop fails on that Item, and usine logs it once per Loop, Item, and content hash ([`evaluation-failures.ts`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/polling/evaluation-failures.ts)). The first poll after a restart fetches the failing Items again, so a fixed Loop evaluates them without waiting for them to change.
 - **`if` of a `schedule` Loop.** The Tick fails for that repository, and usine evaluates it again at the next wake.
 - **The re-check before a queued Run opens.** usine logs a warning and the Run opens as if the check had passed ([`TriggerCondition.holds`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/trigger-condition.ts#L87)).
 - **A `{{ ... }}` interpolation.** See [when rendering fails](/reference/configuration/loop-files/#when-rendering-fails).
@@ -157,7 +158,7 @@ The environment registers only the types and variables above. It enables no opti
 | `list.filter(x, predicate)` | list | `item.reviews.nodes.filter(r, r.state == "COMMENTED")` |
 | `list.map(x, expression)` | list | `item.labels.nodes.map(label, label.name)` |
 | `list.map(x, predicate, expression)` | list | `item.reviews.nodes.map(r, r.state == "COMMENTED", r.body)` |
-| `has(object.field)` | bool | Fails on a null object; see above. |
+| `has(object.field)` | bool | `false` when `object` is null; see above. |
 | `cel.bind(name, value, expression)` | any | `cel.bind(n, size(item.labels.nodes), n > 0 && n < 5)` |
 
 ### Functions
