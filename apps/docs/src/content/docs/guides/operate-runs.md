@@ -121,6 +121,8 @@ For a Claude Code or Codex child, the expanded child section also shows its save
 | **Label preflight failed**             | usine couldn't create a label that `usine.yaml` declares.                                                            |
 | **Item projection quarantined**        | usine couldn't place an Item on its Board.                                                                           |
 | A schedule error                       | A schedule Loop couldn't evaluate or submit a tick.                                                                  |
+| **Loop quarantined**                   | A Loop file failed to load and opens no Runs. Fix the file and restart `usine up`.                                   |
+| **Agent file not loaded**              | An Agent file failed to load and isn't in the roster. Fix the file and restart `usine up`.                          |
 
 ## Cycle budgets
 

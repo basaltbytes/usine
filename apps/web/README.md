@@ -51,4 +51,6 @@ An exhausted Item cycle budget appears in Needs you with the participating Loops
 
 Expand a Claude or Codex child's activity to see its saved harness session id, worker worktree path, and copyable resume command. Run the command on the same worker under the same harness account. Resuming requires both the saved session files and the worktree; Attempt cleanup removes the worktree after completion. Older transcripts and Pi children show that no saved harness session was recorded.
 
+A Loop or Agent file that failed to load at startup appears in Needs you as **Loop quarantined** or **Agent file not loaded**, with the file and the reason. It stays there until the file is fixed and `usine up` restarts.
+
 Choose **Mark resolved** in a failed Run’s drawer to clear its Needs you warning and related Project and Board attention. Open the drawer from Needs you or Run history. Resolution persists across reloads and restarts; the failed outcome, Attempt details, transcript, and retry controls remain available. A later failed Attempt requests attention again.

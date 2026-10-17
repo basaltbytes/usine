@@ -2,7 +2,7 @@ import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Logger, Option, Schema } from "effect";
 import { InstanceFolder } from "../src/instance-folder.ts";
 import { InstancePath } from "../src/file.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
@@ -598,7 +598,37 @@ describe("InstanceFolder", () => {
   it.effect("loads the three acceptance loops and quarantines broken siblings", () =>
     Effect.gen(function* () {
       const folder = yield* InstanceFolder;
-      const loaded = yield* folder.load(acceptanceRoot);
+      const warnings: Array<unknown> = [];
+      const logger = Logger.make(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(message);
+      });
+      const loaded = yield* folder.load(acceptanceRoot).pipe(Effect.withLogger(logger));
+
+      expect(warnings).toContainEqual([
+        "Agent file left out of the roster; Loops that use it are quarantined",
+        {
+          file: "agents/intern.md",
+          stage: "schema",
+          message: loaded.invalidAgents[0]?.error.message,
+        },
+      ]);
+      expect(warnings).toContainEqual([
+        "Loop quarantined; it opens no Runs until its file is fixed",
+        {
+          file: "loops/unknown-agent.md",
+          stage: "reference",
+          message: "Unknown agent: ghost",
+          expression: undefined,
+        },
+      ]);
+      expect(warnings).toContainEqual([
+        "Loop quarantined; it opens no Runs until its file is fixed",
+        expect.objectContaining({
+          file: "loops/broken-loop.md",
+          stage: "expression",
+          expression: 'item.labels.nodes.exists(label, label.nmae == "ready")',
+        }),
+      ]);
 
       expect(loaded.loops.map(({ name }) => name)).toEqual([
         "act-on-findings",

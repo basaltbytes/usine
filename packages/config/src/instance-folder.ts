@@ -141,6 +141,31 @@ export class InstanceFolder extends Context.Service<
                   );
                 } else loops.push(entry.result.success);
               }
+              yield* Effect.forEach(
+                invalidAgents,
+                ({ file, error }) =>
+                  Effect.logWarning(
+                    "Agent file left out of the roster; Loops that use it are quarantined",
+                    { file, stage: error.stage, message: error.message },
+                  ),
+                { discard: true },
+              );
+              yield* Effect.forEach(
+                quarantinedLoops,
+                ({ file, error }) =>
+                  Effect.logWarning("Loop quarantined; it opens no Runs until its file is fixed", {
+                    file,
+                    stage: error.stage,
+                    message: error.message,
+                    expression: Option.getOrUndefined(error.expression),
+                  }),
+                { discard: true },
+              );
+              yield* Effect.annotateCurrentSpan({
+                loops: loops.length,
+                quarantinedLoops: quarantinedLoops.length,
+                invalidAgents: invalidAgents.length,
+              });
 
               const warnings = yield* parser.configWarnings(config, loops).pipe(
                 Effect.catch((error) =>

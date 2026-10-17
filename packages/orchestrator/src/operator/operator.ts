@@ -31,6 +31,7 @@ import { GitHubItemKey, PollingTriggers, type RepositoryPollFailure } from "../p
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import {
   ApprovalNeed,
+  ConfigFileNeed,
   CycleBudgetNeed,
   BoardProjectionNeed,
   PollFailureNeed,
@@ -275,6 +276,12 @@ const makeOperatorObservation = Effect.gen(function* () {
         }),
       );
     });
+    for (const { file, error } of instance.invalidAgents) {
+      needsYou.push(new ConfigFileNeed({ id: `config-file:${file}`, kind: "agent", error }));
+    }
+    for (const { file, error } of instance.quarantinedLoops) {
+      needsYou.push(new ConfigFileNeed({ id: `config-file:${file}`, kind: "loop", error }));
+    }
     const projected = new ReadyOverview({ projects, loops, needsYou });
     yield* Effect.logDebug("Refreshed operator overview", {
       revision,
@@ -710,6 +717,7 @@ export {
   PreflightFindingNeed,
   BoardProjectionNeed,
   ScheduleFailureNeed,
+  ConfigFileNeed,
   NeedView,
 } from "./need.ts";
 export {

@@ -207,9 +207,7 @@ usine validates each Loop file separately. A file that fails any check is quaran
 | `expression` | `if` type-checks as a boolean; each interpolation is closed and type-checks as a scalar. | `No such key: nmae` |
 | `reference` | The Agent is in the roster; selected repositories and tags exist in `usine.yaml`. | `Unknown selector tags: mobile` |
 
-:::caution
-At this commit, `usine up` doesn't report quarantined Loops. The loader returns them with their stage and message, but usine doesn't log them, and the UI lists only loaded Loops. A Loop missing from the UI was quarantined. Fix the file and restart `usine up`.
-:::
+At startup, `usine up` logs each quarantined Loop as a warning, `Loop quarantined; it opens no Runs until its file is fixed`, with its file, stage, and message, and lists it in **Needs you** as **Loop quarantined**. Fix the file and restart `usine up`.
 
 Two checks only log a warning. If `if` compares `item.labels` against a label name that isn't declared under `labels` in `usine.yaml`, usine logs `Loop trigger references an undeclared GitHub label` and still loads the Loop. The other check covers labels in Board Lanes; see [`repos[].lanes`](/reference/configuration/usine-yaml/#reposlanes).
 
