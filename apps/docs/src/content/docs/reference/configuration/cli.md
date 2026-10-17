@@ -45,6 +45,8 @@ When a flag repeats, the last value wins.
 5. **GitHub App credentials.** usine reads `USINE_GITHUB_APP_ID` and `USINE_GITHUB_PRIVATE_KEY`, and fills a missing one from `.usine/github-app.json` ([`loadLocalCredentials`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/github/src/local-secrets.ts#L69)). usine doesn't read the file when both variables are set.
 6. **Runtime.** usine opens the stores, reads each Gateway's admin token, runs Preflight on every Worker, and starts polling and schedules. It prints `usine is running at http://127.0.0.1:<port>`.
 
+Every expected startup failure prints one plain line that names the file, setting, or Worker at fault and what to do, then exits with status 1. A failed Preflight names the Worker and the check that failed, such as `machine` or `harness-login`. Only a defect in usine prints a full error trace.
+
 When the credentials are missing or invalid, usine starts in setup mode instead of the runtime. It serves the UI read-only, prints `usine is waiting for GitHub App setup at http://127.0.0.1:<port>`, and opens that page in the browser. usine doesn't poll GitHub, and it refuses operator actions. Restart `usine up` once the credentials are in place.
 
 The secrets file is JSON with two keys and must be a regular file with mode `0600`:

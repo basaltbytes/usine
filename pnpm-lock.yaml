@@ -187,6 +187,9 @@ importers:
         specifier: 'catalog:'
         version: 4.0.0-rc.111
     devDependencies:
+      '@usine/executor':
+        specifier: workspace:*
+        version: link:../../packages/executor
       '@usine/tsconfig':
         specifier: workspace:*
         version: link:../../tooling/tsconfig
