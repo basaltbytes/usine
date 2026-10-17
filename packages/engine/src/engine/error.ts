@@ -18,6 +18,18 @@ export class RunOperationRejectedError extends Schema.TaggedError<RunOperationRe
   state: Schema.String,
 }) {}
 
+/**
+ * An operator retry would reopen a failed Run while `openRunId`, another Run of
+ * the same Loop and Item, is open. Retry again once that Run closes.
+ */
+export class RunRetryBlockedError extends Schema.TaggedError<RunRetryBlockedError>(
+  "@usine/engine/RunRetryBlockedError",
+)("RunRetryBlockedError", {
+  runId: RunId,
+  openRunId: RunId,
+  message: Schema.NonEmptyString,
+}) {}
+
 /** An operation could not read or update the instance's durable records. */
 export class EnginePersistenceError extends Schema.TaggedError<EnginePersistenceError>(
   "@usine/engine/EnginePersistenceError",
@@ -38,6 +50,7 @@ export class AttemptCancellationError extends Schema.TaggedError<AttemptCancella
 export const RunStoreError = Schema.Union([
   RunNotFoundError,
   RunOperationRejectedError,
+  RunRetryBlockedError,
   EnginePersistenceError,
 ]);
 
@@ -56,6 +69,7 @@ export class RunInterventionRejectedError extends Schema.TaggedError<RunInterven
 export const RunEngineError = Schema.Union([
   RunNotFoundError,
   RunOperationRejectedError,
+  RunRetryBlockedError,
   EnginePersistenceError,
   AttemptCancellationError,
   RunInterventionRejectedError,

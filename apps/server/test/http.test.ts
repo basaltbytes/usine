@@ -12,7 +12,11 @@ import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { RunNotFoundError, RunOperationRejectedError } from "@usine/engine/engine";
+import {
+  RunNotFoundError,
+  RunOperationRejectedError,
+  RunRetryBlockedError,
+} from "@usine/engine/engine";
 import { CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
@@ -241,7 +245,14 @@ describe("operator HTTP API", () => {
           new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
         ),
       resetCycleBudget: () => Effect.void,
-      retry: () => Effect.void,
+      retry: (id: RunId) =>
+        Effect.fail(
+          new RunRetryBlockedError({
+            runId: id,
+            openRunId: RunId.make("run-open"),
+            message: `Cannot retry Run ${id}: Run run-open of Loop fix-ci is open on the same Item. Retry after it closes, or cancel it first.`,
+          }),
+        ),
       cancel: () => Effect.void,
       moveBoardItem: (move) =>
         move.toLane === "proposed:ready"
@@ -271,6 +282,15 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(await rejected.json(), {
         error: "RunOperationRejectedError",
         message: `Cannot approve Run ${runId} while it is Running.`,
+      });
+
+      const blocked = await rejectingApp.handler(
+        new Request(`http://localhost/api/runs/${runId}/retry`, { method: "POST" }),
+      );
+      assert.strictEqual(blocked.status, 409);
+      assert.deepStrictEqual(await blocked.json(), {
+        error: "RunRetryBlockedError",
+        message: `Cannot retry Run ${runId}: Run run-open of Loop fix-ci is open on the same Item. Retry after it closes, or cancel it first.`,
       });
 
       const wrongAttempt = AttemptId.make("attempt-from-another-run");

@@ -23,6 +23,7 @@ import type {
   EnginePersistenceError,
   RunNotFoundError,
   RunOperationRejectedError,
+  RunRetryBlockedError,
   RunStoreError,
 } from "./error.ts";
 import type { FinishDecision } from "./lifecycle.ts";
@@ -41,6 +42,7 @@ const asAttemptFailure = <A, R>(
       }),
     RunNotFoundError: (error: RunNotFoundError) => Effect.die(error),
     RunOperationRejectedError: (error: RunOperationRejectedError) => Effect.die(error),
+    RunRetryBlockedError: (error: RunRetryBlockedError) => Effect.die(error),
   });
 
 /** How many times a Run's fiber repeats a store operation that failed to persist before the fiber stops. */

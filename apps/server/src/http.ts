@@ -28,6 +28,7 @@ const operatorFailure = (error: BackendError) => {
       case "TranscriptAttemptNotFoundError":
         return `Attempt ${error.attemptId} does not belong to Run ${error.runId}.`;
       case "BackendUnavailableError":
+      case "RunRetryBlockedError":
       case "RunInterventionRejectedError":
       case "RosterAgentNotFoundError":
         return error.message;

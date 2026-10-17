@@ -453,6 +453,49 @@ describe("run store", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.live("rejects a retry while another Run of the same Loop and Item is open", () =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const failedRun = RunId.make("retry-blocked-failed");
+        const openRun = RunId.make("retry-blocked-open");
+        yield* store.recordAndClaim(lifecycleSubmission, failedRun);
+        const started = yield* store.beginAttempt(
+          failedRun,
+          WorkerName.make("local"),
+          Option.none(),
+        );
+        assert(started._tag === "AttemptStarted");
+        yield* store.finishAttempt(
+          started.execution.attempt,
+          Result.fail(new AgentFailure({ message: "Needs the operator" })),
+        );
+        // A Failed Run is closed, so the Item's next Event opens a Run of its own.
+        const later = new Submission({
+          ...lifecycleSubmission,
+          event: new Event({
+            id: EventId.make("retry-blocked-later"),
+            dedupKey: DedupKey.make("lifecycle/event/later-revision"),
+            payload: {},
+            receivedAt: DateTime.makeUnsafe("2026-08-25T01:00:00Z"),
+          }),
+        });
+        const claim = yield* store.recordAndClaim(later, openRun);
+        assert.deepStrictEqual(claim.openedRun, Option.some(openRun));
+
+        const blocked = yield* Effect.flip(store.retry(failedRun));
+        assert(blocked._tag === "RunRetryBlockedError");
+        assert.strictEqual(blocked.openRunId, openRun);
+        assert.include(blocked.message, openRun);
+        assert.strictEqual((yield* store.snapshot(failedRun)).run.state._tag, "Failed");
+
+        yield* store.cancel(openRun);
+        assert.strictEqual(yield* store.retry(failedRun), true);
+        assert.strictEqual((yield* store.snapshot(failedRun)).run.state._tag, "Running");
+      }),
+    ),
+  );
+
   it.live(
     "caps interrupted Attempts and cancels an operator retry before another Attempt starts",
     () =>

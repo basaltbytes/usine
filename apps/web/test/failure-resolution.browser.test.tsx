@@ -41,7 +41,7 @@ declare module "vitest/browser" {
   }
 }
 
-it("resolves a failure from Needs you while retaining unrelated attention, failed history, and retry", async () => {
+it("resolves a failure from Needs you while retaining unrelated attention, failed history, and retry, and shows why a retry is refused", async () => {
   const repository = RepositoryName.make("resolution/project");
   const runId = RunId.make("resolution-run");
   const attemptId = AttemptId.make("resolution-attempt");
@@ -147,6 +147,14 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
       .element(page.getByRole("button", { name: "Mark resolved", exact: true }))
       .not.toBeInTheDocument();
     await expect.element(page.getByRole("button", { name: "Retry", exact: true })).toBeEnabled();
+    await page.getByRole("button", { name: "Retry", exact: true }).click();
+    await expect
+      .element(
+        page.getByText("Run newer-run of Loop implement is open on the same Item", {
+          exact: false,
+        }),
+      )
+      .toBeVisible();
     await page.getByRole("tab", { name: "Attempts (1)" }).click();
     await expect
       .element(page.getByText("Work was completed separately", { exact: false }))

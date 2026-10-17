@@ -22,6 +22,7 @@ import {
 import {
   RunNotFoundError,
   RunOperationRejectedError,
+  RunRetryBlockedError,
   type RunStoreError,
 } from "../engine/error.ts";
 import { RunSnapshot } from "../run-reader/model.ts";
@@ -448,6 +449,22 @@ const makeRunStore = Effect.gen(function* () {
           decision: decision._tag,
         });
         if (decision._tag === "Resume") {
+          // A Failed Run is closed, so a later Event may have opened another Run
+          // of this Loop on the Item. Reopening this one would run both at once.
+          const blocking = (yield* tx.blockingRun(current.run.loop, current.itemKey))[0];
+          if (blocking !== undefined) {
+            yield* Effect.logInfo("Operator retry rejected; another Run is open on the Item", {
+              runId,
+              openRunId: blocking.runId,
+              loop: current.run.loop,
+              itemKey: current.itemKey,
+            });
+            return yield* new RunRetryBlockedError({
+              runId,
+              openRunId: blocking.runId,
+              message: `Cannot retry Run ${runId}: Run ${blocking.runId} of Loop ${current.run.loop} is open on the same Item. Retry after it closes, or cancel it first.`,
+            });
+          }
           if (Option.isSome(amendment)) {
             yield* tx.amend(runId, amendment.value);
             yield* Effect.logInfo("Run effective task and Agent amended", {
@@ -671,7 +688,11 @@ export class RunStore extends Context.Service<
       runId: RunId,
       attemptId: AttemptId,
     ) => Effect.Effect<void, RunStoreError>;
-    /** Reopens a failed Run for its next Attempt. True when this call reopened it; a request while the Run runs between Attempts changes nothing. */
+    /**
+     * Reopens a failed Run for its next Attempt. True when this call reopened it;
+     * a request while the Run runs between Attempts changes nothing. Fails with
+     * `RunRetryBlockedError` while another Run of the same Loop and Item is open.
+     */
     readonly retry: (
       runId: RunId,
       amendment?: Option.Option<AttemptContext>,
