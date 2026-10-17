@@ -7,7 +7,7 @@ import {
   type ExpressionError,
   Source,
 } from "@usine/expression/expression-engine";
-import { Context, Effect, Layer, Option, Schema, SchemaIssue } from "effect";
+import { Context, Effect, Layer, Option, Schema, SchemaGetter, SchemaIssue, Struct } from "effect";
 import { splitMarkdown } from "./frontmatter.ts";
 import { AgentFile } from "./agent.ts";
 import { canonicalLabelName, GitHubLabelName } from "./label.ts";
@@ -19,7 +19,7 @@ import {
 } from "./instance/diagnostics.ts";
 import { LoopFile, loopPath, PromptTemplate } from "./loop.ts";
 import { AgentPersona, AgentName } from "@usine/core/agent";
-import { Trigger } from "./trigger.ts";
+import { IssueTrigger, PullRequestTrigger, ScheduleTrigger } from "./trigger.ts";
 import { UsineConfig } from "./factory.ts";
 import { ValidSelector } from "./selector.ts";
 import { Effort, Harness, ModelId } from "@usine/core/agent/brain";
@@ -28,8 +28,30 @@ import { parseYamlDocument } from "./yaml/document.ts";
 
 const formatIssue = SchemaIssue.makeFormatterDefault();
 
+// YAML reads an unquoted `if: true` as a boolean; it decodes to the same CEL literal.
+const ConditionFromYaml = Schema.Union([Schema.String, Schema.Boolean])
+  .annotate({ message: "Expected a CEL expression: quote the value so YAML reads it as a string" })
+  .pipe(
+    Schema.decodeTo(Source, {
+      decode: SchemaGetter.transform((condition: string | boolean) => String(condition)),
+      encode: SchemaGetter.transform((condition: string) => condition),
+    }),
+  );
+
+const TriggerFromYaml = Schema.Union([
+  IssueTrigger.mapFields(Struct.assign({ if: ConditionFromYaml })).pipe(
+    Schema.decodeTo(IssueTrigger),
+  ),
+  PullRequestTrigger.mapFields(Struct.assign({ if: ConditionFromYaml })).pipe(
+    Schema.decodeTo(PullRequestTrigger),
+  ),
+  ScheduleTrigger.mapFields(Struct.assign({ if: ConditionFromYaml })).pipe(
+    Schema.decodeTo(ScheduleTrigger),
+  ),
+]);
+
 class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopFrontmatter")({
-  trigger: Trigger,
+  trigger: TriggerFromYaml,
   selector: Schema.OptionFromOptionalKey(ValidSelector),
   approval: ApprovalRequirement.pipe(Schema.withDecodingDefaultKey(Effect.succeed("none"))),
   step: StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
