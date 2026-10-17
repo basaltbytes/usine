@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 /** A type name in CEL syntax such as `string`, `Issue`, or `list<Label>`. */
 export const TypeReference = Schema.String.check(
@@ -25,10 +25,15 @@ const uniqueNames = (message: string) =>
     { message },
   );
 
-/** One named field and its CEL type within an object descriptor. */
+/**
+ * One named field and its CEL type within an object descriptor. A nullable
+ * field holds `null` or a value of its type, and an absent key reads as `null`.
+ * Expressions can compare it with `null`, while reads below it stay typed.
+ */
 export class ObjectField extends Schema.Class<ObjectField>("@usine/expression/ObjectField")({
   name: Identifier,
   type: TypeReference,
+  nullable: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
 }) {}
 
 /** A CEL object type. Declare a type before the types that reference it. */

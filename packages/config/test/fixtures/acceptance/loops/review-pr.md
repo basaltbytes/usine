@@ -5,7 +5,8 @@ trigger:
     item.state == "OPEN" &&
     !item.isDraft &&
     !item.reviews.nodes.exists(review,
-      review.author.login == "usine-reviewer" && review.commit.oid == item.headRefOid)
+      review.author != null && review.author.login == "usine-reviewer" &&
+      review.commit != null && review.commit.oid == item.headRefOid)
 agent: reviewer
 step: review
 ---

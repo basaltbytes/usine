@@ -12,13 +12,19 @@ import type { Stream } from "./trigger.ts";
 
 const reference = Schema.decodeUnknownSync(TypeReference);
 
-type FieldDeclaration = readonly [name: string, type: string];
+/** Mark a field `nullable` where the GitHub payload slice can hold `null` for it or omit it. */
+type FieldDeclaration = readonly [name: string, type: string, nullability?: "nullable"];
 
 const objectType = (name: string, fields: ReadonlyArray<FieldDeclaration>): ObjectType =>
   new ObjectType({
     name,
     fields: fields.map(
-      ([fieldName, fieldType]) => new ObjectField({ name: fieldName, type: reference(fieldType) }),
+      ([fieldName, fieldType, nullability]) =>
+        new ObjectField({
+          name: fieldName,
+          type: reference(fieldType),
+          nullable: nullability === "nullable",
+        }),
     ),
   });
 
@@ -42,7 +48,7 @@ const assignees = objectType("Assignees", [
   ["nodes", "list<Actor>"],
 ]);
 const issueComment = objectType("IssueComment", [
-  ["author", "Actor"],
+  ["author", "Actor", "nullable"],
   ["body", "string"],
   ["createdAt", "string"],
 ]);
@@ -66,38 +72,40 @@ const issue = objectType("IssuePayload", [
   ["body", "string"],
   ["url", "string"],
   ["state", "string"],
-  ["stateReason", "string"],
+  ["stateReason", "string", "nullable"],
   ["createdAt", "string"],
   ["updatedAt", "string"],
-  ["closedAt", "string"],
-  ["author", "Actor"],
-  ["issueType", "IssueType"],
-  ["milestone", "Milestone"],
+  ["closedAt", "string", "nullable"],
+  ["author", "Actor", "nullable"],
+  ["issueType", "IssueType", "nullable"],
+  ["milestone", "Milestone", "nullable"],
   ["labels", "Labels"],
   ["assignees", "Assignees"],
   ["comments", "IssueComments"],
   ["closedByPullRequestsReferences", "PullRequestReferences"],
 ]);
 
-const requestedReviewer = objectType("RequestedReviewer", [["login", "string"]]);
-const reviewRequest = objectType("ReviewRequest", [["requestedReviewer", "RequestedReviewer"]]);
+const requestedReviewer = objectType("RequestedReviewer", [["login", "string", "nullable"]]);
+const reviewRequest = objectType("ReviewRequest", [
+  ["requestedReviewer", "RequestedReviewer", "nullable"],
+]);
 const reviewRequests = objectType("ReviewRequests", [
   ["totalCount", "int"],
   ["nodes", "list<ReviewRequest>"],
 ]);
 const review = objectType("Review", [
-  ["author", "Actor"],
+  ["author", "Actor", "nullable"],
   ["state", "string"],
   ["body", "string"],
-  ["submittedAt", "string"],
-  ["commit", "Commit"],
+  ["submittedAt", "string", "nullable"],
+  ["commit", "Commit", "nullable"],
 ]);
 const reviews = objectType("Reviews", [
   ["totalCount", "int"],
   ["nodes", "list<Review>"],
 ]);
 const reviewThreadComment = objectType("ReviewThreadComment", [
-  ["author", "Actor"],
+  ["author", "Actor", "nullable"],
   ["body", "string"],
 ]);
 const reviewThreadComments = objectType("ReviewThreadComments", [
@@ -115,7 +123,7 @@ const reviewThreads = objectType("ReviewThreads", [
   ["nodes", "list<ReviewThread>"],
 ]);
 const pullRequestComment = objectType("PullRequestComment", [
-  ["author", "Actor"],
+  ["author", "Actor", "nullable"],
   ["body", "string"],
   ["createdAt", "string"],
 ]);
@@ -142,18 +150,18 @@ const pullRequest = objectType("PullRequestPayload", [
   ["merged", "bool"],
   ["createdAt", "string"],
   ["updatedAt", "string"],
-  ["mergedAt", "string"],
-  ["author", "Actor"],
+  ["mergedAt", "string", "nullable"],
+  ["author", "Actor", "nullable"],
   ["baseRefName", "string"],
   ["headRefName", "string"],
   ["headRefOid", "string"],
   ["additions", "int"],
   ["deletions", "int"],
   ["changedFiles", "int"],
-  ["reviewDecision", "string"],
+  ["reviewDecision", "string", "nullable"],
   ["mergeable", "string"],
   ["mergeStateStatus", "string"],
-  ["statusCheckRollup", "StatusCheckRollup"],
+  ["statusCheckRollup", "StatusCheckRollup", "nullable"],
   ["labels", "Labels"],
   ["reviewRequests", "ReviewRequests"],
   ["reviews", "Reviews"],
