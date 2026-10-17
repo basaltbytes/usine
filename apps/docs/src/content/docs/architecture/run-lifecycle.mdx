@@ -104,9 +104,9 @@ flowchart TB
 
 ```ts title="packages/engine/src/engine/lifecycle.ts"
 /**
- * Places a previously unclaimed Event behind its Item's running work, or
- * replaces unstarted work. The ledger must resolve permanent deduplication and
- * ignored Events before this decision; running Attempts always finish (ADR 0007).
+ * Decides what to do with an Event that no Run has claimed: open a Run, queue the Event
+ * while the Item's Run is running, or supersede the Item's unstarted Run. The ledger handles
+ * duplicate and ignored Events before this decision; a running Attempt always finishes (ADR 0007).
  */
 export const claimRun = (blocking: Option.Option<Run>, eventId: EventId): ClaimDecision => {
   if (Option.isNone(blocking)) return { _tag: "OpenRun" };
@@ -156,7 +156,7 @@ stateDiagram-v2
 ```
 
 ```ts title="packages/core/src/run/state.ts"
-/** Parks a pending run on its loop's approval gate. */
+/** Moves a pending Run to the waiting state until its Loop's required approval arrives. */
 export const awaitApproval = (_state: Pending): Waiting => new Waiting();
 
 /** Returns the approved state; the Run still waits for a Worker slot before execution. */
@@ -180,7 +180,7 @@ export const cancelByOperator = (_state: Open): Canceled =>
 
 /**
  * Cancels an unstarted run because a newer Event for the same Item replaced it.
- * A running attempt always finishes and the newer state is judged when it ends (ADR 0007).
+ * A running Attempt always finishes, and the engine evaluates the newer Event after it ends (ADR 0007).
  */
 export const supersede = (_state: Unstarted, by: EventId): Canceled =>
   new Canceled({ reason: new Superseded({ by }) });

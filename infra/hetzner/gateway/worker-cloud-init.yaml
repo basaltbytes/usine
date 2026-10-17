@@ -24,7 +24,7 @@ write_files:
     encoding: b64
     content: "@@WORKER_NFTABLES_B64@@"
 
-  # Read by every SSH session, the harness logins included, and by the setup script of ../cloud-init.yaml.
+  # Every SSH session reads this file, including the harness logins, and so does the setup script of ../cloud-init.yaml.
   - path: /etc/environment
     append: true
     content: |
@@ -65,7 +65,7 @@ write_files:
       DynamicUser=yes
       PrivateTmp=yes
 
-  # The executor sends each Attempt's caller token in these variables through the SSH connection, so it is in no command line.
+  # The executor sends each Attempt's caller token in these variables over the SSH connection, so the token never appears on a command line.
   - path: /etc/ssh/sshd_config.d/40-usine-gateway.conf
     permissions: "0644"
     content: |

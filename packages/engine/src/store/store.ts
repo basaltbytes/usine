@@ -664,7 +664,7 @@ export class RunStore extends Context.Service<
     readonly nextQueued: (
       runId: RunId,
     ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
-    /** Parks a pending Run on its approval gate and returns the Run's state, which is `Waiting` until an approval arrives. */
+    /** Moves a pending Run to `Waiting` and returns the Run's state, which stays `Waiting` until an approval arrives. */
     readonly parkForApproval: (runId: RunId) => Effect.Effect<RunState.RunState, RunStoreError>;
     /** The closed Runs whose Item still has a queued Event that no continuation has opened or revoked. */
     readonly pendingContinuations: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;

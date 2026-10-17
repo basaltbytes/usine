@@ -55,13 +55,13 @@ A schedule trigger adds two keys: `cron`, a five-field cron expression, and `tz`
 
 Lists are GraphQL connections with `totalCount` and `nodes`, so CEL's list macros apply to `nodes`:
 
-| Condition                                                 | Expression                                                                                   |
-| --------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| The Item has a label                                      | `item.labels.nodes.exists(label, label.name == "ready-for-agent")`                           |
-| No open pull request closes the issue yet                 | `!item.closedByPullRequestsReferences.nodes.exists(pr, pr.state == "OPEN")`                  |
-| The pull request is open and not a draft                  | `item.state == "OPEN" && !item.isDraft`                                                      |
-| GitHub reports a merge conflict                           | `item.mergeable == "CONFLICTING"`                                                            |
-| Fewer than three reviews contain the reviewer's signature | `size(item.reviews.nodes.filter(review, review.body.contains("usine agent: reviewer"))) < 3` |
+| Condition                                 | Expression                                                                  |
+| ----------------------------------------- | --------------------------------------------------------------------------- |
+| The Item has a label                      | `item.labels.nodes.exists(label, label.name == "ready-for-agent")`          |
+| No open pull request closes the issue yet | `!item.closedByPullRequestsReferences.nodes.exists(pr, pr.state == "OPEN")` |
+| The pull request is open and not a draft  | `item.state == "OPEN" && !item.isDraft`                                     |
+| GitHub reports a merge conflict           | `item.mergeable == "CONFLICTING"`                                           |
+| Every review thread is resolved           | `item.reviewThreads.nodes.all(thread, thread.isResolved)`                   |
 
 The orchestrator type-checks `if:` and every `{{ }}` expression of the body when it loads the Loop. If an expression reads a field that the payload doesn't have, or `if:` isn't a boolean, the Loop doesn't load.
 
@@ -114,7 +114,7 @@ The task must remove the trigger label first. While the Agent works, new comment
    ```yaml title="usine.yaml"
    labels:
      - name: ready-for-agent
-       color: 0e8a16
+       color: "0e8a16"
      - name: agent-in-progress
      - name: ready-for-review
      - name: agent-review-findings

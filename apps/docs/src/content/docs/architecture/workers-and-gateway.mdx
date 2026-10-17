@@ -265,8 +265,8 @@ write_files:
 ```yaml title="infra/hetzner/gateway/gateway-cloud-init.yaml"
 write_files:
   # ...
-  # Workers resolve the gateway's names here and nothing else: with no upstream server, every other name is refused, and each query is in the journal.
-  # local= answers an AAAA query for the gateway's names with no address instead of refusing it: musl's resolver, which Codex uses, fails the whole lookup on a refusal.
+  # dnsmasq answers Worker queries for the gateway's names only. It has no upstream server, so it refuses every other name, and it logs each query to the journal.
+  # With local=, an AAAA query for the gateway's names gets an empty answer instead of a refusal, because musl's resolver, which Codex uses, fails the whole lookup on a refusal.
   - path: /etc/dnsmasq.d/usine-gateway.conf
     permissions: "0644"
     content: |
@@ -525,7 +525,7 @@ The parts of `worker-cloud-init.yaml` that every SSH session reads:
 ```yaml title="infra/hetzner/gateway/worker-cloud-init.yaml"
 write_files:
   # ...
-  # Read by every SSH session, the harness logins included, and by the setup script of ../cloud-init.yaml.
+  # Every SSH session reads this file, including the harness logins, and so does the setup script of ../cloud-init.yaml.
   - path: /etc/environment
     append: true
     content: |
@@ -538,7 +538,7 @@ write_files:
       no_proxy=@@DOMAIN@@
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
   # ...
-  # The executor sends each Attempt's caller token in these variables through the SSH connection, so it is in no command line.
+  # The executor sends each Attempt's caller token in these variables over the SSH connection, so the token never appears on a command line.
   - path: /etc/ssh/sshd_config.d/40-usine-gateway.conf
     permissions: "0644"
     content: |

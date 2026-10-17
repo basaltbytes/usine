@@ -1,7 +1,7 @@
 // @ts-check
 import { fileURLToPath } from "node:url";
 import starlightTypeDoc from "starlight-typedoc";
-import { documentedPackages, entryPoints, packagesDirectory } from "./typedoc-package-modules.mjs";
+import { documentedPackages, entryPoints, packagesDirectory } from "./typedoc/package-modules.mjs";
 
 const output = "reference/api";
 
@@ -14,7 +14,7 @@ export const apiReference = starlightTypeDoc({
   tsconfig: fileURLToPath(new URL("tsconfig.typedoc.json", import.meta.url)),
   output,
   typeDoc: {
-    plugin: [fileURLToPath(new URL("typedoc-package-modules.mjs", import.meta.url))],
+    plugin: [fileURLToPath(new URL("typedoc/plugin.mjs", import.meta.url))],
     name: "API",
     displayBasePath: packagesDirectory,
     router: "module",
@@ -27,6 +27,7 @@ export const apiReference = starlightTypeDoc({
     disableSources: true,
     skipErrorChecking: true,
     parametersFormat: "table",
+    classPropertiesFormat: "table",
   },
 });
 
