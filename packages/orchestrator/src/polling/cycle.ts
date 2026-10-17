@@ -7,7 +7,11 @@ import { DateTime, Option, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { configFileErrorLogFields } from "../trigger-submission.ts";
 
-/** One repository whose cycle failed; its siblings finished normally. */
+/**
+ * A failure isolated to one repository, or to one Loop and Item of it; the
+ * repository's siblings finished normally. A Loop that cannot evaluate an Item
+ * is reported in every cycle until the Item or the Loop changes.
+ */
 export class RepositoryPollFailure extends Schema.Class<RepositoryPollFailure>(
   "@usine/orchestrator/RepositoryPollFailure",
 )({
@@ -51,7 +55,7 @@ export const repositoryFailureLogFields = (error: RepositoryPollError) => {
 export interface InterruptedRepositoryCycle {
   readonly _tag: "InterruptedRepositoryCycle";
   readonly error: RepositoryPollError;
-  /** Preflight failures such as a failed catalog request, kept through the interruption. */
+  /** Preflight failures such as a failed catalog request, and the Loop failures the cursor recorded, kept through the interruption. */
   readonly failures: ReadonlyArray<RepositoryPollFailure>;
   readonly preflightFindings: ReadonlyArray<LabelPreflightFinding>;
   readonly nextPollAt: Option.Option<DateTime.Utc>;
