@@ -78,14 +78,14 @@ export class Executor extends Context.Service<
     ) => Effect.Effect<void, E | ExecutorError>;
     readonly kind: WorkerKind;
     /**
-     * Whether the Attempt's parent task survived an orchestrator restart and can be reattached:
-     * it still runs, or it reported success before its checkout was harvested.
+     * Whether the orchestrator can reattach to the Attempt's parent task after a restart: the
+     * task is still running, or it reported success before the executor harvested its checkout.
      */
     readonly isLive: (attemptId: AttemptId) => Effect.Effect<boolean, AttemptFailure>;
     /**
-     * The result an Attempt's finished parent task left in durable storage before an
+     * The result that an Attempt's finished parent task wrote to durable storage before an
      * orchestrator restart: the harvested result, or the parent's failure. None when
-     * nothing was stored, or when `isLive` says the Attempt is reattached instead.
+     * nothing is stored, or when `isLive` returns true and the orchestrator reattaches instead.
      */
     readonly outcome: (
       attemptId: AttemptId,

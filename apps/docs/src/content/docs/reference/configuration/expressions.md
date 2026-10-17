@@ -206,29 +206,22 @@ if: >-
   !item.labels.nodes.exists(label, label.name == "ready-to-merge")
 ```
 
-Fewer than three reviews contain the reviewer Agent's signature:
+A review left findings to fix. The condition doesn't count reviews: the Loop's `max_cycles` limits the review and fix rounds on each pull request ([Bounded review and fix Loops](/guides/review-fix-loops/)):
 
 ```yaml title="loops/act-on-findings.md"
 if: >-
   item.state == "OPEN" &&
-  item.labels.nodes.exists(label, label.name == "agent-review-findings") &&
-  size(item.reviews.nodes.filter(review, review.body.contains("usine agent: reviewer"))) < 3
+  !item.isDraft &&
+  item.labels.nodes.exists(label, label.name == "agent-review-findings")
 ```
 
-Review passed, or three review rounds didn't converge:
+A review passed:
 
 ```yaml title="loops/finish-pr.md"
 if: >-
   item.state == "OPEN" &&
   !item.isDraft &&
-  !item.labels.nodes.exists(label, label.name == "ready-to-merge") &&
-  (
-    item.labels.nodes.exists(label, label.name == "review-passed") ||
-    (
-      item.labels.nodes.exists(label, label.name == "agent-review-findings") &&
-      size(item.reviews.nodes.filter(review, review.body.contains("usine agent: reviewer"))) >= 3
-    )
-  )
+  item.labels.nodes.exists(label, label.name == "review-passed")
 ```
 
 A pull request marked for merge has a conflicting branch:

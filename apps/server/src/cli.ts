@@ -29,7 +29,7 @@ export const CLI_USAGE = `Usage:
 
 Options:
   -p, --port <port>            Listen on this port (default: 7331)
-  --allow-volatile-instance    Start even when the instance folder sits under a temp path
+  --allow-volatile-instance    Start even when the instance folder is in a temporary directory
   -o, --output <path>          Write Run evidence here (default: run-<encoded-runId>.json)
   -h, --help                   Print this usage
   -v, --version                Print the pinned @usine/server version
@@ -60,7 +60,7 @@ export class ServerStartError extends Schema.TaggedError<ServerStartError>(
   "@usine/server/ServerStartError",
 )("ServerStartError", { port: Port, cause: Schema.Defect() }) {}
 
-/** Raised when the instance folder sits under a path the OS may clear, since its runtime store is the only copy of run history. */
+/** Raised when the instance folder is in a directory the OS may clear. Its runtime store is the only copy of run history. */
 export class VolatileInstanceDirectoryError extends Schema.TaggedError<VolatileInstanceDirectoryError>(
   "@usine/server/VolatileInstanceDirectoryError",
 )("VolatileInstanceDirectoryError", {
@@ -227,7 +227,7 @@ export const volatileRoots = (environmentTmpdir: Option.Option<string>): Readonl
 const isUnder = (directory: string, root: string): boolean =>
   directory === root || directory.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 
-/** Returns the volatile root the directory sits under, if any. Paths are compared as given, with symlinks unresolved. */
+/** Returns the volatile root that contains the directory, if any. Compares the paths as given, without resolving symlinks. */
 export const volatileRoot = (
   directory: string,
   roots: ReadonlyArray<string>,

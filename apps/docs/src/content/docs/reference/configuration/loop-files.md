@@ -239,7 +239,7 @@ Before reading the diff, fetch `refs/pull/{{ item.number }}/head`, verify that i
 Post the review on GitHub. If you find any actionable issue, explain it with file and line references and add `agent-review-findings` to the pull request. If there are no actionable findings, post a short review result, make sure `agent-review-findings` is absent, and add `review-passed`. Do not edit the branch or merge the pull request.
 ```
 
-A pull-request Loop that stops after three review rounds. It counts the reviews that contain the reviewer Agent's signature:
+A pull-request Loop that fixes the findings of a review. Its trigger doesn't count reviews: `max_cycles` limits the review and fix rounds on each pull request, and when a Loop has used its limit, usine opens an Ask instead of another Run ([Bounded review and fix Loops](/guides/review-fix-loops/)):
 
 ```markdown title="loops/act-on-findings.md"
 ---
@@ -247,16 +247,19 @@ trigger:
   on: pr
   if: >-
     item.state == "OPEN" &&
-    item.labels.nodes.exists(label, label.name == "agent-review-findings") &&
-    size(item.reviews.nodes.filter(review, review.body.contains("usine agent: reviewer"))) < 3
+    !item.isDraft &&
+    item.labels.nodes.exists(label, label.name == "agent-review-findings")
 selector:
   repos: [acme/widgets]
 step: act-on-findings
 agent: developer
+max_cycles: 3
 ---
 Address the review findings on pull request #{{ item.number }}. Do not merge the pull request.
 
-First remove `agent-review-findings` from the pull request. Fetch `refs/pull/{{ item.number }}/head`, verify that it resolves to {{ item.headRefOid }}, and check out the pull request branch `{{ item.headRefName }}` before editing.
+Fetch `refs/pull/{{ item.number }}/head`, verify that it resolves to {{ item.headRefOid }}, and check out the pull request branch `{{ item.headRefName }}` before editing.
 
-Read every review comment signed `usine agent: reviewer`. Fix each finding in the branch, run the required checks, commit the changes, and push them to `{{ item.headRefName }}`. Reply to each finding with what changed or why it was left as is, then add `ready-for-review` so the updated commit receives another review.
+Read every review comment signed `usine agent: reviewer`. Fix each finding in the branch, run the required checks, commit the changes, and push them to `{{ item.headRefName }}`. Reply to each finding with what changed or why it was left as is. Then add `ready-for-review` and remove `agent-review-findings` and `review-passed`, so the new commit gets another review.
+
+If you can't complete the fix, leave `agent-review-findings` on the pull request and comment with the blocker.
 ```

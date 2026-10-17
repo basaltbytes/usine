@@ -218,9 +218,9 @@ type ClaimDecision =
   | { readonly _tag: "SupersedeRun"; readonly runId: RunId; readonly state: RunState.Canceled };
 
 /**
- * Places a previously unclaimed Event behind its Item's running work, or
- * replaces unstarted work. The ledger must resolve permanent deduplication and
- * ignored Events before this decision; running Attempts always finish (ADR 0007).
+ * Decides what to do with an Event that no Run has claimed: open a Run, queue the Event
+ * while the Item's Run is running, or supersede the Item's unstarted Run. The ledger handles
+ * duplicate and ignored Events before this decision; a running Attempt always finishes (ADR 0007).
  */
 export const claimRun = (blocking: Option.Option<Run>, eventId: EventId): ClaimDecision => {
   if (Option.isNone(blocking)) return { _tag: "OpenRun" };

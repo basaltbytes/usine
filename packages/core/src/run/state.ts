@@ -118,7 +118,7 @@ export const STATE_TAGS = tagsOf<RunState>()(
 /** The unstarted states as `_tag` literals, for queries that filter stored rows. */
 export const UNSTARTED_STATE_TAGS = tagsOf<Unstarted>()("Pending", "Waiting", "Queued");
 
-/** Parks a pending run on its loop's approval gate. */
+/** Moves a pending Run to the waiting state until its Loop's required approval arrives. */
 export const awaitApproval = (_state: Pending): Waiting => new Waiting();
 
 /** Returns the approved state; the Run still waits for a Worker slot before execution. */
@@ -142,7 +142,7 @@ export const cancelByOperator = (_state: Open): Canceled =>
 
 /**
  * Cancels an unstarted run because a newer Event for the same Item replaced it.
- * A running attempt always finishes and the newer state is judged when it ends (ADR 0007).
+ * A running Attempt always finishes, and the engine evaluates the newer Event after it ends (ADR 0007).
  */
 export const supersede = (_state: Unstarted, by: EventId): Canceled =>
   new Canceled({ reason: new Superseded({ by }) });
