@@ -20,7 +20,7 @@ The spec lives in [CONTEXT.md](./CONTEXT.md) (domain glossary) and [docs/adr/](.
 | [`@usine/orchestrator`](./packages/orchestrator) | The embeddable composition: the full engine as an Effect layer, startable in-process                                            |
 | [`@usine/server`](./apps/server)                 | Thin `usine up` CLI that runs the orchestrator in the foreground and serves the local web UI                                   |
 | `apps/web`                                       | The web UI (never published)                                                                                                    |
-| [`apps/docs`](./apps/docs)                       | The documentation site, built with Astro Starlight (never published)                                                            |
+| [`apps/docs`](./apps/docs)                       | The documentation site, built with Astro Starlight, at [docs.usine.dev](https://docs.usine.dev)                                 |
 
 `effect` is exact-pinned once, in the [workspace catalog](./pnpm-workspace.yaml), and declared as a peer dependency by the published libraries: consumers supply `effect` themselves, so there is one Effect runtime per tree.
 

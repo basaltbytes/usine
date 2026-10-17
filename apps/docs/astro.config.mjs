@@ -7,6 +7,7 @@ import starlightLinksValidator from "starlight-links-validator";
 import { apiReference, apiSidebarGroup } from "./api-reference.mjs";
 
 export default defineConfig({
+  site: "https://docs.usine.dev",
   integrations: [
     mermaid({
       autoTheme: true,
