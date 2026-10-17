@@ -1,3 +1,4 @@
+import { ConfigFileError } from "@usine/config/file";
 import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAsk } from "@usine/core/cycle-budget";
 import { RepositoryName } from "@usine/core/repository";
@@ -62,6 +63,20 @@ export class ScheduleFailureNeed extends Schema.TaggedClass<ScheduleFailureNeed>
   failure: ScheduleFailure,
 }) {}
 
+/**
+ * An authored file failed to load at startup and was left out: a quarantined
+ * Loop opens no Runs, and an invalid Agent is not in the roster. `error` names
+ * the file, the parse stage, and the reason. Fixing the file takes effect at
+ * the next `usine up`.
+ */
+export class ConfigFileNeed extends Schema.TaggedClass<ConfigFileNeed>(
+  "@usine/orchestrator/ConfigFileNeed",
+)("ConfigFileNeed", {
+  id: Schema.String,
+  kind: Schema.Literals(["loop", "agent"]),
+  error: ConfigFileError,
+}) {}
+
 /** An Item stopped opening Runs and requires an explicit reset of its shared cycle budget. */
 export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleBudgetNeed")(
   "CycleBudgetNeed",
@@ -82,5 +97,6 @@ export const NeedView = Schema.Union([
   PollFailureNeed,
   PreflightFindingNeed,
   ScheduleFailureNeed,
+  ConfigFileNeed,
 ]);
 export type NeedView = typeof NeedView.Type;

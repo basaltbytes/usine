@@ -339,6 +339,7 @@ export { RunEngineShutdown } from "./shutdown.ts";
 export {
   RunNotFoundError,
   RunOperationRejectedError,
+  RunRetryBlockedError,
   EnginePersistenceError,
   AttemptCancellationError,
   RunInterventionRejectedError,

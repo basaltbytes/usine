@@ -60,6 +60,17 @@ export default mergeConfig(
                     resolved = true;
                     return route.fulfill({ contentType: "application/json", body: '{"ok":true}' });
                   });
+                  await page.route("**/api/runs/resolution-run/retry", (route) =>
+                    route.fulfill({
+                      status: 409,
+                      contentType: "application/json",
+                      body: JSON.stringify({
+                        error: "RunRetryBlockedError",
+                        message:
+                          "Cannot retry Run resolution-run: Run newer-run of Loop implement is open on the same Item. Retry after it closes, or cancel it first.",
+                      }),
+                    }),
+                  );
                 },
                 interventionResponses: async ({ page }, status: 200 | 503) => {
                   interventionRequests.set(page, []);

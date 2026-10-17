@@ -2,6 +2,7 @@
 import { NodeRuntime, NodeServices } from "@effect/platform-node";
 import { Console, Effect, Match, Option } from "effect";
 import { CLI_USAGE, packageVersion, parseCli } from "./cli.ts";
+import { failureMessage } from "./failure-message.ts";
 
 const exitWith = (message: string) =>
   Console.error(message).pipe(
@@ -11,38 +12,6 @@ const exitWith = (message: string) =>
       }),
     ),
   );
-
-/** The operator's message for a failed backup of either store; `openHint` says how to fix an unreadable source. */
-const backupFailure = (
-  failure: {
-    readonly operation: "open" | "stage" | "copy" | "publish";
-    readonly source: string;
-    readonly destination: string;
-    readonly reason: string;
-  },
-  openHint: string,
-) => {
-  const { source, destination, reason } = failure;
-  return Match.value(failure.operation).pipe(
-    Match.when("open", () => `Could not open ${source} (${reason}). ${openHint}`),
-    Match.when(
-      "copy",
-      () =>
-        `Could not copy ${source} to ${destination} (${reason}). Check the source database and the output directory's free space and permissions.`,
-    ),
-    Match.when(
-      "stage",
-      () =>
-        `Could not create a backup at ${destination} (${reason}). Choose an existing writable output directory.`,
-    ),
-    Match.when("publish", () =>
-      reason === "AlreadyExists"
-        ? `Could not save the backup to ${destination} (${reason}). Choose a different filename; the destination already exists.`
-        : `Could not save the backup to ${destination} (${reason}). Check the destination path and permissions; its filesystem must support hard links.`,
-    ),
-    Match.exhaustive,
-  );
-};
 
 const main = Effect.gen(function* () {
   const command = yield* parseCli(process.argv.slice(2), {
@@ -70,47 +39,8 @@ const main = Effect.gen(function* () {
   });
 }).pipe(
   Effect.provide(NodeServices.layer),
-  Effect.catchTags({
-    CliUsageError: ({ message }) => exitWith(message),
-    RunNotFoundError: ({ runId }) => exitWith(`Run ${runId} was not found.`),
-    RunExportError: ({ runId, operation, path, reason }) =>
-      exitWith(
-        `Could not ${operation} evidence for Run ${runId} at ${path} (${reason}). Check the instance database and choose a new writable output path.`,
-      ),
-    RuntimeStoreBackupError: (error) =>
-      exitWith(
-        backupFailure(
-          error,
-          "Run usine backup from the instance folder containing .usine/runtime.sqlite.",
-        ),
-      ),
-    DurableStorageBackupError: (error) =>
-      exitWith(
-        backupFailure(error, "Check that the instance's .usine/durable.sqlite is a readable file."),
-      ),
-    VolatileInstanceDirectoryError: ({ directory, root }) =>
-      exitWith(
-        `Refusing to start: ${directory} sits under ${root}, which the OS clears. The runtime store there is the only copy of every Run and transcript. Move the instance folder, or pass --allow-volatile-instance (or USINE_ALLOW_VOLATILE_INSTANCE=1) to proceed anyway.`,
-      ),
-    InstanceInUseError: ({ directory, holder }) =>
-      exitWith(
-        `usine up did not start: another usine process${Option.match(holder, {
-          onNone: () => "",
-          onSome: (pid) => ` (pid ${pid})`,
-        })} is running in ${directory}, possibly still draining its Attempts. Wait for it to exit or stop it, then run usine up again.`,
-      ),
-    InstanceLockError: ({ directory, reason }) =>
-      exitWith(
-        `usine up did not start: could not lock ${directory}/.usine/instance.lock (${reason}). Check that the folder is writable.`,
-      ),
-    PortInUseError: ({ port, holder }) =>
-      exitWith(
-        `usine up stopped: port ${port} is already in use${Option.match(holder, {
-          onNone: () => "",
-          onSome: (pid) => ` (pid ${pid})`,
-        })}. Stop the process using it or run usine up --port <port>.`,
-      ),
-  }),
+  // Only typed failures are caught: a defect still crashes with its full cause.
+  Effect.catch((failure) => exitWith(failureMessage(failure))),
 );
 
 NodeRuntime.runMain(main);

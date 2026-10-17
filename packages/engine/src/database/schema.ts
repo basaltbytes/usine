@@ -190,6 +190,10 @@ export const attempts = snakeCase.table(
       "usine_attempts_outcome_json_valid",
       sql`${table.outcomeJson} is null or json_valid(${table.outcomeJson})`,
     ),
+    check(
+      "usine_attempts_salvage_json_valid",
+      sql`${table.salvageJson} is null or json_valid(${table.salvageJson})`,
+    ),
     uniqueIndex("usine_attempt_number").on(table.runId, table.stepName, table.attemptNumber),
     uniqueIndex("usine_one_in_flight_attempt")
       .on(table.runId)
@@ -281,7 +285,6 @@ export const itemProjections = snakeCase.table(
     check("usine_item_projections_number", sql`${table.itemNumber} >= 1`),
     check("usine_item_projections_payload_json_valid", sql`json_valid(${table.payloadJson})`),
     uniqueIndex("usine_item_projection_number").on(table.repository, table.itemNumber),
-    index("usine_item_projection_repository").on(table.repository, table.itemNumber),
   ],
 );
 

@@ -80,6 +80,8 @@ The engine retries an Attempt automatically only after an `InfraFailure`, such a
 
 **Retry** starts a new Attempt of the same Run, and you can retry any number of times. When an Attempt ends without success, usine commits its uncommitted changes and pushes its worktree to the branch `usine/salvage/<run>/<attempt number>` of the repository; the next Attempt starts from the newest salvage branch, and its prompt says so. If that push fails, the worktree stays on the Worker and the Attempt shows its path. usine never deletes a salvage branch.
 
+A later Event on the same Item can open a new Run of the Loop while the failed one waits for you. usine refuses to retry the failed Run while that other Run is open, so that one Loop never runs twice on one Item; the drawer names the open Run. Retry after it closes, or cancel it first. **Edit and retry** follows the same rule.
+
 **Mark resolved** removes a failure you have handled from **Needs you** and from the project's status. The Run stays `Failed`, and you can still retry it. If a later Attempt fails, the Run appears in **Needs you** again.
 
 ## Edit and retry
@@ -119,6 +121,8 @@ For a Claude Code or Codex child, the expanded child section also shows its save
 | **Label preflight failed**             | usine couldn't create a label that `usine.yaml` declares.                                                            |
 | **Item projection quarantined**        | usine couldn't place an Item on its Board.                                                                           |
 | A schedule error                       | A schedule Loop couldn't evaluate or submit a tick.                                                                  |
+| **Loop quarantined**                   | A Loop file failed to load and opens no Runs. Fix the file and restart `usine up`.                                   |
+| **Agent file not loaded**              | An Agent file failed to load and isn't in the roster. Fix the file and restart `usine up`.                          |
 
 ## Cycle budgets
 

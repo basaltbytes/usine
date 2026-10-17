@@ -2,10 +2,11 @@ import { NodeFileSystem, NodePath } from "@effect/platform-node";
 import { describe, expect, it } from "@effect/vitest";
 import { InstanceDirectory } from "@usine/core/instance";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Logger, Option, Schema } from "effect";
 import { InstanceFolder } from "../src/instance-folder.ts";
 import { InstancePath } from "../src/file.ts";
 import { LoadedInstance } from "../src/instance/instance.ts";
+import { loopReferenceFailure, referenceIndex } from "../src/instance/references.ts";
 import { ManagedRepo } from "../src/factory.ts";
 import { ConfigParser } from "../src/parser.ts";
 import { matchesSelector } from "../src/selector.ts";
@@ -215,6 +216,47 @@ describe("ConfigParser", () => {
 
       expect(failure.stage).toBe("schema");
       expect(failure.message).toContain("unique GitHub label names");
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
+  it.effect("rejects repository names and lane labels that differ only in case", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const registry = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          "version: 1\nrepos: [{ name: Acme/Widgets }, { name: acme/widgets }]\n",
+        )
+        .pipe(Effect.flip);
+      expect(registry.stage).toBe("schema");
+      expect(registry.message).toContain("unique repository names, ignoring case");
+
+      const lanes = yield* parser
+        .parseUsineYaml(
+          InstancePath.make("usine.yaml"),
+          [
+            "version: 1",
+            "repos:",
+            "  - name: acme/widgets",
+            "    lanes:",
+            "      - name: Ready",
+            "        sources: [{ label: Ready }]",
+            "      - name: Also ready",
+            "        sources: [{ label: ready }]",
+          ].join("\n"),
+        )
+        .pipe(Effect.flip);
+      expect(lanes.stage).toBe("schema");
+      expect(lanes.message).toContain("every lane source to be mapped once");
+
+      const selector = yield* parser
+        .parseLoopFile(
+          InstancePath.make("loops/widgets.md"),
+          "---\ntrigger:\n  on: issue\n  if: 'true'\nselector:\n  repos: [Acme/Widgets, acme/widgets]\nstep: implement\nagent: developer\n---\nWork on the Item.",
+        )
+        .pipe(Effect.flip);
+      expect(selector.stage).toBe("schema");
+      expect(selector.message).toContain("unique repository names, ignoring case");
     }).pipe(Effect.provide(parserLayer)),
   );
 
@@ -556,7 +598,37 @@ describe("InstanceFolder", () => {
   it.effect("loads the three acceptance loops and quarantines broken siblings", () =>
     Effect.gen(function* () {
       const folder = yield* InstanceFolder;
-      const loaded = yield* folder.load(acceptanceRoot);
+      const warnings: Array<unknown> = [];
+      const logger = Logger.make(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(message);
+      });
+      const loaded = yield* folder.load(acceptanceRoot).pipe(Effect.withLogger(logger));
+
+      expect(warnings).toContainEqual([
+        "Agent file left out of the roster; Loops that use it are quarantined",
+        {
+          file: "agents/intern.md",
+          stage: "schema",
+          message: loaded.invalidAgents[0]?.error.message,
+        },
+      ]);
+      expect(warnings).toContainEqual([
+        "Loop quarantined; it opens no Runs until its file is fixed",
+        {
+          file: "loops/unknown-agent.md",
+          stage: "reference",
+          message: "Unknown agent: ghost",
+          expression: undefined,
+        },
+      ]);
+      expect(warnings).toContainEqual([
+        "Loop quarantined; it opens no Runs until its file is fixed",
+        expect.objectContaining({
+          file: "loops/broken-loop.md",
+          stage: "expression",
+          expression: 'item.labels.nodes.exists(label, label.nmae == "ready")',
+        }),
+      ]);
 
       expect(loaded.loops.map(({ name }) => name)).toEqual([
         "act-on-findings",
@@ -647,6 +719,36 @@ describe("InstanceFolder", () => {
         true,
       );
     }).pipe(Effect.provide(instanceFolderLayer)),
+  );
+
+  it.effect("resolves and matches selector repositories ignoring case", () =>
+    Effect.gen(function* () {
+      const folder = yield* InstanceFolder;
+      const parser = yield* ConfigParser;
+      const loaded = yield* folder.load(acceptanceRoot);
+      const file = InstancePath.make("loops/mixed-case.md");
+      const loop = yield* parser.parseLoopFile(
+        file,
+        "---\ntrigger:\n  on: issue\n  if: 'true'\nselector:\n  repos: [BasaltBytes/Usine]\nstep: implement\nagent: developer\n---\nWork on the Item.",
+      );
+
+      const references = referenceIndex(loaded.config, loaded.agents);
+      expect(Option.isNone(loopReferenceFailure(file, loop, references))).toBe(true);
+      expect(
+        () =>
+          new LoadedInstance({
+            config: loaded.config,
+            agents: loaded.agents,
+            invalidAgents: loaded.invalidAgents,
+            loops: [...loaded.loops, loop],
+            quarantinedLoops: loaded.quarantinedLoops,
+            warnings: loaded.warnings,
+          }),
+      ).not.toThrow();
+      const repo = Schema.decodeUnknownSync(ManagedRepo);
+      expect(matchesSelector(loop.selector, repo({ name: "basaltbytes/usine" }))).toBe(true);
+      expect(matchesSelector(loop.selector, repo({ name: "basaltbytes/other" }))).toBe(false);
+    }).pipe(Effect.provide(Layer.merge(instanceFolderLayer, parserLayer))),
   );
 });
 

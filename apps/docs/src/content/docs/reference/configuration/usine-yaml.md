@@ -14,7 +14,7 @@ The parser is strict:
 - Keys are snake_case in the file. The parser renames them to camelCase domain fields ([`Schema.encodeKeys`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L182)), so `poll_interval` in the file is `pollInterval` in code.
 - An unknown key at any level is an error ([`onExcessProperty: "error"`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L186)).
 - Duplicate keys and YAML parser warnings are errors ([`parseYamlDocument`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/yaml/document.ts#L18)).
-- An invalid `usine.yaml` stops the whole instance from loading: `usine up` logs a `FactoryConfigError` and exits with status 1. An invalid Loop or Agent file affects only that file; see [Loop files](/reference/configuration/loop-files/#validation-and-quarantine).
+- An invalid `usine.yaml` stops the whole instance from loading: `usine up` prints one line naming the file, the failed stage, and the reason, including the path of the offending key, and exits with status 1. An invalid Loop or Agent file affects only that file; see [Loop files](/reference/configuration/loop-files/#validation-and-quarantine).
 
 The schema is [`UsineConfig`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L209) in `packages/config/src/factory.ts`.
 
@@ -161,7 +161,7 @@ labels:
 
 ## `repos`
 
-Each entry is one managed repository ([`ManagedRepo`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L62)). Names must be unique.
+Each entry is one managed repository ([`ManagedRepo`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L62)). Names must be unique, compared case-insensitively as on GitHub.
 
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
@@ -182,10 +182,10 @@ Each lane is one Board column ([`Lane`](https://github.com/basaltbytes/usine/blo
 
 | Source | Valid values | Description |
 | --- | --- | --- |
-| `label` | a GitHub label name | Places Items that have this label in the lane. A Board move into the lane adds the label. |
+| `label` | a GitHub label name | Places Items that have this label, in any case, in the lane. A Board move into the lane adds the label. |
 | `state` | `issue-open`, `issue-closed`, `pr-open`, `pr-closed`, `pr-merged` | Places Items in this GitHub state in the lane. A Board move can't change a state. |
 
-A source may appear in only one lane of a repository. The Board places each Task as follows ([`laneFor`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L78)):
+A source may appear in only one lane of a repository; two `label` sources that differ only in case count as the same source. The Board places each Task as follows ([`laneFor`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L78)):
 
 1. A Task whose current Item is a merged or closed pull request, or a closed issue, goes to the first lane with a matching `state` source.
 2. Any other Task goes to the first lane, in file order, that has a `label` source matching one of the Item's labels. If no lane matches, it goes to the first lane with a matching `state` source.

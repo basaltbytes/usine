@@ -4,12 +4,7 @@ import type { BrainSpec } from "@usine/core/agent/brain";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { salvageRefFor } from "@usine/core/attempt/salvage";
 import { WorkerName } from "@usine/core/worker";
-import {
-  CheckoutRequest,
-  Executor,
-  ExecutorError,
-  type ExecutorOperationError,
-} from "@usine/executor";
+import { CheckoutRequest, Executor, ExecutorError, ExecutorOperationError } from "@usine/executor";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
 import {
   DateTime,
@@ -93,10 +88,23 @@ export const stepExecutorLayer = (
     Effect.gen(function* () {
       const executor = yield* Executor;
       const workers = yield* validateWorkers(executor.kind, config.workers);
-      yield* Effect.forEach(workers, ({ name }) => executor.preflight(name, brains), {
-        concurrency: "unbounded",
-        discard: true,
-      });
+      yield* Effect.forEach(
+        workers,
+        ({ name }) =>
+          executor.preflight(name, brains).pipe(
+            // The operation error has no Worker field; startup reports must name the Worker.
+            Effect.mapError((error) =>
+              error._tag === "ExecutorOperationError"
+                ? new ExecutorOperationError({
+                    operation: error.operation,
+                    message: `Worker ${name}: ${error.message}`,
+                    cause: error.cause,
+                  })
+                : error,
+            ),
+          ),
+        { concurrency: "unbounded", discard: true },
+      );
 
       const available = yield* Queue.make<WorkerName>();
       yield* Queue.offerAll(

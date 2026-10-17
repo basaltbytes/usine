@@ -77,4 +77,10 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: failure._tag === "ScheduleTickFailure" ? failure.repository : null,
       runId: null,
     }),
+    ConfigFileNeed: ({ kind, error }) => ({
+      title: kind === "loop" ? "Loop quarantined" : "Agent file not loaded",
+      detail: `${error.file}: ${error.message.replace(/\.$/u, "")}. Fix the file and restart usine up.`,
+      repository: null,
+      runId: null,
+    }),
   });

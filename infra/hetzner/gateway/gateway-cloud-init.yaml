@@ -106,7 +106,7 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/sh
-      # Installs or upgrades the gateway from npm package specs or packed tarballs, then restarts it.
+      # Installs or upgrades the gateway from tarballs made with pnpm pack, then restarts it.
       # One tree for all of them, so @usine/gateway and @usine/core share one copy of effect.
       set -eu
       npm install --prefix /opt/usine-gateway --omit=dev "$@"
@@ -144,7 +144,6 @@ write_files:
       rm -f "$archive"
       systemctl daemon-reload
       systemctl enable usine-gateway
-      if [ "$1" != none ]; then /usr/local/sbin/usine-gateway-install "$1"; fi
 
 runcmd:
-  - [/usr/local/sbin/usine-gateway-setup, "@@GATEWAY_PACKAGE@@"]
+  - [/usr/local/sbin/usine-gateway-setup]

@@ -23,11 +23,12 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId, Run } from "@usine/core/run";
 import { StepName, Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
-import { AgentFile } from "@usine/config/agent";
+import { AgentFile, InvalidAgent } from "@usine/config/agent";
+import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { GitHubLabelName } from "@usine/config/label";
 import { IssueTrigger } from "@usine/config/trigger";
 import { LoadedInstance } from "@usine/config/instance";
-import { LoopFile, PromptTemplate } from "@usine/config/loop";
+import { LoopFile, PromptTemplate, QuarantinedLoop } from "@usine/config/loop";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin, UsineConfig } from "@usine/config/factory";
 import {
@@ -71,6 +72,7 @@ import {
 } from "../src/operator/transcript.ts";
 import { FailureView } from "../src/operator/attempt.ts";
 import { Operator } from "../src/operator/operator.ts";
+import { ReadyOverview } from "../src/operator/overview.ts";
 import { EditAndRetry, SessionIntervention } from "../src/operator/run.ts";
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
@@ -875,6 +877,67 @@ describe("Operator", () => {
           Effect.provide(testLayer(approved, movedLabels, overviewReads, projectionRevision)),
         );
       }),
+  );
+
+  it.effect("lists quarantined Loops and invalid Agent files in Needs you", () =>
+    Effect.gen(function* () {
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const fileError = (file: string, stage: "schema" | "reference", message: string) =>
+        new ConfigFileError({
+          file: InstancePath.make(file),
+          stage,
+          expression: Option.none(),
+          message,
+        });
+      const broken = new LoadedInstance({
+        ...instance,
+        invalidAgents: [
+          new InvalidAgent({
+            file: InstancePath.make("agents/intern.md"),
+            error: fileError("agents/intern.md", "schema", "Expected a known harness"),
+          }),
+        ],
+        quarantinedLoops: [
+          new QuarantinedLoop({
+            file: InstancePath.make("loops/ghost.md"),
+            error: fileError("loops/ghost.md", "reference", "Unknown agent: ghost"),
+          }),
+        ],
+      });
+      const overview = yield* Effect.flatMap(Operator, (operator) =>
+        operator.overview(broken),
+      ).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
+      const needs = overview.needsYou.filter((need) => need._tag === "ConfigFileNeed");
+      assert.deepStrictEqual(
+        needs.map(({ id, kind, error }) => [id, kind, error.file, error.stage, error.message]),
+        [
+          [
+            "config-file:agents/intern.md",
+            "agent",
+            "agents/intern.md",
+            "schema",
+            "Expected a known harness",
+          ],
+          [
+            "config-file:loops/ghost.md",
+            "loop",
+            "loops/ghost.md",
+            "reference",
+            "Unknown agent: ghost",
+          ],
+        ],
+      );
+      const encoded = Schema.encodeUnknownSync(ReadyOverview)(overview);
+      assert.deepStrictEqual(
+        Schema.decodeUnknownSync(ReadyOverview)(encoded).needsYou.filter(
+          (need) => need._tag === "ConfigFileNeed",
+        ),
+        needs,
+      );
+    }),
   );
 
   it.each([InfraFailure, DefectFailure])(

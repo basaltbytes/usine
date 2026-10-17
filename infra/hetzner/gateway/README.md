@@ -70,11 +70,20 @@ ORCHESTRATOR_CIDR=203.0.113.7/32 SSH_KEY=my-key ./gateway.sh create
 ssh root@<gateway> cloud-init status --wait
 ```
 
-`create` installs `@usine/gateway` from npm into `/opt/usine-gateway`. For a build that is not published, set `GATEWAY_PACKAGE=none` and install the tarballs of `@usine/gateway` and of the `@usine/core` it depends on, made with `pnpm --filter @usine/core --filter @usine/gateway pack`:
+`@usine/gateway` is not published on npm, so `create` installs no gateway service. Build it in a usine checkout and pack it with the `@usine/core` it depends on, whose published version can lag behind the checkout:
 
 ```sh
-./gateway.sh install ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
+pnpm build
+pnpm --filter @usine/core --filter @usine/gateway pack
 ```
+
+`pnpm pack` writes one tarball per package in its folder, named after the package version, such as `packages/core/usine-core-0.3.0.tgz` and `packages/gateway/usine-gateway-0.0.0.tgz`; `--pack-destination <dir>` puts both in one folder. Once cloud-init is done, `install` copies the tarballs to the gateway, installs them into `/opt/usine-gateway`, and restarts the service. `-i` names the private key for its `scp` and `ssh`, such as the dedicated key of [`../README.md`](../README.md); without it they use your SSH agent and configuration:
+
+```sh
+./gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
+```
+
+Run `install` again with new tarballs to upgrade the gateway.
 
 The VM generates its admin token and caller key at first boot in `/etc/usine-gateway/secrets.env`, readable by root only. Add API keys to the same file and restart the service:
 

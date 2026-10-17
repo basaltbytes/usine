@@ -26,6 +26,7 @@ const errorStatuses = {
   BoardItemNotFoundError: 404,
   BoardLaneNotFoundError: 404,
   RunOperationRejectedError: 409,
+  RunRetryBlockedError: 409,
   RunInterventionRejectedError: 409,
   RosterAgentNotFoundError: 404,
   CycleBudgetResetRejectedError: 409,

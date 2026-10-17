@@ -11,7 +11,7 @@ import {
   WorkerRoot,
 } from "@usine/core/worker";
 import { Effect, Schema } from "effect";
-import { nonBlankString } from "./checks.ts";
+import { nonBlankString, uniqueRepositoryNames } from "./checks.ts";
 import { LaneSource, Lane } from "./board.ts";
 import { canonicalLabelName, DeclaredLabel } from "./label.ts";
 
@@ -39,7 +39,7 @@ const uniqueNames = Schema.makeFilter<ReadonlyArray<{ readonly name: string }>>(
 );
 
 const laneSourceKey = (source: LaneSource): string =>
-  "label" in source ? `label:${source.label}` : `state:${source.state}`;
+  "label" in source ? `label:${canonicalLabelName(source.label)}` : `state:${source.state}`;
 
 const uniqueLaneSources = Schema.makeFilter<ReadonlyArray<Lane>>(
   (lanes) => {
@@ -201,7 +201,9 @@ const WorkerFromYaml = Schema.Union([
   ),
 ]);
 
-const ManagedRepos = Schema.Array(ManagedRepo).check(uniqueNames);
+const ManagedRepos = Schema.Array(ManagedRepo).check(
+  uniqueRepositoryNames((repo: ManagedRepo) => repo.name),
+);
 
 const Workers = Schema.Array(WorkerFromYaml).check(Schema.isNonEmpty(), uniqueNames);
 

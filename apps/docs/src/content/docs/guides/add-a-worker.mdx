@@ -137,7 +137,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
 
 <Steps>
 
-1. Pack the Gateway service. `gateway.sh create` installs `@usine/gateway` from npm by default, but that package isn't published, so build it from your checkout:
+1. Pack the Gateway service. `@usine/gateway` isn't published on npm, so build it from your checkout with the `@usine/core` it depends on:
 
    ```sh title="usine checkout"
    pnpm build
@@ -146,20 +146,20 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
 
    This writes `usine-core-0.3.0.tgz` and `usine-gateway-0.0.0.tgz` at this commit.
 
-2. Create the private network, the Gateway VM, and its firewall. `ORCHESTRATOR_CIDR` is the only address that can connect to the Gateway's SSH port. `SSH_KEY` is the name of an SSH key of the Hetzner project; register the Worker key under the name `usine-worker` if the project doesn't have it yet. `GATEWAY_PACKAGE=none` skips the npm install. The scripts and the commands below connect as `root@<gateway>` without specifying a key, so load the key into your SSH agent first:
+2. Create the private network, the Gateway VM, and its firewall. `ORCHESTRATOR_CIDR` is the only address that can connect to the Gateway's SSH port. `SSH_KEY` is the name of an SSH key of the Hetzner project; register the Worker key under the name `usine-worker` if the project doesn't have it yet. The commands below connect as `root@<gateway>` without specifying a key, so load the key into your SSH agent first:
 
    ```sh title="usine checkout"
    ssh-add ~/.ssh/usine_worker
    hcloud ssh-key create --name usine-worker --public-key-from-file ~/.ssh/usine_worker.pub
-   ORCHESTRATOR_CIDR=203.0.113.10/32 SSH_KEY=usine-worker GATEWAY_PACKAGE=none \
+   ORCHESTRATOR_CIDR=203.0.113.10/32 SSH_KEY=usine-worker \
      ./infra/hetzner/gateway/gateway.sh create
    ```
 
-3. Wait for the Gateway's cloud-init, then install the two tarballs, which also starts the service. `gateway.sh create` printed the Gateway's public address, here `203.0.113.30`:
+3. Wait for the Gateway's cloud-init, then install the two tarballs, which also starts the service. `gateway.sh create` printed the Gateway's public address, here `203.0.113.30`. `-i` gives `install` the key for its `scp` and `ssh`:
 
    ```sh title="usine checkout"
    ssh root@203.0.113.30 cloud-init status --wait
-   ./infra/hetzner/gateway/gateway.sh install ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
+   ./infra/hetzner/gateway/gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
    ```
 
    On first boot the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root only. To let the Gateway call Anthropic with its own key, add `ANTHROPIC_API_KEY` to that file and restart the service with `systemctl restart usine-gateway`. A restarted Gateway loses its attachments; the executor stores each running Attempt's attachment again within two minutes.

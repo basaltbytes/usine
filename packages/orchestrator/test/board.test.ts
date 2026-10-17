@@ -154,6 +154,21 @@ describe("Board projection", () => {
     }),
   );
 
+  it.effect("matches lane labels ignoring case, as GitHub does", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [
+          { name: repository, lanes: [{ name: "Ready", sources: [{ label: "Ready-For-Agent" }] }] },
+        ],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const board = yield* projectBoard(managed, [], [item], []);
+      assert.strictEqual(board.lanes[0]?.items[0]?.itemKey, itemKey);
+    }),
+  );
+
   it.effect("groups a merged pull request by state even when it still carries a lane label", () =>
     Effect.gen(function* () {
       const config = Schema.decodeUnknownSync(UsineConfig)({
