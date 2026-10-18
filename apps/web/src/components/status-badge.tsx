@@ -3,7 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 /** Run, Attempt, and Project states share one semantic tone scale (ADR 0015). */
-const tone = (state: string): string => {
+export const stateTone = (state: string): string => {
   switch (state) {
     case "Succeeded":
     case "clear":
@@ -23,7 +23,7 @@ const tone = (state: string): string => {
 };
 
 export const StatusBadge = ({ state }: { readonly state: string }) => (
-  <Badge variant="outline" aria-label={state} className={cn("font-mono", tone(state))}>
+  <Badge variant="outline" aria-label={state} className={cn("font-mono", stateTone(state))}>
     <CircleIcon weight="fill" aria-hidden="true" />
     {state}
   </Badge>

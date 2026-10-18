@@ -3,8 +3,9 @@ import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { InstanceReload } from "@usine/orchestrator/current-instance";
-import type { FailureView, NeedView } from "@usine/orchestrator/operator";
+import type { BoardItemLink, FailureView, NeedView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
+import type { BoardMoveProgress } from "./board/moves.ts";
 
 export interface NeedCopy {
   readonly title: string;
@@ -15,6 +16,30 @@ export interface NeedCopy {
 
 export const brainLine = (brain: BrainSpec): string =>
   `${brain.harness} · ${brain.model} · ${brain.effort}`;
+
+/** Labels of the Run actions that the Run drawer and the Board card menu both offer. */
+export const runActionLabel = {
+  approve: "Approve",
+  retry: "Retry",
+  cancel: "Cancel Run",
+  confirmCancel: "Confirm cancel",
+  keepRunning: "Keep running",
+} as const;
+
+export const itemKindLabel = (kind: BoardItemLink["kind"]): string =>
+  kind === "pr" ? "Pull request" : "Issue";
+
+/** How long ago `since` happened, in the largest whole unit: `now`, `12m`, `3h`, or `2d`. */
+export const elapsedLabel = (since: string, now: number = Date.now()): string => {
+  const elapsed = Math.max(0, now - Date.parse(since));
+  if (elapsed < 60_000) return "now";
+  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m`;
+  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
+  return `${Math.floor(elapsed / 86_400_000)}d`;
+};
+
+export const moveProgressMessage = (phase: BoardMoveProgress["phase"]): string =>
+  phase === "saving" ? "Moving…" : "Saved on GitHub · syncing…";
 
 export const failureMessage = (failure: FailureView): string =>
   Match.valueTags(failure, {

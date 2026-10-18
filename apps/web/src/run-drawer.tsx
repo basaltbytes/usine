@@ -1,5 +1,4 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { AttemptId } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import {
   ColdTranscriptRequest,
@@ -32,7 +31,14 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { api } from "./api.ts";
-import { brainLine, failureMessage, salvageMessage } from "./operator-copy.ts";
+import {
+  brainLine,
+  elapsedLabel,
+  failureMessage,
+  runActionLabel,
+  salvageMessage,
+} from "./operator-copy.ts";
+import { type RunActionRequest, useRunAction } from "./run-actions.ts";
 import {
   mergeTranscript,
   mergeEarlierTranscript,
@@ -43,14 +49,6 @@ import { Conversation } from "./run-transcript/conversation.tsx";
 import { fetchRunDetail } from "./run-transcript/fetch.ts";
 import { EditAndRetry } from "./run-intervention/edit-and-retry.tsx";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-
-const timeAgo = (value: string): string => {
-  const elapsed = Math.max(0, Date.now() - Date.parse(value));
-  if (elapsed < 60_000) return "now";
-  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)}m`;
-  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
-  return `${Math.floor(elapsed / 86_400_000)}d`;
-};
 
 export const RunDrawer = ({
   runId,
@@ -90,25 +88,9 @@ export const RunDrawer = ({
     enabled: open,
     refetchInterval: (query) => (query.state.data?.run.canCancel === true ? 1_000 : false),
   });
-  const mutation = useMutation({
-    mutationFn: (
-      request:
-        | { readonly action: "approve" | "retry" | "cancel" }
-        | { readonly action: "resolveFailure"; readonly attemptId: AttemptId },
-    ) =>
-      api((client) =>
-        request.action === "resolveFailure"
-          ? client.resolveFailure({ params: { runId }, payload: { attemptId: request.attemptId } })
-          : client[request.action]({ params: { runId } }),
-      ),
-    onSuccess: async () => {
-      setConfirmCancel(false);
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["overview"] }),
-        queryClient.invalidateQueries({ queryKey: ["run", runId] }),
-      ]);
-    },
-  });
+  const mutation = useRunAction();
+  const act = (request: RunActionRequest) =>
+    mutation.mutate({ runId, request }, { onSuccess: () => setConfirmCancel(false) });
   const earlierMutation = useMutation({
     mutationFn: (cursor: TranscriptPageCursor) =>
       api((client) =>
@@ -160,9 +142,9 @@ export const RunDrawer = ({
                   <Button
                     size="sm"
                     disabled={mutation.isPending}
-                    onClick={() => mutation.mutate({ action: "approve" })}
+                    onClick={() => act({ action: "approve" })}
                   >
-                    Approve
+                    {runActionLabel.approve}
                   </Button>
                 )}
                 {run.canResolveFailure && latestAttempt !== undefined && (
@@ -170,9 +152,7 @@ export const RunDrawer = ({
                     size="sm"
                     variant="outline"
                     disabled={mutation.isPending}
-                    onClick={() =>
-                      mutation.mutate({ action: "resolveFailure", attemptId: latestAttempt.id })
-                    }
+                    onClick={() => act({ action: "resolveFailure", attemptId: latestAttempt.id })}
                   >
                     Mark resolved
                   </Button>
@@ -182,9 +162,9 @@ export const RunDrawer = ({
                     size="sm"
                     variant="secondary"
                     disabled={mutation.isPending}
-                    onClick={() => mutation.mutate({ action: "retry" })}
+                    onClick={() => act({ action: "retry" })}
                   >
-                    Retry
+                    {runActionLabel.retry}
                   </Button>
                 )}
                 {run.canCancel && (
@@ -193,10 +173,10 @@ export const RunDrawer = ({
                     variant={confirmCancel ? "destructive" : "outline"}
                     disabled={mutation.isPending}
                     onClick={() =>
-                      confirmCancel ? mutation.mutate({ action: "cancel" }) : setConfirmCancel(true)
+                      confirmCancel ? act({ action: "cancel" }) : setConfirmCancel(true)
                     }
                   >
-                    {confirmCancel ? "Confirm cancel" : "Cancel Run"}
+                    {confirmCancel ? runActionLabel.confirmCancel : runActionLabel.cancel}
                   </Button>
                 )}
                 {run.canRetry && (
@@ -211,7 +191,7 @@ export const RunDrawer = ({
                     disabled={mutation.isPending}
                     onClick={() => setConfirmCancel(false)}
                   >
-                    Keep running
+                    {runActionLabel.keepRunning}
                   </Button>
                 )}
               </div>
@@ -306,7 +286,7 @@ export const RunDrawer = ({
                       <ItemContent>
                         <ItemDescription className="font-mono">
                           {attempt.agent} · {attempt.worker} · {brainLine(attempt.brain)} ·{" "}
-                          {timeAgo(attempt.startedAt)}
+                          {elapsedLabel(attempt.startedAt)}
                         </ItemDescription>
                         {attempt.operatorIntervened && (
                           <Badge variant="outline">Operator intervened</Badge>

@@ -30,16 +30,10 @@ import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import {
-  itemFailure,
-  laneUnder,
-  orderLanes,
-  ProjectBoard,
-  runsWithoutCard,
-} from "../src/board/board.tsx";
-import { TaskHistory } from "../src/components/task-history.tsx";
+import { laneUnder, orderLanes, ProjectBoard, runsWithoutCard } from "../src/board/board.tsx";
+import { cardLabels, itemFailure } from "../src/board/card.tsx";
 import { RunLinks } from "../src/components/run-links.tsx";
-import { failureMessage, needCopy } from "../src/operator-copy.ts";
+import { elapsedLabel, failureMessage, needCopy } from "../src/operator-copy.ts";
 
 const brain = new BrainSpec({
   harness: "codex",
@@ -314,15 +308,15 @@ describe("Board drag targets", () => {
     const proposed = render("proposed", ["ready", "review"]);
     const singleAuthored = render("authored", ["ready"]);
     for (const readOnly of [proposed, singleAuthored]) {
-      assert.ok(!readOnly.includes("Move issue #33 to a lane"));
-      // Read-only cards are content, without an inert interactive control around them.
+      // Read-only cards are content, without an inert drag control around them.
       assert.ok(!readOnly.includes('role="button"'));
+      assert.ok(readOnly.includes("Actions for issue #33"));
     }
     assert.ok(proposed.includes("repos[].lanes"));
     assert.ok(proposed.includes("usine.yaml"));
     const authored = render("authored", ["ready", "review"]);
-    assert.ok(authored.includes("Move issue #33 to a lane"));
     assert.ok(authored.includes('role="button"'));
+    assert.ok(authored.includes('aria-roledescription="sortable"'));
   });
 
   const lane = (id: string, items: ReadonlyArray<BoardTaskView>) =>
@@ -343,23 +337,43 @@ describe("Board drag targets", () => {
   });
 });
 
-describe("Task history", () => {
-  it("renders each stage with its saved Attempt count and a Run action", () => {
-    const development = new RunView({
-      ...runOnItem("Succeeded", [attempt(1, null)]),
-      id: RunId.make("development"),
-      loop: LoopName.make("develop"),
+describe("Board card labels", () => {
+  it("leaves out the labels of the card's own lane and keeps the others", () => {
+    const ready = GitHubLabelName.make("ready");
+    const review = GitHubLabelName.make("review");
+    const bug = GitHubLabelName.make("bug");
+    const card = new BoardTaskView({
+      ...itemWithRun("Succeeded", [attempt(1, null)]),
+      labels: [ready, bug, review],
     });
-    const review = new RunView({
-      ...runOnItem("Failed", [attempt(1, "first"), attempt(2, "latest")]),
-      id: RunId.make("review"),
+    const lane = new WritableBoardLaneView({
+      id: BoardLaneId.make("authored:ready"),
+      name: LaneName.make("Ready"),
+      sources: [new LabelLaneSource({ label: ready })],
+      origin: "authored",
+      labels: [ready],
+      items: [card],
     });
-    const markup = renderToStaticMarkup(
-      <TaskHistory runs={[development, review]} openRun={() => {}} />,
-    );
-    assert.ok(markup.includes("2 Runs · 3 Attempts"));
-    assert.ok(markup.includes("Open develop Run: Succeeded"));
-    assert.ok(markup.includes("Open review Run: Failed"));
-    assert.ok(markup.indexOf("Open develop") < markup.indexOf("Open review"));
+    assert.deepStrictEqual(cardLabels(card, lane), [bug, review]);
+    const unmapped = new ReadOnlyBoardLaneView({
+      id: BoardLaneId.make("fallback:unmapped"),
+      name: LaneName.make("Unmapped"),
+      sources: [],
+      origin: "fallback",
+      items: [card],
+    });
+    assert.deepStrictEqual(cardLabels(card, unmapped), [ready, bug, review]);
+  });
+});
+
+describe("Elapsed time", () => {
+  it("names the largest whole unit since the instant", () => {
+    const since = "2026-09-01T12:00:00.000Z";
+    const at = (milliseconds: number) => Date.parse(since) + milliseconds;
+    assert.strictEqual(elapsedLabel(since, at(59_000)), "now");
+    assert.strictEqual(elapsedLabel(since, at(12 * 60_000)), "12m");
+    assert.strictEqual(elapsedLabel(since, at(3 * 3_600_000 + 59 * 60_000)), "3h");
+    assert.strictEqual(elapsedLabel(since, at(2 * 86_400_000)), "2d");
+    assert.strictEqual(elapsedLabel(since, at(-5_000)), "now");
   });
 });

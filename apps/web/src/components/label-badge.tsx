@@ -30,14 +30,22 @@ export const labelTextColor = (hex: string): string => {
 export const LabelBadge = ({
   name,
   label,
+  className,
 }: {
   readonly name: string;
   readonly label: LabelView | undefined;
+  readonly className?: string;
 }) => {
-  if (label === undefined || label.color === null) return <Badge variant="outline">{name}</Badge>;
+  if (label === undefined || label.color === null)
+    return (
+      <Badge variant="outline" className={className}>
+        {name}
+      </Badge>
+    );
   return (
     <Badge
       variant="outline"
+      className={className}
       title={label.description ?? undefined}
       style={{
         color: labelTextColor(label.color),
