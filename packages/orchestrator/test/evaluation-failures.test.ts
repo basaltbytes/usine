@@ -15,12 +15,12 @@ import { CursorStore } from "@usine/engine/cursor";
 import { Claimed, RunEngine } from "@usine/engine/engine";
 import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import {
   ChangedIssue,
   ChangedPullRequest,
   ContentHash,
   EntityTag,
+  GitHubItemNotFoundError,
   GitHubPolling,
   type IssuePayload,
   IssueSnapshot,
@@ -378,10 +378,10 @@ describe("Loop evaluation failures", () => {
         snapshot: (_repository, item) =>
           deleted
             ? Effect.fail(
-                new InvalidGitHubResponseError({
+                new GitHubItemNotFoundError({
                   operation: "fetch-issue-snapshot",
-                  message: "The issue came back null",
-                  detail: `issue ${item.number} came back null`,
+                  item: item.number,
+                  message: `GitHub has no issue ${item.number}`,
                 }),
               )
             : Effect.succeed(
