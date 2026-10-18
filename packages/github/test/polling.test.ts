@@ -459,6 +459,42 @@ describe("GitHubPolling", () => {
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 
+  it.effect("reports a pull request the repository no longer has as not found", () => {
+    const answers = [
+      {
+        data: { repository: { pullRequest: null } },
+        errors: [
+          {
+            type: "NOT_FOUND",
+            message: "Could not resolve to a PullRequest with the number of 51.",
+          },
+        ],
+      },
+      { data: { repository: { pullRequest: null } } },
+      { data: { repository: null } },
+    ];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => response(request, answers.shift() ?? null)),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const fetch = polling
+        .snapshot(
+          repository,
+          new ChangedPullRequest({
+            number: 51,
+            updatedAt: DateTime.makeUnsafe("2026-08-30T19:00:00Z"),
+          }),
+        )
+        .pipe(Effect.flip);
+      assert.strictEqual((yield* fetch)._tag, "GitHubItemNotFoundError");
+      assert.strictEqual((yield* fetch)._tag, "GitHubItemNotFoundError");
+      // A null repository is not evidence about the Item.
+      assert.strictEqual((yield* fetch)._tag, "InvalidGitHubResponseError");
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
   it.effect("hashes canonical issue content without any timestamp fields", () => {
     const requests: Array<HttpClientRequest.HttpClientRequest> = [];
     const firstVersion = issuePayload({

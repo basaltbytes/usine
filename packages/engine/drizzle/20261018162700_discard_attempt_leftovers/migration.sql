@@ -1,0 +1,1 @@
+ALTER TABLE `usine_attempts` ADD `leftovers_discarded_at` text;

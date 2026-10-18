@@ -4,6 +4,7 @@ import { Intervention } from "@usine/core/attempt/channel";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
+import type { WorkerName } from "@usine/core/worker";
 import { Context, Crypto, type Duration, Effect, Layer, Option, Result } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import {
@@ -178,6 +179,61 @@ const makeRunEngine = Effect.gen(function* () {
     return yield* store.transcript(query);
   });
 
+  const discardLeftovers = Effect.fn("RunEngine.discardLeftovers")(function* (worker: WorkerName) {
+    yield* Effect.annotateCurrentSpan({ worker });
+    if (stepExecutor.workers.includes(worker)) {
+      yield* Effect.logInfo(
+        "Leftovers kept; the Worker is configured, so startup reconciles its Attempts",
+        { worker },
+      );
+      return 0;
+    }
+    const attempts = yield* store.discardLeftovers(worker);
+    yield* Effect.logInfo(
+      "Discarded the leftovers of the Attempts on a Worker that is not configured; startup no longer reconciles them",
+      { worker, attempts },
+    );
+    return attempts;
+  });
+
+  // Startup reconciliation belongs in this memoized layer: a combinator such as
+  // `Layer.tap` runs again for every service the engine is provided to.
+  const recoverWorkspaces = Effect.fn("RunEngine.recoverWorkspaces")(function* () {
+    const configured = new Set(stepExecutor.workers);
+    const candidates = yield* store.salvageCandidates;
+    const reconcilable = candidates.filter(({ worker }) => configured.has(worker));
+    const unconfigured = candidates.filter(({ worker }) => !configured.has(worker));
+    if (unconfigured.length > 0) {
+      yield* Effect.logWarning(
+        "Attempts recorded on Workers that are not configured were not reconciled; their checkouts stay until those Workers are configured again or their leftovers are discarded",
+        {
+          attempts: unconfigured.length,
+          workers: [...new Set(unconfigured.map(({ worker }) => worker))].sort().join(","),
+        },
+      );
+    }
+    // Before Run recovery can admit a retry, publish and durably record any
+    // work left by its predecessor. Failed recovery keeps the checkout on disk.
+    yield* Effect.forEach(
+      reconcilable,
+      (attempt) =>
+        stepExecutor
+          .recover(attempt, (salvage) => store.recordSalvage(attempt.attemptId, salvage))
+          .pipe(
+            Effect.tapError((error) =>
+              Effect.logError("Attempt salvage reconciliation failed; work retained", {
+                attemptId: attempt.attemptId,
+                worker: attempt.worker,
+                message: String(error),
+              }),
+            ),
+            Effect.ignore,
+          ),
+      { discard: true },
+    );
+  });
+
+  yield* recoverWorkspaces();
   yield* driver.reconcile();
   const interval = yield* ReconcileInterval;
   yield* Effect.sleep(interval).pipe(
@@ -195,6 +251,7 @@ const makeRunEngine = Effect.gen(function* () {
   return {
     approve,
     cancel,
+    discardLeftovers,
     drain: admission.drain,
     inspect,
     intervene,
@@ -217,6 +274,13 @@ export class RunEngine extends Context.Service<
     readonly approve: (runId: RunId, approval: Event) => Effect.Effect<void, RunEngineError>;
     /** Cancels an open Run and interrupts its active Attempt. An already closed Run is unchanged. */
     readonly cancel: (runId: RunId) => Effect.Effect<void, RunEngineError>;
+    /**
+     * Stops reconciling the Attempts recorded on `worker`, a Worker this engine
+     * does not run, and leaves whatever they left on it in place. Returns how
+     * many Attempts it marked; a Worker the engine runs is left unchanged and
+     * the result is 0.
+     */
+    readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<number, RunEngineError>;
     /** Reads the Run's current state, effective task and Agent, Step result, and Attempt history. */
     readonly inspect: (runId: RunId) => Effect.Effect<RunSnapshot, RunEngineError>;
     /** Addresses one current Attempt explicitly so an old drawer cannot steer its replacement. */
@@ -280,34 +344,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   RunEngineError | DatabaseError,
   Crypto.Crypto | StepExecutor | TriggerCondition | DatabaseRequirements
 > => {
-  const store = RunStore.layer.pipe(
-    Layer.provide(database),
-    Layer.tap(
-      Effect.fn("RunEngine.recoverWorkspaces")(function* (services) {
-        const store = Context.get(services, RunStore);
-        const stepExecutor = yield* StepExecutor;
-        // Before Run recovery can admit a retry, publish and durably record any
-        // work left by its predecessor. Failed recovery keeps the checkout on disk.
-        yield* Effect.forEach(
-          yield* store.salvageCandidates,
-          (attempt) =>
-            stepExecutor
-              .recover(attempt, (salvage) => store.recordSalvage(attempt.attemptId, salvage))
-              .pipe(
-                Effect.tapError((error) =>
-                  Effect.logError("Attempt salvage reconciliation failed; work retained", {
-                    attemptId: attempt.attemptId,
-                    worker: attempt.worker,
-                    message: String(error),
-                  }),
-                ),
-                Effect.ignore,
-              ),
-          { discard: true },
-        );
-      }),
-    ),
-  );
+  const store = RunStore.layer.pipe(Layer.provide(database));
   const driver = RunDriver.layer.pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(AttemptAdmission.layer),

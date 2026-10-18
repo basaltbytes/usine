@@ -31,7 +31,7 @@ describe("exe.dev preparation", () => {
       const recorded: Array<AttemptSalvage> = [];
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const prepared = yield* executor.prepare(request);
         const failure = yield* prepared
           .launch({
@@ -277,7 +277,7 @@ describe("exe.dev preparation", () => {
       ssh.state.salvage = "dirty";
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const owner = yield* Scope.make();
         const prepared = yield* executor.prepare(request).pipe(Scope.provide(owner));
         ssh.state.failStop = true;
@@ -376,7 +376,7 @@ describe("exe.dev preparation", () => {
     const ssh = fakeSsh();
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       for (const command of ssh.state.commands) {
         const line = remoteLine(command);
         for (const mutating of [
@@ -402,7 +402,7 @@ describe("exe.dev preparation", () => {
     const ssh = fakeSsh("invalid-path");
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       // The sweep failure is isolated: prepare proceeds, and the path outside
       // the Worker root is never touched.
       const prepared = yield* executor.prepare(request);
@@ -424,7 +424,7 @@ describe("exe.dev preparation", () => {
     });
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       const firstScope = yield* Scope.make();
       const secondScope = yield* Scope.make();
       const prepared = yield* executor.prepare(request).pipe(Scope.provide(firstScope));
@@ -472,7 +472,7 @@ describe("exe.dev preparation", () => {
       });
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const owner = yield* Scope.make();
         const prepared = yield* executor.prepare(request).pipe(Scope.provide(owner));
         ssh.state.failStop = true;
@@ -513,7 +513,7 @@ describe("exe.dev preparation", () => {
         ssh.state.failStop = true;
         return Effect.gen(function* () {
           const executor = yield* Executor;
-          yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+          yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
           ssh.state.hangPreparation = phase;
           const fiber = yield* Effect.forkChild(executor.prepare(request));
           while (!ssh.state.parked) yield* Effect.yieldNow;
@@ -573,7 +573,7 @@ describe("exe.dev preparation", () => {
     const detaches = () => ssh.state.commands.filter(({ args }) => args.includes("detach")).length;
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       ssh.state.hangPreparation = "checkout";
       const attempt = Effect.gen(function* () {
         const prepared = yield* executor.prepare(request);
@@ -595,7 +595,7 @@ describe("exe.dev preparation", () => {
     ssh.state.hangPreparation = "clone";
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       const first = yield* executor.prepare(request).pipe(Effect.scoped, Effect.forkChild);
       while (!ssh.state.commands.some((command) => remoteLine(command).includes("'clone'"))) {
         yield* Effect.yieldNow;
@@ -633,7 +633,7 @@ describe("exe.dev preparation", () => {
     });
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       const first = yield* Scope.make();
       const second = yield* Scope.make();
       yield* executor.prepare(request).pipe(Scope.provide(first));
@@ -654,7 +654,7 @@ describe("exe.dev preparation", () => {
     const ssh = fakeSsh();
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       const owner = yield* Scope.make();
       yield* executor.prepare(request).pipe(Scope.provide(owner));
       ssh.state.failAttach = true;

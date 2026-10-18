@@ -7,7 +7,7 @@ sidebar:
 
 import { Steps } from "@astrojs/starlight/components";
 
-A Loop is one Markdown file in the instance folder's `loops/` folder. Its YAML frontmatter sets which issues or pull requests start work, on which repositories, whether you approve each Run first, and which Agent does the work. Its body is the task the Agent receives. The file name without `.md` is the Loop's name: it must be kebab-case, renaming the file creates a different Loop, and deleting the file retires the Loop at the next restart. usine has no built-in Loops.
+A Loop is one Markdown file in the instance folder's `loops/` folder. Its YAML frontmatter sets which issues or pull requests start work, on which repositories, whether you approve each Run first, and which Agent does the work. Its body is the task the Agent receives. The file name without `.md` is the Loop's name: it must be kebab-case, renaming the file creates a different Loop, and deleting the file retires the Loop at the next reload or restart. usine has no built-in Loops.
 
 This page starts with a minimal Loop and extends it into two Loops that pass an Item from one to the other. [Loop files](/reference/configuration/loop-files/) lists every key and its validation, and [Expressions](/reference/configuration/expressions/) lists every field an expression can read.
 
@@ -99,7 +99,7 @@ The task is one part of what the Agent's first session receives. The full prompt
 
 The task doesn't need to repeat the payload or these rules; it only needs what is specific to the Loop. A pull request Run starts detached at the head commit, so a task that pushes must tell the Agent to check out `{{ item.headRefName }}` first. usine removes the worktree when the Attempt ends, and when the Attempt succeeds, commits that weren't pushed are lost.
 
-If a `{{ }}` expression fails, for example because it reads below a null field, **Needs you** reports the failure for that Loop and Item only, until the template renders. The repository's other Loops still run and the poll continues. After you fix the Loop and restart, the first poll evaluates the Item again.
+If a `{{ }}` expression fails, for example because it reads below a null field, **Needs you** reports the failure for that Loop and Item only, until the template renders. The repository's other Loops still run and the poll continues. After you fix the Loop and reload the configuration, the first poll evaluates the Item again.
 
 ## Pass an Item to the next Loop
 
@@ -221,13 +221,13 @@ Quote the `cron` value, because YAML reads a leading `*` as an alias. A schedule
 
 ## Pause a Loop
 
-The **Loops** page under **Configuration** lists every loaded Loop with its trigger, its Agent, and a **Pause** button. A paused Loop opens no new Runs, and the Runs it already opened continue. usine keeps the paused flag in the runtime store, so it persists across restarts, and never writes it to the Loop file. When you unpause an issue or pr Loop, the next poll reads the repository's Items from the start, so usine evaluates the Items that changed while the Loop was paused.
+The **Loops** page under **Configuration** lists every loaded Loop with its trigger, its Agent, and a **Pause** button. **Reload configuration** at the top of the page loads the Loop and Agent files again after you edit them ([Run a factory](/guides/#change-the-configuration)). A paused Loop opens no new Runs, and the Runs it already opened continue. usine keeps the paused flag in the runtime store, so it persists across restarts, and never writes it to the Loop file. When you unpause an issue or pr Loop, the next poll reads the repository's Items from the start, so usine evaluates the Items that changed while the Loop was paused.
 
-The HTTP API has the same switch: `POST /api/loops/<name>/pause` and `POST /api/loops/<name>/unpause`. To retire a Loop permanently, delete or rename its file and restart.
+The HTTP API has the same switch: `POST /api/loops/<name>/pause` and `POST /api/loops/<name>/unpause`. To retire a Loop permanently, delete or rename its file and reload the configuration.
 
 ## When a Loop does not load
 
-usine leaves out a Loop file that has an error and loads the other Loops. At this commit, usine doesn't log or display the reason, so after a restart, check that the Loop appears on the **Loops** page. usine leaves out a Loop when:
+usine leaves out a Loop file that has an error and loads the other Loops. It logs the reason and lists the file in **Needs you** as **Loop quarantined**, at startup and at each reload. usine leaves out a Loop when:
 
 - the file doesn't start with a `---` line or has no closing `---`;
 - the file name isn't kebab-case;

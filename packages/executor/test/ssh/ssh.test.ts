@@ -45,7 +45,7 @@ describe("SSH Worker", () => {
       return Effect.gen(function* () {
         const executor = yield* Executor;
         assert.strictEqual(executor.kind, "ssh");
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const prepared = yield* executor.prepare(request);
         assert.strictEqual(prepared.workspace.worktree, WORKTREE);
         yield* prepared.launch({ append: () => Effect.void, salvage: () => Effect.void });
@@ -280,29 +280,67 @@ describe("SSH Worker", () => {
     const credentials = mintingProvider();
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       for (const { line } of machine.state.calls)
         for (const mutating of ["mkdir", "rm", "mv", "clone", "find", "read -r token"])
           assert.notInclude(line, mutating, `preflight ran ${mutating}`);
 
       machine.state.rootWritable = false;
-      const unwritable = yield* executor.preflight(WORKER, []).pipe(Effect.flip);
+      const unwritable = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
       assert(unwritable._tag === "WorkerCapabilityError");
       assert.strictEqual(unwritable.capability, "machine");
       assert.include(unwritable.message, "/srv/usine is not a writable directory");
 
       machine.state.reachable = false;
-      const unreachable = yield* executor.preflight(WORKER, []).pipe(Effect.flip);
+      const unreachable = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
       assert(unreachable._tag === "WorkerCapabilityError");
       assert.strictEqual(
         unreachable.message,
         `Could not connect to SSH Worker eu-one at ${DESTINATION}`,
       );
 
-      const unknown = yield* executor.preflight(WorkerName.make("eu-two"), []).pipe(Effect.flip);
+      const unknown = yield* executor.preflight(WorkerName.make("eu-two"), [], 1).pipe(Effect.flip);
       assert(unknown._tag === "WorkerCapabilityError");
       assert.strictEqual(unknown.capability, "machine");
       assert.strictEqual(credentials.minted.length, 0);
     }).pipe(Effect.provide(runtime(machine, credentials)));
   });
+
+  it.effect(
+    "preflight warns below 3 GiB and refuses below 1.5 GiB per concurrent Attempt, or concurrency without swap",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const logs = capturedLogs();
+      const warnings = () =>
+        logs.lines.filter((line) => line.includes("Worker memory is below 3.0 GiB"));
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        machine.state.memoryGib = 6;
+        machine.state.swapGib = 2;
+
+        yield* executor.preflight(WORKER, [], 2);
+        assert.lengthOf(warnings(), 0, "3 GiB per Attempt is enough");
+
+        yield* executor.preflight(WORKER, [], 4);
+        assert.lengthOf(warnings(), 1, "1.5 GiB per Attempt starts with a warning");
+        assert.include(warnings().join("\n"), '"suggestedMaxConcurrentAttempts":2');
+
+        const short = yield* executor.preflight(WORKER, [], 5).pipe(Effect.flip);
+        assert(short._tag === "WorkerCapabilityError");
+        assert.strictEqual(short.capability, "memory");
+        assert.include(short.message, "6.0 GiB of memory for max_concurrent_attempts: 5");
+        assert.include(short.message, "set max_concurrent_attempts to 4 or less");
+
+        machine.state.swapGib = 0;
+        yield* executor.preflight(WORKER, [], 1);
+        const withoutSwap = yield* executor.preflight(WORKER, [], 2).pipe(Effect.flip);
+        assert(withoutSwap._tag === "WorkerCapabilityError");
+        assert.strictEqual(withoutSwap.capability, "memory");
+        assert.include(withoutSwap.message, "has no swap for max_concurrent_attempts: 2");
+        const shortWithoutSwap = yield* executor.preflight(WORKER, [], 5).pipe(Effect.flip);
+        assert.include(shortWithoutSwap.message, "set max_concurrent_attempts to 1 or less");
+      }).pipe(Effect.provide(runtime(machine, credentials)), Effect.provide(logs.layer));
+    },
+  );
 });

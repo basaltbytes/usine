@@ -16,12 +16,13 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 - [#41][]: there is no `create-usine` scaffolder, no GitHub App manifest flow, and no Workers page with preflight on demand; without credentials `usine up` only shows a notice ([up.ts:122][]).
 - [#154][]: the CLI has `up`, `backup`, and `export-run` only, with no `status`, `stop`, `restart`, or `upgrade` ([cli.ts:23][]).
 - [#233][]: npm installs of usine packages pull `@effect/platform-node-shared` 4.0.4, which needs `effect` ^4.0.4.
-- [#280][]: usine reads the instance once at startup and doesn't watch it for changes, so every configuration edit needs a restart ([up.ts:114][]).
 
 ## Configuration
 
 - [#40][]: the UI has no configuration form or raw editor, and the surgical YAML writer has no production caller ([writer.ts][]).
 - [#281][]: `AgentFrontmatter` declares `parent_model` and `parent_effort` as snake_case fields and copies them into camelCase by hand, instead of renaming them with `Schema.encodeKeys` ([parser.ts:44][], [parser.ts:203][]).
+- [#331][]: a reload refuses any change to `workers` or `webhooks`, so changing a Worker's `max_concurrent_attempts` still needs a restart.
+- [#332][]: a reload doesn't preflight the harness of a new or changed Agent; its first Attempt fails with `AgentFailure` instead.
 
 ## Triggers and polling
 
@@ -29,6 +30,7 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 - [#158][]: every poll fetches every known open pull request again, instead of only after the base branch changes ([polling.ts:222][]).
 - [#267][]: a canceled Run keeps its Event, so changing an Item's labels back to the same content opens no Run ([store.ts:117][]).
 - [#152][]: the Run drawer can't rerun a completed Run whose outcome left the Item unresolved.
+- [#333][]: after a reload, new Loops apply only when the current poll wait ends, up to one `poll_interval` later.
 
 ## Asks and notifications
 
@@ -45,8 +47,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 - [#177][]: a reattached Attempt keeps its own Worker while the scheduler reserved a slot on another one ([store.ts:284][]).
 - [#178][]: the runaway guard loses an Attempt's elapsed time and its finished sessions' tokens across a reattach.
 - [#180][]: the checkout of an Attempt closed between a restart and its reattach isn't reconciled until the next startup.
-- [#211][]: startup recovery calls `Executor.recover` four times for the same open Attempt.
-- [#268][]: salvage reconciliation fails at every start for Attempts retained on a Worker that `usine.yaml` no longer lists.
 - [#282][]: a retried Attempt resumes from the previous Attempt's salvage branch and never fetches the default branch again, so it keeps the base of the first Attempt ([provision.ts:485][]).
 
 ## Durable layer
@@ -117,7 +117,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 - [#115][]: v2 task-source port, with local Markdown files as the first source besides GitHub.
 - [#56][]: a seed issue used by tests; it is not a gap.
 
-[up.ts:114]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L114
 [up.ts:122]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L122
 [cli.ts:23]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/cli.ts#L23
 [writer.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/yaml/writer.ts
@@ -157,7 +156,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#199]: https://github.com/basaltbytes/usine/issues/199
 [#200]: https://github.com/basaltbytes/usine/issues/200
 [#201]: https://github.com/basaltbytes/usine/issues/201
-[#211]: https://github.com/basaltbytes/usine/issues/211
 [#217]: https://github.com/basaltbytes/usine/issues/217
 [#223]: https://github.com/basaltbytes/usine/issues/223
 [#226]: https://github.com/basaltbytes/usine/issues/226
@@ -188,11 +186,12 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#264]: https://github.com/basaltbytes/usine/issues/264
 [#266]: https://github.com/basaltbytes/usine/issues/266
 [#267]: https://github.com/basaltbytes/usine/issues/267
-[#268]: https://github.com/basaltbytes/usine/issues/268
 [#270]: https://github.com/basaltbytes/usine/issues/270
 [#277]: https://github.com/basaltbytes/usine/issues/277
 [#278]: https://github.com/basaltbytes/usine/issues/278
 [#279]: https://github.com/basaltbytes/usine/issues/279
-[#280]: https://github.com/basaltbytes/usine/issues/280
 [#281]: https://github.com/basaltbytes/usine/issues/281
 [#282]: https://github.com/basaltbytes/usine/issues/282
+[#331]: https://github.com/basaltbytes/usine/issues/331
+[#332]: https://github.com/basaltbytes/usine/issues/332
+[#333]: https://github.com/basaltbytes/usine/issues/333

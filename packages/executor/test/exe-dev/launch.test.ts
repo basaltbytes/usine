@@ -47,7 +47,7 @@ const stopMidAttempt = (ssh: ReturnType<typeof fakeSsh>, storage: StubStorage) =
     const started = yield* Deferred.make<void>();
     yield* Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+      yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
       const prepared = yield* executor.prepare(request);
       const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
       yield* Deferred.await(started);
@@ -121,7 +121,7 @@ describe("exe.dev launch", () => {
       return Effect.gen(function* () {
         const executor = yield* Executor;
         assert.strictEqual(executor.kind, "exe.dev");
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const prepared = yield* executor.prepare(request);
         const result = yield* prepared.launch(sink);
         assert.strictEqual(result.message, `Completed: ${request.task}`);
@@ -409,7 +409,7 @@ describe("exe.dev launch", () => {
         const { transcript, sink } = recording();
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
-          yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+          yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
           assert.isTrue(yield* executor.isLive(ATTEMPT_ID));
           const before = ssh.state.commands.length;
           const prepared = yield* executor.prepare(
@@ -447,7 +447,7 @@ describe("exe.dev launch", () => {
       ssh.state.worktreeGone = true;
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const before = ssh.state.commands.length;
         const error = yield* executor
           .prepare(new CheckoutRequest({ ...request, reattach: true }))
@@ -464,7 +464,11 @@ describe("exe.dev launch", () => {
     const ssh = fakeSsh();
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      yield* executor.preflight(WORKER, [TEST_AGENT.brain, new BrainSpec({ ...TEST_AGENT.brain })]);
+      yield* executor.preflight(
+        WORKER,
+        [TEST_AGENT.brain, new BrainSpec({ ...TEST_AGENT.brain })],
+        1,
+      );
       assert.strictEqual(
         ssh.state.commands.filter((command) => remoteLine(command) === "exec 'claude' '--version'")
           .length,
@@ -483,9 +487,17 @@ describe("exe.dev launch", () => {
     return Effect.gen(function* () {
       const executor = yield* Executor;
       const error = yield* executor
-        .preflight(WORKER, [
-          new BrainSpec({ harness: "pi", model: ModelId.make("anthropic/claude"), effort: "low" }),
-        ])
+        .preflight(
+          WORKER,
+          [
+            new BrainSpec({
+              harness: "pi",
+              model: ModelId.make("anthropic/claude"),
+              effort: "low",
+            }),
+          ],
+          1,
+        )
         .pipe(Effect.flip);
       assert(error._tag === "WorkerCapabilityError");
       assert.strictEqual(error.message, "Pi children run only on local Workers");

@@ -18,9 +18,11 @@ import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApiError } from "@usine/github/github-app";
 import { GitHubPolling } from "@usine/github/polling";
-import { DateTime, Deferred, Effect, Fiber, Layer, Option, Schema } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Ref, Schema } from "effect";
 import { TestClock } from "effect/testing";
+import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
+import { fixedInstanceLayer } from "./support/current-instance.ts";
 
 const config = Schema.decodeUnknownSync(UsineConfig)({
   version: 1,
@@ -86,10 +88,14 @@ const submissionFor = (loop: LoopName, itemKey: string) =>
     parentModel: Option.none(),
   });
 
-const layerWith = (github: GitHubPolling["Service"]) =>
-  triggerConditionLayer(instance).pipe(
+const layerWith = (
+  github: GitHubPolling["Service"],
+  current: Layer.Layer<CurrentInstance> = fixedInstanceLayer(instance),
+) =>
+  triggerConditionLayer.pipe(
     Layer.provide(Layer.succeed(GitHubPolling, github)),
     Layer.provide(MarcbachmannCelLayer),
+    Layer.provide(current),
   );
 
 const failingGitHub: GitHubPolling["Service"] = {
@@ -152,6 +158,25 @@ describe("TriggerCondition", () => {
       );
       assert.strictEqual(holds, true);
     }).pipe(Effect.provide(layerWith(failingGitHub))),
+  );
+
+  it.effect(
+    "re-checks against the current instance, so a reload that removes a Loop drops its Events",
+    () =>
+      Effect.gen(function* () {
+        const current = yield* Ref.make(instance);
+        const reloadable = Layer.succeed(CurrentInstance)({
+          get: Ref.get(current),
+          reload: Effect.die("the test swaps the instance itself"),
+        });
+        const submission = submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]');
+        yield* Effect.gen(function* () {
+          const condition = yield* TriggerCondition;
+          assert.strictEqual(yield* condition.holds(submission), true);
+          yield* Ref.set(current, new LoadedInstance({ ...instance, loops: [issueLoop] }));
+          assert.strictEqual(yield* condition.holds(submission), false);
+        }).pipe(Effect.provide(layerWith(failingGitHub, reloadable)));
+      }),
   );
 
   it.effect("drops a queued Event whose Loop is no longer loaded", () =>

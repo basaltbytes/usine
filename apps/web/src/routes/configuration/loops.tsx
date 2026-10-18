@@ -1,11 +1,19 @@
-import { PauseIcon, PlayIcon } from "@phosphor-icons/react";
+import { ArrowClockwiseIcon, CheckCircleIcon, PauseIcon, PlayIcon } from "@phosphor-icons/react";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createFileRoute } from "@tanstack/react-router";
 import type { LoopView } from "@usine/orchestrator/operator";
 import { ErrorAlert } from "@/components/error-alert";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -15,6 +23,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "../../api.ts";
+import { reloadSummary } from "../../operator-copy.ts";
 import { overviewQuery } from "../../overview.ts";
 
 const Loops = () => {
@@ -24,6 +33,14 @@ const Loops = () => {
     mutationFn: (loop: LoopView) =>
       api((client) => client[loop.paused ? "unpause" : "pause"]({ params: { loop: loop.name } })),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["overview"] }),
+  });
+  const reloadMutation = useMutation({
+    mutationFn: () => api((client) => client.reload()),
+    onSuccess: () =>
+      Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["overview"] }),
+        queryClient.invalidateQueries({ queryKey: ["agents"] }),
+      ]),
   });
   const loops = data.loops;
   const pending = pauseMutation.isPending || data._tag === "NeedsSetup";
@@ -35,6 +52,17 @@ const Loops = () => {
           <CardDescription>
             {loops.length} loop{loops.length === 1 ? "" : "s"}
           </CardDescription>
+          <CardAction>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={reloadMutation.isPending}
+              onClick={() => reloadMutation.mutate()}
+            >
+              <ArrowClockwiseIcon data-icon="inline-start" aria-hidden="true" />
+              {reloadMutation.isPending ? "Reloading…" : "Reload configuration"}
+            </Button>
+          </CardAction>
         </CardHeader>
         <CardContent>
           <Table>
@@ -77,6 +105,27 @@ const Loops = () => {
           </Table>
         </CardContent>
       </Card>
+      {reloadMutation.isSuccess && (
+        <Alert className="max-w-5xl">
+          <CheckCircleIcon weight="fill" className="text-run-succeeded" />
+          <AlertTitle>Configuration reloaded</AlertTitle>
+          <AlertDescription>
+            <ul>
+              {reloadSummary(reloadMutation.data).map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <p>New Runs use it; open Runs keep the Agent they were opened with.</p>
+          </AlertDescription>
+        </Alert>
+      )}
+      {reloadMutation.isError && (
+        <ErrorAlert
+          className="max-w-5xl"
+          title="Configuration not reloaded"
+          message={reloadMutation.error.message}
+        />
+      )}
       {pauseMutation.isError && (
         <ErrorAlert className="max-w-5xl" message={pauseMutation.error.message} />
       )}

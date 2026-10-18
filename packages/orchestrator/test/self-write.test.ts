@@ -13,6 +13,7 @@ import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
@@ -188,6 +189,7 @@ describe("Board self-writes", () => {
               }),
           });
           const executor = Layer.succeed(StepExecutor)({
+            workers: [WorkerName.make("local")],
             isLive: () => Effect.succeed(false),
             outcome: () => Effect.succeed(Option.none()),
             recover: () => Effect.void,
@@ -219,7 +221,7 @@ describe("Board self-writes", () => {
             const polling = yield* PollingTriggers;
             const operator = yield* Operator;
             const reader = yield* RunReader;
-            const fiber = yield* polling.run(instance).pipe(Effect.forkChild);
+            const fiber = yield* polling.run(Effect.succeed(instance)).pipe(Effect.forkChild);
             yield* awaitCondition(polling.latest, Option.isSome);
             assert.strictEqual(changeRequests, 1);
             const move = new BoardMove({

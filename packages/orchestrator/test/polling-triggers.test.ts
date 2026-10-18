@@ -1,8 +1,11 @@
 import { noCycleBudgets } from "./support/polling.ts";
+import { fixedInstanceLayer } from "./support/current-instance.ts";
+import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { ModelId } from "@usine/core/agent/brain";
 import { AgentName, AgentPersona } from "@usine/core/agent";
+import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -52,6 +55,7 @@ import {
   RepositoryLabelName,
   RepositoryLabelsNotModified,
   RepositoryNotModified,
+  GitHubItemNotFoundError,
   GitHubPolling,
 } from "@usine/github/polling";
 import {
@@ -70,6 +74,7 @@ import {
   Scope,
 } from "effect";
 import { TestClock } from "effect/testing";
+import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
 import {
@@ -184,6 +189,7 @@ const claimedRun = (cycle: Effect.Success<ReturnType<PollingTriggers["Service"][
 };
 
 const gatedExecutor = Layer.succeed(StepExecutor)({
+  workers: [WorkerName.make("local")],
   isLive: () => Effect.succeed(false),
   outcome: () => Effect.succeed(Option.none()),
   recover: () => Effect.void,
@@ -337,6 +343,101 @@ describe("PollingTriggers", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.live("drops an open pull request GitHub no longer has and revokes its unstarted Run", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-missing-pr-" }),
+      );
+      const instance = instanceWith([
+        new LoopFile({
+          ...issueLoop("review-pr"),
+          trigger: new PullRequestTrigger({ on: "pr", if: Source.make('item.state == "OPEN"') }),
+        }),
+      ]);
+      let gone = false;
+      let fetches = 0;
+      const github: GitHubPolling["Service"] = {
+        labels: () => Effect.succeed(emptyLabelCatalog),
+        changes: (repository, cursor) =>
+          Effect.succeed(
+            repository === watchedRepository && Option.isNone(cursor.entityTag)
+              ? new RepositoryChanges({
+                  cursor: new PollCursor({
+                    entityTag: Option.some(EntityTag.make('W/"unchanged"')),
+                    watermark: Option.some(DateTime.makeUnsafe("2026-08-30T20:00:00Z")),
+                  }),
+                  items: [
+                    new ChangedPullRequest({
+                      number: 28,
+                      updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+                    }),
+                  ],
+                  backlog: false,
+                  nextPollAt: Option.none(),
+                })
+              : new RepositoryNotModified({ cursor, nextPollAt: Option.none() }),
+          ),
+        snapshot: (repository, item) =>
+          Effect.suspend(() => {
+            fetches += 1;
+            return gone
+              ? Effect.fail(
+                  new GitHubItemNotFoundError({
+                    operation: "fetch-pull-request-snapshot",
+                    item: item.number,
+                    message: `GitHub has no pull request ${item.number} in ${repository}`,
+                  }),
+                )
+              : Effect.succeed(
+                  new PullRequestSnapshot({
+                    contentHash: ContentHash.make("a".repeat(64)),
+                    payload: Schema.decodeUnknownSync(PullRequestPayload)({
+                      ...issuePayload([]),
+                      mergeable: "MERGEABLE",
+                      mergeStateStatus: "CLEAN",
+                      isDraft: false,
+                      merged: false,
+                      mergedAt: null,
+                      baseRefName: "main",
+                      headRefName: "feature",
+                      headRefOid: "a".repeat(40),
+                      additions: 1,
+                      deletions: 0,
+                      changedFiles: 1,
+                      reviewDecision: null,
+                      statusCheckRollup: null,
+                      reviewThreads: { totalCount: 0, nodes: [] },
+                      reviewRequests: { totalCount: 0, nodes: [] },
+                      reviews: { totalCount: 0, nodes: [] },
+                      closingIssuesReferences: { totalCount: 0, nodes: [] },
+                    }),
+                  }),
+                );
+          }),
+      };
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const engine = yield* RunEngine;
+        const run = claimedRun(yield* polling.poll(instance));
+        yield* waitForState(engine, run, "Waiting");
+
+        gone = true;
+        const dropped = yield* polling.poll(instance);
+        assert.deepStrictEqual(dropped.failures, []);
+        assert.strictEqual(dropped.revokedRuns, 1);
+        const revoked = yield* waitForState(engine, run, "Canceled");
+        assert(revoked.run.state._tag === "Canceled");
+        assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
+
+        // The cursor no longer holds the pull request, so it is not fetched again.
+        const after = yield* polling.poll(instance);
+        assert.deepStrictEqual(after.failures, []);
+        assert.strictEqual(fetches, 2);
+      }).pipe(Effect.provide(runtimeLayer(directory, github)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.live("opens exactly one finish Run when the finisher pushes before it relabels", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -409,6 +510,7 @@ describe("PollingTriggers", () => {
       const finishing = yield* Deferred.make<void>();
       let executions = 0;
       const executor = Layer.succeed(StepExecutor)({
+        workers: [WorkerName.make("local")],
         isLive: () => Effect.succeed(false),
         outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,
@@ -423,9 +525,10 @@ describe("PollingTriggers", () => {
             return new StepResult({ message: "Finished", facts: [] });
           }),
       });
-      const condition = triggerConditionLayer(instance).pipe(
+      const condition = triggerConditionLayer.pipe(
         Layer.provide(Layer.succeed(GitHubPolling, github)),
         Layer.provide(MarcbachmannCelLayer),
+        Layer.provide(fixedInstanceLayer(instance)),
       );
 
       yield* Effect.gen(function* () {
@@ -486,7 +589,9 @@ describe("PollingTriggers", () => {
 
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
-      const fiber = yield* Effect.forkChild(polling.run(instanceWith([issueLoop("start-dev")])));
+      const fiber = yield* Effect.forkChild(
+        polling.run(Effect.succeed(instanceWith([issueLoop("start-dev")]))),
+      );
       yield* Effect.yieldNow;
       assert.strictEqual(changeRequests, 2);
       yield* TestClock.adjust("119 seconds");
@@ -496,6 +601,42 @@ describe("PollingTriggers", () => {
       yield* Fiber.interrupt(fiber);
     }).pipe(Effect.provide(pollingTestLayer(github)));
   });
+
+  it.effect(
+    "reads the current instance at each cycle, so a reload applies from the next one",
+    () => {
+      const polled: Array<string> = [];
+      const github: GitHubPolling["Service"] = {
+        changes: (repository, cursor) =>
+          Effect.sync(() => {
+            polled.push(repository);
+            return new RepositoryNotModified({ cursor, nextPollAt: Option.none() });
+          }),
+        labels: () => Effect.succeed(emptyLabelCatalog),
+        snapshot: () => Effect.die("an unchanged repository has no snapshots"),
+      };
+      const onlyWatched = new LoadedInstance({
+        ...instanceWith([]),
+        config: new UsineConfig({ ...config, repos: config.repos.slice(0, 1) }),
+      });
+
+      return Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const current = yield* Ref.make(onlyWatched);
+        const fiber = yield* Effect.forkChild(polling.run(Ref.get(current)));
+        yield* Effect.yieldNow;
+        assert.deepStrictEqual(polled, [watchedRepository]);
+        yield* Ref.set(current, instanceWith([]));
+        yield* TestClock.adjust("60 seconds");
+        assert.deepStrictEqual(polled, [
+          watchedRepository,
+          watchedRepository,
+          "basaltbytes/unwatched",
+        ]);
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(pollingTestLayer(github)));
+    },
+  );
 
   it.live(
     "keeps Board Items current for paused Loops and repositories without matching Loops",
@@ -955,6 +1096,7 @@ describe("PollingTriggers", () => {
       intervene: () => Effect.void,
       approve: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
+      discardLeftovers: () => Effect.die("unused"),
       inspect: () => Effect.die("unused"),
       reconcile: () => Effect.die("unused"),
       drain: () => Effect.void,
@@ -1058,6 +1200,7 @@ describe("PollingTriggers", () => {
         intervene: () => Effect.void,
         approve: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
+        discardLeftovers: () => Effect.die("unused"),
         inspect: () => Effect.die("unused"),
         reconcile: () => Effect.die("unused"),
         drain: () => Effect.void,
@@ -1165,6 +1308,7 @@ describe("PollingTriggers", () => {
       intervene: () => Effect.void,
       approve: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
+      discardLeftovers: () => Effect.die("unused"),
       inspect: () => Effect.die("unused"),
       reconcile: () => Effect.die("unused"),
       drain: () => Effect.void,
@@ -1325,6 +1469,96 @@ describe("PollingTriggers", () => {
           yield* waitForState(engine, runId, "Waiting");
         }
       }).pipe(Effect.provide(runtimeLayer(directory, github)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+  it.live("opens the next Run with a reloaded Agent while the open Run keeps its own", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-reload-agent-" }),
+      );
+      const agentFile = (model: string) =>
+        `---\nharness: codex\nmodel: ${model}\neffort: high\n---\nImplement the issue.\n`;
+      yield* writeInstanceFiles(directory, [
+        ["usine.yaml", `version: 1\nrepos:\n  - name: ${watchedRepository}\n`],
+        ["agents/developer.md", agentFile("gpt-5.6-sol")],
+        [
+          "loops/start-dev.md",
+          '---\ntrigger:\n  on: issue\n  if: item.labels.nodes.exists(label, label.name == "ready")\napproval: required\nstep: implement\nagent: developer\n---\nImplement issue {{ item.number }}.\n',
+        ],
+      ]);
+      const open = new Set([28]);
+      const updatedAt = DateTime.makeUnsafe("2026-08-30T20:00:00Z");
+      const github: GitHubPolling["Service"] = {
+        labels: () => Effect.succeed(emptyLabelCatalog),
+        changes: (_repository, cursor) =>
+          Effect.succeed(
+            new RepositoryChanges({
+              cursor,
+              items: [...open].map((number) => new ChangedIssue({ number, updatedAt })),
+              backlog: false,
+              nextPollAt: Option.none(),
+            }),
+          ),
+        snapshot: (_repository, item) =>
+          Effect.succeed(
+            new IssueSnapshot({
+              payload: issuePayload(["ready"], item.number),
+              contentHash: ContentHash.make((item.number === 28 ? "a" : "b").repeat(64)),
+            }),
+          ),
+      };
+      const models: Array<string> = [];
+      const executor = Layer.succeed(StepExecutor)({
+        workers: [WorkerName.make("local")],
+        isLive: () => Effect.succeed(false),
+        outcome: () => Effect.succeed(Option.none()),
+        recover: () => Effect.void,
+        intervene: () => Effect.void,
+        interrupt: () => Effect.void,
+        reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+        execute: (execution) =>
+          Effect.sync(() => {
+            models.push(execution.agent.brain.model);
+            return new StepResult({ message: "Implemented", facts: [] });
+          }),
+      });
+
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const engine = yield* RunEngine;
+        const instances = yield* CurrentInstance;
+        const openRun = claimedRun(yield* polling.poll(yield* instances.get));
+        yield* waitForState(engine, openRun, "Waiting");
+
+        yield* writeInstanceFiles(directory, [["agents/developer.md", agentFile("gpt-5.7-sol")]]);
+        const reload = yield* instances.reload;
+        assert.deepStrictEqual(reload.agents.changed, [agent.name]);
+
+        open.add(29);
+        const second = yield* polling.poll(yield* instances.get);
+        const nextRun = second.submissions.flatMap((submission) =>
+          submission._tag === "Claimed" && submission.runId !== openRun ? [submission.runId] : [],
+        )[0];
+        assert(nextRun !== undefined, "issue 29 opens a Run");
+        assert.strictEqual((yield* engine.inspect(nextRun)).agent.brain.model, "gpt-5.7-sol");
+        assert.strictEqual((yield* engine.inspect(openRun)).agent.brain.model, "gpt-5.6-sol");
+
+        const dedupKey = DedupKey.make(JSON.stringify(["operator-approval", openRun]));
+        yield* engine.approve(
+          openRun,
+          new Event({ id: EventId.make(dedupKey), dedupKey, payload: {}, receivedAt: updatedAt }),
+        );
+        yield* waitForState(engine, openRun, "Succeeded");
+        assert.deepStrictEqual(models, ["gpt-5.6-sol"]);
+      }).pipe(
+        Effect.provide(
+          Layer.merge(
+            runtimeLayer(directory, github, executor),
+            reloadableInstanceLayer(directory),
+          ),
+        ),
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

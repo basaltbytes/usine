@@ -3,6 +3,7 @@ import { RepositoryName } from "@usine/core/repository";
 import { type RunEngineError, SubmissionResult } from "@usine/engine/engine";
 import type { ExpressionError } from "@usine/expression/expression-engine";
 import type { GitHubAppError } from "@usine/github/github-app";
+import type { GitHubItemNotFoundError } from "@usine/github/polling";
 import { DateTime, Option, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { configFileErrorLogFields } from "../trigger-submission.ts";
@@ -37,6 +38,7 @@ export type RepositoryPollError =
   | ConfigFileError
   | ExpressionError
   | GitHubAppError
+  | GitHubItemNotFoundError
   | RunEngineError;
 
 /** Safe diagnostic fields for a failed repository operation. */

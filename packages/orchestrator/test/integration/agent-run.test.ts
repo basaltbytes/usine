@@ -41,6 +41,7 @@ import { PollingTriggers } from "../../src/polling-triggers.ts";
 import { triggerConditionLayer } from "../../src/trigger-condition.ts";
 import { BrainSpec } from "@usine/core/agent/brain";
 import { layer as localWorkerLayer } from "../../src/local.ts";
+import { fixedInstanceLayer } from "../support/current-instance.ts";
 import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
 
 const PositiveIntFromString = Schema.FiniteFromString.pipe(
@@ -183,15 +184,17 @@ const runtimeLayer = (
     Layer.provide(localSecretsLayer(credentialsDirectory).pipe(Layer.provide(platform))),
     Layer.provide(FetchHttpClient.layer),
   );
-  const credentials = gitHubCredentialLayer(instance.config).pipe(Layer.provide(app));
+  const current = fixedInstanceLayer(instance);
+  const credentials = gitHubCredentialLayer.pipe(Layer.provide(app), Layer.provide(current));
   const polling = GitHubPolling.layer.pipe(
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
   );
-  const triggerCondition = triggerConditionLayer(instance).pipe(
+  const triggerCondition = triggerConditionLayer.pipe(
     Layer.provide(polling),
     Layer.provide(MarcbachmannCelLayer),
+    Layer.provide(current),
   );
   const engine = localWorkerLayer(
     runtimeDirectory,
@@ -206,6 +209,7 @@ const runtimeLayer = (
     Layer.provide(
       durableAttemptRuntimeLayer(runtimeDirectory).pipe(Layer.provide(NodeServices.layer)),
     ),
+    Layer.provide(current),
   );
   const labelWriter = GitHubLabelWriter.layer.pipe(
     Layer.provide(app),

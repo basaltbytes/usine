@@ -18,6 +18,7 @@ import {
   Schema,
   TxPriorityQueue,
 } from "effect";
+import { CurrentInstance } from "./current-instance/current-instance.ts";
 
 export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorkerError>(
   "@usine/orchestrator/UnsupportedWorkerError",
@@ -78,20 +79,26 @@ const validateWorkers = (
     : new UnsupportedWorkerError({ worker: unsupported.name, kind: unsupported.kind });
 };
 
-/** Schedules Attempts FIFO over the configured Workers and adapts the Executor to the engine's StepExecutor port. */
+/**
+ * Schedules Attempts FIFO over the configured Workers and adapts the Executor
+ * to the engine's StepExecutor port. The Workers in `config` and the `brains`
+ * they preflight are fixed when the layer builds; each Attempt reads its
+ * `settings` (child budget, ceilings, parent effort) from the current instance.
+ */
 export const stepExecutorLayer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
-): Layer.Layer<StepExecutor, ExecutorError | UnsupportedWorkerError, Executor> =>
+): Layer.Layer<StepExecutor, ExecutorError | UnsupportedWorkerError, CurrentInstance | Executor> =>
   Layer.effect(
     StepExecutor,
     Effect.gen(function* () {
       const executor = yield* Executor;
+      const instances = yield* CurrentInstance;
       const workers = yield* validateWorkers(executor.kind, config.workers);
       yield* Effect.forEach(
         workers,
-        ({ name }) =>
-          executor.preflight(name, brains).pipe(
+        ({ name, maxConcurrentAttempts }) =>
+          executor.preflight(name, brains, maxConcurrentAttempts).pipe(
             // The operation error has no Worker field; startup reports must name the Worker.
             Effect.mapError((error) =>
               error._tag === "ExecutorOperationError"
@@ -176,6 +183,7 @@ export const stepExecutorLayer = (
             worker: execution.attempt.worker,
             reattach: execution.reattach,
           });
+          const { settings } = (yield* instances.get).config;
           const prepared = yield* executor
             .prepare(
               new CheckoutRequest({
@@ -187,10 +195,10 @@ export const stepExecutorLayer = (
                 task: execution.task,
                 agent: execution.agent,
                 parentModel: execution.parentModel,
-                maxChildren: config.settings.maxChildren,
-                maxAttemptMinutes: config.settings.maxAttemptMinutes,
-                maxAttemptTokens: config.settings.maxAttemptTokens,
-                parentEffort: resolveParentEffort(execution.agent, config.settings.parentEffort),
+                maxChildren: settings.maxChildren,
+                maxAttemptMinutes: settings.maxAttemptMinutes,
+                maxAttemptTokens: settings.maxAttemptTokens,
+                parentEffort: resolveParentEffort(execution.agent, settings.parentEffort),
                 salvageRef: salvageRefFor(execution.run.id, execution.attempt.number),
                 resume: execution.resume,
                 reattach: execution.reattach,
@@ -206,6 +214,7 @@ export const stepExecutorLayer = (
         executor.cancel(attemptId).pipe(Effect.mapError(asAttemptFailure));
 
       return StepExecutor.of({
+        workers: workers.map(({ name }) => name),
         execute,
         interrupt,
         isLive: executor.isLive,

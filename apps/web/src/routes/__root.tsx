@@ -34,6 +34,7 @@ import { overviewQuery } from "../overview.ts";
 import { Suspense, lazy, useState } from "react";
 import { useOpenRun } from "../open-run.ts";
 import { CycleBudgetAsk } from "../cycle-budget-ask.tsx";
+import { UnconfiguredWorkerAsk } from "../unconfigured-worker-ask.tsx";
 
 // The drawer bundles the transcript, Markdown, and message components, so it
 // loads on first open to keep a project's first paint small.
@@ -76,6 +77,8 @@ const NeedStrip = ({ needs }: { readonly needs: ReadonlyArray<NeedView> }) => {
           {needs.map((need) => {
             if (need._tag === "CycleBudgetNeed")
               return <CycleBudgetAsk key={need.id} need={need} />;
+            if (need._tag === "UnconfiguredWorkerNeed")
+              return <UnconfiguredWorkerAsk key={need.id} need={need} />;
             const copy = needCopy(need);
             const runId = copy.runId;
             const body = (

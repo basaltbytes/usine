@@ -40,7 +40,7 @@ import {
   triggerEvents,
 } from "../database/schema.ts";
 import { RunNotFoundError } from "../engine/error.ts";
-import { RunSnapshot, RunSummary } from "../run-reader/model.ts";
+import { RunSnapshot, RunSummary, WorkerAttempts } from "../run-reader/model.ts";
 import { Submission } from "../engine/submission.ts";
 import { cycleQueries } from "../cycle-budget/queries.ts";
 import {
@@ -187,6 +187,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       })
       .from(attempts)
       .innerJoin(runs, eq(runs.runId, attempts.runId))
+      .where(isNull(attempts.leftoversDiscardedAt))
       .execute();
     const decoded = yield* Schema.decodeUnknownEffect(
       Schema.Array(
@@ -206,6 +207,30 @@ export const queriesFor = (database: RunDatabaseClient) => {
       succeeded: outcome === "Succeeded",
       open: outcome === "",
     }));
+  });
+
+  const attemptCountsByWorker = Effect.fn("RunStoreQueries.attemptCountsByWorker")(function* () {
+    const rows = yield* database
+      .select({ worker: attempts.workerName, attempts: sql<number>`count(*)` })
+      .from(attempts)
+      .where(isNull(attempts.leftoversDiscardedAt))
+      .groupBy(attempts.workerName)
+      .orderBy(asc(attempts.workerName))
+      .execute();
+    return yield* Schema.decodeUnknownEffect(Schema.Array(WorkerAttempts))(rows);
+  });
+
+  const discardLeftovers = Effect.fn("RunStoreQueries.discardLeftovers")(function* (
+    worker: WorkerName,
+    discardedAt: DateTime.Utc,
+  ) {
+    const discarded = yield* database
+      .update(attempts)
+      .set({ leftoversDiscardedAt: encodeDateTime(discardedAt) })
+      .where(and(eq(attempts.workerName, worker), isNull(attempts.leftoversDiscardedAt)))
+      .returning({ attemptId: attempts.attemptId })
+      .execute();
+    return discarded.length;
   });
 
   const attemptRows = Effect.fn("RunStoreQueries.attemptRows")(function* (runId: RunId) {
@@ -733,6 +758,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
 
   return {
     salvageCandidates,
+    attemptCountsByWorker,
+    discardLeftovers,
     cycles: cycleQueries(database),
     ...transcriptQueries(database),
     addAttempt,

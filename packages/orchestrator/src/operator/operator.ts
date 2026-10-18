@@ -10,6 +10,7 @@ import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { CycleBudgets, type CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
+import type { WorkerName } from "@usine/core/worker";
 import {
   RunEngine,
   type EnginePersistenceError,
@@ -38,6 +39,7 @@ import {
   PreflightFindingNeed,
   RunFailureNeed,
   ScheduleFailureNeed,
+  UnconfiguredWorkerNeed,
   type NeedView,
 } from "./need.ts";
 import {
@@ -109,11 +111,12 @@ const makeOperatorObservation = Effect.gen(function* () {
     scheduleFailures: ReadonlyArray<ScheduleFailure>,
     revision: Option.Option<ProjectionRevision>,
   ) {
-    const [snapshots, states, cycleAsks] = yield* Effect.all(
+    const [snapshots, states, cycleAsks, workerAttempts] = yield* Effect.all(
       [
         reader.list({ closedLimit: OVERVIEW_CLOSED_RUNS }),
         controls.states,
         budgets.asks(),
+        reader.attemptsByWorker(),
       ] as const,
       { concurrency: "unbounded" },
     );
@@ -282,6 +285,13 @@ const makeOperatorObservation = Effect.gen(function* () {
     for (const { file, error } of instance.quarantinedLoops) {
       needsYou.push(new ConfigFileNeed({ id: `config-file:${file}`, kind: "loop", error }));
     }
+    const configuredWorkers = new Set(instance.config.workers.map(({ name }) => name));
+    for (const { worker, attempts } of workerAttempts) {
+      if (configuredWorkers.has(worker)) continue;
+      needsYou.push(
+        new UnconfiguredWorkerNeed({ id: `unconfigured-worker:${worker}`, worker, attempts }),
+      );
+    }
     const projected = new ReadyOverview({ projects, loops, needsYou });
     yield* Effect.logDebug("Refreshed operator overview", {
       revision,
@@ -317,6 +327,11 @@ const makeOperatorObservation = Effect.gen(function* () {
             value,
             instance.config.repos.map(({ name, lanes }) => [name, lanes]),
             instance.loops.map(({ name, agent, trigger }) => [name, agent, trigger.on]),
+            [...instance.invalidAgents, ...instance.quarantinedLoops].map(({ file, error }) => [
+              file,
+              error.stage,
+              error.message,
+            ]),
             pollFailures,
             preflightFindings,
             scheduleFailures,
@@ -607,6 +622,7 @@ const makeOperator = Effect.gen(function* () {
     ...observation,
     approve,
     cancel,
+    discardLeftovers: (worker: WorkerName) => runs.discardLeftovers(worker).pipe(Effect.asVoid),
     moveBoardItem,
     pause,
     retry,
@@ -647,6 +663,12 @@ export class Operator extends Context.Service<
     ) => Effect.Effect<void, OperatorError>;
     /** Cancels an open Run and interrupts its current Attempt; an already closed Run is unchanged. */
     readonly cancel: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /**
+     * Answers an `UnconfiguredWorkerNeed`: startup stops reconciling the
+     * Attempts recorded on `worker` and whatever they left stays on it. A
+     * Worker `usine.yaml` declares is left unchanged.
+     */
+    readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<void, OperatorError>;
     /** Swaps lane labels on GitHub and hints an authoritative refresh of its Board position and Loop matches. */
     readonly moveBoardItem: (
       instance: LoadedInstance,
@@ -718,6 +740,7 @@ export {
   BoardProjectionNeed,
   ScheduleFailureNeed,
   ConfigFileNeed,
+  UnconfiguredWorkerNeed,
   NeedView,
 } from "./need.ts";
 export {

@@ -74,7 +74,7 @@ describe("Polling self-write Hints", () => {
     };
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
-      const fiber = yield* polling.run(instance).pipe(Effect.forkChild);
+      const fiber = yield* polling.run(Effect.succeed(instance)).pipe(Effect.forkChild);
       yield* TestClock.adjust("1 millis");
       yield* polling.hint(repository, changed, Option.some(DateTime.makeUnsafe(90_000)));
       yield* TestClock.adjust("40 seconds");
@@ -115,7 +115,7 @@ describe("Polling self-write Hints", () => {
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
       for (let index = 0; index < 20; index += 1) yield* polling.hint(repository, changed);
-      const fiber = yield* polling.run(instance).pipe(Effect.forkChild);
+      const fiber = yield* polling.run(Effect.succeed(instance)).pipe(Effect.forkChild);
       yield* TestClock.adjust("1 millis");
       assert.strictEqual(snapshots, 1);
       assert.strictEqual(requests, 1);
@@ -166,7 +166,7 @@ describe("Polling self-write Hints", () => {
       };
       return Effect.gen(function* () {
         const polling = yield* PollingTriggers;
-        const fiber = yield* polling.run(instance).pipe(Effect.forkChild);
+        const fiber = yield* polling.run(Effect.succeed(instance)).pipe(Effect.forkChild);
         yield* TestClock.adjust("1 millis");
         yield* polling.hint(repository, changed);
         yield* TestClock.adjust("89998 millis");
@@ -218,7 +218,7 @@ describe("Polling self-write Hints", () => {
         };
         yield* Effect.gen(function* () {
           const polling = yield* PollingTriggers;
-          const background = yield* polling.run(instance).pipe(Effect.forkChild);
+          const background = yield* polling.run(Effect.succeed(instance)).pipe(Effect.forkChild);
           yield* TestClock.adjust("1 millis");
           yield* polling.hint(repository, changed);
           yield* Deferred.await(snapshotStarted);

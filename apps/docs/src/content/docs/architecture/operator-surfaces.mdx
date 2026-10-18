@@ -21,7 +21,7 @@ The operator works with usine through a local HTTP API, the web UI built on it, 
 - `GET /` and `GET /assets/*`: the built web UI, from the `web` folder next to the server's `main.js`.
 - Any other `GET` path without a file extension and outside `/api` and `/assets`: `index.html`, so client routes load on refresh ([http.ts:220][]).
 
-There is no authentication. If a request has an `Origin` header that isn't a loopback host, the server refuses it with 403 `CrossSiteRequestError` before its handler runs ([http.ts:68][]). The server accepts JSON bodies with any `Content-Type`. Without GitHub App credentials, the server runs in setup mode: the overview, the roster, and Run detail work, and every action returns 503 `BackendUnavailableError` ([backend.ts:77][]).
+There is no authentication. If a request has an `Origin` header that isn't a loopback host, the server refuses it with 403 `CrossSiteRequestError` before its handler runs ([http.ts:68][]). The server accepts JSON bodies with any `Content-Type`. Without GitHub App credentials, the server runs in setup mode: the overview, the roster, Run detail, and the reload work, and every other action returns 503 `BackendUnavailableError` ([backend.ts:77][]).
 
 A request from the web UI goes through the same layers for every action. Approving a Run, for example:
 
@@ -56,7 +56,7 @@ The browser and the server share one contract. `OperatorApi` ([operator/http.ts:
 
 ## Endpoints
 
-Every action returns `{ "ok": true }` once accepted; the result appears in later reads. The API refuses request bodies with unknown properties. The definitions, trimmed:
+Every action except the reload returns `{ "ok": true }` once accepted; the result appears in later reads. The API refuses request bodies with unknown properties. The definitions, trimmed:
 
 ```ts title="packages/orchestrator/src/operator/http.ts"
 export const OperatorApi = HttpApi.make("OperatorApi").add(
@@ -107,28 +107,38 @@ Each action calls the `Operator` service, which calls `RunEngine` ([operator.ts:
 | POST   | `/api/runs/:runId/resolve-failure` | `{ attemptId }`                 | Marks the latest failed Attempt as handled, which removes it from Needs you.                                                            |
 | POST   | `/api/runs/:runId/intervene`       | `{ attemptId, target, action }` | Sends `Steer`, `Interrupt`, `OperatorMessage`, or `Release` to the parent or a child ([How an Attempt runs](/architecture/execution/)). |
 
-### Board, Loops, and cycle budgets
+### Board, Loops, cycle budgets, and Workers
 
-| Method | Path                                                | Body         | Does                                                                                                                                                          |
-| ------ | --------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/projects/:owner/:repository/items/:item/lane` | `{ toLane }` | Writes the label swap of a Board move to GitHub, then queues a Hint for that Item, even when the write fails ([operator.ts:556][]). 409 for a read-only lane. |
-| POST   | `/api/loops/:loop/pause`                            |              | Sets the Loop's paused flag; its existing Runs continue.                                                                                                      |
-| POST   | `/api/loops/:loop/unpause`                          |              | Clears it.                                                                                                                                                    |
-| POST   | `/api/cycle-budgets/reset`                          | `{ askId }`  | Answers a cycle-budget Ask and gives the Item a new allowance.                                                                                                |
+| Method | Path                                                | Body         | Does                                                                                                                                                                                          |
+| ------ | --------------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/projects/:owner/:repository/items/:item/lane` | `{ toLane }` | Writes the label swap of a Board move to GitHub, then queues a Hint for that Item, even when the write fails ([operator.ts:556][]). 409 for a read-only lane.                                 |
+| POST   | `/api/loops/:loop/pause`                            |              | Sets the Loop's paused flag; its existing Runs continue.                                                                                                                                      |
+| POST   | `/api/loops/:loop/unpause`                          |              | Clears it.                                                                                                                                                                                    |
+| POST   | `/api/cycle-budgets/reset`                          | `{ askId }`  | Answers a cycle-budget Ask and gives the Item a new allowance.                                                                                                                                |
+| POST   | `/api/workers/:worker/discard-leftovers`            |              | Answers an `UnconfiguredWorkerNeed`: startup stops reconciling the Attempts recorded on that Worker, and nothing on the Worker changes. A Worker that `usine.yaml` declares is left as it is. |
+
+### Instance folder
+
+`CurrentInstance` ([current-instance.ts][]) holds the instance folder the orchestrator runs. Polling, schedules, queued-Event checks, GitHub App project discovery, Attempt settings, and the backend read it when they act, so a reload applies from their next cycle, check, or Attempt.
+
+| Method | Path                   | Body | Does                                                                                                                                                                                                                                                                                                                                                                            |
+| ------ | ---------------------- | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/instance/reload` |      | Loads `usine.yaml`, `agents/`, and `loops/` again with the startup loader and replaces the running configuration. Returns an `InstanceReload`: the Loops, Agents, labels, and repositories added, removed, or changed, whether `settings` or `operator` changed, and the files left out. 422 `FactoryConfigError` or 409 `RestartRequiredError` keep the running configuration. |
 
 ### Errors
 
 Failures return `{ error, message }`, where `error` is the domain error's tag ([operator/http.ts:19][]).
 
-| Status | `error`                                                                                                                                                           |
-| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `SchemaError`, `InvalidRequestError`: the request didn't decode                                                                                                   |
-| 403    | `CrossSiteRequestError`                                                                                                                                           |
-| 404    | `RunNotFoundError`, `TranscriptAttemptNotFoundError`, `BoardProjectNotFoundError`, `BoardItemNotFoundError`, `BoardLaneNotFoundError`, `RosterAgentNotFoundError` |
-| 409    | `RunOperationRejectedError`, `RunInterventionRejectedError`, `CycleBudgetResetRejectedError`, `BoardLaneReadOnlyError`                                            |
-| 500    | `EnginePersistenceError`, `AttemptCancellationError`, `HttpBodyError` (the response didn't encode)                                                                |
-| 502    | `GitHubApiError`, `InvalidGitHubResponseError`                                                                                                                    |
-| 503    | `BackendUnavailableError` (setup mode), `InstallationDiscoveryError`, `AppPermissionError`, `GitHubRateLimitError`                                                |
+| Status | `error`                                                                                                                                                                                   |
+| ------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `SchemaError`, `InvalidRequestError`: the request didn't decode                                                                                                                           |
+| 403    | `CrossSiteRequestError`                                                                                                                                                                   |
+| 404    | `RunNotFoundError`, `TranscriptAttemptNotFoundError`, `BoardProjectNotFoundError`, `BoardItemNotFoundError`, `BoardLaneNotFoundError`, `RosterAgentNotFoundError`                         |
+| 409    | `RunOperationRejectedError`, `RunInterventionRejectedError`, `CycleBudgetResetRejectedError`, `BoardLaneReadOnlyError`, `RestartRequiredError` (a reload changed `workers` or `webhooks`) |
+| 422    | `FactoryConfigError`: a reload found `usine.yaml` invalid or a folder missing                                                                                                             |
+| 500    | `EnginePersistenceError`, `AttemptCancellationError`, `HttpBodyError` (the response didn't encode)                                                                                        |
+| 502    | `GitHubApiError`, `InvalidGitHubResponseError`                                                                                                                                            |
+| 503    | `BackendUnavailableError` (setup mode), `InstallationDiscoveryError`, `AppPermissionError`, `GitHubRateLimitError`                                                                        |
 
 ### Calling the API by hand
 
@@ -138,6 +148,7 @@ Failures return `{ error, message }`, where `error` is the domain error's tag ([
 curl -s http://127.0.0.1:7331/api/overview
 curl -s -X POST http://127.0.0.1:7331/api/runs/<runId>/approve
 curl -s -X POST http://127.0.0.1:7331/api/loops/review-pr/pause
+curl -s -X POST http://127.0.0.1:7331/api/instance/reload
 curl -s -X POST http://127.0.0.1:7331/api/runs/<runId>/intervene \
   -d '{"attemptId":"<runId>/<step>/<n>","action":{"_tag":"OperatorMessage","message":"Stop after the tests pass."}}'
 ```
@@ -146,7 +157,7 @@ Without `target`, an intervention goes to the parent ([run.ts:30][]); to send it
 
 ### Needs you
 
-The Needs you list has seven kinds of entries ([need.ts][]): `ApprovalNeed`, `RunFailureNeed`, `PollFailureNeed`, `PreflightFindingNeed`, `BoardProjectionNeed`, `ScheduleFailureNeed`, and `CycleBudgetNeed`.
+The Needs you list has nine kinds of entries ([need.ts][]): `ApprovalNeed`, `RunFailureNeed`, `PollFailureNeed`, `PreflightFindingNeed`, `BoardProjectionNeed`, `ScheduleFailureNeed`, `CycleBudgetNeed`, `ConfigFileNeed`, and `UnconfiguredWorkerNeed`. An `UnconfiguredWorkerNeed` names a Worker that `usine.yaml` no longer declares and counts the Attempts recorded on it that startup doesn't reconcile.
 
 ## The web UI
 
@@ -157,7 +168,7 @@ The Needs you list has seven kinds of entries ([need.ts][]): `ApprovalNeed`, `Ru
 | `/`                           | Projects: one row per registered repository with Item and lane counts and a status ([routes/index.tsx][]).                                                                 |
 | `/projects/$owner/$name`      | The Board of one Project: lanes of Task cards, drag-and-drop moves on authored label lanes, each card's Run history ([routes/projects/$owner/$name.tsx][], [board.tsx][]). |
 | `/configuration`              | Redirects to `/configuration/loops`.                                                                                                                                       |
-| `/configuration/loops`        | Loops with their trigger, Agent, and a pause toggle ([configuration/loops.tsx][]).                                                                                         |
+| `/configuration/loops`        | Loops with their trigger, Agent, and a pause toggle, and **Reload configuration**, which shows what the reload changed ([configuration/loops.tsx][]).                      |
 | any route with `?run=<runId>` | The Run drawer over the current page ([open-run.ts][]).                                                                                                                    |
 
 The root layout ([`__root.tsx`][root-layout]) has the sidebar, the Needs you strip, and, in setup mode, a notice that lists the credential variables to set and says to restart `usine up`. The drawer has the conversation, plus Task, Event, and Attempts tabs. Its actions are Approve, Mark resolved, Retry, Cancel Run (with a confirmation), and Edit and retry ([run-drawer.tsx:154][]). Its message box sends `OperatorMessage` to the parent or a child, Pause session sends `Interrupt`, and Release child sends `Release` ([session-composer.tsx][]). The drawer keeps each reader's position in browser storage ([ADR 0025](https://github.com/basaltbytes/usine/blob/main/docs/adr/0025-run-conversation-reader-bookmarks.md)).
@@ -204,7 +215,7 @@ Environment:
 1. Refuse a volatile instance folder.
 2. Take the instance lock: an exclusive SQLite transaction on `.usine/instance.lock`, which the OS releases when the process exits ([instance-lock.ts:44][]).
 3. Refuse a port that another process listens on, and print that process's pid when `lsof` finds it ([cli.ts:318][]).
-4. Load the instance folder.
+4. Load the instance folder, then reload it on each SIGHUP ([reload-signal.ts][]).
 5. Load the GitHub App credentials. When they are missing, start in setup mode and open the browser ([up.ts:122][]).
 6. Otherwise, build the runtime and run the HTTP server and the trigger streams together under graceful shutdown. The first SIGINT or SIGTERM drains the open Attempts, for at most `max_attempt_minutes` when it is set; a second signal ends the drain ([shutdown.ts:25][]).
 
@@ -218,16 +229,17 @@ Every service method is an `Effect.fn` span annotated with its domain ids (`runI
 
 These log messages answer common questions:
 
-| Question                               | Message                                                                                                               | Code                                                             |
-| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
-| Did the poll run?                      | `Poll cycle complete`                                                                                                 | [polling.ts:491][]                                               |
-| Did an Item match a Loop?              | `Submitted matching item state`                                                                                       | [loop-evaluation.ts:163][]                                       |
-| What did the engine do with the Event? | `Event claim decided`, `Event joined its existing Run`, `Event remains ignored`                                       | [store.ts:152][], [store.ts:119][], [store.ts:130][]             |
-| Why doesn't a Run start?               | `Run waits for a worker slot`, `Run waits for its approval`, `Attempt deferred until restart; the engine is draining` | [scheduler.ts:142][], [run-driver.ts:356][], [admission.ts:37][] |
-| Did an Attempt start and end?          | `Attempt started`, `Attempt completion decided`                                                                       | [store.ts:326][], [store.ts:204][]                               |
-| Is a Worker ready?                     | `Worker preflight verified`, `SSH Worker preflight verified`, `Worker preflight failed`                               | [local.ts:271][], [ssh/preflight.ts:95][], [executor.ts:80][]    |
-| Did operator input arrive?             | `Operator input applied`, `Session refused operator input`                                                            | [runtime.ts:363][], [runtime.ts:339][]                           |
-| What happened at restart?              | `Runs recovered from the run tables`, `The open Attempt's parent task is live; reattaching it`                        | [run-driver.ts:414][], [run-driver.ts:255][]                     |
+| Question                               | Message                                                                                                                                   | Code                                                             |
+| -------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| Did the poll run?                      | `Poll cycle complete`                                                                                                                     | [polling.ts:491][]                                               |
+| Did an Item match a Loop?              | `Submitted matching item state`                                                                                                           | [loop-evaluation.ts:163][]                                       |
+| What did the engine do with the Event? | `Event claim decided`, `Event joined its existing Run`, `Event remains ignored`                                                           | [store.ts:152][], [store.ts:119][], [store.ts:130][]             |
+| Why doesn't a Run start?               | `Run waits for a worker slot`, `Run waits for its approval`, `Attempt deferred until restart; the engine is draining`                     | [scheduler.ts:142][], [run-driver.ts:356][], [admission.ts:37][] |
+| Did an Attempt start and end?          | `Attempt started`, `Attempt completion decided`                                                                                           | [store.ts:326][], [store.ts:204][]                               |
+| Is a Worker ready?                     | `Worker preflight verified`, `SSH Worker preflight verified`, `Worker preflight failed`                                                   | [local.ts:271][], [ssh/preflight.ts:95][], [executor.ts:80][]    |
+| Did operator input arrive?             | `Operator input applied`, `Session refused operator input`                                                                                | [runtime.ts:363][], [runtime.ts:339][]                           |
+| What happened at restart?              | `Runs recovered from the run tables`, `The open Attempt's parent task is live; reattaching it`                                            | [run-driver.ts:414][], [run-driver.ts:255][]                     |
+| Did a reload apply?                    | `Instance folder reloaded; new Runs use the new configuration`, `Instance folder reload rejected; the running configuration is unchanged` | [current-instance.ts][]                                          |
 
 [cli.ts:10]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/cli.ts#L10
 [cli.ts:318]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/cli.ts#L318
@@ -284,3 +296,5 @@ These log messages answer common questions:
 [runtime.ts:339]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/durable/src/attempt/runtime.ts#L339
 [runtime.ts:363]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/durable/src/attempt/runtime.ts#L363
 [#279]: https://github.com/basaltbytes/usine/issues/279
+[current-instance.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/current-instance/current-instance.ts
+[reload-signal.ts]: https://github.com/basaltbytes/usine/blob/main/apps/server/src/reload-signal.ts
