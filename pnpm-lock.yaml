@@ -162,6 +162,9 @@ importers:
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.0.0-rc.111(effect@4.0.0-rc.111)(redis@6.2.1)
+      '@effect/platform-node-shared':
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111(effect@4.0.0-rc.111)
       '@usine/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -448,6 +451,9 @@ importers:
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.0.0-rc.111(effect@4.0.0-rc.111)(redis@6.2.1)
+      '@effect/platform-node-shared':
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111(effect@4.0.0-rc.111)
       '@usine/agents':
         specifier: workspace:*
         version: link:../agents
@@ -476,6 +482,9 @@ importers:
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.0.0-rc.111(effect@4.0.0-rc.111)(redis@6.2.1)
+      '@effect/platform-node-shared':
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111(effect@4.0.0-rc.111)
       '@effect/sql-sqlite-node':
         specifier: 'catalog:'
         version: 4.0.0-rc.111(effect@4.0.0-rc.111)
@@ -616,6 +625,9 @@ importers:
       '@effect/platform-node':
         specifier: 'catalog:'
         version: 4.0.0-rc.111(effect@4.0.0-rc.111)(redis@6.2.1)
+      '@effect/platform-node-shared':
+        specifier: 'catalog:'
+        version: 4.0.0-rc.111(effect@4.0.0-rc.111)
       '@usine/config':
         specifier: workspace:*
         version: link:../config
