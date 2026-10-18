@@ -422,9 +422,13 @@ const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
  * Provides {@link ExpressionEngine} on `@marcbachmann/cel-js`, pinned to 8.0.0 as
  * the CEL seam requires
  * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
- * The layer has no requirements. Before evaluation it converts JSON integers
- * declared as `int` or `uint` to `bigint` and reads absent nullable fields as
- * `null`.
+ * The layer has no requirements. Before evaluation it converts JSON integers to
+ * `bigint` where the {@link Environment} declares `int` or `uint`: on a
+ * variable, on a field of a declared object type, or as the item type of a
+ * `list<T>`, at any depth. It also reads absent nullable fields of declared
+ * object types as `null`. It does not convert values inside a `map<K,V>`, so
+ * reading a JSON integer from a `map<string,int>` fails evaluation because the
+ * value is a `double`. Declare such map values as `double`.
  */
 export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {
   relatedStringLiterals,
