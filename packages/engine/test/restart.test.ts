@@ -261,6 +261,59 @@ describe("engine restart", () => {
       ),
   );
 
+  it.live("reconciles each persisted Attempt once per start, however the engine is provided", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+          Effect.succeed(stepResult("delivered before the restart")),
+        ]);
+        const firstScope = yield* Scope.make();
+        const firstEngine = Context.get(
+          yield* Scope.provide(
+            Layer.build(engineLayer(directory, executorLayer(plans))),
+            firstScope,
+          ),
+          RunEngine,
+        );
+        const accepted = yield* firstEngine.submit(submission({ number: 58 }));
+        assert(accepted._tag === "Claimed");
+        const delivered = yield* waitFor(
+          firstEngine,
+          accepted.runId,
+          ({ run }) => run.state._tag === "Succeeded",
+        );
+        yield* Scope.close(firstScope, Exit.void);
+
+        const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+        const engine = engineLayer(
+          directory,
+          Layer.succeed(StepExecutor)({
+            isLive: () => Effect.succeed(false),
+            outcome: () => Effect.succeed(Option.none()),
+            recover: (attempt) => Ref.update(recovered, (ids) => [...ids, attempt.attemptId]),
+            intervene: () => Effect.void,
+            interrupt: () => Effect.void,
+            reserve: () => Effect.never,
+            execute: () => Effect.die("no Attempt starts after the restart"),
+          }),
+        );
+        // The orchestrator provides the engine to several services at once.
+        const consumer = () =>
+          Layer.effectDiscard(Effect.asVoid(RunEngine)).pipe(Layer.provide(engine));
+        const secondScope = yield* Scope.make();
+        yield* Scope.provide(
+          Layer.build(Layer.mergeAll(engine, consumer(), consumer())),
+          secondScope,
+        );
+        assert.deepStrictEqual(
+          yield* Ref.get(recovered),
+          delivered.attempts.map(({ id }) => id),
+        );
+        yield* Scope.close(secondScope, Exit.void);
+      }),
+    ),
+  );
+
   it.live("drains an admitted Attempt and leaves queued and new work for restart", () =>
     withInstance((directory) =>
       Effect.scoped(

@@ -64,7 +64,7 @@ The fiber begins the Attempt and gives `StepExecutor` a sink for envelopes. `Ste
 | `cancel(attemptId)`                  | Stops preparation, or cancels the live parent task, waits a grace period, then interrupts.                                                                                        |
 | `intervene(attemptId, intervention)` | Delivers an operator action to the live session.                                                                                                                                  |
 | `isLive`, `outcome`                  | Tell a restarted engine whether to reattach an open Attempt or finish it with a stored result.                                                                                    |
-| `recover(attempt, record)`           | Salvages or removes a checkout that an earlier process left.                                                                                                                      |
+| `recover(attempt, record)`           | Salvages or removes a checkout that an earlier process left. The engine calls it once per persisted Attempt at each start.                                                        |
 
 ```ts title="packages/executor/src/executor.ts"
 /** Prepares isolated checkouts, runs Attempts on a Worker, and releases their resources (ADR 0006). */

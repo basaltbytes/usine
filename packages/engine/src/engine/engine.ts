@@ -178,6 +178,31 @@ const makeRunEngine = Effect.gen(function* () {
     return yield* store.transcript(query);
   });
 
+  // Startup reconciliation belongs in this memoized layer: a combinator such as
+  // `Layer.tap` runs again for every service the engine is provided to.
+  const recoverWorkspaces = Effect.fn("RunEngine.recoverWorkspaces")(function* () {
+    // Before Run recovery can admit a retry, publish and durably record any
+    // work left by its predecessor. Failed recovery keeps the checkout on disk.
+    yield* Effect.forEach(
+      yield* store.salvageCandidates,
+      (attempt) =>
+        stepExecutor
+          .recover(attempt, (salvage) => store.recordSalvage(attempt.attemptId, salvage))
+          .pipe(
+            Effect.tapError((error) =>
+              Effect.logError("Attempt salvage reconciliation failed; work retained", {
+                attemptId: attempt.attemptId,
+                worker: attempt.worker,
+                message: String(error),
+              }),
+            ),
+            Effect.ignore,
+          ),
+      { discard: true },
+    );
+  });
+
+  yield* recoverWorkspaces();
   yield* driver.reconcile();
   const interval = yield* ReconcileInterval;
   yield* Effect.sleep(interval).pipe(
@@ -280,34 +305,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   RunEngineError | DatabaseError,
   Crypto.Crypto | StepExecutor | TriggerCondition | DatabaseRequirements
 > => {
-  const store = RunStore.layer.pipe(
-    Layer.provide(database),
-    Layer.tap(
-      Effect.fn("RunEngine.recoverWorkspaces")(function* (services) {
-        const store = Context.get(services, RunStore);
-        const stepExecutor = yield* StepExecutor;
-        // Before Run recovery can admit a retry, publish and durably record any
-        // work left by its predecessor. Failed recovery keeps the checkout on disk.
-        yield* Effect.forEach(
-          yield* store.salvageCandidates,
-          (attempt) =>
-            stepExecutor
-              .recover(attempt, (salvage) => store.recordSalvage(attempt.attemptId, salvage))
-              .pipe(
-                Effect.tapError((error) =>
-                  Effect.logError("Attempt salvage reconciliation failed; work retained", {
-                    attemptId: attempt.attemptId,
-                    worker: attempt.worker,
-                    message: String(error),
-                  }),
-                ),
-                Effect.ignore,
-              ),
-          { discard: true },
-        );
-      }),
-    ),
-  );
+  const store = RunStore.layer.pipe(Layer.provide(database));
   const driver = RunDriver.layer.pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(AttemptAdmission.layer),
