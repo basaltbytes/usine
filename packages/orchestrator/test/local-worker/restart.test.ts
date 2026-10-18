@@ -29,6 +29,7 @@ import {
   StubChildren,
 } from "@usine/durable/testing";
 import { layer as localLayer } from "../../src/local.ts";
+import { fixedConfigLayer } from "../support/current-instance.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import {
   LIVE_TEST_TIMEOUT,
@@ -59,6 +60,7 @@ const durableRuntime = (
     Layer.provide(credentials),
     Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
     Layer.provide(alwaysHoldsLayer),
+    Layer.provide(fixedConfigLayer(config)),
   );
 
 const commitInWorktree = (worktree: string, message: string) =>

@@ -18,6 +18,7 @@ import { TranscriptAllQuery } from "@usine/engine/transcript";
 import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as exeDevLayer } from "../../src/exe-dev.ts";
+import { fixedConfigLayer } from "../support/current-instance.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
 const VmList = Schema.Struct({
@@ -103,6 +104,7 @@ describe("live exe.dev Worker", () => {
       }).pipe(
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(durableAttemptRuntimeLayer(instanceDirectory)),
+        Layer.provide(fixedConfigLayer(config)),
       );
 
       yield* Effect.gen(function* () {

@@ -1,10 +1,11 @@
 import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
+import { InstanceReload } from "@usine/orchestrator/current-instance";
 import { ConfigFileNeed, UnconfiguredWorkerNeed } from "@usine/orchestrator/operator";
 import { Option, Schema } from "effect";
 import { assert, describe, it } from "vitest";
-import { needCopy, salvageMessage } from "../src/operator-copy.ts";
+import { needCopy, reloadSummary, salvageMessage } from "../src/operator-copy.ts";
 
 describe("salvage copy in the run drawer", () => {
   it("names the pushed ref and short commit", () => {
@@ -45,7 +46,7 @@ describe("config file copy in Needs you", () => {
     const copy = needCopy(need("loop", "loops/ghost.md", "Unknown agent: ghost"));
     assert.strictEqual(copy.title, "Loop quarantined");
     assert.include(copy.detail, "loops/ghost.md: Unknown agent: ghost");
-    assert.include(copy.detail, "restart usine up");
+    assert.include(copy.detail, "reload the configuration");
     assert.isNull(copy.runId);
   });
 
@@ -53,6 +54,53 @@ describe("config file copy in Needs you", () => {
     const copy = needCopy(need("agent", "agents/intern.md", "Expected a known harness"));
     assert.strictEqual(copy.title, "Agent file not loaded");
     assert.include(copy.detail, "agents/intern.md: Expected a known harness");
+  });
+});
+
+describe("reload summary on the Loops page", () => {
+  const reload = (encoded: Partial<typeof InstanceReload.Encoded>) =>
+    Schema.decodeUnknownSync(InstanceReload)({
+      loops: { added: [], removed: [], changed: [] },
+      agents: { added: [], removed: [], changed: [] },
+      labels: { added: [], removed: [], changed: [] },
+      repos: { added: [], removed: [], changed: [] },
+      settingsChanged: false,
+      operatorChanged: false,
+      quarantinedLoops: [],
+      invalidAgents: [],
+      ...encoded,
+    });
+
+  it("names what each kind of change touched and the files left out", () => {
+    const lines = reloadSummary(
+      reload({
+        loops: { added: ["triage"], removed: ["start-dev"], changed: [] },
+        agents: { added: [], removed: [], changed: ["developer"] },
+        settingsChanged: true,
+        quarantinedLoops: [
+          {
+            file: "loops/start-dev.md",
+            error: {
+              _tag: "ConfigFileError",
+              file: "loops/start-dev.md",
+              stage: "reference",
+              message: "Unknown agent: ghost",
+            },
+          },
+        ],
+      }),
+    );
+    assert.deepStrictEqual(lines, [
+      "Loops added: triage",
+      "Loops removed: start-dev",
+      "Agents changed: developer",
+      "Settings changed",
+      "1 file was left out; Needs you lists it",
+    ]);
+  });
+
+  it("says when the folder matched the running configuration", () => {
+    assert.deepStrictEqual(reloadSummary(reload({})), ["Nothing changed"]);
   });
 });
 

@@ -23,6 +23,10 @@
       "types": "./dist/credentials.d.ts",
       "default": "./dist/credentials.js"
     },
+    "./current-instance": {
+      "types": "./dist/current-instance/current-instance.d.ts",
+      "default": "./dist/current-instance/current-instance.js"
+    },
     "./exe-dev": {
       "types": "./dist/exe-dev.d.ts",
       "default": "./dist/exe-dev.js"

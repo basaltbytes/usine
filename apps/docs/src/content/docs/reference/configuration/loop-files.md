@@ -178,7 +178,7 @@ Labels on this issue: {{ item.labels.nodes.map(label, label.name).join(", ") }}
 
 usine type-checks every interpolation when the file loads, but a value can still fail at render time, for example a field that is `null` on this Item (see [null fields](/reference/configuration/expressions/#fields-that-can-be-null)).
 
-- For `issue` and `pr` Loops, usine submits no Event for that Loop and Item and continues with the other Loops and Items; the poll cursor still advances. **Needs you** shows the failure with the Loop, the Item, and the interpolation for as long as it lasts, and usine logs `Loop evaluation failed on an Item` once per Loop, Item, and content hash. usine evaluates the Item again when it changes, and on the first poll after a restart, so a fixed template renders without waiting for a change.
+- For `issue` and `pr` Loops, usine submits no Event for that Loop and Item and continues with the other Loops and Items; the poll cursor still advances. **Needs you** shows the failure with the Loop, the Item, and the interpolation for as long as it lasts, and usine logs `Loop evaluation failed on an Item` once per Loop, Item, and content hash. usine evaluates the Item again when it changes, and on the first poll after a restart or a reload, so a fixed template renders without waiting for a change.
 - For `schedule` Loops, the Tick fails for that repository, and usine evaluates it again at the next wake.
 
 ### What the Agent receives
@@ -207,7 +207,7 @@ usine validates each Loop file separately. A file that fails any check is quaran
 | `expression` | `if` type-checks as a boolean; each interpolation is closed and type-checks as a scalar. | `No such key: nmae` |
 | `reference` | The Agent is in the roster; selected repositories and tags exist in `usine.yaml`. | `Unknown selector tags: mobile` |
 
-At startup, `usine up` logs each quarantined Loop as a warning, `Loop quarantined; it opens no Runs until its file is fixed`, with its file, stage, and message, and lists it in **Needs you** as **Loop quarantined**. Fix the file and restart `usine up`.
+At startup and at each reload, usine logs each quarantined Loop as a warning, `Loop quarantined; it opens no Runs until its file is fixed`, with its file, stage, and message, and lists it in **Needs you** as **Loop quarantined**. Fix the file and reload the configuration ([CLI](/reference/configuration/cli/#reload)).
 
 Two checks only log a warning. If `if` compares `item.labels` against a label name that isn't declared under `labels` in `usine.yaml`, usine logs `Loop trigger references an undeclared GitHub label` and still loads the Loop. The other check covers labels in Board Lanes; see [`repos[].lanes`](/reference/configuration/usine-yaml/#reposlanes).
 

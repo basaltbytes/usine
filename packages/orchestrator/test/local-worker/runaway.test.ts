@@ -17,6 +17,7 @@ import { TestClock } from "effect/testing";
 import { layer as localLayer } from "../../src/local.ts";
 import { stepExecutorLayer } from "../../src/scheduler.ts";
 import { type StubParent, stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
+import { fixedConfigLayer } from "../support/current-instance.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import {
   LIVE_TEST_TIMEOUT,
@@ -94,6 +95,7 @@ describe("local worker runaway guard", () => {
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(storage, spender)),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(fixedConfigLayer(ceiling)),
         );
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -154,7 +156,14 @@ describe("local worker runaway guard", () => {
             yield* fileSystem.readDirectory(`${root}/.usine/workers/local/attempts`),
             [],
           );
-        }).pipe(Effect.provide(stepExecutorLayer(ceiling, []).pipe(Layer.provide(executor))));
+        }).pipe(
+          Effect.provide(
+            stepExecutorLayer(ceiling, []).pipe(
+              Layer.provide(executor),
+              Layer.provide(fixedConfigLayer(ceiling)),
+            ),
+          ),
+        );
       }).pipe(Effect.provide(NodeServices.layer)),
     LIVE_TEST_TIMEOUT,
   );

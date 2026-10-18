@@ -1,6 +1,5 @@
 import { BrainSpec } from "@usine/core/agent/brain";
 import { NodeServices } from "@effect/platform-node";
-import type { LoadedInstance } from "@usine/config/instance";
 import { ConfigParser } from "@usine/config/parser";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
@@ -10,9 +9,10 @@ import { GitHubApp } from "@usine/github/github-app";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
 import { GitHubPolling } from "@usine/github/polling";
-import { Layer } from "effect";
+import { Effect, Layer } from "effect";
 import { FetchHttpClient } from "effect/unstable/http";
 import { gitHubCredentialLayer } from "./credentials.ts";
+import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
 import { LabelReconciler } from "./label-reconciler.ts";
 import { Operator, OperatorObservation } from "./operator/operator.ts";
@@ -29,33 +29,43 @@ export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =
   );
 
 /**
- * The full Node composition for one loaded factory: both trigger streams, the
+ * The full Node composition for one factory: both trigger streams, the
  * durable engine, Worker execution with each Attempt's Pi parent on the
- * instance's durable storage, and the operator surface. The Worker kind in
- * `usine.yaml` selects the executor. The caller supplies the GitHub credentials.
+ * instance's durable storage, and the operator surface. The caller supplies
+ * the GitHub credentials and the `CurrentInstance`. Its snapshot when the
+ * layer builds selects the executor from the Worker kind in `usine.yaml` and
+ * names the brains each Worker preflights; everything else reads the current
+ * instance when it acts.
  */
-export const runtimeLayer = (instanceDirectory: InstanceDirectory, instance: LoadedInstance) => {
+export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
   const app = GitHubApp.layer.pipe(
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
   );
-  const credentials = gitHubCredentialLayer(instance.config).pipe(Layer.provide(app));
+  const credentials = gitHubCredentialLayer.pipe(Layer.provide(app));
   const polling = GitHubPolling.layer.pipe(
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),
     Layer.provide(NodeServices.layer),
   );
-  const triggerCondition = triggerConditionLayer(instance).pipe(
+  const triggerCondition = triggerConditionLayer.pipe(
     Layer.provide(polling),
     Layer.provide(MarcbachmannCelLayer),
   );
   const attemptRuntime = durableAttemptRuntimeLayer(instanceDirectory).pipe(
     Layer.provide(NodeServices.layer),
   );
-  const engine = workerEngineLayer(
-    instanceDirectory,
-    instance.config,
-    instance.agents.map(({ harness, model, effort }) => new BrainSpec({ harness, model, effort })),
+  const engine = Layer.unwrap(
+    Effect.gen(function* () {
+      const startup = yield* (yield* CurrentInstance).get;
+      return workerEngineLayer(
+        instanceDirectory,
+        startup.config,
+        startup.agents.map(
+          ({ harness, model, effort }) => new BrainSpec({ harness, model, effort }),
+        ),
+      );
+    }),
   ).pipe(
     Layer.provide(credentials),
     Layer.provide(triggerCondition),

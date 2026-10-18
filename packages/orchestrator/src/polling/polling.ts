@@ -90,6 +90,12 @@ interface WatchedRepository {
   readonly watches: ReadonlyArray<WatchKey>;
 }
 
+/** The repositories whose recorded failing Items were fetched again for one instance. */
+interface FailingItemRetries {
+  readonly instance: Option.Option<LoadedInstance>;
+  readonly repositories: ReadonlySet<CursorKey>;
+}
+
 interface RepositoryCycle {
   readonly changedItems: number;
   readonly submissions: ReadonlyArray<SubmissionResult>;
@@ -137,11 +143,14 @@ export class PollingTriggers extends Context.Service<
      * A repository commits its cursor only after all Items finish. A Loop
      * whose `if:` or prompt fails on an Item is logged once per content hash
      * and reported in every cycle while it keeps failing; the Item's other
-     * Loops and the repository's other Items continue. An open pull request
-     * or failing Item that only the cursor kept and that GitHub no longer has
-     * is dropped from the cursor with a warning, and its unstarted Runs are
-     * revoked. Repository failures are reported while siblings continue;
-     * failure to read Loop runtime state fails the whole cycle.
+     * Loops and the repository's other Items continue. The first completed
+     * cycle of the process, and the first one with an instance that differs
+     * from the previous cycle's, fetches those failing Items again, changed
+     * or not. An open pull request or failing Item that only the cursor kept
+     * and that GitHub no longer has is dropped from the cursor with a warning,
+     * and its unstarted Runs are revoked. Repository failures are reported
+     * while siblings continue; failure to read Loop runtime state fails the
+     * whole cycle.
      */
     readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle, EnginePersistenceError>;
     /** Nudges an authoritative Item fetch after a self-write, retaining any request backoff from the writer. Pending duplicates coalesce; polling repairs loss. */
@@ -150,8 +159,12 @@ export class PollingTriggers extends Context.Service<
       item: ChangedItem,
       backoffUntil?: Option.Option<DateTime.Utc>,
     ) => Effect.Effect<void>;
-    /** Repeats cycles at the configured interval and processes self-write Hints, respecting GitHub request backoff. */
-    readonly run: (instance: LoadedInstance) => Effect.Effect<never>;
+    /**
+     * Repeats cycles at the configured interval and processes self-write Hints,
+     * respecting GitHub request backoff. Each cycle and each Hint reads the
+     * instance from `current`, so a reload applies from the next one.
+     */
+    readonly run: (current: Effect.Effect<LoadedInstance>) => Effect.Effect<never>;
     /** The last completed cycle, including its isolated failures; absent until the first cycle completes. */
     readonly latest: Effect.Effect<Option.Option<PollCycle>>;
   }
@@ -166,9 +179,12 @@ export class PollingTriggers extends Context.Service<
       const latest = yield* Ref.make(Option.none<PollCycle>());
       const hints = yield* ItemHints;
       const ownership = yield* Semaphore.make(1);
-      // Loops are fixed for the life of the process, so a failing Item is
-      // fetched again only on its repository's first completed cycle.
-      const retriedFailingItems = yield* Ref.make<ReadonlySet<CursorKey>>(new Set());
+      // A failing Item is fetched again only on its repository's first
+      // completed cycle of a process or of a reloaded instance.
+      const retriedFailingItems = yield* Ref.make<FailingItemRetries>({
+        instance: Option.none(),
+        repositories: new Set(),
+      });
 
       const emptyCursor = (watches: ReadonlyArray<WatchKey>) =>
         new StoredPollCursor({
@@ -232,7 +248,9 @@ export class PollingTriggers extends Context.Service<
           // begin, including on the first cycle after `usine up`.
           const detected = yield* github.changes(watched.repository.name, stored.cursor);
           yield* hints.defer(detected.backoffUntil);
-          const retrying = (yield* Ref.get(retriedFailingItems)).has(cursorKey(watched.repository))
+          const retrying = (yield* Ref.get(retriedFailingItems)).repositories.has(
+            cursorKey(watched.repository),
+          )
             ? []
             : stored.failingItems;
           // Mergeability can change without an issue updated_at/ETag change
@@ -259,7 +277,8 @@ export class PollingTriggers extends Context.Service<
             ),
           );
           // Fetched only because the cursor kept them: the open pull requests
-          // it refreshes and the Items whose Loops failed before this process.
+          // it refreshes and the Items whose Loops failed before this process
+          // or this instance.
           const cursorOnly = new Set(
             [...stored.openPullRequests, ...retrying]
               .map(({ number }) => number)
@@ -267,7 +286,7 @@ export class PollingTriggers extends Context.Service<
           );
           if (retrying.length > 0) {
             yield* Effect.logInfo(
-              "Evaluating Items whose Loops failed before this process started",
+              "Evaluating Items whose Loops failed before this process started or the instance was reloaded",
               {
                 repository: watched.repository.name,
                 items: retrying.map(({ number }) => number).join(", "),
@@ -369,10 +388,10 @@ export class PollingTriggers extends Context.Service<
           ) {
             yield* writeCursor(watched, nextCursor);
           }
-          yield* Ref.update(
-            retriedFailingItems,
-            (keys) => new Set([...keys, cursorKey(watched.repository)]),
-          );
+          yield* Ref.update(retriedFailingItems, (retried) => ({
+            ...retried,
+            repositories: new Set([...retried.repositories, cursorKey(watched.repository)]),
+          }));
           yield* Effect.forEach(resets, budgets.acknowledgeReset, { discard: true });
           return {
             // Refreshed open PRs are observed, not reported as changed by
@@ -429,6 +448,11 @@ export class PollingTriggers extends Context.Service<
       const poll = Effect.fn("PollingTriggers.poll")(
         function* (instance: LoadedInstance) {
           yield* hints.awaitBackoff;
+          yield* Ref.update(retriedFailingItems, (retried) =>
+            Option.contains(retried.instance, instance)
+              ? retried
+              : { instance: Option.some(instance), repositories: new Set<CursorKey>() },
+          );
           const paused = new Set(
             (yield* loops.states).filter((state) => state.paused).map((state) => state.loop),
           );
@@ -578,7 +602,7 @@ export class PollingTriggers extends Context.Service<
           ),
       );
 
-      const waitForNextPoll = (instance: LoadedInstance, target: number) =>
+      const waitForNextPoll = (current: Effect.Effect<LoadedInstance>, target: number) =>
         Effect.gen(function* () {
           while (true) {
             const remaining = target - (yield* Clock.currentTimeMillis);
@@ -588,14 +612,15 @@ export class PollingTriggers extends Context.Service<
               Effect.sleep(Duration.millis(remaining)).pipe(Effect.as(Option.none<ItemHint>())),
             );
             if (Option.isNone(hint)) return;
-            yield* refreshHint(instance, hint.value);
+            yield* refreshHint(yield* current, hint.value);
           }
         });
 
       // `run` never returns, so wrapping it in Effect.fn would open a span that
       // never closes; `poll` opens the span for each cycle.
-      const run = (instance: LoadedInstance): Effect.Effect<never> =>
+      const run = (current: Effect.Effect<LoadedInstance>): Effect.Effect<never> =>
         Effect.gen(function* () {
+          const instance = yield* current;
           const startedAt = yield* Clock.currentTimeMillis;
           const result = yield* Effect.result(poll(instance));
           if (Result.isFailure(result)) {
@@ -626,7 +651,7 @@ export class PollingTriggers extends Context.Service<
             preflightFindings: cycle.preflightFindings.length,
             sleepMs,
           });
-          yield* waitForNextPoll(instance, target);
+          yield* waitForNextPoll(current, target);
         }).pipe(Effect.forever);
 
       return { latest: Ref.get(latest), poll, run, hint: hints.offer };
