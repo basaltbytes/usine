@@ -42,9 +42,21 @@ export type CheckErrorCode = typeof CheckErrorCode.Type;
 export class ExpressionCheckError extends Schema.TaggedError<ExpressionCheckError>(
   "@usine/expression/ExpressionCheckError",
 )("ExpressionCheckError", {
+  /** The expression that failed checking, exactly as the caller passed it. */
   source: Source,
+  /** The stage that rejected the expression. Branch on this rather than on `message`. */
   code: CheckErrorCode,
+  /**
+   * A readable description from the CEL implementation, for operators. It can
+   * span several lines with an excerpt of `source` that marks the failing spot.
+   * Its wording is not part of the contract.
+   */
   message: Schema.NonEmptyString,
+  /**
+   * The zero-based character offset in `source` where the failure starts, when
+   * the CEL implementation reports one. Parse and type errors usually carry it;
+   * `unexpected_result_type` and `check_failed` never do.
+   */
   position: Schema.Option(Position),
 }) {}
 
@@ -57,7 +69,13 @@ export class ExpressionCheckError extends Schema.TaggedError<ExpressionCheckErro
 export class ExpressionEvaluationError extends Schema.TaggedError<ExpressionEvaluationError>(
   "@usine/expression/ExpressionEvaluationError",
 )("ExpressionEvaluationError", {
+  /** The expression whose evaluation failed, exactly as the caller passed it. */
   source: Source,
+  /**
+   * A readable description of the runtime failure, for operators. It can span
+   * several lines with an excerpt of `source` that marks the failing spot. Its
+   * wording is not part of the contract.
+   */
   message: Schema.NonEmptyString,
 }) {}
 

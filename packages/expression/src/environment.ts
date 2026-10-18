@@ -36,8 +36,15 @@ const uniqueNames = (message: string) =>
  * Expressions can compare it with `null`, while reads below it stay typed.
  */
 export class ObjectField extends Schema.Class<ObjectField>("@usine/expression/ObjectField")({
+  /** The key expressions read after a dot, such as `title` in `item.title`. A CEL identifier. */
   name: Identifier,
+  /** The CEL type of the field's value when it is present and not `null`. */
   type: TypeReference,
+  /**
+   * Whether the field can hold `null` or be absent from the payload. Defaults
+   * to `false` when constructing. Reading an absent non-nullable field fails
+   * evaluation.
+   */
   nullable: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
 }) {}
 
@@ -47,7 +54,12 @@ export class ObjectField extends Schema.Class<ObjectField>("@usine/expression/Ob
  * reference it. Field names must be unique within the type.
  */
 export class ObjectType extends Schema.Class<ObjectType>("@usine/expression/ObjectType")({
+  /**
+   * The name a {@link TypeReference} uses to refer to this type, such as
+   * `Label`. Dots are allowed for qualified names.
+   */
   name: ObjectTypeName,
+  /** The fields expressions can read on a value of this type, each name used once. */
   fields: Schema.Array(ObjectField).check(uniqueNames("Expected unique CEL object-field names")),
 }) {}
 
@@ -57,7 +69,9 @@ export class ObjectType extends Schema.Class<ObjectType>("@usine/expression/Obje
  * the same name.
  */
 export class Variable extends Schema.Class<Variable>("@usine/expression/Variable")({
+  /** The identifier expressions use for the variable, and its key in `context`. */
   name: Identifier,
+  /** The CEL type of the variable's value, usually one of the environment's object types. */
   type: TypeReference,
 }) {}
 
@@ -67,6 +81,11 @@ export class Variable extends Schema.Class<Variable>("@usine/expression/Variable
  * name anything outside this environment fail checking.
  */
 export class Environment extends Schema.Class<Environment>("@usine/expression/Environment")({
+  /**
+   * The object types expressions can use, in declaration order: a type comes
+   * before the types whose fields reference it.
+   */
   types: Schema.Array(ObjectType).check(uniqueNames("Expected unique CEL object-type names")),
+  /** The root variables expressions can name, such as `repo` and `item`. */
   variables: Schema.Array(Variable).check(uniqueNames("Expected unique CEL variable names")),
 }) {}
