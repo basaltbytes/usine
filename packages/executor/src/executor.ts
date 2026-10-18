@@ -80,9 +80,11 @@ export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityEr
   /**
    * The missing prerequisite. `machine`: the machine or VM is absent, stopped,
    * or unreachable, or its Worker directory is not writable. `toolchain`: Git or a brain's
-   * harness does not run. `harness-login`: a brain's harness is not logged in.
-   * `credentials`: an exe.dev GitHub integration is not ready. `gateway`: the
-   * Gateway in front of the machine does not answer or is not reachable from it.
+   * harness does not run. `memory`: the machine has less than 1.5 GiB of memory per
+   * concurrent Attempt, has no swap for more than one, or does not report its memory.
+   * `harness-login`: a brain's harness is not logged in. `credentials`: an exe.dev
+   * GitHub integration is not ready. `gateway`: the Gateway in front of the machine
+   * does not answer or is not reachable from it.
    */
   capability: WorkerCapability,
   /** A summary for operators of the check that failed. */
@@ -219,10 +221,11 @@ export class WorkerCredential extends Schema.Class<WorkerCredential>(
 )({
   /**
    * The token that git and gh authenticate with. The executor never writes it
-   * inside the checkout, and wipes it from memory when the Attempt's scope closes.
+   * inside the checkout. When the Attempt's scope closes, it removes the token
+   * from this `Redacted` wrapper, so `Redacted.value` on it throws from then on.
    */
   value: Schema.Redacted(Schema.String),
-  /** When the token stops working. The executor requests a new credential once fewer than five minutes remain. */
+  /** When the token stops working. The executor requests a new credential once five minutes or fewer remain. */
   expiresAt: Schema.DateTimeUtc,
 }) {}
 
