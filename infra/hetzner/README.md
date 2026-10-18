@@ -9,7 +9,10 @@ Hetzner Cloud in Falkenstein (`fsn1`), Nuremberg (`nbg1`), or Helsinki (`hel1`):
   sets `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium`, which Playwright does not read
   itself, so a project's test config passes it to Playwright as `executablePath`, as
   `apps/web/vitest.config.ts` does. A Turborepo task sees the variable only when it lists it in
-  `env`, as the `test` task in `turbo.json` does. The same file builds a Worker behind the gateway
+  `env`, as the `test` task in `turbo.json` does. `/etc/environment` also sets `TURBO_CACHE_DIR`,
+  which Turborepo reads itself: see [Caches shared by Attempts](#caches-shared-by-attempts). Each
+  of an Attempt's children is a non-interactive SSH session, which gets these variables from
+  `/etc/environment` and reads no shell profile. The same file builds a Worker behind the gateway
   of `gateway/`, where `gateway/gateway.sh worker-user-data` adds the gateway's Worker settings to
   it.
 - `create-worker.sh` creates the server with that file, labels it `usine=worker`, and attaches a
@@ -77,6 +80,8 @@ workers:
 - `root` is a directory the SSH user can write to; cloud-init creates `/home/usine/.usine`. Each
   Worker keeps its cached clones, Attempt checkouts, and Attempt credentials under
   `<root>/workers/<name>`.
+- `max_concurrent_attempts` is the number of Attempts the Worker runs at the same time. Its memory
+  must carry them: see [Memory per Attempt](#memory-per-attempt).
 
 Every Worker in one `usine.yaml` must have the same kind. Each Attempt clones from GitHub with the
 one-hour token the factory's GitHub App mints for the Attempt's repository; the token is written to
@@ -84,6 +89,41 @@ one-hour token the factory's GitHub App mints for the Attempt's repository; the 
 
 A Worker on a private network behind the gateway of `gateway/` takes a `gateway` setting instead,
 and no token is written on its machine: see [`gateway/README.md`](gateway/README.md).
+
+## Memory per Attempt
+
+The children of an Attempt run the repository's own gates on the Worker, such as `pnpm install`,
+`pnpm build`, and `pnpm test`, and these use far more memory than the harnesses. On 2026-10-15 two
+Attempts at once on a 4 GB Worker without swap thrashed it until sshd stopped answering
+([#270](https://github.com/basaltbytes/usine/issues/270)). At startup, preflight reads the
+Worker's memory and swap from `/proc/meminfo` and divides the memory by `max_concurrent_attempts`:
+
+| Memory per concurrent Attempt | Preflight                                                          |
+| ----------------------------- | ------------------------------------------------------------------ |
+| 3 GiB or more                 | passes                                                             |
+| 1.5 GiB to 3 GiB              | passes, and logs a warning with a `max_concurrent_attempts` to use |
+| less than 1.5 GiB             | fails the `memory` check, and `usine up` stops                     |
+
+A Worker without swap also fails the `memory` check when `max_concurrent_attempts` is more than 1.
+A cx33 or cpx32 has 7.7 GiB of memory and gets a 2 GB swap file from `cloud-init.yaml`, so it runs
+two Attempts without a warning.
+
+## Caches shared by Attempts
+
+Every Attempt starts in a new worktree, so only the caches outside the worktree carry over from
+one Attempt to the next. All Attempts on the machine run as the `usine` user and share two caches:
+
+- pnpm's store, at pnpm's default location `/home/usine/.local/share/pnpm/store`. `pnpm install`
+  links packages from it into the worktree and downloads only the packages it lacks.
+- Turborepo's cache, at `/home/usine/.cache/turbo`, which `/etc/environment` sets as
+  `TURBO_CACHE_DIR`. A task whose inputs match a run of an earlier Attempt restores its outputs
+  instead of running. The variable takes precedence over a `cacheDir` in the repository's
+  `turbo.json`. Turborepo still writes each task's log to `.turbo/` in the package's folder, which
+  is removed with the worktree.
+
+Without `TURBO_CACHE_DIR`, Turborepo 2.10 puts the cache of a linked worktree beside the main
+repository, which for an Attempt is `<root>/workers/<name>/repos/.turbo/cache`, unless `turbo.json`
+sets `cacheDir`.
 
 ## Remove a Worker
 
