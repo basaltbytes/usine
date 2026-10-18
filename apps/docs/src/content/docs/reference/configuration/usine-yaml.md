@@ -234,9 +234,11 @@ Every kind takes these keys:
 | --- | --- | --- | --- |
 | `name` | string | required | Kebab-case: lowercase letters and digits separated by single hyphens. |
 | `kind` | `local`, `ssh`, `exe.dev` | required | Selects the Worker adapter and the other keys it accepts. |
-| `max_concurrent_attempts` | integer ≥ 1 | `1` | Attempts the Worker runs at the same time. |
+| `max_concurrent_attempts` | integer ≥ 1 | `1` | Attempts the Worker runs at the same time. The Worker's memory must carry them; see below. |
 
 Runs wait for a free Worker slot in the order their Events arrived ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/scheduler.ts#L87)). At startup, `usine up` runs Preflight on every Worker for every harness in the Agent roster. A failed Preflight stops startup.
+
+Preflight also divides the Worker's memory by `max_concurrent_attempts`. It fails the `memory` check, which stops startup, when an Attempt would get less than 1.5 GiB, or when the Worker has no swap and `max_concurrent_attempts` is more than 1. Below 3 GiB per Attempt it logs a warning with a value to use. The limits come from two Attempts that thrashed a 4 GB Worker without swap until sshd stopped answering ([#270](https://github.com/basaltbytes/usine/issues/270)). Local Workers on Linux and SSH Workers report memory and swap in `/proc/meminfo`. On macOS, preflight reads the physical memory and counts swap as present, because macOS adds swap files as memory runs short.
 
 :::caution
 `usine up` uses one executor for every Worker. It starts the instance only when all Workers are `local` or all are `ssh` ([`workerEngineLayer`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/worker-engine.ts#L13)). Any other combination, and any `exe.dev` Worker, parses but fails startup with `UnsupportedWorkerError`.

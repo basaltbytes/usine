@@ -97,8 +97,8 @@ export const stepExecutorLayer = (
       const workers = yield* validateWorkers(executor.kind, config.workers);
       yield* Effect.forEach(
         workers,
-        ({ name }) =>
-          executor.preflight(name, brains).pipe(
+        ({ name, maxConcurrentAttempts }) =>
+          executor.preflight(name, brains, maxConcurrentAttempts).pipe(
             // The operation error has no Worker field; startup reports must name the Worker.
             Effect.mapError((error) =>
               error._tag === "ExecutorOperationError"
@@ -214,6 +214,7 @@ export const stepExecutorLayer = (
         executor.cancel(attemptId).pipe(Effect.mapError(asAttemptFailure));
 
       return StepExecutor.of({
+        workers: workers.map(({ name }) => name),
         execute,
         interrupt,
         isLive: executor.isLive,

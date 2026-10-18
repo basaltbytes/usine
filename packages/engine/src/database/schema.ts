@@ -182,6 +182,8 @@ export const attempts = snakeCase.table(
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
     salvageJson: text({ mode: "json" }).$type<unknown>(),
+    /** When the operator discarded what the Attempt left on a Worker that is no longer configured; startup reconciliation skips it from then on. */
+    leftoversDiscardedAt: text(),
   },
   (table) => [
     check("usine_attempts_number", sql`${table.attemptNumber} >= 1`),

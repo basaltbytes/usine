@@ -31,7 +31,7 @@ export const salvageMessage = (salvage: AttemptSalvage): string =>
     Pushed: ({ ref, commit }) =>
       `Unfinished work pushed to ${ref} at ${commit.slice(0, 7)}; a retry resumes from it`,
     Retained: ({ path, message }) =>
-      `Salvage incomplete; unfinished work stays at ${path} and is retried at every startup. Last error: ${message}`,
+      `Salvage incomplete; unfinished work stays at ${path} and is retried at every startup while its Worker is configured. Last error: ${message}`,
   });
 
 export const needCopy = (need: NeedView): NeedCopy =>
@@ -81,6 +81,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
     ConfigFileNeed: ({ kind, error }) => ({
       title: kind === "loop" ? "Loop quarantined" : "Agent file not loaded",
       detail: `${error.file}: ${error.message.replace(/\.$/u, "")}. Fix the file, then reload the configuration from Configuration > Loops.`,
+      repository: null,
+      runId: null,
+    }),
+    UnconfiguredWorkerNeed: ({ worker, attempts }) => ({
+      title: "Worker not configured",
+      detail: `usine.yaml no longer declares Worker ${worker}, so startup doesn't reconcile its ${attempts} recorded ${attempts === 1 ? "Attempt" : "Attempts"} and any checkout they left stays on it. Declare the Worker again and restart usine up, or discard the leftovers to stop tracking them.`,
       repository: null,
       runId: null,
     }),

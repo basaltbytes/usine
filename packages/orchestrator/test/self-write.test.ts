@@ -13,6 +13,7 @@ import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
@@ -188,6 +189,7 @@ describe("Board self-writes", () => {
               }),
           });
           const executor = Layer.succeed(StepExecutor)({
+            workers: [WorkerName.make("local")],
             isLive: () => Effect.succeed(false),
             outcome: () => Effect.succeed(Option.none()),
             recover: () => Effect.void,

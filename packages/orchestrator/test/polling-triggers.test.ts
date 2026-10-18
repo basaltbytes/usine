@@ -55,6 +55,7 @@ import {
   RepositoryLabelName,
   RepositoryLabelsNotModified,
   RepositoryNotModified,
+  GitHubItemNotFoundError,
   GitHubPolling,
 } from "@usine/github/polling";
 import {
@@ -188,6 +189,7 @@ const claimedRun = (cycle: Effect.Success<ReturnType<PollingTriggers["Service"][
 };
 
 const gatedExecutor = Layer.succeed(StepExecutor)({
+  workers: [WorkerName.make("local")],
   isLive: () => Effect.succeed(false),
   outcome: () => Effect.succeed(Option.none()),
   recover: () => Effect.void,
@@ -341,6 +343,101 @@ describe("PollingTriggers", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
+  it.live("drops an open pull request GitHub no longer has and revokes its unstarted Run", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-missing-pr-" }),
+      );
+      const instance = instanceWith([
+        new LoopFile({
+          ...issueLoop("review-pr"),
+          trigger: new PullRequestTrigger({ on: "pr", if: Source.make('item.state == "OPEN"') }),
+        }),
+      ]);
+      let gone = false;
+      let fetches = 0;
+      const github: GitHubPolling["Service"] = {
+        labels: () => Effect.succeed(emptyLabelCatalog),
+        changes: (repository, cursor) =>
+          Effect.succeed(
+            repository === watchedRepository && Option.isNone(cursor.entityTag)
+              ? new RepositoryChanges({
+                  cursor: new PollCursor({
+                    entityTag: Option.some(EntityTag.make('W/"unchanged"')),
+                    watermark: Option.some(DateTime.makeUnsafe("2026-08-30T20:00:00Z")),
+                  }),
+                  items: [
+                    new ChangedPullRequest({
+                      number: 28,
+                      updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
+                    }),
+                  ],
+                  backlog: false,
+                  nextPollAt: Option.none(),
+                })
+              : new RepositoryNotModified({ cursor, nextPollAt: Option.none() }),
+          ),
+        snapshot: (repository, item) =>
+          Effect.suspend(() => {
+            fetches += 1;
+            return gone
+              ? Effect.fail(
+                  new GitHubItemNotFoundError({
+                    operation: "fetch-pull-request-snapshot",
+                    item: item.number,
+                    message: `GitHub has no pull request ${item.number} in ${repository}`,
+                  }),
+                )
+              : Effect.succeed(
+                  new PullRequestSnapshot({
+                    contentHash: ContentHash.make("a".repeat(64)),
+                    payload: Schema.decodeUnknownSync(PullRequestPayload)({
+                      ...issuePayload([]),
+                      mergeable: "MERGEABLE",
+                      mergeStateStatus: "CLEAN",
+                      isDraft: false,
+                      merged: false,
+                      mergedAt: null,
+                      baseRefName: "main",
+                      headRefName: "feature",
+                      headRefOid: "a".repeat(40),
+                      additions: 1,
+                      deletions: 0,
+                      changedFiles: 1,
+                      reviewDecision: null,
+                      statusCheckRollup: null,
+                      reviewThreads: { totalCount: 0, nodes: [] },
+                      reviewRequests: { totalCount: 0, nodes: [] },
+                      reviews: { totalCount: 0, nodes: [] },
+                      closingIssuesReferences: { totalCount: 0, nodes: [] },
+                    }),
+                  }),
+                );
+          }),
+      };
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const engine = yield* RunEngine;
+        const run = claimedRun(yield* polling.poll(instance));
+        yield* waitForState(engine, run, "Waiting");
+
+        gone = true;
+        const dropped = yield* polling.poll(instance);
+        assert.deepStrictEqual(dropped.failures, []);
+        assert.strictEqual(dropped.revokedRuns, 1);
+        const revoked = yield* waitForState(engine, run, "Canceled");
+        assert(revoked.run.state._tag === "Canceled");
+        assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
+
+        // The cursor no longer holds the pull request, so it is not fetched again.
+        const after = yield* polling.poll(instance);
+        assert.deepStrictEqual(after.failures, []);
+        assert.strictEqual(fetches, 2);
+      }).pipe(Effect.provide(runtimeLayer(directory, github)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
   it.live("opens exactly one finish Run when the finisher pushes before it relabels", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
@@ -413,6 +510,7 @@ describe("PollingTriggers", () => {
       const finishing = yield* Deferred.make<void>();
       let executions = 0;
       const executor = Layer.succeed(StepExecutor)({
+        workers: [WorkerName.make("local")],
         isLive: () => Effect.succeed(false),
         outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,
@@ -998,6 +1096,7 @@ describe("PollingTriggers", () => {
       intervene: () => Effect.void,
       approve: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
+      discardLeftovers: () => Effect.die("unused"),
       inspect: () => Effect.die("unused"),
       reconcile: () => Effect.die("unused"),
       drain: () => Effect.void,
@@ -1101,6 +1200,7 @@ describe("PollingTriggers", () => {
         intervene: () => Effect.void,
         approve: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
+        discardLeftovers: () => Effect.die("unused"),
         inspect: () => Effect.die("unused"),
         reconcile: () => Effect.die("unused"),
         drain: () => Effect.void,
@@ -1208,6 +1308,7 @@ describe("PollingTriggers", () => {
       intervene: () => Effect.void,
       approve: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
+      discardLeftovers: () => Effect.die("unused"),
       inspect: () => Effect.die("unused"),
       reconcile: () => Effect.die("unused"),
       drain: () => Effect.void,
@@ -1409,6 +1510,7 @@ describe("PollingTriggers", () => {
       };
       const models: Array<string> = [];
       const executor = Layer.succeed(StepExecutor)({
+        workers: [WorkerName.make("local")],
         isLive: () => Effect.succeed(false),
         outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,

@@ -15,12 +15,12 @@ import { CursorStore } from "@usine/engine/cursor";
 import { Claimed, RunEngine } from "@usine/engine/engine";
 import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
-import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import {
   ChangedIssue,
   ChangedPullRequest,
   ContentHash,
   EntityTag,
+  GitHubItemNotFoundError,
   GitHubPolling,
   type IssuePayload,
   IssueSnapshot,
@@ -153,6 +153,7 @@ const claimingRuns = Layer.succeed(RunEngine)({
   intervene: () => Effect.void,
   approve: () => Effect.die("unused"),
   cancel: () => Effect.die("unused"),
+  discardLeftovers: () => Effect.die("unused"),
   inspect: () => Effect.die("unused"),
   reconcile: () => Effect.die("unused"),
   drain: () => Effect.void,
@@ -422,10 +423,10 @@ describe("Loop evaluation failures", () => {
         snapshot: (_repository, item) =>
           deleted
             ? Effect.fail(
-                new InvalidGitHubResponseError({
+                new GitHubItemNotFoundError({
                   operation: "fetch-issue-snapshot",
-                  message: "The issue came back null",
-                  detail: `issue ${item.number} came back null`,
+                  item: item.number,
+                  message: `GitHub has no issue ${item.number}`,
                 }),
               )
             : Effect.succeed(
@@ -449,6 +450,50 @@ describe("Loop evaluation failures", () => {
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
         const cycle = yield* polling.poll(instance);
+        assert.deepStrictEqual(cycle.failures, []);
+        assert.deepStrictEqual(storedFailingItems(cursors), []);
+      }).pipe(Effect.provide(processLayer(github, cursors.store)));
+    }),
+  );
+
+  it.effect("drops a failing Item GitHub no longer has on the first poll after a reload", () =>
+    Effect.gen(function* () {
+      submissions.length = 0;
+      const cursors = memoryCursorStore();
+      let deleted = false;
+      const github: GitHubPolling["Service"] = {
+        labels: () =>
+          Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
+        changes: changesOnce([new ChangedIssue({ number: 28, updatedAt })]),
+        snapshot: (_repository, item) =>
+          deleted
+            ? Effect.fail(
+                new GitHubItemNotFoundError({
+                  operation: "fetch-issue-snapshot",
+                  item: item.number,
+                  message: `GitHub has no issue ${item.number}`,
+                }),
+              )
+            : Effect.succeed(
+                new IssueSnapshot({
+                  payload: issuePayload(item.number, null),
+                  contentHash: ContentHash.make("d".repeat(64)),
+                }),
+              ),
+      };
+
+      yield* Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        yield* polling.poll(
+          instanceWith([loop("plan", 'item.state == "OPEN"', "Plan {{ item.milestone.title }}.")]),
+        );
+        assert.deepStrictEqual(storedFailingItems(cursors), [28]);
+
+        deleted = true;
+        const reloaded = instanceWith([
+          loop("plan", 'item.state == "OPEN"', "Plan issue {{ item.milestone.title }}."),
+        ]);
+        const cycle = yield* polling.poll(reloaded);
         assert.deepStrictEqual(cycle.failures, []);
         assert.deepStrictEqual(storedFailingItems(cursors), []);
       }).pipe(Effect.provide(processLayer(github, cursors.store)));

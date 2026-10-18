@@ -4,6 +4,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { AgentName, AgentPersona } from "@usine/core/agent";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { AgentFile } from "@usine/config/agent";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { Cron as CronExpression, ScheduleTrigger, TimeZone } from "@usine/config/trigger";
@@ -125,6 +126,7 @@ const fakeLayer = (
     intervene: () => Effect.void,
     approve: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
+    discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
     reconcile: () => Effect.die("unused"),
     drain: () => Effect.void,
@@ -172,6 +174,7 @@ const waitForWaiting = Effect.fn("test.waitForWaiting")(function* (
 
 const runtimeLayer = (directory: InstanceDirectory) => {
   const executor = Layer.succeed(StepExecutor)({
+    workers: [WorkerName.make("local")],
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeed(Option.none()),
     recover: () => Effect.void,

@@ -107,14 +107,15 @@ Each action calls the `Operator` service, which calls `RunEngine` ([operator.ts:
 | POST   | `/api/runs/:runId/resolve-failure` | `{ attemptId }`                 | Marks the latest failed Attempt as handled, which removes it from Needs you.                                                            |
 | POST   | `/api/runs/:runId/intervene`       | `{ attemptId, target, action }` | Sends `Steer`, `Interrupt`, `OperatorMessage`, or `Release` to the parent or a child ([How an Attempt runs](/architecture/execution/)). |
 
-### Board, Loops, and cycle budgets
+### Board, Loops, cycle budgets, and Workers
 
-| Method | Path                                                | Body         | Does                                                                                                                                                          |
-| ------ | --------------------------------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| POST   | `/api/projects/:owner/:repository/items/:item/lane` | `{ toLane }` | Writes the label swap of a Board move to GitHub, then queues a Hint for that Item, even when the write fails ([operator.ts:556][]). 409 for a read-only lane. |
-| POST   | `/api/loops/:loop/pause`                            |              | Sets the Loop's paused flag; its existing Runs continue.                                                                                                      |
-| POST   | `/api/loops/:loop/unpause`                          |              | Clears it.                                                                                                                                                    |
-| POST   | `/api/cycle-budgets/reset`                          | `{ askId }`  | Answers a cycle-budget Ask and gives the Item a new allowance.                                                                                                |
+| Method | Path                                                | Body         | Does                                                                                                                                                                                          |
+| ------ | --------------------------------------------------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/projects/:owner/:repository/items/:item/lane` | `{ toLane }` | Writes the label swap of a Board move to GitHub, then queues a Hint for that Item, even when the write fails ([operator.ts:556][]). 409 for a read-only lane.                                 |
+| POST   | `/api/loops/:loop/pause`                            |              | Sets the Loop's paused flag; its existing Runs continue.                                                                                                                                      |
+| POST   | `/api/loops/:loop/unpause`                          |              | Clears it.                                                                                                                                                                                    |
+| POST   | `/api/cycle-budgets/reset`                          | `{ askId }`  | Answers a cycle-budget Ask and gives the Item a new allowance.                                                                                                                                |
+| POST   | `/api/workers/:worker/discard-leftovers`            |              | Answers an `UnconfiguredWorkerNeed`: startup stops reconciling the Attempts recorded on that Worker, and nothing on the Worker changes. A Worker that `usine.yaml` declares is left as it is. |
 
 ### Instance folder
 
@@ -156,7 +157,7 @@ Without `target`, an intervention goes to the parent ([run.ts:30][]); to send it
 
 ### Needs you
 
-The Needs you list has seven kinds of entries ([need.ts][]): `ApprovalNeed`, `RunFailureNeed`, `PollFailureNeed`, `PreflightFindingNeed`, `BoardProjectionNeed`, `ScheduleFailureNeed`, and `CycleBudgetNeed`.
+The Needs you list has nine kinds of entries ([need.ts][]): `ApprovalNeed`, `RunFailureNeed`, `PollFailureNeed`, `PreflightFindingNeed`, `BoardProjectionNeed`, `ScheduleFailureNeed`, `CycleBudgetNeed`, `ConfigFileNeed`, and `UnconfiguredWorkerNeed`. An `UnconfiguredWorkerNeed` names a Worker that `usine.yaml` no longer declares and counts the Attempts recorded on it that startup doesn't reconcile.
 
 ## The web UI
 

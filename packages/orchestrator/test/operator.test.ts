@@ -50,7 +50,12 @@ import {
   ItemProjectionReader,
 } from "@usine/engine/item-projection";
 import { LoopControl, LoopRuntimeState } from "@usine/engine/loop-control";
-import { ProjectionRevision, RunSnapshot, RunReader } from "@usine/engine/run-reader";
+import {
+  ProjectionRevision,
+  RunSnapshot,
+  RunReader,
+  WorkerAttempts,
+} from "@usine/engine/run-reader";
 import {
   TranscriptEntry,
   type TranscriptQuery,
@@ -292,6 +297,7 @@ const testLayer = (
     intervene: commands.intervene,
     approve: (id, event) => Ref.update(approved, (entries) => [...entries, { runId: id, event }]),
     cancel: () => Effect.void,
+    discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.succeed(runSnapshot),
     reconcile: () => Effect.void,
     drain: () => Effect.void,
@@ -311,6 +317,8 @@ const testLayer = (
     forItems: () => Effect.succeed([runSnapshot]),
     revision: () => Ref.get(projectionRevision),
     transcript: readTranscript,
+    attemptsByWorker: () =>
+      Effect.succeed([new WorkerAttempts({ worker: WorkerName.make("local"), attempts: 3 })]),
   });
   const controls = Layer.succeed(LoopControl)({
     isPaused: () => Effect.succeed(true),
@@ -941,6 +949,41 @@ describe("Operator", () => {
         ),
         needs,
       );
+    }),
+  );
+
+  it.effect("lists the Attempts of a Worker that usine.yaml no longer declares once", () =>
+    Effect.gen(function* () {
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const unconfiguredNeeds = (current: LoadedInstance) =>
+        Effect.flatMap(Operator, (operator) => operator.overview(current)).pipe(
+          Effect.provide(testLayer(approved, moved, reads, revision)),
+          Effect.map(({ needsYou }) =>
+            needsYou.filter((need) => need._tag === "UnconfiguredWorkerNeed"),
+          ),
+        );
+      // The reader reports three Attempts on `local`, the Worker `instance` declares.
+      assert.deepStrictEqual(yield* unconfiguredNeeds(instance), []);
+      const switched = new LoadedInstance({
+        ...instance,
+        config: Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [{ name: repository }],
+          workers: [{ name: "laptop", kind: "local" }],
+        }),
+      });
+      const needs = yield* unconfiguredNeeds(switched);
+      assert.deepStrictEqual(
+        needs.map(({ id, worker, attempts }) => [id, worker, attempts]),
+        [["unconfigured-worker:local", "local", 3]],
+      );
+      const encoded = Schema.encodeUnknownSync(ReadyOverview)(
+        new ReadyOverview({ projects: [], loops: [], needsYou: needs }),
+      );
+      assert.deepStrictEqual(Schema.decodeUnknownSync(ReadyOverview)(encoded).needsYou, needs);
     }),
   );
 

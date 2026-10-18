@@ -123,6 +123,7 @@ For a Claude Code or Codex child, the expanded child section also shows its save
 | A schedule error                       | A schedule Loop couldn't evaluate or submit a tick.                                                                  |
 | **Loop quarantined**                   | A Loop file failed to load and opens no Runs. Fix the file and reload the configuration.                             |
 | **Agent file not loaded**              | An Agent file failed to load and isn't in the roster. Fix the file and reload the configuration.                    |
+| **Worker not configured**              | Attempts are recorded on a Worker that `usine.yaml` no longer declares, so startup doesn't reconcile them. Declare the Worker again and restart `usine up`, or **Discard leftovers**. |
 
 ## Cycle budgets
 
@@ -149,6 +150,8 @@ Select **Reload configuration** on the **Loops** page to apply edits to Loops, A
 ## Restarts
 
 When the orchestrator stops, a running Attempt's Pi parent task stays in `.usine/durable.sqlite`. The next `usine up` reattaches the same Attempt with the same worktree, and this doesn't count as a retry. If the parent task or the worktree no longer exists, the Attempt fails with an `InfraFailure`, and the Run retries with a new Attempt, starting from the newest salvage branch if there is one.
+
+At each start, usine also checks every Worker that `usine.yaml` declares for checkouts that earlier Attempts left: it salvages the unfinished work of a failed or canceled Attempt and removes the checkout of a succeeded one. It skips the Attempts recorded on a Worker that `usine.yaml` no longer declares, for example after you replace the `local` Worker with an SSH Worker. The log has one warning per start with their count and the Workers, and **Needs you** shows **Worker not configured** for each such Worker. Their checkouts stay where they are. Declare the Worker again and restart `usine up` to reconcile them, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them. Discarding changes nothing on the Worker, so remove its checkouts yourself if you no longer need them. A Worker you declare again later only reconciles the Attempts recorded after the discard.
 
 ## Stop the orchestrator
 

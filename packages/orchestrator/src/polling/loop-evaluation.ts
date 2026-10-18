@@ -6,9 +6,10 @@ import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey } from "@usine/core/event";
 import { CommitSha, RepositoryRevision, canonicalRepositoryName } from "@usine/core/repository";
 import { RunEngine, type SubmissionResult } from "@usine/engine/engine";
-import type { ObservedItem } from "./repository-sync.ts";
+import { gitHubItemKey, type ObservedItem } from "./repository-sync.ts";
 import { ExpressionEngine } from "@usine/expression/expression-engine";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
+import type { ChangedItem } from "@usine/github/polling";
 import { DateTime, Effect, Option, Result, Schema } from "effect";
 import {
   DEFAULT_BRANCH_REVISION,
@@ -175,4 +176,36 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
     submissions.push(submitted);
   }
   return { submissions, revokedRuns, failures } satisfies ItemCycle;
+});
+
+/**
+ * Revokes the unstarted Runs of an Item GitHub no longer has, for each of the
+ * repository's active Loops on the Item's stream, as `evaluateItem` does for
+ * an Item that stops matching; running Attempts continue. Returns how many
+ * Runs it revoked.
+ */
+export const revokeMissingItem = Effect.fn("PollingTriggers.revokeMissingItem")(function* (
+  repository: ManagedRepo,
+  resolved: ReadonlyArray<ResolvedLoop>,
+  item: ChangedItem,
+) {
+  yield* Effect.annotateCurrentSpan({ repository: repository.name, item: item.number });
+  const runs = yield* RunEngine;
+  const stream = item._tag === "ChangedIssue" ? "issue" : "pr";
+  const itemKey = gitHubItemKey(repository.name, item.number);
+  let revokedRuns = 0;
+  for (const { agent, loop } of resolved.filter(({ loop }) => loop.trigger.on === stream)) {
+    const revoked = yield* runs.revoke(loop.name, itemKey);
+    revokedRuns += revoked.length;
+    if (revoked.length > 0) {
+      yield* Effect.logInfo("Item is gone from GitHub; revoked its unstarted runs", {
+        repository: repository.name,
+        loop: loop.name,
+        agent: agent.name,
+        item: item.number,
+        runIds: revoked.join(", "),
+      });
+    }
+  }
+  return revokedRuns;
 });

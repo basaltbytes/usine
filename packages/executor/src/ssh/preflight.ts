@@ -8,6 +8,7 @@ import {
   type WorkerCapability,
 } from "../executor.ts";
 import { type HarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
+import { verifyLinuxMemory } from "../memory-preflight.ts";
 import type { RemoteCommands } from "../remote/commands.ts";
 import { verifyGateway } from "./gateway/preflight.ts";
 import type { SshMachine } from "./model.ts";
@@ -24,9 +25,10 @@ const capabilityError = (
 
 /**
  * Verifies an SSH Worker without changing its machine: the SSH client connects
- * to it, the configured root is a writable directory, Git runs, the Gateway
- * in front of it answers and is reachable from it when it has one, and each
- * rostered brain is ready where the Attempt's children run.
+ * to it, the configured root is a writable directory, Git runs, its memory
+ * carries its concurrent Attempts, the Gateway in front of it answers and is
+ * reachable from it when it has one, and each rostered brain is ready where
+ * the Attempt's children run.
  */
 export const sshPreflightFor = (
   commands: RemoteCommands,
@@ -36,11 +38,12 @@ export const sshPreflightFor = (
   Effect.fn("SshExecutor.preflight")(function* (
     worker: WorkerName,
     brains: ReadonlyArray<BrainSpec>,
+    maxConcurrentAttempts: number,
   ) {
     const machine = yield* machineFor(worker);
     const host = machine.shell.destination;
     const root = machine.address.root;
-    yield* Effect.annotateCurrentSpan({ worker, host });
+    yield* Effect.annotateCurrentSpan({ worker, host, maxConcurrentAttempts });
     const connected = yield* commands
       .inspect("preflight", machine.shell, "true", [])
       .pipe(
@@ -88,6 +91,11 @@ export const sshPreflightFor = (
         `Worker ${worker} returned an unrecognized Git version`,
         new Error(gitVersion),
       );
+    yield* verifyLinuxMemory(
+      worker,
+      maxConcurrentAttempts,
+      commands.run("preflight", machine.shell, "cat", ["/proc/meminfo"]),
+    );
 
     if (Option.isSome(machine.gateway))
       yield* verifyGateway(commands, worker, machine, machine.gateway.value);

@@ -186,6 +186,8 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
       if (line === "exec 'git' '--version'") {
         return oneShotHandle("git version 2.50.1\n", 0);
       }
+      if (line === "exec 'cat' '/proc/meminfo'")
+        return oneShotHandle("MemTotal:        8074035 kB\nSwapTotal:       2097148 kB\n", 0);
       if (line === "exec 'claude' '--version'") return oneShotHandle("2.1.296 (Claude Code)\n", 0);
       if (line === "exec 'claude' 'auth' 'status' '--json'") {
         return oneShotHandle(

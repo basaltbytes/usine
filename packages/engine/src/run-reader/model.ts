@@ -6,6 +6,7 @@ import { ItemKey } from "@usine/core/item";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run } from "@usine/core/run";
 import { Step } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { Schema } from "effect";
 import { TranscriptEntry } from "../transcript.ts";
 
@@ -42,6 +43,16 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
   repository: RepositoryName,
   task: AttemptTask,
   agent: Agent,
+}) {}
+
+/**
+ * How many Attempts recorded on one Worker startup reconciliation still
+ * visits: every Attempt of that Worker whose leftovers the operator has not
+ * discarded.
+ */
+export class WorkerAttempts extends Schema.Class<WorkerAttempts>("@usine/engine/WorkerAttempts")({
+  worker: WorkerName,
+  attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
 /** Monotonic version of the operator projection. */

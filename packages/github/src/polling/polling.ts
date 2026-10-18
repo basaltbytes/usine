@@ -14,7 +14,12 @@ import {
   statusError,
   transportError,
 } from "../http.ts";
-import { GitHubRateLimitError, type GitHubAppError, type GitHubOperation } from "../error.ts";
+import {
+  GitHubItemNotFoundError,
+  GitHubRateLimitError,
+  type GitHubAppError,
+  type GitHubOperation,
+} from "../error.ts";
 import {
   ChangedIssue,
   ChangedPullRequest,
@@ -195,11 +200,15 @@ export class GitHubPolling extends Context.Service<
       repository: RepositoryName,
       entityTag: Option.Option<EntityTag>,
     ) => Effect.Effect<RepositoryLabelCatalog | RepositoryLabelsNotModified, GitHubAppError>;
-    /** Fetches an Item's selection and prompt payload together with its timestamp-independent content hash. */
+    /**
+     * Fetches an Item's selection and prompt payload together with its
+     * timestamp-independent content hash. Fails with `GitHubItemNotFoundError`
+     * when the repository answers but has no such Item.
+     */
     readonly snapshot: (
       repository: RepositoryName,
       item: ChangedItem,
-    ) => Effect.Effect<PayloadSnapshot, GitHubAppError>;
+    ) => Effect.Effect<PayloadSnapshot, GitHubAppError | GitHubItemNotFoundError>;
   }
 >()("@usine/github/GitHubPolling") {
   static readonly layer: Layer.Layer<
@@ -429,10 +438,14 @@ export class GitHubPolling extends Context.Service<
               message: "GitHub GraphQL asked the poller to wait before retrying",
             });
           }
-          return yield* invalidResponse(
-            operation,
-            `GraphQL errors: ${envelope.errors.map((error) => error.message).join("; ")}`,
-          );
+          // GitHub reports a missing Item as a NOT_FOUND error beside a null
+          // field, which `dataSchema` decodes as absent for the caller to judge.
+          if (!envelope.errors.every((error) => error.type === "NOT_FOUND")) {
+            return yield* invalidResponse(
+              operation,
+              `GraphQL errors: ${envelope.errors.map((error) => error.message).join("; ")}`,
+            );
+          }
         }
         return yield* Schema.decodeUnknownEffect(dataSchema)(envelope.data).pipe(
           Effect.mapError((error) => invalidResponse(operation, error.message)),
@@ -443,8 +456,19 @@ export class GitHubPolling extends Context.Service<
         (
           repository: RepositoryName,
           item: ChangedItem,
-        ): Effect.Effect<PayloadSnapshot, GitHubAppError> =>
+        ): Effect.Effect<PayloadSnapshot, GitHubAppError | GitHubItemNotFoundError> =>
           Effect.gen(function* () {
+            const repositoryGone = (operation: GitHubOperation) =>
+              invalidResponse(
+                operation,
+                `repository ${repository} came back null: deleted, renamed, or access lost`,
+              );
+            const itemGone = (operation: GitHubOperation, kind: string) =>
+              new GitHubItemNotFoundError({
+                operation,
+                item: item.number,
+                message: `GitHub has no ${kind} ${item.number} in ${repository}: deleted, transferred, or access lost`,
+              });
             const completeLabels = Effect.fn("GitHubPolling.completeItemLabels")(function* (
               payload: IssuePayload | PullRequestPayload,
             ) {
@@ -472,13 +496,10 @@ export class GitHubPolling extends Context.Service<
                 ISSUE_PAYLOAD_QUERY,
                 IssueData,
               );
-              const payload = Option.flatMap(data.repository, ({ issue }) => issue);
-              if (Option.isNone(payload)) {
-                return yield* invalidResponse(
-                  "fetch-issue-snapshot",
-                  `issue ${item.number} came back null — deleted, transferred, or access lost`,
-                );
-              }
+              if (Option.isNone(data.repository))
+                return yield* repositoryGone("fetch-issue-snapshot");
+              const payload = data.repository.value.issue;
+              if (Option.isNone(payload)) return yield* itemGone("fetch-issue-snapshot", "issue");
               const completePayload = {
                 ...payload.value,
                 labels: yield* completeLabels(payload.value),
@@ -496,13 +517,11 @@ export class GitHubPolling extends Context.Service<
               PULL_REQUEST_PAYLOAD_QUERY,
               PullRequestData,
             );
-            const payload = Option.flatMap(data.repository, ({ pullRequest }) => pullRequest);
-            if (Option.isNone(payload)) {
-              return yield* invalidResponse(
-                "fetch-pull-request-snapshot",
-                `pull request ${item.number} came back null — deleted or access lost`,
-              );
-            }
+            if (Option.isNone(data.repository))
+              return yield* repositoryGone("fetch-pull-request-snapshot");
+            const payload = data.repository.value.pullRequest;
+            if (Option.isNone(payload))
+              return yield* itemGone("fetch-pull-request-snapshot", "pull request");
             const completePayload = {
               ...payload.value,
               labels: yield* completeLabels(payload.value),
@@ -537,6 +556,7 @@ export {
   RepositoryLabelsNotModified,
   RepositoryLabelDetection,
 } from "./labels.ts";
+export { GitHubItemNotFoundError } from "../error.ts";
 export {
   ContentHash,
   IssuePayload,

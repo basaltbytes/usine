@@ -55,7 +55,7 @@ import {
   failingItemPollFailures,
   logItemEvaluation,
 } from "./evaluation-failures.ts";
-import { evaluateItem } from "./loop-evaluation.ts";
+import { evaluateItem, revokeMissingItem } from "./loop-evaluation.ts";
 import { observeItem, synchronizeLabels } from "./repository-sync.ts";
 import { ItemHints, type ItemHint } from "./hints.ts";
 
@@ -146,8 +146,11 @@ export class PollingTriggers extends Context.Service<
      * Loops and the repository's other Items continue. The first completed
      * cycle of the process, and the first one with an instance that differs
      * from the previous cycle's, fetches those failing Items again, changed
-     * or not. Repository failures are reported while siblings continue;
-     * failure to read Loop runtime state fails the whole cycle.
+     * or not. An open pull request or failing Item that only the cursor kept
+     * and that GitHub no longer has is dropped from the cursor with a warning,
+     * and its unstarted Runs are revoked. Repository failures are reported
+     * while siblings continue; failure to read Loop runtime state fails the
+     * whole cycle.
      */
     readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle, EnginePersistenceError>;
     /** Nudges an authoritative Item fetch after a self-write, retaining any request backoff from the writer. Pending duplicates coalesce; polling repairs loss. */
@@ -268,14 +271,18 @@ export class PollingTriggers extends Context.Service<
               backlog: detected.backlog,
             });
           }
-          const refreshed = new Set([
-            ...stored.openPullRequests.map(({ number }) => number),
-            ...(detected._tag === "RepositoryChanges" ? detected.items : []).map(
+          const detectedNumbers = new Set(
+            (detected._tag === "RepositoryChanges" ? detected.items : []).map(
               ({ number }) => number,
             ),
-          ]);
-          const retryOnly = new Set<number>(
-            retrying.map(({ number }) => number).filter((number) => !refreshed.has(number)),
+          );
+          // Fetched only because the cursor kept them: the open pull requests
+          // it refreshes and the Items whose Loops failed before this process
+          // or this instance.
+          const cursorOnly = new Set(
+            [...stored.openPullRequests, ...retrying]
+              .map(({ number }) => number)
+              .filter((number) => !detectedNumbers.has(number)),
           );
           if (retrying.length > 0) {
             yield* Effect.logInfo(
@@ -313,30 +320,46 @@ export class PollingTriggers extends Context.Service<
                   Option.fromNullishOr(recorded.get(item.number)),
                   failing,
                 );
-                return Option.some({ item, observation, cycle, failing });
+                return { _tag: "Evaluated", item, observation, cycle, failing } as const;
               }).pipe(
-                // An Item fetched only to retry its failed Loops may have been
-                // deleted or transferred since, which GitHub answers with a null
-                // payload; it must not stall the repository. Transient request
-                // failures still interrupt the cycle, which retries it next time.
-                Effect.catchTag("InvalidGitHubResponseError", (error) =>
-                  retryOnly.has(item.number)
-                    ? Effect.logWarning(
-                        "Could not fetch an Item to retry its failed Loops; it is no longer retried",
-                        {
-                          repository: watched.repository.name,
-                          item: item.number,
-                          errorTag: error._tag,
-                          message: error.message,
-                          detail: error.detail,
-                        },
-                      ).pipe(Effect.as(Option.none()))
-                    : Effect.fail(error),
+                // An Item the cursor kept may have been deleted or transferred
+                // since; it must not stall the repository. A detected Item, a
+                // transient request failure, or any other invalid response
+                // still interrupts the cycle, which retries it next time.
+                Effect.catchTag("GitHubItemNotFoundError", (error) =>
+                  Effect.gen(function* () {
+                    if (!cursorOnly.has(item.number)) return yield* error;
+                    const revokedRuns = yield* revokeMissingItem(
+                      watched.repository,
+                      watched.loops,
+                      item,
+                    );
+                    yield* Effect.logWarning(
+                      "GitHub no longer has an Item the poll cursor kept; it is dropped from the cursor",
+                      {
+                        repository: watched.repository.name,
+                        item: item.number,
+                        openPullRequest: stored.openPullRequests.some(
+                          ({ number }) => number === item.number,
+                        ),
+                        revokedRuns,
+                        errorTag: error._tag,
+                        message: error.message,
+                      },
+                    );
+                    return { _tag: "Missing", revokedRuns } as const;
+                  }),
                 ),
               ),
             { concurrency: ITEM_CONCURRENCY },
           );
-          const observed = evaluations.flatMap(Option.toArray);
+          const observed = evaluations.flatMap((evaluation) =>
+            evaluation._tag === "Evaluated" ? [evaluation] : [],
+          );
+          const missingRevokedRuns = evaluations.reduce(
+            (sum, evaluation) => sum + (evaluation._tag === "Missing" ? evaluation.revokedRuns : 0),
+            0,
+          );
           const itemCycles = observed.map(({ cycle }) => cycle);
           // An Item the cycle did not fetch keeps its recorded failures.
           const failingItems = [
@@ -375,7 +398,10 @@ export class PollingTriggers extends Context.Service<
             // GitHub; counting them would make every idle poll look busy.
             changedItems: detected._tag === "RepositoryChanges" ? detected.items.length : 0,
             submissions: itemCycles.flatMap(({ submissions }) => submissions),
-            revokedRuns: itemCycles.reduce((sum, cycle) => sum + cycle.revokedRuns, 0),
+            revokedRuns: itemCycles.reduce(
+              (sum, cycle) => sum + cycle.revokedRuns,
+              missingRevokedRuns,
+            ),
             failures: [
               ...preflight.failures,
               ...failingItems.flatMap((failing) =>

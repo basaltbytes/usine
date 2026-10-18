@@ -8,6 +8,7 @@ import type {
   InstanceReload,
   InstanceReloadError,
 } from "@usine/orchestrator/current-instance";
+import type { WorkerName } from "@usine/core/worker";
 import {
   type BoardMove,
   type FactoryOverview,
@@ -52,6 +53,7 @@ export class FactoryBackend extends Context.Service<
       input: SessionIntervention,
     ) => Effect.Effect<void, BackendError>;
     readonly cancel: (runId: RunId) => Effect.Effect<void, BackendError>;
+    readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<void, BackendError>;
     readonly moveBoardItem: (move: BoardMove) => Effect.Effect<void, BackendError>;
     readonly pause: (loop: LoopName) => Effect.Effect<void, BackendError>;
     readonly unpause: (loop: LoopName) => Effect.Effect<void, BackendError>;
@@ -80,6 +82,7 @@ export const liveBackendLayer = (
     intervene: (runId, input) =>
       Effect.flatMap(instances.get, (instance) => operator.intervene(instance, runId, input)),
     cancel: operator.cancel,
+    discardLeftovers: operator.discardLeftovers,
     moveBoardItem: (move) =>
       Effect.flatMap(instances.get, (instance) => operator.moveBoardItem(instance, move)),
     pause: (loop) => operator.pause(loop).pipe(Effect.asVoid),
@@ -114,6 +117,7 @@ export const needsSetupBackendLayer = (
     editAndRetry: fail,
     intervene: fail,
     cancel: fail,
+    discardLeftovers: fail,
     moveBoardItem: fail,
     pause: fail,
     unpause: fail,
