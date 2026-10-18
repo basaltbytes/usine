@@ -172,7 +172,7 @@ The per-attempt ceiling — wall-clock and consumed tokens — that interrupts a
 _Avoid_: budget, timeout (the wall-clock half only), kill switch
 
 **Salvage**:
-What the executor preserves of an Attempt's worktree when the Attempt ends without success: uncommitted changes committed as a work-in-progress snapshot and HEAD pushed to `usine/salvage/<run>/<attempt>`, recorded on the Attempt. The next Attempt of the same Run starts from a pushed salvage. A salvage whose push failed keeps the worktree on the Worker and records its path instead.
+What the executor preserves of an Attempt's worktree when the Attempt ends without success: uncommitted changes committed as a work-in-progress snapshot and HEAD pushed to `usine/salvage/<run>/<attempt>`, recorded on the Attempt. The next Attempt of the same Run starts from a pushed salvage, rebased onto the current revision; a salvage that conflicts with it stays on its branch. A salvage whose push failed keeps the worktree on the Worker and records its path instead.
 _Avoid_: backup, checkpoint, recovery branch
 
 **Child-session budget**:

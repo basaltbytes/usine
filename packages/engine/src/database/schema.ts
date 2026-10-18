@@ -56,6 +56,12 @@ export const triggerEvents = snakeCase.table(
     task: text().$type<AttemptTask>().notNull(),
     agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
     parentModel: text().$type<ModelId>(),
+    // Set when the engine opened this Event again for the Event a trigger
+    // submitted, after that Event's Run was canceled (#267).
+    reopensEventId: text()
+      .$type<EventId>()
+      .references(() => events.eventId),
+    reopening: integer().notNull().default(0),
   },
   (table) => [
     check("usine_trigger_events_approval", sql`${table.approval} in ('none', 'required')`),
@@ -66,7 +72,32 @@ export const triggerEvents = snakeCase.table(
     check("usine_trigger_events_agent_json_valid", sql`json_valid(${table.agentJson})`),
     index("usine_trigger_events_item").on(table.loopName, table.itemKey),
     index("usine_trigger_events_item_history").on(table.itemKey),
+    uniqueIndex("usine_trigger_event_reopening").on(table.reopensEventId, table.reopening),
   ],
+);
+
+/**
+ * What each Loop last saw of an Item: the Event a trigger last submitted for it,
+ * or none after a sighting that did not match. A Run whose Attempt asked the
+ * operator a question holds the Loop on the Item (#241); `heldEventId` is the
+ * Item's state after the question, which holds no Run either.
+ */
+export const loopItems = snakeCase.table(
+  "usine_loop_items",
+  {
+    loopName: text().$type<LoopName>().notNull(),
+    itemKey: text().$type<ItemKey>().notNull(),
+    observedEventId: text()
+      .$type<EventId>()
+      .references(() => events.eventId),
+    heldByRunId: text()
+      .$type<RunId>()
+      .references(() => runs.runId),
+    heldEventId: text()
+      .$type<EventId>()
+      .references(() => events.eventId),
+  },
+  (table) => [primaryKey({ columns: [table.loopName, table.itemKey] })],
 );
 
 export const itemCycleBudgets = snakeCase.table(

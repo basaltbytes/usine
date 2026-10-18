@@ -15,6 +15,7 @@ describe("assemblePrompt", () => {
       persona: AgentPersona.make("You are the factory's implementation agent."),
       task: AttemptTask.make("Implement issue #30: Build the agent layer"),
       resume: Option.none(),
+      conflictingSalvage: Option.none(),
     });
 
     assert.strictEqual(
@@ -43,6 +44,7 @@ describe("assemblePrompt", () => {
         "Do not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.",
         "A running command or pending CI check is unfinished work, not a blocker. Keep waiting and complete the task. For a genuine blocker, record the exact blocker on the issue or pull request and report which work remains incomplete.",
         "For an unresolved blocker, start your final answer with exactly [usine:blocked] on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.",
+        "When the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly [usine:question] on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.",
         "",
         "# GitHub identity",
         "",
@@ -66,6 +68,7 @@ describe("assemblePrompt", () => {
       resume: Option.some(
         new SalvagePushed({ ref: SalvageRef.make("usine/salvage/run-1/1"), commit }),
       ),
+      conflictingSalvage: Option.none(),
     });
     assert(
       prompt.startsWith(
@@ -76,6 +79,33 @@ describe("assemblePrompt", () => {
           `Resumes from: usine/salvage/run-1/1 at ${commit}, the previous Attempt's unfinished work, checked out at HEAD. Its last commit is an automatic work-in-progress snapshot. Continue from this state instead of starting over.`,
           "",
           "Payload snapshot:",
+        ].join("\n"),
+      ),
+      prompt,
+    );
+  });
+
+  it("names the previous work a retry starts without because it conflicts", () => {
+    const commit = CommitSha.make("0123456789abcdef0123456789abcdef01234567");
+    const prompt = assemblePrompt({
+      repository: RepositoryName.make("acme/demo"),
+      payload: {},
+      agent: AgentName.make("developer"),
+      persona: AgentPersona.make("Persona."),
+      task: AttemptTask.make("Finish the work"),
+      resume: Option.none(),
+      conflictingSalvage: Option.some(
+        new SalvagePushed({ ref: SalvageRef.make("usine/salvage/run-1/2"), commit }),
+      ),
+    });
+    assert(
+      prompt.startsWith(
+        [
+          "# Run context",
+          "",
+          "Repository: acme/demo",
+          `Previous work: usine/salvage/run-1/2 at ${commit}, the previous Attempt's unfinished work, conflicts with the current revision, so the checkout starts without it. Fetch that branch to reuse parts of it.`,
+          "",
         ].join("\n"),
       ),
       prompt,
@@ -106,6 +136,7 @@ describe("assemblePrompt", () => {
         "Do not end a turn promising to resume after a background notification. Your final answer returns control to the caller and may end the Attempt and remove its worktree. Push all commits that must survive before returning.",
         "A running command or pending CI check is unfinished work, not a blocker. Keep waiting and complete the task. For a genuine blocker, record the exact blocker on the issue or pull request and report which work remains incomplete.",
         "For an unresolved blocker, start your final answer with exactly [usine:blocked] on its own line, followed by the exact blocker and incomplete work. This reserved marker reports a failed Attempt. A child's report that starts with the marker fails the Attempt: return it verbatim as your own final answer. Use an ordinary final answer only after completing the task.",
+        "When the work needs a decision that only the operator can make, post the question on the task's issue or pull request when it has one, then start your final answer with exactly [usine:question] on its own line, followed by the question and the options you see. This reserved marker ends the Attempt and asks the operator; usine does not run this task again on the same Item until the operator answers or the Item changes. Return a child's report that starts with this marker verbatim as your own final answer.",
         "",
         "# GitHub identity",
         "",

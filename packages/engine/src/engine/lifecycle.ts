@@ -7,6 +7,7 @@ import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
 import { Array as EffectArray, Option, Result } from "effect";
+import type { IgnoreReason } from "./submission.ts";
 
 // Engine policy, not a limit imposed on consumers of the core Attempt model.
 const MAX_AUTO_ATTEMPTS = AttemptNumber.make(3);
@@ -211,6 +212,83 @@ export const retryRun = (current: RunProgress): RetryDecision => {
   }
   return { _tag: "RetryRejected" };
 };
+
+/**
+ * What a Loop saw of an Item before the current sighting: none when the Loop
+ * never saw it, `Some(None)` after a sighting that did not match, and
+ * `Some(Some(event))` for the Event a trigger last submitted.
+ */
+export type PreviousSighting = Option.Option<Option.Option<EventId>>;
+
+/**
+ * Whether a sighting of `eventId` finds the Item back in a state the Loop had
+ * left: since it last saw this Event, the Loop saw the Item not matching or saw
+ * another Event. An Item the Loop never saw before has not come back.
+ */
+export const cameBack = (previous: PreviousSighting, eventId: EventId): boolean =>
+  Option.match(previous, {
+    onNone: () => false,
+    onSome: (observed) => !Option.contains(observed, eventId),
+  });
+
+/** How an Event already settled before this sighting: it owns a Run, or it was ignored. */
+export type Settlement =
+  | { readonly _tag: "Owned"; readonly run: Run }
+  | { readonly _tag: "Ignored"; readonly reason: IgnoreReason };
+
+type SightingDecision =
+  | { readonly _tag: "JoinRun"; readonly run: Run }
+  | { readonly _tag: "StayIgnored"; readonly reason: IgnoreReason }
+  | { readonly _tag: "ReopenEvent" };
+
+/**
+ * Decides what a new sighting of a settled Event does. The Event opens again
+ * only when the Item came back to its state (#267) and nothing worked on that
+ * state: its Run was canceled, by the operator, a supersede, or a revoke, or the
+ * Event was revoked while it waited in the queue. A Run that succeeded or failed
+ * keeps its Event, and a failed Run waits for operator retry. An Event that a
+ * newer Event superseded in the queue stays ignored.
+ */
+export const resightEvent = (settled: Settlement, itemCameBack: boolean): SightingDecision => {
+  if (settled._tag === "Owned") {
+    return settled.run.state._tag === "Canceled" && itemCameBack
+      ? { _tag: "ReopenEvent" }
+      : { _tag: "JoinRun", run: settled.run };
+  }
+  return settled.reason === "revoked" && itemCameBack
+    ? { _tag: "ReopenEvent" }
+    : { _tag: "StayIgnored", reason: settled.reason };
+};
+
+/**
+ * A question that holds a Loop on an Item: the Run whose Attempt asked it, and
+ * the Item's state after the question once the Loop saw one (#241).
+ */
+export interface QuestionHold {
+  readonly runId: RunId;
+  readonly heldEventId: Option.Option<EventId>;
+}
+
+/** Whether the Attempt the decision closes asked the operator a question, so its Loop holds the Item. */
+export const asksOperator = (decision: FinishDecision): boolean =>
+  decision._tag === "RunFailed" && decision.outcome.failure._tag === "QuestionFailure";
+
+type HoldDecision =
+  | { readonly _tag: "Hold" }
+  | { readonly _tag: "HoldAt" }
+  | { readonly _tag: "Release" };
+
+/**
+ * Decides what an unclaimed Event does while a question holds its Loop on the
+ * Item. The first state the Loop sees after the question normally carries the
+ * Agent's own question comment, so it becomes the held state (`HoldAt`); a later
+ * Event with other content means the Item changed again, and the Loop acts on it.
+ */
+export const holdEvent = (hold: QuestionHold, eventId: EventId): HoldDecision =>
+  Option.match(hold.heldEventId, {
+    onNone: (): HoldDecision => ({ _tag: "HoldAt" }),
+    onSome: (held): HoldDecision => (held === eventId ? { _tag: "Hold" } : { _tag: "Release" }),
+  });
 
 type ClaimDecision =
   | { readonly _tag: "OpenRun" }

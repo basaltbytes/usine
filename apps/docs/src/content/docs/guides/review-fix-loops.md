@@ -62,6 +62,8 @@ trigger:
 
 Its prompt tells the Agent to check out the PR branch (`{{ item.headRefName }}`), fix the findings, run the repository checks, push, and apply the “Fix pushed” labels. If the Agent can't complete the fix, it must leave the findings visible.
 
+When a finding needs a decision that only you can make, the Agent posts its question on the PR and ends its answer with `[usine:question]`. The Run fails with `QuestionFailure`, and **Needs you** shows the question. The Loop then holds the PR: polling sees the Agent's own comment and opens no Run for it, so the question costs one Attempt and one round of the budget, not three. The Loop acts on the PR again when you push a commit or comment on the PR, when you remove and add the Loop's label, when you **Retry** or **Edit and retry** the Run with your answer, or when you **Mark answered** in the Run drawer.
+
 `loops/finish-pr.md` runs only after a clean review:
 
 ```yaml title="loops/finish-pr.md"

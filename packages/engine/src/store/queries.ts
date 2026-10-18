@@ -34,6 +34,7 @@ import {
   events,
   ignoredEvents,
   itemCycleBudgets,
+  loopItems,
   projectionRevision,
   runs,
   steps,
@@ -50,6 +51,7 @@ import {
   decodeDiscards,
   decodeEventRoutes,
   decodeProjectionRevision,
+  decodeReopenings,
   decodeRunIds,
   decodeRunRows,
   encodeAgent,
@@ -67,6 +69,7 @@ import {
   submissionFromRow,
 } from "./codec.ts";
 
+import { loopItemQueries } from "./loop-items.ts";
 import { transcriptQueries } from "./transcript.ts";
 
 /** The newest queued submission and the exact Events observed alongside it. */
@@ -583,8 +586,36 @@ export const queriesFor = (database: RunDatabaseClient) => {
     );
   });
 
+  /** The newest Event the engine opened again for `eventId` (#267), with its reopening number. */
+  const newestReopening = Effect.fn("RunStoreQueries.newestReopening")(function* (
+    eventId: EventId,
+  ) {
+    const rows = yield* decodeReopenings(
+      yield* database
+        .select({ ...eventRouteSelection, reopening: triggerEvents.reopening })
+        .from(events)
+        .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
+        .where(eq(triggerEvents.reopensEventId, eventId))
+        .orderBy(desc(triggerEvents.reopening))
+        .limit(1)
+        .execute(),
+    );
+    return Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+      submission: submissionFromRow(row),
+      reopening: row.reopening,
+    }));
+  });
+
+  /**
+   * Records a trigger's Event and its route once, and returns the route as first
+   * recorded. `reopens` marks an Event the engine opened again for an earlier one.
+   */
   const recordTriggerEvent = Effect.fn("RunStoreQueries.recordTriggerEvent")(function* (
     submission: Submission,
+    reopens: Option.Option<{
+      readonly eventId: EventId;
+      readonly reopening: number;
+    }> = Option.none(),
   ) {
     yield* database
       .insert(events)
@@ -614,6 +645,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
           task: submission.task,
           agentJson: storedAgent(submission.agent),
           parentModel: Option.getOrNull(submission.parentModel),
+          reopensEventId: Option.getOrNull(Option.map(reopens, ({ eventId }) => eventId)),
+          reopening: Option.match(reopens, {
+            onNone: () => 0,
+            onSome: ({ reopening }) => reopening,
+          }),
         })
         .execute();
       return submission;
@@ -625,6 +661,16 @@ export const queriesFor = (database: RunDatabaseClient) => {
     const routes = yield* eventRouteByRun(runId);
     const current = routes[0];
     if (current === undefined) return Option.none<QueuedEvents>();
+    const hold = yield* loopItemQueries(database).hold(current.loop, current.itemKey);
+    if (Option.isSome(hold)) {
+      yield* Effect.logInfo("Queued Events wait for the operator question on the Item", {
+        runId,
+        heldBy: hold.value.runId,
+        loop: current.loop,
+        itemKey: current.itemKey,
+      });
+      return Option.none<QueuedEvents>();
+    }
     const queuedRows = yield* database
       .select(eventRouteSelection)
       .from(events)
@@ -664,7 +710,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
   // The newest Run of each Item that has a current queued Event and no open
   // Run: the Run closed before its continuation opened or revoked that Event.
   // An Item awaiting a cycle-budget reset is left out, since none of its
-  // queued Events can open a Run before the reset supersedes them.
+  // queued Events can open a Run before the reset supersedes them, and so is
+  // an Item an operator question holds.
   const pendingContinuations = Effect.fn("RunStoreQueries.pendingContinuations")(function* () {
     const items = yield* database
       .selectDistinct({ loop: triggerEvents.loopName, itemKey: triggerEvents.itemKey })
@@ -672,11 +719,19 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .leftJoin(runs, eq(runs.eventId, triggerEvents.eventId))
       .leftJoin(ignoredEvents, eq(ignoredEvents.eventId, triggerEvents.eventId))
       .leftJoin(itemCycleBudgets, eq(itemCycleBudgets.itemKey, triggerEvents.itemKey))
+      .leftJoin(
+        loopItems,
+        and(
+          eq(loopItems.loopName, triggerEvents.loopName),
+          eq(loopItems.itemKey, triggerEvents.itemKey),
+        ),
+      )
       .where(
         and(
           isNull(runs.runId),
           isNull(ignoredEvents.eventId),
           isNull(itemCycleBudgets.askJson),
+          isNull(loopItems.heldByRunId),
           cycleQueries(database).currentEvent,
         ),
       )
@@ -761,6 +816,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     attemptCountsByWorker,
     discardLeftovers,
     cycles: cycleQueries(database),
+    loopItems: loopItemQueries(database),
     ...transcriptQueries(database),
     addAttempt,
     recordSalvage,
@@ -772,6 +828,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     createRun,
     eventRouteByRun,
     ignoredEvent,
+    newestReopening,
     nextQueued,
     pendingContinuations,
     recordTriggerEvent,

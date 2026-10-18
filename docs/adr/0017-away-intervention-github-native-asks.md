@@ -22,3 +22,9 @@ The single operator must be able to unblock runs from a phone with **zero inboun
 - Schedule-stream runs have no item to anchor an ask — their blocking moments are strip-only until a bespoke notifier lands (the seam's first customer).
 
 [ADR 0022](./0022-item-cycle-budgets-and-comment-reviews.md) extends this decision with durable Item cycle budgets, operator reset Asks, and comment-only reviews under the shared App identity.
+
+## Amendment (2026-10-18, #241): a question ends its Attempt until the ask tool exists
+
+The ask tool and the GitHub notifier (#36) are not built, and Agents still stopped to ask for decisions: they posted the question, ended their Attempt with a blocker, and their own comment was new Item content, so the Loop opened a new Run that asked again until the cycle budget ran out. Without the ask tool, an Agent asks by opening its final answer with the reserved marker `[usine:question]`. The Attempt ends with a typed `QuestionFailure` that never retries automatically, and the question appears in the Needs you strip. A marker, like `[usine:blocked]`, is the one channel every harness child shares with the parent; reading prose for questions would misfire on any answer that contains one.
+
+The Run's Loop then holds the Item: the first Item state after the question, normally the Agent's own comment, opens no Run. The Item moving on (another content change, such as the operator's reply or a push, or a sighting that does not match) ends the hold, and so do an operator retry and marking the question answered, which re-evaluates the Item's newest state. The hold keys on the first state after the question rather than on any change, because the question's own comment is a change; the operator can always answer from the UI when that heuristic does not fit. This is the ask-and-end shape listed in the options above, with one round of clarification per Attempt.

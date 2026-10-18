@@ -4,7 +4,7 @@ import { StorageRejected } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { InfraFailure, RunawayFailure } from "@usine/core/attempt/failure";
+import { InfraFailure, QuestionFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import { StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import { Context, Effect, Exit, Fiber, Layer, Logger, Option } from "effect";
@@ -731,6 +731,54 @@ describe("durable AttemptRuntime", () => {
       }).pipe(
         Effect.provide(
           layer({ database, parent: [delegate("First part"), delegate("Second part")] }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("ends the Attempt with the operator question a child asked", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/9");
+        const recording = recordingSink();
+        const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+        yield* (yield* (yield* StubChildren).next).ask("HTTP CONNECT or SOCKS for egress?");
+        const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+        assert.deepStrictEqual(
+          failure,
+          new QuestionFailure({ question: "HTTP CONNECT or SOCKS for egress?" }),
+        );
+        assertAdmitted(request.spec.attemptId, recording.outbound());
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [delegate("Fix the P0 finding"), answer("The child needs a decision.")],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("ends the Attempt with the parent's own operator question", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/10");
+        const failure = yield* runtime.execute(request, recordingSink().sink).pipe(Effect.flip);
+        assert.deepStrictEqual(
+          failure,
+          new QuestionFailure({ question: "Should the migration keep the old column?" }),
+        );
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [answer("[usine:question]\nShould the migration keep the old column?")],
+          }),
         ),
       );
     }).pipe(Effect.scoped),

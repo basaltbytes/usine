@@ -11,7 +11,8 @@ import { Effect, Option, Result, Schema } from "effect";
 
 /** Bounds the salvage push so a stalled remote cannot hold the Attempt's cleanup open. */
 const PUSH_TIMEOUT = "2 minutes";
-const SALVAGE_GIT_CONFIG = [
+/** The identity of the commits usine makes in an Attempt's worktree: salvage snapshots and rebased salvage. */
+export const SALVAGE_GIT_CONFIG = [
   "-c",
   "user.name=usine",
   "-c",
@@ -41,7 +42,7 @@ const decodeCommit = Schema.decodeUnknownEffect(CommitSha);
  * Attempt's token from that stderr before forming the error; an exe.dev VM
  * never receives one.
  */
-const failureMessage = (failure: Error): string => {
+export const failureMessage = (failure: Error): string => {
   const detail = failure.cause instanceof Error ? failure.cause.message.trim() : "";
   return detail.length === 0 ? failure.message : `${failure.message}: ${detail}`;
 };

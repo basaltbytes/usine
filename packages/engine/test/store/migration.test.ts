@@ -22,6 +22,22 @@ import { InstanceDirectory } from "@usine/core/instance";
 import { RunStore } from "../../src/store/store.ts";
 
 import { testAgent, lifecycleSubmission } from "./support.ts";
+
+/** Seeds a pending Run in a historical schema: today's store writes columns added by later migrations. */
+const seedPendingRun = (runId: RunId) =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const agent = JSON.stringify(Schema.encodeSync(Agent)(testAgent));
+    const eventId = lifecycleSubmission.event.id;
+    yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
+      VALUES (${eventId}, ${lifecycleSubmission.event.dedupKey}, '{}', '2026-10-01T00:00:00.000Z')`;
+    yield* sql`INSERT INTO usine_trigger_events (event_id, item_key, loop_name, step_name, approval, repository, revision, task, agent_json)
+      VALUES (${eventId}, ${lifecycleSubmission.itemKey}, ${lifecycleSubmission.loop}, ${lifecycleSubmission.step}, 'none', ${lifecycleSubmission.repository}, ${lifecycleSubmission.revision}, ${lifecycleSubmission.task}, ${agent})`;
+    yield* sql`INSERT INTO usine_runs (run_id, event_id, loop_name, state_json, opened_at, repository, revision, task, agent_json)
+      VALUES (${runId}, ${eventId}, ${lifecycleSubmission.loop}, '{"_tag":"Pending"}', '2026-10-01T00:00:00.000Z', ${lifecycleSubmission.repository}, ${lifecycleSubmission.revision}, ${lifecycleSubmission.task}, ${agent})`;
+    yield* sql`INSERT INTO usine_steps (run_id, step_name) VALUES (${runId}, ${lifecycleSubmission.step})`;
+  });
+
 describe("Attempt migrations", () => {
   it.live("upgrades populated Attempts without losing transcripts or disabling foreign keys", () =>
     Effect.gen(function* () {
@@ -154,15 +170,14 @@ describe("Run driver migration", () => {
       const runId = RunId.make("workflow-era-run");
       yield* Effect.scoped(
         Effect.gen(function* () {
-          const store = yield* RunStore;
-          yield* store.recordAndClaim(lifecycleSubmission, runId);
+          yield* seedPendingRun(runId);
           const sql = yield* SqlClient.SqlClient;
           // The tables Effect's SingleRunner kept beside usine's, and a pending command.
           yield* sql`CREATE TABLE cluster_migrations (migration_id integer PRIMARY KEY)`;
           yield* sql`CREATE TABLE cluster_messages (id text PRIMARY KEY)`;
           yield* sql`CREATE TABLE cluster_replies (id text PRIMARY KEY)`;
           yield* sql`INSERT INTO usine_workflow_commands (run_id, command) VALUES (${runId}, 'Resume')`;
-        }).pipe(Effect.provide(RunStore.layer), Effect.provide(workflowEraDatabase)),
+        }).pipe(Effect.provide(workflowEraDatabase)),
       );
       yield* Effect.gen(function* () {
         const sql = yield* SqlClient.SqlClient;
@@ -173,6 +188,67 @@ describe("Run driver migration", () => {
         assert.strictEqual((yield* store.snapshot(runId)).run.state._tag, "Pending");
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("Event reopening migration", () => {
+  it.live(
+    "keeps a canceled Run's Event after the upgrade until the Loop sees the Item leave and come back",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = InstanceDirectory.make(
+          yield* fs.makeTempDirectoryScoped({ prefix: "usine-reopening-upgrade-" }),
+        );
+        const historical = yield* fs.makeTempDirectoryScoped({
+          prefix: "usine-reopening-migrations-",
+        });
+        const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
+        for (const name of yield* fs.readDirectory(source)) {
+          if (name >= "20261018172605_loop_items_and_reopenings") continue;
+          yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
+        }
+        yield* fs.makeDirectory(`${directory}/.usine`);
+        const previousDatabase = Layer.effect(
+          RunDatabase,
+          Effect.gen(function* () {
+            const database = yield* SQLiteDrizzle.makeWithDefaults();
+            yield* migrate(database, {
+              migrationsFolder: historical,
+              migrationsTable: "usine_migrations",
+            });
+            return database;
+          }),
+        ).pipe(
+          Layer.provideMerge(
+            SqliteClient.layer({ filename: `${directory}/.usine/runtime.sqlite` }),
+          ),
+        );
+        const runId = RunId.make("canceled-before-upgrade");
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* seedPendingRun(runId);
+            const sql = yield* SqlClient.SqlClient;
+            yield* sql`UPDATE usine_runs SET state_json = '{"_tag":"Canceled","reason":{"_tag":"OperatorCanceled"}}' WHERE run_id = ${runId}`;
+          }).pipe(Effect.provide(previousDatabase)),
+        );
+        yield* Effect.gen(function* () {
+          const store = yield* RunStore;
+          const first = yield* store.recordAndClaim(lifecycleSubmission, RunId.make("unused"));
+          assert(first.result._tag === "Claimed");
+          assert.strictEqual(first.result.runId, runId);
+          yield* store.revoke(lifecycleSubmission.loop, lifecycleSubmission.itemKey);
+          const returned = yield* store.recordAndClaim(lifecycleSubmission, RunId.make("unused"));
+          assert(returned.result._tag === "Claimed");
+          assert.notStrictEqual(returned.result.runId, runId);
+          assert.strictEqual(
+            (yield* store.snapshot(returned.result.runId)).run.state._tag,
+            "Pending",
+          );
+          const sql = yield* SqlClient.SqlClient;
+          assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+        }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
 
@@ -219,12 +295,11 @@ describe("Attempt salvage check migration", () => {
         const brain = JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain));
         yield* Effect.scoped(
           Effect.gen(function* () {
-            const store = yield* RunStore;
-            yield* store.recordAndClaim(lifecycleSubmission, runId);
+            yield* seedPendingRun(runId);
             const sql = yield* SqlClient.SqlClient;
             yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, task, agent, started_at, outcome_json, salvage_json)
             VALUES (${id}, ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${brain}, ${lifecycleSubmission.task}, ${testAgent.name}, '2026-10-17T00:00:00.000Z', '{"_tag":"Canceled"}', ${salvage})`;
-          }).pipe(Effect.provide(RunStore.layer), Effect.provide(previousDatabase)),
+          }).pipe(Effect.provide(previousDatabase)),
         );
         yield* Effect.gen(function* () {
           const store = yield* RunStore;

@@ -117,11 +117,12 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     parentModel: options.parentModel,
   });
 
-/** The log fields for a submission outcome: the run id for a claim, the reason for an ignore. */
+/** The log fields for a submission outcome: the run id for a claim or a hold, the reason for an ignore. */
 export const submissionLogFields = (submission: SubmissionResult): Record<string, string> =>
   Match.valueTags(submission, {
     Claimed: ({ runId }) => ({ runId }),
     Queued: () => ({}),
+    Held: ({ runId }) => ({ heldBy: runId }),
     Ignored: ({ reason }) => ({ reason }),
     CycleBlocked: ({ ask }) => ({ askId: ask.id, reason: "cycle-budget-exhausted" }),
   });

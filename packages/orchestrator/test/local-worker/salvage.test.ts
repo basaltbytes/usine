@@ -99,11 +99,9 @@ describe("local worker salvage", () => {
         const remote = yield* makeRemote(root);
         const seed = `${root}/seed`;
         const base = (yield* output("git", ["rev-parse", "HEAD"], seed)).trim();
-        yield* run(
-          "git",
-          ["commit", "--allow-empty", "-m", "wip(usine): salvage attempt r/1"],
-          seed,
-        );
+        yield* fileSystem.writeFileString(`${seed}/progress.md`, "half done\n");
+        yield* run("git", ["add", "progress.md"], seed);
+        yield* run("git", ["commit", "-m", "wip(usine): salvage attempt r/1"], seed);
         const salvageCommit = CommitSha.make(
           (yield* output("git", ["rev-parse", "HEAD"], seed)).trim(),
         );
@@ -231,6 +229,125 @@ describe("local worker salvage", () => {
                 (yield* output("git", ["rev-parse", "HEAD"], prepared.workspace.worktree)).trim(),
                 base,
               );
+            }),
+          );
+        }).pipe(Effect.provide(runtime));
+      }).pipe(Effect.provide(NodeServices.layer)),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "starts a retry from the current default branch and applies the previous salvage onto it",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-local-rebase-" });
+        const remote = yield* makeRemote(root);
+        const seed = `${root}/seed`;
+        const git = (args: ReadonlyArray<string>) => run("git", args, seed);
+        const head = (cwd: string) =>
+          output("git", ["rev-parse", "HEAD"], cwd).pipe(
+            Effect.map((sha) => CommitSha.make(sha.trim())),
+          );
+        const commitFile = (file: string, content: string, message: string) =>
+          Effect.gen(function* () {
+            yield* fileSystem.writeFileString(`${seed}/${file}`, content);
+            yield* git(["add", file]);
+            yield* git(["commit", "-m", message]);
+            return yield* head(seed);
+          });
+        const salvage = (number: number, commit: CommitSha) =>
+          Effect.gen(function* () {
+            const ref = SalvageRef.make(`usine/salvage/r/${number}`);
+            yield* git(["push", "origin", `${commit}:refs/heads/${ref}`]);
+            return new SalvagePushed({ ref, commit });
+          });
+        const firstBase = yield* head(seed);
+        yield* git(["checkout", "-b", "attempt-1"]);
+        const worked = yield* salvage(
+          1,
+          yield* commitFile("progress.md", "half done\n", "wip(usine): salvage attempt r/1"),
+        );
+        yield* git(["checkout", "-b", "attempt-2", firstBase]);
+        const conflicting = yield* salvage(
+          2,
+          yield* commitFile("README.md", "# edited by the Attempt\n", "wip(usine): salvage r/2"),
+        );
+        yield* git(["checkout", "-b", "attempt-3", firstBase]);
+        yield* git(["commit", "--allow-empty", "-m", "wip(usine): salvage attempt r/3"]);
+        const empty = yield* salvage(3, yield* head(seed));
+        // A fix lands on the default branch after the first Attempt started.
+        yield* git(["checkout", "main"]);
+        const tip = yield* commitFile("README.md", "# fixed on main\n", "fix: unblock the run");
+        yield* git(["push", "origin", "main"]);
+
+        const runtime = localExecutorLayer({
+          instanceDirectory: InstanceDirectory.make(root),
+          repositoryUrl: () => remote,
+          harnessReadiness: harnessReady,
+        }).pipe(
+          Layer.provide(credentialLayer),
+          Layer.provide(stubAttemptRuntime(new StubStorage())),
+        );
+        const request = (number: number, resume: SalvagePushed) =>
+          new CheckoutRequest({
+            attemptId: AttemptId.make(`r/run/${number}`),
+            worker: WorkerName.make("local"),
+            repository: RepositoryName.make("acme/demo"),
+            revision: RepositoryRevision.make("main"),
+            payload: {},
+            task: AttemptTask.make("Continue the work"),
+            agent: testAgent,
+            parentModel: Option.none(),
+            maxChildren: ChildSessionBudget.make(4),
+            maxAttemptMinutes: Option.none(),
+            maxAttemptTokens: Option.none(),
+            parentEffort: "high",
+            salvageRef: SalvageRef.make(`usine/salvage/r/${number}`),
+            resume: Option.some(resume),
+          });
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const read = (worktree: string, file: string) =>
+            fileSystem.readFileString(`${worktree}/${file}`);
+
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const { spec, worktree } = (yield* executor.prepare(request(4, worked))).workspace;
+              assert.strictEqual(spec.baseCommit, tip);
+              assert.deepStrictEqual(spec.resume, Option.some(worked));
+              assert(Option.isNone(spec.conflictingSalvage));
+              assert.strictEqual(
+                (yield* output("git", ["rev-parse", "HEAD^"], worktree)).trim(),
+                tip,
+              );
+              assert.strictEqual(yield* read(worktree, "progress.md"), "half done\n");
+              assert.strictEqual(yield* read(worktree, "README.md"), "# fixed on main\n");
+            }),
+          );
+
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const { spec, worktree } = (yield* executor.prepare(request(5, conflicting)))
+                .workspace;
+              assert.strictEqual(spec.baseCommit, tip);
+              assert(Option.isNone(spec.resume));
+              assert.deepStrictEqual(spec.conflictingSalvage, Option.some(conflicting));
+              assert.strictEqual(yield* head(worktree), tip);
+              assert.strictEqual(yield* read(worktree, "README.md"), "# fixed on main\n");
+              assert.strictEqual(
+                (yield* output("git", ["--git-dir", remote, "rev-parse", conflicting.ref])).trim(),
+                conflicting.commit,
+              );
+            }),
+          );
+
+          yield* Effect.scoped(
+            Effect.gen(function* () {
+              const { spec, worktree } = (yield* executor.prepare(request(6, empty))).workspace;
+              assert(Option.isNone(spec.resume));
+              assert(Option.isNone(spec.conflictingSalvage));
+              assert.strictEqual(yield* head(worktree), tip);
             }),
           );
         }).pipe(Effect.provide(runtime));

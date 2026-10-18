@@ -20,8 +20,12 @@ export type AttemptRecord = {
   parentConversation: ConversationId | null;
   /** Child spawn requests so far, including requests rejected by the child-session budget. */
   children: number;
-  /** The first blocked child report; it fails the Attempt unless the parent relays a blocker itself. */
-  childBlocker: { sessionId: string; message: string } | null;
+  /**
+   * The first blocked report or operator question of a child; it fails the
+   * Attempt unless the parent relays one itself. Records written before
+   * questions existed have no `kind` and hold a blocker.
+   */
+  childBlocker: { sessionId: string; message: string; kind?: "blocked" | "question" } | null;
   childBudgetExceeded: { attempted: number; max: number } | null;
   /** The next outbound and inbound attempt channel sequences. */
   nextOutbound: number;

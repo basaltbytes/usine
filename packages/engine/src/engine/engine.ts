@@ -5,7 +5,7 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import type { WorkerName } from "@usine/core/worker";
-import { Context, Crypto, type Duration, Effect, Layer, Option, Result } from "effect";
+import { Context, Crypto, type Duration, Effect, Layer, Match, Option, Result } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import {
   AttemptCancellationError,
@@ -147,12 +147,14 @@ const makeRunEngine = Effect.gen(function* () {
           new RunInterventionRejectedError({
             runId,
             attemptId,
-            message:
-              error._tag === "RunawayFailure"
-                ? "The Attempt reached its runaway limit"
-                : error._tag === "ChildSessionBudgetFailure"
-                  ? "The Attempt reached its child-session budget"
-                  : error.message,
+            message: Match.valueTags(error, {
+              RunawayFailure: () => "The Attempt reached its runaway limit",
+              ChildSessionBudgetFailure: () => "The Attempt reached its child-session budget",
+              QuestionFailure: () => "The Attempt ended with a question for the operator",
+              InfraFailure: ({ message }) => message,
+              DefectFailure: ({ message }) => message,
+              AgentFailure: ({ message }) => message,
+            }),
           }),
       ),
       Effect.tapError((error) =>
@@ -164,6 +166,21 @@ const makeRunEngine = Effect.gen(function* () {
       ),
     );
   });
+
+  const resolveFailure = Effect.fn("RunEngine.resolveFailure")(function* (
+    runId: RunId,
+    attemptId: AttemptId,
+  ) {
+    if (!(yield* store.resolveFailure(runId, attemptId))) return;
+    yield* Effect.logInfo(
+      "The operator answered the question; the Item's queued Events get their turn",
+      {
+        runId,
+        attemptId,
+      },
+    );
+    yield* driver.continueWithNewest(runId);
+  }, Effect.uninterruptible);
 
   const revoke = Effect.fn("RunEngine.revoke")(function* (loop: LoopName, itemKey: ItemKey) {
     const revoked = yield* store.revoke(loop, itemKey);
@@ -257,7 +274,7 @@ const makeRunEngine = Effect.gen(function* () {
     intervene,
     reconcile: driver.reconcile,
     retry,
-    resolveFailure: store.resolveFailure,
+    resolveFailure,
     revoke,
     submit,
     transcript,
@@ -295,7 +312,11 @@ export class RunEngine extends Context.Service<
      * then every `ReconcileInterval`.
      */
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
-    /** Resolves the current failed Attempt's attention without changing its outcome or starting work. */
+    /**
+     * Resolves the current failed Attempt's attention without changing its outcome.
+     * When the Attempt asked the operator a question, this answers it: the Loop
+     * evaluates the Item's queued Events again, and one may open a Run.
+     */
     readonly resolveFailure: (
       runId: RunId,
       attemptId: AttemptId,
@@ -367,6 +388,7 @@ export {
   Submission,
   Claimed,
   Queued,
+  Held,
   Ignored,
   CycleBlocked,
   IgnoreReason,

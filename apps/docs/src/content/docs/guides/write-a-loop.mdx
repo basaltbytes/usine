@@ -95,7 +95,7 @@ The task is one part of what the Agent's first session receives. The full prompt
 2. the Item payload as JSON;
 3. the Agent's persona;
 4. the task;
-5. fixed instructions: run checks in the foreground, push before finishing, start a final answer with `[usine:blocked]` to report a blocker, submit pull request reviews as `COMMENT` only, and end every GitHub comment, issue, pull request, and review with the line `— usine agent: <name>`.
+5. fixed instructions: run checks in the foreground, push before finishing, start a final answer with `[usine:blocked]` to report a blocker or with `[usine:question]` to ask you for a decision, submit pull request reviews as `COMMENT` only, and end every GitHub comment, issue, pull request, and review with the line `— usine agent: <name>`.
 
 The task doesn't need to repeat the payload or these rules; it only needs what is specific to the Loop. A pull request Run starts detached at the head commit, so a task that pushes must tell the Agent to check out `{{ item.headRefName }}` first. usine removes the worktree when the Attempt ends, and when the Attempt succeeds, commits that weren't pushed are lost.
 

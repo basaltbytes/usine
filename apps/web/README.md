@@ -56,3 +56,5 @@ A Loop or Agent file that failed to load at startup or at a reload appears in Ne
 A Worker that `usine.yaml` no longer declares appears in Needs you as **Worker not configured** while Attempts are recorded on it, with their count; startup doesn't reconcile those Attempts. Declare the Worker again and restart `usine up`, or choose **Discard leftovers**, then **Confirm discard**, to stop tracking them. Discarding removes nothing from the Worker.
 
 Choose **Mark resolved** in a failed Run’s drawer to clear its Needs you warning and related Project and Board attention. Open the drawer from Needs you or Run history. Resolution persists across reloads and restarts; the failed outcome, Attempt details, transcript, and retry controls remain available. A later failed Attempt requests attention again.
+
+An Agent's question appears in Needs you as **\<loop\> asks a question**, with the question. In its drawer the button reads **Mark answered**; the Run's Loop then acts on the Item's newest state.

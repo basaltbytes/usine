@@ -154,7 +154,10 @@ export const RunDrawer = ({
                     disabled={mutation.isPending}
                     onClick={() => act({ action: "resolveFailure", attemptId: latestAttempt.id })}
                   >
-                    Mark resolved
+                    {latestAttempt.outcome?._tag === "Failed" &&
+                    latestAttempt.outcome.failure._tag === "QuestionFailure"
+                      ? "Mark answered"
+                      : "Mark resolved"}
                   </Button>
                 )}
                 {run.canRetry && (

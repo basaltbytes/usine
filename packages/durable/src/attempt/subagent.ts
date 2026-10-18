@@ -4,9 +4,9 @@ import { Type } from "@earendil-works/pi-ai";
 import { defineTool, type ToolExecutionApi } from "@earendil-works/pi-durable";
 import { assembleChildPrompt } from "@usine/agents/prompt";
 import {
-  BLOCKED_MARKER,
   ChildRequest,
   ChildSessionBudgetExceededError,
+  reportText,
   type RunningSession,
   WorkingDirectory,
 } from "@usine/agents/runtime";
@@ -198,16 +198,18 @@ export const subagentTool = (services: ExtensionServices) => {
             : Effect.void,
         ),
       );
-    // The child's result carries the same AgentResultError that ends its stream.
+    // The child's result carries the same report that ends its stream.
     const forwarding = yield* child.events.pipe(
       Stream.runForEach(forward),
-      Effect.catchTag("AgentResultError", () => Effect.void),
+      Effect.catchTag(["AgentResultError", "AgentQuestionError"], () => Effect.void),
       Effect.forkScoped,
     );
     const outcome = yield* Effect.raceFirst(
       child.result.pipe(
         Effect.map(Result.succeed),
-        Effect.catchTag("AgentResultError", (error) => Effect.succeed(Result.fail(error))),
+        Effect.catchTag(["AgentResultError", "AgentQuestionError"], (report) =>
+          Effect.succeed(Result.fail(report)),
+        ),
       ),
       aborted(context, session.id).pipe(
         Effect.tap(() =>
@@ -227,26 +229,28 @@ export const subagentTool = (services: ExtensionServices) => {
       await firstAccepted(watch, (hold) => !hold.held.includes(session.id), scoped);
     });
     const text = yield* Result.match(outcome, {
-      onFailure: (error) =>
+      onFailure: (report) =>
         Effect.gen(function* () {
-          yield* Effect.logInfo("Child session returned a blocked report to the Pi parent", {
+          const kind = report._tag === "AgentQuestionError" ? "question" : "blocked";
+          yield* Effect.logInfo("Child session returned a reserved report to the Pi parent", {
             sessionId: session.id,
+            kind,
           });
-          const first = yield* call("record the child's blocker", () =>
+          const first = yield* call("record the child's report", () =>
             api.commit(async (tx) => {
               const record = await tx.doc(AttemptRecordDoc, spec.attemptId, null);
               if (record.childBlocker !== null) return false;
-              record.childBlocker = { sessionId: session.id, message: error.message };
+              record.childBlocker = { sessionId: session.id, message: report.message, kind };
               return true;
             }, context),
           );
           if (!first) {
-            yield* Effect.logInfo("Kept the Attempt's first child blocker ahead of this one", {
+            yield* Effect.logInfo("Kept the Attempt's first child report ahead of this one", {
               sessionId: session.id,
             });
           }
           yield* services.hubs.child(hub, new SessionFinished({ session: child.session }));
-          return `${BLOCKED_MARKER}\n${error.message}`;
+          return reportText(report);
         }),
       onSuccess: (result) =>
         Effect.logInfo("Child session returned to the Pi parent", { sessionId: session.id }).pipe(

@@ -1,11 +1,23 @@
 import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
-import { CommitSha } from "@usine/core/repository";
+import { LoopName } from "@usine/core/loop";
+import { CommitSha, RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { InstanceReload } from "@usine/orchestrator/current-instance";
-import { ConfigFileNeed, UnconfiguredWorkerNeed } from "@usine/orchestrator/operator";
+import {
+  ConfigFileNeed,
+  QuestionFailureView,
+  RunFailureNeed,
+  UnconfiguredWorkerNeed,
+} from "@usine/orchestrator/operator";
 import { Option, Schema } from "effect";
 import { assert, describe, it } from "vitest";
-import { needCopy, reloadSummary, salvageMessage } from "../src/operator-copy.ts";
+import {
+  conflictingSalvageMessage,
+  needCopy,
+  reloadSummary,
+  salvageMessage,
+} from "../src/operator-copy.ts";
 
 describe("salvage copy in the run drawer", () => {
   it("names the pushed ref and short commit", () => {
@@ -19,6 +31,17 @@ describe("salvage copy in the run drawer", () => {
     assert.include(message, "0123456");
   });
 
+  it("names the conflicting salvage a retry starts without", () => {
+    const message = conflictingSalvageMessage(
+      new SalvagePushed({
+        ref: SalvageRef.make("usine/salvage/run/2"),
+        commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+      }),
+    );
+    assert.include(message, "usine/salvage/run/2 at 0123456");
+    assert.include(message, "starts without it");
+  });
+
   it("shows where retained work lives, that startup retries it, and why the last try failed", () => {
     const message = salvageMessage(
       new SalvageRetained({
@@ -30,6 +53,23 @@ describe("salvage copy in the run drawer", () => {
     assert.include(message, "/workers/local/attempts/run_execute_1");
     assert.include(message, "every startup");
     assert.include(message, "remote: Repository not found.");
+  });
+});
+
+describe("operator question copy in Needs you", () => {
+  it("names the asking Loop and shows the Agent's question", () => {
+    const copy = needCopy(
+      new RunFailureNeed({
+        id: "run-failure:asked",
+        repository: RepositoryName.make("basaltbytes/usine"),
+        runId: RunId.make("asked"),
+        loop: LoopName.make("act-on-findings"),
+        failure: new QuestionFailureView({ question: "HTTP CONNECT or SOCKS for egress?" }),
+      }),
+    );
+    assert.strictEqual(copy.title, "act-on-findings asks a question");
+    assert.strictEqual(copy.detail, "HTTP CONNECT or SOCKS for egress?");
+    assert.strictEqual(copy.runId, "asked");
   });
 });
 

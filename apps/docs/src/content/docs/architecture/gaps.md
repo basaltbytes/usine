@@ -28,7 +28,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 
 - [#37][]: usine parses `webhooks.mode` but never reads it, there is no `POST /webhooks/github`, and Board moves are the only Hint source ([operator.ts:556][]).
 - [#158][]: every poll fetches every known open pull request again, instead of only after the base branch changes ([polling.ts:222][]).
-- [#267][]: a canceled Run keeps its Event, so changing an Item's labels back to the same content opens no Run ([store.ts:117][]).
 - [#152][]: the Run drawer can't rerun a completed Run whose outcome left the Item unresolved.
 - [#333][]: after a reload, new Loops apply only when the current poll wait ends, up to one `poll_interval` later.
 
@@ -47,7 +46,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 - [#177][]: a reattached Attempt keeps its own Worker while the scheduler reserved a slot on another one ([store.ts:284][]).
 - [#178][]: the runaway guard loses an Attempt's elapsed time and its finished sessions' tokens across a reattach.
 - [#180][]: the checkout of an Attempt closed between a restart and its reattach isn't reconciled until the next startup.
-- [#282][]: a retried Attempt resumes from the previous Attempt's salvage branch and never fetches the default branch again, so it keeps the base of the first Attempt ([provision.ts:485][]).
 
 ## Durable layer
 
@@ -124,10 +122,8 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [parser.ts:203]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L203
 [operator.ts:556]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/operator/operator.ts#L556
 [polling.ts:222]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/polling.ts#L222
-[store.ts:117]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/store/store.ts#L117
 [store.ts:284]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/store/store.ts#L284
 [schema.ts:169]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/database/schema.ts#L169
-[provision.ts:485]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/provision.ts#L485
 [harvest.ts:135]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/step/harvest.ts#L135
 [worker-engine.ts:13]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/worker-engine.ts#L13
 [scheduler.ts:76]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/scheduler.ts#L76
@@ -185,13 +181,11 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#262]: https://github.com/basaltbytes/usine/issues/262
 [#264]: https://github.com/basaltbytes/usine/issues/264
 [#266]: https://github.com/basaltbytes/usine/issues/266
-[#267]: https://github.com/basaltbytes/usine/issues/267
 [#270]: https://github.com/basaltbytes/usine/issues/270
 [#277]: https://github.com/basaltbytes/usine/issues/277
 [#278]: https://github.com/basaltbytes/usine/issues/278
 [#279]: https://github.com/basaltbytes/usine/issues/279
 [#281]: https://github.com/basaltbytes/usine/issues/281
-[#282]: https://github.com/basaltbytes/usine/issues/282
 [#331]: https://github.com/basaltbytes/usine/issues/331
 [#332]: https://github.com/basaltbytes/usine/issues/332
 [#333]: https://github.com/basaltbytes/usine/issues/333

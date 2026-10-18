@@ -21,6 +21,7 @@ import {
   FailedAttemptView,
   type FailureView,
   InfraFailureView,
+  QuestionFailureView,
   RunawayFailureView,
   SucceededAttemptView,
 } from "./attempt.ts";
@@ -43,6 +44,7 @@ export const failureView = (failure: AttemptFailure): FailureView =>
     InfraFailure: ({ message }) => new InfraFailureView({ message }),
     DefectFailure: ({ message }) => new DefectFailureView({ message }),
     AgentFailure: ({ message }) => new AgentFailureView({ message }),
+    QuestionFailure: ({ question }) => new QuestionFailureView({ question }),
     RunawayFailure: ({ ceiling }) => new RunawayFailureView({ ceiling }),
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
       new ChildSessionBudgetFailureView({ attemptedChildren, maxChildren }),

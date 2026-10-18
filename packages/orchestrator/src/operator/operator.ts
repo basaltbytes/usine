@@ -705,6 +705,7 @@ export {
   InfraFailureView,
   DefectFailureView,
   AgentFailureView,
+  QuestionFailureView,
   RunawayFailureView,
   ChildSessionBudgetFailureView,
   FailureView,

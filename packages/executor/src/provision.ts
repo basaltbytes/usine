@@ -13,7 +13,7 @@ import {
   WorktreePath,
   type CheckoutRequest,
 } from "./executor.ts";
-import { salvageWorktree } from "./salvage.ts";
+import { failureMessage, SALVAGE_GIT_CONFIG, salvageWorktree } from "./salvage.ts";
 
 const CACHE_DIRECTORY_SUFFIX = ".git";
 
@@ -222,13 +222,122 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
   };
 });
 
+/** How a retry's worktree used the previous Attempt's salvage. */
+interface SalvageCheckout {
+  /** The salvage whose work the worktree holds on top of the base commit. */
+  readonly resume: Option.Option<SalvagePushed>;
+  /** The salvage that conflicts with the base commit; the worktree starts without it. */
+  readonly conflicting: Option.Option<SalvagePushed>;
+}
+
+const withoutSalvage: SalvageCheckout = { resume: Option.none(), conflicting: Option.none() };
+
+/**
+ * Creates the Attempt's detached worktree at `base`, with the previous
+ * Attempt's salvage on top when the request resumes one. A salvage made on an
+ * older base is rebased onto `base`, so a retry after a fix on the default
+ * branch works from that fix (#282). A salvage with no changes beyond `base` is
+ * dropped. A salvage that does not rebase cleanly is left out: the worktree
+ * starts from `base`, and the work stays on its salvage branch.
+ */
+const checkOutWorktree = Effect.fn("Executor.checkOutWorktree")(function* <E extends Error>(
+  options: ProvisionOptions<E>,
+  base: CommitSha,
+  salvage: Option.Option<SalvagePushed>,
+) {
+  const { layout, ops, request } = options;
+  const inCache = (args: ReadonlyArray<string>) =>
+    ops.git("prepare", ["--git-dir", layout.cache, ...args]);
+  const add = (commit: string) => inCache(["worktree", "add", "--detach", layout.worktree, commit]);
+  if (Option.isNone(salvage)) {
+    yield* add(base);
+    return withoutSalvage;
+  }
+  const { ref, commit } = salvage.value;
+  const fields = {
+    attemptId: request.attemptId,
+    worker: request.worker,
+    host: options.host,
+    ref,
+    commit,
+    base,
+  };
+  const setAside = (reason: string, message: string) =>
+    Effect.gen(function* () {
+      yield* Effect.logWarning(reason, { ...fields, message });
+      yield* add(base);
+      return { resume: Option.none(), conflicting: salvage } satisfies SalvageCheckout;
+    });
+  const forkPoint = yield* inCache(["merge-base", base, commit]).pipe(
+    Effect.map((output) => output.trim()),
+    Effect.result,
+  );
+  if (Result.isFailure(forkPoint)) {
+    return yield* setAside(
+      "The previous salvage shares no history with the revision; the Attempt starts from the revision and the salvage stays on its branch",
+      failureMessage(forkPoint.failure),
+    );
+  }
+  const changed = (yield* inCache(["diff", "--name-only", forkPoint.success, commit])).trim();
+  if (changed === "") {
+    yield* Effect.logInfo(
+      "The previous salvage holds no changes beyond the revision; the Attempt starts from the revision",
+      fields,
+    );
+    yield* add(base);
+    return withoutSalvage;
+  }
+  yield* add(commit);
+  if (forkPoint.success === base) {
+    yield* Effect.logInfo("Resuming the Attempt from the previous salvage", fields);
+    return { resume: salvage, conflicting: Option.none() } satisfies SalvageCheckout;
+  }
+  const rebased = yield* ops
+    .git("prepare", [
+      "-C",
+      layout.worktree,
+      ...SALVAGE_GIT_CONFIG,
+      "rebase",
+      "--no-verify",
+      "--onto",
+      base,
+      forkPoint.success,
+    ])
+    .pipe(Effect.result);
+  if (Result.isFailure(rebased)) {
+    yield* inCache(["worktree", "remove", "--force", layout.worktree]);
+    return yield* setAside(
+      "The previous salvage does not rebase onto the revision; the Attempt starts from the revision and the salvage stays on its branch",
+      failureMessage(rebased.failure),
+    );
+  }
+  const rebasedHead = (yield* ops.git("prepare", [
+    "-C",
+    layout.worktree,
+    "rev-parse",
+    "HEAD",
+  ])).trim();
+  if (rebasedHead === base) {
+    yield* Effect.logInfo(
+      "The revision already holds the previous salvage's changes; the Attempt starts from the revision",
+      fields,
+    );
+    return withoutSalvage;
+  }
+  yield* Effect.logInfo(
+    "Resuming the Attempt from the previous salvage, rebased onto the revision",
+    { ...fields, forkPoint: forkPoint.success, rebasedHead },
+  );
+  return { resume: salvage, conflicting: Option.none() } satisfies SalvageCheckout;
+});
+
 /**
  * The clone-to-worktree sequence every Executor shares: clone into a staging
  * sibling and promote it on success, so an interrupted clone never leaves a
  * half-initialized cache that later fetches would poison; then fetch the
  * requested revision and check out a detached worktree at the resolved commit,
- * or at the previous Attempt's salvage when the request resumes one. The
- * checkout's release finalizer is registered before the first mutation.
+ * with the previous Attempt's salvage applied on top when the request resumes
+ * one. The checkout's release finalizer is registered before the first mutation.
  */
 export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(function* <
   E extends Error,
@@ -300,16 +409,8 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         }),
     ),
   );
-  const resume = yield* fetchSalvage(options, request.resume);
-  yield* ops.git("prepare", [
-    "--git-dir",
-    layout.cache,
-    "worktree",
-    "add",
-    "--detach",
-    layout.worktree,
-    Option.match(resume, { onNone: () => baseCommit, onSome: ({ commit }) => commit }),
-  ]);
+  const salvage = yield* fetchSalvage(options, request.resume);
+  const checkout = yield* checkOutWorktree(options, baseCommit, salvage);
   yield* Ref.set(release.checkedOut, Option.some(baseCommit));
   return {
     workspace: new AttemptWorkspace({
@@ -325,7 +426,8 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         parentModel: request.parentModel,
         maxChildren: request.maxChildren,
         parentEffort: request.parentEffort,
-        resume,
+        resume: checkout.resume,
+        conflictingSalvage: checkout.conflicting,
       }),
       worktree: WorktreePath.make(layout.worktree),
     }),
@@ -482,9 +584,6 @@ const fetchSalvage = Effect.fn("Executor.fetchSalvage")(function* <E>(
       current: fetched,
     });
   }
-  yield* Effect.logInfo("Resuming the Attempt from the previous salvage", {
-    ...fields,
-    commit: fetched,
-  });
+  yield* Effect.logInfo("Fetched the previous Attempt's salvage", { ...fields, commit: fetched });
   return Option.some(new SalvagePushed({ ref: resume.value.ref, commit: fetched }));
 });
