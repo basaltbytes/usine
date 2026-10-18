@@ -206,6 +206,7 @@ export const stepExecutorLayer = (
         executor.cancel(attemptId).pipe(Effect.mapError(asAttemptFailure));
 
       return StepExecutor.of({
+        workers: workers.map(({ name }) => name),
         execute,
         interrupt,
         isLive: executor.isLive,

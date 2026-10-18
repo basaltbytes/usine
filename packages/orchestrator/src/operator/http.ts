@@ -4,6 +4,7 @@ import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { Record, Schema, SchemaTransformation } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi";
@@ -201,6 +202,10 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         payload: Schema.Struct({ toLane: BoardLaneId }).annotate({
           parseOptions: { onExcessProperty: "error" },
         }),
+        success: acknowledged,
+      }),
+      HttpApiEndpoint.post("discardLeftovers", "/api/workers/:worker/discard-leftovers", {
+        params: { worker: WorkerName },
         success: acknowledged,
       }),
       HttpApiEndpoint.post("pause", "/api/loops/:loop/pause", {

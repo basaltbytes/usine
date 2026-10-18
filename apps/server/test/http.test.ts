@@ -12,6 +12,7 @@ import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
 import {
   RunNotFoundError,
   RunOperationRejectedError,
@@ -254,6 +255,7 @@ describe("operator HTTP API", () => {
           }),
         ),
       cancel: () => Effect.void,
+      discardLeftovers: () => Effect.void,
       moveBoardItem: (move) =>
         move.toLane === "proposed:ready"
           ? Effect.fail(
@@ -403,6 +405,7 @@ describe("operator HTTP API", () => {
           : Effect.fail(new CycleBudgetResetRejectedError({ askId: id })),
       retry: (id) => record(`retry:${id}`),
       cancel: (id) => record(`cancel:${id}`),
+      discardLeftovers: (worker) => record(`discard:${worker}`),
       pause: (loop) =>
         loop === loopName
           ? record(`pause:${loop}`)
@@ -479,6 +482,10 @@ describe("operator HTTP API", () => {
           }),
           { ok: true },
         );
+        assert.deepStrictEqual(
+          yield* client.discardLeftovers({ params: { worker: WorkerName.make("local") } }),
+          { ok: true },
+        );
         assert.deepStrictEqual(interventions, [
           "reset:current-ask",
           `resolve:${runId}:attempt/1`,
@@ -488,6 +495,7 @@ describe("operator HTTP API", () => {
           `pause:${loopName}`,
           `unpause:${loopName}`,
           "move:basaltbytes/usine#31:authored:Review",
+          "discard:local",
         ]);
 
         const missingId = RunId.make("missing/run");

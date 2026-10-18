@@ -3,6 +3,7 @@ import { LoopName } from "@usine/core/loop";
 import { CycleBudgetAsk } from "@usine/core/cycle-budget";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
 import { Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
@@ -77,6 +78,21 @@ export class ConfigFileNeed extends Schema.TaggedClass<ConfigFileNeed>(
   error: ConfigFileError,
 }) {}
 
+/**
+ * Attempts are recorded on a Worker that `usine.yaml` no longer declares.
+ * Startup does not reconcile them, so any checkout they left stays on that
+ * Worker. Declaring the Worker again reconciles them at the next `usine up`;
+ * discarding their leftovers stops tracking them and leaves the Worker as it is.
+ */
+export class UnconfiguredWorkerNeed extends Schema.TaggedClass<UnconfiguredWorkerNeed>(
+  "@usine/orchestrator/UnconfiguredWorkerNeed",
+)("UnconfiguredWorkerNeed", {
+  id: Schema.String,
+  worker: WorkerName,
+  /** How many Attempts recorded on the Worker startup would otherwise reconcile. */
+  attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+}) {}
+
 /** An Item stopped opening Runs and requires an explicit reset of its shared cycle budget. */
 export class CycleBudgetNeed extends Schema.TaggedClass<CycleBudgetNeed>("CycleBudgetNeed")(
   "CycleBudgetNeed",
@@ -98,5 +114,6 @@ export const NeedView = Schema.Union([
   PreflightFindingNeed,
   ScheduleFailureNeed,
   ConfigFileNeed,
+  UnconfiguredWorkerNeed,
 ]);
 export type NeedView = typeof NeedView.Type;

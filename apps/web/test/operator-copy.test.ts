@@ -1,6 +1,7 @@
 import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
-import { ConfigFileNeed } from "@usine/orchestrator/operator";
+import { WorkerName } from "@usine/core/worker";
+import { ConfigFileNeed, UnconfiguredWorkerNeed } from "@usine/orchestrator/operator";
 import { Option, Schema } from "effect";
 import { assert, describe, it } from "vitest";
 import { needCopy, salvageMessage } from "../src/operator-copy.ts";
@@ -52,5 +53,24 @@ describe("config file copy in Needs you", () => {
     const copy = needCopy(need("agent", "agents/intern.md", "Expected a known harness"));
     assert.strictEqual(copy.title, "Agent file not loaded");
     assert.include(copy.detail, "agents/intern.md: Expected a known harness");
+  });
+});
+
+describe("unconfigured Worker copy in Needs you", () => {
+  const need = (attempts: number) =>
+    new UnconfiguredWorkerNeed({
+      id: "unconfigured-worker:local",
+      worker: WorkerName.make("local"),
+      attempts,
+    });
+
+  it("names the Worker, counts its Attempts, and gives both ways out", () => {
+    const copy = needCopy(need(114));
+    assert.strictEqual(copy.title, "Worker not configured");
+    assert.include(copy.detail, "Worker local");
+    assert.include(copy.detail, "114 recorded Attempts");
+    assert.include(copy.detail, "Declare the Worker again");
+    assert.include(copy.detail, "discard the leftovers");
+    assert.include(needCopy(need(1)).detail, "1 recorded Attempt and");
   });
 });

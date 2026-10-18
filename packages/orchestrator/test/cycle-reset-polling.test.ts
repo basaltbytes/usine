@@ -204,6 +204,7 @@ it.live(
           ),
       };
       const executor = Layer.succeed(StepExecutor)({
+        workers: [WorkerName.make("local")],
         isLive: () => Effect.succeed(false),
         outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,
