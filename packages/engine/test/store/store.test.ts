@@ -538,6 +538,37 @@ describe("run store", () => {
       ),
   );
 
+  it.live("records when an Attempt ends, whether it fails or its Run is canceled", () =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const runId = RunId.make("attempt-end-times");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const first = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(first._tag === "AttemptStarted");
+        assert.deepStrictEqual((yield* store.snapshot(runId)).attempts[0]?.endedAt, Option.none());
+        yield* store.finishAttempt(
+          first.execution.attempt,
+          Result.fail(new AgentFailure({ message: "Checks failed" })),
+        );
+        yield* store.retry(runId);
+        const second = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(second._tag === "AttemptStarted");
+        assert.deepStrictEqual((yield* store.snapshot(runId)).attempts[1]?.endedAt, Option.none());
+        yield* store.cancel(runId);
+        const attempts = (yield* store.snapshot(runId)).attempts;
+        assert.deepStrictEqual(
+          attempts.map(({ outcome }) => Option.map(outcome, ({ _tag }) => _tag)),
+          [Option.some("Failed"), Option.some("Canceled")],
+        );
+        for (const attempt of attempts) {
+          assert(Option.isSome(attempt.endedAt));
+          assert(DateTime.isGreaterThanOrEqualTo(attempt.endedAt.value, attempt.startedAt));
+        }
+      }),
+    ),
+  );
+
   it.live("keeps a canceled Run closed when its recovered Attempt reports late", () =>
     withRunStore(
       Effect.gen(function* () {

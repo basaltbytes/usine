@@ -212,6 +212,8 @@ export const attempts = snakeCase.table(
     parentModel: text().$type<ModelId>(),
     startedAt: text().notNull(),
     outcomeJson: text({ mode: "json" }).$type<unknown>(),
+    /** When the outcome was recorded; null while in flight and for Attempts closed before this column existed. */
+    endedAt: text(),
     salvageJson: text({ mode: "json" }).$type<unknown>(),
     /** When the operator discarded what the Attempt left on a Worker that is no longer configured; startup reconciliation skips it from then on. */
     leftoversDiscardedAt: text(),

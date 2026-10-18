@@ -39,7 +39,12 @@ const link = (number: number, kind: "issue" | "pr", title: string) =>
     url: `https://github.com/${boardRepository}/${kind === "pr" ? "pull" : "issues"}/${number}`,
   });
 
-const attempt = (number: number, startedAt: string, failure: string | null | "running") =>
+const attempt = (
+  number: number,
+  startedAt: string,
+  failure: string | null | "running",
+  endedAt: string | null = null,
+) =>
   new AttemptView({
     task: AttemptTask.make("Implement the issue"),
     agent: AgentName.make("developer"),
@@ -55,6 +60,7 @@ const attempt = (number: number, startedAt: string, failure: string | null | "ru
         : failure === null
           ? new SucceededAttemptView()
           : new FailedAttemptView({ failure: new AgentFailureView({ message: failure }) }),
+    endedAt,
     salvage: null,
   });
 
@@ -126,13 +132,14 @@ const salvage = link(
 );
 const pinned = link(28, "pr", "Pin GitHub Actions to commit SHAs and add Dependabot for them");
 const shipped = link(5, "issue", "Show the salvage branch on failed Attempts");
+const dropped = link(18, "issue", "Cache the label catalog per repository");
 const flaky = link(
   15,
   "issue",
   "Reader restore test is flaky on narrow viewports when the sidebar is collapsed and the transcript history spans several earlier pages",
 );
 
-/** A Board with every card shape: lane-only and overflowing labels, a linked PR, and open, waiting, failed and finished Runs. */
+/** A Board with every card shape: lane-only and overflowing labels, a linked PR, and open, waiting, failed, canceled and finished Runs. */
 const boardProject = () =>
   new ProjectView({
     repository: boardRepository,
@@ -144,6 +151,18 @@ const boardProject = () =>
       new LabelView({ name: GitHubLabelName.make("ui"), color: "a2eeef", description: null }),
       new LabelView({ name: GitHubLabelName.make("ci"), color: "0e8a16", description: null }),
       new LabelView({ name: GitHubLabelName.make("docs"), color: "0075ca", description: null }),
+      new LabelView({ name: GitHubLabelName.make("backlog"), color: "c5def5", description: null }),
+      new LabelView({
+        name: GitHubLabelName.make("ready-for-agent"),
+        color: "1d76db",
+        description: "An agent may start work",
+      }),
+      new LabelView({
+        name: GitHubLabelName.make("in-progress"),
+        color: "5319e7",
+        description: null,
+      }),
+      new LabelView({ name: GitHubLabelName.make("review"), color: "d93f0b", description: null }),
     ],
     preflightFindings: [],
     board: new BoardView({
@@ -152,6 +171,11 @@ const boardProject = () =>
         writable("Backlog", "backlog", [
           task([link(12, "issue", "Document the cycle budget reset")], ["backlog", "docs"]),
           task([flaky], ["backlog", "bug", "priority", "ci", "flaky"]),
+          task(
+            [dropped],
+            ["backlog"],
+            [run("run-dropped", dropped, "implement", "Canceled", 1440, [])],
+          ),
         ]),
         writable("Ready", "ready-for-agent", [
           task(
@@ -166,10 +190,10 @@ const boardProject = () =>
             ["in-progress", "ui"],
             [
               run("run-redesign-plan", redesign, "plan", "Succeeded", 180, [
-                attempt(1, minutesAgo(180), null),
+                attempt(1, minutesAgo(180), null, minutesAgo(150)),
               ]),
               run("run-redesign", redesignPr, "implement", "Running", 12, [
-                attempt(1, minutesAgo(12), "The Worker restarted"),
+                attempt(1, minutesAgo(12), "The Worker restarted", minutesAgo(7)),
                 attempt(2, minutesAgo(6), "running"),
               ]),
             ],
@@ -181,7 +205,12 @@ const boardProject = () =>
             ["review"],
             [
               run("run-pinned", pinned, "review", "Failed", 95, [
-                attempt(1, minutesAgo(95), "The required check lint failed on the pinned commit"),
+                attempt(
+                  1,
+                  minutesAgo(95),
+                  "The required check lint failed on the pinned commit",
+                  minutesAgo(80),
+                ),
               ]),
             ],
             { conflicting: true },
@@ -198,7 +227,7 @@ const boardProject = () =>
               [],
               [
                 run("run-shipped", shipped, "implement", "Succeeded", 2 * 1440, [
-                  attempt(1, minutesAgo(2 * 1440), null),
+                  attempt(1, minutesAgo(2 * 1440), null, minutesAgo(2 * 1440 - 30)),
                 ]),
               ],
               { state: "issue-closed" },

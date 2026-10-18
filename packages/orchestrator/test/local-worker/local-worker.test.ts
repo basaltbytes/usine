@@ -335,6 +335,7 @@ describe("local worker", () => {
               parentModel: Option.none(),
               startedAt: selected.event.receivedAt,
               outcome: Option.none(),
+              endedAt: Option.none(),
               salvage: Option.none(),
             }),
             event: selected.event,

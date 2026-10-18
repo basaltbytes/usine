@@ -306,7 +306,8 @@ const makeRunStore = Effect.gen(function* () {
         Succeeded: () => fields,
       }),
     );
-    yield* tx.closeAttempt(attempt.id, outcome);
+    const endedAt = yield* DateTime.now;
+    yield* tx.closeAttempt(attempt.id, outcome, endedAt);
     if (decision._tag === "RetryAttempt") return;
     if (decision._tag === "RunSucceeded") {
       yield* tx.updateStepResult(runId, attempt.stepName, decision.result);
@@ -449,6 +450,7 @@ const makeRunStore = Effect.gen(function* () {
           parentModel: current.parentModel,
           startedAt,
           outcome: Option.none(),
+          endedAt: Option.none(),
           salvage: Option.none(),
         });
         yield* tx.addAttempt(attempt);
@@ -642,7 +644,8 @@ const makeRunStore = Effect.gen(function* () {
         });
         if (decision._tag === "AlreadyClosed") return decision;
         if (Option.isSome(decision.attempt)) {
-          yield* tx.closeAttempt(decision.attempt.value.id, decision.attempt.value.outcome);
+          const { id, outcome } = decision.attempt.value;
+          yield* tx.closeAttempt(id, outcome, yield* DateTime.now);
         }
         yield* tx.updateState(runId, decision.state);
         const canceled: CancelOutcome = {

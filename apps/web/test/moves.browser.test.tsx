@@ -113,10 +113,9 @@ const move = async (number: number, destination: string) => {
 /** Opens the card's menu to check whether Move to is offered, then closes it. */
 const expectMovable = async (number: number, movable: boolean) => {
   await actions(number).click();
+  await expect.element(page.getByRole("menu")).toBeVisible();
   const offered = expect.element(moveTo());
-  await (movable
-    ? offered.not.toHaveAttribute("aria-disabled", "true")
-    : offered.toHaveAttribute("aria-disabled", "true"));
+  await (movable ? offered.toBeVisible() : offered.not.toBeInTheDocument());
   await userEvent.keyboard("{Escape}");
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
 };

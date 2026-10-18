@@ -3,9 +3,10 @@ import type { AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage"
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { InstanceReload } from "@usine/orchestrator/current-instance";
-import type { BoardItemLink, FailureView, NeedView } from "@usine/orchestrator/operator";
+import type { BoardItemLink, FailureView, NeedView, RunView } from "@usine/orchestrator/operator";
 import { Match } from "effect";
 import type { BoardMoveProgress } from "./board/moves.ts";
+import type { RunActionRequest } from "./run-actions.ts";
 
 export interface NeedCopy {
   readonly title: string;
@@ -37,6 +38,31 @@ export const elapsedLabel = (since: string, now: number = Date.now()): string =>
   if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)}h`;
   return `${Math.floor(elapsed / 86_400_000)}d`;
 };
+
+/** An instant as a local date and minute, such as `2026-10-18 17:27`. */
+export const timestampLabel = (instant: string): string => {
+  const date = new Date(instant);
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`;
+};
+
+/** The tooltip of a Run's age, which counts from when the Run opened. */
+export const openedTitle = (openedAt: string): string => `Opened ${timestampLabel(openedAt)}`;
+
+/** The tooltip of the time on a Board card's Run line: the instant it counts from and what that instant is. */
+export const runLineTimeTitle = (state: RunView["state"], since: string): string => {
+  if (state === "Running") return `Running since ${timestampLabel(since)}`;
+  if (state === "Failed") return `Failed at ${timestampLabel(since)}`;
+  return openedTitle(since);
+};
+
+/** The card's status while one of its Run actions is being sent. */
+export const runActionProgress = {
+  approve: "Approving…",
+  retry: "Retrying…",
+  cancel: "Canceling…",
+  resolveFailure: "Marking resolved…",
+} as const satisfies Record<RunActionRequest["action"], string>;
 
 export const moveProgressMessage = (phase: BoardMoveProgress["phase"]): string =>
   phase === "saving" ? "Moving…" : "Saved on GitHub · syncing…";

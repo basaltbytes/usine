@@ -31,9 +31,9 @@ import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { laneUnder, orderLanes, ProjectBoard, runsWithoutCard } from "../src/board/board.tsx";
-import { cardLabels, itemFailure } from "../src/board/card.tsx";
+import { cardLabels, currentRun, itemFailure, runLineSince } from "../src/board/card.tsx";
 import { RunLinks } from "../src/components/run-links.tsx";
-import { elapsedLabel, failureMessage, needCopy } from "../src/operator-copy.ts";
+import { elapsedLabel, failureMessage, needCopy, timestampLabel } from "../src/operator-copy.ts";
 
 const brain = new BrainSpec({
   harness: "codex",
@@ -55,6 +55,7 @@ const attempt = (number: number, message: string | null) =>
       message === null
         ? new SucceededAttemptView()
         : new FailedAttemptView({ failure: new AgentFailureView({ message }) }),
+    endedAt: `2026-09-01T12:30:0${number}.000Z`,
     salvage: null,
   });
 
@@ -375,5 +376,50 @@ describe("Elapsed time", () => {
     assert.strictEqual(elapsedLabel(since, at(3 * 3_600_000 + 59 * 60_000)), "3h");
     assert.strictEqual(elapsedLabel(since, at(2 * 86_400_000)), "2d");
     assert.strictEqual(elapsedLabel(since, at(-5_000)), "now");
+  });
+
+  it("names a local date and minute in tooltips", () => {
+    const local = (...parts: [number, number, number, number, number]) =>
+      new Date(...parts).toISOString();
+    assert.strictEqual(timestampLabel(local(2026, 9, 18, 17, 27)), "2026-10-18 17:27");
+    assert.strictEqual(timestampLabel(local(2026, 0, 5, 9, 3)), "2026-01-05 09:03");
+  });
+});
+
+describe("Board card Run line", () => {
+  const failed = attempt(1, "Checks failed");
+
+  it("shows an open Run or a failure that still needs the operator, and no closed Run", () => {
+    const card = itemWithRun("Failed", [failed]);
+    const shown = (state: RunView["state"], canResolveFailure = false) =>
+      currentRun(
+        new BoardTaskView({
+          ...card,
+          run: new RunView({ ...runOnItem("Failed", [failed]), state, canResolveFailure }),
+        }),
+      )?.state ?? null;
+    assert.strictEqual(shown("Failed", true), "Failed");
+    assert.strictEqual(shown("Failed"), null);
+    assert.strictEqual(shown("Waiting"), "Waiting");
+    assert.strictEqual(shown("Queued"), "Queued");
+    assert.strictEqual(shown("Running"), "Running");
+    assert.strictEqual(shown("Canceled"), null);
+    assert.strictEqual(shown("Succeeded"), null);
+  });
+
+  it("counts from the Run's opening, its live Attempt's start, or its last Attempt's end", () => {
+    const run = runOnItem("Failed", [failed]);
+    const live = new AttemptView({ ...attempt(2, null), outcome: null, endedAt: null });
+    assert.strictEqual(runLineSince(new RunView({ ...run, state: "Waiting" })), run.openedAt);
+    assert.strictEqual(
+      runLineSince(new RunView({ ...run, state: "Running", attempts: [failed, live] })),
+      live.startedAt,
+    );
+    assert.strictEqual(runLineSince(run), failed.endedAt);
+    // A retried Run is Running before its next Attempt starts.
+    assert.strictEqual(runLineSince(new RunView({ ...run, state: "Running" })), null);
+    // Attempts closed before end times were recorded have none.
+    const unrecorded = new AttemptView({ ...failed, endedAt: null });
+    assert.strictEqual(runLineSince(new RunView({ ...run, attempts: [unrecorded] })), null);
   });
 });

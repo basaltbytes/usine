@@ -1,12 +1,13 @@
 import { QueryClient, QueryClientProvider, useSuspenseQuery } from "@tanstack/react-query";
 import type { RunId } from "@usine/core/run";
-import { FactoryOverview } from "@usine/orchestrator/operator";
+import { FactoryOverview, type ReadyOverview, type RunView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
 import { ProjectBoard } from "../src/board/board.tsx";
+import { timestampLabel } from "../src/operator-copy.ts";
 import { overviewQuery } from "../src/overview.ts";
 import { boardOverview } from "./board-fixture.ts";
 import "../src/index.css";
@@ -21,6 +22,7 @@ let host: HTMLDivElement;
 let root: Root;
 let queryClient: QueryClient;
 let opened: Array<RunId>;
+let overview: ReadyOverview;
 
 const Board = () => {
   const { data } = useSuspenseQuery(overviewQuery());
@@ -37,10 +39,37 @@ const cardOf = (title: RegExp) => {
   if (!(card instanceof HTMLElement)) throw new Error(`No card titled ${title}`);
   return card;
 };
+const runOf = (id: string): RunView => {
+  const run = overview.projects
+    .flatMap(({ board }) => board.lanes)
+    .flatMap(({ items }) => items)
+    .flatMap(({ runs }) => runs)
+    .find((candidate) => candidate.id === id);
+  if (run === undefined) throw new Error(`No Run ${id}`);
+  return run;
+};
+/** The Run line of a card: the row holding the Run's state. */
+const runLine = (card: HTMLElement, state: string) => {
+  const row = page.elementLocator(card).getByText(state, { exact: true }).element().parentElement;
+  if (row === null) throw new Error(`No ${state} Run line`);
+  return row;
+};
+/** The open menu's items, then the number of separators between its groups. */
+const menuContents = async () => {
+  const menu = page.getByRole("menu");
+  await expect.element(menu).toBeVisible();
+  return {
+    items: menu
+      .getByRole("menuitem")
+      .elements()
+      .map((item) => item.textContent),
+    separators: menu.element().querySelectorAll("[role=separator]").length,
+  };
+};
 
 beforeEach(async () => {
   await page.viewport(1280, 800);
-  const overview = boardOverview();
+  overview = boardOverview();
   await commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(overview)), 200);
   opened = [];
   queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -64,6 +93,19 @@ afterEach(() => {
   host.remove();
 });
 
+it("heads each lane with the labels in their GitHub colors and the Item states that route to it", async () => {
+  const sources = (name: string) => lane(name).getByRole("list", { name: "Lane sources" });
+  const ready = sources("Ready").getByText("ready-for-agent", { exact: true }).element();
+  expect(getComputedStyle(ready).borderColor).toBe("rgba(29, 118, 219, 0.4)");
+  expect(ready.getAttribute("title")).toBe("An agent may start work");
+  expect(
+    getComputedStyle(sources("Review").getByText("review", { exact: true }).element()).borderColor,
+  ).toBe("rgba(217, 63, 11, 0.4)");
+  const closed = sources("Done").getByText("issue-closed", { exact: true }).element();
+  expect(closed.getAttribute("style")).toBeNull();
+  expect(closed.classList).toContain("text-muted-foreground");
+});
+
 it("shows the number and kind, a title clamped to two lines, and only labels the lane does not name", async () => {
   const card = cardOf(/^Reader restore test/u);
   expect(card.textContent).toContain("#15 Issue");
@@ -81,29 +123,47 @@ it("shows the number and kind, a title clamped to two lines, and only labels the
   expect(labels(cardOf(/^Document the cycle budget/u))).toEqual(["docs"]);
 });
 
-it("shows the open Run on one line, with a pulsing dot only while an Attempt runs", async () => {
+it("times a running Run from its current Attempt, on one line with a pulsing dot", async () => {
   const running = cardOf(/^Redesign the Board/u);
   expect(running.textContent).toContain("#9 Issue#31 Pull request");
-  const line = page.elementLocator(running).getByText("Running", { exact: true }).element();
-  const row = line.parentElement;
-  expect(row?.textContent).toBe("implementRunning12mdeveloper");
-  expect(row?.getBoundingClientRect().height).toBeLessThanOrEqual(
-    Number.parseFloat(getComputedStyle(line).lineHeight) + 1,
+  const row = runLine(running, "Running");
+  expect(row.textContent).toBe("implementRunning6mdeveloper");
+  const state = page.elementLocator(running).getByText("Running", { exact: true }).element();
+  expect(row.getBoundingClientRect().height).toBeLessThanOrEqual(
+    Number.parseFloat(getComputedStyle(state).lineHeight) + 1,
   );
-  expect(getComputedStyle(line.querySelector("[aria-hidden]") ?? line).animationName).not.toBe(
+  expect(getComputedStyle(state.querySelector("[aria-hidden]") ?? state).animationName).not.toBe(
     "none",
   );
+  const startedAt = runOf("run-redesign").attempts[1]?.startedAt ?? "";
+  const time = row.querySelector("time");
+  expect(time?.dateTime).toBe(startedAt);
+  expect(time?.title).toBe(`Running since ${timestampLabel(startedAt)}`);
+  expect(time?.title).toMatch(/^Running since \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/u);
   // Earlier Attempts and their failures stay in the Run drawer.
   expect(running.textContent).not.toContain("Attempt");
   expect(running.textContent).not.toContain("The Worker restarted");
+});
 
-  const waiting = page
-    .elementLocator(cardOf(/^Retry salvage/u))
-    .getByText("Waiting")
-    .element();
-  expect(getComputedStyle(waiting.querySelector("[aria-hidden]") ?? waiting).animationName).toBe(
-    "none",
-  );
+it("times a waiting Run from its opening and a failed one from its failure, without a dot", async () => {
+  const waiting = runLine(cardOf(/^Retry salvage/u), "Waiting");
+  expect(waiting.textContent).toBe("implementWaiting3mdeveloper");
+  expect(waiting.querySelector("[aria-hidden]")).toBeNull();
+  const openedAt = runOf("run-salvage").openedAt;
+  expect(waiting.querySelector("time")?.title).toBe(`Opened ${timestampLabel(openedAt)}`);
+
+  const failed = runLine(cardOf(/^Pin GitHub Actions/u), "Failed");
+  expect(failed.textContent).toBe("reviewFailed1hreviewer");
+  expect(failed.querySelector("[aria-hidden]")).toBeNull();
+  const endedAt = runOf("run-pinned").attempts[0]?.endedAt ?? "";
+  expect(failed.querySelector("time")?.title).toBe(`Failed at ${timestampLabel(endedAt)}`);
+});
+
+it("leaves canceled and succeeded Runs off the card", async () => {
+  for (const card of [cardOf(/^Cache the label catalog/u), cardOf(/^Show the salvage branch/u)]) {
+    expect(card.querySelector("time")).toBeNull();
+    expect(card.textContent).not.toMatch(/Canceled|Succeeded|implement/u);
+  }
 });
 
 it("opens the Run drawer from anywhere on the card body", async () => {
@@ -113,22 +173,30 @@ it("opens the Run drawer from anywhere on the card body", async () => {
   expect(opened).toEqual(["run-salvage"]);
 });
 
-it("lists the card's actions behind its menu button and moves the card through Move to", async () => {
+it("lists only the actions that apply to a card without a Run", async () => {
+  await actions(12).click();
+  expect(await menuContents()).toEqual({ items: ["Open #12 on GitHub", "Move to"], separators: 1 });
+  await userEvent.keyboard("{Escape}");
+  await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
+
+  await actions(18).click();
+  expect(await menuContents()).toEqual({
+    items: ["Open #18 on GitHub", "Run history", "Move to"],
+    separators: 2,
+  });
+});
+
+it("lists the current Run's applicable actions and moves the card through Move to", async () => {
   await actions(7).click();
   expect(opened).toEqual([]);
+  expect(await menuContents()).toEqual({
+    items: ["Open #7 on GitHub", "Open Run", "Approve", "Cancel Run", "Move to"],
+    separators: 3,
+  });
   await expect
     .element(page.getByRole("menuitem", { name: "Open #7 on GitHub" }))
     .toHaveAttribute("href", "https://github.com/board-test/repo/issues/7");
-  await expect.element(page.getByRole("menuitem", { name: "Open Run" })).toBeVisible();
-  await expect
-    .element(page.getByRole("menuitem", { name: "Approve" }))
-    .not.toHaveAttribute("aria-disabled", "true");
-  await expect
-    .element(page.getByRole("menuitem", { name: "Retry" }))
-    .toHaveAttribute("aria-disabled", "true");
-  await expect
-    .element(page.getByRole("menuitem", { name: "Cancel Run" }))
-    .not.toHaveAttribute("aria-disabled", "true");
+  expect(page.getByRole("menu").element().querySelector("[aria-disabled=true]")).toBeNull();
 
   await page.getByRole("menuitem", { name: "Move to" }).click();
   const destinations = page.getByRole("menu").last().getByRole("menuitem");
@@ -142,6 +210,28 @@ it("lists the card's actions behind its menu button and moves the card through M
     .element(lane("In progress").getByRole("status"))
     .toHaveTextContent("Saved on GitHub");
   await expect.element(lane("Ready").getByText(/^Retry salvage/u)).not.toBeInTheDocument();
+});
+
+it("offers Retry for a failed Run and Cancel Run alone for a running one", async () => {
+  await page.getByRole("button", { name: "Actions for pull request #28", exact: true }).click();
+  expect((await menuContents()).items).toEqual([
+    "Open #28 on GitHub",
+    "Open Run",
+    "Retry",
+    "Move to",
+  ]);
+  await userEvent.keyboard("{Escape}");
+  await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
+
+  await page.getByRole("button", { name: "Actions for pull request #31", exact: true }).click();
+  expect((await menuContents()).items).toEqual([
+    "Open #9 on GitHub",
+    "Open #31 on GitHub",
+    "Open Run",
+    "Run history",
+    "Cancel Run",
+    "Move to",
+  ]);
 });
 
 it("tints only the column a keyboard drag is over", async () => {

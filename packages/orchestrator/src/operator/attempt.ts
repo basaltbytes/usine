@@ -74,7 +74,7 @@ export const AttemptOutcomeView = Schema.Union([
 ]);
 export type AttemptOutcomeView = typeof AttemptOutcomeView.Type;
 
-/** One Attempt's identity, Worker, effective brain, start time, optional terminal outcome, and salvaged work. */
+/** One Attempt's identity, Worker, effective brain, start and end times, optional terminal outcome, and salvaged work. */
 export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/AttemptView")({
   id: AttemptId,
   number: AttemptNumber,
@@ -85,5 +85,7 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
   operatorIntervened: Schema.Boolean,
   startedAt: Schema.String,
   outcome: Schema.NullOr(AttemptOutcomeView),
+  /** When the outcome was recorded; null while the Attempt runs and for Attempts closed before end times were recorded. */
+  endedAt: Schema.NullOr(Schema.String),
   salvage: Schema.NullOr(AttemptSalvage),
 }) {}

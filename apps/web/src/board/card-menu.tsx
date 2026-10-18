@@ -1,7 +1,7 @@
 import { ArrowSquareOutIcon, DotsThreeVerticalIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, RunView } from "@usine/orchestrator/operator";
-import { useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -26,7 +26,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
-import { elapsedLabel, itemKindLabel, runActionLabel } from "../operator-copy.ts";
+import { elapsedLabel, itemKindLabel, openedTitle, runActionLabel } from "../operator-copy.ts";
 import type { RunActions } from "../run-actions.ts";
 
 /** Where a card can move: the other writable lanes, unavailable while a move is saving. */
@@ -51,7 +51,11 @@ const RunHistory = ({
           <span className="truncate font-mono">{run.loop}</span>
           <span className="ml-auto flex shrink-0 gap-2 text-muted-foreground">
             <span>{run.state}</span>
-            <time dateTime={run.openedAt} className="tabular-nums">
+            <time
+              dateTime={run.openedAt}
+              title={openedTitle(run.openedAt)}
+              className="tabular-nums"
+            >
               {elapsedLabel(run.openedAt)}
             </time>
           </span>
@@ -61,23 +65,100 @@ const RunHistory = ({
   </DropdownMenuSub>
 );
 
-/** The card's actions: GitHub links, its Run's drawer and operator actions, and lane moves. */
+/** The card's actions, listing only those that apply now: GitHub links, the current Run's drawer
+ * and operator actions, earlier Runs, and lane moves. */
 export const CardMenu = ({
   item,
+  run,
   moves,
   openRun,
   action,
   className,
 }: {
   readonly item: BoardTaskView;
+  /** The Run the card shows, or null when it shows none. */
+  readonly run: RunView | null;
   readonly moves: CardMoves;
   readonly openRun: (runId: RunId) => void;
   readonly action: RunActions;
   readonly className?: string;
 }) => {
   const [confirmingCancel, setConfirmingCancel] = useState(false);
-  const run = item.run;
   const subject = `${itemKindLabel(item.kind).toLowerCase()} #${item.number}`;
+  const past = item.runs.filter(({ id }) => id !== run?.id);
+  const groups: Array<{ readonly key: string; readonly content: ReactNode }> = [
+    {
+      key: "links",
+      content: item.items.map((member) => (
+        <DropdownMenuLinkItem
+          key={member.itemKey}
+          href={member.url}
+          target="_blank"
+          rel="noreferrer"
+          closeOnClick
+        >
+          Open #{member.number} on GitHub
+          <ArrowSquareOutIcon className="ml-auto text-muted-foreground" aria-hidden="true" />
+        </DropdownMenuLinkItem>
+      )),
+    },
+  ];
+  if (run !== null || past.length > 0)
+    groups.push({
+      key: "runs",
+      content: (
+        <>
+          {run !== null && (
+            <DropdownMenuItem onClick={() => openRun(run.id)}>Open Run</DropdownMenuItem>
+          )}
+          {past.length > 0 && <RunHistory runs={past} openRun={openRun} />}
+        </>
+      ),
+    });
+  // The card shows a sent action's progress; its menu offers no action until the answer arrives.
+  if (run !== null && !action.isPending && (run.canApprove || run.canRetry || run.canCancel))
+    groups.push({
+      key: "actions",
+      content: (
+        <>
+          {run.canApprove && (
+            <DropdownMenuItem
+              onClick={() => action.mutate({ runId: run.id, request: { action: "approve" } })}
+            >
+              {runActionLabel.approve}
+            </DropdownMenuItem>
+          )}
+          {run.canRetry && (
+            <DropdownMenuItem
+              onClick={() => action.mutate({ runId: run.id, request: { action: "retry" } })}
+            >
+              {runActionLabel.retry}
+            </DropdownMenuItem>
+          )}
+          {run.canCancel && (
+            <DropdownMenuItem variant="destructive" onClick={() => setConfirmingCancel(true)}>
+              {runActionLabel.cancel}
+            </DropdownMenuItem>
+          )}
+        </>
+      ),
+    });
+  if (!moves.disabled && moves.targets.length > 0)
+    groups.push({
+      key: "move",
+      content: (
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>Move to</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="min-w-40">
+            {moves.targets.map((lane) => (
+              <DropdownMenuItem key={lane.id} onClick={() => moves.onMove(item, lane)}>
+                {lane.name}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+      ),
+    });
   return (
     <>
       <DropdownMenu>
@@ -94,64 +175,12 @@ export const CardMenu = ({
           <DotsThreeVerticalIcon weight="bold" className="size-4" aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-auto min-w-48">
-          <DropdownMenuGroup>
-            {item.items.map((member) => (
-              <DropdownMenuLinkItem
-                key={member.itemKey}
-                href={member.url}
-                target="_blank"
-                rel="noreferrer"
-                closeOnClick
-              >
-                Open #{member.number} on GitHub
-                <ArrowSquareOutIcon className="ml-auto text-muted-foreground" aria-hidden="true" />
-              </DropdownMenuLinkItem>
-            ))}
-          </DropdownMenuGroup>
-          {run !== null && (
-            <>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuItem onClick={() => openRun(run.id)}>Open Run</DropdownMenuItem>
-                {item.runs.length > 1 && <RunHistory runs={item.runs} openRun={openRun} />}
-              </DropdownMenuGroup>
-              <DropdownMenuSeparator />
-              <DropdownMenuGroup>
-                <DropdownMenuItem
-                  disabled={!run.canApprove || action.isPending}
-                  onClick={() => action.mutate({ runId: run.id, request: { action: "approve" } })}
-                >
-                  {runActionLabel.approve}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={!run.canRetry || action.isPending}
-                  onClick={() => action.mutate({ runId: run.id, request: { action: "retry" } })}
-                >
-                  {runActionLabel.retry}
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  variant="destructive"
-                  disabled={!run.canCancel || action.isPending}
-                  onClick={() => setConfirmingCancel(true)}
-                >
-                  {runActionLabel.cancel}
-                </DropdownMenuItem>
-              </DropdownMenuGroup>
-            </>
-          )}
-          <DropdownMenuSeparator />
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger disabled={moves.disabled || moves.targets.length === 0}>
-              Move to
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="min-w-40">
-              {moves.targets.map((lane) => (
-                <DropdownMenuItem key={lane.id} onClick={() => moves.onMove(item, lane)}>
-                  {lane.name}
-                </DropdownMenuItem>
-              ))}
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
+          {groups.map(({ key, content }, index) => (
+            <Fragment key={key}>
+              {index > 0 && <DropdownMenuSeparator />}
+              <DropdownMenuGroup>{content}</DropdownMenuGroup>
+            </Fragment>
+          ))}
         </DropdownMenuContent>
       </DropdownMenu>
       {run !== null && (
