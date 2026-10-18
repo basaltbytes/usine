@@ -418,7 +418,14 @@ const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
   );
 });
 
-/** The ExpressionEngine implementation on @marcbachmann/cel-js. */
+/**
+ * Provides {@link ExpressionEngine} on `@marcbachmann/cel-js`, pinned to 8.0.0 as
+ * the CEL seam requires
+ * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
+ * The layer has no requirements. Before evaluation it converts JSON integers
+ * declared as `int` or `uint` to `bigint` and reads absent nullable fields as
+ * `null`.
+ */
 export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {
   relatedStringLiterals,
   checkBoolean,

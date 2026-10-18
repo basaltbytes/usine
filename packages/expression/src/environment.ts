@@ -1,6 +1,11 @@
 import { Effect, Schema } from "effect";
 
-/** A type name in CEL syntax such as `string`, `Issue`, or `list<Label>`. */
+/**
+ * A type name in CEL syntax: a primitive such as `string` or `int`, an object
+ * type such as `Label`, `list<T>`, or `map<K,V>`, with no spaces. Decoding checks
+ * the syntax only. A name that no {@link ObjectType} declares fails when an
+ * expression is checked.
+ */
 export const TypeReference = Schema.String.check(
   Schema.isPattern(
     /^(?:[A-Za-z_][A-Za-z0-9_.]*|list<[A-Za-z_][A-Za-z0-9_.]*>|map<[A-Za-z_][A-Za-z0-9_.]*,[A-Za-z_][A-Za-z0-9_.]*>)$/u,
@@ -36,19 +41,31 @@ export class ObjectField extends Schema.Class<ObjectField>("@usine/expression/Ob
   nullable: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
 }) {}
 
-/** A CEL object type. Declare a type before the types that reference it. */
+/**
+ * A named object type expressions can read fields from, such as the
+ * `IssuePayload` type of a payload slice. Declare a type before the types that
+ * reference it. Field names must be unique within the type.
+ */
 export class ObjectType extends Schema.Class<ObjectType>("@usine/expression/ObjectType")({
   name: ObjectTypeName,
   fields: Schema.Array(ObjectField).check(uniqueNames("Expected unique CEL object-field names")),
 }) {}
 
-/** A root variable available to CEL expressions in an Environment. */
+/**
+ * A root variable available to CEL expressions in an {@link Environment}, such
+ * as `repo` or `item`. Evaluation reads its value from the `context` entry of
+ * the same name.
+ */
 export class Variable extends Schema.Class<Variable>("@usine/expression/Variable")({
   name: Identifier,
   type: TypeReference,
 }) {}
 
-/** The types and root variables an expression is checked and evaluated against. */
+/**
+ * The types and root variables an expression is checked and evaluated against.
+ * Object-type names and variable names must each be unique. Expressions that
+ * name anything outside this environment fail checking.
+ */
 export class Environment extends Schema.Class<Environment>("@usine/expression/Environment")({
   types: Schema.Array(ObjectType).check(uniqueNames("Expected unique CEL object-type names")),
   variables: Schema.Array(Variable).check(uniqueNames("Expected unique CEL variable names")),
