@@ -1,8 +1,8 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "ae79dba8-4983-4692-8ba6-61d0f8650f84",
-  "prevIds": ["b782e09d-7c1d-4efd-84d4-7d8e05414ea0"],
+  "id": "fba4f3f5-7874-44fa-9e30-b9c3abaf4a59",
+  "prevIds": ["4b1671f6-a933-49df-9316-c43fd09fb218"],
   "ddl": [
     {
       "name": "usine_approvals",
@@ -279,6 +279,16 @@
       "default": null,
       "generated": null,
       "name": "salvage_json",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "leftovers_discarded_at",
       "entityType": "columns",
       "table": "usine_attempts"
     },

@@ -4,9 +4,11 @@ import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { Record, Schema, SchemaTransformation } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi";
+import { InstanceReload } from "../current-instance/changes.ts";
 import { BoardLaneId } from "./board.ts";
 import {
   ColdTranscriptRequest,
@@ -31,6 +33,8 @@ const errorStatuses = {
   RosterAgentNotFoundError: 404,
   CycleBudgetResetRejectedError: 409,
   BoardLaneReadOnlyError: 409,
+  RestartRequiredError: 409,
+  FactoryConfigError: 422,
   EnginePersistenceError: 500,
   AttemptCancellationError: 500,
   HttpBodyError: 500,
@@ -142,7 +146,8 @@ const loopParams = { loop: LoopName };
  * The operator's HTTP reads and interventions. Server handlers and generated
  * clients derive URLs, request codecs, successful responses, and typed failures
  * from this contract. Action acknowledgement means the request was accepted;
- * subsequent observation reports execution and GitHub polling progress.
+ * subsequent observation reports execution and GitHub polling progress. A
+ * reload of the instance folder answers with what it changed.
  *
  * This capability is platform-free (ADRs 0012 and 0020). Library consumers can
  * continue using Operator directly without an HTTP server or client.
@@ -203,6 +208,10 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         }),
         success: acknowledged,
       }),
+      HttpApiEndpoint.post("discardLeftovers", "/api/workers/:worker/discard-leftovers", {
+        params: { worker: WorkerName },
+        success: acknowledged,
+      }),
       HttpApiEndpoint.post("pause", "/api/loops/:loop/pause", {
         params: loopParams,
         success: acknowledged,
@@ -211,6 +220,7 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         params: loopParams,
         success: acknowledged,
       }),
+      HttpApiEndpoint.post("reload", "/api/instance/reload", { success: InstanceReload }),
     )
     .middleware(OperatorHttpPolicy),
 );

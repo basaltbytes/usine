@@ -46,6 +46,18 @@ export class InvalidGitHubResponseError extends Schema.TaggedError<InvalidGitHub
   detail: Schema.NonEmptyString,
 }) {}
 
+/**
+ * GitHub has no Item with this number in the repository: it was deleted or
+ * transferred, or the App can no longer read it. The repository itself answered.
+ */
+export class GitHubItemNotFoundError extends Schema.TaggedError<GitHubItemNotFoundError>(
+  "@usine/github/GitHubItemNotFoundError",
+)("GitHubItemNotFoundError", {
+  operation: GitHubOperation,
+  item: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+  message: Schema.NonEmptyString,
+}) {}
+
 /** Failures from discovering installation access or making an authenticated GitHub request. */
 export const GitHubAppError = Schema.Union([
   InstallationDiscoveryError,

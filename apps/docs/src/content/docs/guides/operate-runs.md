@@ -140,8 +140,9 @@ For a Claude Code or Codex child, the expanded child section also shows its save
 | **Label preflight failed**             | usine couldn't create a label that `usine.yaml` declares.                                                            |
 | **Item projection quarantined**        | usine couldn't place an Item on its Board.                                                                           |
 | A schedule error                       | A schedule Loop couldn't evaluate or submit a tick.                                                                  |
-| **Loop quarantined**                   | A Loop file failed to load and opens no Runs. Fix the file and restart `usine up`.                                   |
-| **Agent file not loaded**              | An Agent file failed to load and isn't in the roster. Fix the file and restart `usine up`.                          |
+| **Loop quarantined**                   | A Loop file failed to load and opens no Runs. Fix the file and reload the configuration.                             |
+| **Agent file not loaded**              | An Agent file failed to load and isn't in the roster. Fix the file and reload the configuration.                    |
+| **Worker not configured**              | Attempts are recorded on a Worker that `usine.yaml` no longer declares, so startup doesn't reconcile them. Declare the Worker again and restart `usine up`, or **Discard leftovers**. |
 
 ## Cycle budgets
 
@@ -161,9 +162,15 @@ settings:
 
 At 80% of a ceiling the parent gets one warning. At 100% the Attempt stops with `RunawayFailure`, which the engine never retries automatically. The minutes clock stops while a child is held, and the token count includes the parent and every child.
 
+## Reload the configuration
+
+Select **Reload configuration** on the **Loops** page to apply edits to Loops, Agents, and `usine.yaml` without stopping the orchestrator. `POST /api/instance/reload` and `SIGHUP` do the same. Running Attempts continue, and an open Run keeps the Agent it was opened with, also when you retry it. **Edit and retry** offers the Agents of the reloaded roster. New Runs use the new configuration. Changes to `workers` or `webhooks` still need a restart. [Run a factory](/guides/#change-the-configuration) describes what a reload applies.
+
 ## Restarts
 
 When the orchestrator stops, a running Attempt's Pi parent task stays in `.usine/durable.sqlite`. The next `usine up` reattaches the same Attempt with the same worktree, and this doesn't count as a retry. If the parent task or the worktree no longer exists, the Attempt fails with an `InfraFailure`, and the Run retries with a new Attempt, starting from the newest salvage branch if there is one.
+
+At each start, usine also checks every Worker that `usine.yaml` declares for checkouts that earlier Attempts left: it salvages the unfinished work of a failed or canceled Attempt and removes the checkout of a succeeded one. It skips the Attempts recorded on a Worker that `usine.yaml` no longer declares, for example after you replace the `local` Worker with an SSH Worker. The log has one warning per start with their count and the Workers, and **Needs you** shows **Worker not configured** for each such Worker. Their checkouts stay where they are. Declare the Worker again and restart `usine up` to reconcile them, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them. Discarding changes nothing on the Worker, so remove its checkouts yourself if you no longer need them. A Worker you declare again later only reconciles the Attempts recorded after the discard.
 
 ## Stop the orchestrator
 

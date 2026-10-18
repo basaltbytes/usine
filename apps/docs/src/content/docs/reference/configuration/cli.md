@@ -58,6 +58,16 @@ The secrets file is JSON with two keys and must be a regular file with mode `060
 }
 ```
 
+### Reload
+
+`SIGHUP` reloads the instance folder without a restart, as **Reload configuration** on the **Loops** page and `POST /api/instance/reload` do. usine reads `usine.yaml`, `agents/`, and `loops/` again with the startup loader: it leaves out invalid Loop and Agent files, logs a warning for each, and lists them in **Needs you**. New Runs, the next poll and schedule tick, and the next Attempt use the new configuration; an open Run keeps its Agent. The process keeps running whatever the outcome, and logs `Instance folder reloaded; new Runs use the new configuration` with what changed, or `Instance folder reload rejected; the running configuration is unchanged` with the reason.
+
+usine refuses the reload and keeps the running configuration when `usine.yaml` is invalid or a folder is missing (`FactoryConfigError`), or when the `workers` or `webhooks` block differs from the running one (`RestartRequiredError`). Those two blocks, and the GitHub App credentials, apply only when `usine up` starts.
+
+```sh title="Instance folder"
+kill -HUP "$(cat .usine/instance.pid)"
+```
+
 ### Shutdown
 
 The first `SIGINT` or `SIGTERM` (Ctrl+C) starts a graceful drain: usine stops opening new work and waits for active Attempts to finish ([`withGracefulShutdown`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/shutdown.ts#L25)). The drain has a deadline equal to `settings.max_attempt_minutes`, and no deadline when that setting is absent. A second signal, or the deadline, stops the orchestrator without waiting; usine recovers unfinished Attempts at the next start. The process then exits with status 130.

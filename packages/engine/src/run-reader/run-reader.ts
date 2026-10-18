@@ -2,7 +2,13 @@ import { Context, Effect, Layer, Option } from "effect";
 import { RunId } from "@usine/core/run";
 import { ItemKey } from "@usine/core/item";
 import { RunDatabase } from "../database/database.ts";
-import { ProjectionRevision, RunEvidence, RunSnapshot, RunSummary } from "./model.ts";
+import {
+  ProjectionRevision,
+  RunEvidence,
+  RunSnapshot,
+  RunSummary,
+  type WorkerAttempts,
+} from "./model.ts";
 import { TranscriptAllQuery, TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import type { RunStoreError } from "../engine/error.ts";
 import { persistence } from "../store/codec.ts";
@@ -51,8 +57,11 @@ const makeRunReader = Effect.gen(function* () {
   const transcript = Effect.fn("RunReader.transcript")((query: TranscriptQuery) =>
     queries.transcript(query).pipe(persistence("read Attempt transcript")),
   );
+  const attemptsByWorker = Effect.fn("RunReader.attemptsByWorker")(() =>
+    queries.attemptCountsByWorker().pipe(persistence("count Attempts by Worker")),
+  );
 
-  return { inspect, evidence, list, forItems, revision, transcript } as const;
+  return { inspect, evidence, list, forItems, revision, transcript, attemptsByWorker } as const;
 });
 
 /** Reads saved Run state and transcripts without starting or recovering execution. */
@@ -77,9 +86,17 @@ export class RunReader extends Context.Service<
     readonly transcript: (
       query: TranscriptQuery,
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunStoreError>;
+    /** The Attempts startup reconciliation visits, counted per Worker and ordered by Worker name; Workers without any are left out. */
+    readonly attemptsByWorker: () => Effect.Effect<ReadonlyArray<WorkerAttempts>, RunStoreError>;
   }
 >()("@usine/engine/RunReader") {
   static readonly layer = Layer.effect(RunReader, makeRunReader);
 }
 
-export { RunEvidence, RunSnapshot, RunSummary, ProjectionRevision } from "./model.ts";
+export {
+  RunEvidence,
+  RunSnapshot,
+  RunSummary,
+  ProjectionRevision,
+  WorkerAttempts,
+} from "./model.ts";

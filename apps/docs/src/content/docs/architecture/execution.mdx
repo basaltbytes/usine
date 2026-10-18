@@ -56,15 +56,15 @@ The fiber begins the Attempt and gives `StepExecutor` a sink for envelopes. `Ste
 
 `Executor` ([executor.ts:172](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/executor.ts#L172)) is the interface that [ADR 0006](https://github.com/basaltbytes/usine/blob/main/docs/adr/0006-executor-contract-run-host-attempt-channel.md) defines:
 
-| Operation                            | Does                                                                                                                                                                              |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `kind`                               | The Worker kind that the executor handles. `StepExecutor` refuses a configured Worker of another kind.                                                                            |
-| `preflight(worker, brains)`          | Verifies Git and each rostered brain where the Worker runs children. Doesn't install anything.                                                                                    |
-| `prepare(request)`                   | Needs a `Scope`. Checks the Attempt's brain again, gets repository access, creates or reattaches the checkout, and returns a `PreparedAttempt` with `workspace` and `launch(io)`. |
-| `cancel(attemptId)`                  | Stops preparation, or cancels the live parent task, waits a grace period, then interrupts.                                                                                        |
-| `intervene(attemptId, intervention)` | Delivers an operator action to the live session.                                                                                                                                  |
-| `isLive`, `outcome`                  | Tell a restarted engine whether to reattach an open Attempt or finish it with a stored result.                                                                                    |
-| `recover(attempt, record)`           | Salvages or removes a checkout that an earlier process left.                                                                                                                      |
+| Operation                            | Does                                                                                                                                                                                           |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kind`                               | The Worker kind that the executor handles. `StepExecutor` refuses a configured Worker of another kind.                                                                                         |
+| `preflight(worker, brains)`          | Verifies Git and each rostered brain where the Worker runs children. Doesn't install anything.                                                                                                 |
+| `prepare(request)`                   | Needs a `Scope`. Checks the Attempt's brain again, gets repository access, creates or reattaches the checkout, and returns a `PreparedAttempt` with `workspace` and `launch(io)`.              |
+| `cancel(attemptId)`                  | Stops preparation, or cancels the live parent task, waits a grace period, then interrupts.                                                                                                     |
+| `intervene(attemptId, intervention)` | Delivers an operator action to the live session.                                                                                                                                               |
+| `isLive`, `outcome`                  | Tell a restarted engine whether to reattach an open Attempt or finish it with a stored result.                                                                                                 |
+| `recover(attempt, record)`           | Salvages or removes a checkout that an earlier process left. The engine calls it once per persisted Attempt at each start, except for an Attempt whose Worker `usine.yaml` no longer declares. |
 
 ```ts title="packages/executor/src/executor.ts"
 /** Prepares isolated checkouts, runs Attempts on a Worker, and releases their resources (ADR 0006). */

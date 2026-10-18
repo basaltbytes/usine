@@ -5,6 +5,7 @@ import { AgentName, AgentPersona } from "@usine/core/agent";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { AgentFile } from "@usine/config/agent";
 import { IssueTrigger } from "@usine/config/trigger";
 import { LoadedInstance } from "@usine/config/instance";
@@ -118,6 +119,7 @@ const makeInstance = (repository: RepositoryName, label: string): LoadedInstance
 
 const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) => {
   const executor = Layer.succeed(StepExecutor)({
+    workers: [WorkerName.make("local")],
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeed(Option.none()),
     recover: () => Effect.void,

@@ -34,8 +34,8 @@ const ProjectIndex = () => {
               <EmptyHeader>
                 <EmptyTitle>No project registered</EmptyTitle>
                 <EmptyDescription>
-                  Add a repository under <code>repos</code> in <code>usine.yaml</code> and restart{" "}
-                  <code>usine up</code>.
+                  Add a repository under <code>repos</code> in <code>usine.yaml</code>, then reload
+                  the configuration from Configuration &gt; Loops.
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>

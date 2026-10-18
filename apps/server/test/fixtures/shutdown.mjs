@@ -44,6 +44,10 @@ NodeRuntime.runMain(
         ),
       };
     });
-    yield* withGracefulShutdown(startup, requested, Duration.millis(deadline ? 20 : 2_000));
+    yield* withGracefulShutdown(
+      startup,
+      requested,
+      Effect.succeed(Duration.millis(deadline ? 20 : 2_000)),
+    );
   }),
 );

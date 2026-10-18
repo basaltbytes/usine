@@ -70,9 +70,10 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
  * each Worker's machine (`sshWorkerAddressesOf(config)` for the ones
  * `usine.yaml` declares). The caller provides the `CredentialProvider` that
  * mints each Attempt's single-repository token, the `TriggerCondition` that
- * re-checks queued Events, and the `AttemptRuntime` that runs each Attempt's
- * Pi parent in this process, built before the engine so durable storage is
- * resumed before Run recovery. Gateway admin APIs are called with `fetch`.
+ * re-checks queued Events, the `AttemptRuntime` that runs each Attempt's Pi
+ * parent in this process, built before the engine so durable storage is
+ * resumed before Run recovery, and the `CurrentInstance` whose settings each
+ * Attempt reads. Gateway admin APIs are called with `fetch`.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,

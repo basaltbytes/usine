@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "ignoreDependencies": ["@effect/platform-node-shared"],
   "workspaces": {
     ".": {
       "entry": [],
@@ -31,9 +32,6 @@
       "ignoreIssues": {
         "src/route-tree.gen.ts": ["types"]
       }
-    },
-    "packages/gateway": {
-      "ignoreDependencies": ["@effect/platform-node-shared"]
     }
   }
 }

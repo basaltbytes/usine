@@ -205,7 +205,7 @@ describe("Event reopening migration", () => {
         });
         const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
         for (const name of yield* fs.readDirectory(source)) {
-          if (name >= "20261018162556_event_reopening") continue;
+          if (name >= "20261018172605_loop_items_and_reopenings") continue;
           yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
         }
         yield* fs.makeDirectory(`${directory}/.usine`);

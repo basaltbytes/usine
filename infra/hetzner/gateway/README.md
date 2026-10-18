@@ -4,7 +4,7 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 
 | File | Contents |
 | --- | --- |
-| `gateway.sh` | Creates and deletes the network, the gateway VM, and its firewall with `hcloud`; installs a packed build; renders a Worker's cloud-init. |
+| `gateway.sh` | Creates and deletes the network, the gateway VM, and its firewall with `hcloud`; installs `@usine/gateway` from npm or from packed tarballs; renders a Worker's cloud-init. |
 | `gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, sshd settings for a bastion, Node.js, and the `usine-gateway` service. |
 | `gateway-nftables.conf` | The gateway's firewall rules. |
 | `egress-allowlist` | The hosts Workers may reach through the forward proxy: package hosts and the harness logins' hosts. |
@@ -70,20 +70,26 @@ ORCHESTRATOR_CIDR=203.0.113.7/32 SSH_KEY=my-key ./gateway.sh create
 ssh root@<gateway> cloud-init status --wait
 ```
 
-`@usine/gateway` is not published on npm, so `create` installs no gateway service. Build it in a usine checkout and pack it with the `@usine/core` it depends on, whose published version can lag behind the checkout:
+`create` installs no gateway service. Once cloud-init is done, `install` installs `@usine/gateway` into `/opt/usine-gateway` and restarts the service. `-i` names the private key for its `ssh` and `scp`, such as the dedicated key of [`../README.md`](../README.md); without it they use your SSH agent and configuration. `@usine/gateway` is on npm from 0.1.0; `install` installs the latest release, or the version you name, such as `@usine/gateway@0.1.0`:
+
+```sh
+./gateway.sh install -i ~/.ssh/usine_worker @usine/gateway
+```
+
+To run a build that is not released, build it in a usine checkout and pack it with the `@usine/core` it depends on, whose published version can lag behind the checkout:
 
 ```sh
 pnpm build
 pnpm --filter @usine/core --filter @usine/gateway pack
 ```
 
-`pnpm pack` writes one tarball per package in its folder, named after the package version, such as `packages/core/usine-core-0.3.0.tgz` and `packages/gateway/usine-gateway-0.0.0.tgz`; `--pack-destination <dir>` puts both in one folder. Once cloud-init is done, `install` copies the tarballs to the gateway, installs them into `/opt/usine-gateway`, and restarts the service. `-i` names the private key for its `scp` and `ssh`, such as the dedicated key of [`../README.md`](../README.md); without it they use your SSH agent and configuration:
+`pnpm pack` writes one tarball per package in its folder, named after the package version, such as `packages/core/usine-core-0.3.0.tgz` and `packages/gateway/usine-gateway-0.0.0.tgz`; `--pack-destination <dir>` puts both in one folder. Given tarballs, `install` copies them to the gateway before it installs them:
 
 ```sh
 ./gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
 ```
 
-Run `install` again with new tarballs to upgrade the gateway.
+Run `install` again with another version or new tarballs to upgrade the gateway.
 
 The VM generates its admin token and caller key at first boot in `/etc/usine-gateway/secrets.env`, readable by root only. Add API keys to the same file and restart the service:
 

@@ -3,7 +3,9 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NodeHttpPlatform, NodeHttpServer } from "@effect/platform-node";
+import { FactoryConfigError, ConfigFileError, InstancePath } from "@usine/config/file";
 import { LoadedInstance } from "@usine/config/instance";
+import { QuarantinedLoop } from "@usine/config/loop";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
@@ -12,6 +14,7 @@ import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
 import {
   RunNotFoundError,
   RunOperationRejectedError,
@@ -45,7 +48,12 @@ import {
   OperatorObservation,
 } from "@usine/orchestrator/operator";
 import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
-import { Effect, Layer, Schema } from "effect";
+import {
+  InstanceReload,
+  type InstanceReloadError,
+  RestartRequiredError,
+} from "@usine/orchestrator/current-instance";
+import { Effect, Layer, Option, Schema } from "effect";
 import { HttpRouter } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { afterAll, assert, describe, it } from "vitest";
@@ -134,7 +142,32 @@ const observation: OperatorObservation["Service"] = {
   overview: () => Effect.succeed(overview),
   detail: () => Effect.succeed(detail),
 };
-const backend = needsSetupBackendLayer(instance, "SecretsFileError", observation);
+const noChanges = { added: [], removed: [], changed: [] };
+const reloaded = new InstanceReload({
+  loops: { added: [LoopName.make("triage")], removed: [], changed: [loopName] },
+  agents: { added: [], removed: [], changed: [agentName] },
+  labels: noChanges,
+  repos: noChanges,
+  settingsChanged: true,
+  operatorChanged: false,
+  quarantinedLoops: [
+    new QuarantinedLoop({
+      file: InstancePath.make("loops/ghost.md"),
+      error: new ConfigFileError({
+        file: InstancePath.make("loops/ghost.md"),
+        stage: "reference",
+        expression: Option.none(),
+        message: "Unknown agent: ghost",
+      }),
+    }),
+  ],
+  invalidAgents: [],
+});
+const backend = needsSetupBackendLayer(
+  { get: Effect.succeed(instance), reload: Effect.succeed(reloaded) },
+  "SecretsFileError",
+  observation,
+);
 const app = HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
   disableLogger: true,
 });
@@ -173,6 +206,13 @@ describe("operator HTTP API", () => {
       error: "BackendUnavailableError",
       message: "GitHub App setup is required before operator actions are available.",
     });
+
+    // Setup mode can still pick up edits to the instance folder.
+    const reload = await app.handler(
+      new Request("http://localhost/api/instance/reload", { method: "POST" }),
+    );
+    assert.strictEqual(reload.status, 200);
+    assert.deepStrictEqual(Schema.decodeUnknownSync(InstanceReload)(await reload.json()), reloaded);
 
     const invalidCursor = await app.handler(
       new Request(`http://localhost/api/runs/${runId}?after=0`),
@@ -228,6 +268,11 @@ describe("operator HTTP API", () => {
 
   it("maps typed engine errors onto operator-readable statuses", async () => {
     let moved: BoardMove | undefined;
+    let reloadFailure: InstanceReloadError = new FactoryConfigError({
+      file: InstancePath.make("usine.yaml"),
+      stage: "yaml",
+      message: "Unexpected flow-map-end token.",
+    });
     const rejecting = Layer.succeed(FactoryBackend)({
       resolveFailure: () => Effect.void,
       agents: Effect.succeed([]),
@@ -254,6 +299,7 @@ describe("operator HTTP API", () => {
           }),
         ),
       cancel: () => Effect.void,
+      discardLeftovers: () => Effect.void,
       moveBoardItem: (move) =>
         move.toLane === "proposed:ready"
           ? Effect.fail(
@@ -262,6 +308,7 @@ describe("operator HTTP API", () => {
           : Effect.sync(() => void (moved = move)),
       pause: () => Effect.void,
       unpause: () => Effect.void,
+      reload: Effect.suspend(() => Effect.fail(reloadFailure)),
     });
     const rejectingApp = HttpRouter.toWebHandler(
       apiRoutes.pipe(HttpRouter.provideRequest(rejecting)),
@@ -347,6 +394,28 @@ describe("operator HTTP API", () => {
       );
       assert.strictEqual(simplePost.status, 200);
       assert.strictEqual(moved?.toLane, "authored:Done");
+
+      const invalidConfig = await rejectingApp.handler(
+        new Request("http://localhost/api/instance/reload", { method: "POST" }),
+      );
+      assert.strictEqual(invalidConfig.status, 422);
+      assert.deepStrictEqual(await invalidConfig.json(), {
+        error: "FactoryConfigError",
+        message:
+          "usine.yaml is invalid (yaml): Unexpected flow-map-end token. The running configuration is unchanged.",
+      });
+      reloadFailure = new RestartRequiredError({
+        blocks: ["workers"],
+        message: "The workers block of usine.yaml changed. Restart usine up to apply it.",
+      });
+      const restart = await rejectingApp.handler(
+        new Request("http://localhost/api/instance/reload", { method: "POST" }),
+      );
+      assert.strictEqual(restart.status, 409);
+      assert.deepStrictEqual(await restart.json(), {
+        error: "RestartRequiredError",
+        message: "The workers block of usine.yaml changed. Restart usine up to apply it.",
+      });
     } finally {
       await rejectingApp.dispose();
     }
@@ -403,12 +472,14 @@ describe("operator HTTP API", () => {
           : Effect.fail(new CycleBudgetResetRejectedError({ askId: id })),
       retry: (id) => record(`retry:${id}`),
       cancel: (id) => record(`cancel:${id}`),
+      discardLeftovers: (worker) => record(`discard:${worker}`),
       pause: (loop) =>
         loop === loopName
           ? record(`pause:${loop}`)
           : Effect.fail(new BackendUnavailableError({ message: "Setup is required." })),
       unpause: (loop) => record(`unpause:${loop}`),
       moveBoardItem: (move) => record(`move:${move.repository}#${move.item}:${move.toLane}`),
+      reload: Effect.succeed(reloaded),
     });
     const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
       Layer.provideMerge(NodeHttpServer.layerTest),
@@ -418,6 +489,7 @@ describe("operator HTTP API", () => {
         const { operator: client } = yield* HttpApiClient.make(OperatorApi);
         assert.deepStrictEqual(yield* client.overview(), overview);
         assert.deepStrictEqual(yield* client.agents(), [agentName]);
+        assert.deepStrictEqual(yield* client.reload(), reloaded);
         const edit = new EditAndRetry({
           task: AttemptTask.make("Fix the reviewed behavior"),
           agent: agentName,
@@ -479,6 +551,10 @@ describe("operator HTTP API", () => {
           }),
           { ok: true },
         );
+        assert.deepStrictEqual(
+          yield* client.discardLeftovers({ params: { worker: WorkerName.make("local") } }),
+          { ok: true },
+        );
         assert.deepStrictEqual(interventions, [
           "reset:current-ask",
           `resolve:${runId}:attempt/1`,
@@ -488,6 +564,7 @@ describe("operator HTTP API", () => {
           `pause:${loopName}`,
           `unpause:${loopName}`,
           "move:basaltbytes/usine#31:authored:Review",
+          "discard:local",
         ]);
 
         const missingId = RunId.make("missing/run");

@@ -4,6 +4,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { AgentName, AgentPersona } from "@usine/core/agent";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
+import { WorkerName } from "@usine/core/worker";
 import { AgentFile } from "@usine/config/agent";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { Cron as CronExpression, ScheduleTrigger, TimeZone } from "@usine/config/trigger";
@@ -125,6 +126,7 @@ const fakeLayer = (
     intervene: () => Effect.void,
     approve: () => Effect.die("unused"),
     cancel: () => Effect.die("unused"),
+    discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.die("unused"),
     reconcile: () => Effect.die("unused"),
     drain: () => Effect.void,
@@ -172,6 +174,7 @@ const waitForWaiting = Effect.fn("test.waitForWaiting")(function* (
 
 const runtimeLayer = (directory: InstanceDirectory) => {
   const executor = Layer.succeed(StepExecutor)({
+    workers: [WorkerName.make("local")],
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeed(Option.none()),
     recover: () => Effect.void,
@@ -321,7 +324,7 @@ describe("ScheduleTriggers", () => {
 
       yield* Effect.gen(function* () {
         const schedules = yield* ScheduleTriggers;
-        const fiber = yield* Effect.forkChild(schedules.run(instance));
+        const fiber = yield* Effect.forkChild(schedules.run(Effect.succeed(instance)));
         // Wait on the observable outcome, not on a scheduler-op budget.
         for (let spin = 0; (yield* Ref.get(submissions)).length === 0; spin += 1) {
           if (spin > 1_000) return yield* Effect.die("the first cycle never submitted");
@@ -483,6 +486,20 @@ describe("ScheduleTriggers", () => {
         assert.deepStrictEqual(
           (yield* Ref.get(submissions)).map(({ loop }) => loop),
           ["minutely", "daily", "minutely"],
+        );
+
+        // A reload that moves the daily boundary earlier forgets the fired
+        // Ticks, as a restart does, so the moved schedule's latest Tick fires.
+        const reloaded = instanceWith(config, [
+          minutely,
+          scheduleLoop(config, { cron: "30 8 * * *", name: "daily" }),
+        ]);
+        yield* TestClock.adjust("60 seconds");
+        const third = yield* schedules.tick(reloaded);
+        assert.strictEqual(third.alreadyFired, 0);
+        assert.deepStrictEqual(
+          (yield* Ref.get(submissions)).map(({ loop }) => loop),
+          ["minutely", "daily", "minutely", "minutely", "daily"],
         );
       }).pipe(Effect.provide(fakeLayer(submissions)));
     }),

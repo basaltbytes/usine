@@ -21,6 +21,7 @@ import { DateTime, Effect, FileSystem, Layer, Option, Path, Redacted, Schema } f
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as localLayer } from "../../src/local.ts";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
+import { fixedConfigLayer } from "../support/current-instance.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
 export const TOKEN = "one-attempt-test-token";
@@ -193,6 +194,7 @@ export const localRuntime = (
     Layer.provide(options.credentials ?? credentialLayer),
     Layer.provide(options.attemptRuntime ?? stubAttemptRuntime(new StubStorage())),
     Layer.provide(alwaysHoldsLayer),
+    Layer.provide(fixedConfigLayer(config)),
   );
 
 export const withLocalEngine = <A, E, R>(

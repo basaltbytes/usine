@@ -106,7 +106,7 @@ write_files:
     permissions: "0755"
     content: |
       #!/bin/sh
-      # Installs or upgrades the gateway from tarballs made with pnpm pack, then restarts it.
+      # Installs or upgrades the gateway from npm package specs or tarballs made with pnpm pack, then restarts it.
       # One tree for all of them, so @usine/gateway and @usine/core share one copy of effect.
       set -eu
       npm install --prefix /opt/usine-gateway --omit=dev "$@"

@@ -1,7 +1,7 @@
 {
   "version": "7",
   "dialect": "sqlite",
-  "id": "b782e09d-7c1d-4efd-84d4-7d8e05414ea0",
+  "id": "4b1671f6-a933-49df-9316-c43fd09fb218",
   "prevIds": ["a89d172f-d214-43b2-af2d-e7937e5359b5"],
   "ddl": [
     {
@@ -42,10 +42,6 @@
     },
     {
       "name": "usine_item_projections",
-      "entityType": "tables"
-    },
-    {
-      "name": "usine_loop_items",
       "entityType": "tables"
     },
     {
@@ -279,6 +275,16 @@
       "default": null,
       "generated": null,
       "name": "salvage_json",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "leftovers_discarded_at",
       "entityType": "columns",
       "table": "usine_attempts"
     },
@@ -541,36 +547,6 @@
       "name": "payload_json",
       "entityType": "columns",
       "table": "usine_item_projections"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "loop_name",
-      "entityType": "columns",
-      "table": "usine_loop_items"
-    },
-    {
-      "type": "text",
-      "notNull": true,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "item_key",
-      "entityType": "columns",
-      "table": "usine_loop_items"
-    },
-    {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "observed_event_id",
-      "entityType": "columns",
-      "table": "usine_loop_items"
     },
     {
       "type": "text",
@@ -893,26 +869,6 @@
       "table": "usine_trigger_events"
     },
     {
-      "type": "text",
-      "notNull": false,
-      "autoincrement": false,
-      "default": null,
-      "generated": null,
-      "name": "reopens_event_id",
-      "entityType": "columns",
-      "table": "usine_trigger_events"
-    },
-    {
-      "type": "integer",
-      "notNull": true,
-      "autoincrement": false,
-      "default": "0",
-      "generated": null,
-      "name": "reopening",
-      "entityType": "columns",
-      "table": "usine_trigger_events"
-    },
-    {
       "columns": ["run_id"],
       "tableTo": "usine_runs",
       "columnsTo": ["run_id"],
@@ -1012,17 +968,6 @@
       "table": "usine_ignored_events"
     },
     {
-      "columns": ["observed_event_id"],
-      "tableTo": "usine_events",
-      "columnsTo": ["event_id"],
-      "onUpdate": "NO ACTION",
-      "onDelete": "NO ACTION",
-      "nameExplicit": false,
-      "name": "fk_usine_loop_items_observed_event_id_usine_events_event_id_fk",
-      "entityType": "fks",
-      "table": "usine_loop_items"
-    },
-    {
       "columns": ["event_id"],
       "tableTo": "usine_trigger_events",
       "columnsTo": ["event_id"],
@@ -1054,24 +999,6 @@
       "name": "fk_usine_trigger_events_event_id_usine_events_event_id_fk",
       "entityType": "fks",
       "table": "usine_trigger_events"
-    },
-    {
-      "columns": ["reopens_event_id"],
-      "tableTo": "usine_events",
-      "columnsTo": ["event_id"],
-      "onUpdate": "NO ACTION",
-      "onDelete": "NO ACTION",
-      "nameExplicit": false,
-      "name": "fk_usine_trigger_events_reopens_event_id_usine_events_event_id_fk",
-      "entityType": "fks",
-      "table": "usine_trigger_events"
-    },
-    {
-      "columns": ["loop_name", "item_key"],
-      "nameExplicit": false,
-      "name": "usine_loop_items_pk",
-      "entityType": "pks",
-      "table": "usine_loop_items"
     },
     {
       "columns": ["run_id", "step_name"],
@@ -1330,24 +1257,6 @@
       "where": null,
       "origin": "manual",
       "name": "usine_trigger_events_item_history",
-      "entityType": "indexes",
-      "table": "usine_trigger_events"
-    },
-    {
-      "columns": [
-        {
-          "value": "reopens_event_id",
-          "isExpression": false
-        },
-        {
-          "value": "reopening",
-          "isExpression": false
-        }
-      ],
-      "isUnique": true,
-      "where": null,
-      "origin": "manual",
-      "name": "usine_trigger_event_reopening",
       "entityType": "indexes",
       "table": "usine_trigger_events"
     },

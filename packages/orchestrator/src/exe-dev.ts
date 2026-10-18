@@ -10,9 +10,10 @@ import { stepExecutorLayer } from "./scheduler.ts";
 /**
  * The full engine composition for a local orchestrator driving exe.dev
  * Workers; brains are the instance roster checked at startup. The caller
- * provides the `TriggerCondition` that re-checks queued Events and the
+ * provides the `TriggerCondition` that re-checks queued Events, the
  * `AttemptRuntime` that runs each Attempt's Pi parent in this process, built
- * before the engine so durable storage is resumed before Run recovery.
+ * before the engine so durable storage is resumed before Run recovery, and the
+ * `CurrentInstance` whose settings each Attempt reads.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,

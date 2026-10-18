@@ -47,6 +47,14 @@ export const GitHubItemKey = Schema.toType(ItemKey).pipe(
 // produces the identity accepted by both the Board projection and Run engine.
 const encodeGitHubItemKey = Schema.encodeSync(GitHubItemKey);
 
+/** The identity the Board projection and the Run engine use for one Item of `repository`. */
+export const gitHubItemKey = (repository: RepositoryName, number: number): ItemKey =>
+  encodeGitHubItemKey([
+    "github",
+    RepositoryName.make(canonicalRepositoryName(repository)),
+    ItemNumber.make(number),
+  ]);
+
 /** What one repository's label-catalog request gave its cycle. */
 interface LabelCatalogCycle {
   readonly labelEntityTag: Option.Option<EntityTag>;
@@ -220,11 +228,7 @@ export const observeItem = Effect.fn("PollingTriggers.observeItem")(function* (
   const github = yield* GitHubPolling;
   const items = yield* ItemProjectionWriter;
   const budgets = yield* CycleBudgets;
-  const itemKey = encodeGitHubItemKey([
-    "github",
-    RepositoryName.make(canonicalRepositoryName(repository)),
-    ItemNumber.make(changed.number),
-  ]);
+  const itemKey = gitHubItemKey(repository, changed.number);
   const cycleGeneration = yield* budgets.generation(itemKey);
   const snapshot = yield* github.snapshot(repository, changed);
   const projection = new ItemProjection({
