@@ -2,6 +2,7 @@ import {
   type CollisionDetection,
   DndContext,
   type DragEndEvent,
+  type DragOverEvent,
   DragOverlay,
   type DragStartEvent,
   KeyboardSensor,
@@ -9,47 +10,24 @@ import {
   pointerWithin,
   rectIntersection,
   type UniqueIdentifier,
-  useDroppable,
   useSensor,
   useSensors,
 } from "@dnd-kit/core";
-import {
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { ArrowUpRightIcon, CaretDownIcon } from "@phosphor-icons/react";
+import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { ArrowUpRightIcon } from "@phosphor-icons/react";
 import { RunId } from "@usine/core/run";
 import type {
-  BoardTaskView,
+  BoardLaneId,
   BoardLaneView,
-  LabelView,
+  BoardTaskView,
   ProjectView,
   RunView,
 } from "@usine/orchestrator/operator";
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
-import { LabelBadge } from "@/components/label-badge";
-import { TaskHistory } from "@/components/task-history";
 import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -58,22 +36,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { cn } from "@/lib/utils";
+import { DraggedCard, type LabelCatalog } from "./card.tsx";
+import { BoardColumn } from "./column.tsx";
 import { type BoardMoveProgress, useBoardMoves } from "./moves.ts";
-import { failureMessage } from "../operator-copy.ts";
-
-export const itemFailure = (item: BoardTaskView): string | null => {
-  const failedRun =
-    [...item.runs].reverse().find(({ canResolveFailure }) => canResolveFailure) ??
-    (item.run?.canResolveFailure ? item.run : null);
-  if (failedRun === null) return null;
-  const attempts = failedRun.attempts;
-  for (let index = attempts.length - 1; index >= 0; index -= 1) {
-    const outcome = attempts[index]?.outcome;
-    if (outcome?._tag === "Failed") return failureMessage(outcome.failure);
-  }
-  return null;
-};
 
 /** The fallback lane collects every unrouted Item and comes first, so a drag into an
  * authored lane does not cross every column. Authored and proposed lanes keep their
@@ -115,249 +80,6 @@ const applyMove = (
     const items = lane.items.filter(({ itemKey }) => itemKey !== move.itemKey);
     return lane.id === move.toLane ? { ...lane, items: [card, ...items] } : { ...lane, items };
   });
-};
-
-type LabelCatalog = ReadonlyMap<string, LabelView>;
-
-/** The keyboard and assistive-technology path for a lane move; drag stays the fast path. */
-interface MoveMenu {
-  readonly targets: ReadonlyArray<BoardLaneView>;
-  readonly disabled: boolean;
-  readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
-  readonly phase?: BoardMoveProgress["phase"] | undefined;
-}
-
-const CardBody = ({
-  item,
-  catalog,
-  openRun,
-  move,
-}: {
-  readonly item: BoardTaskView;
-  readonly catalog: LabelCatalog;
-  readonly openRun: (runId: RunId) => void;
-  readonly move?: MoveMenu;
-}) => {
-  const failure = itemFailure(item);
-  const run = item.run;
-  const visibleRuns = item.runs.filter((run) => run.canApprove || run.canResolveFailure);
-  const moveTargets = move?.targets ?? [];
-  const titleClass =
-    "h-auto justify-start p-0 text-left text-xs/relaxed font-medium whitespace-normal text-card-foreground hover:text-primary";
-  return (
-    <>
-      <CardHeader className="gap-0.5">
-        <CardDescription className="font-mono">
-          {item.items.map((member) => (
-            <a
-              key={member.itemKey}
-              href={member.url}
-              target="_blank"
-              rel="noreferrer"
-              draggable={false}
-              className="mr-2 hover:text-primary"
-              title={member.title}
-            >
-              {member.kind === "pr" ? "PR" : "Issue"} #{member.number}
-            </a>
-          ))}
-        </CardDescription>
-        <CardTitle className="font-sans text-xs/relaxed">
-          {run === null ? (
-            <Button
-              variant="link"
-              className={titleClass}
-              nativeButton={false}
-              render={<a href={item.url} target="_blank" rel="noreferrer" draggable={false} />}
-            >
-              {item.title}
-            </Button>
-          ) : (
-            <Button variant="link" className={titleClass} onClick={() => openRun(run.id)}>
-              {item.title}
-            </Button>
-          )}
-        </CardTitle>
-      </CardHeader>
-      {(item.labels.length > 0 ||
-        item.runs.length > 0 ||
-        item.needsYou ||
-        item.conflicting ||
-        failure !== null ||
-        move?.phase !== undefined ||
-        moveTargets.length > 0) && (
-        <CardContent className="flex flex-col items-start gap-2">
-          {item.labels.length > 0 && (
-            <div className="flex flex-wrap gap-1">
-              {item.labels.map((label) => (
-                <LabelBadge key={label} name={label} label={catalog.get(label)} />
-              ))}
-            </div>
-          )}
-          <TaskHistory runs={item.runs} openRun={openRun} />
-          {move?.phase !== undefined && (
-            <p role="status" className="text-muted-foreground">
-              {move.phase === "saving" ? "Moving…" : "Saved on GitHub · syncing…"}
-            </p>
-          )}
-          {item.needsYou && <NeedsYouBadge />}
-          {item.conflicting && (
-            <Badge variant="outline" className="border-destructive/40 font-mono text-destructive">
-              Conflicts with base
-            </Badge>
-          )}
-          {failure !== null && <p className="text-destructive wrap-anywhere">{failure}</p>}
-          {visibleRuns.some(({ state }) => state === "Waiting") && (
-            <p className="text-needs-you">A Run in this task is waiting for approval.</p>
-          )}
-          {item.runs.some(({ state }) => state === "Queued") && (
-            <p className="text-muted-foreground">Approved. Waiting for a free worker slot.</p>
-          )}
-          {move !== undefined && moveTargets.length > 0 && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                disabled={move.disabled}
-                render={<Button variant="ghost" size="sm" className="-ml-2" />}
-                aria-label={`Move ${item.kind === "pr" ? "PR" : "issue"} #${item.number} to a lane`}
-              >
-                Move {item.kind === "pr" ? "PR" : "issue"} #{item.number} to
-                <CaretDownIcon aria-hidden="true" />
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start">
-                {moveTargets.map((lane) => (
-                  <DropdownMenuItem key={lane.id} onClick={() => move.onMove(item, lane)}>
-                    {lane.name}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </CardContent>
-      )}
-    </>
-  );
-};
-
-const cardClass = (needsYou: boolean) => cn("gap-2.5", needsYou && "ring-needs-you/50");
-
-const BoardCard = ({
-  item,
-  catalog,
-  disabled,
-  openRun,
-  move,
-}: {
-  readonly item: BoardTaskView;
-  readonly catalog: LabelCatalog;
-  readonly disabled: boolean;
-  readonly openRun: (runId: RunId) => void;
-  readonly move: MoveMenu;
-}) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: item.itemKey,
-    disabled,
-  });
-  return (
-    <Card
-      ref={setNodeRef}
-      size="sm"
-      style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn(
-        cardClass(item.needsYou),
-        !disabled && "cursor-grab touch-none",
-        isDragging && "opacity-40",
-      )}
-      {...(!disabled && attributes)}
-      {...(!disabled && listeners)}
-    >
-      <CardBody item={item} catalog={catalog} openRun={openRun} move={move} />
-    </Card>
-  );
-};
-
-const BoardLane = ({
-  lane,
-  lanes,
-  catalog,
-  dragging,
-  pending,
-  moves,
-  openRun,
-  onMove,
-}: {
-  readonly lane: BoardLaneView;
-  readonly lanes: ReadonlyArray<BoardLaneView>;
-  readonly catalog: LabelCatalog;
-  readonly dragging: boolean;
-  readonly pending: boolean;
-  readonly moves: ReadonlyArray<BoardMoveProgress>;
-  readonly openRun: (runId: RunId) => void;
-  readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
-}) => {
-  const move: MoveMenu = {
-    targets: lanes.filter((other) => other._tag === "WritableBoardLane" && other.id !== lane.id),
-    disabled: pending,
-    onMove,
-  };
-  const writable = lane._tag === "WritableBoardLane";
-  const { setNodeRef, isOver } = useDroppable({ id: lane.id, disabled: !writable || pending });
-  return (
-    <Card
-      ref={setNodeRef}
-      size="sm"
-      aria-label={`${lane.name} lane`}
-      className={cn(
-        "w-72 shrink-0 bg-muted/30 transition-shadow",
-        dragging && writable && "ring-run-active/50",
-        isOver && writable && "ring-run-active",
-      )}
-    >
-      <CardHeader>
-        <CardTitle className="wrap-anywhere">{lane.name}</CardTitle>
-        <CardDescription>
-          {lane.items.length} task{lane.items.length === 1 ? "" : "s"}
-        </CardDescription>
-        {lane.sources.length > 0 && (
-          <CardAction className="flex flex-wrap justify-end gap-1">
-            {lane.sources.map((source) =>
-              "label" in source ? (
-                <LabelBadge
-                  key={`label:${source.label}`}
-                  name={source.label}
-                  label={catalog.get(source.label)}
-                />
-              ) : (
-                <Badge variant="secondary" className="font-mono" key={`state:${source.state}`}>
-                  {source.state}
-                </Badge>
-              ),
-            )}
-          </CardAction>
-        )}
-      </CardHeader>
-      <CardContent className="flex min-h-40 flex-col gap-2">
-        <SortableContext
-          items={lane.items.map(({ itemKey }) => itemKey)}
-          strategy={verticalListSortingStrategy}
-        >
-          {lane.items.length === 0 && <p className="text-muted-foreground">No tasks.</p>}
-          {lane.items.map((item) => {
-            const phase = moves.find(({ itemKey }) => itemKey === item.itemKey)?.phase;
-            return (
-              <BoardCard
-                key={item.itemKey}
-                item={item}
-                catalog={catalog}
-                disabled={pending || phase !== undefined || move.targets.length === 0}
-                openRun={openRun}
-                move={{ ...move, disabled: pending || phase !== undefined, phase }}
-              />
-            );
-          })}
-        </SortableContext>
-      </CardContent>
-    </Card>
-  );
 };
 
 /** Runs whose Item has no card, such as schedule Runs and quarantined Items, so they stay reachable. */
@@ -425,6 +147,12 @@ const UncardedRuns = ({
   </Card>
 );
 
+/** The card being dragged and the lane it left. */
+interface DragSource {
+  readonly item: BoardTaskView;
+  readonly lane: BoardLaneView;
+}
+
 export const ProjectBoard = ({
   project,
   disabled,
@@ -434,7 +162,8 @@ export const ProjectBoard = ({
   readonly disabled: boolean;
   readonly openRun: (runId: RunId) => void;
 }) => {
-  const [active, setActive] = useState<BoardTaskView | null>(null);
+  const [active, setActive] = useState<DragSource | null>(null);
+  const [over, setOver] = useState<BoardLaneId | null>(null);
   const { moves, moveItem, isPending, error } = useBoardMoves(project);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -444,15 +173,22 @@ export const ProjectBoard = ({
   const lanes = moves.reduce(applyMove, orderLanes(project.board.lanes));
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
   const pending = disabled || isPending;
-  const onDragStart = ({ active: dragged }: DragStartEvent) => {
-    const item = lanes.flatMap(({ items }) => items).find(({ itemKey }) => itemKey === dragged.id);
-    setActive(item ?? null);
-  };
-  const onDragEnd = ({ over }: DragEndEvent) => {
+  const endDrag = () => {
     setActive(null);
-    if (over === null || active === null) return;
-    const target = laneUnder(over.id, lanes);
-    if (target !== undefined) moveItem(active, target);
+    setOver(null);
+  };
+  const onDragStart = ({ active: dragged }: DragStartEvent) => {
+    const lane = lanes.find(({ items }) => items.some(({ itemKey }) => itemKey === dragged.id));
+    const item = lane?.items.find(({ itemKey }) => itemKey === dragged.id);
+    setActive(lane === undefined || item === undefined ? null : { item, lane });
+  };
+  const onDragOver = ({ over: target }: DragOverEvent) =>
+    setOver(target === null ? null : (laneUnder(target.id, lanes)?.id ?? null));
+  const onDragEnd = ({ over: target }: DragEndEvent) => {
+    endDrag();
+    if (target === null || active === null) return;
+    const lane = laneUnder(target.id, lanes);
+    if (lane !== undefined) moveItem(active.item, lane);
   };
   return (
     <main className="flex flex-col gap-4 px-4 py-6 sm:px-6">
@@ -478,20 +214,26 @@ export const ProjectBoard = ({
         sensors={sensors}
         collisionDetection={dropCollision}
         onDragStart={onDragStart}
+        onDragOver={onDragOver}
         onDragEnd={onDragEnd}
-        onDragCancel={() => setActive(null)}
+        onDragCancel={endDrag}
       >
         <div
-          className="flex gap-3 overflow-x-auto pb-3 overscroll-x-contain scrollbar-thin"
+          className="-mx-2 flex gap-2 overflow-x-auto pb-3 overscroll-x-contain scrollbar-thin"
           aria-label={`${project.repository} project board`}
         >
           {lanes.map((lane) => (
-            <BoardLane
+            <BoardColumn
               key={lane.id}
               lane={lane}
               lanes={lanes}
               catalog={catalog}
-              dragging={active !== null}
+              targeted={
+                active !== null &&
+                over === lane.id &&
+                lane.id !== active.lane.id &&
+                lane._tag === "WritableBoardLane"
+              }
               pending={pending}
               moves={moves}
               openRun={openRun}
@@ -501,9 +243,7 @@ export const ProjectBoard = ({
         </div>
         <DragOverlay>
           {active !== null && (
-            <Card size="sm" className={cn(cardClass(active.needsYou), "cursor-grabbing shadow-lg")}>
-              <CardBody item={active} catalog={catalog} openRun={openRun} />
-            </Card>
+            <DraggedCard item={active.item} lane={active.lane} catalog={catalog} />
           )}
         </DragOverlay>
       </DndContext>

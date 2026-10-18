@@ -9,9 +9,9 @@ A Run is the work that a Loop does for one Event, and each try of its Step is an
 
 ## Follow a Run
 
-**Projects** lists the registered repositories with their Item and lane counts and a status: **needs you**, **active** while a Run can still be canceled, or **clear**. Opening a project shows its Board, where each card is a task: an issue and the pull requests linked to it, with the history of their Runs. A card shows when one of its Runs is waiting for approval or for a free Worker. The Board lists Runs without an Item, such as schedule Runs, below the lanes under **Runs without a card**.
+**Projects** lists the registered repositories with their Item and lane counts and a status: **needs you**, **active** while a Run can still be canceled, or **clear**. Opening a project shows its Board, where each card is a task: an issue and the pull requests linked to it. A card shows the Loop, state, age, and Agent of its current Run, so you can see when that Run is `Waiting` for your approval or `Queued` for a free Worker. The card's menu button opens its Items on GitHub, lists the task's earlier Runs under **Run history**, approves, retries, or cancels the current Run, and moves the card to another lane under **Move to**. The Board lists Runs without an Item, such as schedule Runs, below the lanes under **Runs without a card**.
 
-Selecting a Run in a card's history, or in **Needs you**, opens the Run drawer. The URL gets `?run=<run id>`, so you can share or reload it. The drawer has:
+Clicking a card that has a Run, choosing a Run in the card's menu, or selecting a Run in **Needs you** opens the Run drawer. The URL gets `?run=<run id>`, so you can share or reload it. The drawer has:
 
 - a header with the Loop, the Run's state, a **Loop paused** badge when that applies, the repository, and links to the Item and to the pull request the Run produced;
 - a row of the actions the Run's state allows;
