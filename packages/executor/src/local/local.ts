@@ -20,6 +20,7 @@ import {
   Schema,
 } from "effect";
 import { type ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+import { platform, totalmem } from "node:os";
 import { allowlistedEnvironment, collectCommand, requireSuccess } from "../child-command.ts";
 import { durableSessionFor } from "../durable-session.ts";
 import {
@@ -39,6 +40,12 @@ import {
   verifyHarnessReadiness,
 } from "../harness-preflight.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
+import {
+  SwapOnDemand,
+  verifyLinuxMemory,
+  verifyWorkerMemory,
+  WorkerMemory,
+} from "../memory-preflight.ts";
 import {
   cacheDirectoryName,
   isCacheDirectoryName,
@@ -256,8 +263,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
     const preflight = Effect.fn("LocalExecutor.preflight")(function* (
       worker: CheckoutRequest["worker"],
       brains: ReadonlyArray<BrainSpec>,
+      maxConcurrentAttempts: number,
     ) {
-      yield* Effect.annotateCurrentSpan({ worker, host: "local" });
+      yield* Effect.annotateCurrentSpan({ worker, host: "local", maxConcurrentAttempts });
       const gitVersion = (yield* executeCommand("preflight", "git", ["--version"])).trim();
       if (!gitVersion.startsWith("git version ")) {
         return yield* new WorkerCapabilityError({
@@ -267,6 +275,18 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           cause: new Error(gitVersion),
         });
       }
+      // macOS has no /proc/meminfo and adds swap files as memory runs short.
+      yield* platform() === "darwin"
+        ? verifyWorkerMemory(
+            worker,
+            maxConcurrentAttempts,
+            new WorkerMemory({ totalBytes: totalmem(), swap: SwapOnDemand.make({}) }),
+          )
+        : verifyLinuxMemory(
+            worker,
+            maxConcurrentAttempts,
+            executeCommand("preflight", "cat", ["/proc/meminfo"]),
+          );
       yield* verifyHarnessReadiness(worker, brains, harnessReadiness);
       yield* Effect.logInfo("Worker preflight verified", {
         worker,

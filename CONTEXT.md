@@ -140,7 +140,7 @@ The persisted flow of one Attempt's activity, its Attempt channel messages, whic
 _Avoid_: log, session history, output
 
 **Preflight**:
-The executor's verify-only readiness check of a Worker: toolchain, each rostered harness and its login where the Worker runs children, and attached credentials, failing with typed capability errors. It never installs; making a Worker ready is out-of-band.
+The executor's verify-only readiness check of a Worker: toolchain, enough memory for its concurrent Attempts, each rostered harness and its login where the Worker runs children, and attached credentials, failing with typed capability errors. It never installs; making a Worker ready is out-of-band.
 _Avoid_: bootstrap, provisioning (that's the out-of-band act), health check
 
 **Gateway**:
