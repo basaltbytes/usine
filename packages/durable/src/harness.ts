@@ -16,8 +16,18 @@ import { Context, Deferred, Effect, Layer, Option, Result, Schedule, Schema, Sco
 export class DurableHarnessError extends Schema.TaggedError<DurableHarnessError>(
   "@usine/durable/DurableHarnessError",
 )("DurableHarnessError", {
+  /**
+   * What the harness was doing, in words: the `operation` given to `use`, such as
+   * `create or find the Attempt task`, a step of the harness itself, such as `open` or `resume`,
+   * or a step of opening its storage, such as `open the durable storage`.
+   */
   operation: Schema.NonEmptyString,
+  /**
+   * The message of the error pi-durable or storage raised. After the harness has stopped for
+   * good, it gives the reason it stopped.
+   */
   message: Schema.NonEmptyString,
+  /** The error the failed call raised, or the reason the harness stopped. */
   cause: Schema.Defect(),
 }) {}
 
@@ -54,7 +64,9 @@ export interface DurableHarnessOptions {
 export class DurableHarness extends Context.Service<
   DurableHarness,
   {
+    /** The pi-ai model access the harness was built with (`DurableHarnessOptions.models`); the harness generates through it. */
     readonly models: Models;
+    /** The parent model from `DurableHarnessOptions.defaultModel`, used when an Attempt's RunSpec names no parent model. */
     readonly defaultModel: Option.Option<ModelRef>;
     /** Installs or replaces an extension; conversations that select it by name use the new code from their next phase. */
     readonly install: (extension: Extension) => Effect.Effect<void>;

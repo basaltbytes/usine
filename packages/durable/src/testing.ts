@@ -88,6 +88,7 @@ export const fauxParent = (
 
 /** One child the stub backend launched; the test decides when and how it finishes. */
 export interface StubChild {
+  /** The request the parent's `subagent` call launched the child with: its session, prompt, checkout, and environment. */
   readonly request: ChildRequest;
   /** Adds one event to the child's stream. */
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
@@ -228,6 +229,10 @@ export const layer = (options: DurableTestingOptions) =>
 
 /** What a scripted stub parent can do while `execute` runs it. */
 export interface StubParentContext {
+  /**
+   * The request this `execute` call received. When the call reattaches a task, this is the new
+   * call's request, not the one the task was created with.
+   */
   readonly request: AttemptRequest;
   /** Records one outbound envelope with the task's next sequence. */
   readonly emit: (payload: AttemptChannel.OutboundPayload) => Effect.Effect<void, AttemptFailure>;
@@ -258,6 +263,11 @@ interface StubTask {
  * survives an orchestrator restart.
  */
 export class StubStorage {
+  /**
+   * Each Attempt's stub task by Attempt id, with the request that created it and its state:
+   * `live`, `finished` with its report, or `canceled`. Tests read the state to check whether
+   * the executor canceled an Attempt.
+   */
   readonly tasks = new Map<AttemptId, StubTask>();
 }
 
