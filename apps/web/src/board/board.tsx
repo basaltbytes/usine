@@ -464,7 +464,7 @@ export const ProjectBoard = ({
         <p className="max-w-3xl text-muted-foreground">
           Proposed lanes are read-only. To enable moves, configure this project’s lanes in{" "}
           <code>repos[].lanes</code> in <code>usine.yaml</code> with the labels the Board may
-          exchange, then restart <code>usine up</code>.
+          exchange, then reload the configuration from Configuration &gt; Loops.
         </p>
       )}
       {project.board.failures.length > 0 && (

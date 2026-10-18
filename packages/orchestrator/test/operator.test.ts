@@ -907,9 +907,13 @@ describe("Operator", () => {
           }),
         ],
       });
-      const overview = yield* Effect.flatMap(Operator, (operator) =>
-        operator.overview(broken),
-      ).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
+      const overview = yield* Effect.gen(function* () {
+        const operator = yield* Operator;
+        const before = yield* operator.overview(instance);
+        assert.isFalse(before.needsYou.some((need) => need._tag === "ConfigFileNeed"));
+        // A reload that only leaves files out still replaces the cached overview.
+        return yield* operator.overview(broken);
+      }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
       const needs = overview.needsYou.filter((need) => need._tag === "ConfigFileNeed");
       assert.deepStrictEqual(
         needs.map(({ id, kind, error }) => [id, kind, error.file, error.stage, error.message]),

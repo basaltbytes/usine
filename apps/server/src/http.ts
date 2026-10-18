@@ -52,6 +52,12 @@ const operatorFailure = (error: BackendError) => {
         return `Runtime persistence failed while trying to ${error.operation}.`;
       case "AttemptCancellationError":
         return `Attempt ${error.attemptId} could not be canceled.`;
+      case "FactoryConfigError":
+        return error.stage === "read"
+          ? `Could not read ${error.file}: ${error.message.replace(/\.$/u, "")}. The running configuration is unchanged.`
+          : `${error.file} is invalid (${error.stage}): ${error.message.replace(/\.$/u, "")}. The running configuration is unchanged.`;
+      case "RestartRequiredError":
+        return error.message;
     }
   })();
   return new OperatorHttpError({ error: error._tag, message });
@@ -187,7 +193,8 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     )
     .handle("unpause", ({ params }) =>
       fromBackend((backend) => backend.unpause(params.loop)).pipe(acknowledge),
-    ),
+    )
+    .handle("reload", () => fromBackend((backend) => backend.reload)),
 );
 
 export const apiRoutes = HttpApiBuilder.layer(OperatorApi).pipe(

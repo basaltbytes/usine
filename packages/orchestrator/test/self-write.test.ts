@@ -219,7 +219,7 @@ describe("Board self-writes", () => {
             const polling = yield* PollingTriggers;
             const operator = yield* Operator;
             const reader = yield* RunReader;
-            const fiber = yield* polling.run(instance).pipe(Effect.forkChild);
+            const fiber = yield* polling.run(Effect.succeed(instance)).pipe(Effect.forkChild);
             yield* awaitCondition(polling.latest, Option.isSome);
             assert.strictEqual(changeRequests, 1);
             const move = new BoardMove({

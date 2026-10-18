@@ -3,6 +3,7 @@ import { UsineConfig } from "@usine/config/factory";
 import { Executor, ExecutorOperationError } from "@usine/executor";
 import { Effect, Layer, Schema } from "effect";
 import { stepExecutorLayer } from "../src/scheduler.ts";
+import { fixedConfigLayer } from "./support/current-instance.ts";
 
 const unused = () => Effect.die("unused");
 
@@ -28,7 +29,10 @@ describe("Worker scheduler startup", () => {
       });
       const config = Schema.decodeUnknownSync(UsineConfig)({ version: 1, repos: [] });
       const failure = yield* Layer.build(
-        stepExecutorLayer(config, []).pipe(Layer.provide(executor)),
+        stepExecutorLayer(config, []).pipe(
+          Layer.provide(executor),
+          Layer.provide(fixedConfigLayer(config)),
+        ),
       ).pipe(Effect.flip, Effect.scoped);
       assert(failure._tag === "ExecutorOperationError", failure._tag);
       assert.strictEqual(failure.operation, "preflight");

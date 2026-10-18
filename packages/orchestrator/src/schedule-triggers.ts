@@ -206,12 +206,14 @@ export class ScheduleTriggers extends Context.Service<
     /**
      * Evaluates the latest due Tick of every schedule. A repository's failure is
      * logged and reported without stopping its siblings; a cron failure in a
-     * DST gap fails only its own schedule.
+     * DST gap fails only its own schedule. An instance that differs from the
+     * previous tick's forgets the fired Ticks, as a restart does.
      */
     readonly tick: (
       instance: LoadedInstance,
     ) => Effect.Effect<ScheduleCycle, EnginePersistenceError>;
-    readonly run: (instance: LoadedInstance) => Effect.Effect<never>;
+    /** Repeats ticks until interrupted, reading the instance from `current` before each one. */
+    readonly run: (current: Effect.Effect<LoadedInstance>) => Effect.Effect<never>;
     readonly latest: Effect.Effect<Option.Option<ScheduleCycle>>;
   }
 >()("@usine/orchestrator/ScheduleTriggers") {
@@ -224,9 +226,12 @@ export class ScheduleTriggers extends Context.Service<
       const loops = yield* LoopControl;
       const latestCycle = yield* Ref.make(Option.none<ScheduleCycle>());
       // Remembers fired ticks to skip repeat work. An empty map after a restart
-      // fires the latest missed tick (ADR 0007); the dedup ledger stays the
-      // correctness guarantee.
-      const lastFired = yield* Ref.make(new Map<LoopName, number>());
+      // or a reload fires the latest missed tick (ADR 0007); the dedup ledger
+      // stays the correctness guarantee.
+      const lastFired = yield* Ref.make({
+        instance: Option.none<LoadedInstance>(),
+        ticks: new Map<LoopName, number>(),
+      });
       // Cron sources were validated at the config boundary, so parseUnsafe is
       // safe and the result is cached instead of re-parsed each cycle.
       const parsedCrons = new WeakMap<ScheduleTrigger, Cron.Cron>();
@@ -307,7 +312,12 @@ export class ScheduleTriggers extends Context.Service<
           }
         }
         const schedules = watchedSchedules(instance).filter(({ loop }) => !paused.has(loop.name));
-        const fired = yield* Ref.get(lastFired);
+        const fired = yield* Ref.modify(lastFired, (memory) => {
+          const current = Option.contains(memory.instance, instance)
+            ? memory
+            : { instance: Option.some(instance), ticks: new Map<LoopName, number>() };
+          return [current.ticks, current] as const;
+        });
 
         const due: Array<DueTick> = [];
         const agentFailures: Array<ScheduleAgentFailure> = [];
@@ -455,14 +465,14 @@ export class ScheduleTriggers extends Context.Service<
         // memory: an all-unmatched tick keeps re-evaluating so a fixed `if:`
         // still fires it, a failed loop retries every repository next cycle, and
         // the dedup ledger absorbs the submissions that already landed.
-        yield* Ref.update(lastFired, (current) => {
-          const next = new Map(current);
+        yield* Ref.update(lastFired, (memory) => {
+          const next = new Map(memory.ticks);
           for (const [loop, latestEpoch] of boundariesByLoop) {
             if (submittedLoops.has(loop) && !failedLoops.has(loop)) {
               next.set(loop, latestEpoch);
             }
           }
-          return next;
+          return { ...memory, ticks: next };
         });
 
         const cycle = new ScheduleCycle({
@@ -480,9 +490,9 @@ export class ScheduleTriggers extends Context.Service<
 
       // `run` never returns, so wrapping it in Effect.fn would open a span that
       // never closes; `tick` opens the span for each cycle.
-      const run = (instance: LoadedInstance): Effect.Effect<never> =>
+      const run = (current: Effect.Effect<LoadedInstance>): Effect.Effect<never> =>
         Effect.gen(function* () {
-          const result = yield* Effect.result(tick(instance));
+          const result = yield* Effect.result(tick(yield* current));
           if (Result.isFailure(result)) {
             yield* Effect.logError("Schedule cycle could not read Loop runtime state; retrying", {
               errorTag: result.failure._tag,

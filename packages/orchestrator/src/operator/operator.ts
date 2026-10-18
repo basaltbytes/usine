@@ -317,6 +317,11 @@ const makeOperatorObservation = Effect.gen(function* () {
             value,
             instance.config.repos.map(({ name, lanes }) => [name, lanes]),
             instance.loops.map(({ name, agent, trigger }) => [name, agent, trigger.on]),
+            [...instance.invalidAgents, ...instance.quarantinedLoops].map(({ file, error }) => [
+              file,
+              error.stage,
+              error.message,
+            ]),
             pollFailures,
             preflightFindings,
             scheduleFailures,

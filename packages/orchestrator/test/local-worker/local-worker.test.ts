@@ -47,6 +47,7 @@ import {
   StubStorage,
   worksFor,
 } from "@usine/durable/testing";
+import { fixedConfigLayer } from "../support/current-instance.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import { runView } from "../../src/operator/projection.ts";
 import {
@@ -148,7 +149,12 @@ const withPullRequestEngine = <A, E, R>(
       Layer.provide(NodeServices.layer),
     );
     const engine = localEngineLayer(instance).pipe(
-      Layer.provide(stepExecutorLayer(config, []).pipe(Layer.provide(executor))),
+      Layer.provide(
+        stepExecutorLayer(config, []).pipe(
+          Layer.provide(executor),
+          Layer.provide(fixedConfigLayer(config)),
+        ),
+      ),
       Layer.provide(alwaysHoldsLayer),
     );
     return yield* Effect.gen(function* () {
@@ -171,6 +177,7 @@ describe("local worker", () => {
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(fixedConfigLayer(config)),
         );
         const error = yield* Effect.void.pipe(Effect.provide(runtime), Effect.flip);
         assert.strictEqual(error._tag, "WorkerCapabilityError");
@@ -306,7 +313,10 @@ describe("local worker", () => {
           ...config,
           settings: new Settings({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
         });
-        const runtime = stepExecutorLayer(budgetConfig, []).pipe(Layer.provide(executor));
+        const runtime = stepExecutorLayer(budgetConfig, []).pipe(
+          Layer.provide(executor),
+          Layer.provide(fixedConfigLayer(budgetConfig)),
+        );
         yield* Effect.gen(function* () {
           const scheduler = yield* StepExecutor;
           const selected = submission(7);
@@ -609,6 +619,7 @@ describe("local worker", () => {
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(alwaysHoldsLayer),
+          Layer.provide(fixedConfigLayer(config)),
         );
         yield* Effect.gen(function* () {
           yield* RunEngine;

@@ -27,6 +27,7 @@ import { HttpApiClient } from "effect/unstable/httpapi";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { gitHubCredentialLayer } from "../../src/credentials.ts";
 import { layer as sshLayer, sshWorkerAddressesOf } from "../../src/ssh.ts";
+import { fixedConfigLayer } from "../support/current-instance.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
 // The machine is named by the environment; without it there is nothing to run against.
@@ -255,9 +256,10 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           harnessReadiness: () => (brain) =>
             Effect.succeed(new HarnessReady({ harness: brain.harness })),
         }).pipe(
-          Layer.provide(gitHubCredentialLayer(config).pipe(Layer.provide(app))),
+          Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+          Layer.provide(fixedConfigLayer(config)),
         );
 
         yield* Effect.gen(function* () {
@@ -583,9 +585,10 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           harnessReadiness: () => (brain) =>
             Effect.succeed(new HarnessReady({ harness: brain.harness })),
         }).pipe(
-          Layer.provide(gitHubCredentialLayer(config).pipe(Layer.provide(app))),
+          Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+          Layer.provide(fixedConfigLayer(config)),
         );
 
         yield* Effect.gen(function* () {

@@ -72,6 +72,30 @@ export default mergeConfig(
                     }),
                   );
                 },
+                reloadResponses: async (
+                  { page },
+                  before: string,
+                  after: string,
+                  report: string,
+                  rejection: string,
+                ) => {
+                  let reloads = 0;
+                  await page.unroute("**/api/overview");
+                  await page.route("**/api/overview", (route) =>
+                    route.fulfill({
+                      contentType: "application/json",
+                      body: reloads === 0 ? before : after,
+                    }),
+                  );
+                  await page.route("**/api/instance/reload", (route) => {
+                    reloads += 1;
+                    return route.fulfill(
+                      reloads === 1
+                        ? { contentType: "application/json", body: report }
+                        : { status: 422, contentType: "application/json", body: rejection },
+                    );
+                  });
+                },
                 interventionResponses: async ({ page }, status: 200 | 503) => {
                   interventionRequests.set(page, []);
                   await page.unroute("**/api/agents");
