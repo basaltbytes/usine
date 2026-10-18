@@ -7,7 +7,7 @@ sidebar:
 
 An Agent is one Markdown file in the `agents/` folder of the instance folder. The filename without `.md` is the Agent's name, which Loop files use in their `agent` field. The frontmatter is the Agent's brain spec: the harness, model, and reasoning effort of the child sessions it runs, plus optional settings for the Attempt's Pi parent. The body is the persona: standing instructions given to every session the Agent runs.
 
-The orchestrator reads every file ending in `.md` directly inside `agents/`, in name order, once at startup. The folder must exist, even when empty.
+The orchestrator reads every file ending in `.md` directly inside `agents/`, in name order, at startup and at each reload ([CLI](/reference/configuration/cli/#reload)). The folder must exist, even when empty. A Run keeps the Agent it was opened with, so an edited Agent applies to new Runs.
 
 The schema is [`AgentFrontmatter`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L44) in `packages/config/src/parser.ts`, which produces an [`AgentFile`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/agent.ts#L7).
 
@@ -78,7 +78,7 @@ Loops can rely on the signature. The `act-on-findings` example in [Loop files](/
 
 ## The roster
 
-Every valid Agent file is added to the roster. usine leaves out a file that fails validation and quarantines every Loop that references it, with the message `Unknown agent: <name>`. At startup, `usine up` logs each invalid Agent file as a warning with its file, stage, and message, and lists it in **Needs you** as **Agent file not loaded**.
+Every valid Agent file is added to the roster. usine leaves out a file that fails validation and quarantines every Loop that references it, with the message `Unknown agent: <name>`. At startup and at each reload, usine logs each invalid Agent file as a warning with its file, stage, and message, and lists it in **Needs you** as **Agent file not loaded**.
 
 | Stage | Checks |
 | --- | --- |
@@ -90,7 +90,7 @@ Every valid Agent file is added to the roster. usine leaves out a file that fail
 
 ### Preflight
 
-When `usine up` starts, it checks every rostered harness, model, and effort on every Worker before it runs any Attempt. A failed check stops startup ([`verifyHarness`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/preflight/preflight.ts#L35)).
+When `usine up` starts, it checks every rostered harness, model, and effort on every Worker before it runs any Attempt. A failed check stops startup. A reload doesn't run these checks; an Attempt checks its own Agent's harness when it starts, and a failed check fails it with `AgentFailure` ([`verifyHarness`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/preflight/preflight.ts#L35)).
 
 | `harness` | Runs | Preflight checks |
 | --- | --- | --- |

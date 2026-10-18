@@ -179,7 +179,7 @@ After these checks the orchestrator serves the web UI, starts polling, and reatt
 
 When the credentials are missing or invalid, `usine up` still starts. It logs `GitHub App credentials are absent; pollers are idle`, prints `usine is waiting for GitHub App setup at http://127.0.0.1:7331`, and opens that address in your default browser. The page shows **GitHub App credentials are missing** with the error and the two ways to supply them.
 
-In setup mode, usine doesn't poll GitHub or fire schedules. You can still read Projects, Runs, and their transcripts, but usine refuses every action (approve, retry, cancel, pause, a Board move) with the error `BackendUnavailableError`. usine reads the credentials only at startup: once they are in place, stop the process with Ctrl+C and run `usine up` again.
+In setup mode, usine doesn't poll GitHub or fire schedules. You can still read Projects, Runs, and their transcripts, and reload the configuration, but usine refuses every other action (approve, retry, cancel, pause, a Board move) with the error `BackendUnavailableError`. usine reads the credentials only at startup: once they are in place, stop the process with Ctrl+C and run `usine up` again.
 
 ## Open the web UI
 
@@ -189,7 +189,7 @@ The UI is at `http://127.0.0.1:7331`, or the port you chose. The server listens 
 ssh -N -L 7331:127.0.0.1:7331 orchestrator.example.com
 ```
 
-The sidebar lists **Projects**, with one Board per registered repository, and **Configuration**, where you pause and unpause Loops on the **Loops** page. **Needs you** at the top of every page lists the items that are waiting for you. [Operate Runs](/guides/operate-runs/) describes each screen.
+The sidebar lists **Projects**, with one Board per registered repository, and **Configuration**, where you pause and unpause Loops and reload the configuration on the **Loops** page. **Needs you** at the top of every page lists the items that are waiting for you. [Operate Runs](/guides/operate-runs/) describes each screen.
 
 ## Runtime state
 
@@ -207,7 +207,17 @@ The runtime store also records every Event the factory has seen. usine uses this
 
 ## Change the configuration
 
-`usine up` reads the instance folder once, at startup, and doesn't watch the files for changes. After you edit `usine.yaml`, a Loop, or an Agent, stop the orchestrator and start it again. When the set of Loops that apply to a repository changes (you add or remove a Loop, or change its `on` or `if:`), the next poll reads that repository's Items from the start.
+`usine up` reads the instance folder at startup and doesn't watch the files for changes. After you edit a Loop, an Agent, or the `labels`, `repos`, `settings`, or `operator` keys of `usine.yaml`, reload the configuration in one of three ways:
+
+- Select **Reload configuration** on the **Loops** page under **Configuration**. The page lists what changed.
+- Send `POST /api/instance/reload` to the server, for example with `curl -s -X POST http://127.0.0.1:7331/api/instance/reload`. The response lists what changed.
+- Send `SIGHUP` to the process: `kill -HUP $(cat .usine/instance.pid)` from the instance folder.
+
+usine loads the folder the way startup does. It leaves out a Loop or Agent file that fails to load, logs a warning for it, and lists it in **Needs you**. If `usine.yaml` itself fails to load, usine keeps the running configuration and returns the error, which the log also shows.
+
+The new configuration applies to new work only. The next poll and the next schedule tick use the new Loops, and the next Attempt uses the new `settings`. A Run that is already open keeps the Agent, task, and parent model it was opened with, also when it retries, and so does an Event that waits behind a running Run. When the set of Loops that apply to a repository changes (you add or remove a Loop, or change its `on` or `if:`), the next poll reads that repository's Items from the start, as after a restart. A reload doesn't run Preflight for a new Agent: an Agent whose harness isn't ready on the Worker fails its first Attempt with `AgentFailure`.
+
+The `workers` and `webhooks` keys still need a restart. A reload that finds either one changed is refused with `RestartRequiredError` and changes nothing. Stop the orchestrator and start it again to apply them.
 
 Press Ctrl+C once, or send SIGTERM, to stop: the orchestrator stops starting Attempts and waits for the running ones to end. A second Ctrl+C stops it without waiting ([Operate Runs](/guides/operate-runs/#stop-the-orchestrator)).
 

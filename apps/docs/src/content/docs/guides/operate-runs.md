@@ -121,8 +121,8 @@ For a Claude Code or Codex child, the expanded child section also shows its save
 | **Label preflight failed**             | usine couldn't create a label that `usine.yaml` declares.                                                            |
 | **Item projection quarantined**        | usine couldn't place an Item on its Board.                                                                           |
 | A schedule error                       | A schedule Loop couldn't evaluate or submit a tick.                                                                  |
-| **Loop quarantined**                   | A Loop file failed to load and opens no Runs. Fix the file and restart `usine up`.                                   |
-| **Agent file not loaded**              | An Agent file failed to load and isn't in the roster. Fix the file and restart `usine up`.                          |
+| **Loop quarantined**                   | A Loop file failed to load and opens no Runs. Fix the file and reload the configuration.                             |
+| **Agent file not loaded**              | An Agent file failed to load and isn't in the roster. Fix the file and reload the configuration.                    |
 
 ## Cycle budgets
 
@@ -141,6 +141,10 @@ settings:
 ```
 
 At 80% of a ceiling the parent gets one warning. At 100% the Attempt stops with `RunawayFailure`, which the engine never retries automatically. The minutes clock stops while a child is held, and the token count includes the parent and every child.
+
+## Reload the configuration
+
+Select **Reload configuration** on the **Loops** page to apply edits to Loops, Agents, and `usine.yaml` without stopping the orchestrator. `POST /api/instance/reload` and `SIGHUP` do the same. Running Attempts continue, and an open Run keeps the Agent it was opened with, also when you retry it. **Edit and retry** offers the Agents of the reloaded roster. New Runs use the new configuration. Changes to `workers` or `webhooks` still need a restart. [Run a factory](/guides/#change-the-configuration) describes what a reload applies.
 
 ## Restarts
 

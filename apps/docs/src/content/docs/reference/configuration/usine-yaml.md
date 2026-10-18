@@ -7,7 +7,7 @@ sidebar:
 
 `usine.yaml` is at the top of the instance folder, next to the `loops/` and `agents/` folders. It contains the registry of managed repositories, the labels usine creates, the Board lanes, factory-wide settings, and the Workers that run Attempts.
 
-The orchestrator reads it once, when `usine up` starts. A change takes effect at the next start.
+The orchestrator reads it when `usine up` starts and at each reload ([CLI](/reference/configuration/cli/#reload)). A reload applies `labels`, `repos`, `settings`, and `operator` to new work. It refuses a change to `workers` or `webhooks`, which take effect at the next start.
 
 The parser is strict:
 
