@@ -31,6 +31,11 @@ export interface SshWorkerGateway {
 
 /** How the orchestrator connects to one SSH Worker's machine, and where the Worker keeps its state there. */
 export interface SshWorkerAddress {
+  /**
+   * The Worker's name in `usine.yaml`. Requests and preflight name the Worker by
+   * it, and its state lives in `workers/<name>` under `root`. A request for a
+   * Worker without an address fails with a `machine` capability error.
+   */
   readonly name: WorkerName;
   /** What the local `ssh` client connects to: `user@host`, or a Host alias from the SSH configuration. */
   readonly destination: SshDestination;

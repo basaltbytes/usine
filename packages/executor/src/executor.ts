@@ -39,8 +39,18 @@ export type WorkerCapability = typeof WorkerCapability.Type;
 export class ExecutorOperationError extends Schema.TaggedError<ExecutorOperationError>(
   "@usine/executor/ExecutorOperationError",
 )("ExecutorOperationError", {
+  /**
+   * The operation that failed. `cleanup` covers removing a checkout, its
+   * credential, or the credentials an earlier process left on a Worker.
+   */
   operation: ExecutorOperation,
+  /**
+   * A summary for operators, such as the command that exited non-zero. The
+   * error has no Worker field, so a caller that reports it names the Worker
+   * itself. The wording is not part of the contract: callers branch on `operation`.
+   */
   message: Schema.NonEmptyString,
+  /** The underlying failure, for example an `Error` holding a command's standard error, or a timeout. */
   cause: Schema.Defect(),
 }) {}
 
@@ -48,8 +58,14 @@ export class ExecutorOperationError extends Schema.TaggedError<ExecutorOperation
 export class CredentialUnavailableError extends Schema.TaggedError<CredentialUnavailableError>(
   "@usine/executor/CredentialUnavailableError",
 )("CredentialUnavailableError", {
+  /** The repository the Attempt needed access to. */
   repository: RepositoryName,
+  /**
+   * A summary for operators, such as a GitHub App installation that does not
+   * cover the repository, or an exe.dev Worker with no GitHub integration for it.
+   */
   message: Schema.NonEmptyString,
+  /** The underlying failure, for example the GitHub API error returned while minting the token. */
   cause: Schema.Defect(),
 }) {}
 
@@ -57,9 +73,19 @@ export class CredentialUnavailableError extends Schema.TaggedError<CredentialUna
 export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityError>(
   "@usine/executor/WorkerCapabilityError",
 )("WorkerCapabilityError", {
+  /** The Worker that lacks the capability. */
   worker: WorkerName,
+  /**
+   * The missing prerequisite. `machine`: the machine or VM is absent, stopped,
+   * or unreachable, or its Worker directory is not writable. `toolchain`: Git or a brain's
+   * harness does not run. `harness-login`: a brain's harness is not logged in.
+   * `credentials`: an exe.dev GitHub integration is not ready. `gateway`: the
+   * Gateway in front of the machine does not answer or is not reachable from it.
+   */
   capability: WorkerCapability,
+  /** A summary for operators of the check that failed. */
   message: Schema.NonEmptyString,
+  /** What the check observed, for example the unrecognized `git --version` output or the harness's readiness report. */
   cause: Schema.Defect(),
 }) {}
 
@@ -93,19 +119,49 @@ export const logPreflightFailure = <A, R>(
 export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
   "@usine/executor/CheckoutRequest",
 )({
+  /**
+   * The Attempt this checkout is for. It names the checkout directory, and
+   * `cancel`, `intervene`, `isLive`, and `outcome` find the Attempt by it.
+   */
   attemptId: AttemptId,
+  /** The Worker that prepares the checkout and runs the Attempt's children. */
   worker: WorkerName,
+  /**
+   * The GitHub repository to check out. The Attempt's credential gives access to
+   * this repository only (ADR 0011).
+   */
   repository: RepositoryName,
+  /**
+   * What to fetch. Preparation resolves it to a commit, which becomes the
+   * RunSpec's `baseCommit`, so a branch that moves later does not change the checkout.
+   */
   revision: RepositoryRevision,
+  /** The payload of the event that triggered the Run. The parent's prompt includes it as JSON. */
   payload: Schema.Json,
+  /** The task text the parent receives, after Loop interpolation or an operator's amendment. */
   task: AttemptTask,
+  /**
+   * The rostered Agent that runs the Attempt. Its persona and name go into the
+   * parent's prompt, and its brain runs the children. Preparation verifies that
+   * brain on the Worker first.
+   */
   agent: Agent,
+  /**
+   * The model for the Pi parent. When none is given, the parent uses the
+   * configured default model, then the first model with a credential. A model
+   * that Pi does not know fails the launch.
+   */
   parentModel: Schema.Option(ModelId),
+  /**
+   * The most child sessions the parent may start over the Attempt's lifetime.
+   * The next one fails the Attempt with a `ChildSessionBudgetFailure`.
+   */
   maxChildren: ChildSessionBudget,
   /** Maximum minutes of live Attempt execution, or none for no timer; preparation and resource cleanup are outside this budget. */
   maxAttemptMinutes: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
   /** Maximum consumed tokens across the parent and every child, or none for no token ceiling; operator Holds never pause this ceiling. */
   maxAttemptTokens: Schema.Option(Schema.Int.check(Schema.isGreaterThan(0))),
+  /** The reasoning effort of the Pi parent. The launch fails if the parent's model does not support it. */
   parentEffort: Effort,
   /** Where the Worker pushes this Attempt's unfinished work if the Attempt ends without success. */
   salvageRef: SalvageRef,
@@ -127,8 +183,14 @@ export type WorktreePath = typeof WorktreePath.Type;
 export class AttemptWorkspace extends Schema.Class<AttemptWorkspace>(
   "@usine/executor/AttemptWorkspace",
 )({
+  /** The Worker whose machine holds the checkout. */
   worker: WorkerName,
+  /**
+   * What the Attempt's parent launches with: the request's fields plus the
+   * commit that preparation resolved the revision to.
+   */
   spec: AttemptChannel.RunSpec,
+  /** The checkout's path on the Worker's machine. The parent's children run in it. */
   worktree: WorktreePath,
 }) {}
 
@@ -153,7 +215,12 @@ export interface PreparedAttempt {
 export class WorkerCredential extends Schema.Class<WorkerCredential>(
   "@usine/executor/WorkerCredential",
 )({
+  /**
+   * The token that git and gh authenticate with. The executor never writes it
+   * inside the checkout, and wipes it from memory when the Attempt's scope closes.
+   */
   value: Schema.Redacted(Schema.String),
+  /** When the token stops working. The executor requests a new credential once fewer than five minutes remain. */
   expiresAt: Schema.DateTimeUtc,
 }) {}
 
@@ -161,6 +228,13 @@ export class WorkerCredential extends Schema.Class<WorkerCredential>(
 export class CredentialProvider extends Context.Service<
   CredentialProvider,
   {
+    /**
+     * Returns a new credential for `repository` only. The local and SSH
+     * executors call it when preparing the Attempt `attemptId`, then again before
+     * each credential expires, until the Attempt's resources are released. A
+     * failure during preparation fails `prepare`. A failed renewal is logged and
+     * tried again 30 seconds later.
+     */
     readonly issue: (
       repository: RepositoryName,
       attemptId: AttemptId,
@@ -177,6 +251,10 @@ export class Executor extends Context.Service<
       attempt: AttemptRecovery,
       record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
     ) => Effect.Effect<void, E | ExecutorError>;
+    /**
+     * The kind of Worker this executor runs Attempts on. Each executor serves one
+     * kind, and the orchestrator does not start when a configured Worker has another.
+     */
     readonly kind: WorkerKind;
     /**
      * Whether the orchestrator can reattach to the Attempt's parent task after a restart: the
