@@ -431,10 +431,13 @@ const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
  * `double`. Declare such map values as `double`.
  *
  * `uint` is not supported for `context` values. An expression that reads a
- * variable, object field, or list item declared `uint` passes checking but
- * fails evaluation, because the value arrives as a signed integer. Declare
- * such values as `int`. A `uint` result fails `evaluateScalar` (see
- * {@link Scalar}).
+ * variable, non-nullable object field, or list item declared `uint` passes
+ * checking but fails evaluation, because the value arrives as a signed
+ * integer. A nullable field is evaluated as `dyn`, so a `uint` value read
+ * from it, or from a list it holds, arrives as the signed integer: comparing
+ * it with a `uint` literal works, but `uint` arithmetic on it fails
+ * evaluation. Declare such values as `int`. A `uint` result fails
+ * `evaluateScalar` (see {@link Scalar}).
  */
 export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {
   relatedStringLiterals,
