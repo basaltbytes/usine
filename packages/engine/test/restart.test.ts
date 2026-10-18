@@ -1,6 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import type { AttemptId } from "@usine/core/attempt";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
+import type { InstanceDirectory } from "@usine/core/instance";
 import { WorkerName } from "@usine/core/worker";
 import {
   Context,
@@ -9,6 +10,7 @@ import {
   Exit,
   Fiber,
   Layer,
+  Logger,
   Option,
   Ref,
   Result,
@@ -17,6 +19,7 @@ import {
 } from "effect";
 import { RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
 import { runIdFor } from "../src/engine/submission.ts";
+import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import {
   approvalEvent,
@@ -29,6 +32,44 @@ import {
   waitFor,
   withInstance,
 } from "./support.ts";
+
+/** Runs one Attempt to success on Worker `local`, then closes that runtime. */
+const deliverOneAttempt = (directory: InstanceDirectory, number: number) =>
+  Effect.gen(function* () {
+    const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+      Effect.succeed(stepResult("delivered before the restart")),
+    ]);
+    const scope = yield* Scope.make();
+    const engine = Context.get(
+      yield* Scope.provide(Layer.build(engineLayer(directory, executorLayer(plans))), scope),
+      RunEngine,
+    );
+    const accepted = yield* engine.submit(submission({ number }));
+    assert(accepted._tag === "Claimed");
+    const delivered = yield* waitFor(
+      engine,
+      accepted.runId,
+      ({ run }) => run.state._tag === "Succeeded",
+    );
+    yield* Scope.close(scope, Exit.void);
+    return delivered;
+  });
+
+/** The executor of a restarted runtime that runs `workers`, starts nothing, and records each `recover` call. */
+const recordingExecutor = (
+  workers: ReadonlyArray<string>,
+  recovered: Ref.Ref<ReadonlyArray<AttemptId>>,
+) =>
+  Layer.succeed(StepExecutor)({
+    workers: workers.map((worker) => WorkerName.make(worker)),
+    isLive: () => Effect.succeed(false),
+    outcome: () => Effect.succeed(Option.none()),
+    recover: (attempt) => Ref.update(recovered, (ids) => [...ids, attempt.attemptId]),
+    intervene: () => Effect.void,
+    interrupt: () => Effect.void,
+    reserve: () => Effect.never,
+    execute: () => Effect.die("no Attempt starts after the restart"),
+  });
 
 describe("engine restart", () => {
   it.live("keeps an approval wait parked when the runtime restarts", () =>
@@ -120,6 +161,7 @@ describe("engine restart", () => {
         const executions = yield* Ref.make<ReadonlyArray<readonly [AttemptId, boolean]>>([]);
         const live = yield* Ref.make<ReadonlySet<AttemptId>>(new Set());
         const executor = Layer.succeed(StepExecutor)({
+          workers: [WorkerName.make("local")],
           isLive: (attemptId) => Ref.get(live).pipe(Effect.map((ids) => ids.has(attemptId))),
           outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
@@ -189,6 +231,7 @@ describe("engine restart", () => {
             ReadonlyMap<AttemptId, Result.Result<ReturnType<typeof stepResult>, AgentFailure>>
           >(new Map());
           const executor = Layer.succeed(StepExecutor)({
+            workers: [WorkerName.make("local")],
             isLive: () => Effect.succeed(false),
             outcome: (attemptId) =>
               Ref.get(stored).pipe(
@@ -264,54 +307,66 @@ describe("engine restart", () => {
   it.live("reconciles each persisted Attempt once per start, however the engine is provided", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Effect.succeed(stepResult("delivered before the restart")),
-        ]);
-        const firstScope = yield* Scope.make();
-        const firstEngine = Context.get(
-          yield* Scope.provide(
-            Layer.build(engineLayer(directory, executorLayer(plans))),
-            firstScope,
-          ),
-          RunEngine,
-        );
-        const accepted = yield* firstEngine.submit(submission({ number: 58 }));
-        assert(accepted._tag === "Claimed");
-        const delivered = yield* waitFor(
-          firstEngine,
-          accepted.runId,
-          ({ run }) => run.state._tag === "Succeeded",
-        );
-        yield* Scope.close(firstScope, Exit.void);
-
+        const delivered = yield* deliverOneAttempt(directory, 58);
         const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
-        const engine = engineLayer(
-          directory,
-          Layer.succeed(StepExecutor)({
-            isLive: () => Effect.succeed(false),
-            outcome: () => Effect.succeed(Option.none()),
-            recover: (attempt) => Ref.update(recovered, (ids) => [...ids, attempt.attemptId]),
-            intervene: () => Effect.void,
-            interrupt: () => Effect.void,
-            reserve: () => Effect.never,
-            execute: () => Effect.die("no Attempt starts after the restart"),
-          }),
-        );
+        const engine = engineLayer(directory, recordingExecutor(["local"], recovered));
         // The orchestrator provides the engine to several services at once.
         const consumer = () =>
           Layer.effectDiscard(Effect.asVoid(RunEngine)).pipe(Layer.provide(engine));
-        const secondScope = yield* Scope.make();
-        yield* Scope.provide(
-          Layer.build(Layer.mergeAll(engine, consumer(), consumer())),
-          secondScope,
-        );
+        const scope = yield* Scope.make();
+        yield* Scope.provide(Layer.build(Layer.mergeAll(engine, consumer(), consumer())), scope);
         assert.deepStrictEqual(
           yield* Ref.get(recovered),
           delivered.attempts.map(({ id }) => id),
         );
-        yield* Scope.close(secondScope, Exit.void);
+        yield* Scope.close(scope, Exit.void);
       }),
     ),
+  );
+
+  it.live(
+    "leaves the Attempts of a Worker that is not configured unreconciled until their leftovers are discarded",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          yield* deliverOneAttempt(directory, 59);
+          const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
+          const warnings: Array<string> = [];
+          const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+            if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+          });
+
+          // `usine.yaml` now declares only `usine-worker-1`.
+          const switched = engineLayer(directory, recordingExecutor(["usine-worker-1"], recovered));
+          const firstScope = yield* Scope.make();
+          const context = yield* Scope.provide(Layer.build(switched), firstScope).pipe(
+            Effect.provide(Logger.layer([logger])),
+          );
+          assert.deepStrictEqual(yield* Ref.get(recovered), []);
+          assert.strictEqual(warnings.length, 1);
+          assert.match(warnings[0] ?? "", /"attempts":1,"workers":"local"/u);
+          const engine = Context.get(context, RunEngine);
+          const reader = Context.get(context, RunReader);
+          assert.deepStrictEqual(
+            (yield* reader.attemptsByWorker()).map(({ worker, attempts }) => [worker, attempts]),
+            [["local", 1]],
+          );
+          // A configured Worker's Attempts stay reconciled at every start.
+          assert.strictEqual(yield* engine.discardLeftovers(WorkerName.make("usine-worker-1")), 0);
+          assert.strictEqual(yield* engine.discardLeftovers(WorkerName.make("local")), 1);
+          assert.deepStrictEqual(yield* reader.attemptsByWorker(), []);
+          yield* Scope.close(firstScope, Exit.void);
+
+          // Configuring `local` again does not bring the discarded Attempt back.
+          const secondScope = yield* Scope.make();
+          yield* Scope.provide(
+            Layer.build(engineLayer(directory, recordingExecutor(["local"], recovered))),
+            secondScope,
+          );
+          assert.deepStrictEqual(yield* Ref.get(recovered), []);
+          yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
   );
 
   it.live("drains an admitted Attempt and leaves queued and new work for restart", () =>

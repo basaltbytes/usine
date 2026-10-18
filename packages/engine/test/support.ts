@@ -51,6 +51,7 @@ export const engineLayer = (
 
 export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
   Layer.succeed(StepExecutor)({
+    workers: [WorkerName.make("local")],
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeed(Option.none()),
     recover: () => Effect.void,

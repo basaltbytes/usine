@@ -360,6 +360,14 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("record attempt salvage"));
 
+  const discardLeftovers = Effect.fn("RunStore.discardLeftovers")(function* (worker: WorkerName) {
+    yield* Effect.annotateCurrentSpan({ worker });
+    const discardedAt = yield* DateTime.now;
+    return yield* database.transaction((transaction) =>
+      queriesFor(transaction).discardLeftovers(worker, discardedAt),
+    );
+  }, persistence("discard Attempt leftovers"));
+
   const finishAttempt = Effect.fn("RunStore.finishAttempt")(function* (
     attempt: Attempt,
     result: Result.Result<StepResult, AttemptFailure>,
@@ -604,6 +612,7 @@ const makeRunStore = Effect.gen(function* () {
     recordAndClaim,
     salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
     recordSalvage,
+    discardLeftovers,
     submission: (runId: RunId) =>
       queries.eventRouteByRun(runId).pipe(
         Effect.flatMap((routes) =>
@@ -682,7 +691,10 @@ export class RunStore extends Context.Service<
       attemptId: AttemptId,
       salvage: AttemptSalvage,
     ) => Effect.Effect<void, RunStoreError>;
+    /** Every persisted Attempt startup reconciliation visits: all of them except those whose leftovers were discarded. */
     readonly salvageCandidates: Effect.Effect<ReadonlyArray<AttemptRecovery>, RunStoreError>;
+    /** Marks every Attempt recorded on `worker` whose leftovers are not discarded yet, so reconciliation skips them; returns how many it marked. */
+    readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
     /** Resolves attention for the current failed Attempt atomically; stale requests are rejected. */
     readonly resolveFailure: (
       runId: RunId,

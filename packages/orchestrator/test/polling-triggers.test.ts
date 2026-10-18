@@ -185,6 +185,7 @@ const claimedRun = (cycle: Effect.Success<ReturnType<PollingTriggers["Service"][
 };
 
 const gatedExecutor = Layer.succeed(StepExecutor)({
+  workers: [WorkerName.make("local")],
   isLive: () => Effect.succeed(false),
   outcome: () => Effect.succeed(Option.none()),
   recover: () => Effect.void,
@@ -505,6 +506,7 @@ describe("PollingTriggers", () => {
       const finishing = yield* Deferred.make<void>();
       let executions = 0;
       const executor = Layer.succeed(StepExecutor)({
+        workers: [WorkerName.make("local")],
         isLive: () => Effect.succeed(false),
         outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,
@@ -1051,6 +1053,7 @@ describe("PollingTriggers", () => {
       intervene: () => Effect.void,
       approve: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
+      discardLeftovers: () => Effect.die("unused"),
       inspect: () => Effect.die("unused"),
       reconcile: () => Effect.die("unused"),
       drain: () => Effect.void,
@@ -1154,6 +1157,7 @@ describe("PollingTriggers", () => {
         intervene: () => Effect.void,
         approve: () => Effect.die("unused"),
         cancel: () => Effect.die("unused"),
+        discardLeftovers: () => Effect.die("unused"),
         inspect: () => Effect.die("unused"),
         reconcile: () => Effect.die("unused"),
         drain: () => Effect.void,
@@ -1261,6 +1265,7 @@ describe("PollingTriggers", () => {
       intervene: () => Effect.void,
       approve: () => Effect.die("unused"),
       cancel: () => Effect.die("unused"),
+      discardLeftovers: () => Effect.die("unused"),
       inspect: () => Effect.die("unused"),
       reconcile: () => Effect.die("unused"),
       drain: () => Effect.void,

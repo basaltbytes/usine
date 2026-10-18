@@ -45,7 +45,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 - [#177][]: a reattached Attempt keeps its own Worker while the scheduler reserved a slot on another one ([store.ts:284][]).
 - [#178][]: the runaway guard loses an Attempt's elapsed time and its finished sessions' tokens across a reattach.
 - [#180][]: the checkout of an Attempt closed between a restart and its reattach isn't reconciled until the next startup.
-- [#268][]: salvage reconciliation fails at every start for Attempts retained on a Worker that `usine.yaml` no longer lists.
 - [#282][]: a retried Attempt resumes from the previous Attempt's salvage branch and never fetches the default branch again, so it keeps the base of the first Attempt ([provision.ts:485][]).
 
 ## Durable layer
@@ -186,7 +185,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#264]: https://github.com/basaltbytes/usine/issues/264
 [#266]: https://github.com/basaltbytes/usine/issues/266
 [#267]: https://github.com/basaltbytes/usine/issues/267
-[#268]: https://github.com/basaltbytes/usine/issues/268
 [#270]: https://github.com/basaltbytes/usine/issues/270
 [#277]: https://github.com/basaltbytes/usine/issues/277
 [#278]: https://github.com/basaltbytes/usine/issues/278

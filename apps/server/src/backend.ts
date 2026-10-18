@@ -4,6 +4,7 @@ import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import { AgentName } from "@usine/core/agent";
+import type { WorkerName } from "@usine/core/worker";
 import {
   type BoardMove,
   type FactoryOverview,
@@ -48,6 +49,7 @@ export class FactoryBackend extends Context.Service<
       input: SessionIntervention,
     ) => Effect.Effect<void, BackendError>;
     readonly cancel: (runId: RunId) => Effect.Effect<void, BackendError>;
+    readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<void, BackendError>;
     readonly moveBoardItem: (move: BoardMove) => Effect.Effect<void, BackendError>;
     readonly pause: (loop: LoopName) => Effect.Effect<void, BackendError>;
     readonly unpause: (loop: LoopName) => Effect.Effect<void, BackendError>;
@@ -69,6 +71,7 @@ export const liveBackendLayer = (
     editAndRetry: (runId, edit) => operator.editAndRetry(instance, runId, edit),
     intervene: (runId, input) => operator.intervene(instance, runId, input),
     cancel: operator.cancel,
+    discardLeftovers: operator.discardLeftovers,
     moveBoardItem: (move) => operator.moveBoardItem(instance, move),
     pause: (loop) => operator.pause(loop).pipe(Effect.asVoid),
     unpause: (loop) => operator.unpause(loop).pipe(Effect.asVoid),
@@ -102,6 +105,7 @@ export const needsSetupBackendLayer = (
     editAndRetry: fail,
     intervene: fail,
     cancel: fail,
+    discardLeftovers: fail,
     moveBoardItem: fail,
     pause: fail,
     unpause: fail,

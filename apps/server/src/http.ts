@@ -160,6 +160,9 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     .handle("cancel", ({ params }) =>
       fromBackend((backend) => backend.cancel(params.runId)).pipe(acknowledge),
     )
+    .handle("discardLeftovers", ({ params }) =>
+      fromBackend((backend) => backend.discardLeftovers(params.worker)).pipe(acknowledge),
+    )
     .handle(
       "moveBoardItem",
       Effect.fn("Http.boardMove")(function* ({ params, payload }) {

@@ -48,6 +48,7 @@ const parent = new ParentSession({ id: AgentSessionId.make("parent"), agent: age
 const result = new StepResult({ message: "Evidence retained", facts: [] });
 
 const executor = Layer.succeed(StepExecutor)({
+  workers: [WorkerName.make("local")],
   isLive: () => Effect.succeed(false),
   outcome: () => Effect.succeed(Option.none()),
   recover: () => Effect.void,
