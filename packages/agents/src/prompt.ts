@@ -14,6 +14,8 @@ export interface PromptParts {
   readonly task: AttemptTask;
   /** The previous Attempt's salvage checked out in the workspace, when the Run is retrying. */
   readonly resume: Option.Option<SalvagePushed>;
+  /** The previous Attempt's salvage that conflicts with the current revision and is not in the workspace. */
+  readonly conflictingSalvage: Option.Option<SalvagePushed>;
 }
 
 /** The Agent's standing instructions and the focused task the parent delegates to a child. */
@@ -47,13 +49,20 @@ const githubInstructions = (agent: AgentName): ReadonlyArray<string> => [
   githubSignature(agent),
 ];
 
-const resumeLines = (resume: Option.Option<SalvagePushed>): ReadonlyArray<string> =>
-  Option.match(resume, {
+const resumeLines = (parts: PromptParts): ReadonlyArray<string> => [
+  ...Option.match(parts.resume, {
     onNone: () => [],
     onSome: ({ ref, commit }) => [
       `Resumes from: ${ref} at ${commit}, the previous Attempt's unfinished work, checked out at HEAD. Its last commit is an automatic work-in-progress snapshot. Continue from this state instead of starting over.`,
     ],
-  });
+  }),
+  ...Option.match(parts.conflictingSalvage, {
+    onNone: () => [],
+    onSome: ({ ref, commit }) => [
+      `Previous work: ${ref} at ${commit}, the previous Attempt's unfinished work, conflicts with the current revision, so the checkout starts without it. Fetch that branch to reuse parts of it.`,
+    ],
+  }),
+];
 
 /** Builds the parent's instructions from the saved payload, effective task, and Agent persona, including GitHub attribution. */
 export const assemblePrompt = (parts: PromptParts): string =>
@@ -61,7 +70,7 @@ export const assemblePrompt = (parts: PromptParts): string =>
     "# Run context",
     "",
     `Repository: ${parts.repository}`,
-    ...resumeLines(parts.resume),
+    ...resumeLines(parts),
     "",
     "Payload snapshot:",
     "```json",

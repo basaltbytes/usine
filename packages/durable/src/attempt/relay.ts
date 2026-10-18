@@ -247,7 +247,10 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       yield* emitPayload(
         durable,
         hub,
-        new AttemptChannel.Started({ parentModel: started.brain.model }),
+        new AttemptChannel.Started({
+          parentModel: started.brain.model,
+          conflictingSalvage: spec.conflictingSalvage,
+        }),
       );
       yield* emitPayload(
         durable,

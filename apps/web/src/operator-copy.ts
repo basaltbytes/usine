@@ -1,5 +1,5 @@
 import { BrainSpec } from "@usine/core/agent/brain";
-import type { AttemptSalvage } from "@usine/core/attempt/salvage";
+import type { AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { FailureView, NeedView } from "@usine/orchestrator/operator";
@@ -33,6 +33,9 @@ export const salvageMessage = (salvage: AttemptSalvage): string =>
     Retained: ({ path, message }) =>
       `Salvage incomplete; unfinished work stays at ${path} and is retried at every startup. Last error: ${message}`,
   });
+
+export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
+  `The previous Attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision; this Attempt starts without it, and the branch keeps it`;
 
 export const needCopy = (need: NeedView): NeedCopy =>
   Match.valueTags(need, {

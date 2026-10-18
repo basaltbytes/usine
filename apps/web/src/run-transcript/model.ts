@@ -2,7 +2,7 @@ import type { AgentSession, HarnessSession } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { Match, Option, type Schema } from "effect";
-import { brainLine, failureMessage } from "../operator-copy.ts";
+import { brainLine, conflictingSalvageMessage, failureMessage } from "../operator-copy.ts";
 import { indexSessions, type SessionEvents, type InterventionRecord } from "./sessions.ts";
 
 /** Conversation filters hide prose or tool calls while preserving lifecycle notices. */
@@ -222,10 +222,13 @@ export const projectTranscript = (
       notice(
         record,
         Match.valueTags(payload, {
-          Started: ({ parentModel }): NoticeContent => ({
+          Started: ({ parentModel, conflictingSalvage }): NoticeContent => ({
             kind: "status",
             label: "Attempt started",
-            detail: parentModel,
+            detail: Option.match(conflictingSalvage, {
+              onNone: () => parentModel,
+              onSome: (salvage) => `${parentModel}. ${conflictingSalvageMessage(salvage)}`,
+            }),
             format: "plain",
             isError: false,
           }),

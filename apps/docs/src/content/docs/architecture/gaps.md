@@ -46,7 +46,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 - [#180][]: the checkout of an Attempt closed between a restart and its reattach isn't reconciled until the next startup.
 - [#211][]: startup recovery calls `Executor.recover` four times for the same open Attempt.
 - [#268][]: salvage reconciliation fails at every start for Attempts retained on a Worker that `usine.yaml` no longer lists.
-- [#282][]: a retried Attempt resumes from the previous Attempt's salvage branch and never fetches the default branch again, so it keeps the base of the first Attempt ([provision.ts:485][]).
 
 ## Durable layer
 
@@ -126,7 +125,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [polling.ts:222]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/polling.ts#L222
 [store.ts:284]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/store/store.ts#L284
 [schema.ts:169]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/database/schema.ts#L169
-[provision.ts:485]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/provision.ts#L485
 [harvest.ts:135]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/step/harvest.ts#L135
 [worker-engine.ts:13]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/worker-engine.ts#L13
 [scheduler.ts:76]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/scheduler.ts#L76
@@ -192,4 +190,3 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#279]: https://github.com/basaltbytes/usine/issues/279
 [#280]: https://github.com/basaltbytes/usine/issues/280
 [#281]: https://github.com/basaltbytes/usine/issues/281
-[#282]: https://github.com/basaltbytes/usine/issues/282

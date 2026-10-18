@@ -1,4 +1,4 @@
-import { Effect, Result, Schema } from "effect";
+import { Effect, Option, Result, Schema } from "effect";
 import { Agent } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
 import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
@@ -39,16 +39,33 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
   parentModel: Schema.OptionFromNullOr(ModelId),
   maxChildren: ChildSessionBudget,
   parentEffort: Effort,
-  /** The previous Attempt's pushed salvage checked out in this workspace; the agent continues from it. */
+  /**
+   * The previous Attempt's pushed salvage whose work this workspace holds, on
+   * top of `baseCommit`, rebased when the base moved; the agent continues from it.
+   */
   resume: Schema.OptionFromNullOr(SalvagePushed),
+  /**
+   * The previous Attempt's pushed salvage that conflicts with `baseCommit`: the
+   * workspace starts from `baseCommit` without it, and its work stays on its branch.
+   */
+  conflictingSalvage: Schema.OptionFromNullOr(SalvagePushed).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(Option.none<SalvagePushed>())),
+  ),
 }) {}
 
 /**
  * The parent model the SDK selected at launch, which the roster may not declare.
  * Child sessions report their own model in `SessionStarted` events.
+ * `conflictingSalvage` is the previous Attempt's work that this Attempt starts
+ * without, because it conflicts with the current revision (`RunSpec`).
  */
 export class Started extends Schema.TaggedClass<Started>("AttemptChannel/Started")("Started", {
   parentModel: ModelId,
+  conflictingSalvage: Schema.OptionFromNullOr(SalvagePushed).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+    Schema.withConstructorDefault(Effect.succeed(Option.none<SalvagePushed>())),
+  ),
 }) {}
 
 /** One normalized parent or child session event, persisted in the Attempt transcript. */

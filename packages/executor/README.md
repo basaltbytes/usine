@@ -40,8 +40,14 @@ from that stderr first, and an exe.dev VM never receives one. The startup sweep 
 worktree alone. Every later startup retries the salvage with fresh credentials, for
 open and closed Runs alike, and rewrites the record from `Retained` to `Pushed` once
 the push succeeds; until then the record carries the latest failure for the run
-drawer. A request whose `resume` names a pushed salvage checks that ref out instead
-of the bare revision; a missing ref falls back to the revision.
+drawer. A request whose `resume` names a pushed salvage fetches the revision again
+and applies the salvage on top of it: a salvage whose fork point is the fetched
+commit is checked out as it is, and one made on an older base is rebased onto it,
+so a retry of an issue Run after a fix on the default branch works from that fix.
+A salvage with no changes beyond the revision is dropped. A salvage that does not
+rebase cleanly is left out: the worktree starts from the revision,
+`RunSpec.conflictingSalvage` names the salvage, and its branch keeps the work. A
+missing ref falls back to the revision.
 
 Startup reconciliation lists each Worker's `attempts/` directory once per executor
 instance. Every adapter skips historical Attempts absent from that listing without

@@ -239,6 +239,7 @@ export const attemptTask = (
         persona: spec.agent.persona,
         task: spec.task,
         resume: spec.resume,
+        conflictingSalvage: spec.conflictingSalvage,
       });
     const submission = yield* call("submit the parent turn", () =>
       conversation.submit(
