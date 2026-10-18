@@ -12,7 +12,13 @@ import { Context, type Effect, type Option, Schema } from "effect";
  * the Attempt, so each `execute` call supplies them afresh.
  */
 export class StoredRequest extends Schema.Class<StoredRequest>("@usine/durable/StoredRequest")({
+  /**
+   * The Attempt's launch input: its id, repository, task, Agent, and parent model and effort.
+   * The parent's task and its `subagent` tool read it from durable storage, so a reattached
+   * Attempt continues with the RunSpec it started with.
+   */
   spec: AttemptChannel.RunSpec,
+  /** The Worker whose machine has the Attempt's checkout and runs its children. */
   worker: WorkerName,
   /** Absolute path of the Attempt's worktree on the machine its children run on. */
   cwd: Schema.NonEmptyString,
@@ -35,23 +41,36 @@ export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable
 
 /** What the parent said when it finished. Commits and pull requests are harvested by the executor afterwards. */
 export class AttemptReport extends Schema.Class<AttemptReport>("@usine/durable/AttemptReport")({
+  /** The parent's final message, never empty. The executor records it as the message of the Attempt's StepResult. */
   message: Schema.NonEmptyString,
 }) {}
 
 /** The parent reported success, and no harvested result was recorded: the Attempt's checkout still has to be harvested. */
 export class ParentReported extends Schema.TaggedClass<ParentReported>(
   "@usine/durable/ParentReported",
-)("ParentReported", { report: AttemptReport }) {}
+)("ParentReported", {
+  /** The report the parent finished with, as `execute` returned it. */
+  report: AttemptReport,
+}) {}
 
 /** The executor recorded the Attempt's harvested result with `recordResult`. */
 export class ResultRecorded extends Schema.TaggedClass<ResultRecorded>(
   "@usine/durable/ResultRecorded",
-)("ResultRecorded", { result: StepResult }) {}
+)("ResultRecorded", {
+  /** The harvested result the executor passed to `recordResult`: the parent's message and the facts from the checkout. */
+  result: StepResult,
+}) {}
 
 /** The parent task ended with a failure. */
 export class ParentFailed extends Schema.TaggedClass<ParentFailed>("@usine/durable/ParentFailed")(
   "ParentFailed",
-  { failure: AttemptFailure },
+  {
+    /**
+     * Why the parent task failed: the same failure `execute` returned for the Attempt, read back
+     * from the task's outcome.
+     */
+    failure: AttemptFailure,
+  },
 ) {}
 
 /** What durable storage keeps of an Attempt whose parent task finished and relayed its terminal envelope. */

@@ -8,10 +8,23 @@ import { durableStoragePath } from "./storage-path.ts";
 export class DurableStorageBackupError extends Schema.TaggedError<DurableStorageBackupError>(
   "@usine/durable/DurableStorageBackupError",
 )("DurableStorageBackupError", {
+  /**
+   * The backup step that failed. `open`: checking or opening the durable storage file.
+   * `stage`: creating the temporary copy beside `destination`. `copy`: SQLite's backup into
+   * that copy. `publish`: hard-linking the copy to `destination`, which fails when a file
+   * already exists there.
+   */
   operation: Schema.Literals(["open", "stage", "copy", "publish"]),
+  /** Path of the instance's durable storage file, `.usine/durable.sqlite` in the instance directory. */
   source: Schema.String,
+  /** The destination path the caller passed to `backup`. */
   destination: Schema.String,
+  /**
+   * A short description of the failure for operators: the platform error's description or code,
+   * SQLite's error message, or why the source is not a regular file.
+   */
   reason: Schema.String,
+  /** The underlying file system or SQLite error. */
   cause: Schema.Defect(),
 }) {}
 
