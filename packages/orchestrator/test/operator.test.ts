@@ -173,6 +173,7 @@ const snapshot = new RunSnapshot({
       parentModel: Option.none(),
       startedAt: now,
       outcome: Option.none(),
+      endedAt: Option.none(),
       salvage: Option.none(),
     }),
   ],
@@ -512,6 +513,51 @@ describe("Operator", () => {
           assert.strictEqual(detail.run.state, "Failed");
         }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
       }
+    }),
+  );
+
+  it.effect("projects when each Attempt on a Board card started and when a closed one ended", () =>
+    Effect.gen(function* () {
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      const original = snapshot.attempts[0];
+      assert(original !== undefined);
+      const failed = new Attempt({
+        ...original,
+        outcome: Option.some(
+          new AttemptFailed({
+            failure: new InfraFailure({ message: "Worker unavailable", cause: "disconnected" }),
+          }),
+        ),
+        endedAt: Option.some(DateTime.add(now, { minutes: 5 })),
+      });
+      const running = new Attempt({
+        ...original,
+        id: AttemptId.make("running-retry"),
+        number: AttemptNumber.make(2),
+        startedAt: DateTime.add(now, { minutes: 6 }),
+      });
+      const current = new RunSnapshot({
+        ...snapshot,
+        run: new Run({ ...snapshot.run, state: new RunState.Running() }),
+        attempts: [failed, running],
+      });
+      yield* Effect.gen(function* () {
+        const operator = yield* Operator;
+        const overview = yield* operator.overview(instance);
+        const card = overview.projects[0]?.board.lanes
+          .flatMap((lane) => lane.items)
+          .find((item) => item.itemKey === itemKey);
+        assert.deepStrictEqual(
+          card?.run?.attempts.map(({ startedAt, endedAt }) => ({ startedAt, endedAt })),
+          [
+            { startedAt: "2026-08-31T12:00:00.000Z", endedAt: "2026-08-31T12:05:00.000Z" },
+            { startedAt: "2026-08-31T12:06:00.000Z", endedAt: null },
+          ],
+        );
+      }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
     }),
   );
 

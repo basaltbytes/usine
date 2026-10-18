@@ -1,0 +1,1 @@
+ALTER TABLE `usine_attempts` ADD `ended_at` text;

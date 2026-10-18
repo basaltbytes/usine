@@ -70,6 +70,7 @@ export const AttemptRow = Schema.Struct({
   parentModel: Schema.NullOr(ModelId),
   startedAt: Schema.DateTimeUtcFromString,
   outcome: Schema.NullOr(AttemptOutcome),
+  endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   salvage: Schema.NullOr(AttemptSalvage),
 });
 export type AttemptRow = typeof AttemptRow.Type;
@@ -174,6 +175,7 @@ export const attemptFromRow = (row: AttemptRow): Attempt =>
     parentModel: Option.fromNullishOr(row.parentModel),
     startedAt: row.startedAt,
     outcome: Option.fromNullishOr(row.outcome),
+    endedAt: Option.fromNullishOr(row.endedAt),
     salvage: Option.fromNullishOr(row.salvage),
   });
 

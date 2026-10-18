@@ -130,6 +130,7 @@ const attemptSelection = {
   parentModel: attempts.parentModel,
   startedAt: attempts.startedAt,
   outcome: attempts.outcomeJson,
+  endedAt: attempts.endedAt,
   salvage: attempts.salvageJson,
 } as const;
 
@@ -397,6 +398,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
         parentModel: Option.getOrNull(attempt.parentModel),
         startedAt: encodeDateTime(attempt.startedAt),
         outcomeJson: null,
+        endedAt: null,
         salvageJson: null,
       })
       .execute();
@@ -417,10 +419,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
   const closeAttempt = Effect.fn("RunStoreQueries.closeAttempt")(function* (
     attemptId: AttemptId,
     outcome: AttemptOutcome,
+    endedAt: DateTime.Utc,
   ) {
     yield* database
       .update(attempts)
-      .set({ outcomeJson: encodeOutcome(outcome) })
+      .set({ outcomeJson: encodeOutcome(outcome), endedAt: encodeDateTime(endedAt) })
       .where(and(eq(attempts.attemptId, attemptId), isNull(attempts.outcomeJson)))
       .execute();
   });

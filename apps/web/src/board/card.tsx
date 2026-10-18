@@ -1,6 +1,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import type { RunId } from "@usine/core/run";
+import { OPEN_STATE_TAGS } from "@usine/core/run/state";
 import type {
   BoardLaneView,
   BoardTaskView,
@@ -18,8 +19,10 @@ import {
   failureMessage,
   itemKindLabel,
   moveProgressMessage,
+  runActionProgress,
+  runLineTimeTitle,
 } from "../operator-copy.ts";
-import { useRunAction } from "../run-actions.ts";
+import { type RunActions, useRunAction } from "../run-actions.ts";
 import { type CardMoves, CardMenu } from "./card-menu.tsx";
 import type { BoardMoveProgress } from "./moves.ts";
 
@@ -27,6 +30,35 @@ import type { BoardMoveProgress } from "./moves.ts";
 export type LabelCatalog = ReadonlyMap<string, LabelView>;
 
 const VISIBLE_LABELS = 3;
+
+const OPEN_STATES = new Set<RunView["state"]>(OPEN_STATE_TAGS);
+
+/** The Run a card shows and acts on: an open Run, or a failed one that still needs the operator.
+ * Succeeded, canceled, and resolved Runs stay in the drawer and Run history. */
+export const currentRun = (item: BoardTaskView): RunView | null => {
+  const run = item.run;
+  return run !== null && (OPEN_STATES.has(run.state) || run.canResolveFailure) ? run : null;
+};
+
+/** The instant a card's Run line counts from: when the Run opened while it waits for approval or a
+ * Worker, when its current Attempt started while it runs, and when its last Attempt ended once it
+ * failed. Null when the records do not hold that instant. */
+export const runLineSince = (run: RunView): string | null => {
+  const last = run.attempts.at(-1);
+  switch (run.state) {
+    case "Pending":
+    case "Waiting":
+    case "Queued":
+      return run.openedAt;
+    case "Running":
+      return last !== undefined && last.outcome === null ? last.startedAt : null;
+    case "Failed":
+      return last?.endedAt ?? null;
+    case "Succeeded":
+    case "Canceled":
+      return null;
+  }
+};
 
 /** The newest failure among the task's Runs that still request attention, or null when none does. */
 export const itemFailure = (item: BoardTaskView): string | null => {
@@ -79,29 +111,41 @@ const CardLabels = ({
 
 const RunLine = ({ run }: { readonly run: RunView }) => {
   const now = useNow(30_000);
+  const since = runLineSince(run);
   return (
     <p className="flex min-w-0 items-center gap-2 whitespace-nowrap text-muted-foreground">
       <span className="truncate font-mono">{run.loop}</span>
       <span className={cn("flex shrink-0 items-center gap-1.5", stateTone(run.state))}>
-        <span
-          aria-hidden="true"
-          className={cn(
-            "size-1.5 rounded-full bg-current",
-            run.state === "Running" && "animate-pulse motion-reduce:animate-none",
-          )}
-        />
+        {run.state === "Running" && (
+          <span
+            aria-hidden="true"
+            className="size-1.5 animate-pulse rounded-full bg-current motion-reduce:animate-none"
+          />
+        )}
         {run.state}
       </span>
-      <time
-        className="shrink-0 tabular-nums"
-        dateTime={run.openedAt}
-        title={new Date(run.openedAt).toLocaleString()}
-      >
-        {elapsedLabel(run.openedAt, now)}
-      </time>
+      {since !== null && (
+        <time
+          className="shrink-0 tabular-nums"
+          dateTime={since}
+          title={runLineTimeTitle(run.state, since)}
+        >
+          {elapsedLabel(since, now)}
+        </time>
+      )}
       <span className="truncate font-mono">{run.agent}</span>
     </p>
   );
+};
+
+/** What a card says while a Run action or a move is in flight, if anything is. */
+const progressMessage = (
+  action: RunActions,
+  phase: BoardMoveProgress["phase"] | undefined,
+): string | null => {
+  if (action.isPending && action.variables !== undefined)
+    return runActionProgress[action.variables.request.action];
+  return phase === undefined ? null : moveProgressMessage(phase);
 };
 
 // The title's hit area stretches over the whole card, so a click anywhere on it opens the Run or Item.
@@ -143,18 +187,18 @@ const CardFace = ({
   lane,
   catalog,
   openRun,
-  phase,
+  progress,
   actionError,
 }: {
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
   readonly openRun: (runId: RunId) => void;
-  readonly phase: BoardMoveProgress["phase"] | undefined;
+  readonly progress: string | null;
   readonly actionError: string | null;
 }) => {
   const failure = itemFailure(item);
-  const run = item.run;
+  const run = currentRun(item);
   // Waiting and Failed Runs already show why the card needs the operator; a blocked Item does not.
   const unexplained = item.needsYou && !(run?.canApprove || run?.canResolveFailure);
   return (
@@ -171,9 +215,9 @@ const CardFace = ({
       </div>
       <CardLabels labels={cardLabels(item, lane)} catalog={catalog} />
       {run !== null && <RunLine run={run} />}
-      {phase !== undefined && (
+      {progress !== null && (
         <p role="status" className="text-muted-foreground">
-          {moveProgressMessage(phase)}
+          {progress}
         </p>
       )}
       {failure !== null && (
@@ -244,12 +288,13 @@ export const BoardCard = ({
           lane={lane}
           catalog={catalog}
           openRun={openRun}
-          phase={phase}
+          progress={progressMessage(action, phase)}
           actionError={action.error?.message ?? null}
         />
       </Card>
       <CardMenu
         item={item}
+        run={currentRun(item)}
         moves={moves}
         openRun={openRun}
         action={action}
@@ -275,7 +320,7 @@ export const DraggedCard = ({
       lane={lane}
       catalog={catalog}
       openRun={() => {}}
-      phase={undefined}
+      progress={null}
       actionError={null}
     />
   </Card>

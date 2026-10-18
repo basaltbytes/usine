@@ -37,6 +37,8 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
 
 /**
  * One try of a step on a worker. `outcome` is none while the attempt is in flight.
+ * `endedAt` is when the outcome was recorded; it is none while the attempt is in
+ * flight and for attempts closed before end times were recorded.
  * `salvage` records what the executor preserved of the workspace after an
  * unsuccessful end; the next attempt of the same Run resumes from a pushed salvage.
  */
@@ -53,6 +55,7 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
   parentModel: Schema.OptionFromNullOr(ModelId),
   startedAt: Schema.DateTimeUtc,
   outcome: Schema.Option(AttemptOutcome),
+  endedAt: Schema.Option(Schema.DateTimeUtc),
   salvage: Schema.Option(AttemptSalvage),
 }) {}
 

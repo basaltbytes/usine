@@ -71,6 +71,7 @@ const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
       onNone: () => null,
       onSome: attemptOutcomeView,
     }),
+    endedAt: Option.match(attempt.endedAt, { onNone: () => null, onSome: DateTime.formatIso }),
     salvage: Option.getOrNull(attempt.salvage),
   });
 };

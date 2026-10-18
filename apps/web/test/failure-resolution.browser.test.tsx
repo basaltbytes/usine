@@ -69,6 +69,7 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
         operatorIntervened: false,
         startedAt: "2026-09-17T00:00:00Z",
         outcome: new FailedAttemptView({ failure }),
+        endedAt: "2026-09-17T00:20:00Z",
         salvage: null,
       }),
     ],
