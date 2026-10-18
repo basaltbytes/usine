@@ -22,6 +22,11 @@ export class AgentFailureView extends Schema.TaggedClass<AgentFailureView>(
   "@usine/orchestrator/AgentFailureView",
 )("AgentFailure", { message: Schema.String }) {}
 
+/** The question an Agent asked the operator when it stopped; its Loop holds the Item until the operator answers. */
+export class QuestionFailureView extends Schema.TaggedClass<QuestionFailureView>(
+  "@usine/orchestrator/QuestionFailureView",
+)("QuestionFailure", { question: Schema.String }) {}
+
 /** The wall-clock or token ceiling that stopped an Attempt. */
 export class RunawayFailureView extends Schema.TaggedClass<RunawayFailureView>(
   "@usine/orchestrator/RunawayFailureView",
@@ -40,6 +45,7 @@ export const FailureView = Schema.Union([
   InfraFailureView,
   DefectFailureView,
   AgentFailureView,
+  QuestionFailureView,
   RunawayFailureView,
   ChildSessionBudgetFailureView,
 ]);

@@ -1,0 +1,2 @@
+ALTER TABLE `usine_loop_items` ADD `held_by_run_id` text REFERENCES usine_runs(run_id);--> statement-breakpoint
+ALTER TABLE `usine_loop_items` ADD `held_event_id` text REFERENCES usine_events(event_id);

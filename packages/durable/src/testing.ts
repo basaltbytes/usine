@@ -10,10 +10,13 @@ import {
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import {
+  AgentQuestionError,
+  type AgentReport,
   AgentResultError,
   type AgentSessionError,
   ChildBackend,
   type ChildRequest,
+  reportText,
   type RunningSession,
   SessionResult,
 } from "@usine/agents/runtime";
@@ -32,7 +35,6 @@ import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { StepResult } from "@usine/core/step/result";
-import { BLOCKED_MARKER } from "@usine/agents/runtime";
 import {
   type Cause,
   Context,
@@ -95,6 +97,8 @@ export interface StubChild {
   readonly reply: (message: string) => Effect.Effect<void>;
   /** Finishes with a blocked report, which fails the Attempt unless the parent relays it. */
   readonly block: (message: string) => Effect.Effect<void>;
+  /** Finishes by asking the operator `question`, which fails the Attempt unless the parent relays it. */
+  readonly ask: (question: string) => Effect.Effect<void>;
   /** Completes once the parent's tool call interrupted the child (abort, cancel, or shutdown). */
   readonly interrupted: Effect.Effect<void>;
   /** The operator actions delivered to this child so far. */
@@ -112,7 +116,7 @@ export class StubChildren extends Context.Service<
 
 const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: ChildRequest) {
   const session = request.session;
-  const events = yield* Queue.make<AgentSessionEvent, AgentResultError | Cause.Done>();
+  const events = yield* Queue.make<AgentSessionEvent, AgentReport | Cause.Done>();
   const result = yield* Deferred.make<SessionResult, AgentSessionError>();
   const interrupted = yield* Deferred.make<void>();
   const interventions: Array<AttemptChannel.OperatorAction> = [];
@@ -133,13 +137,16 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
       pending = Option.some(message);
       return emit(new SessionIdle({ session }));
     });
-  const block = (message: string) =>
+  const report = (error: AgentReport) =>
     Effect.gen(function* () {
-      const error = new AgentResultError({ sessionId: Option.some(session.id), message });
-      yield* emit(new TextOutput({ session, text: `${BLOCKED_MARKER}\n${message}` }));
+      yield* emit(new TextOutput({ session, text: reportText(error) }));
       yield* Queue.fail(events, error);
       yield* Deferred.fail(result, error);
     });
+  const block = (message: string) =>
+    report(new AgentResultError({ sessionId: Option.some(session.id), message }));
+  const ask = (question: string) =>
+    report(new AgentQuestionError({ sessionId: Option.some(session.id), message: question }));
   const intervene = (action: AttemptChannel.OperatorAction) =>
     Effect.gen(function* () {
       interventions.push(action);
@@ -172,6 +179,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     emit,
     reply,
     block,
+    ask,
     interrupted: Deferred.await(interrupted),
     interventions: Effect.sync(() => [...interventions]),
   };

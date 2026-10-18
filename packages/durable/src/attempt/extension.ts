@@ -1,5 +1,5 @@
 import { defineExtension, type Extension, section } from "@earendil-works/pi-durable";
-import { BLOCKED_MARKER } from "@usine/agents/runtime";
+import { BLOCKED_MARKER, QUESTION_MARKER } from "@usine/agents/runtime";
 import type { ExtensionServices } from "./services.ts";
 import { subagentTool } from "./subagent.ts";
 import { attemptTask } from "./task.ts";
@@ -10,7 +10,7 @@ const USINE_EXTENSION = "usine";
 const parentGuidance = [
   "You coordinate one usine Attempt. Your only tool is `subagent`: it delegates one focused task to a child agent working in the Attempt's checkout and returns the child's report.",
   "- Delegate only independent, focused work; the child cannot create more children.",
-  `- When a child's report starts with ${BLOCKED_MARKER}, return that report verbatim as your own final answer instead of summarising it.`,
+  `- When a child's report starts with ${BLOCKED_MARKER} or ${QUESTION_MARKER}, return that report verbatim as your own final answer instead of summarising it.`,
   "- A `subagent` call that ends as interrupted is not a blocker: the orchestrator restarted and the checkout keeps everything the child did. Delegate again with a task that tells the child to inspect the checkout and continue from its current state.",
 ].join("\n");
 

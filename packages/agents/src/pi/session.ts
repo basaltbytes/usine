@@ -11,12 +11,7 @@ import {
 } from "@usine/core/agent/session";
 import { Cause, Deferred, Effect, Option, Queue, Ref, Schema } from "effect";
 import { piMessageTokens } from "./usage.ts";
-import {
-  type AgentSessionError,
-  AgentResultError,
-  BLOCKED_MARKER,
-  SessionResult,
-} from "../runtime.ts";
+import { type AgentSessionError, reportedOutcome, SessionResult } from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
 
 export interface SessionChannelOptions {
@@ -40,27 +35,6 @@ export interface SessionChannel {
   readonly fail: (error: AgentSessionError) => Effect.Effect<void>;
   readonly finish: (session: AgentSession, message: string) => Effect.Effect<void>;
 }
-
-/**
- * Only an answer that opens with the reserved marker is an outcome signal,
- * whether its details follow on the same line or the next; ordinary prose and
- * later mentions are unchanged.
- */
-const reportedBlocker = (
-  session: AgentSession,
-  message: string,
-): Option.Option<AgentResultError> => {
-  const answer = message.trim();
-  if (!answer.startsWith(BLOCKED_MARKER)) return Option.none();
-  return Option.some(
-    new AgentResultError({
-      sessionId: Option.some(session.id),
-      message:
-        answer.slice(BLOCKED_MARKER.length).trim() ||
-        "Agent reported an unresolved blocker without details.",
-    }),
-  );
-};
 
 export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
   options: SessionChannelOptions,
@@ -103,7 +77,7 @@ export const sessionChannel = Effect.fn("SessionChannel.make")(function* (
     message: string,
   ) {
     yield* Effect.annotateCurrentSpan({ sessionId: session.id });
-    const own = reportedBlocker(session, message);
+    const own = reportedOutcome(Option.some(session.id), message);
     if (Option.isSome(own)) return yield* fail(own.value);
     if (yield* Ref.getAndSet(terminal, true)) return;
     yield* Queue.offer(events, new SessionFinished({ session }));

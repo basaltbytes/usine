@@ -29,6 +29,17 @@ export class AgentFailure extends Schema.TaggedError<AgentFailure>("AttemptFailu
   },
 ) {}
 
+/**
+ * The agent stopped because it needs an operator decision it cannot make
+ * itself, and `question` is what it asks. Never auto-retried: the Loop holds
+ * the Item until the operator answers or the Item changes again (ADR 0017).
+ */
+export class QuestionFailure extends Schema.TaggedError<QuestionFailure>(
+  "AttemptFailure/QuestionFailure",
+)("QuestionFailure", {
+  question: Schema.NonEmptyString,
+}) {}
+
 /** Which per-attempt ceiling the runaway guard tripped. */
 export const RunawayCeiling = Schema.Literals(["wall-clock", "tokens"]);
 export type RunawayCeiling = typeof RunawayCeiling.Type;
@@ -55,6 +66,7 @@ export const AttemptFailure = Schema.Union([
   InfraFailure,
   DefectFailure,
   AgentFailure,
+  QuestionFailure,
   RunawayFailure,
   ChildSessionBudgetFailure,
 ]);

@@ -260,6 +260,36 @@ export const resightEvent = (settled: Settlement, itemCameBack: boolean): Sighti
     : { _tag: "StayIgnored", reason: settled.reason };
 };
 
+/**
+ * A question that holds a Loop on an Item: the Run whose Attempt asked it, and
+ * the Item's state after the question once the Loop saw one (#241).
+ */
+export interface QuestionHold {
+  readonly runId: RunId;
+  readonly heldEventId: Option.Option<EventId>;
+}
+
+/** Whether the Attempt the decision closes asked the operator a question, so its Loop holds the Item. */
+export const asksOperator = (decision: FinishDecision): boolean =>
+  decision._tag === "RunFailed" && decision.outcome.failure._tag === "QuestionFailure";
+
+type HoldDecision =
+  | { readonly _tag: "Hold" }
+  | { readonly _tag: "HoldAt" }
+  | { readonly _tag: "Release" };
+
+/**
+ * Decides what an unclaimed Event does while a question holds its Loop on the
+ * Item. The first state the Loop sees after the question normally carries the
+ * Agent's own question comment, so it becomes the held state (`HoldAt`); a later
+ * Event with other content means the Item changed again, and the Loop acts on it.
+ */
+export const holdEvent = (hold: QuestionHold, eventId: EventId): HoldDecision =>
+  Option.match(hold.heldEventId, {
+    onNone: (): HoldDecision => ({ _tag: "HoldAt" }),
+    onSome: (held): HoldDecision => (held === eventId ? { _tag: "Hold" } : { _tag: "Release" }),
+  });
+
 type ClaimDecision =
   | { readonly _tag: "OpenRun" }
   | { readonly _tag: "QueueEvent" }

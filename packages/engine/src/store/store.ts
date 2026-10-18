@@ -14,6 +14,7 @@ import { RunDatabase } from "../database/database.ts";
 import {
   Claimed,
   CycleBlocked,
+  Held,
   Ignored,
   Queued,
   reopeningOf,
@@ -33,8 +34,10 @@ import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import { persistence, submissionFromRow } from "./codec.ts";
 import { queriesFor, type QueuedEvents } from "./queries.ts";
 import {
+  asksOperator,
   beginAttempt as decideBeginAttempt,
   cameBack,
+  holdEvent,
   cancelRun,
   claimRun,
   finishAttempt as decideFinishAttempt,
@@ -126,7 +129,10 @@ const makeRunStore = Effect.gen(function* () {
       : Option.some<Settlement>({ _tag: "Ignored", reason: ignored.reason });
   });
 
-  /** Claims a recorded Event that owns no Run and was not ignored: queue it, or open its Run as `runId`. */
+  /**
+   * Claims a recorded Event that owns no Run and was not ignored: hold it behind
+   * the Loop's open question on the Item, queue it, or open its Run as `runId`.
+   */
   const claimEvent = Effect.fn("RunStore.claimEvent")(function* (
     tx: ReturnType<typeof queriesFor>,
     recorded: Submission,
@@ -136,6 +142,38 @@ const makeRunStore = Effect.gen(function* () {
       return new Claim({
         result: new Ignored({ eventId: recorded.event.id, reason: "superseded" }),
       });
+    }
+    const hold = yield* tx.loopItems.hold(recorded.loop, recorded.itemKey);
+    if (Option.isSome(hold)) {
+      const held = holdEvent(hold.value, recorded.event.id);
+      const fields = {
+        eventId: recorded.event.id,
+        heldBy: hold.value.runId,
+        loop: recorded.loop,
+        itemKey: recorded.itemKey,
+      };
+      switch (held._tag) {
+        case "HoldAt":
+          yield* tx.loopItems.holdAt(recorded.loop, recorded.itemKey, recorded.event.id);
+          yield* Effect.logInfo(
+            "First Item state after the operator question; it waits for the answer",
+            fields,
+          );
+          return new Claim({
+            result: new Held({ eventId: recorded.event.id, runId: hold.value.runId }),
+          });
+        case "Hold":
+          yield* Effect.logInfo("Item unchanged since the operator question; no Run opens", fields);
+          return new Claim({
+            result: new Held({ eventId: recorded.event.id, runId: hold.value.runId }),
+          });
+        case "Release":
+          yield* tx.loopItems.release(recorded.loop, recorded.itemKey);
+          yield* Effect.logInfo(
+            "Item changed after the operator question; the Loop acts on its new state",
+            fields,
+          );
+      }
     }
     const blocking = yield* tx.blockingRun(recorded.loop, recorded.itemKey);
     const blockedBy = blocking[0];
@@ -274,6 +312,36 @@ const makeRunStore = Effect.gen(function* () {
       yield* tx.updateStepResult(runId, attempt.stepName, decision.result);
     }
     yield* tx.updateState(runId, decision.state);
+  });
+
+  // The Event queued while the Attempt ran is usually the Agent's own question
+  // comment, so it starts as the held state rather than as a change to act on.
+  const holdForQuestion = Effect.fn("RunStore.holdForQuestion")(function* (
+    tx: ReturnType<typeof queriesFor>,
+    current: RunSnapshot,
+  ) {
+    const runId = current.run.id;
+    const queued = Option.map(yield* tx.nextQueued(runId), ({ submission }) => submission.event.id);
+    const fields = { runId, loop: current.run.loop, itemKey: current.itemKey };
+    if (
+      yield* tx.loopItems.startHold(
+        current.run.loop,
+        current.itemKey,
+        runId,
+        current.event.id,
+        queued,
+      )
+    ) {
+      yield* Effect.logInfo("Operator question holds the Loop on its Item", {
+        ...fields,
+        heldEventId: Option.getOrElse(queued, () => "none yet"),
+      });
+      return;
+    }
+    yield* Effect.logInfo(
+      "Operator question holds nothing; the Loop last saw the Item not matching",
+      fields,
+    );
   });
 
   const executionOf = (
@@ -431,6 +499,7 @@ const makeRunStore = Effect.gen(function* () {
         const current = yield* tx.snapshot(attempt.runId);
         const decision = decideFinishAttempt(current, attempt.id, result);
         yield* applyFinish(tx, attempt.runId, decision);
+        if (asksOperator(decision)) yield* holdForQuestion(tx, current);
         return decision;
       }),
     );
@@ -441,7 +510,7 @@ const makeRunStore = Effect.gen(function* () {
     attemptId: AttemptId,
   ) {
     yield* Effect.annotateCurrentSpan({ runId, attemptId });
-    yield* database.transaction((transaction) =>
+    return yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const current = yield* tx.snapshot(runId);
@@ -464,10 +533,12 @@ const makeRunStore = Effect.gen(function* () {
         }
         if (Option.contains(current.resolvedFailureAttemptId, attemptId)) {
           yield* Effect.logInfo("Run failure already resolved", { runId, attemptId });
-          return;
+          return false;
         }
         yield* tx.resolveFailure(runId, attemptId);
-        yield* Effect.logInfo("Run failure resolved", { runId, attemptId });
+        const released = yield* tx.loopItems.releaseRun(runId);
+        yield* Effect.logInfo("Run failure resolved", { runId, attemptId, releasedHold: released });
+        return released;
       }),
     );
   }, persistence("resolve Run failure"));
@@ -531,6 +602,10 @@ const makeRunStore = Effect.gen(function* () {
               runId,
               agent: amendment.value.agent.name,
             });
+          }
+          // A retried question is answered: Events wait behind the running Run again.
+          if (yield* tx.loopItems.releaseRun(runId)) {
+            yield* Effect.logInfo("Operator retry ends the question's hold on the Item", { runId });
           }
           yield* tx.updateState(runId, decision.state);
           return true;
@@ -615,6 +690,9 @@ const makeRunStore = Effect.gen(function* () {
           return Option.none<RunId>();
         }
         if ((yield* tx.blockingRun(submission.loop, submission.itemKey)).length > 0) {
+          return Option.none<RunId>();
+        }
+        if (Option.isSome(yield* tx.loopItems.hold(submission.loop, submission.itemKey))) {
           return Option.none<RunId>();
         }
         if (!(yield* tx.cycles.isCurrentEvent(submission))) return Option.none<RunId>();
@@ -718,18 +796,23 @@ export class RunStore extends Context.Service<
     /**
      * Records an executor result only if `attempt` is still the Run's open try.
      * The returned decision tells execution whether to retry; the Attempt's
-     * outcome, the Step result and the Run's closing state commit together.
+     * outcome, the Step result and the Run's closing state commit together. An
+     * Attempt that asked the operator a question also starts its Loop's hold on the Item.
      */
     readonly finishAttempt: (
       attempt: Attempt,
       result: Result.Result<StepResult, AttemptFailure>,
     ) => Effect.Effect<FinishDecision, RunStoreError>;
+    /** The newest queued Event of the Run's Loop and Item; none while an operator question holds them. */
     readonly nextQueued: (
       runId: RunId,
     ) => Effect.Effect<Option.Option<QueuedEvents>, RunStoreError>;
     /** Moves a pending Run to `Waiting` and returns the Run's state, which stays `Waiting` until an approval arrives. */
     readonly parkForApproval: (runId: RunId) => Effect.Effect<RunState.RunState, RunStoreError>;
-    /** The closed Runs whose Item still has a queued Event that no continuation has opened or revoked. */
+    /**
+     * The closed Runs whose Item still has a queued Event that no continuation has
+     * opened or revoked, leaving out Items an operator question holds.
+     */
     readonly pendingContinuations: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
     /**
      * Every open Run a fiber drives: pending, queued for a Worker, or running. A
@@ -752,11 +835,15 @@ export class RunStore extends Context.Service<
       salvage: AttemptSalvage,
     ) => Effect.Effect<void, RunStoreError>;
     readonly salvageCandidates: Effect.Effect<ReadonlyArray<AttemptRecovery>, RunStoreError>;
-    /** Resolves attention for the current failed Attempt atomically; stale requests are rejected. */
+    /**
+     * Resolves attention for the current failed Attempt atomically; stale requests
+     * are rejected. True when this ended the hold of the Attempt's question, so
+     * the Item's queued Events get their turn.
+     */
     readonly resolveFailure: (
       runId: RunId,
       attemptId: AttemptId,
-    ) => Effect.Effect<void, RunStoreError>;
+    ) => Effect.Effect<boolean, RunStoreError>;
     /**
      * Reopens a failed Run for its next Attempt. True when this call reopened it;
      * a request while the Run runs between Attempts changes nothing. Fails with

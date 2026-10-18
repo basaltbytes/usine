@@ -74,6 +74,7 @@ The engine retries an Attempt automatically only after an `InfraFailure`, such a
 | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `InfraFailure`              | Infrastructure failed around the Agent, and the Run has used its three automatic Attempts.                 |
 | `AgentFailure`              | The Agent reported a blocker with `[usine:blocked]`, a harness isn't ready on the Worker, or the parent's model, effort, or credential is unusable. |
+| `QuestionFailure`           | The Agent needs a decision from you and asked it with `[usine:question]`. See [Answer a question](#answer-a-question). |
 | `DefectFailure`             | A defect in usine at the execution boundary.                                                               |
 | `RunawayFailure`            | The Attempt reached `max_attempt_minutes` or `max_attempt_tokens`.                                         |
 | `ChildSessionBudgetFailure` | The parent tried to start more children than `max_children` allows.                                       |
@@ -83,6 +84,19 @@ The engine retries an Attempt automatically only after an `InfraFailure`, such a
 A later Event on the same Item can open a new Run of the Loop while the failed one waits for you. usine refuses to retry the failed Run while that other Run is open, so that one Loop never runs twice on one Item; the drawer names the open Run. Retry after it closes, or cancel it first. **Edit and retry** follows the same rule.
 
 **Mark resolved** removes a failure you have handled from **Needs you** and from the project's status. The Run stays `Failed`, and you can still retry it. If a later Attempt fails, the Run appears in **Needs you** again.
+
+## Answer a question
+
+An Agent that can't continue without your decision posts its question on the Item and ends its Attempt with `[usine:question]`. The Run fails with `QuestionFailure`, and **Needs you** lists it as **\<loop\> asks a question**, with the question. usine doesn't retry it.
+
+While the question waits, the Loop holds the Item. The Agent's own comment changed the Item, but the Loop opens no Run for that state, so a new Run doesn't ask the same question again and use up the cycle budget. The state the Loop holds is the first one polling sees after the question. The Loop acts on the Item again when one of these happens:
+
+- the Item changes again, for example through your reply on the issue or pull request, an edit, or a pushed commit: the new state opens a Run, and its Agent reads your reply;
+- the Item stops matching the Loop and comes back, for example when you remove and add the Loop's label;
+- you **Retry** the Run, or **Edit and retry** it with your answer in the task;
+- you select **Mark answered** in the Run drawer: the Loop takes the newest state it saw after the question, checks the trigger against the Item again, and opens a Run for it.
+
+An answer on GitHub only counts when it changes the Item after polling has seen the Agent's question. If the Agent asked without posting anything, or you answer within the same poll, use **Mark answered** or **Retry** instead.
 
 ## Edit and retry
 
@@ -118,6 +132,7 @@ For a Claude Code or Codex child, the expanded child section also shows its save
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
 | **Approval required**                  | A Run is in `Waiting`. Approve or cancel it.                                                                         |
 | A failure name, such as `AgentFailure` | A Run is `Failed`. Read the Attempt, then **Retry**, **Edit and retry**, or **Mark resolved**.                       |
+| **\<loop\> asks a question**           | An Agent asked you a question and its Loop holds the Item. [Answer it](#answer-a-question).                          |
 | **Cycle budget exhausted**             | An Item reached a Loop's `max_cycles`. Inspect it, then **Reset cycle budget**.                                      |
 | An error name from polling             | A repository's poll failed, for example on a GitHub error, a missing App permission, or an `if:` that fails to evaluate. |
 | **Label preflight failed**             | usine couldn't create a label that `usine.yaml` declares.                                                            |

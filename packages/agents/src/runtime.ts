@@ -14,8 +14,9 @@ import {
   AttemptFailure,
   ChildSessionBudgetFailure,
   InfraFailure,
+  QuestionFailure,
 } from "@usine/core/attempt/failure";
-import { Context, Effect, Match, Schema, Scope, Stream } from "effect";
+import { Context, Effect, Match, Option, Schema, Scope, Stream } from "effect";
 import { ChildHost } from "./child-host/child-host.ts";
 
 /** The checkout directory one Attempt runs in. */
@@ -80,10 +81,25 @@ export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffort
  */
 export const BLOCKED_MARKER = "[usine:blocked]";
 
+/**
+ * The reserved opening of a final answer that asks the operator for a decision
+ * the Agent cannot make itself. Text after the marker is the question; the
+ * session fails with `AgentQuestionError`.
+ */
+export const QUESTION_MARKER = "[usine:question]";
+
 /** The session finished and reported that the work itself failed. */
 export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   "@usine/agents/AgentResultError",
 )("AgentResultError", {
+  sessionId: Schema.OptionFromNullOr(AgentSessionId),
+  message: Schema.NonEmptyString,
+}) {}
+
+/** The session finished by asking the operator a question; `message` is the question as the Agent wrote it. */
+export class AgentQuestionError extends Schema.TaggedError<AgentQuestionError>(
+  "@usine/agents/AgentQuestionError",
+)("AgentQuestionError", {
   sessionId: Schema.OptionFromNullOr(AgentSessionId),
   message: Schema.NonEmptyString,
 }) {}
@@ -117,10 +133,52 @@ export const AgentSessionError = Schema.Union([
   PoolUnavailableError,
   UnsupportedEffortError,
   AgentResultError,
+  AgentQuestionError,
   ChildSessionBudgetExceededError,
   SessionOperationError,
 ]);
 export type AgentSessionError = typeof AgentSessionError.Type;
+
+/** The reports an Agent ends its work with by opening its final answer with a reserved marker. */
+export type AgentReport = AgentResultError | AgentQuestionError;
+
+/**
+ * Reads a final answer's reserved marker: `[usine:blocked]` reports a blocker
+ * and `[usine:question]` asks the operator. Only an answer that opens with a
+ * marker counts, whether its details follow on the same line or the next; ordinary
+ * prose and later mentions are unchanged.
+ */
+export const reportedOutcome = (
+  sessionId: Option.Option<AgentSessionId>,
+  answer: string,
+): Option.Option<AgentReport> => {
+  const trimmed = answer.trim();
+  if (trimmed.startsWith(QUESTION_MARKER)) {
+    return Option.some(
+      new AgentQuestionError({
+        sessionId,
+        message:
+          trimmed.slice(QUESTION_MARKER.length).trim() ||
+          "Agent asked the operator a question without writing it.",
+      }),
+    );
+  }
+  if (trimmed.startsWith(BLOCKED_MARKER)) {
+    return Option.some(
+      new AgentResultError({
+        sessionId,
+        message:
+          trimmed.slice(BLOCKED_MARKER.length).trim() ||
+          "Agent reported an unresolved blocker without details.",
+      }),
+    );
+  }
+  return Option.none();
+};
+
+/** The final answer that relays `report` to whoever awaits it, opening with its marker. */
+export const reportText = (report: AgentReport): string =>
+  `${report._tag === "AgentQuestionError" ? QUESTION_MARKER : BLOCKED_MARKER}\n${report.message}`;
 
 /**
  * Maps session errors onto the retry taxonomy: an SDK or process failure is
@@ -135,6 +193,7 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
     PoolUnavailableError: ({ message }) => new AgentFailure({ message }),
     UnsupportedEffortError: ({ message }) => new AgentFailure({ message }),
     AgentResultError: ({ message }) => new AgentFailure({ message }),
+    AgentQuestionError: ({ message }) => new QuestionFailure({ question: message }),
     ChildSessionBudgetExceededError: ({ attemptedChildren, maxChildren }) =>
       new ChildSessionBudgetFailure({ attemptedChildren, maxChildren }),
   });

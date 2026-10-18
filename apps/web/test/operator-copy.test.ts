@@ -1,6 +1,8 @@
 import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
-import { CommitSha } from "@usine/core/repository";
-import { ConfigFileNeed } from "@usine/orchestrator/operator";
+import { LoopName } from "@usine/core/loop";
+import { CommitSha, RepositoryName } from "@usine/core/repository";
+import { RunId } from "@usine/core/run";
+import { ConfigFileNeed, QuestionFailureView, RunFailureNeed } from "@usine/orchestrator/operator";
 import { Option, Schema } from "effect";
 import { assert, describe, it } from "vitest";
 import { needCopy, salvageMessage } from "../src/operator-copy.ts";
@@ -28,6 +30,23 @@ describe("salvage copy in the run drawer", () => {
     assert.include(message, "/workers/local/attempts/run_execute_1");
     assert.include(message, "every startup");
     assert.include(message, "remote: Repository not found.");
+  });
+});
+
+describe("operator question copy in Needs you", () => {
+  it("names the asking Loop and shows the Agent's question", () => {
+    const copy = needCopy(
+      new RunFailureNeed({
+        id: "run-failure:asked",
+        repository: RepositoryName.make("basaltbytes/usine"),
+        runId: RunId.make("asked"),
+        loop: LoopName.make("act-on-findings"),
+        failure: new QuestionFailureView({ question: "HTTP CONNECT or SOCKS for egress?" }),
+      }),
+    );
+    assert.strictEqual(copy.title, "act-on-findings asks a question");
+    assert.strictEqual(copy.detail, "HTTP CONNECT or SOCKS for egress?");
+    assert.strictEqual(copy.runId, "asked");
   });
 });
 

@@ -11,6 +11,7 @@ import { AgentName } from "@usine/core/agent";
 import { Option, Schema } from "effect";
 import { RemoteShell } from "../src/child-host/child-host.ts";
 import {
+  AgentQuestionError,
   AgentResultError,
   ChildRequest,
   ChildSessionBudgetExceededError,
@@ -94,6 +95,14 @@ describe("agent runtime contract", () => {
     ];
     for (const error of terminal) {
       assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
+    }
+
+    const asked = toAttemptFailure(
+      new AgentQuestionError({ sessionId, message: "Which transport should egress use?" }),
+    );
+    assert.strictEqual(asked._tag, "QuestionFailure");
+    if (asked._tag === "QuestionFailure") {
+      assert.strictEqual(asked.question, "Which transport should egress use?");
     }
 
     const budget = toAttemptFailure(

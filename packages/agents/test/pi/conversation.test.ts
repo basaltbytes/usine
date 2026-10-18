@@ -4,7 +4,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession, ParentSession } from "@usine/core/agent/session";
 import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
 import { Deferred, Effect, Fiber } from "effect";
-import { AgentResultError } from "../../src/runtime.ts";
+import { AgentQuestionError, AgentResultError } from "../../src/runtime.ts";
 import { sessionChannel } from "../../src/pi/session.ts";
 import { sessionConversation } from "../../src/pi/conversation.ts";
 
@@ -76,6 +76,21 @@ describe("session supervision", () => {
       const error = yield* Fiber.join(session.result).pipe(Effect.flip);
       assert(error instanceof AgentResultError);
       assert.strictEqual(error.message, "Repository permission denied.");
+    }),
+  );
+
+  it.effect("ends a child that asks the operator a question with the question", () =>
+    Effect.gen(function* () {
+      const session = yield* conversation(child("question"));
+      yield* session.finish(
+        "[usine:question]\nShould egress use HTTP CONNECT or a SOCKS proxy?\n\nBoth fit the gateway.",
+      );
+      const error = yield* Fiber.join(session.result).pipe(Effect.flip);
+      assert(error instanceof AgentQuestionError);
+      assert.strictEqual(
+        error.message,
+        "Should egress use HTTP CONNECT or a SOCKS proxy?\n\nBoth fit the gateway.",
+      );
     }),
   );
 

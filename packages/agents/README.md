@@ -43,9 +43,16 @@ An unresolved blocker must open its final answer with the reserved marker `[usin
 Repository permission denied; publishing remains incomplete.
 ```
 
-Pi, Claude, and Codex children interpret this final-answer marker as `AgentResultError`. A parent's blocker becomes a non-retryable `AgentFailure` on the Attempt channel, so the Run fails and waits for operator action. A child's failed report returns to the parent's `subagent` tool call as text opening with the marker, and the tool guidelines tell the parent to return it verbatim. The parent keeps the first child blocker: a parent that later finishes with an ordinary answer fails with it, and its paraphrase stays in the transcript. Successful siblings do not clear it. Held children can receive guidance and replace a blocked answer before release. A marker without details still fails; ordinary prose and marker mentions elsewhere keep their existing behavior.
+A decision that only the operator can make opens the final answer with `[usine:question]`, followed by the question. The prompt asks the Agent to post the question on the issue or pull request first.
 
-Model identifiers stay opaque until the selected harness checks its registry. Agent-reported failures use `AgentResultError`; SDK, process, and protocol failures use `SessionOperationError`. `toAttemptFailure` maps only `SessionOperationError` to retryable infrastructure failure, while `ChildSessionBudgetExceededError` becomes a non-retryable `ChildSessionBudgetFailure`.
+```text
+[usine:question]
+Should egress use HTTP CONNECT or a SOCKS proxy? Both fit the gateway.
+```
+
+Pi, Claude, and Codex children interpret these final-answer markers as `AgentResultError` and `AgentQuestionError`; `reportedOutcome` reads them and `reportText` writes them back. A parent's blocker becomes a non-retryable `AgentFailure` on the Attempt channel, and its question a non-retryable `QuestionFailure`, so the Run fails and waits for operator action. A child's report returns to the parent's `subagent` tool call as text opening with its marker, and the tool guidelines tell the parent to return it verbatim. The parent keeps the first child report: a parent that later finishes with an ordinary answer fails with it, and its paraphrase stays in the transcript. Successful siblings do not clear it. Held children can receive guidance and replace a reported answer before release. A marker without details still fails; ordinary prose and marker mentions elsewhere keep their existing behavior.
+
+Model identifiers stay opaque until the selected harness checks its registry. Agent-reported failures use `AgentResultError` and operator questions `AgentQuestionError`; SDK, process, and protocol failures use `SessionOperationError`. `toAttemptFailure` maps only `SessionOperationError` to retryable infrastructure failure, while `ChildSessionBudgetExceededError` becomes a non-retryable `ChildSessionBudgetFailure`.
 
 `@usine/agents/pi/authentication` holds the Pi parent's model and pool rules for other parent runtimes: `splitPiModel` parses `provider/model`, `piAuthentication` reads a provider's credential check, `requiredPiPool` names the pool a provider spends from, and `resolvePiPool` the pool the credential actually pays from.
 

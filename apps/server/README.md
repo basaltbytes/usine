@@ -63,4 +63,4 @@ Send SIGTERM or press Ctrl+C once to stop trigger polling and drain admitted Att
 
 After `pnpm build`, reload the page to use the rebuilt web bundle; no process restart is required. Instance configuration and GitHub credentials are read at startup.
 
-Choose **Mark resolved** in a failed Run’s drawer to clear a failure you have handled. Open the drawer from its Needs you entry or Run history. Resolution persists across restarts and preserves the failed outcome, transcript, and retry controls. A later failed Attempt requests attention again.
+Choose **Mark resolved** in a failed Run’s drawer to clear a failure you have handled. Open the drawer from its Needs you entry or Run history. Resolution persists across restarts and preserves the failed outcome, transcript, and retry controls. A later failed Attempt requests attention again. When the Agent asked a question, the button reads **Mark answered**, and the Run's Loop then acts on the Item's newest state.

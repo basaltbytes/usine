@@ -54,3 +54,5 @@ Expand a Claude or Codex child's activity to see its saved harness session id, w
 A Loop or Agent file that failed to load at startup appears in Needs you as **Loop quarantined** or **Agent file not loaded**, with the file and the reason. It stays there until the file is fixed and `usine up` restarts.
 
 Choose **Mark resolved** in a failed Run’s drawer to clear its Needs you warning and related Project and Board attention. Open the drawer from Needs you or Run history. Resolution persists across reloads and restarts; the failed outcome, Attempt details, transcript, and retry controls remain available. A later failed Attempt requests attention again.
+
+An Agent's question appears in Needs you as **\<loop\> asks a question**, with the question. In its drawer the button reads **Mark answered**; the Run's Loop then acts on the Item's newest state.

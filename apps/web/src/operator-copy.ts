@@ -20,6 +20,7 @@ export const failureMessage = (failure: FailureView): string =>
     InfraFailure: ({ message }) => message,
     DefectFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,
+    QuestionFailure: ({ question }) => question,
     RunawayFailure: ({ ceiling }) => `Runaway guard tripped its ${ceiling} ceiling`,
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
       `This Attempt used its ${maxChildren}-child session budget; child ${attemptedChildren} did not start`,
@@ -47,8 +48,8 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository,
       runId,
     }),
-    RunFailureNeed: ({ failure, repository, runId }) => ({
-      title: failure._tag,
+    RunFailureNeed: ({ failure, loop, repository, runId }) => ({
+      title: failure._tag === "QuestionFailure" ? `${loop} asks a question` : failure._tag,
       detail: failureMessage(failure),
       repository,
       runId,

@@ -96,13 +96,23 @@ export class Ignored extends Schema.TaggedClass<Ignored>("@usine/engine/Ignored"
   reason: IgnoreReason,
 }) {}
 
+/**
+ * The Agent of `runId` asked the operator a question, and the Event shows the
+ * Item as the question left it, so it waits. It opens a Run once the operator
+ * answers, or a later Event replaces it when the Item changes again (#241).
+ */
+export class Held extends Schema.TaggedClass<Held>("@usine/engine/Held")("Held", {
+  eventId: EventId,
+  runId: RunId,
+}) {}
+
 /** No Run opened because this Item requires an explicit cycle-budget reset. */
 export class CycleBlocked extends Schema.TaggedClass<CycleBlocked>("@usine/engine/CycleBlocked")(
   "CycleBlocked",
   { eventId: EventId, ask: CycleBudgetAsk },
 ) {}
 
-/** Whether a recorded Event owns a Run, waits behind running work, or can no longer open a Run. */
-export const SubmissionResult = Schema.Union([Claimed, Queued, Ignored, CycleBlocked]);
+/** Whether a recorded Event owns a Run, waits behind running work or a question, or can no longer open a Run. */
+export const SubmissionResult = Schema.Union([Claimed, Queued, Held, Ignored, CycleBlocked]);
 
 export type SubmissionResult = typeof SubmissionResult.Type;

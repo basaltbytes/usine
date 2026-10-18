@@ -14,13 +14,19 @@ import {
   type Tx,
 } from "@earendil-works/pi-durable";
 import { assemblePrompt } from "@usine/agents/prompt";
-import { BLOCKED_MARKER, toAttemptFailure } from "@usine/agents/runtime";
+import { reportedOutcome, toAttemptFailure } from "@usine/agents/runtime";
 import type { AttemptId } from "@usine/core/attempt";
-import { AgentFailure, ChildSessionBudgetFailure, InfraFailure } from "@usine/core/attempt/failure";
+import {
+  AgentFailure,
+  type AttemptFailure,
+  ChildSessionBudgetFailure,
+  InfraFailure,
+  QuestionFailure,
+} from "@usine/core/attempt/failure";
 import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
 import { Effect, Option, Result } from "effect";
 import { durableError } from "../harness.ts";
-import { type AttemptResult, AttemptRecordDoc, HoldDoc } from "./documents.ts";
+import { type AttemptRecord, type AttemptResult, AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import { assistantText } from "./events.ts";
 import { completedOutcome, failedOutcome } from "./outcome.ts";
 import { parentSessionId, resolveParent } from "./parent.ts";
@@ -55,17 +61,12 @@ const commit = (
   change: (tx: Tx) => NextState | undefined | Promise<NextState | undefined>,
 ) => call(operation, () => runtime.commit((tx) => change(tx), context));
 
-const reportedBlocker = (answer: string): Option.Option<AgentFailure> => {
-  const trimmed = answer.trim();
-  if (!trimmed.startsWith(BLOCKED_MARKER)) return Option.none();
-  return Option.some(
-    new AgentFailure({
-      message:
-        trimmed.slice(BLOCKED_MARKER.length).trim() ||
-        "Agent reported an unresolved blocker without details.",
-    }),
-  );
-};
+/** The failure a child's recorded report ends the Attempt with when the parent did not relay one. */
+const childReportFailure = ({
+  message,
+  kind,
+}: NonNullable<AttemptRecord["childBlocker"]>): AttemptFailure =>
+  kind === "question" ? new QuestionFailure({ question: message }) : new AgentFailure({ message });
 
 const finalAnswer = Effect.fn("AttemptTask.finalAnswer")(function* (
   runtime: Runtime,
@@ -280,16 +281,15 @@ export const attemptTask = (
       const record = yield* call("read the Attempt record", () =>
         runtime.snapshot(AttemptRecordDoc, spec.attemptId, context),
       );
-      const own = reportedBlocker(answer);
+      const own = Option.map(reportedOutcome(Option.none(), answer), toAttemptFailure);
       const relayed = Option.fromNullishOr(record?.childBlocker);
       if (Option.isNone(own) && Option.isSome(relayed)) {
-        yield* Effect.logWarning("Pi parent finished without relaying its child's blocker", {
+        yield* Effect.logWarning("Pi parent finished without relaying its child's report", {
           childSessionId: relayed.value.sessionId,
+          kind: relayed.value.kind ?? "blocked",
         });
       }
-      const outcome = Option.orElse(own, () =>
-        Option.map(relayed, ({ message }) => new AgentFailure({ message })),
-      );
+      const outcome = Option.orElse(own, () => Option.map(relayed, childReportFailure));
       let finished = false;
       yield* commit(runtime, context, "record the parent's answer", async (tx) => {
         const hold = await tx.doc(HoldDoc, task.id);
@@ -303,7 +303,7 @@ export const attemptTask = (
       if (finished) {
         yield* Effect.logInfo("Pi parent finished", {
           turn,
-          blocked: Option.isSome(outcome),
+          report: Option.match(outcome, { onNone: () => "none", onSome: ({ _tag }) => _tag }),
         });
         return;
       }
