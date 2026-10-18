@@ -61,6 +61,7 @@ export interface RemoteWorker<M extends RemoteMachine> {
   readonly preflight: (
     worker: WorkerName,
     brains: ReadonlyArray<BrainSpec>,
+    maxConcurrentAttempts: number,
   ) => Effect.Effect<void, ExecutorError>;
   /** Checks one brain where the machine runs the Attempt's children. */
   readonly harnessProbe: (machine: M) => HarnessProbe;
