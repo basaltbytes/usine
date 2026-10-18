@@ -10,6 +10,7 @@ import {
   type WorkerCapability,
 } from "../executor.ts";
 import { agentsHarnessProbe, verifyHarnessReadiness } from "../harness-preflight.ts";
+import { verifyLinuxMemory } from "../memory-preflight.ts";
 import type { ExeDevCommands } from "./commands.ts";
 import { HomePath, type ExeDevExecutorOptions, type VmState } from "./model.ts";
 
@@ -93,6 +94,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   const preflight = Effect.fn("ExeDevExecutor.preflight")(function* (
     worker: WorkerName,
     brains: ReadonlyArray<BrainSpec>,
+    maxConcurrentAttempts: number,
   ) {
     const vm = yield* resolveVm(worker).pipe(
       Effect.catchTag("ExecutorOperationError", (cause) =>
@@ -114,6 +116,11 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
         new Error(gitVersion),
       );
     }
+    yield* verifyLinuxMemory(
+      worker,
+      maxConcurrentAttempts,
+      commands.remote("preflight", vm.sshDest, "cat", ["/proc/meminfo"]),
+    );
 
     yield* verifyHarnessReadiness(worker, brains, harnessProbe(commands.childHost(vm.sshDest)));
 

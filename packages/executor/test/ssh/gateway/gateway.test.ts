@@ -375,7 +375,7 @@ describe("SSH Worker behind a Gateway", () => {
       const gateway = fakeGateway(machine);
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         assert.deepStrictEqual(
           gateway.calls.map(({ method, path }) => `${method} ${path}`),
           ["GET /v1/attachments"],
@@ -391,13 +391,13 @@ describe("SSH Worker behind a Gateway", () => {
             assert.notInclude(line, mutating, `preflight ran ${mutating}`);
 
         machine.state.droppedSentVariables.add("GH_TOKEN");
-        const missingGitHubToken = yield* executor.preflight(WORKER, []).pipe(Effect.flip);
+        const missingGitHubToken = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
         assert(missingGitHubToken._tag === "WorkerCapabilityError");
         assert.include(missingGitHubToken.message, "sshd drops GH_TOKEN;");
         machine.state.droppedSentVariables.clear();
 
         machine.state.acceptsSentVariables = false;
-        const dropped = yield* executor.preflight(WORKER, []).pipe(Effect.flip);
+        const dropped = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
         assert(dropped._tag === "WorkerCapabilityError");
         assert.strictEqual(dropped.capability, "gateway");
         assert.include(
@@ -407,7 +407,7 @@ describe("SSH Worker behind a Gateway", () => {
 
         machine.state.acceptsSentVariables = true;
         machine.state.gatewayReachable = false;
-        const unreachable = yield* executor.preflight(WORKER, []).pipe(Effect.flip);
+        const unreachable = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
         assert(unreachable._tag === "WorkerCapabilityError");
         assert.strictEqual(
           unreachable.message,
@@ -423,7 +423,7 @@ describe("SSH Worker behind a Gateway", () => {
     const gateway = fakeGateway(machine);
     return Effect.gen(function* () {
       const executor = yield* Executor;
-      const refused = yield* executor.preflight(WORKER, []).pipe(Effect.flip);
+      const refused = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
       assert(refused._tag === "WorkerCapabilityError");
       assert.strictEqual(refused.capability, "gateway");
       assert.include(refused.message, "the Gateway refused the admin token");
@@ -445,7 +445,7 @@ describe("SSH Worker behind a Gateway", () => {
       machine.state.claudeLoggedIn = false;
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const lines = machine.state.calls.map(({ line }) => line);
         assert.include(lines, "exec 'claude' '--version'");
         assert(!lines.some((line) => line.includes("'auth' 'status'")));
@@ -461,7 +461,7 @@ describe("SSH Worker behind a Gateway", () => {
       const gateway = fakeGateway(machine);
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [TEST_AGENT.brain]);
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const lines = machine.state.calls.map(({ line }) => line);
         assert.include(lines, "exec 'claude' 'auth' 'status' '--json'");
         const hostCheck = lines.find((line) => line.includes("http_connect"));
@@ -473,7 +473,7 @@ describe("SSH Worker behind a Gateway", () => {
         );
 
         machine.state.refusedHosts.add("platform.claude.com");
-        const refused = yield* executor.preflight(WORKER, [TEST_AGENT.brain]).pipe(Effect.flip);
+        const refused = yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1).pipe(Effect.flip);
         assert(refused._tag === "WorkerCapabilityError");
         assert.strictEqual(refused.capability, "gateway");
         assert.strictEqual(
@@ -483,7 +483,9 @@ describe("SSH Worker behind a Gateway", () => {
         machine.state.refusedHosts.clear();
 
         machine.state.forwardProxyReachable = false;
-        const unreachable = yield* executor.preflight(WORKER, [TEST_AGENT.brain]).pipe(Effect.flip);
+        const unreachable = yield* executor
+          .preflight(WORKER, [TEST_AGENT.brain], 1)
+          .pipe(Effect.flip);
         assert(unreachable._tag === "WorkerCapabilityError");
         assert.strictEqual(unreachable.capability, "gateway");
         assert.strictEqual(
@@ -494,7 +496,9 @@ describe("SSH Worker behind a Gateway", () => {
 
         machine.state.claudeLoggedIn = false;
         const checked = machine.state.calls.length;
-        const loggedOut = yield* executor.preflight(WORKER, [TEST_AGENT.brain]).pipe(Effect.flip);
+        const loggedOut = yield* executor
+          .preflight(WORKER, [TEST_AGENT.brain], 1)
+          .pipe(Effect.flip);
         assert(loggedOut._tag === "WorkerCapabilityError");
         assert.strictEqual(loggedOut.capability, "harness-login");
         assert.include(loggedOut.message, "run claude auth login on the Worker");
@@ -537,7 +541,7 @@ describe("SSH Worker behind a Gateway", () => {
         });
       return Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.preflight(WORKER, [codex]);
+        yield* executor.preflight(WORKER, [codex], 1);
         assert.strictEqual(login.probes, 1, "the login on the machine is checked");
         const hostCheck = machine.state.calls
           .map(({ line }) => line)
@@ -545,7 +549,7 @@ describe("SSH Worker behind a Gateway", () => {
         assert(hostCheck?.endsWith("'sh' 'http://gw.test:3128' 'chatgpt.com' 'auth.openai.com'"));
 
         machine.state.refusedHosts.add("chatgpt.com");
-        const refused = yield* executor.preflight(WORKER, [codex]).pipe(Effect.flip);
+        const refused = yield* executor.preflight(WORKER, [codex], 1).pipe(Effect.flip);
         assert(refused._tag === "WorkerCapabilityError");
         assert.strictEqual(refused.capability, "gateway");
         assert.strictEqual(
@@ -554,7 +558,7 @@ describe("SSH Worker behind a Gateway", () => {
         );
 
         login.present = false;
-        const loggedOut = yield* executor.preflight(WORKER, [codex]).pipe(Effect.flip);
+        const loggedOut = yield* executor.preflight(WORKER, [codex], 1).pipe(Effect.flip);
         assert(loggedOut._tag === "WorkerCapabilityError");
         assert.strictEqual(loggedOut.capability, "harness-login");
         assert.include(loggedOut.message, "run codex login on the Worker");

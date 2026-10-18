@@ -70,6 +70,9 @@ interface FakeMachineState {
   readonly credentials: Map<string, string>;
   reachable: boolean;
   rootWritable: boolean;
+  /** The machine's physical memory and swap in GiB, as `/proc/meminfo` reports them. */
+  memoryGib: number;
+  swapGib: number;
   cacheExists: boolean;
   /** A failing clone whose stderr echoes the token git authenticated with. */
   cloneEchoesToken: boolean;
@@ -105,6 +108,19 @@ const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
     getOutputFd: () => Stream.empty,
     unref: Effect.succeed(Effect.void),
   });
+};
+
+/** `/proc/meminfo` of a Linux machine with `memoryGib` of memory and `swapGib` of swap. */
+const meminfo = (memoryGib: number, swapGib: number): string => {
+  const kib = (gib: number) => Math.round(gib * 1024 * 1024);
+  return [
+    `MemTotal:       ${kib(memoryGib)} kB`,
+    `MemFree:        ${kib(memoryGib / 2)} kB`,
+    `MemAvailable:   ${kib(memoryGib * 0.8)} kB`,
+    `SwapTotal:      ${kib(swapGib)} kB`,
+    `SwapFree:       ${kib(swapGib)} kB`,
+    "",
+  ].join("\n");
 };
 
 /** The single remote command line an SSH invocation passes after `--`. */
@@ -150,6 +166,8 @@ export const fakeMachine = () => {
     credentials: new Map(),
     reachable: true,
     rootWritable: true,
+    memoryGib: 7.7,
+    swapGib: 2,
     cacheExists: false,
     cloneEchoesToken: false,
     salvage: "clean",
@@ -207,6 +225,8 @@ export const fakeMachine = () => {
     }
     if (line.includes("test -d") && line.includes("test -w"))
       return oneShotHandle("", state.rootWritable ? 0 : 1);
+    if (line === "exec 'cat' '/proc/meminfo'")
+      return oneShotHandle(meminfo(state.memoryGib, state.swapGib), 0);
     if (line.includes("pidfile")) return oneShotHandle("no-children\n", 0);
     if (line.startsWith("exec 'rm' '-rf' ")) {
       const target = line.slice("exec 'rm' '-rf' '".length, -1);

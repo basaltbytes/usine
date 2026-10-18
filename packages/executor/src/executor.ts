@@ -23,12 +23,14 @@ export type ExecutorOperation = typeof ExecutorOperation.Type;
 
 /**
  * A prerequisite a Worker must satisfy before it can accept Attempts.
- * `gateway` is the Gateway in front of the Worker's machine: its admin API
- * answers the orchestrator, and the machine reaches it.
+ * `memory` is enough memory on the Worker's machine for its concurrent
+ * Attempts. `gateway` is the Gateway in front of the Worker's machine: its
+ * admin API answers the orchestrator, and the machine reaches it.
  */
 export const WorkerCapability = Schema.Literals([
   "machine",
   "toolchain",
+  "memory",
   "harness-login",
   "credentials",
   "gateway",
@@ -269,10 +271,15 @@ export class Executor extends Context.Service<
     readonly outcome: (
       attemptId: AttemptId,
     ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
-    /** Verifies Git and each rostered brain where the Worker runs children; never installs tools or logs in. */
+    /**
+     * Verifies Git, that the Worker's machine has the memory to run
+     * `maxConcurrentAttempts` Attempts at the same time, and each rostered
+     * brain where the Worker runs children; never installs tools or logs in.
+     */
     readonly preflight: (
       worker: WorkerName,
       brains: ReadonlyArray<BrainSpec>,
+      maxConcurrentAttempts: number,
     ) => Effect.Effect<void, ExecutorError>;
     /**
      * Verifies the assigned brain before acquiring the Attempt in the caller's scope. Clone, fetch, and lock waits
