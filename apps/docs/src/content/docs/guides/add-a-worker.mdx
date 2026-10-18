@@ -153,16 +153,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
 
 <Steps>
 
-1. Pack the Gateway service. `@usine/gateway` isn't published on npm, so build it from your checkout with the `@usine/core` it depends on:
-
-   ```sh title="usine checkout"
-   pnpm build
-   pnpm --filter @usine/core --filter @usine/gateway pack --pack-destination .
-   ```
-
-   This writes `usine-core-0.3.0.tgz` and `usine-gateway-0.0.0.tgz` at this commit.
-
-2. Create the private network, the Gateway VM, and its firewall. `ORCHESTRATOR_CIDR` is the only address that can connect to the Gateway's SSH port. `SSH_KEY` is the name of an SSH key of the Hetzner project; register the Worker key under the name `usine-worker` if the project doesn't have it yet. The commands below connect as `root@<gateway>` without specifying a key, so load the key into your SSH agent first:
+1. Create the private network, the Gateway VM, and its firewall. `ORCHESTRATOR_CIDR` is the only address that can connect to the Gateway's SSH port. `SSH_KEY` is the name of an SSH key of the Hetzner project; register the Worker key under the name `usine-worker` if the project doesn't have it yet. The commands below connect as `root@<gateway>` without specifying a key, so load the key into your SSH agent first:
 
    ```sh title="usine checkout"
    ssh-add ~/.ssh/usine_worker
@@ -171,16 +162,24 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
      ./infra/hetzner/gateway/gateway.sh create
    ```
 
-3. Wait for the Gateway's cloud-init, then install the two tarballs, which also starts the service. `gateway.sh create` printed the Gateway's public address, here `203.0.113.30`. `-i` gives `install` the key for its `scp` and `ssh`:
+2. Wait for the Gateway's cloud-init, then install the Gateway service from npm, which also starts it. `@usine/gateway` is on npm from 0.1.0. `gateway.sh create` printed the Gateway's public address, here `203.0.113.30`. `-i` gives `install` the key for its `ssh` and `scp`:
 
    ```sh title="usine checkout"
    ssh root@203.0.113.30 cloud-init status --wait
+   ./infra/hetzner/gateway/gateway.sh install -i ~/.ssh/usine_worker @usine/gateway
+   ```
+
+   To run a build of your checkout instead, pack it with the `@usine/core` it depends on and install the two tarballs. At this commit, the pack step writes `usine-core-0.3.0.tgz` and `usine-gateway-0.0.0.tgz`:
+
+   ```sh title="usine checkout"
+   pnpm build
+   pnpm --filter @usine/core --filter @usine/gateway pack --pack-destination .
    ./infra/hetzner/gateway/gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
    ```
 
    On first boot the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root only. To let the Gateway call Anthropic with its own key, add `ANTHROPIC_API_KEY` to that file and restart the service with `systemctl restart usine-gateway`. A restarted Gateway loses its attachments; the executor stores each running Attempt's attachment again within two minutes.
 
-4. Create the Worker on the private network, without public addresses. `worker-user-data` combines `infra/hetzner/cloud-init.yaml` with `infra/hetzner/gateway/worker-cloud-init.yaml`, which configures the Worker's resolver, apt, and environment to use the Gateway, forwards gh's socket to it, configures sshd to accept the caller token variables, and allows connections only to the Gateway. The type `cx33` has the 8 GB a Worker needs.
+3. Create the Worker on the private network, without public addresses. `worker-user-data` combines `infra/hetzner/cloud-init.yaml` with `infra/hetzner/gateway/worker-cloud-init.yaml`, which configures the Worker's resolver, apt, and environment to use the Gateway, forwards gh's socket to it, configures sshd to accept the caller token variables, and allows connections only to the Gateway. The type `cx33` has the 8 GB a Worker needs.
 
    ```sh title="usine checkout"
    ./infra/hetzner/gateway/gateway.sh worker-user-data ~/.ssh/usine_worker.pub > worker.mime
@@ -195,7 +194,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    ssh -J root@203.0.113.30 usine@10.42.0.3 cloud-init status --wait
    ```
 
-5. Log in to the harnesses on the Worker. Both logins go through the Gateway's forward proxy.
+4. Log in to the harnesses on the Worker. Both logins go through the Gateway's forward proxy.
 
    ```sh title="Orchestrator machine"
    ssh -t -J root@203.0.113.30 usine@10.42.0.3
@@ -203,7 +202,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    codex login --device-auth
    ```
 
-6. Add both hosts to the SSH configuration of the user who runs `usine up`. The executor connects to the Worker through the Gateway as a jump host, and to the admin API through a local forward that you keep open; usine doesn't open it ([#249](https://github.com/basaltbytes/usine/issues/249)).
+5. Add both hosts to the SSH configuration of the user who runs `usine up`. The executor connects to the Worker through the Gateway as a jump host, and to the admin API through a local forward that you keep open; usine doesn't open it ([#249](https://github.com/basaltbytes/usine/issues/249)).
 
    ```text title="~/.ssh/config"
    Host usine-gateway
@@ -223,13 +222,13 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    ssh -N usine-gateway
    ```
 
-7. Copy the admin token into a file that only you can read, in the instance folder:
+6. Copy the admin token into a file that only you can read, in the instance folder:
 
    ```sh title="Instance folder"
    (umask 077; ssh root@203.0.113.30 "sed -n 's/^USINE_GATEWAY_ADMIN_TOKEN=//p' /etc/usine-gateway/secrets.env" > .usine/gateway-admin-token)
    ```
 
-8. Give the Worker a `gateway` in `usine.yaml`. `destination` is the `Host` alias, `domain` the Gateway's `DOMAIN`, `admin_url` the local forward, and `admin_token_env` the name of the orchestrator's environment variable that contains the admin token. Don't put the token itself in the file.
+7. Give the Worker a `gateway` in `usine.yaml`. `destination` is the `Host` alias, `domain` the Gateway's `DOMAIN`, `admin_url` the local forward, and `admin_token_env` the name of the orchestrator's environment variable that contains the admin token. Don't put the token itself in the file.
 
    ```yaml title="usine.yaml"
    workers:
@@ -245,7 +244,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
 
    Add `llm_providers: [anthropic]` under `gateway` when the Gateway has `ANTHROPIC_API_KEY`. Claude Code children then call `llm.gw.internal/anthropic` with the caller token instead of a login on the Worker, and preflight checks only the `claude` binary. Remove the Claude Code hosts, `api.anthropic.com` and `platform.claude.com`, from the Gateway's `/etc/usine-gateway/egress-allowlist` and restart the service, so that no tunnel can send the caller token past the Gateway. Codex always uses its login on the Worker.
 
-9. Start the orchestrator with the token in its environment:
+8. Start the orchestrator with the token in its environment:
 
    ```sh title="Instance folder"
    USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up

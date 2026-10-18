@@ -10,6 +10,24 @@ The gateway serves three things:
 
 Every refused request is logged at warning level as `Gateway refused a request` with the reason, the host, the client address, and the Worker when the caller token names one. Forwarded requests are logged at info level with the Worker, repository, method, path, and status. No token, key, or request body is logged.
 
+## Install
+
+`@usine/gateway` is on npm from 0.1.0. On the gateway host, this installs it with its `usine-gateway` command in `node_modules/.bin`:
+
+```sh
+npm install --omit=dev @usine/gateway
+```
+
+To run a build that is not released, pack it in a usine checkout with the `@usine/core` it depends on, whose published version can lag behind the checkout, and install both tarballs with one `npm install`:
+
+```sh
+pnpm build
+pnpm --filter @usine/core --filter @usine/gateway pack --pack-destination .
+npm install --omit=dev ./usine-core-<version>.tgz ./usine-gateway-<version>.tgz
+```
+
+At Hetzner Cloud, `gateway.sh install` runs either one on the gateway VM and restarts the service; see [`infra/hetzner/gateway/README.md`](../../infra/hetzner/gateway/README.md).
+
 ## Entry points
 
 | Import | Contents |
