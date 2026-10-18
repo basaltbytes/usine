@@ -88,7 +88,10 @@ const DiscardRow = Schema.Struct({ reason: IgnoreReason });
 
 const ProjectionRevisionRow = Schema.Struct({ revision: ProjectionRevision });
 
+const ReopeningRow = Schema.Struct({ ...EventRouteRow.fields, reopening: Schema.Int });
+
 export const decodeEventRoutes = Schema.decodeUnknownEffect(Schema.Array(EventRouteRow));
+export const decodeReopenings = Schema.decodeUnknownEffect(Schema.Array(ReopeningRow));
 export const decodeRunRows = Schema.decodeUnknownEffect(Schema.Array(RunRow));
 export const decodeAttemptRows = Schema.decodeUnknownEffect(Schema.Array(AttemptRow));
 export const decodeRunIds = Schema.decodeUnknownEffect(Schema.Array(RunIdRow));

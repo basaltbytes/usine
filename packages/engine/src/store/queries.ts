@@ -50,6 +50,7 @@ import {
   decodeDiscards,
   decodeEventRoutes,
   decodeProjectionRevision,
+  decodeReopenings,
   decodeRunIds,
   decodeRunRows,
   encodeAgent,
@@ -67,6 +68,7 @@ import {
   submissionFromRow,
 } from "./codec.ts";
 
+import { loopItemQueries } from "./loop-items.ts";
 import { transcriptQueries } from "./transcript.ts";
 
 /** The newest queued submission and the exact Events observed alongside it. */
@@ -558,8 +560,36 @@ export const queriesFor = (database: RunDatabaseClient) => {
     );
   });
 
+  /** The newest Event the engine opened again for `eventId` (#267), with its reopening number. */
+  const newestReopening = Effect.fn("RunStoreQueries.newestReopening")(function* (
+    eventId: EventId,
+  ) {
+    const rows = yield* decodeReopenings(
+      yield* database
+        .select({ ...eventRouteSelection, reopening: triggerEvents.reopening })
+        .from(events)
+        .innerJoin(triggerEvents, eq(triggerEvents.eventId, events.eventId))
+        .where(eq(triggerEvents.reopensEventId, eventId))
+        .orderBy(desc(triggerEvents.reopening))
+        .limit(1)
+        .execute(),
+    );
+    return Option.map(Option.fromNullishOr(rows[0]), (row) => ({
+      submission: submissionFromRow(row),
+      reopening: row.reopening,
+    }));
+  });
+
+  /**
+   * Records a trigger's Event and its route once, and returns the route as first
+   * recorded. `reopens` marks an Event the engine opened again for an earlier one.
+   */
   const recordTriggerEvent = Effect.fn("RunStoreQueries.recordTriggerEvent")(function* (
     submission: Submission,
+    reopens: Option.Option<{
+      readonly eventId: EventId;
+      readonly reopening: number;
+    }> = Option.none(),
   ) {
     yield* database
       .insert(events)
@@ -589,6 +619,11 @@ export const queriesFor = (database: RunDatabaseClient) => {
           task: submission.task,
           agentJson: storedAgent(submission.agent),
           parentModel: Option.getOrNull(submission.parentModel),
+          reopensEventId: Option.getOrNull(Option.map(reopens, ({ eventId }) => eventId)),
+          reopening: Option.match(reopens, {
+            onNone: () => 0,
+            onSome: ({ reopening }) => reopening,
+          }),
         })
         .execute();
       return submission;
@@ -734,6 +769,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   return {
     salvageCandidates,
     cycles: cycleQueries(database),
+    loopItems: loopItemQueries(database),
     ...transcriptQueries(database),
     addAttempt,
     recordSalvage,
@@ -745,6 +781,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     createRun,
     eventRouteByRun,
     ignoredEvent,
+    newestReopening,
     nextQueued,
     pendingContinuations,
     recordTriggerEvent,

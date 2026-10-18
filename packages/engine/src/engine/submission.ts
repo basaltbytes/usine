@@ -7,7 +7,7 @@ import {
 } from "@usine/core/cycle-budget";
 import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
-import { Event, EventId } from "@usine/core/event";
+import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName, ApprovalRequirement } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
@@ -54,6 +54,24 @@ export const runIdFor = Effect.fn("Submission.runIdFor")(function* (submission: 
     .pipe(Effect.orDie);
   return RunId.make(Encoding.encodeHex(digest.subarray(0, 16)));
 });
+
+/**
+ * The Event the engine records when the Item comes back to the state of an
+ * Event whose Run was canceled: the trigger's Submission under a dedup key made
+ * from the original Event's key and the reopening's number, so its Run gets an
+ * id of its own and the original Event keeps its Run (#267).
+ */
+export const reopeningOf = (
+  submission: Submission,
+  original: DedupKey,
+  reopening: number,
+): Submission => {
+  const dedupKey = DedupKey.make(JSON.stringify(["reopened", reopening, original]));
+  return new Submission({
+    ...submission,
+    event: new Event({ ...submission.event, id: EventId.make(dedupKey), dedupKey }),
+  });
+};
 
 /** The Event now owns a Run; submitting it again returns the same run id. */
 export class Claimed extends Schema.TaggedClass<Claimed>("@usine/engine/Claimed")("Claimed", {

@@ -27,7 +27,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 
 - [#37][]: usine parses `webhooks.mode` but never reads it, there is no `POST /webhooks/github`, and Board moves are the only Hint source ([operator.ts:556][]).
 - [#158][]: every poll fetches every known open pull request again, instead of only after the base branch changes ([polling.ts:222][]).
-- [#267][]: a canceled Run keeps its Event, so changing an Item's labels back to the same content opens no Run ([store.ts:117][]).
 - [#152][]: the Run drawer can't rerun a completed Run whose outcome left the Item unresolved.
 
 ## Asks and notifications
@@ -125,7 +124,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [parser.ts:203]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L203
 [operator.ts:556]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/operator/operator.ts#L556
 [polling.ts:222]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/polling.ts#L222
-[store.ts:117]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/store/store.ts#L117
 [store.ts:284]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/store/store.ts#L284
 [schema.ts:169]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/database/schema.ts#L169
 [provision.ts:485]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/provision.ts#L485
@@ -187,7 +185,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#262]: https://github.com/basaltbytes/usine/issues/262
 [#264]: https://github.com/basaltbytes/usine/issues/264
 [#266]: https://github.com/basaltbytes/usine/issues/266
-[#267]: https://github.com/basaltbytes/usine/issues/267
 [#268]: https://github.com/basaltbytes/usine/issues/268
 [#270]: https://github.com/basaltbytes/usine/issues/270
 [#277]: https://github.com/basaltbytes/usine/issues/277

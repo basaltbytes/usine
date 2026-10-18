@@ -2,20 +2,22 @@ import { Attempt, AttemptId, AttemptContext } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
-import { Event } from "@usine/core/event";
+import { Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId, Run } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
-import { Context, DateTime, Effect, Layer, Match, Option, Result, Schema } from "effect";
+import { Context, Crypto, DateTime, Effect, Layer, Match, Option, Result, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import {
   Claimed,
   CycleBlocked,
   Ignored,
   Queued,
+  reopeningOf,
+  runIdFor,
   Submission,
   SubmissionResult,
 } from "../engine/submission.ts";
@@ -32,11 +34,14 @@ import { persistence, submissionFromRow } from "./codec.ts";
 import { queriesFor, type QueuedEvents } from "./queries.ts";
 import {
   beginAttempt as decideBeginAttempt,
+  cameBack,
   cancelRun,
   claimRun,
   finishAttempt as decideFinishAttempt,
+  resightEvent,
   retryRun,
   type FinishDecision,
+  type Settlement,
 } from "../engine/lifecycle.ts";
 
 const OptionalRunId = Schema.Option(RunId).pipe(
@@ -78,6 +83,7 @@ export type CancelOutcome =
 
 const makeRunStore = Effect.gen(function* () {
   const database = yield* RunDatabase;
+  const crypto = yield* Crypto.Crypto;
   const queries = queriesFor(database);
 
   const openRun = Effect.fn("RunStore.openRun")(function* (
@@ -101,6 +107,59 @@ const makeRunStore = Effect.gen(function* () {
     });
   });
 
+  const runIdOf = (submission: Submission) =>
+    runIdFor(submission).pipe(Effect.provideService(Crypto.Crypto, crypto));
+
+  /** The Run the Event owns, or the reason it was ignored; none for an Event still to claim. */
+  const settlementOf = Effect.fn("RunStore.settlementOf")(function* (
+    tx: ReturnType<typeof queriesFor>,
+    eventId: EventId,
+  ) {
+    const owner = (yield* tx.runForEvent(eventId))[0];
+    if (owner !== undefined) {
+      const run = (yield* tx.snapshot(owner.runId)).run;
+      return Option.some<Settlement>({ _tag: "Owned", run });
+    }
+    const ignored = (yield* tx.ignoredEvent(eventId))[0];
+    return ignored === undefined
+      ? Option.none<Settlement>()
+      : Option.some<Settlement>({ _tag: "Ignored", reason: ignored.reason });
+  });
+
+  /** Claims a recorded Event that owns no Run and was not ignored: queue it, or open its Run as `runId`. */
+  const claimEvent = Effect.fn("RunStore.claimEvent")(function* (
+    tx: ReturnType<typeof queriesFor>,
+    recorded: Submission,
+    runId: RunId,
+  ) {
+    if (!(yield* tx.cycles.isCurrentEvent(recorded))) {
+      return new Claim({
+        result: new Ignored({ eventId: recorded.event.id, reason: "superseded" }),
+      });
+    }
+    const blocking = yield* tx.blockingRun(recorded.loop, recorded.itemKey);
+    const blockedBy = blocking[0];
+    const decision = claimRun(
+      blockedBy === undefined
+        ? Option.none()
+        : Option.some((yield* tx.snapshot(blockedBy.runId)).run),
+      recorded.event.id,
+    );
+    yield* Effect.logInfo("Event claim decided", {
+      eventId: recorded.event.id,
+      decision: decision._tag,
+    });
+    switch (decision._tag) {
+      case "QueueEvent":
+        return new Claim({ result: new Queued({ eventId: recorded.event.id }) });
+      case "SupersedeRun":
+        yield* tx.updateState(decision.runId, decision.state);
+        return yield* openRun(tx, recorded, runId, Option.some(decision.runId));
+      case "OpenRun":
+        return yield* openRun(tx, recorded, runId);
+    }
+  });
+
   const recordAndClaim = Effect.fn("RunStore.recordAndClaim")(function* (
     submission: Submission,
     requestedRunId: RunId,
@@ -115,53 +174,54 @@ const makeRunStore = Effect.gen(function* () {
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
         const recorded = yield* tx.recordTriggerEvent(submission);
-        const existing = yield* tx.runForEvent(recorded.event.id);
-        if (existing[0] !== undefined) {
-          yield* Effect.logInfo("Event joined its existing Run", {
-            eventId: recorded.event.id,
-            runId: existing[0].runId,
-          });
-          return new Claim({
-            result: new Claimed({ eventId: recorded.event.id, runId: existing[0].runId }),
-          });
-        }
-
-        const ignored = yield* tx.ignoredEvent(recorded.event.id);
-        if (ignored[0] !== undefined) {
-          yield* Effect.logInfo("Event remains ignored", {
-            eventId: recorded.event.id,
-            reason: ignored[0].reason,
-          });
-          return new Claim({
-            result: new Ignored({ eventId: recorded.event.id, reason: ignored[0].reason }),
-          });
-        }
-
-        if (!(yield* tx.cycles.isCurrentEvent(recorded))) {
-          return new Claim({
-            result: new Ignored({ eventId: recorded.event.id, reason: "superseded" }),
-          });
-        }
-        const blocking = yield* tx.blockingRun(recorded.loop, recorded.itemKey);
-        const blockedBy = blocking[0];
-        const decision = claimRun(
-          blockedBy === undefined
-            ? Option.none()
-            : Option.some((yield* tx.snapshot(blockedBy.runId)).run),
+        const previous = yield* tx.loopItems.sighted(
+          recorded.loop,
+          recorded.itemKey,
           recorded.event.id,
         );
-        yield* Effect.logInfo("Event claim decided", {
-          eventId: recorded.event.id,
-          decision: decision._tag,
-        });
+        // After a reopening, later sightings of the trigger's Event belong to the newest one.
+        const current = Option.getOrElse(yield* tx.newestReopening(recorded.event.id), () => ({
+          submission: recorded,
+          reopening: 0,
+        }));
+        const eventId = current.submission.event.id;
+        const settled = yield* settlementOf(tx, eventId);
+        if (Option.isNone(settled)) {
+          return yield* claimEvent(
+            tx,
+            current.submission,
+            current.reopening === 0 ? requestedRunId : yield* runIdOf(current.submission),
+          );
+        }
+        const decision = resightEvent(settled.value, cameBack(previous, recorded.event.id));
         switch (decision._tag) {
-          case "QueueEvent":
-            return new Claim({ result: new Queued({ eventId: recorded.event.id }) });
-          case "SupersedeRun":
-            yield* tx.updateState(decision.runId, decision.state);
-            return yield* openRun(tx, recorded, requestedRunId, Option.some(decision.runId));
-          case "OpenRun":
-            return yield* openRun(tx, recorded, requestedRunId);
+          case "JoinRun":
+            yield* Effect.logInfo("Event joined its existing Run", {
+              eventId,
+              runId: decision.run.id,
+              state: decision.run.state._tag,
+            });
+            return new Claim({ result: new Claimed({ eventId, runId: decision.run.id }) });
+          case "StayIgnored":
+            yield* Effect.logInfo("Event remains ignored", { eventId, reason: decision.reason });
+            return new Claim({ result: new Ignored({ eventId, reason: decision.reason }) });
+          case "ReopenEvent": {
+            const reopening = current.reopening + 1;
+            const reopened = yield* tx.recordTriggerEvent(
+              reopeningOf(submission, recorded.event.dedupKey, reopening),
+              Option.some({ eventId: recorded.event.id, reopening }),
+            );
+            yield* Effect.logInfo(
+              "The Item came back to the state of an Event no Attempt worked on; it opens again",
+              {
+                eventId,
+                settled: settled.value._tag,
+                reopenedEventId: reopened.event.id,
+                reopening,
+              },
+            );
+            return yield* claimEvent(tx, reopened, yield* runIdOf(reopened));
+          }
         }
       }),
     );
@@ -515,6 +575,7 @@ const makeRunStore = Effect.gen(function* () {
     return yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
+        yield* tx.loopItems.unmatched(loop, itemKey);
         const storedRuns = yield* tx.revokeUnstarted(loop, itemKey);
         for (const row of storedRuns) {
           const current = yield* tx.snapshot(row.runId);
@@ -530,6 +591,8 @@ const makeRunStore = Effect.gen(function* () {
   const revokeQueued = Effect.fn("RunStore.revokeQueued")(function* (queued: QueuedEvents) {
     const { loop, itemKey, event } = queued.submission;
     yield* Effect.annotateCurrentSpan({ loop, itemKey, eventId: event.id });
+    // Not a sighting: the trigger may still submit the Event from a fetch made
+    // before the closing Run changed the Item, and that Event must stay ignored.
     return yield* queries.revokeQueued(loop, itemKey, queued.eventIds);
   }, persistence("revoke queued Events"));
 
@@ -673,6 +736,12 @@ export class RunStore extends Context.Service<
      * Run waiting for its approval is left out; its approval starts its fiber.
      */
     readonly runIdsToDrive: Effect.Effect<ReadonlyArray<RunId>, RunStoreError>;
+    /**
+     * Records a trigger's Event as what its Loop last saw of the Item, then claims
+     * it: `requestedRunId` names the Run the Event opens. When the Item came back
+     * to the state of an Event whose Run was canceled, the Event opens again as a
+     * reopening whose Run id derives from its own dedup key (#267).
+     */
     readonly recordAndClaim: (
       submission: Submission,
       requestedRunId: RunId,
@@ -697,6 +766,7 @@ export class RunStore extends Context.Service<
       runId: RunId,
       amendment?: Option.Option<AttemptContext>,
     ) => Effect.Effect<boolean, RunStoreError>;
+    /** Records that the Loop saw the Item not matching, and revokes its unstarted Runs and queued Events. */
     readonly revoke: (
       loop: LoopName,
       itemKey: ItemKey,

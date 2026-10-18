@@ -90,7 +90,9 @@ A later Event on the same Item can open a new Run of the Loop while the failed o
 
 ## Cancel
 
-Select **Cancel Run**, then **Confirm cancel**, to close any open Run as `Canceled`. usine stops a running Attempt and pushes its unfinished work to a salvage branch, as on a failure. The Event of a canceled Run stays recorded, so the same Item content doesn't open a new Run. The Item must change first, for example through a new comment or a label you remove and add again ([#267](https://github.com/basaltbytes/usine/issues/267)).
+Select **Cancel Run**, then **Confirm cancel**, to close any open Run as `Canceled`. usine stops a running Attempt and pushes its unfinished work to a salvage branch, as on a failure. The cancel holds while the Item stays as it is: polling sees the same content again and starts nothing.
+
+To run the Loop on the Item again, make it leave the Loop and come back: remove the Loop's label, wait until usine sees the Item without it (one poll, or right away for a Board move), then add the label again. The same content then opens a new Run with a new id. A Run that usine superseded or revoked behaves the same way when the Item returns to its content. A `Failed` Run is different: it keeps its Event, and you retry it instead.
 
 ## Steer a live Attempt
 
