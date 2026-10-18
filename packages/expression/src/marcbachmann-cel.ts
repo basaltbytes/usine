@@ -423,12 +423,18 @@ const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
  * the CEL seam requires
  * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
  * The layer has no requirements. Before evaluation it converts JSON integers to
- * `bigint` where the {@link Environment} declares `int` or `uint`: on a
- * variable, on a field of a declared object type, or as the item type of a
- * `list<T>`, at any depth. It also reads absent nullable fields of declared
- * object types as `null`. It does not convert values inside a `map<K,V>`, so
- * reading a JSON integer from a `map<string,int>` fails evaluation because the
- * value is a `double`. Declare such map values as `double`.
+ * `bigint` where the {@link Environment} declares `int`: on a variable, on a
+ * field of a declared object type, or as the item type of a `list<T>`, at any
+ * depth. It also reads absent nullable fields of declared object types as
+ * `null`. It does not convert values inside a `map<K,V>`, so reading a JSON
+ * integer from a `map<string,int>` fails evaluation because the value is a
+ * `double`. Declare such map values as `double`.
+ *
+ * `uint` is not supported for `context` values. An expression that reads a
+ * variable, object field, or list item declared `uint` passes checking but
+ * fails evaluation, because the value arrives as a signed integer. Declare
+ * such values as `int`. A `uint` result fails `evaluateScalar` (see
+ * {@link Scalar}).
  */
 export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {
   relatedStringLiterals,

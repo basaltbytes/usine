@@ -88,8 +88,11 @@ export type ExpressionError = typeof ExpressionError.Type;
 
 /**
  * A value one prompt interpolation can render: a string, number, bigint,
- * boolean, or `null`. CEL `int` and `uint` results arrive as `bigint`, and CEL
- * `double` results as `number`.
+ * boolean, or `null`. CEL `int` results arrive as `bigint`, and CEL `double`
+ * results as `number`. A CEL `uint` result, such as `1u` or `uint(1)`, is not a
+ * `Scalar`: `checkScalar` accepts it, but `evaluateScalar` fails with
+ * {@link ExpressionEvaluationError}. Convert it with `string(...)` or
+ * `double(...)` to render it.
  */
 export const Scalar = Schema.Union([
   Schema.String,
