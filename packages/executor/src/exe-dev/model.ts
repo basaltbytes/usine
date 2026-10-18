@@ -23,7 +23,13 @@ export type HomePath = typeof HomePath.Type;
 export class GitHubIntegration extends Schema.Class<GitHubIntegration>(
   "@usine/executor/ExeDevGitHubIntegration",
 )({
+  /** The repository the integration gives access to. Each repository may appear in only one integration. */
   repository: RepositoryName,
+  /**
+   * The integration's name on exe.dev. Preflight tests it, and each Attempt on
+   * the repository attaches it to the Worker's VM for `credentialGrantMinutes`.
+   * Each name may appear only once in the options.
+   */
   name: IntegrationName,
 }) {}
 
