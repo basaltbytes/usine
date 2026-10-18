@@ -50,6 +50,7 @@
     "@earendil-works/pi-coding-agent": "1.1.0",
     "@earendil-works/pi-durable": "1.1.0",
     "@effect/platform-node": "catalog:",
+    "@effect/platform-node-shared": "catalog:",
     "@usine/agents": "workspace:*",
     "@usine/core": "workspace:*"
   },
