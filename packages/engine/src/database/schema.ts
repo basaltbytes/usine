@@ -323,7 +323,10 @@ export const cursors = snakeCase.table(
   (table) => [check("usine_cursors_value_json_valid", sql`json_valid(${table.valueJson})`)],
 );
 
-/** The latest payload seen for each Item, for operator reads. */
+/**
+ * The latest payload seen for each Item, for operator reads, and when a poll
+ * found that GitHub no longer has the Item.
+ */
 export const itemProjections = snakeCase.table(
   "usine_item_projections",
   {
@@ -333,6 +336,7 @@ export const itemProjections = snakeCase.table(
     itemNumber: integer({ mode: "number" }).notNull(),
     contentHash: text().notNull(),
     payloadJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    goneAt: text(),
   },
   (table) => [
     check("usine_item_projections_number", sql`${table.itemNumber} >= 1`),

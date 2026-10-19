@@ -3,7 +3,7 @@ import type { LaneItemState } from "@usine/config/board";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { IssuePayload, PullRequestPayload } from "@usine/github/polling";
-import { Effect, Schema } from "effect";
+import { Effect, Option, Schema } from "effect";
 import { BoardProjectionError } from "../operator/board.ts";
 
 export interface ProjectedItem {
@@ -28,10 +28,15 @@ const projectionError = (item: ItemProjection, message: string) =>
     message,
   });
 
+/**
+ * The Board's view of one stored Item. An Item GitHub no longer has counts as
+ * closed, so its card leaves the open lanes.
+ */
 export const projectedItem = (
   item: ItemProjection,
 ): Effect.Effect<ProjectedItem, BoardProjectionError> =>
   Effect.gen(function* () {
+    const gone = Option.isSome(item.goneAt);
     if (item.source === "issue") {
       const payload = yield* Schema.decodeUnknownEffect(IssuePayload)(item.payload).pipe(
         Effect.mapError((error) => projectionError(item, error.message)),
@@ -42,7 +47,7 @@ export const projectedItem = (
         number: ItemNumber.make(item.number),
         title: payload.title,
         url: payload.url,
-        state: payload.state === "OPEN" ? "issue-open" : "issue-closed",
+        state: payload.state === "OPEN" && !gone ? "issue-open" : "issue-closed",
         linkedPullRequests: payload.closedByPullRequestsReferences.nodes.map(({ url }) => url),
         labels: yield* labelsFrom(payload.labels.nodes.map(({ name }) => name)).pipe(
           Effect.mapError((error) => projectionError(item, error.message)),
@@ -56,7 +61,7 @@ export const projectedItem = (
       );
       const state: LaneItemState = payload.merged
         ? "pr-merged"
-        : payload.state === "OPEN"
+        : payload.state === "OPEN" && !gone
           ? "pr-open"
           : "pr-closed";
       return {

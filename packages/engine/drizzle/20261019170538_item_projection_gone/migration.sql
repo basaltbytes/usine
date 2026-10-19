@@ -1,0 +1,1 @@
+ALTER TABLE `usine_item_projections` ADD `gone_at` text;

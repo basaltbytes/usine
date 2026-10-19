@@ -19,6 +19,7 @@ import { PollingTriggers } from "../../src/polling-triggers.ts";
 
 export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
   upsert: () => Effect.succeed(true),
+  markGone: () => Effect.succeed(true),
 });
 
 /** A queued Event always keeps its turn: the engine's pre-check behavior. */

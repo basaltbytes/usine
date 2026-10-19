@@ -420,8 +420,11 @@ describe("PollingTriggers", () => {
       yield* Effect.gen(function* () {
         const polling = yield* PollingTriggers;
         const engine = yield* RunEngine;
+        const items = yield* ItemProjectionReader;
         const run = claimedRun(yield* polling.poll(instance));
         yield* waitForState(engine, run, "Waiting");
+        const [observed] = yield* items.list(watchedRepository, { limit: 10 });
+        assert(observed !== undefined && Option.isNone(observed.goneAt));
 
         gone = true;
         const dropped = yield* polling.poll(instance);
@@ -430,6 +433,10 @@ describe("PollingTriggers", () => {
         const revoked = yield* waitForState(engine, run, "Canceled");
         assert(revoked.run.state._tag === "Canceled");
         assert.strictEqual(revoked.run.state.reason._tag, "Revoked");
+        // The Board reads the dropped pull request as gone, with its last payload kept.
+        const [dropped28] = yield* items.list(watchedRepository, { limit: 10 });
+        assert(dropped28 !== undefined && Option.isSome(dropped28.goneAt));
+        assert.strictEqual(dropped28.payload.state, "OPEN");
 
         // The cursor no longer holds the pull request, so it is not fetched again.
         const after = yield* polling.poll(instance);
@@ -1237,6 +1244,7 @@ describe("PollingTriggers", () => {
                   projections.set(projection.number, projection);
                   return true;
                 }),
+              markGone: () => Effect.die("no Item goes missing in this test"),
             }),
             repositoryLabelProjectionReaderLayer,
             repositoryLabelProjectionWriterLayer,
