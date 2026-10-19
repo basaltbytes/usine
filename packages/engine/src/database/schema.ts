@@ -356,6 +356,26 @@ export const repositoryLabelProjections = snakeCase.table(
   ],
 );
 
+/** The label swaps of the operator's Board moves, each recorded before the factory sends it to GitHub. */
+export const boardMoves = snakeCase.table(
+  "usine_board_moves",
+  {
+    moveId: integer({ mode: "number" }).primaryKey({ autoIncrement: true }),
+    repository: text().$type<RepositoryName>().notNull(),
+    itemKey: text().$type<ItemKey>().notNull(),
+    movedAt: text().notNull(),
+    fromLane: text().notNull(),
+    toLane: text().notNull(),
+    addedJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    removedJson: text({ mode: "json" }).$type<unknown>().notNull(),
+  },
+  (table) => [
+    check("usine_board_moves_added_json_valid", sql`json_valid(${table.addedJson})`),
+    check("usine_board_moves_removed_json_valid", sql`json_valid(${table.removedJson})`),
+    index("usine_board_moves_item").on(table.itemKey, table.movedAt),
+  ],
+);
+
 /** Operator-owned runtime toggles, kept apart from authored loop files (ADR 0009). */
 export const loopRuntime = snakeCase.table("usine_loop_runtime", {
   loopName: text().$type<LoopName>().primaryKey(),

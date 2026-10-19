@@ -28,6 +28,7 @@ import { TriggerCondition } from "../trigger-condition.ts";
 import { CursorStore } from "../cursor/cursor.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
+import { BoardMoves } from "../board-moves/board-moves.ts";
 import { AttemptAdmission } from "./admission.ts";
 import { RunDriver } from "./run-driver.ts";
 
@@ -372,6 +373,7 @@ export class RunEngine extends Context.Service<
 export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   database: Layer.Layer<RunDatabase, DatabaseError, DatabaseRequirements>,
 ): Layer.Layer<
+  | BoardMoves
   | CursorStore
   | CycleBudgets
   | ItemProjectionReader
@@ -392,6 +394,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(driver));
   return Layer.mergeAll(
     runEngine,
+    BoardMoves.layer.pipe(Layer.provide(database)),
     CycleBudgets.layer.pipe(Layer.provide(database)),
     RunReader.layer.pipe(Layer.provide(database)),
     CursorStore.layer.pipe(Layer.provide(database)),
