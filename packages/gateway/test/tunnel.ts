@@ -74,3 +74,22 @@ export const abandonedTunnel = (proxy: Listener, authority: string) =>
     socket.once("close", () => done("closed"));
     socket.end();
   });
+
+/** Opens a tunnel and keeps it open without writing anything, so the proxy waits for its ClientHello. */
+export const silentTunnel = (proxy: Listener, authority: string) =>
+  Effect.callback<Socket>((resume) => {
+    const outgoing = request({
+      host: proxy.host,
+      port: proxy.port,
+      method: "CONNECT",
+      path: authority,
+    });
+    outgoing.once("connect", (response, socket) => {
+      socket.on("error", () => socket.destroy());
+      if (response.statusCode === 200) return resume(Effect.succeed(socket));
+      socket.destroy();
+      resume(Effect.die(new Error(`CONNECT answered ${response.statusCode ?? 0}`)));
+    });
+    outgoing.once("error", (error) => resume(Effect.die(error)));
+    outgoing.end();
+  });

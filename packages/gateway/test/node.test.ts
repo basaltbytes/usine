@@ -4,12 +4,14 @@ import {
   DateTime,
   Deferred,
   Effect,
+  Exit,
   Layer,
   Logger,
   Option,
   Predicate,
   Redacted,
   Schedule,
+  Scope,
   Tracer,
 } from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
@@ -21,7 +23,7 @@ import { serveEgressProxy } from "../src/node/egress-proxy.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../src/node/node.ts";
 import { UpstreamBase } from "../src/upstream.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
-import { abandonedTunnel, rawThroughTunnel, tlsThroughTunnel } from "./tunnel.ts";
+import { abandonedTunnel, rawThroughTunnel, silentTunnel, tlsThroughTunnel } from "./tunnel.ts";
 
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
@@ -379,6 +381,18 @@ describe("the Node gateway", () => {
       assert.include(abandoned, '"host":"registry.npmjs.org"');
       assert.isFalse(gatewayLines.some((line) => line.includes("Gateway refused")));
     }).pipe(Effect.provide(gatewayRecordingLogs)),
+  );
+
+  it.live("closes while a tunnel waits for its ClientHello", () =>
+    Effect.gen(function* () {
+      const scope = yield* Scope.make();
+      const proxy = yield* serveEgressProxy(LOOPBACK, LOOPBACK).pipe(Scope.provide(scope));
+      yield* Effect.acquireRelease(silentTunnel(proxy, "registry.npmjs.org:443"), (socket) =>
+        Effect.sync(() => socket.destroy()),
+      );
+      const closed = yield* Scope.close(scope, Exit.void).pipe(Effect.timeoutOption("1 second"));
+      assert.isTrue(Option.isSome(closed), "the proxy did not close within a second");
+    }).pipe(Effect.scoped, Effect.provide(egressServices)),
   );
 
   it.live("closes the downstream and logs a failure when an upstream body is truncated", () =>

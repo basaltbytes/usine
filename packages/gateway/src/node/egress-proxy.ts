@@ -639,7 +639,12 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     Fiber.runIn(Effect.runForkWith(context)(effect), scope);
   server.on("connect", (request: IncomingMessage, client: Duplex, head: Buffer) => {
     client.on("error", () => client.destroy());
-    run(tunnel(request, client, head));
+    // The server's sockets are half-open, so `server.close` waits for an interrupted tunnel until its client socket is destroyed.
+    run(
+      tunnel(request, client, head).pipe(
+        Effect.onInterrupt(() => Effect.sync(() => client.destroy())),
+      ),
+    );
   });
   server.on("request", (request, response) => run(relay(request, response)));
 
