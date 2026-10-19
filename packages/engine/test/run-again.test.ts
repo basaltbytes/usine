@@ -31,6 +31,7 @@ const request = (fields: Partial<ConstructorParameters<typeof RunAgainRequest>[0
     step: StepName.make("run"),
     approval: "none",
     cycleLimit: Option.some(DEFAULT_CYCLE_LIMIT),
+    permissions: "write",
     context: new AttemptContext({
       task: AttemptTask.make("Finish the review"),
       agent: testAgent,
@@ -61,7 +62,8 @@ describe("Run again", () => {
           assert(first._tag === "Claimed");
           yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Succeeded");
 
-          const again = yield* engine.runAgain(first.runId, request());
+          // The Loop file now says `permissions: read`; the new Run takes it.
+          const again = yield* engine.runAgain(first.runId, request({ permissions: "read" }));
           assert(again._tag === "Claimed");
           assert.notStrictEqual(again.runId, first.runId);
           const reran = yield* waitFor(
@@ -71,6 +73,7 @@ describe("Run again", () => {
           );
           assert.strictEqual(reran.attempts.length, 1);
           assert.strictEqual(reran.attempts[0]?.task, "Finish the review");
+          assert.strictEqual(reran.permissions, "read");
           assert.strictEqual(reran.itemKey, sighting.itemKey);
           assert.deepStrictEqual(reran.event.payload, sighting.event.payload);
           assert.strictEqual(
@@ -82,6 +85,7 @@ describe("Run again", () => {
           assert.strictEqual(Option.getOrNull(reran.runAgain.value.requestedBy), operator);
           const original = yield* engine.inspect(first.runId);
           assert.strictEqual(original.run.state._tag, "Succeeded");
+          assert.strictEqual(original.permissions, "write");
           assert(Option.isNone(original.runAgain));
 
           // The unchanged Item still opens nothing: its Event joins the newest Run.

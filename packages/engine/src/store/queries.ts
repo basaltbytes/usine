@@ -8,7 +8,7 @@ import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { AttemptSalvage, salvageRefFor } from "@usine/core/attempt/salvage";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
-import { LoopName } from "@usine/core/loop";
+import { LoopName, LoopPermissions } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import type { RunAgain } from "@usine/core/run/again";
 import type { ApprovalSource } from "@usine/core/run/approval";
@@ -97,6 +97,7 @@ const eventRouteSelection = {
   loop: triggerEvents.loopName,
   step: triggerEvents.stepName,
   approval: triggerEvents.approval,
+  permissions: triggerEvents.permissions,
   cycleLimit: triggerEvents.cycleLimit,
   cycleGeneration: triggerEvents.cycleGeneration,
   repository: triggerEvents.repository,
@@ -204,10 +205,12 @@ export const queriesFor = (database: RunDatabaseClient) => {
         repository: runs.repository,
         runId: attempts.runId,
         number: attempts.attemptNumber,
+        permissions: triggerEvents.permissions,
         outcome: sql<string>`coalesce(json_extract(${attempts.outcomeJson}, '$._tag'), '')`,
       })
       .from(attempts)
       .innerJoin(runs, eq(runs.runId, attempts.runId))
+      .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
       .where(isNull(attempts.leftoversDiscardedAt))
       .execute();
     const decoded = yield* Schema.decodeUnknownEffect(
@@ -218,6 +221,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           repository: RepositoryName,
           runId: RunId,
           number: AttemptNumber,
+          permissions: LoopPermissions,
           outcome: Schema.String,
         }),
       ),
@@ -289,6 +293,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       task: storedRun.task,
       agent: storedRun.agent,
       parentModel: Option.fromNullishOr(storedRun.parentModel),
+      permissions: route.permissions,
     });
   });
 
@@ -686,6 +691,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
           loopName: submission.loop,
           stepName: submission.step,
           approval: submission.approval,
+          permissions: submission.permissions,
           cycleLimit: Option.getOrNull(submission.cycleLimit),
           cycleGeneration: submission.cycleGeneration,
           repository: submission.repository,

@@ -1542,95 +1542,104 @@ describe("PollingTriggers", () => {
       }).pipe(Effect.provide(runtimeLayer(directory, github)));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
-  it.live("opens the next Run with a reloaded Agent while the open Run keeps its own", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
-      const directory = InstanceDirectory.make(
-        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-reload-agent-" }),
-      );
-      const agentFile = (model: string) =>
-        `---\nharness: codex\nmodel: ${model}\neffort: high\n---\nImplement the issue.\n`;
-      yield* writeInstanceFiles(directory, [
-        ["usine.yaml", `version: 1\nrepos:\n  - name: ${watchedRepository}\n`],
-        ["agents/developer.md", agentFile("gpt-5.6-sol")],
-        [
-          "loops/start-dev.md",
-          '---\ntrigger:\n  on: issue\n  if: item.labels.nodes.exists(label, label.name == "ready")\napproval: required\nstep: implement\nagent: developer\n---\nImplement issue {{ item.number }}.\n',
-        ],
-      ]);
-      const open = new Set([28]);
-      const updatedAt = DateTime.makeUnsafe("2026-08-30T20:00:00Z");
-      const github: GitHubPolling["Service"] = {
-        labels: () => Effect.succeed(emptyLabelCatalog),
-        changes: (_repository, cursor) =>
-          Effect.succeed(
-            new RepositoryChanges({
-              cursor,
-              items: [...open].map((number) => new ChangedIssue({ number, updatedAt })),
-              backlog: false,
-              nextPollAt: Option.none(),
-            }),
-          ),
-        snapshot: (_repository, item) =>
-          Effect.succeed(
-            new IssueSnapshot({
-              payload: issuePayload(["ready"], item.number),
-              contentHash: ContentHash.make((item.number === 28 ? "a" : "b").repeat(64)),
-            }),
-          ),
-      };
-      const models: Array<string> = [];
-      const executor = Layer.succeed(StepExecutor)({
-        workers: [WorkerName.make("local")],
-        isLive: () => Effect.succeed(false),
-        outcome: () => Effect.succeed(Option.none()),
-        recover: () => Effect.void,
-        intervene: () => Effect.void,
-        interrupt: () => Effect.void,
-        reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
-        execute: (execution) =>
-          Effect.sync(() => {
-            models.push(execution.agent.brain.model);
-            return new StepResult({ message: "Implemented", facts: [] });
-          }),
-      });
-
-      yield* Effect.gen(function* () {
-        const polling = yield* PollingTriggers;
-        const engine = yield* RunEngine;
-        const instances = yield* CurrentInstance;
-        const openRun = claimedRun(yield* polling.poll(yield* instances.get));
-        yield* waitForState(engine, openRun, "Waiting");
-
-        yield* writeInstanceFiles(directory, [["agents/developer.md", agentFile("gpt-5.7-sol")]]);
-        const reload = yield* instances.reload;
-        assert.deepStrictEqual(reload.agents.changed, [agent.name]);
-
-        open.add(29);
-        const second = yield* polling.poll(yield* instances.get);
-        const nextRun = second.submissions.flatMap((submission) =>
-          submission._tag === "Claimed" && submission.runId !== openRun ? [submission.runId] : [],
-        )[0];
-        assert(nextRun !== undefined, "issue 29 opens a Run");
-        assert.strictEqual((yield* engine.inspect(nextRun)).agent.brain.model, "gpt-5.7-sol");
-        assert.strictEqual((yield* engine.inspect(openRun)).agent.brain.model, "gpt-5.6-sol");
-
-        const dedupKey = DedupKey.make(JSON.stringify(["operator-approval", openRun]));
-        yield* engine.approve(
-          openRun,
-          new Event({ id: EventId.make(dedupKey), dedupKey, payload: {}, receivedAt: updatedAt }),
-          new ApprovalSource({ channel: "ui", approver: Option.none() }),
+  it.live(
+    "opens the next Run with a reloaded Agent and Loop while the open Run keeps its own",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const directory = InstanceDirectory.make(
+          yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-reload-agent-" }),
         );
-        yield* waitForState(engine, openRun, "Succeeded");
-        assert.deepStrictEqual(models, ["gpt-5.6-sol"]);
-      }).pipe(
-        Effect.provide(
-          Layer.merge(
-            runtimeLayer(directory, github, executor),
-            reloadableInstanceLayer(directory),
+        const agentFile = (model: string) =>
+          `---\nharness: codex\nmodel: ${model}\neffort: high\n---\nImplement the issue.\n`;
+        const loopFile = (permissions: string) =>
+          `---\ntrigger:\n  on: issue\n  if: item.labels.nodes.exists(label, label.name == "ready")\napproval: required\nstep: implement\nagent: developer\n${permissions}---\nImplement issue {{ item.number }}.\n`;
+        yield* writeInstanceFiles(directory, [
+          ["usine.yaml", `version: 1\nrepos:\n  - name: ${watchedRepository}\n`],
+          ["agents/developer.md", agentFile("gpt-5.6-sol")],
+          ["loops/start-dev.md", loopFile("permissions: read\n")],
+        ]);
+        const open = new Set([28]);
+        const updatedAt = DateTime.makeUnsafe("2026-08-30T20:00:00Z");
+        const github: GitHubPolling["Service"] = {
+          labels: () => Effect.succeed(emptyLabelCatalog),
+          changes: (_repository, cursor) =>
+            Effect.succeed(
+              new RepositoryChanges({
+                cursor,
+                items: [...open].map((number) => new ChangedIssue({ number, updatedAt })),
+                backlog: false,
+                nextPollAt: Option.none(),
+              }),
+            ),
+          snapshot: (_repository, item) =>
+            Effect.succeed(
+              new IssueSnapshot({
+                payload: issuePayload(["ready"], item.number),
+                contentHash: ContentHash.make((item.number === 28 ? "a" : "b").repeat(64)),
+              }),
+            ),
+        };
+        const models: Array<string> = [];
+        const permissions: Array<string> = [];
+        const executor = Layer.succeed(StepExecutor)({
+          workers: [WorkerName.make("local")],
+          isLive: () => Effect.succeed(false),
+          outcome: () => Effect.succeed(Option.none()),
+          recover: () => Effect.void,
+          intervene: () => Effect.void,
+          interrupt: () => Effect.void,
+          reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
+          execute: (execution) =>
+            Effect.sync(() => {
+              models.push(execution.agent.brain.model);
+              permissions.push(execution.permissions);
+              return new StepResult({ message: "Implemented", facts: [] });
+            }),
+        });
+
+        yield* Effect.gen(function* () {
+          const polling = yield* PollingTriggers;
+          const engine = yield* RunEngine;
+          const instances = yield* CurrentInstance;
+          const openRun = claimedRun(yield* polling.poll(yield* instances.get));
+          yield* waitForState(engine, openRun, "Waiting");
+
+          yield* writeInstanceFiles(directory, [
+            ["agents/developer.md", agentFile("gpt-5.7-sol")],
+            ["loops/start-dev.md", loopFile("")],
+          ]);
+          const reload = yield* instances.reload;
+          assert.deepStrictEqual(reload.agents.changed, [agent.name]);
+
+          open.add(29);
+          const second = yield* polling.poll(yield* instances.get);
+          const nextRun = second.submissions.flatMap((submission) =>
+            submission._tag === "Claimed" && submission.runId !== openRun ? [submission.runId] : [],
+          )[0];
+          assert(nextRun !== undefined, "issue 29 opens a Run");
+          assert.strictEqual((yield* engine.inspect(nextRun)).agent.brain.model, "gpt-5.7-sol");
+          assert.strictEqual((yield* engine.inspect(openRun)).agent.brain.model, "gpt-5.6-sol");
+          assert.strictEqual((yield* engine.inspect(nextRun)).permissions, "write");
+          assert.strictEqual((yield* engine.inspect(openRun)).permissions, "read");
+
+          const dedupKey = DedupKey.make(JSON.stringify(["operator-approval", openRun]));
+          yield* engine.approve(
+            openRun,
+            new Event({ id: EventId.make(dedupKey), dedupKey, payload: {}, receivedAt: updatedAt }),
+            new ApprovalSource({ channel: "ui", approver: Option.none() }),
+          );
+          yield* waitForState(engine, openRun, "Succeeded");
+          assert.deepStrictEqual(models, ["gpt-5.6-sol"]);
+          assert.deepStrictEqual(permissions, ["read"]);
+        }).pipe(
+          Effect.provide(
+            Layer.merge(
+              runtimeLayer(directory, github, executor),
+              reloadableInstanceLayer(directory),
+            ),
           ),
-        ),
-      );
-    }).pipe(Effect.provide(NodeServices.layer)),
+        );
+      }).pipe(Effect.provide(NodeServices.layer)),
   );
 });

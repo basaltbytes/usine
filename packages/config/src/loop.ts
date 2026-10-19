@@ -1,6 +1,6 @@
 import { AgentName } from "@usine/core/agent";
 import { CycleLimit, DEFAULT_CYCLE_LIMIT } from "@usine/core/cycle-budget";
-import { LoopName, ApprovalRequirement } from "@usine/core/loop";
+import { LoopName, ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
 import { StepName } from "@usine/core/step";
 import { Effect, Schema } from "effect";
 import { InstancePath, ConfigFileError } from "./file.ts";
@@ -30,6 +30,11 @@ export class LoopFile extends Schema.Class<LoopFile>("@usine/config/LoopFile")({
   maxCycles: CycleLimit.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
     Schema.withConstructorDefault(Effect.succeed(DEFAULT_CYCLE_LIMIT)),
+  ),
+  /** What the Loop's Attempts may do to their repository; `write` unless the file says `read`. */
+  permissions: LoopPermissions.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("write" as const)),
+    Schema.withConstructorDefault(Effect.succeed("write" as const)),
   ),
   step: StepName,
   agent: AgentName,

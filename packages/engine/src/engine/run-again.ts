@@ -1,7 +1,7 @@
 import { AttemptContext } from "@usine/core/attempt";
 import { type CycleGeneration, CycleLimit } from "@usine/core/cycle-budget";
 import { DedupKey, Event, EventId } from "@usine/core/event";
-import { ApprovalRequirement } from "@usine/core/loop";
+import { ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { StepName } from "@usine/core/step";
 import { type DateTime, Schema } from "effect";
@@ -10,9 +10,10 @@ import { Claimed, CycleBlocked, Submission } from "./submission.ts";
 
 /**
  * The operator's request to run a succeeded or canceled Run again (#152): the
- * Step, approval requirement, and cycle limit the Loop file names now, as a
- * polled Event would carry them, the task and Agent the new Run starts with,
- * and the operator login that asked, none while `usine.yaml` names no operator.
+ * Step, approval requirement, cycle limit, and permission level the Loop file
+ * names now, as a polled Event would carry them, the task and Agent the new
+ * Run starts with, and the operator login that asked, none while `usine.yaml`
+ * names no operator.
  */
 export class RunAgainRequest extends Schema.Class<RunAgainRequest>("@usine/engine/RunAgainRequest")(
   {
@@ -20,6 +21,7 @@ export class RunAgainRequest extends Schema.Class<RunAgainRequest>("@usine/engin
     approval: ApprovalRequirement,
     /** None for a schedule Loop, whose Runs no cycle budget counts. */
     cycleLimit: Schema.Option(CycleLimit),
+    permissions: LoopPermissions,
     context: AttemptContext,
     requestedBy: Schema.Option(OperatorLogin),
   },
@@ -69,6 +71,7 @@ export const runAgainSubmission = (
     loop: ran.run.loop,
     step: request.step,
     approval: request.approval,
+    permissions: request.permissions,
     cycleLimit: request.cycleLimit,
     cycleGeneration: identity.generation,
     repository: ran.repository,

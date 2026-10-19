@@ -571,6 +571,68 @@ describe("run store", () => {
     ),
   );
 
+  it.live(
+    "keeps the Loop's permissions with the Event, so each Attempt and its recovery use them",
+    () =>
+      withRunStore(
+        Effect.gen(function* () {
+          const store = yield* RunStore;
+          const readRun = RunId.make("read-only-review");
+          yield* store.recordAndClaim(
+            new Submission({ ...lifecycleSubmission, permissions: "read" }),
+            readRun,
+          );
+          const writeRun = RunId.make("default-write");
+          yield* store.recordAndClaim(
+            new Submission({
+              ...lifecycleSubmission,
+              event: new Event({
+                ...lifecycleSubmission.event,
+                id: EventId.make("default-write"),
+                dedupKey: DedupKey.make("default/write"),
+              }),
+              itemKey: ItemKey.make("default-write-item"),
+            }),
+            writeRun,
+          );
+          const first = yield* store.beginAttempt(readRun, WorkerName.make("local"), Option.none());
+          assert(first._tag === "AttemptStarted");
+          assert.strictEqual(first.execution.permissions, "read");
+          yield* store.finishAttempt(
+            first.execution.attempt,
+            Result.fail(new AgentFailure({ message: "Checks failed" })),
+          );
+          yield* store.retry(readRun);
+          const retried = yield* store.beginAttempt(
+            readRun,
+            WorkerName.make("local"),
+            Option.none(),
+          );
+          assert(retried._tag === "AttemptStarted");
+          assert.strictEqual(retried.execution.permissions, "read");
+          assert.strictEqual((yield* store.snapshot(readRun)).permissions, "read");
+
+          const written = yield* store.beginAttempt(
+            writeRun,
+            WorkerName.make("local"),
+            Option.none(),
+          );
+          assert(written._tag === "AttemptStarted");
+          assert.strictEqual(written.execution.permissions, "write");
+
+          const candidates = yield* store.salvageCandidates;
+          assert.deepStrictEqual(
+            new Map(candidates.map(({ attemptId, permissions }) => [attemptId, permissions])),
+            new Map([
+              [first.execution.attempt.id, "read"],
+              [retried.execution.attempt.id, "read"],
+              [written.execution.attempt.id, "write"],
+            ]),
+          );
+        }),
+      ),
+  );
+
   it.live("keeps a canceled Run closed when its recovered Attempt reports late", () =>
     withRunStore(
       Effect.gen(function* () {

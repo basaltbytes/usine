@@ -1,3 +1,4 @@
+import type { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import {
   Clock,
@@ -20,6 +21,7 @@ import {
   type InstalledRepository,
   type ProjectAccess,
   REQUIRED_REPOSITORY_PERMISSIONS,
+  WORKER_TOKEN_PERMISSIONS,
   deriveProjectAccess,
   missingPermissions,
 } from "./access.ts";
@@ -90,7 +92,7 @@ const mintPlan = (scope: TokenScope): { operation: GitHubOperation; body: Schema
     : {
         operation: "mint-worker-token",
         body: {
-          permissions: REQUIRED_REPOSITORY_PERMISSIONS,
+          permissions: WORKER_TOKEN_PERMISSIONS[scope.permissions],
           repository_ids: [scope.repositoryId],
         },
       };
@@ -111,9 +113,14 @@ export class GitHubApp extends Context.Service<
     readonly projectAccess: (
       registry: ReadonlyArray<RepositoryName>,
     ) => Effect.Effect<ReadonlyArray<ProjectAccess>, GitHubAppError>;
-    /** Mints a fresh token restricted to the covered Project's repository for a Worker. */
+    /**
+     * Mints a fresh token restricted to the covered Project's repository for a
+     * Worker, with the repository permissions `WORKER_TOKEN_PERMISSIONS` lists
+     * for the Attempt's Loop permission level.
+     */
     readonly workerToken: (
       project: CoveredProject,
+      permissions: LoopPermissions,
     ) => Effect.Effect<InstallationToken, GitHubAppError>;
   }
 >()("@usine/github/GitHubApp") {
@@ -193,7 +200,12 @@ export class GitHubApp extends Context.Service<
         scope: TokenScope,
       ) {
         const { operation, body } = mintPlan(scope);
-        yield* Effect.annotateCurrentSpan({ installationId, operation, scope: scope._tag });
+        yield* Effect.annotateCurrentSpan({
+          installationId,
+          operation,
+          scope: scope._tag,
+          permissions: scope._tag === "SingleRepository" ? scope.permissions : "installation",
+        });
         const jwt = yield* sign();
         const response = yield* fetchJson(
           operation,
@@ -297,14 +309,16 @@ export class GitHubApp extends Context.Service<
           const installed = yield* installedRepositories(token);
           return deriveProjectAccess(installation, registry, installed);
         }),
-        workerToken: Effect.fn("GitHubApp.workerToken")((project: CoveredProject) =>
-          mintToken(
-            project.installationId,
-            new SingleRepository({
-              repository: project.repository,
-              repositoryId: project.repositoryId,
-            }),
-          ),
+        workerToken: Effect.fn("GitHubApp.workerToken")(
+          (project: CoveredProject, permissions: LoopPermissions) =>
+            mintToken(
+              project.installationId,
+              new SingleRepository({
+                repository: project.repository,
+                repositoryId: project.repositoryId,
+                permissions,
+              }),
+            ),
         ),
       };
     }),
@@ -313,6 +327,7 @@ export class GitHubApp extends Context.Service<
 
 export {
   REQUIRED_REPOSITORY_PERMISSIONS,
+  WORKER_TOKEN_PERMISSIONS,
   deriveProjectAccess,
   missingPermissions,
   type InstalledRepository,

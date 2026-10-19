@@ -112,6 +112,7 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     loop: options.loop.name,
     step: options.loop.step,
     approval: options.loop.approval,
+    permissions: options.loop.permissions,
     cycleLimit: cycleLimitOf(options.loop),
     repository: options.repository.name,
     revision: options.revision,

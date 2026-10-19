@@ -13,6 +13,7 @@ import {
   WorktreePath,
   type CheckoutRequest,
 } from "./executor.ts";
+import { PRE_PUSH_HOOKS_DIRECTORY, prePushHook } from "./pre-push-hook.ts";
 import { failureMessage, SALVAGE_GIT_CONFIG, salvageWorktree } from "./salvage.ts";
 
 const CACHE_DIRECTORY_SUFFIX = ".git";
@@ -49,6 +50,8 @@ export interface WorkspaceOps<E> {
     operation: "prepare" | "cleanup",
     args: ReadonlyArray<string>,
   ) => Effect.Effect<string, E>;
+  /** Writes `content` to the file `path` on the Worker's machine, creating its directory, and makes it executable. */
+  readonly writeExecutable: (path: string, content: string) => Effect.Effect<void, E>;
 }
 
 export interface ProvisionOptions<E> {
@@ -71,6 +74,12 @@ export interface ProvisionedWorktree {
    * to reattach the parent task or repeat a harvest whose result was not stored.
    */
   readonly keepForReattach: Effect.Effect<void>;
+  /**
+   * The hooks directory the Attempt's children run git with (`withGitHooks`):
+   * for a Loop with `permissions: read`, one whose pre-push hook tells the
+   * Agent why a push fails; none otherwise, so the repository's own hooks apply.
+   */
+  readonly gitHooks: Option.Option<string>;
 }
 
 interface ReleaseOptions<E> {
@@ -135,15 +144,26 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
       const baseCommit = yield* Ref.get(checkedOut);
       const salvage =
         Option.isSome(baseCommit) && !Exit.isSuccess(exit)
-          ? yield* salvageWorktree({
-              attemptId: request.attemptId,
-              worker: request.worker,
-              host: options.host,
-              worktree: layout.worktree,
-              baseCommit,
-              ref: request.salvageRef,
-              git: (args) => ops.git("cleanup", args),
-            })
+          ? request.permissions === "read"
+            ? yield* Effect.logInfo(
+                "The Attempt's Loop has read permissions, so its checkout is removed without salvage",
+                {
+                  attemptId: request.attemptId,
+                  worker: request.worker,
+                  loop: request.loop,
+                  host: options.host,
+                  worktree: layout.worktree,
+                },
+              ).pipe(Effect.as(Option.none<AttemptSalvage>()))
+            : yield* salvageWorktree({
+                attemptId: request.attemptId,
+                worker: request.worker,
+                host: options.host,
+                worktree: layout.worktree,
+                baseCommit,
+                ref: request.salvageRef,
+                git: (args) => ops.git("cleanup", args),
+              })
           : Option.none<AttemptSalvage>();
       if (Option.isSome(salvage)) {
         const record = yield* Ref.get(recorder);
@@ -220,6 +240,49 @@ const registerRelease = Effect.fn("Executor.registerRelease")(function* <E exten
       Ref.set(recorder, Option.some(record)),
     keepForReattach: Ref.set(kept, true),
   };
+});
+
+/**
+ * Gives the checkout of an Attempt whose Loop has `permissions: read` the
+ * pre-push hook `prePushHook`, which tells the Agent why its push fails, in
+ * a hooks directory inside the checkout's own git directory. Returns that
+ * directory; a `write` checkout gets none.
+ */
+const installPrePushHook = Effect.fn("Executor.installPrePushHook")(function* <E>(options: {
+  readonly request: CheckoutRequest;
+  readonly host: string;
+  readonly layout: Pick<WorkspaceLayout, "worktree">;
+  readonly ops: Pick<WorkspaceOps<E>, "git" | "writeExecutable">;
+}) {
+  const { layout, ops, request } = options;
+  const fields = {
+    attemptId: request.attemptId,
+    worker: request.worker,
+    loop: request.loop,
+    permissions: request.permissions,
+    host: options.host,
+  };
+  yield* Effect.annotateCurrentSpan(fields);
+  if (request.permissions === "write") {
+    yield* Effect.logDebug(
+      "The Attempt's Loop may push; its checkout keeps git's own hooks",
+      fields,
+    );
+    return Option.none<string>();
+  }
+  const gitDirectory = (yield* ops.git("prepare", [
+    "-C",
+    layout.worktree,
+    "rev-parse",
+    "--absolute-git-dir",
+  ])).trim();
+  const hooks = `${gitDirectory}/${PRE_PUSH_HOOKS_DIRECTORY}`;
+  yield* ops.writeExecutable(`${hooks}/pre-push`, prePushHook(request.loop));
+  yield* Effect.logInfo(
+    "The Attempt's Loop has read permissions; its checkout's pre-push hook explains a refused push",
+    { ...fields, hooks },
+  );
+  return Option.some(hooks);
 });
 
 /** How a retry's worktree used the previous Attempt's salvage. */
@@ -412,6 +475,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
   const salvage = yield* fetchSalvage(options, request.resume);
   const checkout = yield* checkOutWorktree(options, baseCommit, salvage);
   yield* Ref.set(release.checkedOut, Option.some(baseCommit));
+  const gitHooks = yield* installPrePushHook(options);
   return {
     workspace: new AttemptWorkspace({
       worker: request.worker,
@@ -434,10 +498,12 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
     salvaged: release.salvaged,
     recordSalvage: release.recordSalvage,
     keepForReattach: release.keepForReattach,
+    gitHooks,
   } satisfies ProvisionedWorktree;
 });
 
 export interface ReattachOptions<E> extends ReleaseOptions<E> {
+  readonly ops: Pick<WorkspaceOps<E>, "cacheExists" | "git" | "removePath" | "writeExecutable">;
   /** The RunSpec the Attempt's parent started with, read back from its durable request. */
   readonly spec: AttemptChannel.RunSpec;
 }
@@ -459,6 +525,7 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
   });
   const release = yield* registerRelease(options);
   yield* Ref.set(release.checkedOut, Option.some(spec.baseCommit));
+  const gitHooks = yield* installPrePushHook(options);
   return {
     workspace: new AttemptWorkspace({
       worker: request.worker,
@@ -468,6 +535,7 @@ export const reattachWorktree = Effect.fn("Executor.reattachWorktree")(function*
     salvaged: release.salvaged,
     recordSalvage: release.recordSalvage,
     keepForReattach: release.keepForReattach,
+    gitHooks,
   } satisfies ProvisionedWorktree;
 });
 
@@ -484,7 +552,8 @@ export interface RecoveryOptions<E> {
  * Reconciles a checkout an earlier process left behind: salvages it without a
  * known base, records the outcome, and removes the worktree only once its work
  * is published. A retained worktree stays for the next reconciliation. A
- * succeeded Attempt already delivered its result, so its checkout is removed
+ * succeeded Attempt already delivered its result, and an Attempt whose Loop
+ * has `permissions: read` has no work to keep, so their checkouts are removed
  * without salvage.
  */
 export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
@@ -496,13 +565,14 @@ export const recoverWorktree = Effect.fn("Executor.recoverWorktree")(function* <
 ) {
   const { attempt, host, worktree } = options;
   yield* Effect.annotateCurrentSpan({ ...attempt, host, worktree });
-  if (attempt.succeeded) {
+  if (attempt.succeeded || attempt.permissions === "read") {
     yield* options.git(["--git-dir", options.cache, "worktree", "remove", "--force", worktree]);
-    yield* Effect.logInfo("Released the checkout of a succeeded Attempt", {
-      ...attempt,
-      host,
-      worktree,
-    });
+    yield* Effect.logInfo(
+      attempt.succeeded
+        ? "Released the checkout of a succeeded Attempt"
+        : "Released the checkout of an Attempt whose Loop has read permissions, without salvage",
+      { ...attempt, host, worktree },
+    );
     return;
   }
   const salvage = yield* salvageWorktree({

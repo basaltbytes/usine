@@ -1,4 +1,5 @@
 import type { AttemptId } from "@usine/core/attempt";
+import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { AttachRequest, type AttachmentId, InstallationCredential } from "@usine/gateway/admin";
@@ -124,12 +125,13 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
     attemptId: AttemptId,
     worker: WorkerName,
     repository: RepositoryName,
+    permissions: LoopPermissions,
     machine: SshMachine,
     gateway: MachineGateway,
     operation: ExecutorOperation,
   ) {
     const { admin, settings } = gateway;
-    const fields = { attemptId, worker, repository, domain: settings.domain };
+    const fields = { attemptId, worker, repository, permissions, domain: settings.domain };
     yield* Effect.annotateCurrentSpan(fields);
     const config = ghGatewayConfig(settings.domain);
     yield* commands.run(operation, machine.shell, "sh", [
@@ -232,7 +234,13 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
       Effect.uninterruptible,
     );
 
-    const credential = yield* renewableCredential(provider.issue, repository, attemptId, publish);
+    const credential = yield* renewableCredential(
+      provider.issue,
+      repository,
+      attemptId,
+      permissions,
+      publish,
+    );
     const callerToken = credential.published;
     // Forked after renewal, so scope closure stops it before the token is
     // wiped and before the detach.

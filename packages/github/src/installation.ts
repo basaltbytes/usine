@@ -1,3 +1,4 @@
+import { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
 
@@ -30,12 +31,16 @@ export class InstallationWide extends Schema.TaggedClass<InstallationWide>(
   "@usine/github/TokenScope/InstallationWide",
 )("InstallationWide", {}) {}
 
-/** Token access restricted to the repository assigned to one Attempt. */
+/**
+ * Token access restricted to the repository assigned to one Attempt, at the
+ * permission level of the Attempt's Loop (`WORKER_TOKEN_PERMISSIONS`).
+ */
 export class SingleRepository extends Schema.TaggedClass<SingleRepository>(
   "@usine/github/TokenScope/SingleRepository",
 )("SingleRepository", {
   repository: RepositoryName,
   repositoryId: RepositoryId,
+  permissions: LoopPermissions,
 }) {}
 
 /** The repository coverage requested when minting an installation token. */

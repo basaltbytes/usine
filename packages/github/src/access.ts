@@ -1,3 +1,4 @@
+import type { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { Schema } from "effect";
 import { InstallationId, RepositoryId, Installation } from "./installation.ts";
@@ -12,6 +13,34 @@ export const REQUIRED_REPOSITORY_PERMISSIONS = {
 } as const;
 
 export type RequiredRepositoryPermission = keyof typeof REQUIRED_REPOSITORY_PERMISSIONS;
+
+/**
+ * The repository permissions of an Attempt's token for each Loop permission
+ * level (ADR 0011). A `read` token can read the code and still post reviews
+ * and comments (`pull_requests` and `issues` stay `write`), but cannot push,
+ * merge, or update a branch, which all need `contents: write`. Names and
+ * levels are those of the installation token API:
+ * https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps
+ */
+export const WORKER_TOKEN_PERMISSIONS = {
+  write: {
+    checks: "read",
+    contents: "write",
+    issues: "write",
+    metadata: "read",
+    pull_requests: "write",
+  },
+  read: {
+    checks: "read",
+    contents: "read",
+    issues: "write",
+    metadata: "read",
+    pull_requests: "write",
+  },
+} as const satisfies Record<
+  LoopPermissions,
+  Readonly<Record<RequiredRepositoryPermission, "read" | "write">>
+>;
 
 const grants = (actual: string | undefined, required: "read" | "write"): boolean =>
   actual === required || (required === "read" && actual === "write");

@@ -81,7 +81,8 @@ describe("operator-created GitHub App", () => {
         const access = yield* app.projectAccess([repository]);
         const project = access[0];
         assert(project !== undefined && project._tag === "CoveredProject");
-        const workerToken = yield* app.workerToken(project);
+        // A read token must still comment, as a review Loop does.
+        const workerToken = yield* app.workerToken(project, "read");
         assert.strictEqual(workerToken.scope._tag, "SingleRepository");
 
         const token = Redacted.value(workerToken.value);

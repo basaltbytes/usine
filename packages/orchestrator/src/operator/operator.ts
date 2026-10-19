@@ -560,6 +560,7 @@ const makeOperator = Effect.gen(function* () {
         step: loop.step,
         approval: loop.approval,
         cycleLimit: cycleLimitOf(loop),
+        permissions: loop.permissions,
         context: new AttemptContext({
           task: edit.task,
           agent,

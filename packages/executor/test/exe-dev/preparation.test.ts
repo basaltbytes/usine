@@ -4,6 +4,7 @@ import { AttemptId } from "@usine/core/attempt";
 
 import { type AttemptSalvage, SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { InfraFailure } from "@usine/core/attempt/failure";
+import { LoopName } from "@usine/core/loop";
 import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 
@@ -77,6 +78,34 @@ describe("exe.dev preparation", () => {
           assert.deepStrictEqual(recorded[0].commit, Option.some(SALVAGE_COMMIT));
         }
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, fails)));
+    },
+  );
+
+  it.effect(
+    "refuses a read Loop's Attempt before attaching the integration, which cannot grant read-only access",
+    () => {
+      const ssh = fakeSsh();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const failure = yield* executor
+          .prepare(
+            new CheckoutRequest({
+              ...request,
+              loop: LoopName.make("review-pr"),
+              permissions: "read",
+            }),
+          )
+          .pipe(Effect.flip);
+        assert(failure._tag === "WorkerCapabilityError");
+        assert.strictEqual(failure.worker, WORKER);
+        assert.strictEqual(failure.capability, "credentials");
+        assert.include(failure.message, "remote-one");
+        assert.include(failure.message, "review-pr");
+        assert.include(failure.message, "read-only");
+        const commandLine = ssh.state.commands.map(({ args }) => args.join(" ")).join("\n");
+        assert.notInclude(commandLine, "integrations attach");
+        assert.notInclude(commandLine, "'clone'");
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer)));
     },
   );
 
@@ -215,6 +244,7 @@ describe("exe.dev preparation", () => {
             repository: request.repository,
             worker: WORKER,
             ref: request.salvageRef,
+            permissions: "write",
             succeeded: false,
             open: false,
           },
@@ -254,6 +284,7 @@ describe("exe.dev preparation", () => {
           repository: request.repository,
           worker: WORKER,
           ref: request.salvageRef,
+          permissions: "write",
           succeeded: false,
           open: true,
         },
@@ -296,6 +327,7 @@ describe("exe.dev preparation", () => {
             repository: request.repository,
             worker: WORKER,
             ref: request.salvageRef,
+            permissions: "write",
             succeeded: true,
             open: false,
           },
@@ -326,6 +358,7 @@ describe("exe.dev preparation", () => {
             repository: request.repository,
             worker: WORKER,
             ref: SalvageRef.make(`usine/salvage/finished-run/${index + 1}`),
+            permissions: "write",
             succeeded,
             open: false,
           },
@@ -359,6 +392,7 @@ describe("exe.dev preparation", () => {
               repository: request.repository,
               worker: WorkerName.make("decommissioned"),
               ref: SalvageRef.make(`usine/salvage/orphaned-run/${index}`),
+              permissions: "write",
               succeeded: index !== 2,
               open: false,
             },

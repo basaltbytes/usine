@@ -5,6 +5,7 @@ import { InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { InstanceDirectory } from "@usine/core/instance";
+import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { RunEngine } from "@usine/engine/engine";
@@ -121,6 +122,8 @@ describe("local worker salvage", () => {
             attemptId: AttemptId.make("r/run/2"),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
+            loop: LoopName.make("local-worker"),
+            permissions: "write",
             revision: RepositoryRevision.make("main"),
             payload: {},
             task: AttemptTask.make("Continue the work"),
@@ -188,6 +191,7 @@ describe("local worker salvage", () => {
               worker: request.worker,
               repository: request.repository,
               ref: request.salvageRef,
+              permissions: "write",
               succeeded: false,
               open: false,
             },
@@ -294,6 +298,8 @@ describe("local worker salvage", () => {
             attemptId: AttemptId.make(`r/run/${number}`),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
+            loop: LoopName.make("local-worker"),
+            permissions: "write",
             revision: RepositoryRevision.make("main"),
             payload: {},
             task: AttemptTask.make("Continue the work"),

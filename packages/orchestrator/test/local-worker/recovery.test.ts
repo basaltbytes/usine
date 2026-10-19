@@ -15,6 +15,7 @@ const attempt = (worker: string, number: number) => ({
   worker: WorkerName.make(worker),
   repository: RepositoryName.make("acme/demo"),
   ref: SalvageRef.make(`usine/salvage/closed/${number}`),
+  permissions: "write" as const,
   succeeded: number % 2 === 0,
   open: false,
 });

@@ -3,6 +3,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { Event } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
+import { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
@@ -30,6 +31,8 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   task: AttemptTask,
   agent: Agent,
   parentModel: Schema.Option(ModelId),
+  /** What the Run's Attempts may do to their repository: the Loop's level when the Run's Event matched. */
+  permissions: LoopPermissions,
 }) {}
 
 /** A Run snapshot and all its saved transcript entries from the same database transaction. */

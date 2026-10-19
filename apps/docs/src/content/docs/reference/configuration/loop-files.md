@@ -53,6 +53,7 @@ Keys are snake_case. An unknown key at any level is an error, as are duplicate k
 | `step` | string | `run` | The name of the Run's single Step. |
 | `agent` | string | required | The Agent that owns the Loop's Runs: the name of a file in `agents/`, without `.md`. |
 | `max_cycles` | integer ≥ 1 | `3` | The Loop's Cycle budget per Item. |
+| `permissions` | `write`, `read` | `write` | What the Loop's Attempts may do to their repository. |
 
 ### `trigger`
 
@@ -154,6 +155,24 @@ The Cycle budget: the most Runs this Loop may open for one Item before the opera
 max_cycles: 5
 ```
 
+### `permissions`
+
+What the Loop's Attempts may do to their repository ([`LoopPermissions`](https://github.com/basaltbytes/usine/blob/main/packages/core/src/loop.ts)). The default, `write`, lets them push branches and open and update pull requests. Set `read` for a Loop whose Agent must not change the repository, such as a review Loop:
+
+- The Attempt's GitHub token has `contents: read`, so GitHub refuses a push, a merge, or a branch update made with it. This token is what keeps the Agent from changing the repository. The token keeps `pull_requests: write` and `issues: write`, so the Agent can still post reviews and comments with `gh pr review`, `gh pr comment`, and `gh issue comment`, and change labels. The sets for both levels are [`WORKER_TOKEN_PERMISSIONS`](https://github.com/basaltbytes/usine/blob/main/packages/github/src/access.ts).
+- The Attempt's checkout has a pre-push hook that stops `git push` with `usine refused this push: the Loop <name> has permissions: read, so its Attempts cannot push to the repository.`, so the Agent reads why instead of GitHub's 403. The hook is a message, not a control: `git push --no-verify` skips it. The Attempt's git commands run this hook instead of the repository's own hooks.
+- An Attempt that ends without success leaves no salvage branch: its checkout is removed.
+
+usine records the permission level with each Event, so a Run keeps the level its Loop had when the Event matched. A change to the file applies to Events that match after the next reload.
+
+An exe.dev Worker uses exe.dev's GitHub integration, which grants the access of exe.dev's own GitHub App and cannot narrow it to `read`. An exe.dev Worker therefore refuses the Attempts of a `read` Loop before it attaches the integration: the Attempt fails with a message that names the Worker and the Loop, usine does not retry it, and the failed Run shows in **Needs you**. Run `read` Loops on a local or SSH Worker.
+
+Two gaps remain. On the local Worker, the Agent runs as your Unix user, so it can read GitHub credentials in your home directory, such as gh's own login, and push with them ([#384](https://github.com/basaltbytes/usine/issues/384)). On an SSH Worker, an Attempt can read the token or caller token of another Attempt running on the same machine at the same time ([#231](https://github.com/basaltbytes/usine/issues/231), [#243](https://github.com/basaltbytes/usine/issues/243)), so a `read` Attempt that runs beside a `write` one can reach access that pushes.
+
+```yaml title="loops/review-pr.md"
+permissions: read
+```
+
 ## The body: prompt template
 
 Everything after the closing `---` line is the prompt template. It must contain at least one non-whitespace character. When a trigger matches, usine renders the template into the Run's task.
@@ -229,6 +248,7 @@ selector:
   tags: [web]
 step: review
 agent: reviewer
+permissions: read
 ---
 Review pull request #{{ item.number }} at commit {{ item.headRefOid }} with the repository's `code-review` skill.
 

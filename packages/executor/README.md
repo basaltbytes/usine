@@ -29,6 +29,14 @@ execution; preparation and resource cleanup are outside that time budget. Both
 ceilings are optional; an absent one leaves that half of the runaway guard unarmed,
 and an armed one steers the parent session once at 80% of its limit.
 
+`CheckoutRequest.permissions` is the Attempt's Loop permission level. A `read`
+Attempt's credential is minted with `contents: read`, so it cannot push; an exe.dev
+Worker, whose integration cannot grant that, refuses the Attempt with a `credentials`
+`WorkerCapabilityError` before it attaches the integration. A `read` checkout also
+gets a pre-push hook that stops `git push` with a message naming the Loop, so the
+Agent reads why instead of GitHub's 403; `git push --no-verify` skips it, and the
+token is what refuses the push. A `read` Attempt is never salvaged.
+
 An Attempt that ends without a successful result is salvaged before its worktree is
 removed: uncommitted changes are committed as `wip(usine): salvage attempt <id>` and
 HEAD is pushed to `CheckoutRequest.salvageRef` with the Worker's credentials. The

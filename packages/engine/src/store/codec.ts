@@ -6,7 +6,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { Event, DedupKey, EventId } from "@usine/core/event";
-import { ApprovalRequirement, LoopName } from "@usine/core/loop";
+import { ApprovalRequirement, LoopName, LoopPermissions } from "@usine/core/loop";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { OperatorLogin } from "@usine/core/operator";
@@ -32,6 +32,7 @@ export const EventRouteRow = Schema.Struct({
   loop: LoopName,
   step: StepName,
   approval: ApprovalRequirement,
+  permissions: LoopPermissions,
   cycleLimit: Schema.NullOr(CycleLimit),
   cycleGeneration: CycleGeneration,
   repository: RepositoryName,
@@ -146,6 +147,7 @@ export const submissionFromRow = (row: EventRouteRow): Submission =>
     loop: row.loop,
     step: row.step,
     approval: row.approval,
+    permissions: row.permissions,
     cycleLimit: Option.fromNullishOr(row.cycleLimit),
     cycleGeneration: row.cycleGeneration,
     repository: row.repository,

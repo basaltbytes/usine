@@ -1,4 +1,5 @@
 import { Schema } from "effect";
+import type { LoopPermissions } from "../loop.ts";
 import { CommitSha, safeSegment, type RepositoryName } from "../repository.ts";
 import type { RunId } from "../run/run.ts";
 import type { WorkerName } from "../worker.ts";
@@ -41,6 +42,8 @@ export interface AttemptRecovery {
   readonly worker: WorkerName;
   readonly repository: RepositoryName;
   readonly ref: SalvageRef;
+  /** The permission level of the Attempt's Loop; a `read` Attempt's leftover checkout is removed rather than salvaged. */
+  readonly permissions: LoopPermissions;
   /** The Attempt delivered its result, so a leftover checkout is removed rather than salvaged. */
   readonly succeeded: boolean;
   /** The Attempt has no outcome yet: an orchestrator restart may reattach it if its parent task is still live. */

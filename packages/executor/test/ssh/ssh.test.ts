@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
+import { LoopName } from "@usine/core/loop";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
@@ -12,6 +13,7 @@ import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
   CREDENTIALS,
   DESTINATION,
+  GIT_DIRECTORY,
   KILL_CHILDREN,
   TEST_AGENT,
   TOKEN_PREFIX,
@@ -173,6 +175,82 @@ describe("SSH Worker", () => {
   });
 
   it.effect(
+    "gives a read Loop's Attempt a read token and a pre-push hook that explains a refused push, and pushes no salvage",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return fails(context);
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        machine.state.salvage = "dirty";
+        const prepared = yield* executor.prepare(
+          new CheckoutRequest({
+            ...request,
+            loop: LoopName.make("review-pr"),
+            permissions: "read",
+          }),
+        );
+        const recorded: Array<AttemptSalvage> = [];
+        yield* prepared
+          .launch({
+            append: () => Effect.void,
+            salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+          })
+          .pipe(Effect.flip);
+        assert.deepStrictEqual(credentials.permissions, ["read"]);
+
+        const hooks = `${GIT_DIRECTORY}/usine-hooks`;
+        const hook = machine.state.calls.find(({ line }) => line.includes(`'${hooks}/pre-push'`));
+        assert(hook !== undefined, "the hook is written into the checkout's own git directory");
+        assert.include(hook.line, "#!/bin/sh");
+        assert.include(hook.line, "the Loop review-pr has permissions: read");
+        assert.include(hook.line, "exit 1");
+        assert(given !== undefined);
+        assert.strictEqual(given.environment.GIT_CONFIG_COUNT, "3");
+        assert.strictEqual(given.environment.GIT_CONFIG_KEY_2, "core.hooksPath");
+        assert.strictEqual(given.environment.GIT_CONFIG_VALUE_2, hooks);
+
+        const lines = machine.state.calls.map(({ line }) => line);
+        assert(!lines.some((line) => line.includes("'push'")), "no salvage is pushed");
+        assert(lines.some((line) => line.includes("'worktree' 'remove'")));
+        assert.deepStrictEqual(recorded, []);
+      }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, parent)));
+    },
+  );
+
+  it.effect("removes a read Loop's leftover checkout without a credential or salvage", () => {
+    const machine = fakeMachine();
+    const credentials = mintingProvider();
+    machine.state.cacheExists = true;
+    machine.state.salvage = "dirty";
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      const recorded: Array<AttemptSalvage> = [];
+      yield* executor.recover(
+        {
+          attemptId: request.attemptId,
+          repository: request.repository,
+          worker: WORKER,
+          ref: request.salvageRef,
+          permissions: "read",
+          succeeded: false,
+          open: false,
+        },
+        (salvage) => Effect.sync(() => void recorded.push(salvage)),
+      );
+      const lines = machine.state.calls.map(({ line }) => line);
+      assert(lines.some((line) => line.includes("'worktree' 'remove'")));
+      assert(!lines.some((line) => line.includes("'push'")));
+      assert.deepStrictEqual(recorded, []);
+      assert.deepStrictEqual(credentials.minted, []);
+    }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials)));
+  });
+
+  it.effect(
     "recovers a crashed Attempt's checkout with a fresh credential and removes stale ones first",
     () => {
       const machine = fakeMachine();
@@ -190,6 +268,7 @@ describe("SSH Worker", () => {
             repository: request.repository,
             worker: WORKER,
             ref: request.salvageRef,
+            permissions: "write",
             succeeded: false,
             open: false,
           },

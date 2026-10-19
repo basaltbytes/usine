@@ -193,6 +193,8 @@ export const stepExecutorLayer = (
             attemptId: execution.attempt.id,
             runId: execution.run.id,
             worker: execution.attempt.worker,
+            loop: execution.run.loop,
+            permissions: execution.permissions,
             reattach: execution.reattach,
           });
           const { settings } = (yield* instances.get).config;
@@ -202,6 +204,8 @@ export const stepExecutorLayer = (
                 attemptId: execution.attempt.id,
                 worker: execution.attempt.worker,
                 repository: execution.repository,
+                loop: execution.run.loop,
+                permissions: execution.permissions,
                 revision: execution.revision,
                 payload: execution.event.payload,
                 task: execution.task,

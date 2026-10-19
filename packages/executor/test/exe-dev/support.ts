@@ -4,6 +4,7 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
@@ -225,6 +226,11 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
           state.cacheExists && !(state.worktreeGone && line.includes(WORKTREE)) ? 0 : 1,
         );
       if (line.startsWith("exec 'git' '-C' ")) {
+        if (line.includes("'--absolute-git-dir'"))
+          return oneShotHandle(
+            "/home/exedev/.usine/workers/remote-one/repos/acme_demo.git/worktrees/remote-run_execute_1\n",
+            0,
+          );
         if (line.includes("'rev-parse'")) {
           return oneShotHandle(`${state.salvageCommitted ? SALVAGE_COMMIT : COMMIT}\n`, 0);
         }
@@ -272,6 +278,8 @@ export const request = new CheckoutRequest({
   attemptId: ATTEMPT_ID,
   worker: WORKER,
   repository: REPOSITORY,
+  loop: LoopName.make("implement"),
+  permissions: "write",
   revision: REVISION,
   payload: { issue: { number: 42 } },
   task: TASK,

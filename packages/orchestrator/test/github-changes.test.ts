@@ -112,6 +112,7 @@ const snapshot = (attempts: ReadonlyArray<Attempt>) =>
     task: AttemptTask.make("Implement #247."),
     agent,
     parentModel: Option.none(),
+    permissions: "write",
   });
 const reviewRun = new RunSummary({
   itemKey,

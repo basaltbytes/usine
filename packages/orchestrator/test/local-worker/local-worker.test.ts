@@ -7,6 +7,7 @@ import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/atte
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import * as RunState from "@usine/core/run/state";
 import { Run, RunId } from "@usine/core/run";
@@ -359,6 +360,7 @@ describe("local worker", () => {
             task: selected.task,
             agent: selected.agent,
             parentModel: selected.parentModel,
+            permissions: selected.permissions,
             resume: Option.none(),
           });
           const running = yield* scheduler
@@ -447,6 +449,8 @@ describe("local worker", () => {
                 attemptId: AttemptId.make(`prepare-${phase}/run/1`),
                 worker: WorkerName.make("local"),
                 repository: RepositoryName.make("acme/demo"),
+                loop: LoopName.make("local-worker"),
+                permissions: "write",
                 revision: RepositoryRevision.make("main"),
                 payload: {},
                 task: AttemptTask.make("Exercise interrupted preparation"),
@@ -519,6 +523,8 @@ describe("local worker", () => {
             attemptId: AttemptId.make("unlaunched/run/1"),
             worker: WorkerName.make("local"),
             repository: RepositoryName.make("acme/demo"),
+            loop: LoopName.make("local-worker"),
+            permissions: "write",
             revision: RepositoryRevision.make(prHead),
             payload: {},
             task: AttemptTask.make("Prepare without launching"),

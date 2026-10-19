@@ -85,7 +85,7 @@ export const githubLayer = GitHubApp.layer.pipe(
 
 Call `GitHubApp.projectAccess(registry)` before scheduling work. Each result is either a `CoveredProject`, which carries the repository ID needed for scoped minting, or a `ProjectNotInstalledError`. A missing repository does not block covered projects.
 
-Pass a `CoveredProject` to `GitHubApp.workerToken`. GitHub must confirm in the token response that the token covers exactly that repository ID; otherwise the call fails with `InvalidGitHubResponseError`.
+Pass a `CoveredProject` and the Attempt's Loop permission level to `GitHubApp.workerToken`. GitHub must confirm in the token response that the token covers exactly that repository ID; otherwise the call fails with `InvalidGitHubResponseError`. `WORKER_TOKEN_PERMISSIONS` lists the repository permissions each level requests: a `read` token has `contents: read`, so it cannot push, and keeps `pull_requests: write` and `issues: write` for reviews and comments.
 
 ## Poll repository changes
 

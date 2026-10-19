@@ -1,4 +1,5 @@
 import type { AttemptId } from "@usine/core/attempt";
+import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
 import { Clock, DateTime, Effect, Redacted, SynchronizedRef } from "effect";
 import type {
@@ -21,7 +22,8 @@ interface RenewableCredential<A, E> {
 }
 
 /**
- * Issues the Attempt's single-repository token, hands it with its expiry to
+ * Issues the Attempt's single-repository token at the level of its Loop
+ * `permissions`, hands it with its expiry to
  * `publish`, and keeps publishing a fresh one before it expires until the
  * caller's scope closes; every issued token is then removed from its
  * `Redacted` wrapper, so `Redacted.value` on it throws.
@@ -32,9 +34,10 @@ export const renewableCredential = Effect.fn("Executor.renewableCredential")(fun
   issue: CredentialProvider["Service"]["issue"],
   repository: RepositoryName,
   attemptId: AttemptId,
+  permissions: LoopPermissions,
   publish: (credential: WorkerCredential) => Effect.Effect<A, E>,
 ) {
-  yield* Effect.annotateCurrentSpan({ repository, attemptId });
+  yield* Effect.annotateCurrentSpan({ repository, attemptId, permissions });
   const issued = new Set<Redacted.Redacted<string>>();
   yield* Effect.addFinalizer(() =>
     Effect.sync(() => {
@@ -42,13 +45,14 @@ export const renewableCredential = Effect.fn("Executor.renewableCredential")(fun
     }),
   );
   const publishFresh = Effect.fn("Executor.publishCredential")(function* () {
-    yield* Effect.annotateCurrentSpan({ repository, attemptId });
-    const credential = yield* issue(repository, attemptId);
+    yield* Effect.annotateCurrentSpan({ repository, attemptId, permissions });
+    const credential = yield* issue(repository, attemptId, permissions);
     issued.add(credential.value);
     const published = yield* publish(credential);
     yield* Effect.logInfo("Published renewed Attempt repository credential", {
       repository,
       attemptId,
+      permissions,
       expiresAt: DateTime.formatIso(credential.expiresAt),
     });
     return { expiresAt: credential.expiresAt, published };
