@@ -8,7 +8,7 @@ sidebar:
 import { FileTree, Steps, TabItem, Tabs } from "@astrojs/starlight/components";
 
 :::note
-This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16.
+This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with the executor's own forward to the Gateway's admin API from [#249][] (2026-10-19).
 :::
 
 A Worker is the machine where an Attempt's checkout is and where its children run. The Pi parent always runs in the orchestrator. The operating recipes (creating machines, logging in to the harnesses, the SSH configuration, deleting) are in [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) and [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md); this page explains what the code does.
@@ -17,12 +17,12 @@ A Worker is the machine where an Attempt's checkout is and where its children ru
 
 `Worker` is a union of three classes ([factory.ts:150][]). Without a `workers` key the factory has one Worker named `local` ([factory.ts:214][]).
 
-| `kind`               | Fields                                                                                                                | Executor              | Children run                                                                                          | GitHub credential on the machine                      |
-| -------------------- | --------------------------------------------------------------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
-| `local`              | `name`, `max_concurrent_attempts` (default 1)                                                                         | [local.ts][]          | as processes on the orchestrator's machine                                                            | token file in a private temporary directory           |
-| `ssh`                | `name`, `destination`, `root`, optional `identity_file`, `port`, `max_concurrent_attempts`, `gateway`                 | [ssh/ssh.ts][]        | one SSH command each                                                                                  | token file under `<root>/workers/<name>/credentials/` |
-| `ssh` with `gateway` | `gateway.domain`, `gateway.admin_url`, `gateway.admin_token_env`, optional `gateway.llm_providers` (only `anthropic`) | the same SSH executor | one SSH command each; the operator's SSH configuration routes it through the Gateway with `ProxyJump` | none; a caller token in the SSH session's environment |
-| `exe.dev`            | `name`, `max_concurrent_attempts`                                                                                     | [exe-dev.ts][]        | one SSH command each on the VM                                                                        | none; exe.dev's edge adds it                          |
+| `kind`               | Fields                                                                                                                                                          | Executor              | Children run                                                                                          | GitHub credential on the machine                      |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------- |
+| `local`              | `name`, `max_concurrent_attempts` (default 1)                                                                                                                   | [local.ts][]          | as processes on the orchestrator's machine                                                            | token file in a private temporary directory           |
+| `ssh`                | `name`, `destination`, `root`, optional `identity_file`, `port`, `max_concurrent_attempts`, `gateway`                                                           | [ssh/ssh.ts][]        | one SSH command each                                                                                  | token file under `<root>/workers/<name>/credentials/` |
+| `ssh` with `gateway` | `gateway.domain`, `gateway.destination`, `gateway.admin_token_env`, optional `gateway.admin_port` (default 7070) and `gateway.llm_providers` (only `anthropic`) | the same SSH executor | one SSH command each; the operator's SSH configuration routes it through the Gateway with `ProxyJump` | none; a caller token in the SSH session's environment |
+| `exe.dev`            | `name`, `max_concurrent_attempts`                                                                                                                               | [exe-dev.ts][]        | one SSH command each on the VM                                                                        | none; exe.dev's edge adds it                          |
 
 The two `ssh` forms, as they appear in the Hetzner READMEs:
 
@@ -50,18 +50,17 @@ workers:
     root: /home/usine/.usine
     gateway:
       domain: gw.internal
-      admin_url: http://127.0.0.1:7070
+      destination: usine-gateway
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
 ```
 
-`destination` is a `Host` alias. The orchestrator user's SSH configuration routes the connection to the Worker through the Gateway and sets up the forward to the admin API:
+Both `destination` keys are `Host` aliases. The orchestrator user's SSH configuration routes the connection to the Worker through the Gateway. The executor opens its own forward to the admin API through `gateway.destination` (see [the forward to the admin API](#the-forward-to-the-admin-api)), so the Gateway's entry has no `LocalForward`:
 
 ```ssh-config title="~/.ssh/config"
 Host usine-gateway
   HostName 203.0.113.7
   User root
   IdentityFile ~/.ssh/usine_worker
-  LocalForward 7070 127.0.0.1:7070
 
 Host worker-one
   HostName 10.42.0.3
@@ -132,6 +131,29 @@ The children's environment has two parts ([gateway/environment.ts:88][]). The ex
 
 The clone URL is `http://git.<domain>/<owner>/<repo>.git` ([gateway/environment.ts:33][]).
 
+#### The forward to the admin API
+
+The admin API listens on the Gateway's loopback interface only. When its layer is built, the SSH executor opens one forward to each Gateway, which the Workers behind that Gateway share ([gateway/forward.ts][]):
+
+```sh
+ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -N \
+  -o ExitOnForwardFailure=yes -o ControlPath=none \
+  -o PermitLocalCommand=yes -o 'LocalCommand=echo usine-gateway-forward-open' \
+  -L 127.0.0.1:<port>:127.0.0.1:<admin_port> <gateway.destination>
+```
+
+`<port>` is a free port on 127.0.0.1 that the kernel picks for each SSH client, so the forward never competes with one the operator opens by hand. The client prints the `LocalCommand` line once its listener is up, and `ExitOnForwardFailure` makes it exit when it can't listen. A `LocalForward` in the SSH configuration for the Gateway's host also applies to this client, which exits when that port is taken. Every log line names the Gateway by its destination.
+
+| When                                                                    | The executor                                                                                 | Log                                                                                                  |
+| ----------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| the client prints the line                                              | sends admin requests to its port                                                             | `Opened the forward to the Gateway's admin API`, or `Reopened ...` with `closedSince`                |
+| the client exits                                                        | starts another client after a pause of 1, 2, 4 seconds and so on, at most one minute         | `The forward to the Gateway's admin API exited; reopening it after a pause`, with ssh's error output |
+| a client exits before the line, or no line comes within 30 seconds      | the same, with the pause doubled                                                             | `Could not open the forward to the Gateway's admin API; trying again after a pause`                  |
+| an admin request finds the forward closed, or gets no answer through it | ends the client or the pause, starts another client at once, and sends the request once more | `A Gateway admin request did not get through; reopening the forward and sending it once more`        |
+| the executor's layer closes                                             | ends the client                                                                              | `Closed the forward to the Gateway's admin API with the executor`                                    |
+
+A request that fails a second time fails as it did before the forward: an attach fails the Attempt with `CredentialUnavailableError`, and a renewal is tried again 30 seconds later. While the forward is closed, the error says since when, for example `the forward through usine-gateway is closed since 2026-10-19T08:12:03.000Z: ssh: connect to host 203.0.113.7 port 22: Connection timed out`. The executor keeps reopening the forward for as long as it runs.
+
 ### Shared by every remote kind
 
 `remoteExecutorFor` ([remote.ts:44][]) contains the checkout, salvage, recovery, and reattach code that SSH and exe.dev share. Each Claude Code or Codex child is one SSH command with a pid file `<worktree>.child-<n>.pid` ([child-host.ts:96][]). `CHILD_KILL_SCRIPT` sends TERM, waits up to five seconds, then sends KILL, before the worktree is kept or removed ([child-host.ts:106][]).
@@ -149,7 +171,8 @@ flowchart TD
   root --> sgit["git --version"]
   sgit --> gw{"gateway?"}
   gw -->|no| sbrain["each brain over SSH"]
-  gw -->|yes| admin["the admin API accepts<br/>the admin token"]
+  gw -->|yes| forward["the executor's forward<br/>to the admin API opens"]
+  forward --> admin["the admin API accepts<br/>the admin token"]
   admin --> sent["sshd accepts the<br/>sent variables"]
   sent --> curl["curl to git.domain returns<br/>missing-caller-token"]
   curl --> gbrain["each brain behind<br/>the Gateway"]
@@ -168,11 +191,11 @@ flowchart TD
   harness -->|pi| refused["refused: Pi children<br/>do not run remotely"]
 ```
 
-| Worker             | Checks                                                                                                                                                                                                                                                                                                                                                                                                   | Code                                                      |
-| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| local              | `git --version`; each brain where children run, with the child's environment                                                                                                                                                                                                                                                                                                                             | [local.ts:256][], [agents/src/preflight/preflight.ts][]   |
-| ssh                | SSH connects (`true`); `root` is a writable directory; `git --version`; each brain over SSH; Pi is refused on a remote machine                                                                                                                                                                                                                                                                           | [ssh/preflight.ts:31][]                                   |
-| ssh with a Gateway | The checks above, plus: the admin API accepts the admin token; sshd accepts the variables that contain the caller token; `curl http://git.<domain>/` from the machine is refused because it has no caller token; for each harness that uses its login on the machine, the login's hosts respond through the forward proxy; only the Claude Code binary is checked when the Gateway has the Anthropic key | [gateway/preflight.ts:47][], [gateway/preflight.ts:162][] |
+| Worker             | Checks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          | Code                                                      |
+| ------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
+| local              | `git --version`; each brain where children run, with the child's environment                                                                                                                                                                                                                                                                                                                                                                                                                                    | [local.ts:256][], [agents/src/preflight/preflight.ts][]   |
+| ssh                | SSH connects (`true`); `root` is a writable directory; `git --version`; each brain over SSH; Pi is refused on a remote machine                                                                                                                                                                                                                                                                                                                                                                                  | [ssh/preflight.ts:31][]                                   |
+| ssh with a Gateway | The checks above, plus: the executor's forward to the admin API opens, or the error gives the `ssh` command to run to see why; the admin API accepts the admin token; sshd accepts the variables that contain the caller token; `curl http://git.<domain>/` from the machine is refused because it has no caller token; for each harness that uses its login on the machine, the login's hosts respond through the forward proxy; only the Claude Code binary is checked when the Gateway has the Anthropic key | [gateway/preflight.ts:47][], [gateway/preflight.ts:162][] |
 
 Local and direct SSH preflight don't check the GitHub credential. Only the exe.dev preflight raises the `credentials` capability ([exe-dev/preflight.ts:123][], [#278][]).
 
@@ -186,7 +209,7 @@ The orchestrator connects to the Worker and the admin API through the Gateway's 
 flowchart LR
   subgraph orchestrator["Orchestrator machine"]
     executor["executor"]
-    forward["local forward<br/>127.0.0.1:7070"]
+    forward["the executor's forward<br/>127.0.0.1, a port<br/>the kernel picks"]
   end
   subgraph gateway["Gateway VM"]
     sshd["sshd :22"]
@@ -196,7 +219,7 @@ flowchart LR
     worker["Worker VM<br/>sshd :22"]
   end
   executor -->|"attach, renew, detach,<br/>list: bearer admin token"| forward
-  forward -->|"ssh -L, kept open<br/>by the operator"| sshd
+  forward -->|"ssh -N -L, reopened<br/>by the executor"| sshd
   sshd --> adminapi
   executor -->|"ssh -J, caller token<br/>in SendEnv"| sshd
   sshd -->|"SSH into the private<br/>network only"| worker
@@ -449,7 +472,7 @@ sequenceDiagram
   O->>A: DELETE /v1/attachments/id when the Attempt's scope closes
 ```
 
-The orchestrator connects to the admin API through the SSH forward that the operator keeps open.
+The orchestrator connects to the admin API through its own SSH forward to the Gateway, which it reopens when it closes.
 
   </TabItem>
   <TabItem label="exe.dev">
@@ -475,7 +498,7 @@ No token goes through the orchestrator: each repository needs a persistent exe.d
   </TabItem>
 </Tabs>
 
-The orchestrator reads the Gateway's admin token once at startup, from the environment variable named by `admin_token_env`. If the variable is unset, startup stops with a `gateway` capability error ([orchestrator/src/ssh.ts:27][]). The orchestrator doesn't open the SSH forward to the admin API itself ([#249][]).
+The orchestrator reads the Gateway's admin token once at startup, from the environment variable named by `admin_token_env`. If the variable is unset, startup stops with a `gateway` capability error ([orchestrator/src/ssh.ts:27][]). The executor opens the SSH forward to the admin API itself; see [the forward to the admin API](#the-forward-to-the-admin-api).
 
 ## Harness logins on the Worker
 
@@ -594,6 +617,7 @@ A Worker behind the Gateway has no time source ([#254][]), and you must apply in
 [gateway/environment.ts:33]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L33
 [gateway/environment.ts:42]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L42
 [gateway/environment.ts:88]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L88
+[gateway/forward.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/gateway/forward.ts
 [gateway/preflight.ts:47]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/preflight.ts#L47
 [gateway/preflight.ts:162]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/preflight.ts#L162
 [exe-dev.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/exe-dev/exe-dev.ts

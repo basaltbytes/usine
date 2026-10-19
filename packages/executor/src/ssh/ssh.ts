@@ -14,8 +14,14 @@ import { sshCredentialsFor } from "./credentials.ts";
 import { gatewayAdminFor } from "./gateway/admin.ts";
 import { gatewayAttachmentsFor } from "./gateway/attachments.ts";
 import { gatewayRepositoryUrl } from "./gateway/environment.ts";
+import { type GatewayForward, gatewayForwardFor } from "./gateway/forward.ts";
 import { gatewayHarnessProbe } from "./gateway/preflight.ts";
-import type { SshExecutorOptions, SshMachine, SshWorkerAddress } from "./model.ts";
+import type {
+  SshExecutorOptions,
+  SshMachine,
+  SshWorkerAddress,
+  SshWorkerGateway,
+} from "./model.ts";
 import { sshPreflightFor } from "./preflight.ts";
 
 /** The SSH client for one Worker: the shared options, then its own port and key. */
@@ -38,12 +44,30 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     const base = options.ssh ?? DEFAULT_SSH;
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length)
       return yield* Effect.die(new Error("SshExecutorOptions.workers contains duplicate names"));
+    const forwards = new Map<string, GatewayForward>();
+    const forwardTo = Effect.fn("SshExecutor.forwardTo")(function* (settings: SshWorkerGateway) {
+      const key = `${settings.destination} ${String(settings.adminPort)}`;
+      const existing = forwards.get(key);
+      if (existing !== undefined) return existing;
+      const forward = yield* gatewayForwardFor(
+        spawner,
+        commands.shellFor(base, settings.destination),
+        settings.destination,
+        settings.adminPort,
+      );
+      forwards.set(key, forward);
+      return forward;
+    });
     const machines = new Map(
       yield* Effect.forEach(options.workers, (address) =>
         Effect.gen(function* () {
           const gateway = yield* Effect.transposeOption(
             Option.map(address.gateway, (settings) =>
-              Effect.map(gatewayAdminFor(address.name, settings), (admin) => ({ settings, admin })),
+              Effect.gen(function* () {
+                const forward = yield* forwardTo(settings);
+                const admin = yield* gatewayAdminFor(address.name, settings, forward);
+                return { settings, forward, admin };
+              }),
             ),
           );
           const machine: SshMachine = {
@@ -133,9 +157,11 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
  * Worker without a Gateway gets the Attempt's single-repository GitHub token
  * written beside its checkout (ADR 0026); a Worker behind a Gateway gets no
  * token, only a caller token for the attachment the executor makes on the
- * Gateway's admin API through `HttpClient` (ADR 0027). An orchestrator
- * restart reattaches a live Attempt to its checkout. Requires Node; worker
- * contracts are platform-free.
+ * Gateway's admin API through `HttpClient` (ADR 0027). The executor opens
+ * its own SSH forward to each Gateway's admin API when the layer is built,
+ * reopens it whenever its SSH client exits, and closes it with the layer. An
+ * orchestrator restart reattaches a live Attempt to its checkout. Requires
+ * Node; worker contracts are platform-free.
  */
 export const layer = (
   options: SshExecutorOptions,

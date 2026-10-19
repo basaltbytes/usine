@@ -71,6 +71,16 @@ export const GatewayDomain = Schema.String.check(
 export type GatewayDomain = typeof GatewayDomain.Type;
 
 /**
+ * The TCP port a Gateway's admin API listens on, on the Gateway's own
+ * loopback interface (`USINE_GATEWAY_ADMIN_PORT`). The executor reaches it
+ * through a forward over its SSH connection to the Gateway.
+ */
+export const GatewayAdminPort = Schema.Int.check(
+  Schema.isBetween({ minimum: 1, maximum: 65_535 }),
+).pipe(Schema.brand("GatewayAdminPort"));
+export type GatewayAdminPort = typeof GatewayAdminPort.Type;
+
+/**
  * An LLM provider whose credential the Gateway holds, so the harness that
  * uses it calls the Gateway with the Attempt's caller token instead of a
  * login on the machine: `anthropic` for Claude Code.

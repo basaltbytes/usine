@@ -151,7 +151,9 @@ A Worker whose address has a `gateway` sits on a private network behind a Gatewa
 
 The cached clone fetches `http://git.<domain>/<repository>.git`. Children, harvesting, and the executor's own git commands export the configuration that points git, gh, and package managers at the Gateway: git sends the caller token only to `git.<domain>` and rewrites `https://github.com/` there, gh uses `git.<domain>` through the Worker's socket with gh's configuration in `<root>/workers/<name>/gh`, and `HTTPS_PROXY` is the Gateway's forward proxy. When the Gateway holds the Anthropic credential, Claude Code calls `llm.<domain>/anthropic`, and preflight checks only its binary. Otherwise Claude Code, and Codex always, use the operator's login on the machine and reach their provider through the forward proxy: preflight checks the login as on a Worker without a Gateway, then that the machine gets an HTTP answer from each of the login's hosts through the proxy (`api.anthropic.com` and `platform.claude.com`, or `chatgpt.com` and `auth.openai.com`). A host the proxy refuses is a `gateway` capability error that names the host to add to the Gateway's egress allowlist. The caller token itself is in no command line: each SSH command for the Attempt sends `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, and `ANTHROPIC_AUTH_TOKEN` from the SSH client's own environment (`SendEnv`), and the machine's sshd must accept them (`AcceptEnv`).
 
-Preflight also checks, without attaching anything, that the admin API answers with the admin token, that the machine's sshd accepts those variables, and that the machine reaches `git.<domain>`, which refuses a request without a caller token. A gap is a `WorkerCapabilityError` with the `gateway` capability.
+The admin API listens on the Gateway's loopback interface. When the layer is built, the executor opens its own forward to it for each Gateway, `ssh -N -L 127.0.0.1:<port>:127.0.0.1:<adminPort> <destination>` with the same SSH command and environment as its other SSH clients, on a local port the kernel picks, and Workers behind the same Gateway share it. When the SSH client exits, the executor starts another one after a pause of one second that doubles up to one minute, and logs each open, exit, and reopen with the Gateway's destination. An admin request that finds the forward closed, or gets no answer through it, has the forward reopened at once and is sent once more; a second failure fails the request, and its message says since when the forward has been closed. The forward closes with the layer.
+
+Preflight also checks, without attaching anything, that the forward opens, giving the `ssh` command to run when it does not, that the admin API answers with the admin token, that the machine's sshd accepts those variables, and that the machine reaches `git.<domain>`, which refuses a request without a caller token. A gap is a `WorkerCapabilityError` with the `gateway` capability.
 
 The SSH layer requires a `ChildProcessSpawner`, a `CredentialProvider`, an `AttemptRuntime`, and an `HttpClient` for Gateway admin APIs.
 
@@ -168,6 +170,7 @@ const executorLayer = layer({
       identityFile: Option.some(SshIdentityFile.make("~/.ssh/usine_worker")),
       port: Option.none(),
       root: WorkerRoot.make("/home/usine/.usine"),
+      gateway: Option.none(),
     },
   ],
 })

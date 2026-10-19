@@ -21,7 +21,17 @@ import { layer as sshExecutorLayer } from "@usine/executor/ssh";
 import { GatewayAdminApi } from "@usine/gateway/admin";
 import { GitHubApp } from "@usine/github/github-app";
 import { localSecretsLayer } from "@usine/github/local-secrets";
-import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema, Stream } from "effect";
+import {
+  Config,
+  DateTime,
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
@@ -414,8 +424,8 @@ const gatewaySettings = Effect.all({
     Config.withDefault("/home/usine/.usine"),
   ),
   domain: Config.string("USINE_GATEWAY_INTEGRATION_DOMAIN").pipe(Config.withDefault("gw.internal")),
-  adminUrl: Config.string("USINE_GATEWAY_INTEGRATION_ADMIN_URL").pipe(
-    Config.withDefault("http://127.0.0.1:7070"),
+  gateway: Config.string("USINE_GATEWAY_INTEGRATION_GATEWAY").pipe(
+    Config.withDefault("usine-gateway"),
   ),
   repository: Config.string("USINE_GATEWAY_INTEGRATION_REPO"),
   revision: Config.string("USINE_GATEWAY_INTEGRATION_REVISION").pipe(Config.withDefault("main")),
@@ -435,7 +445,7 @@ const gatewayConfigFor = (values: Effect.Success<typeof gatewaySettings>) =>
         root: values.root,
         gateway: {
           domain: values.domain,
-          admin_url: values.adminUrl,
+          destination: values.gateway,
           admin_token_env: "USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN",
         },
       },
@@ -452,6 +462,46 @@ const gatewaySshFor = (values: Effect.Success<typeof gatewaySettings>) => ({
       onSome: (file) => ["-F", file],
     }),
   ],
+});
+
+/** The local port of the test's own forward to the admin API, which checks the Gateway after the Attempt. */
+const CHECK_PORT = 17070;
+
+/**
+ * The attachments the Gateway holds, listed through a forward the test opens
+ * itself with the Worker's SSH options, separate from the executor's.
+ */
+const gatewayAttachments = Effect.fn("GatewayIntegration.attachments")(function* (
+  values: Effect.Success<typeof gatewaySettings>,
+) {
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  yield* spawner.spawn(
+    ChildProcess.make(
+      "ssh",
+      [
+        ...gatewaySshFor(values).args,
+        "-N",
+        "-o",
+        "ExitOnForwardFailure=yes",
+        "-L",
+        `127.0.0.1:${String(CHECK_PORT)}:127.0.0.1:7070`,
+        values.gateway,
+      ],
+      { detached: false, forceKillAfter: "5 seconds", stdin: "ignore" },
+    ),
+  );
+  const admin = yield* HttpApiClient.make(GatewayAdminApi, {
+    baseUrl: `http://127.0.0.1:${String(CHECK_PORT)}`,
+    transformClient: HttpClient.mapRequest(
+      HttpClientRequest.bearerToken(
+        yield* Config.redacted("USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN"),
+      ),
+    ),
+  });
+  // The forward listens once its SSH connection is up.
+  return yield* admin.attachments
+    .list()
+    .pipe(Effect.retry({ schedule: Schedule.spaced("1 second"), times: 20 }));
 });
 
 /** What the scripted parent saw on a Worker behind a Gateway. */
@@ -645,15 +695,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           assert(host !== undefined);
           assert.notInclude(host.ssh.args.join(" "), "ugw1.");
 
-          const admin = yield* HttpApiClient.make(GatewayAdminApi, {
-            baseUrl: values.adminUrl,
-            transformClient: HttpClient.mapRequest(
-              HttpClientRequest.bearerToken(
-                yield* Config.redacted("USINE_GATEWAY_INTEGRATION_ADMIN_TOKEN"),
-              ),
-            ),
-          });
-          const { attachments } = yield* admin.attachments.list();
+          const { attachments } = yield* gatewayAttachments(values);
           assert.deepStrictEqual(
             attachments.filter(({ worker }) => worker === GATEWAY_WORKER),
             [],

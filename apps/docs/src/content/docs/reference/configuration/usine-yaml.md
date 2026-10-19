@@ -80,7 +80,7 @@ workers:
     max_concurrent_attempts: 2
     gateway:
       domain: gateway.example.com
-      admin_url: http://127.0.0.1:7070
+      destination: usine-gateway
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
       llm_providers: [anthropic]
   - name: worker-2
@@ -284,7 +284,8 @@ A Worker behind a Gateway has no GitHub token on its machine. The executor attac
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `domain` | string | required | The Gateway's private DNS domain, in lowercase. The machine resolves `git.<domain>` for GitHub, `llm.<domain>` for LLM providers, and `<domain>` for the forward proxy. |
-| `admin_url` | URL | required | The URL the orchestrator uses for the Gateway's admin API, often a local port forward. `http` or `https`, without a user name or password. |
+| `destination` | string | required | What the orchestrator's `ssh` client connects to for the Gateway: a host name or address, optionally prefixed by `user@`, or a `Host` alias from the SSH configuration. The executor opens its own forward to the admin API through it and opens it again whenever it closes. |
+| `admin_port` | integer, 1 to 65535 | `7070` | The admin API's port on the Gateway's loopback interface (`USINE_GATEWAY_ADMIN_PORT` on the Gateway). |
 | `admin_token_env` | string | required | Name of the orchestrator's environment variable that contains the admin token. The file never contains the token itself. |
 | `llm_providers` | list | `[]` | Providers whose credential is stored on the Gateway. The only value is `anthropic` (Claude Code). |
 
@@ -300,7 +301,7 @@ workers:
     root: /home/usine/.usine
     gateway:
       domain: gateway.example.com
-      admin_url: http://127.0.0.1:7070
+      destination: usine-gateway
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
       llm_providers: [anthropic]
 ```

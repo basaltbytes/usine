@@ -3,6 +3,7 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import {
+  GatewayAdminPort,
   GatewayDomain,
   GatewayLlmProvider,
   SshDestination,
@@ -82,29 +83,23 @@ const EnvironmentVariableName = Schema.String.check(
   }),
 ).pipe(Schema.brand("EnvironmentVariableName"));
 
-// A user name or password in the URL would be a credential in the file and in every message that names the URL.
-const isHttpUrlWithoutCredentials = Schema.makeFilter<URL>(
-  (url) =>
-    (url.protocol === "http:" || url.protocol === "https:") &&
-    url.username === "" &&
-    url.password === "",
-  { message: "Expected an http or https URL without a user name or password" },
-);
-
 /**
  * The Gateway in front of an SSH Worker's machine on a private network
- * (ADR 0027). `domain` is the Gateway's private DNS domain. `adminUrl` is its
- * admin API as the orchestrator reaches it, usually a local forward through
- * the SSH connection to the Gateway. The admin token is read at startup from
- * the orchestrator's environment variable `adminTokenEnv`, so it is never in
- * the file. `llmProviders` names the providers whose credential the Gateway
- * holds. A harness whose provider is not listed uses the operator's login on
- * the Worker and reaches the provider through the Gateway's forward proxy;
- * Codex always does.
+ * (ADR 0027). `domain` is the Gateway's private DNS domain. `destination` is
+ * what the orchestrator's `ssh` client connects to for the Gateway, usually
+ * the Host alias the Worker's `ProxyJump` names; the executor opens its own
+ * forward through it to the admin API at `adminPort` on the Gateway's
+ * loopback interface, 7070 by default as on the Gateway. The admin token is
+ * read at startup from the orchestrator's environment variable
+ * `adminTokenEnv`, so it is never in the file. `llmProviders` names the
+ * providers whose credential the Gateway holds. A harness whose provider is
+ * not listed uses the operator's login on the Worker and reaches the provider
+ * through the Gateway's forward proxy; Codex always does.
  */
 export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/WorkerGateway")({
   domain: GatewayDomain,
-  adminUrl: Schema.URLFromString.check(isHttpUrlWithoutCredentials),
+  destination: SshDestination,
+  adminPort: GatewayAdminPort.pipe(Schema.withDecodingDefaultKey(Effect.succeed(7070))),
   adminTokenEnv: EnvironmentVariableName,
   llmProviders: Schema.Array(GatewayLlmProvider)
     .check(Schema.isUnique())
@@ -130,7 +125,7 @@ export class SshWorker extends Schema.Class<SshWorker>("@usine/config/SshWorker"
   gateway: Schema.OptionFromOptionalKey(
     WorkerGateway.pipe(
       Schema.encodeKeys({
-        adminUrl: "admin_url",
+        adminPort: "admin_port",
         adminTokenEnv: "admin_token_env",
         llmProviders: "llm_providers",
       }),

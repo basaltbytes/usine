@@ -53,7 +53,7 @@ describe("Worker engine selection", () => {
           ...unreachable,
           gateway: {
             domain: "gw.internal",
-            admin_url: "http://127.0.0.1:1",
+            destination: "usine@127.0.0.1",
             admin_token_env: "USINE_TEST_UNSET_GATEWAY_ADMIN_TOKEN",
           },
         },

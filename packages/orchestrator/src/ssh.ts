@@ -35,7 +35,8 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
             const adminToken = yield* Config.redacted(settings.adminTokenEnv);
             return {
               domain: settings.domain,
-              adminUrl: settings.adminUrl,
+              destination: settings.destination,
+              adminPort: settings.adminPort,
               adminToken,
               llmProviders: settings.llmProviders,
             };

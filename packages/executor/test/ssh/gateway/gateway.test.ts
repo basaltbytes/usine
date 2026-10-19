@@ -30,6 +30,7 @@ import {
   attachmentsInForce,
   advance,
   claimsOf,
+  eventually,
   fakeGateway,
   gatewayAddress,
   gatewayRuntime,
@@ -157,6 +158,201 @@ describe("SSH Worker behind a Gateway", () => {
       }).pipe(
         Effect.scoped,
         Effect.provide(gatewayRuntime(machine, credentials, gateway, { parent })),
+        Effect.provide(logs.layer),
+      );
+    },
+  );
+
+  it.effect(
+    "opens its own forward to the Gateway's admin API before the first attach, and closes it with the executor",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const gateway = fakeGateway(machine);
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* (yield* executor.prepare(request)).launch(sink);
+          const [forward, ...others] = machine.state.forwards;
+          assert(forward !== undefined, "the executor opened a forward");
+          assert.strictEqual(others.length, 0, "one forward serves every request");
+          const { command, args, options } = forward.command;
+          assert.strictEqual(command, "ssh");
+          assert.deepStrictEqual(
+            args.slice(0, 6),
+            ["-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "-o", "ServerAliveCountMax=4"],
+            "the SSH options of the executor's other clients",
+          );
+          assert.strictEqual(args.at(-1), "usine-gateway");
+          assert.include(args, `127.0.0.1:${String(forward.port)}:127.0.0.1:7070`);
+          assert.include(args, "ExitOnForwardFailure=yes");
+          assert.notInclude(args, "-p", "the Worker's port is not the Gateway's");
+          assert.notInclude(args, "~/.ssh/usine_worker", "nor is its key");
+          for (const name of Object.keys(options.env ?? {}))
+            assert(allowlisted.has(name), `unexpected SSH environment key: ${name}`);
+
+          const spawned = machine.state.calls.findIndex((call) => call.command === forward.command);
+          const attach = gateway.calls.find(({ method }) => method === "POST");
+          assert(attach !== undefined && attach.port === forward.port);
+          assert(attach.machineCalls > spawned, "the forward opens before the first attach");
+          assert(
+            gateway.calls.every(({ delivered }) => delivered),
+            "no request met a closed forward",
+          );
+        }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, credentials, gateway)));
+        assert(
+          machine.state.forwards.every(({ live }) => !live),
+          "the forward's SSH client ends with the executor",
+        );
+        const opened = logs.lines.find((line) =>
+          line.includes("Opened the forward to the Gateway's admin API"),
+        );
+        assert.include(opened ?? "", '"gateway":"usine-gateway"');
+      }).pipe(Effect.provide(logs.layer));
+    },
+  );
+
+  it.effect(
+    "reopens a forward whose SSH client exited after a pause, and the next Attempt attaches through it",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const gateway = fakeGateway(machine);
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [], 1);
+        const [first] = machine.state.forwards;
+        assert(first !== undefined);
+        yield* first.drop;
+        yield* eventually(() => machine.state.forwards.length === 2, "1 second");
+        const second = machine.state.forwards[1];
+        assert(second?.live === true);
+
+        yield* (yield* executor.prepare(request)).launch(sink);
+        const attach = gateway.calls.find(({ method }) => method === "POST");
+        assert(attach?.delivered === true && attach.port === second.port);
+        assert(
+          gateway.calls.every(({ delivered }) => delivered),
+          "the forward was open again before the Attempt needed it",
+        );
+        const logged = logs.lines.join("\n");
+        for (const line of [
+          "The forward to the Gateway's admin API exited; reopening it after a pause",
+          "Connection to 203.0.113.30 closed by remote host.",
+          "Reopening the forward to the Gateway's admin API",
+          "Reopened the forward to the Gateway's admin API",
+        ])
+          assert.include(logged, line);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(gatewayRuntime(machine, credentials, gateway)),
+        Effect.provide(logs.layer),
+      );
+    },
+  );
+
+  it.effect("an attach while the forward is closed reopens it at once instead of waiting", () => {
+    const machine = fakeMachine();
+    const credentials = mintingProvider();
+    const gateway = fakeGateway(machine);
+    return Effect.gen(function* () {
+      const executor = yield* Executor;
+      yield* executor.preflight(WORKER, [], 1);
+      const [first] = machine.state.forwards;
+      assert(first !== undefined);
+      yield* first.drop;
+      yield* (yield* executor.prepare(request)).launch(sink);
+      assert.strictEqual(machine.state.forwards.length, 2, "one reopen, without the clock moving");
+      const attach = gateway.calls.find(({ method }) => method === "POST");
+      assert(attach?.delivered === true && attach.port === machine.state.forwards[1]?.port);
+    }).pipe(Effect.scoped, Effect.provide(gatewayRuntime(machine, credentials, gateway)));
+  });
+
+  it.effect(
+    "sends a renewal once more through a reopened forward when the forward died without its SSH client noticing",
+    () => {
+      const machine = fakeMachine();
+      // Fifteen-minute tokens are renewed ten minutes in.
+      const credentials = mintingProvider(15 * 60_000);
+      const gateway = fakeGateway(machine);
+      const logs = capturedLogs();
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(request);
+        const [attached] = yield* attachmentsInForce;
+        assert(attached !== undefined);
+        yield* advance(gateway, 9);
+        const [first] = machine.state.forwards;
+        assert(first !== undefined);
+        first.carries = false;
+        yield* advance(gateway, 1);
+        const renewedThroughSecond = () =>
+          gateway.calls.some(
+            ({ method, port, delivered, body }) =>
+              method === "PUT" &&
+              delivered &&
+              port === machine.state.forwards[1]?.port &&
+              Option.exists(body, ({ credential }) => credential.token === `${TOKEN_PREFIX}2`),
+          );
+        yield* eventually(renewedThroughSecond);
+        assert.strictEqual(machine.state.forwards.length, 2, "one reopen");
+        assert(
+          gateway.calls.some(
+            ({ method, port, delivered }) => method === "PUT" && port === first.port && !delivered,
+          ),
+          "the first try met the dead forward",
+        );
+        const [renewed] = yield* attachmentsInForce;
+        assert.strictEqual(renewed?.id, attached.id);
+        assert(
+          renewed !== undefined && DateTime.isGreaterThan(renewed.expiresAt, attached.expiresAt),
+        );
+        const logged = logs.lines.join("\n");
+        assert.include(
+          logged,
+          "A Gateway admin request did not get through; reopening the forward and sending it once more",
+        );
+        assert.include(
+          logged,
+          "Replacing the forward to the Gateway's admin API, which a request found unanswered",
+        );
+        assert.notInclude(logged, "Attempt credential renewal failed");
+        yield* prepared.launch(sink);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(gatewayRuntime(machine, credentials, gateway)),
+        Effect.provide(logs.layer),
+      );
+    },
+  );
+
+  it.effect(
+    "fails the attach with the time the Gateway became unreachable while its forward stays closed, and keeps trying to open it",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const gateway = fakeGateway(machine);
+      const logs = capturedLogs();
+      machine.state.gatewayAcceptsSsh = false;
+      const tries = () =>
+        machine.state.calls.filter(({ command }) => command.args.includes("-N")).length;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const failure = yield* executor.prepare(request).pipe(Effect.flip);
+        assert(failure._tag === "CredentialUnavailableError", failure._tag);
+        assert.include(
+          failure.message,
+          "Could not attach on the admin API of Gateway usine-gateway for Worker eu-one: the forward through usine-gateway is closed since 1970-01-01T00:00:00.000Z: ssh: connect to host 203.0.113.30 port 22: Connection refused",
+        );
+        assert.deepStrictEqual(gateway.calls, [], "no request without a forward");
+        assert.include(logs.lines.join("\n"), '"closedSince":"1970-01-01T00:00:00.000Z"');
+        const before = tries();
+        yield* eventually(() => tries() >= before + 5, "1 minute");
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(gatewayRuntime(machine, credentials, gateway)),
         Effect.provide(logs.layer),
       );
     },
@@ -415,6 +611,35 @@ describe("SSH Worker behind a Gateway", () => {
         );
         assert.strictEqual(credentials.minted.length, 0);
       }).pipe(Effect.provide(gatewayRuntime(machine, credentials, gateway)));
+    },
+  );
+
+  it.effect(
+    "preflight reports a forward that does not open with the command to run, and passes once it opens",
+    () => {
+      const machine = fakeMachine();
+      const gateway = fakeGateway(machine);
+      machine.state.gatewayAcceptsSsh = false;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const closed = yield* executor.preflight(WORKER, [], 1).pipe(Effect.flip);
+        assert(closed._tag === "WorkerCapabilityError", closed._tag);
+        assert.strictEqual(closed.capability, "gateway");
+        assert.strictEqual(
+          closed.message,
+          "Could not open the forward to SSH Worker eu-one's Gateway admin API through usine-gateway: ssh: connect to host 203.0.113.30 port 22: Connection refused; run ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -N -o ExitOnForwardFailure=yes -L 127.0.0.1:7070:127.0.0.1:7070 usine-gateway to see why",
+        );
+        assert.deepStrictEqual(gateway.calls, [], "the admin token is not sent without a forward");
+
+        machine.state.gatewayAcceptsSsh = true;
+        yield* executor.preflight(WORKER, [], 1);
+        assert.deepStrictEqual(
+          gateway.calls.map(
+            ({ method, path, delivered }) => `${method} ${path} ${String(delivered)}`,
+          ),
+          ["GET /v1/attachments true"],
+        );
+      }).pipe(Effect.provide(gatewayRuntime(machine, mintingProvider(), gateway)));
     },
   );
 
