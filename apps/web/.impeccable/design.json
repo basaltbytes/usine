@@ -1,6 +1,6 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-10-19T07:56:47+00:00",
+  "generatedAt": "2026-10-19T12:00:00+00:00",
   "title": "Design System: usine",
   "extensions": {
     "colorMeta": {
@@ -334,7 +334,13 @@
       "laneWidth": "272px",
       "laneGap": "12px",
       "railWidth": "40px",
-      "gutter": "16px, 20px from md"
+      "gutter": "16px, 20px from md",
+      "runOutlineWidth": "288px, from lg; below lg a 36px Outline button opening a box at most 60svh tall",
+      "readerMaxWidth": "616px",
+      "readerGutter": "72px time-and-speaker column, 24px gap",
+      "readerMeasure": "504px content column, about 72 characters at 14px",
+      "readerFootBand": "40px",
+      "runDrawerMaxWidth": "448px from sm"
     }
   },
   "components": [
@@ -417,6 +423,30 @@
       "description": "The arrow between two authored lanes, named after the Loops at work on the left lane's Tasks.",
       "html": "<p class=\"ds-flow\"><span>start-dev</span><svg viewBox=\"0 0 22 8\" width=\"22\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M0.5 4h18M15.5 1l3 3-3 3\"/></svg></p>",
       "css": ".ds-flow { margin:0; display:inline-flex; align-items:center; gap:6px; font:400 12px/16px 'Inter Variable', system-ui, sans-serif; color:var(--run-active,#89b4fa); }"
+    },
+    {
+      "name": "Fold Line",
+      "kind": "custom",
+      "refersTo": "fold-line",
+      "description": "One quiet line in place of a burst of tool calls between two messages; opening it shows each call.",
+      "html": "<button class=\"ds-fold\" aria-expanded=\"false\"><svg width=\"12\" height=\"12\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M181.66 133.66l-80 80a8 8 0 0 1-11.32-11.32L164.69 128 90.34 53.66a8 8 0 0 1 11.32-11.32l80 80a8 8 0 0 1 0 11.32z\"/></svg><span>Ran 5 commands · baseline gate, pnpm lint<span class=\"ds-fold-failed\">, 1 failed</span> · <span class=\"ds-fold-time\">25s</span></span></button>",
+      "css": ".ds-fold { display:flex; align-items:center; gap:8px; width:100%; min-height:28px; padding:4px 8px; border:0; border-radius:6px; background:transparent; color:var(--muted-foreground,#a6adc8); font-family:'Inter Variable', system-ui, sans-serif; font-size:12px; line-height:16px; text-align:left; cursor:pointer; transition: color .1s, background-color .1s; } .ds-fold svg { flex-shrink:0; transition: transform .1s; } .ds-fold:hover { color:var(--foreground,#cdd6f4); background:color-mix(in oklab, var(--muted,#313244) 70%, transparent); } .ds-fold[aria-expanded=true] svg { transform: rotate(90deg); } .ds-fold:focus-visible { outline:none; box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring,#cba6f7) 70%, transparent); } .ds-fold-failed { color:var(--destructive,#f38ba8); } .ds-fold-time { font-family:'JetBrains Mono Variable', ui-monospace, monospace; font-variant-numeric: tabular-nums; }"
+    },
+    {
+      "name": "Failure Note",
+      "kind": "custom",
+      "refersTo": "failure-note",
+      "description": "A failed Attempt's typed reason and message on a red tint, with the salvage line under it.",
+      "html": "<div class=\"ds-failure-wrap\"><div class=\"ds-failure\"><p class=\"ds-failure-reason\">Agent failure</p><p class=\"ds-failure-msg\">Baseline lint and knip fail allocating a 6 GiB virtual buffer on this 4 GiB Worker.</p></div><p class=\"ds-salvage\">No salvage branch.</p></div>",
+      "css": ".ds-failure-wrap { display:flex; flex-direction:column; gap:8px; } .ds-failure { padding:8px 12px 10px; border-radius:8px; border:1px solid color-mix(in oklab, var(--destructive,#f38ba8) 25%, transparent); background:color-mix(in oklab, var(--destructive,#f38ba8) 8%, transparent); color:var(--foreground,#cdd6f4); font-family:'Inter Variable', system-ui, sans-serif; font-size:13px; line-height:20px; } .ds-failure p { margin:0; } .ds-failure-reason { font-weight:500; color:var(--destructive,#f38ba8); } .ds-salvage { margin:0; font-family:'Inter Variable', system-ui, sans-serif; font-size:12px; line-height:16px; color:var(--muted-foreground,#a6adc8); }"
+    },
+    {
+      "name": "Run Outline Item",
+      "kind": "nav",
+      "refersTo": "run-outline-item",
+      "description": "An Attempt in the Run outline: state mark, name, start time and duration; the open one lists checkpoints on a rail with the reading position marked.",
+      "html": "<nav class=\"ds-outline\"><button class=\"ds-oi\" aria-current=\"true\"><span class=\"ds-oi-dot\"></span><span class=\"ds-oi-name\">Attempt 1<svg width=\"12\" height=\"12\" class=\"ds-oi-caret\" viewBox=\"0 0 256 256\" fill=\"currentColor\" aria-hidden=\"true\"><path d=\"M181.66 133.66l-80 80a8 8 0 0 1-11.32-11.32L164.69 128 90.34 53.66a8 8 0 0 1 11.32-11.32l80 80a8 8 0 0 1 0 11.32z\"/></svg></span><span class=\"ds-oi-meta\"><span>15 Oct 21:30</span><span>25 min</span></span></button><ol class=\"ds-rail\"><li><button class=\"ds-cp\">The baseline linter is crashing...</button></li><li><button class=\"ds-cp\" aria-current=\"location\">The baseline gate is blocked by...</button></li><li><button class=\"ds-cp ds-cp-failed\">Baseline lint and knip fail...</button></li></ol></nav>",
+      "css": ".ds-outline { width:288px; padding:0 12px; font-family:'Inter Variable', system-ui, sans-serif; font-size:13px; line-height:20px; color:var(--foreground,#cdd6f4); } .ds-oi { position:relative; display:block; width:100%; padding:6px 8px 6px 24px; border:0; border-radius:6px; background:transparent; color:inherit; font:inherit; text-align:left; cursor:pointer; transition: background-color .1s; } .ds-oi:hover { background:color-mix(in oklab, var(--muted,#313244) 60%, transparent); } .ds-oi[aria-current=true] { background:var(--muted,#313244); } .ds-oi:focus-visible, .ds-cp:focus-visible { outline:none; box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring,#cba6f7) 70%, transparent); } .ds-oi-dot { position:absolute; top:12px; left:10px; width:6px; height:6px; border-radius:9999px; background:var(--destructive,#f38ba8); } .ds-oi-name { display:flex; align-items:center; justify-content:space-between; font-weight:500; } .ds-oi-caret { color:var(--muted-foreground,#a6adc8); transform: rotate(90deg); } .ds-oi-meta { display:flex; justify-content:space-between; gap:12px; font-family:'JetBrains Mono Variable', ui-monospace, monospace; font-size:12px; line-height:16px; font-variant-numeric: tabular-nums; color:var(--muted-foreground,#a6adc8); } .ds-rail { list-style:none; margin:2px 0 0 24px; padding:0 0 0 2px; border-left:1px solid var(--border, rgb(255 255 255 / 7%)); } .ds-cp { position:relative; display:block; width:100%; height:26px; padding:0 4px 0 6px; border:0; border-radius:6px; background:transparent; color:var(--muted-foreground,#a6adc8); font:inherit; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; cursor:pointer; } .ds-cp:hover { background:color-mix(in oklab, var(--muted,#313244) 60%, transparent); } .ds-cp[aria-current=location] { color:var(--foreground,#cdd6f4); font-weight:500; } .ds-cp[aria-current=location]::before { content:''; position:absolute; top:4px; bottom:4px; left:-3px; width:1px; background:var(--foreground,#cdd6f4); } .ds-cp-failed { color:var(--destructive,#f38ba8); }"
     }
   ],
   "narrative": {
@@ -454,6 +484,11 @@
         "name": "The Flat At Rest Rule",
         "body": "Nothing on the Board casts a shadow unless it floats. Hover on a card raises its ring from 7% to 15% white, not a shadow.",
         "section": "elevation"
+      },
+      {
+        "name": "The Said Once Rule",
+        "body": "A Run's reader shows each fact once: Worker and models in the Attempt's meta line, never per message; a final message that the outcome repeats only as the outcome; a parent's copy of a child's message not at all.",
+        "section": "components"
       }
     ],
     "dos": [
@@ -462,7 +497,9 @@
       "**Do** show state as a 6px dot in the state's tone beside the state's word; pulse the dot only while Running, and not under reduced motion.",
       "**Do** keep text on the 12/13/14/16/20 scale and use mono only for ids, numbers, times, and code.",
       "**Do** separate surfaces with 7% white hairlines and keep them flat; use the Raised shadow only for menus, popovers, and dragged items.",
-      "**Do** render GitHub labels as tinted pills in their own colour."
+      "**Do** render GitHub labels as tinted pills in their own colour.",
+      "**Do** set a Run's prose at 14px in the 504px reader column beside the 72px time-and-speaker gutter, and fold each burst of tool calls between messages to one fold line.",
+      "**Do** keep the reader's foot band clear for Jump to latest and new updates, so no control floats over the outcome."
     ],
     "donts": [
       "**Don't** add a second accent colour or use a state colour for decoration.",
@@ -470,7 +507,9 @@
       "**Don't** wrap Run states in pill badges or nest a filled box inside another filled box.",
       "**Don't** set headings in mono or use uppercase, letter-spaced labels above headings.",
       "**Don't** add factory imagery that carries no information; the floor plan is limited to flow arrows and dashed empty lanes.",
-      "**Don't** design screens against the light `:root` palette; it is a fallback."
+      "**Don't** design screens against the light `:root` palette; it is a fallback.",
+      "**Don't** repeat a Run's outcome, its Worker and models, or a child's final message elsewhere in the reader; see the Said Once Rule.",
+      "**Don't** put the Run drawer's summary in tabs or show the conversation in it; the conversation is on the Run page."
     ]
   }
 }
