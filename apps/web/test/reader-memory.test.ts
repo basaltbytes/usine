@@ -5,7 +5,6 @@ import { ReaderBookmark, readerMemory } from "../src/run-transcript/reader/memor
 
 const runId = RunId.make("run-one");
 const bookmark = ReaderBookmark.make({
-  filter: "tools",
   disclosures: [{ key: "call-one", open: true, groupOpen: true }],
   position: {
     _tag: "Anchor",
@@ -36,7 +35,6 @@ it("restores a Run's inspected location and keeps other Runs and latest independ
   const second = RunId.make("run-two");
   const latest = ReaderBookmark.make({
     ...bookmark,
-    filter: "messages",
     position: { _tag: "Latest" },
     disclosures: [],
   });
@@ -68,8 +66,23 @@ it("rejects invalid offsets and unknown stored fields at the storage boundary", 
   const original = browser.serialized();
   browser.replace(original.replace('"offset":-87', '"offset":1e100'));
   assert.isNull(memory.read(runId, 110));
-  browser.replace(original.replace('"filter":"tools"', '"filter":"tools","payload":"private"'));
+  browser.replace(original.replace('"readThrough":95', '"readThrough":95,"payload":"private"'));
   assert.isNull(memory.read(runId, 110));
+});
+
+it("drops version 1 bookmarks, which also stored the removed conversation filter", () => {
+  const browser = storage();
+  const memory = readerMemory(() => browser);
+  memory.write(runId, bookmark, 100);
+  browser.replace(
+    browser
+      .serialized()
+      .replace('"version":2', '"version":1')
+      .replace('"readThrough":95', '"readThrough":95,"filter":"tools"'),
+  );
+  assert.isNull(memory.read(runId, 110));
+  memory.write(runId, bookmark, 120);
+  assert.deepEqual(memory.read(runId, 130), bookmark);
 });
 
 it("bounds saved Runs and expires stale or future-dated bookmarks", () => {

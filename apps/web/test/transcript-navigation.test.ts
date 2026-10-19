@@ -22,6 +22,7 @@ import {
 } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { assert, describe, it } from "vitest";
+import { readerDocument } from "../src/run-transcript/document/model.ts";
 import { projectTranscript } from "../src/run-transcript/model.ts";
 import { locateReadingAnchor, readingRows } from "../src/run-transcript/reader/anchor.ts";
 import { ReadingAnchor } from "../src/run-transcript/reader/memory.ts";
@@ -81,25 +82,24 @@ const meter = (sequence: number) =>
       }),
     }),
   );
+const document = (events: ReadonlyArray<TranscriptEventView>) =>
+  readerDocument(projectTranscript(events, []), [], events);
 const index = (events: ReadonlyArray<TranscriptEventView>) =>
-  indexTranscriptUpdates(projectTranscript(events, []));
+  indexTranscriptUpdates(document(events));
 const through = (events: ReadonlyArray<TranscriptEventView>) => events.at(-1)?.sequence ?? null;
 
 describe("conversation update index", () => {
   it("indexes original parent and child rows once, keeping call order when results arrive", () => {
-    const projection = projectTranscript(
-      [
-        message(1),
-        started(2),
-        started(3, child),
-        message(4, child),
-        finished(5),
-        finished(6, child),
-        meter(7),
-      ],
-      [],
-    );
-    const rows = indexTranscriptUpdates(projection);
+    const events = [
+      message(1),
+      started(2),
+      started(3, child),
+      message(4, child),
+      finished(5),
+      finished(6, child),
+      meter(7),
+    ];
+    const rows = index(events);
     assert.deepEqual(
       rows.map((row) => row.sequence),
       [1, 2, 3, 4],
@@ -109,11 +109,11 @@ describe("conversation update index", () => {
       [1, 5, 6, 4],
     );
     assert.equal(new Set(rows.map((row) => row.key)).size, 4);
-    const childSession = projection.sessions.find((session) => session.session.id === child.id);
-    assert.isDefined(childSession);
     assert.deepEqual(
-      rows.map((row) => row.childKey),
-      [null, null, childSession.key, childSession.key],
+      document(events).chapters[0]?.rows.map((row) =>
+        row._tag === "Message" || row._tag === "Burst" ? row.speaker.name : null,
+      ),
+      ["Parent", "Parent", "reviewer", "reviewer"],
     );
     assert.deepEqual(
       rows.map((row) => row.isTool),
@@ -147,8 +147,6 @@ describe("conversation update index", () => {
       errors.map((row) => row.isTool),
       [true, false],
     );
-    assert.isNotNull(errors[0]?.childKey);
-    assert.isNull(errors[1]?.childKey);
   });
 });
 
@@ -225,10 +223,7 @@ it("rebuilds unread activity across cold pages without losing updates first disc
 it.each(["row", "result"] as const)(
   "recovers the previously visible tool input before restoring its %s across a page boundary",
   (surface) => {
-    const complete = readingRows(
-      projectTranscript([started(386), finished(387), message(426)], []),
-      "all",
-    );
+    const complete = readingRows(document([started(386), finished(387), message(426)]));
     const saved = complete.find((row) => row.surface === surface && row.sequence === 386);
     assert.isDefined(saved);
     const anchor = ReadingAnchor.make({
@@ -238,7 +233,7 @@ it.each(["row", "result"] as const)(
       sequence: saved.sequence,
       offset: -87,
     });
-    const partial = readingRows(projectTranscript([finished(387), message(426)], []), "all");
+    const partial = readingRows(document([finished(387), message(426)]));
     assert.deepEqual(locateReadingAnchor(anchor, partial, "available"), { _tag: "Earlier" });
     assert.deepEqual(locateReadingAnchor(anchor, complete, "available"), {
       _tag: "Row",

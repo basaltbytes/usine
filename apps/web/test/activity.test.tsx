@@ -12,6 +12,7 @@ const startedAt = "2026-09-06T12:00:00.000Z";
 const command: TranscriptTool = {
   _tag: "Tool",
   key: "command",
+  attemptId: AttemptId.make("attempt-1"),
   sequence: TranscriptSequence.make(1),
   latestSequence: TranscriptSequence.make(1),
   receivedAt: startedAt,

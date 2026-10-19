@@ -26,7 +26,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { NeedsYou } from "../needs-you/needs-you.tsx";
-import { needsYouByProject, overviewQuery } from "../overview.ts";
+import { needsYouByProject, overviewQuery, projectParams } from "../overview.ts";
 import { Suspense, lazy, useState } from "react";
 
 // The drawer bundles the transcript, Markdown, and message components, so it
@@ -53,7 +53,13 @@ const Unreachable = ({ error }: { readonly error: Error }) => {
   );
 };
 
-const Crumbs = ({ project }: { readonly project: RepositoryName | undefined }) => {
+const Crumbs = ({
+  project,
+  runId,
+}: {
+  readonly project: RepositoryName | undefined;
+  readonly runId: RunId | undefined;
+}) => {
   const matchRoute = useMatchRoute();
   const configuration = matchRoute({ to: "/configuration/loops" }) !== false;
   if (configuration)
@@ -81,8 +87,26 @@ const Crumbs = ({ project }: { readonly project: RepositoryName | undefined }) =
       </BreadcrumbItem>
       <BreadcrumbSeparator />
       <BreadcrumbItem>
-        <BreadcrumbPage>{project}</BreadcrumbPage>
+        {runId === undefined ? (
+          <BreadcrumbPage>{project}</BreadcrumbPage>
+        ) : (
+          <BreadcrumbLink
+            render={<Link to="/projects/$owner/$name" params={projectParams(project)} />}
+          >
+            {project}
+          </BreadcrumbLink>
+        )}
       </BreadcrumbItem>
+      {runId !== undefined && (
+        <>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>
+              Run <span className="font-mono text-xs">{runId.slice(0, 8)}</span>
+            </BreadcrumbPage>
+          </BreadcrumbItem>
+        </>
+      )}
     </>
   );
 };
@@ -115,7 +139,7 @@ const Shell = () => {
           <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
           <Breadcrumb>
             <BreadcrumbList>
-              <Crumbs project={project} />
+              <Crumbs project={project} runId={params.runId} />
             </BreadcrumbList>
           </Breadcrumb>
         </header>

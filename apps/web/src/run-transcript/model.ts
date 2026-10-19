@@ -1,12 +1,9 @@
-import type { AgentSession, HarnessSession } from "@usine/core/agent/session";
+import type { AgentSession, AgentSessionEvent, HarnessSession } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { Match, Option, type Schema } from "effect";
 import { brainLine, conflictingSalvageMessage, failureMessage } from "../operator-copy.ts";
 import { indexSessions, type SessionEvents, type InterventionRecord } from "./sessions.ts";
-
-/** Conversation filters hide prose or tool calls while preserving lifecycle notices. */
-export type TranscriptFilter = "all" | "messages" | "tools";
 
 interface NoticeContent {
   readonly kind: "message" | "status";
@@ -18,15 +15,27 @@ interface NoticeContent {
 
 interface TranscriptPosition {
   readonly key: string;
+  readonly attemptId: AttemptId;
   readonly sequence: TranscriptEventView["sequence"];
   /** Newest durable event represented by this row, independently of its position. */
   readonly latestSequence: TranscriptEventView["sequence"];
   readonly receivedAt: string;
 }
 
+/** What a notice reports: a session's own event, an operator input receipt, or an Attempt envelope. */
+export type NoticeOrigin =
+  | {
+      readonly _tag: "Session";
+      readonly session: AgentSession;
+      readonly event: Exclude<AgentSessionEvent["_tag"], "ToolStarted" | "ToolFinished">;
+    }
+  | { readonly _tag: "Operator"; readonly operator: string }
+  | { readonly _tag: "Envelope"; readonly payload: TranscriptEventView["payload"] };
+
 /** Prose or a lifecycle notice retained in the conversation. */
 export interface TranscriptNotice extends TranscriptPosition, NoticeContent {
   readonly _tag: "Notice";
+  readonly origin: NoticeOrigin;
 }
 
 interface ToolStart {
@@ -59,7 +68,6 @@ type SessionStatus = "Live" | "Finished" | "Stopped";
 /** One session's observed activity, scoped to its Attempt so retries never share state. */
 export interface TranscriptSession extends TranscriptPosition {
   readonly _tag: "Session";
-  readonly attemptId: AttemptId;
   readonly session: AgentSession;
   readonly harnessSession: Option.Option<HarnessSession>;
   readonly status: SessionStatus;
@@ -77,18 +85,20 @@ export interface TranscriptProjection {
 }
 
 const position = (
-  event: Pick<TranscriptEventView, "sequence" | "receivedAt">,
+  event: Pick<TranscriptEventView, "sequence" | "receivedAt" | "attemptId">,
 ): TranscriptPosition => ({
   key: `event:${event.sequence}`,
+  attemptId: event.attemptId,
   sequence: event.sequence,
   latestSequence: event.sequence,
   receivedAt: event.receivedAt,
 });
 
 const notice = (
-  event: Pick<TranscriptEventView, "sequence" | "receivedAt">,
+  event: Pick<TranscriptEventView, "sequence" | "receivedAt" | "attemptId">,
   content: NoticeContent,
-): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content });
+  origin: NoticeOrigin,
+): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content, origin });
 
 const sessionEntries = (
   group: SessionEvents,
@@ -98,13 +108,14 @@ const sessionEntries = (
   const tools = new Map<string, TranscriptTool>();
   for (const record of group.events) {
     const event = record.event;
+    const at = { ...record, attemptId: group.attemptId };
     if (event._tag === "ToolStarted" || event._tag === "ToolFinished") {
       const key = JSON.stringify([group.attemptId, group.session.id, event.callId]);
       const previous = tools.get(key);
       const start = previous?.start ?? Option.none<ToolStart>();
       tools.set(key, {
         _tag: "Tool",
-        ...position(record),
+        ...position(at),
         key,
         sequence: previous?.sequence ?? record.sequence,
         receivedAt: previous?.receivedAt ?? record.receivedAt,
@@ -161,7 +172,7 @@ const sessionEntries = (
         isError: false,
       }),
     });
-    entries.push(notice(record, content));
+    entries.push(notice(at, content, { _tag: "Session", session: group.session, event: event._tag }));
   }
   return [...entries, ...tools.values()].sort((left, right) => left.sequence - right.sequence);
 };
@@ -170,23 +181,27 @@ const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
   const { action, operator } = record.payload.intervention;
   const rejected = record.payload._tag === "InterventionRejected";
   const message = action._tag === "OperatorMessage" || action._tag === "Steer";
-  return notice(record, {
-    kind: message ? "message" : "status",
-    label: rejected
-      ? `${operator} · not delivered`
-      : message
-        ? operator
-        : action._tag === "Release"
-          ? `${operator} released the child`
-          : `${operator} paused the session`,
-    detail: rejected
-      ? `${message ? `${action.message}\n\n` : ""}${record.payload.message}`
-      : message
-        ? action.message
-        : "",
-    format: message ? "markdown" : "plain",
-    isError: rejected,
-  });
+  return notice(
+    record,
+    {
+      kind: message ? "message" : "status",
+      label: rejected
+        ? `${operator} · not delivered`
+        : message
+          ? operator
+          : action._tag === "Release"
+            ? `${operator} released the child`
+            : `${operator} paused the session`,
+      detail: rejected
+        ? `${message ? `${action.message}\n\n` : ""}${record.payload.message}`
+        : message
+          ? action.message
+          : "",
+      format: message ? "markdown" : "plain",
+      isError: rejected,
+    },
+    { _tag: "Operator", operator },
+  );
 };
 
 /** Folds durable transcript events into conversation rows without reading time or changing stored data. */
@@ -289,6 +304,7 @@ export const projectTranscript = (
             isError: false,
           }),
         }),
+        { _tag: "Envelope", payload },
       ),
     );
   }
@@ -299,7 +315,6 @@ export const projectTranscript = (
       ...position(group.first),
       key,
       latestSequence: group.latestSequence,
-      attemptId: group.attemptId,
       session: group.session,
       harnessSession: group.harnessSession,
       status: group.status,
@@ -333,10 +348,6 @@ export const projectTranscript = (
     ].sort((left, right) => left.sequence - right.sequence),
   };
 };
-
-/** Applies a conversation filter after pairing tools, so their results and lifecycle remain intact. */
-export const matchesFilter = (entry: TranscriptEntry, filter: TranscriptFilter): boolean =>
-  entry._tag === "Tool" ? filter !== "messages" : entry.kind === "status" || filter !== "tools";
 
 /** Describes observed session activity without assuming unrecorded thinking or success. */
 export const sessionActivityLabel = (session: TranscriptSession): string => {

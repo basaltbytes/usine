@@ -1,9 +1,10 @@
 import type { TranscriptSequence } from "@usine/engine/transcript";
-import { groupTranscript, type GroupedItem } from "../grouping/model.ts";
-import { matchesFilter, type TranscriptFilter, type TranscriptProjection } from "../model.ts";
+import { Option } from "effect";
+import type { ReaderDocument } from "../document/model.ts";
+import type { TranscriptTool } from "../model.ts";
 import type { ReadingAnchor } from "./memory.ts";
 
-/** One possible reading surface, including its disclosure path and durable group members. */
+/** One possible reading surface, including its disclosure path and durable burst members. */
 export interface ReadingRow {
   readonly key: string;
   readonly surface: ReadingAnchor["surface"];
@@ -14,56 +15,65 @@ export interface ReadingRow {
   readonly groupKeys: ReadonlyArray<string>;
 }
 
-/** Indexes rendered identities without retaining any of their contents in a bookmark. */
-export const readingRows = (
-  projection: TranscriptProjection,
-  filter: TranscriptFilter,
+const toolRows = (
+  tool: TranscriptTool,
+  groupKeys: ReadonlyArray<string>,
 ): ReadonlyArray<ReadingRow> => {
-  const rows: Array<ReadingRow> = [];
-  const append = (
-    item: GroupedItem,
-    openKeys: ReadonlyArray<string>,
-    groupKeys: ReadonlyArray<string>,
-  ) => {
-    if (item._tag === "ToolGroup") {
-      if (filter === "messages") return;
-      const keys = item.tools.map((tool) => tool.key);
-      rows.push({
-        key: item.tools[0].key,
-        sequence: item.tools[0].sequence,
-        surface: "group",
-        elementId: item.key,
-        messageId: item.key,
-        openKeys,
-        groupKeys: keys,
-      });
-      for (const tool of item.tools) append(tool, openKeys, keys);
-      return;
-    }
-    if (item._tag !== "Session" && !matchesFilter(item, filter)) return;
-    const row: ReadingRow = {
-      key: item.key,
-      sequence: item.sequence,
-      surface: "row",
-      elementId: item.key,
-      messageId: item.key,
-      openKeys,
-      groupKeys,
-    };
-    rows.push(row);
-    if (item._tag === "Session")
-      for (const entry of item.entries) append(entry, [...openKeys, item.key], []);
-    if (item._tag === "Tool")
-      rows.push({
-        ...row,
-        surface: "result",
-        elementId: `${item.key}:result`,
-        openKeys: [...openKeys, item.key],
-      });
+  const row: ReadingRow = {
+    key: tool.key,
+    sequence: tool.sequence,
+    surface: "row",
+    elementId: tool.key,
+    messageId: tool.key,
+    openKeys: [],
+    groupKeys,
   };
-  for (const item of groupTranscript(projection)) append(item, [], []);
-  return rows;
+  return [row, { ...row, surface: "result", elementId: `${tool.key}:result`, openKeys: [tool.key] }];
 };
+
+const plainRow = (key: string, sequence: TranscriptSequence): ReadingRow => ({
+  key,
+  sequence,
+  surface: "row",
+  elementId: key,
+  messageId: key,
+  openKeys: [],
+  groupKeys: [],
+});
+
+/** Indexes rendered identities without retaining any of their contents in a bookmark. */
+export const readingRows = (document: ReaderDocument): ReadonlyArray<ReadingRow> =>
+  document.chapters.flatMap((chapter) =>
+    chapter.rows.flatMap((row): ReadonlyArray<ReadingRow> => {
+      switch (row._tag) {
+        case "Message":
+        case "Note":
+          return [plainRow(row.key, row.sequence)];
+        case "Ending":
+          return Option.match(row.position, {
+            onNone: () => [],
+            onSome: ({ key, sequence }) => [plainRow(key, sequence)],
+          });
+        case "Delegation":
+          return toolRows(row.tool, []);
+        case "Burst": {
+          const keys = row.tools.map((tool) => tool.key);
+          return [
+            {
+              key: row.tools[0].key,
+              sequence: row.tools[0].sequence,
+              surface: "group",
+              elementId: row.key,
+              messageId: row.key,
+              openKeys: [],
+              groupKeys: keys,
+            },
+            ...row.tools.flatMap((tool) => toolRows(tool, keys)),
+          ];
+        }
+      }
+    }),
+  );
 
 type Restoration =
   | { readonly _tag: "Earlier" }
@@ -76,7 +86,7 @@ type Restoration =
     };
 
 /**
- * Prefers the same durable member even when its group gains an earlier first call.
+ * Prefers the same durable member even when its burst gains an earlier first call.
  * Waits for history until the matching row reaches its saved sequence.
  * Exhausted history falls back to the nearest surviving row.
  */

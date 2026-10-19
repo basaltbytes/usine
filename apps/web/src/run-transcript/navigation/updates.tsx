@@ -6,24 +6,22 @@ import {
   useMessageScroller,
   useMessageScrollerScrollable,
 } from "@/components/ui/message-scroller";
-import type { TranscriptFilter } from "../model.ts";
 
-/** Observes the visible conversation while the unread ledger survives filter remounts. */
+/** Observes the visible conversation and offers a way back to the latest activity. */
 export const UpdateNavigation = ({
   count,
   active,
-  filter,
   pendingLatest,
-  revealingError,
+  revealing,
   onObserve,
   onLatest,
   onReachedLatest,
 }: {
   readonly count: number;
   readonly active: boolean;
-  readonly filter: TranscriptFilter;
   readonly pendingLatest: boolean;
-  readonly revealingError: boolean;
+  /** A navigation request is moving the reader, so its passing "at latest" state must not acknowledge updates. */
+  readonly revealing: boolean;
   readonly onObserve: (atLatest: boolean) => void;
   readonly onLatest: () => void;
   readonly onReachedLatest: () => void;
@@ -31,19 +29,18 @@ export const UpdateNavigation = ({
   const { end } = useMessageScrollerScrollable();
   const { scrollToEnd } = useMessageScroller();
   useEffect(() => {
-    onObserve(active && filter === "all" && !end && !revealingError);
-  }, [active, filter, end, revealingError, onObserve]);
+    onObserve(active && !end && !revealing);
+  }, [active, end, revealing, onObserve]);
   useLayoutEffect(() => {
-    if (pendingLatest && filter === "all" && scrollToEnd({ behavior: "instant" }))
-      onReachedLatest();
-  }, [pendingLatest, filter, scrollToEnd, onReachedLatest]);
+    if (pendingLatest && scrollToEnd({ behavior: "instant" })) onReachedLatest();
+  }, [pendingLatest, scrollToEnd, onReachedLatest]);
 
   if (count > 0)
     return (
       <Button
         variant="secondary"
         size="sm"
-        className="absolute bottom-4 inset-s-1/2 -translate-x-1/2 gap-1.5 border border-border shadow-sm"
+        className="absolute bottom-4 inset-s-1/2 -translate-x-1/2 gap-1.5 border border-border shadow-raised"
         onClick={onLatest}
       >
         <ArrowDownIcon aria-hidden="true" />
@@ -53,7 +50,7 @@ export const UpdateNavigation = ({
   return (
     <MessageScrollerButton
       size="sm"
-      className="gap-1.5 shadow-sm"
+      className="gap-1.5 shadow-raised"
       aria-label="Jump to latest"
       onClick={(event) => {
         event.preventDefault();

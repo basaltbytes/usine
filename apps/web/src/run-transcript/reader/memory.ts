@@ -24,7 +24,6 @@ export type ReaderPosition = typeof ReaderPosition.Type;
 
 /** Browser-only reader preferences; no transcript content or tool payload is retained. */
 export const ReaderBookmark = Schema.Struct({
-  filter: Schema.Literals(["all", "messages", "tools"]),
   disclosures: Schema.Array(
     Schema.Struct({ key: identity, open: Schema.Boolean, groupOpen: Schema.Boolean }),
   ).check(Schema.isMaxLength(200)),
@@ -34,9 +33,10 @@ export const ReaderBookmark = Schema.Struct({
 export type ReaderBookmark = typeof ReaderBookmark.Type;
 
 const record = Schema.Struct({ runId: identity, savedAt: timestamp, bookmark: ReaderBookmark });
+// Version 1 also stored the conversation filter; its archives decode as absent and are replaced on the next write.
 const archive = Schema.fromJsonString(
   Schema.Struct({
-    version: Schema.Literal(1),
+    version: Schema.Literal(2),
     runs: Schema.Array(record).check(Schema.isMaxLength(20)),
   }),
 );
@@ -94,10 +94,10 @@ export const readerMemory = (storage: () => Pick<Storage, "getItem" | "setItem">
           runs.push({ runId, savedAt: now, bookmark });
           runs.sort((a, b) => b.savedAt - a.savedAt);
           runs.splice(20);
-          let serialized = encode({ version: 1, runs });
+          let serialized = encode({ version: 2, runs });
           while (serialized.length > maximumSize && runs.length > 1) {
             runs.pop();
-            serialized = encode({ version: 1, runs });
+            serialized = encode({ version: 2, runs });
           }
           storage().setItem(storageKey, serialized);
         },

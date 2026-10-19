@@ -164,10 +164,12 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
         }),
       )
       .toBeVisible();
-    await page.getByRole("tab", { name: "Attempts (1)" }).click();
+    const drawer = page.getByRole("dialog");
+    await expect.element(drawer.getByText("Agent failure", { exact: true })).toBeVisible();
     await expect
-      .element(page.getByText("Work was completed separately", { exact: false }))
+      .element(drawer.getByText("Work was completed separately", { exact: false }))
       .toBeVisible();
+    await expect.element(drawer.getByRole("link", { name: "Open Run" })).toBeVisible();
     await page.getByRole("button", { name: "Close", exact: true }).click();
     const needs = page.getByRole("region", { name: "Items needing intervention" });
     await expect

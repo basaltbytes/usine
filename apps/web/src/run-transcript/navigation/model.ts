@@ -1,7 +1,9 @@
 import type { TranscriptSequence } from "@usine/engine/transcript";
-import type { TranscriptEntry, TranscriptProjection } from "../model.ts";
+import { Match, Option } from "effect";
+import type { ChapterRow, ReaderDocument } from "../document/model.ts";
+import type { TranscriptTool } from "../model.ts";
 
-/** One conversation row that can receive new activity or be revealed during error navigation. */
+/** One reader row that can receive new activity or be revealed during error navigation. */
 export interface TranscriptUpdate {
   readonly key: string;
   /** Original conversation position; a tool result does not move its call. */
@@ -9,37 +11,62 @@ export interface TranscriptUpdate {
   /** Latest event contributing to this row, including a paired tool result. */
   readonly latestSequence: TranscriptSequence;
   readonly isError: boolean;
-  /** Child disclosure to open before revealing this row, or null for parent activity. */
-  readonly childKey: string | null;
+  /** A tool call, which error navigation opens inside its folded burst. */
   readonly isTool: boolean;
 }
 
-const update = (entry: TranscriptEntry, childKey: string | null): TranscriptUpdate => ({
-  key: entry.key,
-  sequence: entry.sequence,
-  latestSequence: entry.latestSequence,
-  isError: entry._tag === "Tool" ? entry.state._tag === "Error" : entry.isError,
-  childKey,
-  isTool: entry._tag === "Tool",
+const toolUpdate = (tool: TranscriptTool): TranscriptUpdate => ({
+  key: tool.key,
+  sequence: tool.sequence,
+  latestSequence: tool.latestSequence,
+  isError: tool.state._tag === "Error",
+  isTool: true,
 });
 
-/** Indexes original rows once, before filtering or grouping; child summaries and meters are excluded. */
+const rowUpdates = (row: ChapterRow): ReadonlyArray<TranscriptUpdate> =>
+  Match.valueTags(row, {
+    Message: (message) => [
+      {
+        key: message.key,
+        sequence: message.sequence,
+        latestSequence: message.latestSequence,
+        isError: message.undelivered,
+        isTool: false,
+      },
+    ],
+    Note: (note) => [
+      {
+        key: note.key,
+        sequence: note.sequence,
+        latestSequence: note.latestSequence,
+        isError: note.undelivered,
+        isTool: false,
+      },
+    ],
+    Burst: ({ tools }) => tools.map(toolUpdate),
+    Delegation: ({ tool }) => [toolUpdate(tool)],
+    Ending: ({ position, end }) =>
+      Option.match(position, {
+        onNone: () => [],
+        onSome: ({ key, sequence, latestSequence }) => [
+          { key, sequence, latestSequence, isError: end._tag === "Failed", isTool: false },
+        ],
+      }),
+  });
+
+/** Indexes the rows the reader shows, once each; account meters and omitted repeats are excluded. */
 export const indexTranscriptUpdates = (
-  projection: TranscriptProjection,
+  document: ReaderDocument,
 ): ReadonlyArray<TranscriptUpdate> =>
-  projection.items
-    .flatMap((item) =>
-      item._tag === "Session"
-        ? item.entries.map((entry) => update(entry, item.key))
-        : [update(item, null)],
-    )
+  document.chapters
+    .flatMap((chapter) => chapter.rows.flatMap(rowUpdates))
     .sort((left, right) => left.sequence - right.sequence);
 
 /** Activity received since the reader last acknowledged the latest conversation. */
 export interface UnreadTranscript {
   /** Newest observed raw transcript event, including events omitted from the conversation. */
   readonly through: TranscriptSequence | null;
-  /** Last explicitly acknowledged tail; retained across drawer closes and refreshes. */
+  /** Last explicitly acknowledged tail; retained across closes and refreshes. */
   readonly readThrough: TranscriptSequence | null;
   readonly keys: ReadonlySet<string>;
 }
