@@ -74,7 +74,9 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
  * re-checks queued Events, the `AttemptRuntime` that runs each Attempt's Pi
  * parent in this process, built before the engine so durable storage is
  * resumed before Run recovery, and the `CurrentInstance` whose settings each
- * Attempt reads. Gateway admin APIs are called with `fetch`.
+ * Attempt reads. Gateway admin APIs are called with `fetch`. The SSH executor
+ * reaches only the Workers in `options`, so a reload can resize or remove
+ * them but adds no other Worker.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,
@@ -86,6 +88,8 @@ export const layer = (
     Layer.provide(NodeServices.layer),
     Layer.provide(FetchHttpClient.layer),
   );
-  const stepExecutor = stepExecutorLayer(config, brains).pipe(Layer.provide(executor));
+  const stepExecutor = stepExecutorLayer(config, brains, { startupWorkersOnly: true }).pipe(
+    Layer.provide(executor),
+  );
   return localEngineLayer(instanceDirectory).pipe(Layer.provide(stepExecutor));
 };

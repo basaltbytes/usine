@@ -284,6 +284,7 @@ export const reloadSummary = (reload: InstanceReload): ReadonlyArray<string> => 
     ["Agents", reload.agents],
     ["Labels", reload.labels],
     ["Repositories", reload.repos],
+    ["Workers", reload.workers],
   ] as const;
   const lines = named.flatMap(([subject, { added, removed, changed }]) =>
     (

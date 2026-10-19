@@ -175,7 +175,7 @@ const waitForWaiting = Effect.fn("test.waitForWaiting")(function* (
 
 const runtimeLayer = (directory: InstanceDirectory) => {
   const executor = Layer.succeed(StepExecutor)({
-    workers: [WorkerName.make("local")],
+    workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeed(Option.none()),
     recover: () => Effect.void,

@@ -193,7 +193,7 @@ describe("TriggerCondition", () => {
           get: SubscriptionRef.get(current),
           changes: SubscriptionRef.changes(current),
           reload: Effect.die("the test swaps the instance itself"),
-          registerPreflight: () => Effect.void,
+          registerWorkers: () => Effect.void,
         });
         const submission = submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]');
         yield* Effect.gen(function* () {

@@ -62,7 +62,7 @@ const recordingExecutor = (
   recovered: Ref.Ref<ReadonlyArray<AttemptId>>,
 ) =>
   Layer.succeed(StepExecutor)({
-    workers: workers.map((worker) => WorkerName.make(worker)),
+    workers: Effect.succeed(workers.map((worker) => WorkerName.make(worker))),
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeed(Option.none()),
     recover: (attempt) => Ref.update(recovered, (ids) => [...ids, attempt.attemptId]),
@@ -162,7 +162,7 @@ describe("engine restart", () => {
         const executions = yield* Ref.make<ReadonlyArray<readonly [AttemptId, boolean]>>([]);
         const live = yield* Ref.make<ReadonlySet<AttemptId>>(new Set());
         const executor = Layer.succeed(StepExecutor)({
-          workers: [WorkerName.make("local")],
+          workers: Effect.succeed([WorkerName.make("local")]),
           isLive: (attemptId) => Ref.get(live).pipe(Effect.map((ids) => ids.has(attemptId))),
           outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
@@ -232,7 +232,7 @@ describe("engine restart", () => {
             ReadonlyMap<AttemptId, Result.Result<ReturnType<typeof stepResult>, AgentFailure>>
           >(new Map());
           const executor = Layer.succeed(StepExecutor)({
-            workers: [WorkerName.make("local")],
+            workers: Effect.succeed([WorkerName.make("local")]),
             isLive: () => Effect.succeed(false),
             outcome: (attemptId) =>
               Ref.get(stored).pipe(

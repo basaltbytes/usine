@@ -221,9 +221,9 @@ const makeRunEngine = Effect.gen(function* () {
 
   const discardLeftovers = Effect.fn("RunEngine.discardLeftovers")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
-    if (stepExecutor.workers.includes(worker)) {
+    if ((yield* stepExecutor.workers).includes(worker)) {
       yield* Effect.logInfo(
-        "Leftovers kept; the Worker is configured, so startup reconciles its Attempts",
+        "Leftovers kept; the Worker is configured or still runs Attempts, so its Attempts stay tracked",
         { worker },
       );
       return 0;
@@ -239,7 +239,7 @@ const makeRunEngine = Effect.gen(function* () {
   // Startup reconciliation belongs in this memoized layer: a combinator such as
   // `Layer.tap` runs again for every service the engine is provided to.
   const recoverWorkspaces = Effect.fn("RunEngine.recoverWorkspaces")(function* () {
-    const configured = new Set(stepExecutor.workers);
+    const configured = new Set(yield* stepExecutor.workers);
     const candidates = yield* store.salvageCandidates;
     const reconcilable = candidates.filter(({ worker }) => configured.has(worker));
     const unconfigured = candidates.filter(({ worker }) => !configured.has(worker));

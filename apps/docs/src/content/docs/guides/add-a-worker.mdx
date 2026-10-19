@@ -113,7 +113,7 @@ Every Attempt on the machine runs as the `usine` user and shares two caches. pnp
    codex login --device-auth  # ChatGPT plan: open the URL it prints and enter the code it prints
    ```
 
-4. Add the Worker to `usine.yaml` as above, with its address as the `destination`, and restart `usine up`.
+4. Add the Worker to `usine.yaml` as above, with its address as the `destination`, and restart `usine up`. A reload can't add an SSH Worker ([#387](https://github.com/basaltbytes/usine/issues/387)).
 
 </Steps>
 
@@ -253,7 +253,7 @@ The Gateway logs one JSON object per line to the journal: `ssh root@203.0.113.30
 
 ## Remove a Worker
 
-Remove the Worker from `usine.yaml` and restart `usine up` before you delete the machine. If an Attempt on it kept its worktree because its salvage push failed, every later start reports a reconciliation error for it ([#268](https://github.com/basaltbytes/usine/issues/268)).
+Remove the Worker from `usine.yaml` and reload the configuration, or restart `usine up`, before you delete the machine. After a reload the Worker starts no new Attempt, but the Attempts it runs continue: wait until they end, which the log reports as `The last Attempt on a removed Worker ended; the Worker leaves the scheduler`. Its Gateway forward stays open until `usine up` stops. If an Attempt on it kept its worktree because its salvage push failed, every later start reports a reconciliation error for it ([#268](https://github.com/basaltbytes/usine/issues/268)).
 
 ```sh title="usine checkout"
 hcloud server delete worker-one

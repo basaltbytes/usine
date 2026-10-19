@@ -95,6 +95,7 @@ describe("reload summary on the Loops page", () => {
       agents: { added: [], removed: [], changed: [] },
       labels: { added: [], removed: [], changed: [] },
       repos: { added: [], removed: [], changed: [] },
+      workers: { added: [], removed: [], changed: [] },
       settingsChanged: false,
       operatorChanged: false,
       quarantinedLoops: [],
@@ -107,6 +108,7 @@ describe("reload summary on the Loops page", () => {
       reload({
         loops: { added: ["triage"], removed: ["start-dev"], changed: [] },
         agents: { added: [], removed: [], changed: ["developer"] },
+        workers: { added: [], removed: ["spare"], changed: ["local"] },
         settingsChanged: true,
         quarantinedLoops: [
           {
@@ -125,6 +127,8 @@ describe("reload summary on the Loops page", () => {
       "Loops added: triage",
       "Loops removed: start-dev",
       "Agents changed: developer",
+      "Workers removed: spare",
+      "Workers changed: local",
       "Settings changed",
       "1 file was left out; Needs you lists it",
     ]);

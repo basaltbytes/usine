@@ -207,7 +207,7 @@ The runtime store also records every Event the factory has seen. usine uses this
 
 ## Change the configuration
 
-`usine up` reads the instance folder at startup and doesn't watch the files for changes. After you edit a Loop, an Agent, or the `labels`, `repos`, `settings`, or `operator` keys of `usine.yaml`, reload the configuration in one of three ways:
+`usine up` reads the instance folder at startup and doesn't watch the files for changes. After you edit a Loop, an Agent, or the `labels`, `repos`, `settings`, `operator`, or `workers` keys of `usine.yaml`, reload the configuration in one of three ways:
 
 - Select **Reload configuration** on the **Loops** page under **Configuration**. The page lists what changed.
 - Send `POST /api/instance/reload` to the server, for example with `curl -s -X POST http://127.0.0.1:7331/api/instance/reload`. The response lists what changed.
@@ -217,7 +217,13 @@ usine loads the folder the way startup does. It leaves out a Loop or Agent file 
 
 The new configuration applies to new work only. The next poll and the next schedule tick use the new Loops, and the next Attempt uses the new `settings`. The next poll starts as soon as the reload is accepted, or at the time GitHub asked usine to wait for when that is later. A Run that is already open keeps the Agent, task, and parent model it was opened with, also when it retries, and so does an Event that waits behind a running Run. When the set of Loops that apply to a repository changes (you add or remove a Loop, or change its `on` or `if:`), the next poll reads that repository's Items from the start, as after a restart. When a new or changed Agent uses a harness, model, and effort that no running Agent uses, the reload runs Preflight for it on every Worker first. If the harness isn't ready on a Worker, usine refuses the reload with `ReloadPreflightError` and changes nothing; make the harness ready or change the Agent file, then reload again.
 
-The `workers` and `webhooks` keys still need a restart. A reload that finds either one changed is refused with `RestartRequiredError` and changes nothing. Stop the orchestrator and start it again to apply them.
+A reload changes the Workers without stopping the Attempts they run:
+
+- **A new `max_concurrent_attempts`.** A higher value runs Preflight on the Worker with the new count first, then the new slots take waiting Runs at once. With a lower value the Worker starts no new Attempt until it runs fewer Attempts than the new count; the running ones finish.
+- **A new Worker.** usine runs Preflight on it with every Agent's harness, model, and effort, and it takes Attempts once that passes. This works for `local` Workers. A new `ssh` Worker needs a restart, because the SSH executor connects to its Workers and their Gateways when `usine up` starts.
+- **A removed Worker.** It starts no new Attempt, and the Attempts it runs finish. Needs you lists it as **Worker not configured**; you can discard its leftovers once its last Attempt has ended.
+
+If Preflight fails, usine refuses the reload with `ReloadPreflightError` and changes nothing. Other `workers` changes still need a restart: a Worker's `kind`, `destination`, `port`, `identity_file`, `root`, or `gateway`, a renamed Worker, and a Worker of another kind than the running ones. So does the `webhooks` key. usine refuses such a reload with `RestartRequiredError`, which names the field, and changes nothing. Stop the orchestrator and start it again to apply them.
 
 Press Ctrl+C once, or send SIGTERM, to stop: the orchestrator stops starting Attempts and waits for the running ones to end. A second Ctrl+C stops it without waiting ([Operate Runs](/guides/operate-runs/#stop-the-orchestrator)).
 
