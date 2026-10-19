@@ -5,6 +5,7 @@ import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/
 import { AttemptId, AttemptTask } from "./attempt.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
 import { StepResult } from "../step/result.ts";
+import { WorkerName } from "../worker.ts";
 import { AttemptFailure } from "./failure.ts";
 import { AttemptSalvage, SalvagePushed } from "./salvage.ts";
 
@@ -165,6 +166,35 @@ export class InterventionRejected extends Schema.TaggedClass<InterventionRejecte
   message: Schema.NonEmptyString,
 }) {}
 
+/**
+ * The executor's probe of the Attempt's Worker got no answer: its machine did
+ * not run a command over a new SSH connection within the probe's bound. The
+ * Attempt and its children keep running, and nothing stops or fails them on
+ * this report (ADR 0013).
+ */
+export class WorkerUnresponsive extends Schema.TaggedClass<WorkerUnresponsive>(
+  "AttemptChannel/WorkerUnresponsive",
+)("WorkerUnresponsive", {
+  worker: WorkerName,
+  /** When the Worker last answered a probe, or when the Attempt launched if no probe has run yet. */
+  lastAnsweredAt: Schema.DateTimeUtcFromString,
+  /** What the failed probe saw, such as the SSH client's error or the bound it exceeded. */
+  reason: Schema.NonEmptyString,
+}) {}
+
+/** The Worker answers the executor's probe again after `WorkerUnresponsive`. */
+export class WorkerResponsive extends Schema.TaggedClass<WorkerResponsive>(
+  "AttemptChannel/WorkerResponsive",
+)("WorkerResponsive", {
+  worker: WorkerName,
+  /** When the Worker last answered before it stopped, as `WorkerUnresponsive` reported it. */
+  lastAnsweredAt: Schema.DateTimeUtcFromString,
+}) {}
+
+/** What the executor reports about an Attempt's Worker while the Attempt runs. */
+export const WorkerNotice = Schema.Union([WorkerUnresponsive, WorkerResponsive]);
+export type WorkerNotice = typeof WorkerNotice.Type;
+
 export const OutboundPayload = Schema.Union([
   Started,
   SessionEvent,
@@ -173,6 +203,8 @@ export const OutboundPayload = Schema.Union([
   Interrupted,
   InterventionApplied,
   InterventionRejected,
+  WorkerUnresponsive,
+  WorkerResponsive,
 ]);
 export type OutboundPayload = typeof OutboundPayload.Type;
 

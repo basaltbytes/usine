@@ -292,9 +292,10 @@ export const worksFor =
 /**
  * An in-memory `AttemptRuntime` over `storage`, for executor and engine tests
  * that need no parent model. It records Started, the parent's session events,
- * intervention receipts, and a Final without facts (the executor harvests
- * those) through the Attempt's sink, numbering them per task so a reattached
- * `execute` continues the sequence. Only a completed parent leaves the live
+ * intervention receipts, Worker notices sent while `execute` runs, and a Final
+ * without facts (the executor harvests those) through the Attempt's sink,
+ * numbering them per task so a reattached `execute` continues the sequence.
+ * Only a completed parent leaves the live
  * state: interrupting `execute` (a stopped process) or a failing parent leaves
  * the task live until someone cancels it, so tests see whether the executor
  * stopped it. A completed task keeps its report, which a later `execute`
@@ -419,6 +420,13 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             const active = attached.get(attemptId);
             if (active !== undefined) yield* Deferred.succeed(active.canceled, undefined);
           }),
+        notify: (attemptId, notice) =>
+          Effect.gen(function* () {
+            const task = storage.tasks.get(attemptId);
+            const active = attached.get(attemptId);
+            if (task === undefined || active === undefined) return;
+            yield* active.io.append("outbound", yield* envelope(task, notice));
+          }).pipe(Effect.orDie),
         intervene: (attemptId, intervention) =>
           Effect.gen(function* () {
             const task = storage.tasks.get(attemptId);

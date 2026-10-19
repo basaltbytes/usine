@@ -164,9 +164,10 @@ export const appendInbound = (
 
 /**
  * Relays one Attempt to `io` until its terminal envelope is sent: `Started`,
- * the parent's committed entries and the children's events in the order they
- * happened, then exactly one `Final`, `Failed`, or `Interrupted`. Progress is
- * durable, so a later call continues the same sequence.
+ * the parent's committed entries, the children's events, and the executor's
+ * Worker notices in the order they happened, then exactly one `Final`,
+ * `Failed`, or `Interrupted`. Progress is durable, so a later call continues
+ * the same sequence.
  */
 export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
   durable: DurableHarness["Service"],
@@ -330,6 +331,23 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     yield* emitPayload(durable, hub, new AttemptChannel.SessionEvent({ event }));
   });
 
+  const relayNotice = Effect.fn("AttemptRelay.notice")(function* (
+    notice: AttemptChannel.WorkerNotice,
+  ) {
+    const started = yield* ensureStarted;
+    if (Option.isNone(started)) {
+      return yield* Effect.logWarning(
+        "Dropped a Worker notice that arrived before the parent started",
+        { notice: notice._tag, worker: notice.worker },
+      );
+    }
+    yield* emitPayload(durable, hub, notice);
+    yield* Effect.logDebug("Relayed a Worker notice", {
+      notice: notice._tag,
+      worker: notice.worker,
+    });
+  });
+
   const finish = Effect.fn("AttemptRelay.finish")(function* (
     task: TaskRecord<JsonValue, JsonValue, unknown>,
   ) {
@@ -381,6 +399,8 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       yield* relayEntries(Option.some(item.entry));
     } else if (item._tag === "Child") {
       yield* relayChild(item.event);
+    } else if (item._tag === "Notice") {
+      yield* relayNotice(item.notice);
     } else {
       yield* ensureStarted;
       const task = yield* readTask;
@@ -392,6 +412,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       for (const remaining of rest) {
         if (remaining._tag === "Entry") yield* relayEntries(Option.some(remaining.entry));
         else if (remaining._tag === "Child") yield* relayChild(remaining.event);
+        else if (remaining._tag === "Notice") yield* relayNotice(remaining.notice);
       }
       yield* relayEntries(Option.none());
       return yield* finish(task);

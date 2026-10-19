@@ -2,7 +2,19 @@ import { assert, describe, it } from "@effect/vitest";
 import { BrainSpec, Effort, Harness, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import { AgentName } from "@usine/core/agent";
-import { Cause, Effect, Exit, Fiber, Layer, Option, Queue, Schema, Scope, Stream } from "effect";
+import {
+  Cause,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Logger,
+  Option,
+  Queue,
+  Schema,
+  Scope,
+  Stream,
+} from "effect";
 import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -396,6 +408,71 @@ describe("Claude child backend", () => {
         const first = yield* Effect.promise(() => input![Symbol.asyncIterator]().next());
         assert.strictEqual(first.value?.message.content, "Implement the focused task.");
       }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect("reports each API retry of a turn and the recovery when an answer arrives", () => {
+    const retry = (attempt: number, status: number | null, error: string) => ({
+      type: "system",
+      subtype: "api_retry",
+      attempt,
+      max_retries: 10,
+      retry_delay_ms: 4_000,
+      error_status: status,
+      error,
+      uuid: `retry-${attempt}`,
+      session_id: "claude-session-1",
+    });
+    const sdk = Layer.succeed(ClaudeSdk)({
+      open: () =>
+        scripted([
+          retry(1, null, "unknown"),
+          retry(2, 529, "overloaded"),
+          {
+            type: "assistant",
+            message: { content: [{ type: "text", text: "Child completed the edit." }] },
+          },
+          { type: "result", subtype: "success", result: "Child completed the edit." },
+        ]),
+    });
+    const warnings: Array<string> = [];
+    const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const session = yield* (yield* ChildBackend).launch(request());
+        const [events] = yield* Effect.all([Stream.runCollect(session.events), session.result]);
+        assert.deepStrictEqual(
+          events.map((event) => event._tag),
+          [
+            "SessionStarted",
+            "ProviderRetrying",
+            "ProviderRetrying",
+            "ProviderRecovered",
+            "TextOutput",
+            "SessionFinished",
+          ],
+        );
+        assert.deepStrictEqual(
+          events.flatMap((event) =>
+            event._tag === "ProviderRetrying" ? [[event.message, event.retries]] : [],
+          ),
+          [
+            ["API request failed without a response (unknown); retry 1 of 10 in 4s", 1],
+            ["API request failed with HTTP 529 (overloaded); retry 2 of 10 in 4s", 2],
+          ],
+        );
+        const recovered = events.find((event) => event._tag === "ProviderRecovered");
+        assert(recovered?._tag === "ProviderRecovered");
+        assert.strictEqual(recovered.retries, 2);
+        const retries = warnings.filter((line) => line.includes("cannot reach its provider"));
+        assert.lengthOf(retries, 2, "one warning per API retry");
+      }).pipe(
+        Effect.provide(claudeChildLayer),
+        Effect.provide(sdk),
+        Effect.provide(Logger.layer([logger])),
+      ),
     );
   });
 

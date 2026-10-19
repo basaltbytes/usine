@@ -57,6 +57,7 @@
   --run-succeeded: #40a02b; /* green */
   --run-canceled: #9ca0b0; /* overlay0 */
   --needs-you: #fe640b; /* peach */
+  --warning: #df8e1d; /* yellow */
 }
 
 /* Catppuccin Mocha. Mantle is the page and the cards, base the work panel, surface0 what floats
@@ -97,6 +98,7 @@
   --run-succeeded: #a6e3a1; /* green */
   --run-canceled: #6c7086; /* overlay0 */
   --needs-you: #fab387; /* peach */
+  --warning: #f9e2af; /* yellow */
 }
 
 /* One type scale: 12 captions and meta, 13 body, 14 emphasised UI, 16 section titles, 20 screen
@@ -187,6 +189,7 @@
   --color-run-succeeded: var(--run-succeeded);
   --color-run-canceled: var(--run-canceled);
   --color-needs-you: var(--needs-you);
+  --color-warning: var(--warning);
   --color-faint: var(--faint);
   --color-overlay: var(--overlay);
   --color-sidebar-ring: var(--sidebar-ring);

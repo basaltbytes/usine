@@ -1,16 +1,31 @@
-import type { AgentSession, AgentSessionEvent, HarnessSession } from "@usine/core/agent/session";
+import type {
+  AgentSession,
+  AgentSessionEvent,
+  HarnessSession,
+  ProviderRecovered,
+  ProviderRetrying,
+} from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
-import { Match, Option, type Schema } from "effect";
-import { brainLine, conflictingSalvageMessage, failureMessage } from "../operator-copy.ts";
+import { DateTime, Match, Option, type Schema } from "effect";
+import {
+  brainLine,
+  clockLabel,
+  conflictingSalvageMessage,
+  durationLabel,
+  failureMessage,
+} from "../operator-copy.ts";
 import { indexSessions, type SessionEvents, type InterventionRecord } from "./sessions.ts";
+
+/** How a notice reads: as plain record, as a signal that work may not be progressing, or as a failure. */
+export type NoticeTone = "plain" | "warning" | "failed";
 
 interface NoticeContent {
   readonly kind: "message" | "status";
   readonly label: string;
   readonly detail: string;
   readonly format: "markdown" | "plain";
-  readonly isError: boolean;
+  readonly tone: NoticeTone;
 }
 
 interface TranscriptPosition {
@@ -22,12 +37,23 @@ interface TranscriptPosition {
   readonly receivedAt: string;
 }
 
-/** What a notice reports: a session's own event, an operator input receipt, or an Attempt envelope. */
+/**
+ * What a notice reports: a session's own event, a harness retrying or reaching its
+ * model provider again, an operator input receipt, or an Attempt envelope.
+ */
 type NoticeOrigin =
   | {
       readonly _tag: "Session";
       readonly session: AgentSession;
-      readonly event: Exclude<AgentSessionEvent["_tag"], "ToolStarted" | "ToolFinished">;
+      readonly event: Exclude<
+        AgentSessionEvent["_tag"],
+        "ToolStarted" | "ToolFinished" | "ProviderRetrying" | "ProviderRecovered"
+      >;
+    }
+  | {
+      readonly _tag: "Provider";
+      readonly session: AgentSession;
+      readonly event: ProviderRetrying | ProviderRecovered;
     }
   | { readonly _tag: "Operator"; readonly operator: string }
   | { readonly _tag: "Envelope"; readonly payload: TranscriptEventView["payload"] };
@@ -100,6 +126,10 @@ const notice = (
   origin: NoticeOrigin,
 ): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content, origin });
 
+/** A count of a harness's provider retries in words: `1 retry`, `27 retries`. */
+export const retriesLabel = (retries: number): string =>
+  `${retries} ${retries === 1 ? "retry" : "retries"}`;
+
 const sessionEntries = (
   group: SessionEvents,
   status: SessionStatus,
@@ -135,41 +165,65 @@ const sessionEntries = (
       });
       continue;
     }
+    if (event._tag === "ProviderRetrying" || event._tag === "ProviderRecovered") {
+      entries.push(
+        notice(
+          at,
+          event._tag === "ProviderRetrying"
+            ? {
+                kind: "status",
+                label: `${group.session.agent} cannot reach its provider`,
+                detail: event.message,
+                format: "plain",
+                tone: "warning",
+              }
+            : {
+                kind: "status",
+                label: `${group.session.agent} reached its provider again`,
+                detail: `After ${retriesLabel(event.retries)}.`,
+                format: "plain",
+                tone: "plain",
+              },
+          { _tag: "Provider", session: group.session, event },
+        ),
+      );
+      continue;
+    }
     const content = Match.valueTags(event, {
-      TextOutput: ({ text }) => ({
-        kind: "message" as const,
+      TextOutput: ({ text }): NoticeContent => ({
+        kind: "message",
         label: group.session.agent,
         detail: text,
-        format: "markdown" as const,
-        isError: false,
+        format: "markdown",
+        tone: "plain",
       }),
-      SessionStarted: () => ({
-        kind: "status" as const,
+      SessionStarted: (): NoticeContent => ({
+        kind: "status",
         label: `${group.session.agent} started`,
         detail: brainLine(group.session.brain),
-        format: "plain" as const,
-        isError: false,
+        format: "plain",
+        tone: "plain",
       }),
-      SessionIdle: () => ({
-        kind: "status" as const,
+      SessionIdle: (): NoticeContent => ({
+        kind: "status",
         label: `${group.session.agent} is waiting`,
         detail: "The session remains open for operator input.",
-        format: "plain" as const,
-        isError: false,
+        format: "plain",
+        tone: "plain",
       }),
-      SessionResumed: () => ({
-        kind: "status" as const,
+      SessionResumed: (): NoticeContent => ({
+        kind: "status",
         label: `${group.session.agent} resumed`,
         detail: "",
-        format: "plain" as const,
-        isError: false,
+        format: "plain",
+        tone: "plain",
       }),
-      SessionFinished: () => ({
-        kind: "status" as const,
+      SessionFinished: (): NoticeContent => ({
+        kind: "status",
         label: `${group.session.agent} finished`,
         detail: "",
-        format: "plain" as const,
-        isError: false,
+        format: "plain",
+        tone: "plain",
       }),
     });
     entries.push(
@@ -200,7 +254,7 @@ const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
           ? action.message
           : "",
       format: message ? "markdown" : "plain",
-      isError: rejected,
+      tone: rejected ? "failed" : "plain",
     },
     { _tag: "Operator", operator },
   );
@@ -247,63 +301,79 @@ export const projectTranscript = (
               onSome: (salvage) => `${parentModel}. ${conflictingSalvageMessage(salvage)}`,
             }),
             format: "plain",
-            isError: false,
+            tone: "plain",
           }),
           Final: ({ result }): NoticeContent => ({
             kind: "status",
             label: "Attempt finished",
             detail: result.message,
             format: "markdown",
-            isError: false,
+            tone: "plain",
           }),
           Failed: ({ failure }): NoticeContent => ({
             kind: "status",
             label: "Attempt failed",
             detail: failureMessage(failure),
             format: "plain",
-            isError: true,
+            tone: "failed",
           }),
           Cancel: (): NoticeContent => ({
             kind: "status",
             label: "Cancel requested",
             detail: "The Attempt is stopping.",
             format: "plain",
-            isError: false,
+            tone: "plain",
           }),
           Interrupted: (): NoticeContent => ({
             kind: "status",
             label: "Interrupted",
             detail: "The Attempt's parent acknowledged the interrupt.",
             format: "plain",
-            isError: false,
+            tone: "plain",
           }),
           Steer: ({ message }): NoticeContent => ({
             kind: "message",
             label: "Operator",
             detail: message,
             format: "markdown",
-            isError: false,
+            tone: "plain",
           }),
           Interrupt: (): NoticeContent => ({
             kind: "status",
             label: "Interrupt requested",
             detail: "The operator asked the Attempt to stop.",
             format: "plain",
-            isError: false,
+            tone: "plain",
           }),
           OperatorMessage: ({ message }): NoticeContent => ({
             kind: "message",
             label: "Operator",
             detail: message,
             format: "markdown",
-            isError: false,
+            tone: "plain",
           }),
           Release: (): NoticeContent => ({
             kind: "status",
             label: "Released",
             detail: "The operator released the held child.",
             format: "plain",
-            isError: false,
+            tone: "plain",
+          }),
+          WorkerUnresponsive: ({ worker, lastAnsweredAt, reason }): NoticeContent => ({
+            kind: "status",
+            label: `Worker ${worker} stopped answering`,
+            detail: `It last answered at ${clockLabel(DateTime.formatIso(lastAnsweredAt))}. ${reason}`,
+            format: "plain",
+            tone: "warning",
+          }),
+          WorkerResponsive: ({ worker, lastAnsweredAt }): NoticeContent => ({
+            kind: "status",
+            label: `Worker ${worker} answers again`,
+            detail: `It did not answer for ${durationLabel(
+              Date.parse(record.receivedAt) - DateTime.toEpochMillis(lastAnsweredAt),
+            )}`,
+            format: "plain",
+            tone: "plain",
           }),
         }),
         { _tag: "Envelope", payload },

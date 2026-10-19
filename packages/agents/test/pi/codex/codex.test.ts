@@ -8,6 +8,7 @@ import {
   Effect,
   Fiber,
   Layer,
+  Logger,
   Option,
   Queue,
   Result,
@@ -378,6 +379,106 @@ describe("Codex child backend", () => {
       }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server)),
     );
   });
+
+  it.effect(
+    "reports each provider reconnect of a turn and the recovery when the turn resumes",
+    () => {
+      // The app-server notifications seen on a Worker whose gateway could not resolve chatgpt.com (#266).
+      const reconnect = (message: string, additionalDetails: string, turnId = "turn-1") => ({
+        method: "error",
+        params: {
+          error: { message, codexErrorInfo: null, additionalDetails },
+          willRetry: true,
+          threadId: "thread-1",
+          turnId,
+        },
+      });
+      const notifications: ReadonlyArray<CodexNotification> = [
+        reconnect("Reconnecting... 1/5", "request timed out"),
+        reconnect(
+          "Reconnecting... waiting for network",
+          "Connection failed: error sending request",
+        ),
+        reconnect("Reconnecting... 1/5", "request timed out", "turn-0"),
+        {
+          method: "error",
+          params: {
+            error: {
+              message: "Usage limit reached",
+              codexErrorInfo: null,
+              additionalDetails: null,
+            },
+            willRetry: false,
+            threadId: "thread-1",
+            turnId: "turn-1",
+          },
+        },
+        {
+          method: "item/agentMessage/delta",
+          params: { threadId: "thread-1", turnId: "turn-1", itemId: "m-1", delta: "Do" },
+        },
+        {
+          method: "item/completed",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: { type: "agentMessage", id: "m-1", text: "Done." },
+          },
+        },
+        {
+          method: "turn/completed",
+          params: { turn: { id: "turn-1", status: "completed", error: null } },
+        },
+      ];
+      const warnings: Array<string> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+      });
+      const server = connectionLayer(
+        successfulResponses([{ id: "gpt-5.6-terra", model: "gpt-5.6-terra" }]),
+        notifications,
+      );
+      return Effect.scoped(
+        Effect.gen(function* () {
+          const running = yield* (yield* CodexChildBackend).launch(request());
+          const [events, result] = yield* Effect.all([
+            Stream.runCollect(running.events),
+            running.result,
+          ]);
+          assert.strictEqual(result.message, "Done.");
+          assert.deepStrictEqual(
+            events.map((event) => event._tag),
+            [
+              "SessionStarted",
+              "ProviderRetrying",
+              "ProviderRetrying",
+              "ProviderRecovered",
+              "TextOutput",
+              "SessionFinished",
+            ],
+          );
+          const reports = events.filter((event) => event._tag === "ProviderRetrying");
+          assert.deepStrictEqual(
+            reports.map(({ message, retries }) => [message, retries]),
+            [
+              ["Reconnecting... 1/5 (request timed out)", 1],
+              ["Reconnecting... waiting for network (Connection failed: error sending request)", 2],
+            ],
+          );
+          const recovered = events.find((event) => event._tag === "ProviderRecovered");
+          assert(recovered?._tag === "ProviderRecovered");
+          assert.strictEqual(recovered.retries, 2);
+          const reconnects = warnings.filter((line) => line.includes("cannot reach its provider"));
+          assert.lengthOf(reconnects, 2, "one warning per reconnect of the current turn");
+          assert.include(reconnects[1], '"retries":2');
+        }).pipe(
+          Effect.provide(codexChildBackendLayer),
+          Effect.provide(server),
+          Effect.provide(Logger.layer([logger])),
+        ),
+      );
+    },
+  );
 
   it.effect("opens the app server on the child's remote host", () => {
     const host = new RemoteShell({

@@ -1,9 +1,11 @@
-import { Option } from "effect";
+import { Match, Option } from "effect";
 import { StateMark } from "@/components/status-badge";
 import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
+import { clockLabel, timestampLabel } from "../operator-copy.ts";
+import type { ConnectivityWarning } from "./document/connectivity.ts";
 import type { Chapter } from "./document/model.ts";
-import { sessionActivityLabel, type TranscriptSession } from "./model.ts";
+import { retriesLabel, sessionActivityLabel, type TranscriptSession } from "./model.ts";
 import { presentTool } from "./tool/presentation.ts";
 
 /** Formats elapsed activity time without implying that a quiet session has stalled. */
@@ -128,6 +130,59 @@ export const CurrentActivity = ({ chapter }: { readonly chapter: Chapter }) => {
           </p>
         ),
       })}
+      {chapter.connectivity.map((warning) => (
+        <ConnectivityLine
+          key={
+            warning._tag === "WorkerSilent" ? warning.worker : `${warning.agent}:${warning.since}`
+          }
+          warning={warning}
+          now={now}
+        />
+      ))}
     </div>
+  );
+};
+
+/** One open connectivity problem: what stopped answering, since when, and the harness's own words. */
+const ConnectivityLine = ({
+  warning,
+  now,
+}: {
+  readonly warning: ConnectivityWarning;
+  readonly now: number;
+}) => {
+  const line = Match.valueTags(warning, {
+    WorkerSilent: ({ worker, lastAnsweredAt }) => ({
+      text: `Worker ${worker} has not answered since ${clockLabel(lastAnsweredAt)}`,
+      since: lastAnsweredAt,
+      detail: null,
+    }),
+    ProviderRetrying: ({ agent, retries, since, message }) => ({
+      text: `${agent} cannot reach its provider, ${retriesLabel(retries)} since ${clockLabel(since)}`,
+      since,
+      detail: message,
+    }),
+  });
+  return (
+    <>
+      <p className="flex min-w-0 items-baseline gap-2 pl-3.5">
+        <span className="min-w-0 text-warning">
+          <span className="sr-only">Warning: </span>
+          {line.text}
+        </span>
+        <span
+          aria-live="off"
+          className="ml-auto shrink-0 font-mono tabular-nums text-muted-foreground"
+          title={`Since ${timestampLabel(line.since)}`}
+        >
+          {elapsedActivity(line.since, now)}
+        </span>
+      </p>
+      {line.detail !== null && (
+        <p className="truncate pl-3.5 text-muted-foreground" title={line.detail}>
+          {line.detail}
+        </p>
+      )}
+    </>
   );
 };

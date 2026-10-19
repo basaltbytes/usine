@@ -12,6 +12,7 @@ import { ATTEMPT_RECORD_KIND, type AttemptRecord } from "./documents.ts";
 export type RelayItem =
   | { readonly _tag: "Entry"; readonly entry: EntryId }
   | { readonly _tag: "Child"; readonly event: AgentSessionEvent }
+  | { readonly _tag: "Notice"; readonly notice: AttemptChannel.WorkerNotice }
   | { readonly _tag: "Wake" };
 
 /** How far the attached channel has progressed; persisted in the Attempt's record after each parent entry and each other envelope. */
@@ -59,6 +60,8 @@ export interface AttemptHubs {
   readonly bindParent: (hub: AttemptHub, parent: ConversationId) => void;
   /** Queues one child event behind everything that happened before it. */
   readonly child: (hub: AttemptHub, event: AgentSessionEvent) => Effect.Effect<void>;
+  /** Queues one notice about the Attempt's Worker behind everything that happened before it. */
+  readonly notice: (hub: AttemptHub, notice: AttemptChannel.WorkerNotice) => Effect.Effect<void>;
   /** Routes commits to hubs: parent entries in order, task and record changes as wake-ups; wakes every hub after a reopen or the stop. */
   readonly listener: HarnessListener;
 }
@@ -148,6 +151,8 @@ export const attemptHubs = Effect.gen(function* () {
     bindParent,
     child: (target, event) =>
       Queue.offer(target.queue, { _tag: "Child", event }).pipe(Effect.asVoid),
+    notice: (target, notice) =>
+      Queue.offer(target.queue, { _tag: "Notice", notice }).pipe(Effect.asVoid),
     listener,
   } satisfies AttemptHubs;
 });

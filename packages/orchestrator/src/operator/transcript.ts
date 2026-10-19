@@ -24,6 +24,8 @@ export const TranscriptPayload = Schema.Union([
   AttemptChannel.Cancel,
   AttemptChannel.InterventionApplied,
   AttemptChannel.InterventionRejected,
+  AttemptChannel.WorkerUnresponsive,
+  AttemptChannel.WorkerResponsive,
 ]);
 export type TranscriptPayload = typeof TranscriptPayload.Type;
 

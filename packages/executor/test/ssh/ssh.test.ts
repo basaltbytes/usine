@@ -1,10 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
+import type * as AttemptChannel from "@usine/core/attempt/channel";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Cause, Deferred, Effect, Exit, Fiber } from "effect";
+import { Cause, DateTime, Deferred, Effect, Exit, Fiber } from "effect";
 import { TestClock } from "effect/testing";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../src/remote/commands.ts";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
@@ -255,6 +256,80 @@ describe("SSH Worker", () => {
         }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, completes, storage)));
         assert.strictEqual(machine.state.credentials.size, 0);
       });
+    },
+  );
+
+  it.effect(
+    "reports in the transcript when the Worker stops answering and when it answers again, and the Attempt goes on",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const logs = capturedLogs();
+      const outbound: Array<AttemptChannel.OutboundPayload> = [];
+      const sink = {
+        append: (_direction: AttemptChannel.Direction, envelope: AttemptChannel.Envelope) =>
+          Effect.sync(() => {
+            if (envelope._tag === "OutboundEnvelope") outbound.push(envelope.payload);
+          }),
+        salvage: () => Effect.void,
+      };
+      const notices = () =>
+        outbound.filter(
+          (payload) => payload._tag === "WorkerUnresponsive" || payload._tag === "WorkerResponsive",
+        );
+      const probes = () => machine.state.calls.filter(({ line }) => line === "exec 'true'").length;
+      return Effect.gen(function* () {
+        const working = yield* Deferred.make<void>();
+        const done = yield* Deferred.make<void>();
+        const parent: StubParent = (context) =>
+          Deferred.succeed(working, undefined).pipe(
+            Effect.andThen(Deferred.await(done)),
+            Effect.andThen(completes(context)),
+          );
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const launch = yield* (yield* executor.prepare(request))
+            .launch(sink)
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(working);
+          const launchedAt = DateTime.formatIso(yield* DateTime.now);
+
+          machine.state.stalled = true;
+          yield* TestClock.adjust("1 minute");
+          yield* TestClock.adjust("45 seconds");
+          assert.lengthOf(notices(), 1, "the first probe without an answer reports it");
+          const silent = notices()[0];
+          assert(silent?._tag === "WorkerUnresponsive");
+          assert.strictEqual(silent.worker, WORKER);
+          assert.strictEqual(DateTime.formatIso(silent.lastAnsweredAt), launchedAt);
+          assert.strictEqual(silent.reason, "No answer within 45 seconds");
+
+          yield* TestClock.adjust("1 minute");
+          yield* TestClock.adjust("45 seconds");
+          assert.lengthOf(notices(), 1, "a Worker that stays silent is reported once");
+
+          machine.state.stalled = false;
+          yield* TestClock.adjust("1 minute");
+          assert.lengthOf(notices(), 2);
+          const answering = notices()[1];
+          assert(answering?._tag === "WorkerResponsive");
+          assert.strictEqual(DateTime.formatIso(answering.lastAnsweredAt), launchedAt);
+
+          yield* Deferred.succeed(done, undefined);
+          const result = yield* Fiber.join(launch);
+          assert.strictEqual(result.message, `Completed: ${request.task}`);
+          const probed = probes();
+          yield* TestClock.adjust("10 minutes");
+          assert.strictEqual(probes(), probed, "probing ends with the Attempt");
+        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, parent)));
+
+        const warnings = logs.lines.filter((line) => line.includes("The Worker"));
+        assert.lengthOf(warnings, 3);
+        assert.include(warnings[0], "The Worker stopped answering");
+        assert.include(warnings[0], `"lastAnsweredAt":"`);
+        assert.include(warnings[1], "The Worker still does not answer");
+        assert.include(warnings[2], "The Worker answers again");
+      }).pipe(Effect.provide(logs.layer));
     },
   );
 

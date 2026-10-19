@@ -584,7 +584,7 @@ it("attaches paged input to its child using unpaged session identity without rep
   const entry = session.entries[0];
   assert(entry?._tag === "Notice");
   assert.strictEqual(entry.detail, "Keep this correction\n\nHarness unavailable");
-  assert.strictEqual(entry.isError, true);
+  assert.strictEqual(entry.tone, "failed");
   const unmatched = projectTranscript([receipt], []).items[0];
   assert(unmatched?._tag === "Notice");
   assert.include(unmatched.label, child.id);

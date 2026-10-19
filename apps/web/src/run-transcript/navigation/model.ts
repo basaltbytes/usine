@@ -39,7 +39,7 @@ const rowUpdates = (row: ChapterRow): ReadonlyArray<TranscriptUpdate> =>
         key: note.key,
         sequence: note.sequence,
         latestSequence: note.latestSequence,
-        isError: note.undelivered,
+        isError: note.tone === "failed",
         isTool: false,
       },
     ],
