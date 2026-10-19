@@ -14,6 +14,7 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
+import { BoardMoves } from "@usine/engine/board-moves";
 import { RunReader } from "@usine/engine/run-reader";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
@@ -49,6 +50,7 @@ import {
 import { BoardLaneId, BoardMove } from "../src/operator/board.ts";
 import { Operator } from "../src/operator/operator.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
+import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { alwaysHoldsLayer, inertLabelReconcilerLayer } from "./support/polling.ts";
 
@@ -244,6 +246,20 @@ describe("Board self-writes", () => {
               );
             });
             yield* applyMove;
+            const recorded = yield* (yield* BoardMoves).onItem(
+              gitHubItemKey(repository, 74),
+              DateTime.makeUnsafe(0),
+            );
+            assert.deepStrictEqual(
+              recorded.map(({ fromLane, toLane, added, removed }) => ({
+                fromLane,
+                toLane,
+                added,
+                removed,
+              })),
+              [{ fromLane: "Backlog", toLane: "Ready", added: ["ready"], removed: ["backlog"] }],
+              "the move is recorded whatever its label write did",
+            );
             const overview = yield* awaitCondition(operator.overview(instance), (value) =>
               value.projects.some((project) => project.runs.some((run) => run.state === "Waiting")),
             );
