@@ -56,6 +56,7 @@ it.effect.each(["issue", "pr"] as const)(
         reconcile: () => Effect.die("unused"),
         drain: () => Effect.void,
         retry: () => Effect.die("unused"),
+        runAgain: () => Effect.die("unused"),
         revoke: () => Effect.succeed([]),
         transcript: () => Effect.die("unused"),
         submit: (submission) =>

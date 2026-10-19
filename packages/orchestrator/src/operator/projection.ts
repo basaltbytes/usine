@@ -103,6 +103,7 @@ export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<LoopName>
           source: Option.getOrNull(source),
         }),
     }),
+    runAgain: Option.getOrNull(snapshot.runAgain),
     resultMessage: result?.message ?? null,
     pullRequestUrl: pullRequest?.url.toString() ?? null,
     ...actions,

@@ -30,10 +30,15 @@ export const brainLine = (brain: BrainSpec): string =>
 export const runActionLabel = {
   approve: "Approve",
   retry: "Retry",
+  runAgain: "Run again",
   cancel: "Cancel Run",
   confirmCancel: "Confirm cancel",
   keepRunning: "Keep running",
 } as const;
+
+/** Why running a Run again opened no Run, and what the operator does next. */
+export const runAgainBlocked =
+  "No Run opened: this Item used up its cycle budget. Reset it in Needs you.";
 
 export const itemKindLabel = (kind: BoardItemLink["kind"]): string =>
   kind === "pr" ? "Pull request" : "Issue";

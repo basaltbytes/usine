@@ -14,6 +14,8 @@ import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import type { WorkerName } from "@usine/core/worker";
 import {
+  RunAgainRequest,
+  type RunAgainResult,
   RunEngine,
   type EnginePersistenceError,
   type RunEngineError,
@@ -27,11 +29,22 @@ import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import type { GitHubAppError } from "@usine/github/github-app";
 import { ChangedIssue, ChangedPullRequest } from "@usine/github/polling";
-import { Context, DateTime, Effect, Exit, Layer, Option, Schema, SynchronizedRef } from "effect";
+import {
+  Context,
+  DateTime,
+  Effect,
+  Exit,
+  Layer,
+  Match,
+  Option,
+  Schema,
+  SynchronizedRef,
+} from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
 import { GitHubItemKey, PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
+import { cycleLimitOf } from "../trigger-submission.ts";
 import {
   ApprovalNeed,
   ConfigFileNeed,
@@ -65,6 +78,7 @@ import { LoopView, ProjectView, ReadyOverview, type ProjectStatus } from "./over
 import {
   RunDetailView,
   EditAndRetry,
+  LoopNotFoundError,
   SessionIntervention,
   RosterAgentNotFoundError,
 } from "./run.ts";
@@ -83,6 +97,7 @@ export type BoardMoveError =
   | EnginePersistenceError
   | GitHubAppError;
 export type OperatorError =
+  | LoopNotFoundError
   | RosterAgentNotFoundError
   | RunEngineError
   | TranscriptAttemptNotFoundError
@@ -509,6 +524,60 @@ const makeOperator = Effect.gen(function* () {
     yield* Effect.logInfo("Operator amended and retried Run", { runId, agent: agent.name });
   });
 
+  const runAgain = Effect.fn("Operator.runAgain")(function* (
+    instance: LoadedInstance,
+    runId: RunId,
+    edit: EditAndRetry,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, agent: edit.agent });
+    const current = yield* runs.inspect(runId);
+    const loop = instance.loops.find(({ name }) => name === current.run.loop);
+    if (loop === undefined) {
+      yield* Effect.logInfo("Run again rejected; the Run's Loop is not loaded", {
+        runId,
+        loop: current.run.loop,
+      });
+      return yield* new LoopNotFoundError({
+        loop: current.run.loop,
+        message: `Loop ${current.run.loop} is not loaded, so Run ${runId} cannot run again`,
+      });
+    }
+    const file = instance.agents.find(({ name }) => name === edit.agent);
+    if (file === undefined) {
+      yield* Effect.logInfo("Run again rejected; the Agent is not in the roster", {
+        runId,
+        agent: edit.agent,
+      });
+      return yield* new RosterAgentNotFoundError({
+        agent: edit.agent,
+        message: `Agent ${edit.agent} is not in the roster`,
+      });
+    }
+    const agent = file.agent;
+    const result = yield* runs.runAgain(
+      runId,
+      new RunAgainRequest({
+        step: loop.step,
+        approval: loop.approval,
+        cycleLimit: cycleLimitOf(loop),
+        context: new AttemptContext({
+          task: edit.task,
+          agent,
+          parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
+        }),
+        requestedBy: instance.config.operator,
+      }),
+    );
+    yield* Effect.logInfo(
+      "Operator ran a Run again",
+      Match.valueTags(result, {
+        Claimed: ({ runId: openedRunId }) => ({ runId, agent: agent.name, openedRunId }),
+        CycleBlocked: ({ ask }) => ({ runId, agent: agent.name, askId: ask.id }),
+      }),
+    );
+    return result;
+  });
+
   const intervene = Effect.fn("Operator.intervene")(function* (
     instance: LoadedInstance,
     runId: RunId,
@@ -661,6 +730,7 @@ const makeOperator = Effect.gen(function* () {
     retry,
     resolveFailure: runs.resolveFailure,
     editAndRetry,
+    runAgain,
     intervene,
     unpause,
     resetCycleBudget,
@@ -695,6 +765,18 @@ export class Operator extends Context.Service<
       runId: RunId,
       edit: EditAndRetry,
     ) => Effect.Effect<void, OperatorError>;
+    /**
+     * Opens a new Run for the Item state of a succeeded or canceled Run, with
+     * the edit's task and roster Agent and the Step, approval, and cycle limit
+     * the Run's Loop file names now, as run again by the operator login
+     * `usine.yaml` names. Returns the new Run, or the cycle-budget Ask the Item
+     * opened instead.
+     */
+    readonly runAgain: (
+      instance: LoadedInstance,
+      runId: RunId,
+      edit: EditAndRetry,
+    ) => Effect.Effect<RunAgainResult, OperatorError>;
     /** Delivers an attributed action through a live session's Attempt channel. */
     readonly intervene: (
       instance: LoadedInstance,
@@ -760,6 +842,7 @@ export {
   RunView,
   RunDetailView,
   EditAndRetry,
+  LoopNotFoundError,
   SessionIntervention,
   RosterAgentNotFoundError,
 } from "./run.ts";

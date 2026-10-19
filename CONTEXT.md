@@ -57,7 +57,7 @@ The defined portion of GitHub's object graph fetched as an item's payload for on
 _Avoid_: event shape, custom schema
 
 **Event**:
-One deduplicated fact the engine may react to, carrying a dedup key and payload — a trigger matching GitHub state, or an operator approval. The dedup key is derived by the engine per trigger type from the event's content — timestamps aside, the same state is the same Event, forever — never authored in the loop file.
+One deduplicated fact the engine may react to, carrying a dedup key and payload — a trigger matching GitHub state, an operator approval, or the operator running a Run again. The dedup key is derived by the engine per trigger type from the event's content — timestamps aside, the same state is the same Event, forever — never authored in the loop file.
 _Avoid_: firing, occurrence, message
 
 **Hint**:
@@ -108,6 +108,10 @@ _Avoid_: claim, lock, pause (the loop-level switch)
 The operator amending a failed run before retrying it — the task text (the interpolated loop-body result), the agent, or both. Sticky: the amendment rewrites the run's effective context and every later attempt runs it until amended again; each attempt records what it actually ran.
 _Avoid_: modify-and-rerun, edit-and-restart
 
+**Run again**:
+The operator opening a new run for the Item state of a succeeded or canceled run, with the task text and agent that edit-and-retry can amend. It is an Event of the operator's own, so the polled Event of that state keeps its run and a later poll of the unchanged Item opens nothing; the loop's approval gate and the Item's cycle budget apply as to a polled Event.
+_Avoid_: rerun, retry (the next attempt of a failed run), restart
+
 **Supersede**:
 What a newer Event does to the same Item's open run before any attempt starts: cancels it (reason recorded) and takes its place. A running attempt always finishes — the newer state is judged again once it ends. Engine behavior, never a loop-file setting.
 _Avoid_: preempt, replace
@@ -117,7 +121,7 @@ The engine canceling a run no attempt has started because its Item no longer mat
 _Avoid_: cancel (the operator's act), expire
 
 **Pause**:
-The operator's loop-level switch: a paused loop opens no new runs. Runtime state in the orchestrator, never written to the loop file; existing runs are untouched. Loops created in the UI are born paused — unpausing is the arming act; a loop arriving by git is born unpaused.
+The operator's loop-level switch: a paused loop's triggers open no new runs; the operator can still run one of its runs again. Runtime state in the orchestrator, never written to the loop file; existing runs are untouched. Loops created in the UI are born paused — unpausing is the arming act; a loop arriving by git is born unpaused.
 _Avoid_: disable (deleting/renaming the file is how a loop retires), stop
 
 **Orchestrator**:

@@ -81,12 +81,17 @@ export const isOpen = Schema.is(Open);
 export const isUnstarted = Schema.is(Unstarted);
 export const isStartable = Schema.is(Startable);
 
-/** The operator actions permitted by a Run's lifecycle state. Command handlers still apply the typed transitions. */
+/**
+ * The operator actions permitted by a Run's lifecycle state. Command handlers still apply the typed transitions.
+ * `canRunAgain` holds for a Run that succeeded or was canceled: running it again opens a new Run
+ * for the same Item state, while a failed Run is retried instead (ADR 0002).
+ */
 export const operatorActions = (state: RunState) => ({
   canApprove: state._tag === "Waiting",
   canRetry: state._tag === "Failed",
   canResolveFailure: state._tag === "Failed",
   canCancel: isOpen(state),
+  canRunAgain: state._tag === "Succeeded" || state._tag === "Canceled",
 });
 
 /**

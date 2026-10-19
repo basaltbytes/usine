@@ -1,6 +1,6 @@
 ---
 title: Operate Runs
-description: Follow Runs in the web UI, approve, retry, cancel, and edit them, steer a live Attempt, answer Needs you, stop the orchestrator cleanly, and back up the runtime store.
+description: Follow Runs in the web UI, approve, retry, cancel, edit, and run them again, steer a live Attempt, answer Needs you, stop the orchestrator cleanly, and back up the runtime store.
 sidebar:
   order: 3
 ---
@@ -116,6 +116,16 @@ The Loop holds the Item as it does for a question: the Agent's blocker comment o
 Select **Cancel Run**, then **Confirm cancel**, to close any open Run as `Canceled`. usine stops a running Attempt and pushes its unfinished work to a salvage branch, as on a failure. The cancel holds while the Item stays as it is: polling sees the same content again and starts nothing.
 
 To run the Loop on the Item again, make it leave the Loop and come back: remove the Loop's label, wait until usine sees the Item without it (one poll, or right away for a Board move), then add the label again. The same content then opens a new Run with a new id. A Run that usine superseded or revoked behaves the same way when the Item returns to its content. A `Failed` Run is different: it keeps its Event, and you retry it instead.
+
+If you remove and add the label within one poll interval, polling sees only the end state and starts nothing. Use **Run again** instead.
+
+## Run again
+
+A `Succeeded` or `Canceled` Run has **Run again** and **Edit and run again** in its drawer and on its Run page. **Run again** opens a new Run of the same Loop on the same Item content, with the Run's task and Agent, and shows the new Run. **Edit and run again** opens the task and Agent editor first; **Save and run again** starts the new Run with your changes. The Run you ran again stays as it ended, and both Runs are in the Item's Run history.
+
+The new Run follows the Loop file as it is now: it waits for your approval when the Loop requires approval, and it counts against the Item's cycle budget. When the budget is used up, no Run opens, the drawer says so, and the Item's cycle budget appears in **Needs you**. usine refuses to run a Run again while another Run of the Loop is open on the Item. The Event section of the new Run's page shows who ran it again, when, and from which Run.
+
+After a Run again, polling the unchanged Item still starts nothing. A Run again works on a paused Loop too.
 
 ## Steer a live Attempt
 

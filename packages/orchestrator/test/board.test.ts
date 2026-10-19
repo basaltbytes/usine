@@ -123,12 +123,14 @@ const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succ
     task: "Build the Board.",
     attempts: [],
     approval: null,
+    runAgain: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: state === "Waiting",
     canRetry: state === "Failed",
     canResolveFailure: state === "Failed",
     canCancel: state === "Waiting" || state === "Running",
+    canRunAgain: false,
   });
 
 describe("Board projection", () => {

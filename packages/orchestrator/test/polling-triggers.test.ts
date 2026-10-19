@@ -1109,6 +1109,7 @@ describe("PollingTriggers", () => {
       reconcile: () => Effect.die("unused"),
       drain: () => Effect.void,
       retry: () => Effect.die("unused"),
+      runAgain: () => Effect.die("unused"),
       revoke: () => Effect.succeed([]),
       submit: (submission) =>
         Effect.succeed(
@@ -1213,6 +1214,7 @@ describe("PollingTriggers", () => {
         reconcile: () => Effect.die("unused"),
         drain: () => Effect.void,
         retry: () => Effect.die("unused"),
+        runAgain: () => Effect.die("unused"),
         transcript: () => Effect.die("unused"),
         submit: (submission) =>
           Effect.gen(function* () {
@@ -1322,6 +1324,7 @@ describe("PollingTriggers", () => {
       reconcile: () => Effect.die("unused"),
       drain: () => Effect.void,
       retry: () => Effect.die("unused"),
+      runAgain: () => Effect.die("unused"),
       revoke: () => Effect.succeed([]),
       submit: (submission) =>
         Effect.succeed(

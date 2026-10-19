@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ReaderLine } from "../run-transcript/transcript.tsx";
 import { ApprovalLine } from "./approval.tsx";
+import { RunAgainLine } from "./run-again.tsx";
 import { eventItem } from "./item.ts";
 
 const Page = ({ label, children }: { readonly label: string; readonly children: ReactNode }) => (
@@ -38,8 +39,9 @@ export const TaskDocument = ({ task }: { readonly task: string }) => (
 );
 
 /**
- * The triggering Event: the Item it carried, when it carried one, who approved the Run when its
- * Loop requires approval, and the Event's complete payload under Raw details.
+ * The triggering Event: the Item it carried, when it carried one, who ran an earlier Run again
+ * to open this one, who approved the Run when its Loop requires approval, and the Event's
+ * complete payload under Raw details.
  */
 export const EventDocument = ({
   detail,
@@ -57,6 +59,7 @@ export const EventDocument = ({
               <p className="mt-2 text-md">
                 {detail.run.loop} opened this Run on {detail.run.repository}.
               </p>
+              <RunAgainLine run={detail.run} className="mt-2 block text-sm" />
               <ApprovalLine approval={detail.run.approval} className="mt-2 block text-sm" />
             </>
           ),
@@ -93,6 +96,7 @@ export const EventDocument = ({
                   ),
                 })}
               </dl>
+              <RunAgainLine run={detail.run} className="block text-sm" />
               <ApprovalLine approval={detail.run.approval} className="block text-sm" />
               {Option.match(event.body, {
                 onNone: () => null,

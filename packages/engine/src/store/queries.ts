@@ -10,6 +10,7 @@ import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
+import type { RunAgain } from "@usine/core/run/again";
 import type { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import * as RunState from "@usine/core/run/state";
@@ -37,6 +38,7 @@ import {
   itemCycleBudgets,
   loopItems,
   projectionRevision,
+  runAgainEvents,
   runs,
   steps,
   triggerEvents,
@@ -53,6 +55,7 @@ import {
   decodeDiscards,
   decodeEventRoutes,
   decodeProjectionRevision,
+  decodeReopenedEvents,
   decodeReopenings,
   decodeRunIds,
   decodeRunRows,
@@ -65,6 +68,7 @@ import {
   encodeRunState,
   encodeStepResult,
   eventFromRow,
+  runAgainFromRow,
   runFromRow,
   runSummaryFromRow,
   stepFromRow,
@@ -122,6 +126,8 @@ const runSelection = {
   approvedAt: approvalEvents.receivedAt,
   approvalChannel: approvals.channel,
   approver: approvals.approver,
+  againFrom: runAgainEvents.fromRunId,
+  againRequestedBy: runAgainEvents.requestedBy,
 } as const;
 
 const attemptSelection = {
@@ -182,7 +188,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
       .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
       .innerJoin(steps, eq(steps.runId, runs.runId))
       .leftJoin(approvals, eq(approvals.runId, runs.runId))
-      .leftJoin(approvalEvents, eq(approvalEvents.eventId, approvals.eventId));
+      .leftJoin(approvalEvents, eq(approvalEvents.eventId, approvals.eventId))
+      .leftJoin(runAgainEvents, eq(runAgainEvents.eventId, runs.eventId));
 
   const runRows = Effect.fn("RunStoreQueries.runRows")(function* (runId: RunId) {
     const rows = yield* selectRuns().where(eq(runs.runId, runId)).execute();
@@ -276,6 +283,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       attempts: storedAttempts.map(attemptFromRow),
       resolvedFailureAttemptId: Option.fromNullishOr(storedRun.resolvedFailureAttemptId),
       approval: approvalFromRow(storedRun),
+      runAgain: runAgainFromRow(storedRun),
       repository: storedRun.repository,
       revision: storedRun.revision,
       task: storedRun.task,
@@ -617,6 +625,35 @@ export const queriesFor = (database: RunDatabaseClient) => {
     }));
   });
 
+  /** The trigger Event that `eventId` opened again, as a reopening or a run again; none for a trigger's own Event. */
+  const reopenedEvent = Effect.fn("RunStoreQueries.reopenedEvent")(function* (eventId: EventId) {
+    const reopened = alias(events, "reopened_event");
+    const rows = yield* decodeReopenedEvents(
+      yield* database
+        .select({ eventId: reopened.eventId, dedupKey: reopened.dedupKey })
+        .from(triggerEvents)
+        .innerJoin(reopened, eq(reopened.eventId, triggerEvents.reopensEventId))
+        .where(eq(triggerEvents.eventId, eventId))
+        .execute(),
+    );
+    return Option.fromNullishOr(rows[0]);
+  });
+
+  /** Records that the operator recorded `eventId` by running a closed Run again, and who asked. */
+  const recordRunAgain = Effect.fn("RunStoreQueries.recordRunAgain")(function* (
+    eventId: EventId,
+    again: RunAgain,
+  ) {
+    yield* database
+      .insert(runAgainEvents)
+      .values({
+        eventId,
+        fromRunId: again.from,
+        requestedBy: Option.getOrNull(again.requestedBy),
+      })
+      .execute();
+  });
+
   /**
    * Records a trigger's Event and its route once, and returns the route as first
    * recorded. `reopens` marks an Event the engine opened again for an earlier one.
@@ -841,6 +878,8 @@ export const queriesFor = (database: RunDatabaseClient) => {
     ignoredEvent,
     newestReopening,
     nextQueued,
+    reopenedEvent,
+    recordRunAgain,
     pendingContinuations,
     recordTriggerEvent,
     runIdsToDrive,

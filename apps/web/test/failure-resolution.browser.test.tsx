@@ -75,10 +75,12 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
       }),
     ],
     approval: null,
+    runAgain: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,
     canCancel: false,
+    canRunAgain: false,
     canRetry: true,
     canResolveFailure: true,
   });

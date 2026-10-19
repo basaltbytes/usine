@@ -15,6 +15,7 @@ import {
 } from "./error.ts";
 import type { RunSnapshot } from "../run-reader/model.ts";
 import { runIdFor, type Submission, type SubmissionResult } from "./submission.ts";
+import type { RunAgainRequest, RunAgainResult } from "./run-again.ts";
 import type { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import { RunStore } from "../store/store.ts";
 import { RunReader } from "../run-reader/run-reader.ts";
@@ -100,6 +101,15 @@ const makeRunEngine = Effect.gen(function* () {
     yield* Effect.logDebug("Retry changed nothing; the Run already waits for its next Attempt", {
       runId,
     });
+  }, Effect.uninterruptible);
+
+  const runAgain = Effect.fn("RunEngine.runAgain")(function* (
+    runId: RunId,
+    request: RunAgainRequest,
+  ) {
+    const result = yield* store.runAgain(runId, request);
+    if (result._tag === "Claimed") yield* driver.launch(result.runId);
+    return result;
   }, Effect.uninterruptible);
 
   const cancel = Effect.fn("RunEngine.cancel")(function* (runId: RunId) {
@@ -289,6 +299,7 @@ const makeRunEngine = Effect.gen(function* () {
     retry,
     resolveFailure,
     revoke,
+    runAgain,
     submit,
     transcript,
   } as const;
@@ -348,6 +359,16 @@ export class RunEngine extends Context.Service<
       runId: RunId,
       amendment?: Option.Option<AttemptContext>,
     ) => Effect.Effect<void, RunEngineError>;
+    /**
+     * Opens a new Run for the Item state of a succeeded or canceled Run, with
+     * the request's task and Agent, as an Event of the operator's that a later
+     * poll of the unchanged Item finds instead of opening another Run. The
+     * Item's cycle budget and the Loop's approval gate apply as to a polled Event.
+     */
+    readonly runAgain: (
+      runId: RunId,
+      request: RunAgainRequest,
+    ) => Effect.Effect<RunAgainResult, RunEngineError>;
     /** Cancels unstarted Runs and discards queued Events for a Loop's Item when it stops matching; running Attempts continue. */
     readonly revoke: (
       loop: LoopName,
@@ -418,6 +439,7 @@ export {
   IgnoreReason,
   SubmissionResult,
 } from "./submission.ts";
+export { RunAgainRequest, RunAgainResult } from "./run-again.ts";
 export { RunEngineShutdown } from "./shutdown.ts";
 export {
   RunNotFoundError,

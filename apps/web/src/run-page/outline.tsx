@@ -21,6 +21,7 @@ import { previewText } from "../run-transcript/document/text.ts";
 import { SessionHandoff } from "../run-transcript/handoff.tsx";
 import type { TranscriptSession } from "../run-transcript/model.ts";
 import { ApprovalLine } from "./approval.tsx";
+import { RunAgainLine } from "./run-again.tsx";
 
 /** The part of the Run the reader shows: the Task, the Event, or an Attempt and one of its sessions. */
 export type OutlineSelection =
@@ -207,8 +208,8 @@ const ChapterTree = ({
 };
 
 /**
- * The Run's parts: Task and Event with a preview each, the Event with its approval when it has
- * one, then each Attempt. While the reader
+ * The Run's parts: Task and Event with a preview each, the Event with who ran the Run again and
+ * its approval when it has them, then each Attempt. While the reader
  * is shown, the Attempt being read opens to its sessions and checkpoints, and the
  * checkpoint at the reading line is marked.
  */
@@ -279,6 +280,7 @@ export const Outline = ({
       >
         <span className="block font-medium">Event</span>
         <span className="line-clamp-2 text-xs text-muted-foreground">{eventPreview}</span>
+        <RunAgainLine run={run} className="mt-0.5 block text-xs" />
         <ApprovalLine approval={run.approval} className="mt-0.5 block text-xs" />
       </button>
       <div className="h-2.5" />

@@ -1,9 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
 import { AttemptTask } from "@usine/core/attempt";
+import type { RunId } from "@usine/core/run";
 import { EditAndRetry as Amendment, type RunView } from "@usine/orchestrator/operator";
 import { useId, useState } from "react";
 import { api } from "../api.ts";
+import { runAgainBlocked } from "../operator-copy.ts";
+import { useRunAgain } from "../run-actions.ts";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
@@ -11,32 +14,31 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { ErrorAlert } from "@/components/error-alert";
 import { cn } from "@/lib/utils";
 
-/** Edits only the task and roster choice; the server derives persona and brain settings. */
-export const EditAndRetry = ({
-  run,
-  close,
-  className,
-}: {
-  readonly run: RunView;
-  readonly close: () => void;
-  readonly className?: string;
-}) => {
-  const [task, setTask] = useState(run.task);
-  const [agent, setAgent] = useState<string>(run.agent);
-  const id = useId();
+/** What the operator edits the task and Agent for: the failed Run's next Attempt, or a new Run of a closed one. */
+export type EditIntent = "retry" | "runAgain";
+
+const editCopy = {
+  retry: {
+    title: "Edit and retry",
+    note: "Later attempts use this task and agent until you edit them again.",
+    submit: "Save and retry",
+  },
+  runAgain: {
+    title: "Edit and run again",
+    note: "A new Run starts on this Item with this task and agent. This Run stays as it ended.",
+    submit: "Save and run again",
+  },
+} as const satisfies Record<EditIntent, { title: string; note: string; submit: string }>;
+
+/** Whether the Run still allows what the edit is for, so a stale form closes on its own. */
+export const editApplies = (run: RunView, intent: EditIntent): boolean =>
+  intent === "retry" ? run.canRetry : run.canRunAgain;
+
+const useRetryWith = (run: RunView, close: () => void) => {
   const queryClient = useQueryClient();
-  const roster = useQuery({
-    queryKey: ["agents"],
-    queryFn: () => api((client) => client.agents()),
-  });
-  const mutation = useMutation({
-    mutationFn: () =>
-      api((client) =>
-        client.editAndRetry({
-          params: { runId: run.id },
-          payload: new Amendment({ task: AttemptTask.make(task), agent: AgentName.make(agent) }),
-        }),
-      ),
+  return useMutation({
+    mutationFn: (amendment: Amendment) =>
+      api((client) => client.editAndRetry({ params: { runId: run.id }, payload: amendment })),
     onSuccess: async () => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["run", run.id] }),
@@ -45,24 +47,59 @@ export const EditAndRetry = ({
       close();
     },
   });
+};
+
+/**
+ * Edits only the task and roster choice; the server derives persona and brain settings. A retry
+ * amends the failed Run; a run again opens the new Run with them and shows it through `openRun`.
+ */
+export const EditAndRetry = ({
+  run,
+  intent,
+  close,
+  openRun,
+  className,
+}: {
+  readonly run: RunView;
+  readonly intent: EditIntent;
+  readonly close: () => void;
+  /** Shows the Run that running this one again opened. */
+  readonly openRun: (runId: RunId) => void;
+  readonly className?: string;
+}) => {
+  const [task, setTask] = useState(run.task);
+  const [agent, setAgent] = useState<string>(run.agent);
+  const id = useId();
+  const copy = editCopy[intent];
+  const roster = useQuery({
+    queryKey: ["agents"],
+    queryFn: () => api((client) => client.agents()),
+  });
+  const retry = useRetryWith(run, close);
+  const again = useRunAgain(run.id);
+  const mutation = intent === "retry" ? retry : again;
+  const valid = task.trim().length > 0 && roster.data?.some((name) => name === agent) === true;
+  const submit = () => {
+    const amendment = new Amendment({ task: AttemptTask.make(task), agent: AgentName.make(agent) });
+    if (intent === "retry") retry.mutate(amendment);
+    else
+      again.mutate(amendment, {
+        onSuccess: (result) => {
+          if (result._tag === "Claimed") openRun(result.runId);
+        },
+      });
+  };
   return (
     <form
-      aria-label="Edit and retry"
+      aria-label={copy.title}
       className={cn("space-y-3", className)}
       onSubmit={(event) => {
         event.preventDefault();
-        if (
-          !mutation.isPending &&
-          task.trim().length > 0 &&
-          roster.data?.some((name) => name === agent)
-        )
-          mutation.mutate();
+        if (!mutation.isPending && valid) submit();
       }}
     >
-      <h3 className="text-md font-semibold">Edit and retry</h3>
-      <p className="text-xs text-muted-foreground">
-        Later attempts use this task and agent until you edit them again.
-      </p>
+      <h3 className="text-md font-semibold">{copy.title}</h3>
+      <p className="text-xs text-muted-foreground">{copy.note}</p>
       <Label htmlFor={`${id}-task`}>Task</Label>
       <Textarea
         id={`${id}-task`}
@@ -90,16 +127,8 @@ export const EditAndRetry = ({
         ))}
       </NativeSelect>
       <div className="flex gap-2">
-        <Button
-          type="submit"
-          size="sm"
-          disabled={
-            mutation.isPending ||
-            task.trim().length === 0 ||
-            !roster.data?.some((name) => name === agent)
-          }
-        >
-          Save and retry
+        <Button type="submit" size="sm" disabled={mutation.isPending || !valid}>
+          {copy.submit}
         </Button>
         <Button
           type="button"
@@ -111,6 +140,11 @@ export const EditAndRetry = ({
           Close editor
         </Button>
       </div>
+      {again.data?._tag === "CycleBlocked" && (
+        <p role="status" className="text-xs text-needs-you">
+          {runAgainBlocked}
+        </p>
+      )}
       {roster.isError && <ErrorAlert message={roster.error.message} />}
       {mutation.isError && <ErrorAlert message={mutation.error.message} />}
     </form>

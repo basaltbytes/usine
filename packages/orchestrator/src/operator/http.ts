@@ -5,6 +5,7 @@ import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
+import { RunAgainResult } from "@usine/engine/engine";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { Record, Schema, SchemaTransformation } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi";
@@ -33,6 +34,7 @@ const errorStatuses = {
   RunRetryBlockedError: 409,
   RunInterventionRejectedError: 409,
   RosterAgentNotFoundError: 404,
+  LoopNotFoundError: 404,
   CycleBudgetResetRejectedError: 409,
   BoardLaneReadOnlyError: 409,
   RestartRequiredError: 409,
@@ -149,7 +151,8 @@ const loopParams = { loop: LoopName };
  * clients derive URLs, request codecs, successful responses, and typed failures
  * from this contract. Action acknowledgement means the request was accepted;
  * subsequent observation reports execution and GitHub polling progress. A
- * reload of the instance folder answers with what it changed.
+ * reload of the instance folder answers with what it changed, and running a
+ * Run again with the new Run or the cycle-budget Ask that blocked it.
  *
  * This capability is platform-free (ADRs 0012 and 0020). Library consumers can
  * continue using Operator directly without an HTTP server or client.
@@ -163,6 +166,11 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         params: runParams,
         payload: EditAndRetry.annotate({ parseOptions: { onExcessProperty: "error" } }),
         success: acknowledged,
+      }),
+      HttpApiEndpoint.post("runAgain", "/api/runs/:runId/run-again", {
+        params: runParams,
+        payload: EditAndRetry.annotate({ parseOptions: { onExcessProperty: "error" } }),
+        success: RunAgainResult,
       }),
       HttpApiEndpoint.post("intervene", "/api/runs/:runId/intervene", {
         params: runParams,

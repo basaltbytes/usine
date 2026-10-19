@@ -45,7 +45,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { BlockedFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptFailed } from "@usine/core/attempt/outcome";
 import * as RunState from "@usine/core/run/state";
-import { RunEngine } from "@usine/engine/engine";
+import { Claimed, RunAgainRequest, RunEngine } from "@usine/engine/engine";
 import {
   ItemContentHash,
   ItemProjection,
@@ -145,6 +145,7 @@ const instance = new LoadedInstance({
 const snapshot = new RunSnapshot({
   resolvedFailureAttemptId: Option.none(),
   approval: Option.none(),
+  runAgain: Option.none(),
   event: new Event({
     id: EventId.make("event-operator-test"),
     dedupKey: DedupKey.make("event-operator-test"),
@@ -278,9 +279,10 @@ const testLayer = (
   projectionRevision: Ref.Ref<Option.Option<ProjectionRevision>>,
   runSnapshot: RunSnapshot = snapshot,
   budgets: Layer.Layer<CycleBudgets> = noCycleBudgets,
-  commands: Pick<RunEngine["Service"], "retry" | "intervene"> = {
+  commands: Pick<RunEngine["Service"], "retry" | "intervene" | "runAgain"> = {
     retry: () => Effect.void,
     intervene: () => Effect.void,
+    runAgain: () => Effect.die("unused"),
   },
 ) => {
   const readTranscript = (query: TranscriptQuery) =>
@@ -311,6 +313,7 @@ const testLayer = (
     drain: () => Effect.void,
     retry: commands.retry,
     revoke: () => Effect.succeed([]),
+    runAgain: commands.runAgain,
     submit: () => Effect.die("unused"),
     transcript: readTranscript,
   });
@@ -656,6 +659,86 @@ describe("Operator", () => {
               intervene: (_runId, _attemptId, input) =>
                 Effect.sync(() => {
                   inputs.push(input);
+                }),
+              runAgain: () => Effect.die("unused"),
+            }),
+          ),
+        );
+      }),
+  );
+
+  it.effect(
+    "runs a Run again with its Loop file's gate and budget, the selected roster Agent, and the configured operator",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const requests: Array<[RunId, RunAgainRequest]> = [];
+        const reviewer = new AgentFile({
+          ...agentFile,
+          name: AgentName.make("reviewer"),
+          parentModel: Option.some(ModelId.make("openai/new-parent")),
+        });
+        const configured = new LoadedInstance({
+          ...instance,
+          config: new UsineConfig({
+            ...instance.config,
+            operator: Option.some(OperatorLogin.make("Philippe")),
+          }),
+          agents: [agentFile, reviewer],
+          loops: [new LoopFile({ ...loop, maxCycles: CycleLimit.make(5) })],
+        });
+        const opened = new Claimed({
+          eventId: EventId.make("run-again-event"),
+          runId: RunId.make("run-opened-again"),
+        });
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          const edit = new EditAndRetry({
+            task: AttemptTask.make("Finish the review"),
+            agent: reviewer.name,
+          });
+          assert.deepStrictEqual(yield* operator.runAgain(configured, runId, edit), opened);
+          assert.deepStrictEqual(requests, [
+            [
+              runId,
+              new RunAgainRequest({
+                step: loop.step,
+                approval: "required",
+                cycleLimit: Option.some(CycleLimit.make(5)),
+                context: new AttemptContext({
+                  task: AttemptTask.make("Finish the review"),
+                  agent: reviewer.agent,
+                  parentModel: reviewer.parentModel,
+                }),
+                requestedBy: Option.some(OperatorLogin.make("Philippe")),
+              }),
+            ],
+          ]);
+          const unknownAgent = yield* Effect.flip(
+            operator.runAgain(
+              configured,
+              runId,
+              new EditAndRetry({ task: edit.task, agent: AgentName.make("missing") }),
+            ),
+          );
+          assert.strictEqual(unknownAgent._tag, "RosterAgentNotFoundError");
+          const retired = yield* Effect.flip(
+            operator.runAgain(new LoadedInstance({ ...configured, loops: [] }), runId, edit),
+          );
+          assert.strictEqual(retired._tag, "LoopNotFoundError");
+          assert.strictEqual(requests.length, 1);
+        }).pipe(
+          Effect.provide(
+            testLayer(approved, moved, reads, revision, snapshot, noCycleBudgets, {
+              retry: () => Effect.die("unused"),
+              intervene: () => Effect.die("unused"),
+              runAgain: (id, request) =>
+                Effect.sync(() => {
+                  requests.push([id, request]);
+                  return opened;
                 }),
             }),
           ),

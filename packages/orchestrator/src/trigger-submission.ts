@@ -6,7 +6,7 @@ import { Agent, resolveParentModel, AgentName } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
-import { CycleGeneration } from "@usine/core/cycle-budget";
+import { CycleGeneration, type CycleLimit } from "@usine/core/cycle-budget";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryRevision } from "@usine/core/repository";
@@ -94,6 +94,10 @@ interface TriggerSubmissionOptions {
   readonly parentModel: Option.Option<ModelId>;
 }
 
+/** The cycle limit a Loop's Events carry: its `max_cycles`, or none for a schedule Loop, whose Runs no budget counts. */
+export const cycleLimitOf = (loop: LoopFile): Option.Option<CycleLimit> =>
+  loop.trigger.on === "schedule" ? Option.none() : Option.some(loop.maxCycles);
+
 /** Builds the Submission every trigger stream hands to the engine. */
 export const triggerSubmission = (options: TriggerSubmissionOptions): Submission =>
   new Submission({
@@ -108,8 +112,7 @@ export const triggerSubmission = (options: TriggerSubmissionOptions): Submission
     loop: options.loop.name,
     step: options.loop.step,
     approval: options.loop.approval,
-    cycleLimit:
-      options.loop.trigger.on === "schedule" ? Option.none() : Option.some(options.loop.maxCycles),
+    cycleLimit: cycleLimitOf(options.loop),
     repository: options.repository.name,
     revision: options.revision,
     task: options.task,

@@ -22,6 +22,8 @@ const operatorFailure = (error: BackendError) => {
       case "RunOperationRejectedError":
         if (error.operation === "resolveFailure")
           return "This failure is no longer current. Refresh the Run before marking it resolved.";
+        if (error.operation === "runAgain")
+          return `Run ${error.runId} is ${error.state}. Only a succeeded or canceled Run can run again.`;
         return `Cannot ${error.operation} Run ${error.runId} while it is ${error.state}.`;
       case "CycleBudgetResetRejectedError":
         return `Cycle budget Ask ${error.askId} is no longer awaiting this answer.`;
@@ -31,6 +33,7 @@ const operatorFailure = (error: BackendError) => {
       case "RunRetryBlockedError":
       case "RunInterventionRejectedError":
       case "RosterAgentNotFoundError":
+      case "LoopNotFoundError":
         return error.message;
       case "BoardProjectNotFoundError":
         return `Project ${error.repository} was not found.`;
@@ -144,6 +147,9 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     .handle("agents", () => fromBackend((backend) => backend.agents))
     .handle("editAndRetry", ({ params, payload }) =>
       fromBackend((backend) => backend.editAndRetry(params.runId, payload)).pipe(acknowledge),
+    )
+    .handle("runAgain", ({ params, payload }) =>
+      fromBackend((backend) => backend.runAgain(params.runId, payload)),
     )
     .handle("intervene", ({ params, payload }) =>
       fromBackend((backend) => backend.intervene(params.runId, payload)).pipe(acknowledge),

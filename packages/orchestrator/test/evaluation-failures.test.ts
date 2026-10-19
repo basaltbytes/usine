@@ -158,6 +158,7 @@ const claimingRuns = Layer.succeed(RunEngine)({
   reconcile: () => Effect.die("unused"),
   drain: () => Effect.void,
   retry: () => Effect.die("unused"),
+  runAgain: () => Effect.die("unused"),
   revoke: () => Effect.succeed([]),
   submit: (submission) =>
     Effect.sync(() => {
