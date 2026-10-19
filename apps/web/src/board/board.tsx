@@ -25,6 +25,7 @@ import type {
 } from "@usine/orchestrator/operator";
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
+import { PageHeading } from "@/components/page";
 import { NeedsYouBadge, StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -196,14 +197,13 @@ export const ProjectBoard = ({
   };
   return (
     <div className="flex min-h-96 flex-1 flex-col gap-4 pt-5">
-      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 md:px-5">
-        <h1 className="text-xl font-semibold wrap-anywhere">{project.repository}</h1>
-        <p className="text-sm text-muted-foreground tabular-nums">
-          {lanes.length} lane{lanes.length === 1 ? "" : "s"}, {itemCount} item
-          {itemCount === 1 ? "" : "s"}
-        </p>
+      <PageHeading
+        title={project.repository}
+        counts={`${lanes.length} lane${lanes.length === 1 ? "" : "s"}, ${itemCount} item${itemCount === 1 ? "" : "s"}`}
+        className="px-4 md:px-5"
+      >
         {project.status === "needs-you" && <NeedsYouBadge />}
-      </header>
+      </PageHeading>
       {project.board.lanes.some(({ origin }) => origin === "proposed") && (
         <p className="mx-4 max-w-3xl text-muted-foreground md:mx-5">
           Proposed lanes are read-only. To enable moves, configure this project’s lanes in{" "}

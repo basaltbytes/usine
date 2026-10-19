@@ -12,6 +12,7 @@ const ProjectNotFound = () => (
     title="Project not found"
     description="This repository is not registered with the running usine."
     tone="error"
+    inPanel
   >
     <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
       Back to projects

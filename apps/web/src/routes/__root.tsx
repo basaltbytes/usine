@@ -26,8 +26,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { NeedsYou } from "../needs-you/needs-you.tsx";
-import { needCopy } from "../operator-copy.ts";
-import { overviewQuery } from "../overview.ts";
+import { needsYouByProject, overviewQuery } from "../overview.ts";
 import { Suspense, lazy, useState } from "react";
 
 // The drawer bundles the transcript, Markdown, and message components, so it
@@ -102,19 +101,13 @@ const Shell = () => {
   const [shownRun, setShownRun] = useState(run);
   if (run !== undefined && run !== shownRun) setShownRun(run);
   const live = data._tag !== "NeedsSetup";
-  const needsByProject = new Map<RepositoryName, number>();
-  for (const need of data.needsYou) {
-    const repository = needCopy(need).repository;
-    if (repository !== null)
-      needsByProject.set(repository, (needsByProject.get(repository) ?? 0) + 1);
-  }
   return (
     <SidebarProvider>
       <AppSidebar
         projects={data.projects}
         view={view}
         project={project}
-        needsYou={needsByProject}
+        needsYou={needsYouByProject(data.needsYou)}
         live={live}
       />
       <SidebarInset className="h-svh overflow-hidden">

@@ -162,7 +162,7 @@ The palette is Catppuccin Mocha used as stated: neutral grounds from crust to te
 - **Blue** (`{colors.blue}`): a Run that is Pending, Queued, or Running; a flow arrow whose Loops are at work.
 - **Peach** (`{colors.peach}`): a Run waiting for approval and everything marked Needs you (sidebar counts, Needs you items, card ring at 45%).
 - **Red** (`{colors.red}`): failed Runs, error text, destructive actions. Fills use it at 8 to 25% alpha, never solid.
-- **Green** (`{colors.green}`): succeeded Runs and the live connection dot.
+- **Green** (`{colors.green}`): succeeded Runs, a clear Project, an active Loop, and the live connection dot.
 
 ### Neutral
 - **Crust** (`{colors.crust}`): text on mauve buttons; the scrim colour under sheets and dialogs.
@@ -170,7 +170,7 @@ The palette is Catppuccin Mocha used as stated: neutral grounds from crust to te
 - **Base** (`{colors.base}`): the inset work panel and the sticky lane headings that sit on it.
 - **Surface0** (`{colors.surface0}`): popovers, menus, secondary buttons, the active sidebar row.
 - **Surface1** (`{colors.surface1}`): hover on secondary buttons, menu item focus, scrollbar thumb.
-- **Overlay0** (`{colors.overlay0}`): graphics only: idle flow arrows, the canceled state dot, the offline dot. Too faint for text.
+- **Overlay0** (`{colors.overlay0}`): graphics only: idle flow arrows, the canceled and paused state dots, the offline dot. Too faint for text.
 - **Subtext0** (`{colors.subtext0}`): secondary text, counts, meta.
 - **Subtext1** (`{colors.subtext1}`): sidebar text.
 - **Text** (`{colors.text}`): primary text.
@@ -181,7 +181,7 @@ GitHub label colours are kept as they come from the repository and rendered by t
 ### Named Rules
 **The One Action Colour Rule.** Mauve marks what the operator can act on or has focused. State never borrows mauve, and actions never borrow a state colour except destructive red.
 
-**The State Tone Rule.** Blue running, peach waiting and Needs you, red failed, green succeeded, overlay0 canceled. A state is shown as a 6px dot in its tone next to the state's word, so colour is never the only signal.
+**The State Tone Rule.** Blue running, peach waiting and Needs you, red failed, green succeeded, overlay0 canceled. A state is shown as a 6px dot in its tone next to the state's word, so colour is never the only signal. Projects and Loops borrow the scale: a Project is active in blue or clear in green; a Loop is active in the live green or paused in overlay0.
 
 ## Typography
 
@@ -191,7 +191,7 @@ GitHub label colours are kept as they come from the repository and rendered by t
 **Character:** One sans family for all text, set small and tight like Linear; mono appears only where the text is machine output.
 
 ### Hierarchy
-- **Headline** (600, 20px, 28px, -0.01em): the screen title, such as the Project name on the Board.
+- **Headline** (600, 20px, 28px, -0.01em): the screen title, such as the Project name on the Board or Loops.
 - **Title** (600, 16px, 24px): section and card titles in the registry Card.
 - **Label strong** (600 or 500, 14px, 20px): the sidebar wordmark, sheet titles, alert titles.
 - **Body** (400, 13px, 20px): default UI text, buttons, menu items, card titles (500), lane names (600).
@@ -208,6 +208,8 @@ GitHub label colours are kept as they come from the repository and rendered by t
 A 232px mantle sidebar on the left; to its right the base work panel, inset 8px from the window on top, right, and bottom, with a 10px radius and a hairline border (below the `md` breakpoint the panel fills the screen and the sidebar becomes a sheet). The panel opens with a 48px header holding the breadcrumb only, then the Needs you row, then the screen.
 
 On the Board, Needs you items sit in a two-column grid from `lg` (one column below) with 10px gaps. The Project title and its counts follow, then the lanes: 272px wide, 12px apart, scrolling sideways together. Each lane heading is sticky on the base ground while its cards scroll. Folded lanes become 40px rails showing the name vertically and the count. Page gutters are 16px, 20px from `md`.
+
+List screens (Projects, Loops) sit flat on the panel, with no card around them: the page heading, then a table at most 768px wide. Its text lines up with the heading, so its hairlines and row fills reach 8px past the heading on each side. Below `sm`, a table drops or folds its least important columns instead of scrolling sideways.
 
 Spacing is a 4px grid used mainly at 4, 6, 8, 10, 12, 16, 20, and 24px. Cards stack 8px apart with 6px between their internal rows.
 
@@ -260,6 +262,12 @@ Compact and quiet; most actions are 28px tall.
 - **Sidebar:** 232px mantle column. The wordmark `usine` in 14px semibold, then group names in 12px subtext0, then 32px rows in 13px subtext1. Hover fills surface0 at 60%; the active row is surface0 with text colour and medium weight. Needs you counts sit at the row's right in peach. The footer shows the live dot and word.
 - **Header:** 48px, hairline bottom border, sidebar toggle and breadcrumb only.
 - **Menus:** surface0 popup, 8px radius, 4px padding, Raised shadow; 28px items in 13px, focus fills surface1; destructive items in red with a red 15% focus fill. Menus list only actions that apply.
+
+### Page heading
+The screen title in 20px semibold, its counts beside it in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), then any mark such as Needs you, with the screen's actions at the right of the row. Shared by the Board, Projects, and Loops.
+
+### Flat table
+The registry table on the panel ground: a 36px heading row of 12px subtext0 labels, then 44px rows split by hairlines, 8px cell padding, numbers right-aligned in tabular figures. A row that opens something fills surface0 at 60% on hover and while its link has focus, and the link takes a 2px mauve outline; rows that open nothing have no hover fill. Row actions are ghost buttons in subtext0 that show only what applies, such as Pause or Resume.
 
 ### Needs you item
 Peach-tinted row: 8px radius, peach border at 25%, peach fill at 5% (8% on hover), 14px by 10px padding. Title 13px medium, context in 12px, and its actions (primary and ghost buttons) at the right. The whole row opens the related Run.
