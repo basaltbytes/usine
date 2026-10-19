@@ -167,7 +167,7 @@ export const RunDrawer = ({
               search={({ run: _run, ...rest }) => rest}
               className={buttonVariants({ variant: "outline" })}
             >
-              Open Run
+              Open Run page
             </Link>
           )}
         </div>
