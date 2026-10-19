@@ -11,12 +11,10 @@ import {
 } from "@tanstack/react-router";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import type { NeedView } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { AppSidebar } from "@/components/app-sidebar";
 import { BootScreen } from "@/components/boot-screen";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -26,15 +24,11 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
-import { Item, ItemContent, ItemDescription, ItemFooter, ItemTitle } from "@/components/ui/item";
-import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { NeedsYou } from "../needs-you/needs-you.tsx";
 import { needCopy } from "../operator-copy.ts";
 import { overviewQuery } from "../overview.ts";
 import { Suspense, lazy, useState } from "react";
-import { useOpenRun } from "../open-run.ts";
-import { CycleBudgetAsk } from "../cycle-budget-ask.tsx";
-import { UnconfiguredWorkerAsk } from "../unconfigured-worker-ask.tsx";
 
 // The drawer bundles the transcript, Markdown, and message components, so it
 // loads on first open to keep a project's first paint small.
@@ -57,64 +51,6 @@ const Unreachable = ({ error }: { readonly error: Error }) => {
         Retry
       </Button>
     </BootScreen>
-  );
-};
-
-const NeedStrip = ({ needs }: { readonly needs: ReadonlyArray<NeedView> }) => {
-  const openRun = useOpenRun();
-  return (
-    <section aria-label="Items needing intervention" className="border-b px-4 py-3 sm:px-6">
-      <div className="flex items-center gap-2">
-        <h2 className="font-heading text-sm font-medium">Needs you</h2>
-        {needs.length > 0 ? (
-          <Badge className="bg-needs-you font-mono text-background">{needs.length}</Badge>
-        ) : (
-          <p className="text-muted-foreground">No item needs intervention.</p>
-        )}
-      </div>
-      {needs.length > 0 && (
-        <div className="mt-2 flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
-          {needs.map((need) => {
-            if (need._tag === "CycleBudgetNeed")
-              return <CycleBudgetAsk key={need.id} need={need} />;
-            if (need._tag === "UnconfiguredWorkerNeed")
-              return <UnconfiguredWorkerAsk key={need.id} need={need} />;
-            const copy = needCopy(need);
-            const runId = copy.runId;
-            const body = (
-              <>
-                <ItemContent>
-                  <ItemTitle className="line-clamp-1">{copy.title}</ItemTitle>
-                  <ItemDescription className="line-clamp-3 wrap-anywhere">
-                    {copy.detail}
-                  </ItemDescription>
-                </ItemContent>
-                {copy.repository !== null && (
-                  <ItemFooter className="font-mono text-[0.625rem] text-muted-foreground">
-                    {copy.repository}
-                  </ItemFooter>
-                )}
-              </>
-            );
-            return runId !== null ? (
-              <Item
-                key={need.id}
-                variant="outline"
-                size="sm"
-                className="w-80 shrink-0 cursor-pointer text-left hover:bg-muted"
-                render={<button type="button" onClick={() => openRun(runId)} />}
-              >
-                {body}
-              </Item>
-            ) : (
-              <Item key={need.id} variant="muted" size="sm" className="w-80 shrink-0">
-                {body}
-              </Item>
-            );
-          })}
-        </div>
-      )}
-    </section>
   );
 };
 
@@ -146,7 +82,7 @@ const Crumbs = ({ project }: { readonly project: RepositoryName | undefined }) =
       </BreadcrumbItem>
       <BreadcrumbSeparator />
       <BreadcrumbItem>
-        <BreadcrumbPage className="font-mono">{project}</BreadcrumbPage>
+        <BreadcrumbPage>{project}</BreadcrumbPage>
       </BreadcrumbItem>
     </>
   );
@@ -166,44 +102,48 @@ const Shell = () => {
   const [shownRun, setShownRun] = useState(run);
   if (run !== undefined && run !== shownRun) setShownRun(run);
   const live = data._tag !== "NeedsSetup";
+  const needsByProject = new Map<RepositoryName, number>();
+  for (const need of data.needsYou) {
+    const repository = needCopy(need).repository;
+    if (repository !== null)
+      needsByProject.set(repository, (needsByProject.get(repository) ?? 0) + 1);
+  }
   return (
     <SidebarProvider>
       <AppSidebar
         projects={data.projects}
         view={view}
         project={project}
-        needsYou={data.needsYou.length}
+        needsYou={needsByProject}
         live={live}
       />
-      <SidebarInset>
-        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
-          <SidebarTrigger className="-ml-1" />
-          <Separator
-            orientation="vertical"
-            className="mr-2 data-vertical:h-4 data-vertical:self-auto"
-          />
+      <SidebarInset className="h-svh overflow-hidden">
+        <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:px-4">
+          <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
           <Breadcrumb>
             <BreadcrumbList>
               <Crumbs project={project} />
             </BreadcrumbList>
           </Breadcrumb>
         </header>
-        {data._tag === "NeedsSetup" && (
-          <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 sm:px-6">
-            <WarningIcon weight="fill" className="text-needs-you" />
-            <AlertTitle className="text-sm">GitHub App credentials are missing</AlertTitle>
-            <AlertDescription className="max-w-prose">
-              <p>
-                {data.errorTag}. Set <code>USINE_GITHUB_APP_ID</code> and{" "}
-                <code>USINE_GITHUB_PRIVATE_KEY</code>, or create <code>.usine/github-app.json</code>{" "}
-                with mode 0600, then restart <code>usine up</code>. Credentials are read at startup
-                only.
-              </p>
-            </AlertDescription>
-          </Alert>
-        )}
-        <NeedStrip needs={data.needsYou} />
-        <Outlet />
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          {data._tag === "NeedsSetup" && (
+            <Alert className="rounded-none border-x-0 border-t-0 bg-transparent px-4 py-4 md:px-5">
+              <WarningIcon weight="fill" className="text-needs-you" />
+              <AlertTitle className="text-md">GitHub App credentials are missing</AlertTitle>
+              <AlertDescription className="max-w-prose">
+                <p>
+                  {data.errorTag}. Set <code>USINE_GITHUB_APP_ID</code> and{" "}
+                  <code>USINE_GITHUB_PRIVATE_KEY</code>, or create{" "}
+                  <code>.usine/github-app.json</code> with mode 0600, then restart{" "}
+                  <code>usine up</code>. Credentials are read at startup only.
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+          <NeedsYou needs={data.needsYou} />
+          <Outlet />
+        </div>
         {shownRun !== undefined && (
           <Suspense fallback={null}>
             <RunDrawer key={shownRun} runId={shownRun} open={run !== undefined} close={closeRun} />
@@ -217,7 +157,7 @@ const Shell = () => {
 export const Route = createRootRouteWithContext<RouterContext>()({
   validateSearch: RootSearch,
   loader: ({ context }) => context.queryClient.ensureQueryData(overviewQuery()),
-  pendingComponent: () => <BootScreen title="Usine" description="Loading…" />,
+  pendingComponent: () => <BootScreen title="usine" description="Loading…" />,
   errorComponent: Unreachable,
   component: Shell,
 });

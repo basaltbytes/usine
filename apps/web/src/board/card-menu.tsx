@@ -1,7 +1,8 @@
-import { ArrowSquareOutIcon, DotsThreeVerticalIcon } from "@phosphor-icons/react";
+import { ArrowSquareOutIcon, DotsThreeIcon } from "@phosphor-icons/react";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, RunView } from "@usine/orchestrator/operator";
 import { Fragment, type ReactNode, useState } from "react";
+import { StateMark } from "@/components/status-badge";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,13 +49,16 @@ const RunHistory = ({
     <DropdownMenuSubContent className="min-w-48">
       {[...runs].reverse().map((run) => (
         <DropdownMenuItem key={run.id} onClick={() => openRun(run.id)}>
-          <span className="truncate font-mono">{run.loop}</span>
-          <span className="ml-auto flex shrink-0 gap-2 text-muted-foreground">
-            <span>{run.state}</span>
+          <span className="truncate">{run.loop}</span>
+          <span className="ml-auto flex shrink-0 items-center gap-2 pl-4 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <StateMark state={run.state} />
+              {run.state}
+            </span>
             <time
               dateTime={run.openedAt}
               title={openedTitle(run.openedAt)}
-              className="tabular-nums"
+              className="font-mono tabular-nums"
             >
               {elapsedLabel(run.openedAt)}
             </time>
@@ -167,12 +171,15 @@ export const CardMenu = ({
             <Button
               variant="ghost"
               size="icon-sm"
-              className={cn("text-muted-foreground hover:text-foreground", className)}
+              className={cn(
+                "text-muted-foreground hover:text-foreground aria-expanded:text-foreground",
+                className,
+              )}
             />
           }
           aria-label={`Actions for ${subject}`}
         >
-          <DotsThreeVerticalIcon weight="bold" className="size-4" aria-hidden="true" />
+          <DotsThreeIcon weight="bold" className="size-4" aria-hidden="true" />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-auto min-w-48">
           {groups.map(({ key, content }, index) => (

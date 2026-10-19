@@ -1,4 +1,3 @@
-import { CircleIcon, KanbanIcon, SlidersHorizontalIcon, WarningIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
 import type { RepositoryName } from "@usine/core/repository";
 import type { ProjectView } from "@usine/orchestrator/operator";
@@ -14,9 +13,6 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarMenuSub,
-  SidebarMenuSubButton,
-  SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { projectParams } from "../overview.ts";
@@ -33,71 +29,59 @@ export const AppSidebar = ({
   readonly projects: ReadonlyArray<ProjectView>;
   readonly view: OperatorView;
   readonly project: RepositoryName | undefined;
-  readonly needsYou: number;
+  /** How many Needs you entries concern each Project. */
+  readonly needsYou: ReadonlyMap<RepositoryName, number>;
   readonly live: boolean;
 }) => (
   <Sidebar variant="inset">
-    <SidebarHeader>
+    <SidebarHeader className="px-2 pt-2 pb-3">
       <SidebarMenu>
         <SidebarMenuItem>
-          <SidebarMenuButton size="lg" render={<Link to="/" />}>
-            <span
-              className="grid size-8 shrink-0 place-items-center rounded-md bg-primary font-heading text-sm font-semibold text-primary-foreground"
-              aria-hidden="true"
-            >
-              U
-            </span>
-            <span className="font-heading text-sm font-medium">Usine</span>
+          <SidebarMenuButton
+            render={<Link to="/" />}
+            className="text-md font-semibold tracking-tight text-foreground"
+          >
+            usine
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
     </SidebarHeader>
     <SidebarContent>
       <SidebarGroup>
+        <SidebarGroupLabel
+          render={<Link to="/" />}
+          className={cn(view === "projects" && project === undefined && "text-foreground")}
+        >
+          Projects
+        </SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={view === "projects" && project === undefined}
-                render={<Link to="/" />}
-              >
-                <KanbanIcon aria-hidden="true" />
-                <span>Projects</span>
-              </SidebarMenuButton>
-              {needsYou > 0 && (
-                <SidebarMenuBadge className="font-mono text-needs-you">{needsYou}</SidebarMenuBadge>
-              )}
-              {projects.length > 0 && (
-                <SidebarMenuSub>
-                  {projects.map((entry) => (
-                    <SidebarMenuSubItem key={entry.repository}>
-                      <SidebarMenuSubButton
-                        isActive={project === entry.repository}
-                        render={
-                          <Link
-                            to="/projects/$owner/$name"
-                            params={projectParams(entry.repository)}
-                          />
-                        }
-                      >
-                        <span className="truncate">{entry.repository}</span>
-                        {entry.status === "needs-you" && (
-                          <WarningIcon
-                            weight="fill"
-                            className="ml-auto text-needs-you"
-                            aria-label="Needs you"
-                          />
-                        )}
-                      </SidebarMenuSubButton>
-                    </SidebarMenuSubItem>
-                  ))}
-                </SidebarMenuSub>
-              )}
-            </SidebarMenuItem>
+            {projects.map((entry) => {
+              const count = needsYou.get(entry.repository) ?? 0;
+              return (
+                <SidebarMenuItem key={entry.repository}>
+                  <SidebarMenuButton
+                    isActive={project === entry.repository}
+                    className={cn(count > 0 && "pr-8")}
+                    render={
+                      <Link to="/projects/$owner/$name" params={projectParams(entry.repository)} />
+                    }
+                  >
+                    <span>{entry.repository}</span>
+                  </SidebarMenuButton>
+                  {count > 0 && (
+                    <SidebarMenuBadge className="text-needs-you peer-data-active/menu-button:text-needs-you">
+                      {count}
+                      <span className="sr-only"> need you</span>
+                    </SidebarMenuBadge>
+                  )}
+                </SidebarMenuItem>
+              );
+            })}
           </SidebarMenu>
         </SidebarGroupContent>
       </SidebarGroup>
-      <SidebarGroup>
+      <SidebarGroup className="pt-3">
         <SidebarGroupLabel>Configuration</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
@@ -106,7 +90,6 @@ export const AppSidebar = ({
                 isActive={view === "configuration"}
                 render={<Link to="/configuration/loops" />}
               >
-                <SlidersHorizontalIcon aria-hidden="true" />
                 <span>Loops</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
@@ -114,17 +97,15 @@ export const AppSidebar = ({
         </SidebarGroupContent>
       </SidebarGroup>
     </SidebarContent>
-    <SidebarFooter>
+    <SidebarFooter className="px-4 pb-3">
       {/* Reports the trigger streams, not the server: idle pollers must never read as a running factory. */}
-      <div
-        className={cn(
-          "flex items-center gap-2 px-2 py-1 font-mono text-[0.625rem]",
-          live ? "text-run-succeeded" : "text-muted-foreground",
-        )}
-      >
-        <CircleIcon weight="fill" className="size-2" aria-hidden="true" />
+      <p className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span
+          aria-hidden="true"
+          className={cn("size-1.5 rounded-full", live ? "bg-run-succeeded" : "bg-faint")}
+        />
         {live ? "live" : "idle"}
-      </div>
+      </p>
     </SidebarFooter>
   </Sidebar>
 );

@@ -6,6 +6,7 @@ import { LabelBadge } from "@/components/label-badge";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { BoardCard, type LabelCatalog } from "./card.tsx";
+import { FlowArrow, type LaneFlow } from "./flow.tsx";
 import type { BoardMoveProgress } from "./moves.ts";
 
 /** The labels and Item states that route Items to the lane, labels in their GitHub colors. */
@@ -18,7 +19,10 @@ const LaneSources = ({
 }) => (
   <ul aria-label="Lane sources" className="flex flex-wrap gap-1">
     {sources.map((source) => (
-      <li key={"label" in source ? `label:${source.label}` : `state:${source.state}`}>
+      <li
+        key={"label" in source ? `label:${source.label}` : `state:${source.state}`}
+        className="flex"
+      >
         {"label" in source ? (
           <LabelBadge name={source.label} label={catalog.get(source.label)} />
         ) : (
@@ -31,10 +35,12 @@ const LaneSources = ({
   </ul>
 );
 
-/** One lane: its name, count, and sources over a stack of cards, tinted while it is a drag's drop target. */
+/** One lane: its name, count, and sources over a stack of cards, tinted while it is a drag's drop
+ * target. An authored label lane followed by another one ends its heading with the flow between them. */
 export const BoardColumn = ({
   lane,
   lanes,
+  flow,
   catalog,
   targeted,
   pending,
@@ -44,6 +50,7 @@ export const BoardColumn = ({
 }: {
   readonly lane: BoardLaneView;
   readonly lanes: ReadonlyArray<BoardLaneView>;
+  readonly flow: LaneFlow | undefined;
   readonly catalog: LabelCatalog;
   readonly targeted: boolean;
   readonly pending: boolean;
@@ -62,23 +69,32 @@ export const BoardColumn = ({
       ref={setNodeRef}
       aria-label={`${lane.name} lane`}
       className={cn(
-        "flex w-72 shrink-0 flex-col gap-3 rounded-lg p-2 transition-colors",
-        targeted && "bg-muted/40",
+        "flex w-68 shrink-0 flex-col gap-2 rounded-lg transition-[background-color,box-shadow]",
+        targeted && "bg-muted/40 ring-6 ring-muted/40",
       )}
     >
-      <header className="flex flex-col gap-1.5 px-1">
-        <h2 className="flex min-w-0 items-baseline gap-2">
-          <span className="truncate font-heading text-sm font-medium">{lane.name}</span>
-          <span className="text-muted-foreground tabular-nums">{count}</span>
-        </h2>
-        {lane.sources.length > 0 && <LaneSources sources={lane.sources} catalog={catalog} />}
+      <header className="flex flex-col gap-1.5 px-0.5 pb-1">
+        <div className="flex h-6 items-center">
+          <h2 className="flex min-w-0 items-baseline gap-2">
+            <span className="truncate text-sm font-semibold">{lane.name}</span>
+            <span className="text-sm text-muted-foreground tabular-nums">{count}</span>
+          </h2>
+          {flow !== undefined && <FlowArrow flow={flow} />}
+        </div>
+        <div className="min-h-5">
+          {lane.sources.length > 0 && <LaneSources sources={lane.sources} catalog={catalog} />}
+        </div>
       </header>
       <div className="flex min-h-40 flex-col gap-2">
         <SortableContext
           items={lane.items.map(({ itemKey }) => itemKey)}
           strategy={verticalListSortingStrategy}
         >
-          {count === 0 && <p className="px-1 text-muted-foreground">No tasks</p>}
+          {count === 0 && (
+            <p className="rounded-lg border border-dashed border-input px-3 py-2.5 text-xs text-muted-foreground">
+              No tasks
+            </p>
+          )}
           {lane.items.map((item) => {
             const phase = moves.find(({ itemKey }) => itemKey === item.itemKey)?.phase;
             const moveDisabled = pending || phase !== undefined;

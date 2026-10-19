@@ -99,7 +99,7 @@ export const needCopy = (need: NeedView): NeedCopy =>
     }),
     ApprovalNeed: ({ loop, repository, runId }) => ({
       title: "Approval required",
-      detail: `${loop} is waiting to run on ${repository}.`,
+      detail: `${loop} is waiting to run.`,
       repository,
       runId,
     }),

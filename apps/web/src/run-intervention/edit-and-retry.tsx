@@ -55,7 +55,7 @@ export const EditAndRetry = ({
           mutation.mutate();
       }}
     >
-      <h3 className="font-heading text-sm">Edit and retry</h3>
+      <h3 className="text-md font-semibold">Edit and retry</h3>
       <p className="text-xs text-muted-foreground">
         Later attempts use this task and agent until you edit them again.
       </p>

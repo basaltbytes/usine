@@ -166,6 +166,10 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
       .element(needs.getByRole("button", { name: /AgentFailure/ }))
       .not.toBeInTheDocument();
     await expect.element(needs.getByRole("button", { name: /Approval required/ })).toBeVisible();
+    await expect.element(needs.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
+    await expect
+      .element(needs.getByRole("button", { name: "Cancel Run", exact: true }))
+      .toBeVisible();
     expect(queryClient.getQueryData<ReadyOverview>(["overview"])?.projects[0]?.status).toBe(
       "clear",
     );

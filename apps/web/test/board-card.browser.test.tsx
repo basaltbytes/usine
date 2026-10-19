@@ -123,7 +123,14 @@ it("shows the number and kind, a title clamped to two lines, and only labels the
   expect(labels(cardOf(/^Document the cycle budget/u))).toEqual(["docs"]);
 });
 
-it("times a running Run from its current Attempt, on one line with a pulsing dot", async () => {
+/** The animation of the state mark that opens a Run line. */
+const markAnimation = (row: HTMLElement) => {
+  const mark = row.querySelector("[data-slot=state-mark]");
+  if (mark === null) throw new Error("No state mark on the Run line");
+  return getComputedStyle(mark).animationName;
+};
+
+it("times a running Run from its current Attempt, on one line with a pulsing mark", async () => {
   const running = cardOf(/^Redesign the Board/u);
   expect(running.textContent).toContain("#9 Issue#31 Pull request");
   const row = runLine(running, "Running");
@@ -132,9 +139,7 @@ it("times a running Run from its current Attempt, on one line with a pulsing dot
   expect(row.getBoundingClientRect().height).toBeLessThanOrEqual(
     Number.parseFloat(getComputedStyle(state).lineHeight) + 1,
   );
-  expect(getComputedStyle(state.querySelector("[aria-hidden]") ?? state).animationName).not.toBe(
-    "none",
-  );
+  expect(markAnimation(row)).not.toBe("none");
   const startedAt = runOf("run-redesign").attempts[1]?.startedAt ?? "";
   const time = row.querySelector("time");
   expect(time?.dateTime).toBe(startedAt);
@@ -145,18 +150,37 @@ it("times a running Run from its current Attempt, on one line with a pulsing dot
   expect(running.textContent).not.toContain("The Worker restarted");
 });
 
-it("times a waiting Run from its opening and a failed one from its failure, without a dot", async () => {
+it("times a waiting Run from its opening and a failed one from its failure, with a still mark", async () => {
   const waiting = runLine(cardOf(/^Retry salvage/u), "Waiting");
   expect(waiting.textContent).toBe("implementWaiting3mdeveloper");
-  expect(waiting.querySelector("[aria-hidden]")).toBeNull();
+  expect(markAnimation(waiting)).toBe("none");
   const openedAt = runOf("run-salvage").openedAt;
   expect(waiting.querySelector("time")?.title).toBe(`Opened ${timestampLabel(openedAt)}`);
 
   const failed = runLine(cardOf(/^Pin GitHub Actions/u), "Failed");
   expect(failed.textContent).toBe("reviewFailed1hreviewer");
-  expect(failed.querySelector("[aria-hidden]")).toBeNull();
+  expect(markAnimation(failed)).toBe("none");
   const endedAt = runOf("run-pinned").attempts[0]?.endedAt ?? "";
   expect(failed.querySelector("time")?.title).toBe(`Failed at ${timestampLabel(endedAt)}`);
+});
+
+it("offers Retry beside the failure only on the card whose Run failed", async () => {
+  const failed = page.elementLocator(cardOf(/^Pin GitHub Actions/u));
+  await expect.element(failed.getByText("The required check lint failed")).toBeVisible();
+  await expect.element(failed.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+  expect(page.getByRole("button", { name: "Retry", exact: true }).elements()).toHaveLength(1);
+});
+
+it("draws the flow between adjacent authored label lanes, named after the Loops at work", async () => {
+  const flow = (name: string) => lane(name).element().querySelector("[data-slot=flow-arrow]");
+  expect(flow("Backlog")?.textContent).toBe("Flows to Ready");
+  expect(flow("Ready")?.textContent).toBe("Flows to In progressimplement");
+  expect(flow("Ready")?.classList).toContain("text-run-waiting");
+  expect(flow("In progress")?.textContent).toBe("Flows to Reviewimplement");
+  expect(flow("In progress")?.classList).toContain("text-run-active");
+  // Done is read-only, so Review has no next bay to flow into.
+  expect(flow("Review")).toBeNull();
+  expect(flow("Done")).toBeNull();
 });
 
 it("leaves canceled and succeeded Runs off the card", async () => {

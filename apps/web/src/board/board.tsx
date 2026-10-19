@@ -38,6 +38,7 @@ import {
 } from "@/components/ui/table";
 import { DraggedCard, type LabelCatalog } from "./card.tsx";
 import { BoardColumn } from "./column.tsx";
+import { laneFlows } from "./flow.tsx";
 import { type BoardMoveProgress, useBoardMoves } from "./moves.ts";
 
 /** The fallback lane collects every unrouted Item and comes first, so a drag into an
@@ -120,9 +121,9 @@ const UncardedRuns = ({
         <TableBody>
           {runs.map((run) => (
             <TableRow key={run.id} className="cursor-pointer" onClick={() => openRun(run.id)}>
-              <TableCell className="font-mono font-medium">{run.loop}</TableCell>
-              <TableCell className="font-mono">{run.agent}</TableCell>
-              <TableCell className="max-w-64 truncate font-mono">{run.itemKey}</TableCell>
+              <TableCell className="font-medium">{run.loop}</TableCell>
+              <TableCell>{run.agent}</TableCell>
+              <TableCell className="max-w-64 truncate font-mono text-xs">{run.itemKey}</TableCell>
               <TableCell>
                 <StatusBadge state={run.state} />
               </TableCell>
@@ -171,6 +172,8 @@ export const ProjectBoard = ({
   );
   const uncarded = runsWithoutCard(project);
   const lanes = moves.reduce(applyMove, orderLanes(project.board.lanes));
+  const flows = laneFlows(lanes);
+  const itemCount = lanes.reduce((total, lane) => total + lane.items.length, 0);
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
   const pending = disabled || isPending;
   const endDrag = () => {
@@ -191,9 +194,13 @@ export const ProjectBoard = ({
     if (lane !== undefined) moveItem(active.item, lane);
   };
   return (
-    <main className="flex flex-col gap-4 px-4 py-6 sm:px-6">
-      <header className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="font-heading text-xl font-medium wrap-anywhere">{project.repository}</h1>
+    <div className="flex flex-col gap-4 px-4 pt-5 pb-2 md:px-5">
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+        <h1 className="text-xl font-semibold wrap-anywhere">{project.repository}</h1>
+        <p className="text-sm text-muted-foreground tabular-nums">
+          {lanes.length} lane{lanes.length === 1 ? "" : "s"}, {itemCount} item
+          {itemCount === 1 ? "" : "s"}
+        </p>
         {project.status === "needs-you" && <NeedsYouBadge />}
       </header>
       {project.board.lanes.some(({ origin }) => origin === "proposed") && (
@@ -219,7 +226,7 @@ export const ProjectBoard = ({
         onDragCancel={endDrag}
       >
         <div
-          className="-mx-2 flex gap-2 overflow-x-auto pb-3 overscroll-x-contain scrollbar-thin"
+          className="-mx-4 flex gap-3 overflow-x-auto px-4 pt-1 pb-4 overscroll-x-contain md:-mx-5 md:px-5"
           aria-label={`${project.repository} project board`}
         >
           {lanes.map((lane) => (
@@ -227,6 +234,7 @@ export const ProjectBoard = ({
               key={lane.id}
               lane={lane}
               lanes={lanes}
+              flow={flows.get(lane.id)}
               catalog={catalog}
               targeted={
                 active !== null &&
@@ -249,6 +257,6 @@ export const ProjectBoard = ({
       </DndContext>
       {error !== null && <ErrorAlert className="max-w-3xl" message={error.message} />}
       {uncarded.length > 0 && <UncardedRuns runs={uncarded} openRun={openRun} />}
-    </main>
+    </div>
   );
 };
