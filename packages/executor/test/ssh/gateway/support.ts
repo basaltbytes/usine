@@ -10,7 +10,7 @@ import {
   GITHUB_ORIGINS,
   parseEgressAllowlist,
 } from "@usine/gateway";
-import { Effect, Layer, Option, Redacted, Result, Schema } from "effect";
+import { Effect, Latch, Layer, Option, Redacted, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import {
   HttpClient,
@@ -78,12 +78,28 @@ const bodyOf = (body: { readonly _tag: string }): AdminCall["body"] =>
 /**
  * A Gateway's real admin API and attachment store, served in memory: each
  * request runs the Gateway's own handlers in the caller's fiber, so the test
- * clock applies to expiries. `calls` records what the executor sent, and a
- * detach of an attachment in `refusedDetaches` is answered with a server error.
+ * clock applies to expiries. `calls` records what the executor sent, a
+ * detach of an attachment in `refusedDetaches` is answered with a server
+ * error, and `settled` waits until no admin request is in flight.
  */
 export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
   const calls: Array<AdminCall> = [];
   const switches = { refusedDetaches: new Set<string>() };
+  let inFlight = 0;
+  const idle = Latch.makeUnsafe(true);
+  const tracked = <A, E, R>(request: Effect.Effect<A, E, R>) =>
+    Effect.acquireUseRelease(
+      Effect.sync(() => {
+        inFlight += 1;
+        idle.closeUnsafe();
+      }),
+      () => request,
+      () =>
+        Effect.sync(() => {
+          inFlight -= 1;
+          if (inFlight === 0) idle.openUnsafe();
+        }),
+    );
   const settings = Layer.succeed(GatewaySettings)({
     domain: DOMAIN,
     github: GITHUB_ORIGINS,
@@ -121,11 +137,11 @@ export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
             Effect.orDie,
           );
           return HttpServerResponse.toClientResponse(response, { request });
-        }).pipe(Effect.scoped, Effect.provide(services)),
+        }).pipe(Effect.scoped, Effect.provide(services), tracked),
       );
     }),
   ).pipe(Layer.provideMerge(services), Layer.provide(HttpServer.layerServices));
-  return { calls, switches, layer: client };
+  return { calls, switches, layer: client, settled: idle.await };
 };
 
 /**
@@ -154,15 +170,18 @@ export const gatewayRuntime = (
   ).pipe(Layer.provideMerge(gateway.layer));
 
 /**
- * Moves the test clock forward in ten-second steps with a short real pause
- * after each. The Gateway's handlers wait on real cryptography, so an admin
- * request in flight needs real time to finish before its 30-second timeout
- * comes due on the test clock.
+ * Moves the test clock forward in ten-second steps, waiting after each until
+ * `gateway` has answered every admin request. The Gateway's handlers wait on
+ * real cryptography, so a request the clock woke must finish before further
+ * steps bring its 30-second timeout due.
  */
-export const advance = Effect.fn("GatewayTest.advance")(function* (minutes: number) {
+export const advance = Effect.fn("GatewayTest.advance")(function* (
+  gateway: ReturnType<typeof fakeGateway>,
+  minutes: number,
+) {
   for (let step = 0; step < minutes * 6; step += 1) {
     yield* TestClock.adjust("10 seconds");
-    yield* TestClock.withLive(Effect.sleep("2 millis"));
+    yield* gateway.settled;
   }
 });
 
