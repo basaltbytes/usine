@@ -219,6 +219,13 @@ const makeOperatorObservation = Effect.gen(function* () {
     }
     const allRuns = new Map(views.map((run) => [run.id, run]));
     for (const project of projects) for (const run of project.runs) allRuns.set(run.id, run);
+    const cardedItems = new Map(
+      projects.flatMap(({ board }) =>
+        board.lanes.flatMap(({ items }) =>
+          items.flatMap((task) => task.items.map((item) => [item.itemKey, item] as const)),
+        ),
+      ),
+    );
     for (const run of allRuns.values()) {
       if (run.state === "Waiting") {
         needsYou.push(
@@ -227,6 +234,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             repository: run.repository,
             runId: run.id,
             loop: run.loop,
+            item: cardedItems.get(run.itemKey) ?? null,
           }),
         );
       } else if (run.canResolveFailure) {
