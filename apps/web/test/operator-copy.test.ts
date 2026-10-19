@@ -5,6 +5,7 @@ import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { InstanceReload } from "@usine/orchestrator/current-instance";
 import {
+  BlockedFailureView,
   ConfigFileNeed,
   QuestionFailureView,
   RunFailureNeed,
@@ -41,6 +42,25 @@ describe("operator question copy in Needs you", () => {
     assert.strictEqual(copy.title, "act-on-findings asks a question");
     assert.strictEqual(copy.detail, "HTTP CONNECT or SOCKS for egress?");
     assert.strictEqual(copy.runId, "asked");
+  });
+});
+
+describe("blocker copy in Needs you", () => {
+  it("names the blocked Loop and shows the Agent's blocker", () => {
+    const copy = needCopy(
+      new RunFailureNeed({
+        id: "run-failure:blocked",
+        repository: RepositoryName.make("basaltbytes/usine"),
+        runId: RunId.make("blocked"),
+        loop: LoopName.make("start-dev"),
+        failure: new BlockedFailureView({
+          message: "The baseline gate fails on main before any change.",
+        }),
+      }),
+    );
+    assert.strictEqual(copy.title, "start-dev is blocked");
+    assert.strictEqual(copy.detail, "The baseline gate fails on main before any change.");
+    assert.strictEqual(copy.runId, "blocked");
   });
 });
 

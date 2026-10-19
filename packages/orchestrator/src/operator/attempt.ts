@@ -22,6 +22,11 @@ export class AgentFailureView extends Schema.TaggedClass<AgentFailureView>(
   "@usine/orchestrator/AgentFailureView",
 )("AgentFailure", { message: Schema.String }) {}
 
+/** The blocker an Agent reported when it stopped; its Loop holds the Item until the operator acts or the Item changes. */
+export class BlockedFailureView extends Schema.TaggedClass<BlockedFailureView>(
+  "@usine/orchestrator/BlockedFailureView",
+)("BlockedFailure", { message: Schema.String }) {}
+
 /** The question an Agent asked the operator when it stopped; its Loop holds the Item until the operator answers. */
 export class QuestionFailureView extends Schema.TaggedClass<QuestionFailureView>(
   "@usine/orchestrator/QuestionFailureView",
@@ -45,6 +50,7 @@ export const FailureView = Schema.Union([
   InfraFailureView,
   DefectFailureView,
   AgentFailureView,
+  BlockedFailureView,
   QuestionFailureView,
   RunawayFailureView,
   ChildSessionBudgetFailureView,

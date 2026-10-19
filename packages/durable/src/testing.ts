@@ -10,9 +10,9 @@ import {
 import type { ModelRef } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import {
+  AgentBlockedError,
   AgentQuestionError,
   type AgentReport,
-  AgentResultError,
   type AgentSessionError,
   ChildBackend,
   type ChildRequest,
@@ -145,7 +145,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
       yield* Deferred.fail(result, error);
     });
   const block = (message: string) =>
-    report(new AgentResultError({ sessionId: Option.some(session.id), message }));
+    report(new AgentBlockedError({ sessionId: Option.some(session.id), message }));
   const ask = (question: string) =>
     report(new AgentQuestionError({ sessionId: Option.some(session.id), message: question }));
   const intervene = (action: AttemptChannel.OperatorAction) =>

@@ -6,7 +6,7 @@ import { and, eq, isNotNull } from "drizzle-orm";
 import { Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
 import { loopItems } from "../database/schema.ts";
-import type { PreviousSighting, QuestionHold } from "../engine/lifecycle.ts";
+import type { OperatorHold, PreviousSighting } from "../engine/lifecycle.ts";
 
 const LoopItemRow = Schema.Struct({
   observedEventId: Schema.NullOr(EventId),
@@ -15,7 +15,7 @@ const LoopItemRow = Schema.Struct({
 });
 const decodeLoopItems = Schema.decodeUnknownEffect(Schema.Array(LoopItemRow));
 
-/** Transaction-local reads and writes of what each Loop last saw of an Item, and of question holds. */
+/** Transaction-local reads and writes of what each Loop last saw of an Item, and of operator holds. */
 export const loopItemQueries = (database: RunDatabaseClient) => {
   const where = (loop: LoopName, itemKey: ItemKey) =>
     and(eq(loopItems.loopName, loop), eq(loopItems.itemKey, itemKey));
@@ -56,7 +56,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
   });
 
   /**
-   * Records a sighting that did not match, which also ends a question's hold. A
+   * Records a sighting that did not match, which also ends an operator hold. A
    * Loop that never saw the Item matching has nothing to record.
    */
   const unmatched = Effect.fn("LoopItems.unmatched")(function* (loop: LoopName, itemKey: ItemKey) {
@@ -67,12 +67,12 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
       .execute();
   });
 
-  /** The question that holds the Loop on the Item, if one does. */
+  /** The operator hold that keeps the Loop on the Item, if one does. */
   const hold = Effect.fn("LoopItems.hold")(function* (loop: LoopName, itemKey: ItemKey) {
     return Option.flatMap(yield* row(loop, itemKey), ({ heldByRunId, heldEventId }) =>
       heldByRunId === null
-        ? Option.none<QuestionHold>()
-        : Option.some<QuestionHold>({
+        ? Option.none<OperatorHold>()
+        : Option.some<OperatorHold>({
             runId: heldByRunId,
             heldEventId: Option.fromNullishOr(heldEventId),
           }),
@@ -80,10 +80,11 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
   });
 
   /**
-   * Starts the hold of `runId`'s question unless the Loop last saw the Item not
-   * matching. `opened` is the asking Run's Event, recorded as the Loop's sighting
-   * for an Item it has no record of; `queued` is the newest Event waiting behind
-   * the Run, already the Item's state after the question. True when the hold started.
+   * Starts the hold of `runId`, whose Attempt stopped for the operator, unless
+   * the Loop last saw the Item not matching. `opened` is the Run's Event,
+   * recorded as the Loop's sighting for an Item it has no record of; `queued` is
+   * the newest Event waiting behind the Run, already the Item's state after the
+   * stop. True when the hold started.
    */
   const startHold = Effect.fn("LoopItems.startHold")(function* (
     loop: LoopName,
@@ -106,7 +107,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     return true;
   });
 
-  /** Records `eventId` as the Item's state after the question that holds the Loop. */
+  /** Records `eventId` as the Item's state after the stop that holds the Loop. */
   const holdAt = Effect.fn("LoopItems.holdAt")(function* (
     loop: LoopName,
     itemKey: ItemKey,
@@ -127,7 +128,7 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
       .execute();
   });
 
-  /** Ends the hold of `runId`'s question, wherever it holds a Loop. True when there was one. */
+  /** Ends the hold of `runId`, wherever it holds a Loop. True when there was one. */
   const releaseRun = Effect.fn("LoopItems.releaseRun")(function* (runId: RunId) {
     const released = yield* database
       .update(loopItems)

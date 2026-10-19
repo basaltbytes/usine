@@ -1,0 +1,1741 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "24b37849-af4f-44b2-b0db-f1a0ecbac97f",
+  "prevIds": ["b492a009-3aea-41d8-82c6-acd081e27f82"],
+  "ddl": [
+    {
+      "name": "usine_approvals",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_attempt_transcripts",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_attempts",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_board_moves",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_cursors",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_cycle_reservations",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_cycle_resets",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_ignored_events",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_item_cycle_budgets",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_item_projections",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_loop_items",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_loop_runtime",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_projection_revision",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_repository_label_projections",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_runs",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_steps",
+      "entityType": "tables"
+    },
+    {
+      "name": "usine_trigger_events",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "usine_approvals"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_approvals"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "channel",
+      "entityType": "columns",
+      "table": "usine_approvals"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "approver",
+      "entityType": "columns",
+      "table": "usine_approvals"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "sequence",
+      "entityType": "columns",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_id",
+      "entityType": "columns",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "direction",
+      "entityType": "columns",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "channel_sequence",
+      "entityType": "columns",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "envelope",
+      "entityType": "columns",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "received_at",
+      "entityType": "columns",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_id",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "step_name",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "worker_name",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "attempt_number",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "brain_json",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "agent",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "operator_intervened",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "parent_model",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "started_at",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "outcome_json",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ended_at",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "salvage_json",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "leftovers_discarded_at",
+      "entityType": "columns",
+      "table": "usine_attempts"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "move_id",
+      "entityType": "columns",
+      "table": "usine_board_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "usine_board_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_key",
+      "entityType": "columns",
+      "table": "usine_board_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "moved_at",
+      "entityType": "columns",
+      "table": "usine_board_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "from_lane",
+      "entityType": "columns",
+      "table": "usine_board_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "to_lane",
+      "entityType": "columns",
+      "table": "usine_board_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "added_json",
+      "entityType": "columns",
+      "table": "usine_board_moves"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "removed_json",
+      "entityType": "columns",
+      "table": "usine_board_moves"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cursor_key",
+      "entityType": "columns",
+      "table": "usine_cursors"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "value_json",
+      "entityType": "columns",
+      "table": "usine_cursors"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "usine_cycle_reservations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_key",
+      "entityType": "columns",
+      "table": "usine_cycle_reservations"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "generation",
+      "entityType": "columns",
+      "table": "usine_cycle_reservations"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "loop",
+      "entityType": "columns",
+      "table": "usine_cycle_reservations"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ask_id",
+      "entityType": "columns",
+      "table": "usine_cycle_resets"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_cycle_resets"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_key",
+      "entityType": "columns",
+      "table": "usine_cycle_resets"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "dedup_key",
+      "entityType": "columns",
+      "table": "usine_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "payload_json",
+      "entityType": "columns",
+      "table": "usine_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "received_at",
+      "entityType": "columns",
+      "table": "usine_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_ignored_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reason",
+      "entityType": "columns",
+      "table": "usine_ignored_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_key",
+      "entityType": "columns",
+      "table": "usine_item_cycle_budgets"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "usine_item_cycle_budgets"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "generation",
+      "entityType": "columns",
+      "table": "usine_item_cycle_budgets"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ask_json",
+      "entityType": "columns",
+      "table": "usine_item_cycle_budgets"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "false",
+      "generated": null,
+      "name": "reset_pending",
+      "entityType": "columns",
+      "table": "usine_item_cycle_budgets"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_key",
+      "entityType": "columns",
+      "table": "usine_item_projections"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "usine_item_projections"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source",
+      "entityType": "columns",
+      "table": "usine_item_projections"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_number",
+      "entityType": "columns",
+      "table": "usine_item_projections"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "content_hash",
+      "entityType": "columns",
+      "table": "usine_item_projections"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "payload_json",
+      "entityType": "columns",
+      "table": "usine_item_projections"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "gone_at",
+      "entityType": "columns",
+      "table": "usine_item_projections"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "loop_name",
+      "entityType": "columns",
+      "table": "usine_loop_items"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_key",
+      "entityType": "columns",
+      "table": "usine_loop_items"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "observed_event_id",
+      "entityType": "columns",
+      "table": "usine_loop_items"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "held_by_run_id",
+      "entityType": "columns",
+      "table": "usine_loop_items"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "held_event_id",
+      "entityType": "columns",
+      "table": "usine_loop_items"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "loop_name",
+      "entityType": "columns",
+      "table": "usine_loop_runtime"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "paused",
+      "entityType": "columns",
+      "table": "usine_loop_runtime"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "singleton",
+      "entityType": "columns",
+      "table": "usine_projection_revision"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "revision",
+      "entityType": "columns",
+      "table": "usine_projection_revision"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "usine_repository_label_projections"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "labels_json",
+      "entityType": "columns",
+      "table": "usine_repository_label_projections"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "loop_name",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "state_json",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resolved_failure_attempt_id",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "opened_at",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revision",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "agent_json",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "parent_model",
+      "entityType": "columns",
+      "table": "usine_runs"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_id",
+      "entityType": "columns",
+      "table": "usine_steps"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "step_name",
+      "entityType": "columns",
+      "table": "usine_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "result",
+      "entityType": "columns",
+      "table": "usine_steps"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "event_id",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "item_key",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "loop_name",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "step_name",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "approval",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cycle_limit",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "cycle_generation",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "repository",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "revision",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "task",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "agent_json",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "parent_model",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "reopens_event_id",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "0",
+      "generated": null,
+      "name": "reopening",
+      "entityType": "columns",
+      "table": "usine_trigger_events"
+    },
+    {
+      "columns": ["run_id"],
+      "tableTo": "usine_runs",
+      "columnsTo": ["run_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_approvals_run_id_usine_runs_run_id_fk",
+      "entityType": "fks",
+      "table": "usine_approvals"
+    },
+    {
+      "columns": ["event_id"],
+      "tableTo": "usine_events",
+      "columnsTo": ["event_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_approvals_event_id_usine_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_approvals"
+    },
+    {
+      "columns": ["attempt_id"],
+      "tableTo": "usine_attempts",
+      "columnsTo": ["attempt_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_attempt_transcripts_attempt_id_usine_attempts_attempt_id_fk",
+      "entityType": "fks",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "columns": ["run_id", "step_name"],
+      "tableTo": "usine_steps",
+      "columnsTo": ["run_id", "step_name"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_attempts_run_id_step_name_usine_steps_run_id_step_name_fk",
+      "entityType": "fks",
+      "table": "usine_attempts"
+    },
+    {
+      "columns": ["run_id"],
+      "tableTo": "usine_runs",
+      "columnsTo": ["run_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_cycle_reservations_run_id_usine_runs_run_id_fk",
+      "entityType": "fks",
+      "table": "usine_cycle_reservations"
+    },
+    {
+      "columns": ["item_key"],
+      "tableTo": "usine_item_cycle_budgets",
+      "columnsTo": ["item_key"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_cycle_reservations_item_key_usine_item_cycle_budgets_item_key_fk",
+      "entityType": "fks",
+      "table": "usine_cycle_reservations"
+    },
+    {
+      "columns": ["event_id"],
+      "tableTo": "usine_events",
+      "columnsTo": ["event_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_cycle_resets_event_id_usine_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_cycle_resets"
+    },
+    {
+      "columns": ["item_key"],
+      "tableTo": "usine_item_cycle_budgets",
+      "columnsTo": ["item_key"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_cycle_resets_item_key_usine_item_cycle_budgets_item_key_fk",
+      "entityType": "fks",
+      "table": "usine_cycle_resets"
+    },
+    {
+      "columns": ["event_id"],
+      "tableTo": "usine_trigger_events",
+      "columnsTo": ["event_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_ignored_events_event_id_usine_trigger_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_ignored_events"
+    },
+    {
+      "columns": ["observed_event_id"],
+      "tableTo": "usine_events",
+      "columnsTo": ["event_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_loop_items_observed_event_id_usine_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_loop_items"
+    },
+    {
+      "columns": ["held_by_run_id"],
+      "tableTo": "usine_runs",
+      "columnsTo": ["run_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_loop_items_held_by_run_id_usine_runs_run_id_fk",
+      "entityType": "fks",
+      "table": "usine_loop_items"
+    },
+    {
+      "columns": ["held_event_id"],
+      "tableTo": "usine_events",
+      "columnsTo": ["event_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_loop_items_held_event_id_usine_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_loop_items"
+    },
+    {
+      "columns": ["event_id"],
+      "tableTo": "usine_trigger_events",
+      "columnsTo": ["event_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_runs_event_id_usine_trigger_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_runs"
+    },
+    {
+      "columns": ["run_id"],
+      "tableTo": "usine_runs",
+      "columnsTo": ["run_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_steps_run_id_usine_runs_run_id_fk",
+      "entityType": "fks",
+      "table": "usine_steps"
+    },
+    {
+      "columns": ["event_id"],
+      "tableTo": "usine_events",
+      "columnsTo": ["event_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_trigger_events_event_id_usine_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_trigger_events"
+    },
+    {
+      "columns": ["reopens_event_id"],
+      "tableTo": "usine_events",
+      "columnsTo": ["event_id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "NO ACTION",
+      "nameExplicit": false,
+      "name": "fk_usine_trigger_events_reopens_event_id_usine_events_event_id_fk",
+      "entityType": "fks",
+      "table": "usine_trigger_events"
+    },
+    {
+      "columns": ["loop_name", "item_key"],
+      "nameExplicit": false,
+      "name": "usine_loop_items_pk",
+      "entityType": "pks",
+      "table": "usine_loop_items"
+    },
+    {
+      "columns": ["run_id", "step_name"],
+      "nameExplicit": false,
+      "name": "usine_steps_pk",
+      "entityType": "pks",
+      "table": "usine_steps"
+    },
+    {
+      "columns": ["run_id"],
+      "nameExplicit": false,
+      "name": "usine_approvals_pk",
+      "table": "usine_approvals",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["sequence"],
+      "nameExplicit": false,
+      "name": "usine_attempt_transcripts_pk",
+      "table": "usine_attempt_transcripts",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["attempt_id"],
+      "nameExplicit": false,
+      "name": "usine_attempts_pk",
+      "table": "usine_attempts",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["move_id"],
+      "nameExplicit": false,
+      "name": "usine_board_moves_pk",
+      "table": "usine_board_moves",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["cursor_key"],
+      "nameExplicit": false,
+      "name": "usine_cursors_pk",
+      "table": "usine_cursors",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["run_id"],
+      "nameExplicit": false,
+      "name": "usine_cycle_reservations_pk",
+      "table": "usine_cycle_reservations",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["ask_id"],
+      "nameExplicit": false,
+      "name": "usine_cycle_resets_pk",
+      "table": "usine_cycle_resets",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["event_id"],
+      "nameExplicit": false,
+      "name": "usine_events_pk",
+      "table": "usine_events",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["event_id"],
+      "nameExplicit": false,
+      "name": "usine_ignored_events_pk",
+      "table": "usine_ignored_events",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["item_key"],
+      "nameExplicit": false,
+      "name": "usine_item_cycle_budgets_pk",
+      "table": "usine_item_cycle_budgets",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["item_key"],
+      "nameExplicit": false,
+      "name": "usine_item_projections_pk",
+      "table": "usine_item_projections",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["loop_name"],
+      "nameExplicit": false,
+      "name": "usine_loop_runtime_pk",
+      "table": "usine_loop_runtime",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["singleton"],
+      "nameExplicit": false,
+      "name": "usine_projection_revision_pk",
+      "table": "usine_projection_revision",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["repository"],
+      "nameExplicit": false,
+      "name": "usine_repository_label_projections_pk",
+      "table": "usine_repository_label_projections",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["run_id"],
+      "nameExplicit": false,
+      "name": "usine_runs_pk",
+      "table": "usine_runs",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["event_id"],
+      "nameExplicit": false,
+      "name": "usine_trigger_events_pk",
+      "table": "usine_trigger_events",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "attempt_id",
+          "isExpression": false
+        },
+        {
+          "value": "direction",
+          "isExpression": false
+        },
+        {
+          "value": "channel_sequence",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_attempt_transcript_envelope",
+      "entityType": "indexes",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "columns": [
+        {
+          "value": "attempt_id",
+          "isExpression": false
+        },
+        {
+          "value": "sequence",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_attempt_transcript_tail",
+      "entityType": "indexes",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false
+        },
+        {
+          "value": "step_name",
+          "isExpression": false
+        },
+        {
+          "value": "attempt_number",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_attempt_number",
+      "entityType": "indexes",
+      "table": "usine_attempts"
+    },
+    {
+      "columns": [
+        {
+          "value": "run_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": "\"usine_attempts\".\"outcome_json\" is null",
+      "origin": "manual",
+      "name": "usine_one_in_flight_attempt",
+      "entityType": "indexes",
+      "table": "usine_attempts"
+    },
+    {
+      "columns": [
+        {
+          "value": "item_key",
+          "isExpression": false
+        },
+        {
+          "value": "moved_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_board_moves_item",
+      "entityType": "indexes",
+      "table": "usine_board_moves"
+    },
+    {
+      "columns": [
+        {
+          "value": "item_key",
+          "isExpression": false
+        },
+        {
+          "value": "generation",
+          "isExpression": false
+        },
+        {
+          "value": "loop",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_cycle_reservations_item",
+      "entityType": "indexes",
+      "table": "usine_cycle_reservations"
+    },
+    {
+      "columns": [
+        {
+          "value": "repository",
+          "isExpression": false
+        },
+        {
+          "value": "item_number",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_item_projection_number",
+      "entityType": "indexes",
+      "table": "usine_item_projections"
+    },
+    {
+      "columns": [
+        {
+          "value": "loop_name",
+          "isExpression": false
+        },
+        {
+          "value": "item_key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_trigger_events_item",
+      "entityType": "indexes",
+      "table": "usine_trigger_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "item_key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_trigger_events_item_history",
+      "entityType": "indexes",
+      "table": "usine_trigger_events"
+    },
+    {
+      "columns": [
+        {
+          "value": "reopens_event_id",
+          "isExpression": false
+        },
+        {
+          "value": "reopening",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "usine_trigger_event_reopening",
+      "entityType": "indexes",
+      "table": "usine_trigger_events"
+    },
+    {
+      "columns": ["event_id"],
+      "nameExplicit": false,
+      "name": "usine_approvals_event_id_unique",
+      "entityType": "uniques",
+      "table": "usine_approvals"
+    },
+    {
+      "columns": ["event_id"],
+      "nameExplicit": false,
+      "name": "usine_cycle_resets_event_id_unique",
+      "entityType": "uniques",
+      "table": "usine_cycle_resets"
+    },
+    {
+      "columns": ["dedup_key"],
+      "nameExplicit": false,
+      "name": "usine_events_dedup_key_unique",
+      "entityType": "uniques",
+      "table": "usine_events"
+    },
+    {
+      "columns": ["event_id"],
+      "nameExplicit": false,
+      "name": "usine_runs_event_id_unique",
+      "entityType": "uniques",
+      "table": "usine_runs"
+    },
+    {
+      "value": "(\"channel\" is null and \"approver\" is null) or \"channel\" = 'ui' or (\"channel\" = 'github-ask' and \"approver\" is not null)",
+      "name": "usine_approvals_source",
+      "entityType": "checks",
+      "table": "usine_approvals"
+    },
+    {
+      "value": "\"direction\" in ('inbound', 'outbound')",
+      "name": "usine_attempt_transcripts_direction",
+      "entityType": "checks",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "value": "\"channel_sequence\" >= 1",
+      "name": "usine_attempt_transcripts_sequence",
+      "entityType": "checks",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "value": "json_valid(\"envelope\")",
+      "name": "usine_attempt_transcripts_envelope_json_valid",
+      "entityType": "checks",
+      "table": "usine_attempt_transcripts"
+    },
+    {
+      "value": "\"attempt_number\" >= 1",
+      "name": "usine_attempts_number",
+      "entityType": "checks",
+      "table": "usine_attempts"
+    },
+    {
+      "value": "json_valid(\"brain_json\")",
+      "name": "usine_attempts_brain_json_valid",
+      "entityType": "checks",
+      "table": "usine_attempts"
+    },
+    {
+      "value": "\"outcome_json\" is null or json_valid(\"outcome_json\")",
+      "name": "usine_attempts_outcome_json_valid",
+      "entityType": "checks",
+      "table": "usine_attempts"
+    },
+    {
+      "value": "\"salvage_json\" is null or json_valid(\"salvage_json\")",
+      "name": "usine_attempts_salvage_json_valid",
+      "entityType": "checks",
+      "table": "usine_attempts"
+    },
+    {
+      "value": "json_valid(\"added_json\")",
+      "name": "usine_board_moves_added_json_valid",
+      "entityType": "checks",
+      "table": "usine_board_moves"
+    },
+    {
+      "value": "json_valid(\"removed_json\")",
+      "name": "usine_board_moves_removed_json_valid",
+      "entityType": "checks",
+      "table": "usine_board_moves"
+    },
+    {
+      "value": "json_valid(\"value_json\")",
+      "name": "usine_cursors_value_json_valid",
+      "entityType": "checks",
+      "table": "usine_cursors"
+    },
+    {
+      "value": "\"generation\" >= 0",
+      "name": "usine_cycle_reservations_generation",
+      "entityType": "checks",
+      "table": "usine_cycle_reservations"
+    },
+    {
+      "value": "json_valid(\"payload_json\")",
+      "name": "usine_events_payload_json_valid",
+      "entityType": "checks",
+      "table": "usine_events"
+    },
+    {
+      "value": "\"reason\" in ('superseded', 'revoked')",
+      "name": "usine_ignored_events_reason",
+      "entityType": "checks",
+      "table": "usine_ignored_events"
+    },
+    {
+      "value": "\"generation\" >= 0",
+      "name": "usine_item_cycle_generation",
+      "entityType": "checks",
+      "table": "usine_item_cycle_budgets"
+    },
+    {
+      "value": "\"ask_json\" is null or json_valid(\"ask_json\")",
+      "name": "usine_item_cycle_ask_json",
+      "entityType": "checks",
+      "table": "usine_item_cycle_budgets"
+    },
+    {
+      "value": "\"item_number\" >= 1",
+      "name": "usine_item_projections_number",
+      "entityType": "checks",
+      "table": "usine_item_projections"
+    },
+    {
+      "value": "json_valid(\"payload_json\")",
+      "name": "usine_item_projections_payload_json_valid",
+      "entityType": "checks",
+      "table": "usine_item_projections"
+    },
+    {
+      "value": "\"singleton\" = 1",
+      "name": "usine_projection_revision_singleton",
+      "entityType": "checks",
+      "table": "usine_projection_revision"
+    },
+    {
+      "value": "json_valid(\"labels_json\")",
+      "name": "usine_repository_label_projections_labels_json_valid",
+      "entityType": "checks",
+      "table": "usine_repository_label_projections"
+    },
+    {
+      "value": "json_valid(\"state_json\")",
+      "name": "usine_runs_state_json_valid",
+      "entityType": "checks",
+      "table": "usine_runs"
+    },
+    {
+      "value": "json_valid(\"agent_json\")",
+      "name": "usine_runs_agent_json_valid",
+      "entityType": "checks",
+      "table": "usine_runs"
+    },
+    {
+      "value": "\"result\" is null or json_valid(\"result\")",
+      "name": "usine_steps_result_json_valid",
+      "entityType": "checks",
+      "table": "usine_steps"
+    },
+    {
+      "value": "\"approval\" in ('none', 'required')",
+      "name": "usine_trigger_events_approval",
+      "entityType": "checks",
+      "table": "usine_trigger_events"
+    },
+    {
+      "value": "\"cycle_limit\" is null or \"cycle_limit\" >= 1",
+      "name": "usine_trigger_events_cycle_limit",
+      "entityType": "checks",
+      "table": "usine_trigger_events"
+    },
+    {
+      "value": "json_valid(\"agent_json\")",
+      "name": "usine_trigger_events_agent_json_valid",
+      "entityType": "checks",
+      "table": "usine_trigger_events"
+    }
+  ],
+  "renames": []
+}

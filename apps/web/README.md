@@ -63,4 +63,4 @@ A Worker that `usine.yaml` no longer declares appears in Needs you as **Worker n
 
 Choose **Mark resolved** in a failed Run’s drawer or Run page to clear its Needs you warning and related Project and Board attention. Open the drawer from Needs you or Run history. Resolution persists across reloads and restarts; the failed outcome, Attempt details, transcript, and retry controls remain available. A later failed Attempt requests attention again.
 
-An Agent's question appears in Needs you as **\<loop\> asks a question**, with the question. In its drawer and Run page the button reads **Mark answered**; the Run's Loop then acts on the Item's newest state.
+An Agent's blocker appears in Needs you as **\<loop\> is blocked**, with the blocker, and **Mark resolved** lets the Run's Loop act on the Item's newest state. An Agent's question appears in Needs you as **\<loop\> asks a question**, with the question. In its drawer and Run page the button reads **Mark answered**; the Run's Loop then acts on the Item's newest state.

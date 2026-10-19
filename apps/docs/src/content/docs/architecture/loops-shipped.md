@@ -124,7 +124,7 @@ Post the review on GitHub. If you find any actionable issue, explain it with fil
 
 ### act-on-findings
 
-The developer removes `agent-review-findings`, checks out the pull request branch after the same head check, and fixes each finding graded P0, P1, or P2 in reviews signed `usine agent: reviewer`. It runs the checks, pushes to the branch, replies to each finding, and adds `ready-for-review`, which sends the pull request back to `review-pr`. An Attempt that ends with a question for the operator used to repeat until the cycle budget was used up ([#241][]); usine now holds the pull request until the operator answers or the pull request changes ([Operator questions](/architecture/run-lifecycle/#operator-questions)).
+The developer removes `agent-review-findings`, checks out the pull request branch after the same head check, and fixes each finding graded P0, P1, or P2 in reviews signed `usine agent: reviewer`. It runs the checks, pushes to the branch, replies to each finding, and adds `ready-for-review`, which sends the pull request back to `review-pr`. An Attempt that ends with a question for the operator used to repeat until the cycle budget was used up ([#241][]); usine now holds the pull request until the operator answers or the pull request changes ([Operator questions and blockers](/architecture/run-lifecycle/#operator-questions-and-blockers)).
 
 ```markdown title="loops/act-on-findings.md"
 ---

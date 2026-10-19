@@ -163,6 +163,7 @@ const makeRunEngine = Effect.gen(function* () {
               RunawayFailure: () => "The Attempt reached its runaway limit",
               ChildSessionBudgetFailure: () => "The Attempt reached its child-session budget",
               QuestionFailure: () => "The Attempt ended with a question for the operator",
+              BlockedFailure: ({ message }) => message,
               InfraFailure: ({ message }) => message,
               DefectFailure: ({ message }) => message,
               AgentFailure: ({ message }) => message,
@@ -185,7 +186,7 @@ const makeRunEngine = Effect.gen(function* () {
   ) {
     if (!(yield* store.resolveFailure(runId, attemptId))) return;
     yield* Effect.logInfo(
-      "The operator answered the question; the Item's queued Events get their turn",
+      "The operator resolved the Agent's question or blocker; the Item's queued Events get their turn",
       {
         runId,
         attemptId,
@@ -334,8 +335,9 @@ export class RunEngine extends Context.Service<
     readonly reconcile: () => Effect.Effect<void, RunEngineError>;
     /**
      * Resolves the current failed Attempt's attention without changing its outcome.
-     * When the Attempt asked the operator a question, this answers it: the Loop
-     * evaluates the Item's queued Events again, and one may open a Run.
+     * When the Attempt asked the operator a question or reported a blocker, this
+     * ends the Loop's hold on the Item: the Loop evaluates the Item's queued
+     * Events again, and one may open a Run.
      */
     readonly resolveFailure: (
       runId: RunId,

@@ -73,7 +73,8 @@ The engine retries an Attempt automatically only after an `InfraFailure`, such a
 | Failure                     | Cause                                                                                                      |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `InfraFailure`              | Infrastructure failed around the Agent, and the Run has used its three automatic Attempts.                 |
-| `AgentFailure`              | The Agent reported a blocker with `[usine:blocked]`, a harness isn't ready on the Worker, or the parent's model, effort, or credential is unusable. |
+| `AgentFailure`              | A harness isn't ready on the Worker, or the parent's model, effort, or credential is unusable. |
+| `BlockedFailure`            | The Agent hit a blocker it can't resolve and reported it with `[usine:blocked]`. See [Clear a blocker](#clear-a-blocker). |
 | `QuestionFailure`           | The Agent needs a decision from you and asked it with `[usine:question]`. See [Answer a question](#answer-a-question). |
 | `DefectFailure`             | A defect in usine at the execution boundary.                                                               |
 | `RunawayFailure`            | The Attempt reached `max_attempt_minutes` or `max_attempt_tokens`.                                         |
@@ -99,6 +100,12 @@ While the question waits, the Loop holds the Item. The Agent's own comment chang
 - you select **Mark answered** in the Run drawer: the Loop takes the newest state it saw after the question, checks the trigger against the Item again, and opens a Run for it.
 
 An answer on GitHub only counts when it changes the Item after polling has seen the Agent's question. If the Agent asked without posting anything, or you answer within the same poll, use **Mark answered** or **Retry** instead.
+
+## Clear a blocker
+
+An Agent that hits a blocker it can't resolve, such as a failing baseline check or a missing permission, records the blocker on the Item and ends its Attempt with `[usine:blocked]`. The Run fails with `BlockedFailure`, and **Needs you** lists it as **\<loop\> is blocked**, with the blocker. usine doesn't retry it.
+
+The Loop holds the Item as it does for a question: the Agent's blocker comment opens no Run, so a new Run doesn't meet the same blocker and post it again. Once you have removed the blocker, the Loop acts on the Item again when the Item changes again, when it stops matching and comes back, when you **Retry** or **Edit and retry** the Run, or when you select **Mark resolved**, which checks the trigger against the Item's newest state and opens a Run for it.
 
 ## Edit and retry
 

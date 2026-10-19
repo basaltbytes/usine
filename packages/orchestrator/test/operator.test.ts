@@ -42,7 +42,7 @@ import {
   ToolStarted,
 } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { BlockedFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptFailed } from "@usine/core/attempt/outcome";
 import * as RunState from "@usine/core/run/state";
 import { RunEngine } from "@usine/engine/engine";
@@ -1085,6 +1085,16 @@ describe("Operator", () => {
       assert.deepStrictEqual(Schema.decodeUnknownSync(ReadyOverview)(encoded).needsYou, needs);
     }),
   );
+
+  it("shows an Agent's blocker to the operator as its own failure kind", () => {
+    const encoded = Schema.encodeUnknownSync(FailureView)(
+      failureView(new BlockedFailure({ message: "The baseline gate fails on main." })),
+    );
+    assert.deepStrictEqual(encoded, {
+      _tag: "BlockedFailure",
+      message: "The baseline gate fails on main.",
+    });
+  });
 
   it.each([InfraFailure, DefectFailure])(
     "removes original causes from operator failure schemas: %s",

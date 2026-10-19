@@ -11,6 +11,7 @@ import { AgentName } from "@usine/core/agent";
 import { Option, Schema } from "effect";
 import { RemoteShell } from "../src/child-host/child-host.ts";
 import {
+  AgentBlockedError,
   AgentQuestionError,
   AgentResultError,
   ChildRequest,
@@ -95,6 +96,14 @@ describe("agent runtime contract", () => {
     ];
     for (const error of terminal) {
       assert.strictEqual(toAttemptFailure(error)._tag, "AgentFailure");
+    }
+
+    const blocked = toAttemptFailure(
+      new AgentBlockedError({ sessionId, message: "The baseline gate fails on main." }),
+    );
+    assert.strictEqual(blocked._tag, "BlockedFailure");
+    if (blocked._tag === "BlockedFailure") {
+      assert.strictEqual(blocked.message, "The baseline gate fails on main.");
     }
 
     const asked = toAttemptFailure(

@@ -1,10 +1,10 @@
+import { type ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
-import { desc, eq, ne } from "drizzle-orm";
-import { Context, Effect, Layer, Schema } from "effect";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import { itemProjections } from "../database/schema.ts";
 import { EnginePersistenceError } from "../engine/error.ts";
-import { ItemNumber } from "@usine/core/item";
 import { ItemContentHash, ItemProjection, ItemProjectionSource } from "./model.ts";
 
 const ItemProjectionRow = Schema.Struct({
@@ -14,10 +14,12 @@ const ItemProjectionRow = Schema.Struct({
   number: ItemNumber,
   contentHash: ItemContentHash,
   payload: Schema.JsonObject,
+  goneAt: ItemProjection.fields.goneAt,
 });
 
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(ItemProjectionRow));
 const encodePayload = Schema.encodeSync(Schema.JsonObject);
+const encodeGoneAt = Schema.encodeSync(ItemProjectionRow.fields.goneAt);
 
 const persistence =
   (operation: string) =>
@@ -45,6 +47,7 @@ const makeReader = Effect.gen(function* () {
           number: itemProjections.itemNumber,
           contentHash: itemProjections.contentHash,
           payload: itemProjections.payloadJson,
+          goneAt: itemProjections.goneAt,
         })
         .from(itemProjections)
         .where(eq(itemProjections.repository, repository))
@@ -67,6 +70,7 @@ const makeWriter = Effect.gen(function* () {
         item: item.number,
         itemKey: item.itemKey,
       });
+      const goneAt = encodeGoneAt(item.goneAt);
       const changed = yield* database
         .insert(itemProjections)
         .values({
@@ -76,6 +80,7 @@ const makeWriter = Effect.gen(function* () {
           itemNumber: item.number,
           contentHash: item.contentHash,
           payloadJson: encodePayload(item.payload),
+          goneAt,
         })
         .onConflictDoUpdate({
           target: itemProjections.itemKey,
@@ -85,8 +90,9 @@ const makeWriter = Effect.gen(function* () {
             itemNumber: item.number,
             contentHash: item.contentHash,
             payloadJson: encodePayload(item.payload),
+            goneAt,
           },
-          setWhere: ne(itemProjections.contentHash, item.contentHash),
+          setWhere: sql`${itemProjections.contentHash} != ${item.contentHash} OR ${itemProjections.goneAt} IS NOT ${goneAt}`,
         })
         .returning({ itemKey: itemProjections.itemKey })
         .execute();
@@ -106,6 +112,27 @@ const makeWriter = Effect.gen(function* () {
       });
       return true;
     }, persistence("write Item projection")),
+    markGone: Effect.fn("ItemProjectionWriter.markGone")(function* (
+      itemKey: ItemKey,
+      goneAt: DateTime.Utc,
+    ) {
+      yield* Effect.annotateCurrentSpan({ itemKey });
+      const marked = yield* database
+        .update(itemProjections)
+        .set({ goneAt: encodeGoneAt(Option.some(goneAt)) })
+        .where(and(eq(itemProjections.itemKey, itemKey), isNull(itemProjections.goneAt)))
+        .returning({ itemKey: itemProjections.itemKey })
+        .execute();
+      if (marked.length === 0) {
+        yield* Effect.logDebug("Item projection already gone or never stored", { itemKey });
+        return false;
+      }
+      yield* Effect.logInfo("Item projection marked gone from GitHub", {
+        itemKey,
+        goneAt: DateTime.formatIso(goneAt),
+      });
+      return true;
+    }, persistence("mark Item projection gone")),
   } as const;
 });
 
@@ -125,8 +152,20 @@ export class ItemProjectionReader extends Context.Service<
 export class ItemProjectionWriter extends Context.Service<
   ItemProjectionWriter,
   {
-    /** `true` means the durable projection changed. */
+    /**
+     * Stores the Item as `item` describes it, which clears a recorded `goneAt`
+     * for an observed snapshot. `true` means the durable projection changed.
+     */
     readonly upsert: (item: ItemProjection) => Effect.Effect<boolean, EnginePersistenceError>;
+    /**
+     * Records that GitHub no longer has the Item, keeping its last payload, so
+     * the Board stops showing it as open. `true` when this marked a stored
+     * projection; an Item already gone keeps its first `goneAt`.
+     */
+    readonly markGone: (
+      itemKey: ItemKey,
+      goneAt: DateTime.Utc,
+    ) => Effect.Effect<boolean, EnginePersistenceError>;
   }
 >()("@usine/engine/ItemProjectionWriter") {
   static readonly layer = Layer.effect(ItemProjectionWriter, makeWriter);

@@ -103,7 +103,6 @@ See [Workers and the Gateway](/architecture/workers-and-gateway/) for how each W
 See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop files.
 
 - [#226][]: the reviewer Agent pushed a fix commit to a pull request branch although `review-pr` forbids branch edits.
-- [#241][]: `act-on-findings` repeats an Attempt that ended with an operator question until the cycle budget is used up.
 - [#242][]: a `finish-pr` commit on the local Worker has the operator as its author instead of the factory's App.
 
 ## Observability
@@ -166,7 +165,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#236]: https://github.com/basaltbytes/usine/issues/236
 [#237]: https://github.com/basaltbytes/usine/issues/237
 [#240]: https://github.com/basaltbytes/usine/issues/240
-[#241]: https://github.com/basaltbytes/usine/issues/241
 [#242]: https://github.com/basaltbytes/usine/issues/242
 [#243]: https://github.com/basaltbytes/usine/issues/243
 [#248]: https://github.com/basaltbytes/usine/issues/248

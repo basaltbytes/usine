@@ -17,8 +17,8 @@ import { assemblePrompt } from "@usine/agents/prompt";
 import { reportedOutcome, toAttemptFailure } from "@usine/agents/runtime";
 import type { AttemptId } from "@usine/core/attempt";
 import {
-  AgentFailure,
   type AttemptFailure,
+  BlockedFailure,
   ChildSessionBudgetFailure,
   InfraFailure,
   QuestionFailure,
@@ -61,12 +61,18 @@ const commit = (
   change: (tx: Tx) => NextState | undefined | Promise<NextState | undefined>,
 ) => call(operation, () => runtime.commit((tx) => change(tx), context));
 
-/** The failure a child's recorded report ends the Attempt with when the parent did not relay one. */
+/**
+ * The failure a child's recorded report ends the Attempt with when the parent
+ * did not relay one. Every report that is not a question reached the parent as
+ * a blocker.
+ */
 const childReportFailure = ({
   message,
   kind,
 }: NonNullable<AttemptRecord["childBlocker"]>): AttemptFailure =>
-  kind === "question" ? new QuestionFailure({ question: message }) : new AgentFailure({ message });
+  kind === "question"
+    ? new QuestionFailure({ question: message })
+    : new BlockedFailure({ message });
 
 const finalAnswer = Effect.fn("AttemptTask.finalAnswer")(function* (
   runtime: Runtime,

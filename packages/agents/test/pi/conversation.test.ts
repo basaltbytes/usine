@@ -4,7 +4,7 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession, ParentSession } from "@usine/core/agent/session";
 import { Interrupt, OperatorMessage, Release, Steer } from "@usine/core/attempt/channel";
 import { Deferred, Effect, Fiber } from "effect";
-import { AgentQuestionError, AgentResultError } from "../../src/runtime.ts";
+import { AgentBlockedError, AgentQuestionError } from "../../src/runtime.ts";
 import { sessionChannel } from "../../src/pi/session.ts";
 import { sessionConversation } from "../../src/pi/conversation.ts";
 
@@ -47,7 +47,7 @@ describe("session supervision", () => {
       assert.strictEqual(session.result.pollUnsafe(), undefined);
       yield* session.intervene(new Release());
       const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      assert(error instanceof AgentResultError);
+      assert(error instanceof AgentBlockedError);
       assert.strictEqual(error.message, "Publishing permission denied.");
     }),
   );
@@ -74,7 +74,7 @@ describe("session supervision", () => {
       const session = yield* conversation(child("same-line"));
       yield* session.finish("[usine:blocked] Repository permission denied.");
       const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      assert(error instanceof AgentResultError);
+      assert(error instanceof AgentBlockedError);
       assert.strictEqual(error.message, "Repository permission denied.");
     }),
   );
@@ -99,7 +99,7 @@ describe("session supervision", () => {
       const session = yield* conversation(child("no-details"));
       yield* session.finish("[usine:blocked]");
       const error = yield* Fiber.join(session.result).pipe(Effect.flip);
-      assert(error instanceof AgentResultError);
+      assert(error instanceof AgentBlockedError);
       assert.match(error.message, /without details/u);
     }),
   );

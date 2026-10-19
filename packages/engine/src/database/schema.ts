@@ -81,8 +81,9 @@ export const triggerEvents = snakeCase.table(
 /**
  * What each Loop last saw of an Item: the Event a trigger last submitted for it,
  * or none after a sighting that did not match. A Run whose Attempt asked the
- * operator a question holds the Loop on the Item (#241); `heldEventId` is the
- * Item's state after the question, which holds no Run either.
+ * operator a question or reported a blocker holds the Loop on the Item (#241,
+ * #341); `heldEventId` is the Item's state after that stop, which opens no Run
+ * either.
  */
 export const loopItems = snakeCase.table(
   "usine_loop_items",
@@ -323,7 +324,10 @@ export const cursors = snakeCase.table(
   (table) => [check("usine_cursors_value_json_valid", sql`json_valid(${table.valueJson})`)],
 );
 
-/** The latest payload seen for each Item, for operator reads. */
+/**
+ * The latest payload seen for each Item, for operator reads, and when a poll
+ * found that GitHub no longer has the Item.
+ */
 export const itemProjections = snakeCase.table(
   "usine_item_projections",
   {
@@ -333,6 +337,7 @@ export const itemProjections = snakeCase.table(
     itemNumber: integer({ mode: "number" }).notNull(),
     contentHash: text().notNull(),
     payloadJson: text({ mode: "json" }).$type<unknown>().notNull(),
+    goneAt: text(),
   },
   (table) => [
     check("usine_item_projections_number", sql`${table.itemNumber} >= 1`),

@@ -12,7 +12,7 @@ import {
   ItemProjection,
   ItemProjectionSource,
 } from "@usine/engine/item-projection";
-import { Effect, Schema } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../src/board/projection.ts";
 import {
   BoardTaskView,
@@ -206,6 +206,48 @@ describe("Board projection", () => {
       const unmapped = board.lanes.find(({ origin }) => origin === "fallback");
       assert.strictEqual(unmapped?.items[0]?.itemKey, itemKey);
       assert.strictEqual(unmapped?.items[0]?.state, "issue-closed");
+    }),
+  );
+
+  it.effect("moves an open pull request GitHub no longer has to its closed lane", () =>
+    Effect.gen(function* () {
+      const config = Schema.decodeUnknownSync(UsineConfig)({
+        version: 1,
+        repos: [
+          {
+            name: repository,
+            lanes: [
+              { name: "Open", sources: [{ state: "pr-open" }] },
+              { name: "Review", sources: [{ label: review }] },
+              { name: "Closed", sources: [{ state: "pr-closed" }] },
+            ],
+          },
+        ],
+      });
+      const managed = config.repos[0];
+      assert(managed !== undefined);
+      const open = new ItemProjection({
+        ...mergedPullRequest,
+        contentHash: ItemContentHash.make("pr-98:open"),
+        payload: {
+          ...mergedPullRequest.payload,
+          state: "OPEN",
+          merged: false,
+          mergedAt: null,
+          labels: { totalCount: 1, nodes: [{ name: review }] },
+        },
+      });
+      const gone = new ItemProjection({
+        ...open,
+        goneAt: Option.some(DateTime.makeUnsafe("2026-09-04T08:00:00Z")),
+      });
+      const before = yield* projectBoard(managed, [], [open], []);
+      assert.strictEqual(before.lanes[1]?.items[0]?.itemKey, open.itemKey);
+      const board = yield* projectBoard(managed, [], [gone], []);
+      assert.deepStrictEqual(board.lanes[0]?.items, []);
+      assert.deepStrictEqual(board.lanes[1]?.items, []);
+      assert.strictEqual(board.lanes[2]?.items[0]?.itemKey, gone.itemKey);
+      assert.strictEqual(board.lanes[2]?.items[0]?.state, "pr-closed");
     }),
   );
 

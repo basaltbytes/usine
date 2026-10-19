@@ -56,7 +56,7 @@ import {
   logItemEvaluation,
 } from "./evaluation-failures.ts";
 import { evaluateItem, revokeMissingItem } from "./loop-evaluation.ts";
-import { observeItem, synchronizeLabels } from "./repository-sync.ts";
+import { markItemGone, observeItem, synchronizeLabels } from "./repository-sync.ts";
 import { ItemHints, type ItemHint } from "./hints.ts";
 
 /** GitHub tolerates a handful of parallel REST and GraphQL calls per token. */
@@ -334,6 +334,7 @@ export class PollingTriggers extends Context.Service<
                       watched.loops,
                       item,
                     );
+                    const projectionMarkedGone = yield* markItemGone(watched.repository.name, item);
                     yield* Effect.logWarning(
                       "GitHub no longer has an Item the poll cursor kept; it is dropped from the cursor",
                       {
@@ -343,6 +344,7 @@ export class PollingTriggers extends Context.Service<
                           ({ number }) => number === item.number,
                         ),
                         revokedRuns,
+                        projectionMarkedGone,
                         errorTag: error._tag,
                         message: error.message,
                       },

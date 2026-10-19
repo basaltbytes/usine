@@ -261,17 +261,30 @@ export const resightEvent = (settled: Settlement, itemCameBack: boolean): Sighti
 };
 
 /**
- * A question that holds a Loop on an Item: the Run whose Attempt asked it, and
- * the Item's state after the question once the Loop saw one (#241).
+ * A hold of a Loop on an Item after an Attempt stopped for the operator: the
+ * Run whose Attempt stopped, and the Item's state after the stop once the
+ * Loop saw one (#241, #341).
  */
-export interface QuestionHold {
+export interface OperatorHold {
   readonly runId: RunId;
   readonly heldEventId: Option.Option<EventId>;
 }
 
-/** Whether the Attempt the decision closes asked the operator a question, so its Loop holds the Item. */
-export const asksOperator = (decision: FinishDecision): boolean =>
-  decision._tag === "RunFailed" && decision.outcome.failure._tag === "QuestionFailure";
+/** How an Attempt stopped for the operator: it asked a question or reported a blocker. */
+export type OperatorStop = "question" | "blocker";
+
+/** How the Attempt the decision closes stopped for the operator, if it did; its Loop then holds the Item (ADR 0017). */
+export const operatorStop = (decision: FinishDecision): Option.Option<OperatorStop> => {
+  if (decision._tag !== "RunFailed") return Option.none();
+  switch (decision.outcome.failure._tag) {
+    case "QuestionFailure":
+      return Option.some("question");
+    case "BlockedFailure":
+      return Option.some("blocker");
+    default:
+      return Option.none();
+  }
+};
 
 type HoldDecision =
   | { readonly _tag: "Hold" }
@@ -279,12 +292,13 @@ type HoldDecision =
   | { readonly _tag: "Release" };
 
 /**
- * Decides what an unclaimed Event does while a question holds its Loop on the
- * Item. The first state the Loop sees after the question normally carries the
- * Agent's own question comment, so it becomes the held state (`HoldAt`); a later
- * Event with other content means the Item changed again, and the Loop acts on it.
+ * Decides what an unclaimed Event does while a hold keeps its Loop on the Item.
+ * The first state the Loop sees after the stop normally carries the Agent's
+ * own question or blocker comment, so it becomes the held state (`HoldAt`); a
+ * later Event with other content means the Item changed again, and the Loop
+ * acts on it.
  */
-export const holdEvent = (hold: QuestionHold, eventId: EventId): HoldDecision =>
+export const holdEvent = (hold: OperatorHold, eventId: EventId): HoldDecision =>
   Option.match(hold.heldEventId, {
     onNone: (): HoldDecision => ({ _tag: "HoldAt" }),
     onSome: (held): HoldDecision => (held === eventId ? { _tag: "Hold" } : { _tag: "Release" }),

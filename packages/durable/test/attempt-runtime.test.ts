@@ -4,7 +4,12 @@ import { StorageRejected } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { InfraFailure, QuestionFailure, RunawayFailure } from "@usine/core/attempt/failure";
+import {
+  BlockedFailure,
+  InfraFailure,
+  QuestionFailure,
+  RunawayFailure,
+} from "@usine/core/attempt/failure";
 import { StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import { Context, Effect, Exit, Fiber, Layer, Logger, Option } from "effect";
@@ -784,6 +789,28 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
+  it.live("ends the Attempt with the parent's own blocker", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/16");
+        const failure = yield* runtime.execute(request, recordingSink().sink).pipe(Effect.flip);
+        assert.deepStrictEqual(
+          failure,
+          new BlockedFailure({ message: "The baseline gate fails on main." }),
+        );
+      }).pipe(
+        Effect.provide(
+          layer({
+            database,
+            parent: [answer("[usine:blocked]\nThe baseline gate fails on main.")],
+          }),
+        ),
+      );
+    }).pipe(Effect.scoped),
+  );
+
   it.live("fails the Attempt with a child's blocker the parent did not relay", () =>
     Effect.gen(function* () {
       const database = yield* temporaryDatabase;
@@ -794,10 +821,9 @@ describe("durable AttemptRuntime", () => {
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         yield* (yield* (yield* StubChildren).next).block("Publishing permission denied.");
         const failure = yield* Fiber.join(execution).pipe(Effect.flip);
-        assert.strictEqual(failure._tag, "AgentFailure");
-        assert.strictEqual(
-          failure._tag === "AgentFailure" ? failure.message : "",
-          "Publishing permission denied.",
+        assert.deepStrictEqual(
+          failure,
+          new BlockedFailure({ message: "Publishing permission denied." }),
         );
         assertAdmitted(request.spec.attemptId, recording.outbound());
       }).pipe(

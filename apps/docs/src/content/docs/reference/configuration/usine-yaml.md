@@ -187,7 +187,7 @@ Each lane is one Board column ([`Lane`](https://github.com/basaltbytes/usine/blo
 
 A source may appear in only one lane of a repository; two `label` sources that differ only in case count as the same source. The Board places each Task as follows ([`laneFor`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/board/projection.ts#L78)):
 
-1. A Task whose current Item is a merged or closed pull request, or a closed issue, goes to the first lane with a matching `state` source.
+1. A Task whose current Item is a merged or closed pull request, or a closed issue, goes to the first lane with a matching `state` source. An Item that polling found GitHub no longer has counts as closed.
 2. Any other Task goes to the first lane, in file order, that has a `label` source matching one of the Item's labels. If no lane matches, it goes to the first lane with a matching `state` source.
 3. A Task that matches no lane goes to the `Unmapped` column.
 

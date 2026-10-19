@@ -26,8 +26,9 @@ export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
 
 /**
  * A failed Run requires an operator decision, with its displayable failure
- * details. A `QuestionFailure` is the Agent's question to the operator; its
- * Loop holds the Item until the operator answers it or the Item changes.
+ * details. A `QuestionFailure` is the Agent's question to the operator and a
+ * `BlockedFailure` its blocker; on either, the Loop holds the Item until the
+ * operator retries or resolves the Run, or the Item changes.
  */
 export class RunFailureNeed extends Schema.TaggedClass<RunFailureNeed>(
   "@usine/orchestrator/RunFailureNeed",

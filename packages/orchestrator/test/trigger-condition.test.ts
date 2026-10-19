@@ -17,7 +17,7 @@ import { TriggerCondition } from "@usine/engine/trigger-condition";
 import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApiError } from "@usine/github/github-app";
-import { GitHubPolling } from "@usine/github/polling";
+import { GitHubItemNotFoundError, GitHubPolling } from "@usine/github/polling";
 import { DateTime, Deferred, Effect, Fiber, Layer, Option, Ref, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
@@ -120,6 +120,30 @@ describe("TriggerCondition", () => {
       );
       assert.strictEqual(holds, true);
     }).pipe(Effect.provide(layerWith(failingGitHub))),
+  );
+
+  it.effect("drops a queued Event whose Item GitHub no longer has", () =>
+    Effect.gen(function* () {
+      const condition = yield* TriggerCondition;
+      const holds = yield* condition.holds(
+        submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
+      );
+      assert.strictEqual(holds, false);
+    }).pipe(
+      Effect.provide(
+        layerWith({
+          ...failingGitHub,
+          snapshot: (repository, item) =>
+            Effect.fail(
+              new GitHubItemNotFoundError({
+                operation: "fetch-issue-snapshot",
+                item: item.number,
+                message: `GitHub has no issue ${item.number} in ${repository}`,
+              }),
+            ),
+        }),
+      ),
+    ),
   );
 
   it.effect("interrupts a hung snapshot and keeps the queued Event's turn after five seconds", () =>

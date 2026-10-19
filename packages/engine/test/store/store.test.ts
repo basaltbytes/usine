@@ -791,6 +791,54 @@ describe("Item projections", () => {
       }).pipe(Effect.provide(services));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  it.live("records an Item GitHub no longer has as gone until a poll observes it again", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-item-projection-gone-" }),
+      );
+      const repository = RepositoryName.make("basaltbytes/usine");
+      const item = new ItemProjection({
+        itemKey: ItemKey.make("github:basaltbytes/usine:28"),
+        repository,
+        source: ItemProjectionSource.make("pr"),
+        number: ItemNumber.make(28),
+        contentHash: ItemContentHash.make("content-28"),
+        payload: { number: 28, state: "OPEN" },
+      });
+      const goneAt = DateTime.makeUnsafe("2026-10-19T12:00:00Z");
+      const services = Layer.mergeAll(
+        ItemProjectionReader.layer,
+        ItemProjectionWriter.layer,
+        RunReader.layer,
+      ).pipe(Layer.provide(localSqliteLayer(directory)));
+
+      yield* Effect.gen(function* () {
+        const reader = yield* ItemProjectionReader;
+        const writer = yield* ItemProjectionWriter;
+        const runs = yield* RunReader;
+        assert.strictEqual(yield* writer.markGone(item.itemKey, goneAt), false);
+        yield* writer.upsert(item);
+        const before = yield* runs.revision();
+
+        assert.strictEqual(yield* writer.markGone(item.itemKey, goneAt), true);
+        const gone = new ItemProjection({ ...item, goneAt: Option.some(goneAt) });
+        assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [gone]);
+        assert(Option.isSome(before));
+        assert.deepStrictEqual(yield* runs.revision(), Option.some(before.value + 1));
+        assert.strictEqual(
+          yield* writer.markGone(item.itemKey, DateTime.makeUnsafe("2026-10-19T13:00:00Z")),
+          false,
+        );
+        assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [gone]);
+
+        // The same content observed again means GitHub has the Item after all.
+        assert.strictEqual(yield* writer.upsert(item), true);
+        assert.deepStrictEqual(yield* reader.list(repository, { limit: 10 }), [item]);
+      }).pipe(Effect.provide(services));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });
 
 describe("repository label projections", () => {
