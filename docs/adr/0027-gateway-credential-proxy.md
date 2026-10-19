@@ -43,3 +43,9 @@ The factories usine runs today pay for Claude Code and Codex with the operator's
 The rule in the consequences above, that the forward proxy never lists an LLM provider, becomes: the forward proxy never lists github.com, nor a provider whose credential the gateway holds. A tunnel to that provider would carry the caller token around the gateway, since Claude Code opens connections to `api.anthropic.com` outside `ANTHROPIC_BASE_URL`. For a provider whose login is on the Worker, the tunnel carries the login the Worker already has, and the proxy still pins the tunnel to the listed name.
 
 What this leaves on the machine is the subscription login, which an agent on the Worker can read and spend, as on a Worker without a gateway. It cannot take the login to a host of its choosing: the paths out are still the gateway's.
+
+## Amendment (2026-10-19, #254): the gateway is the Workers' time server
+
+A Worker behind the gateway could reach no time server, so its clock was never corrected after boot and drifted. TLS certificate checks and the harnesses' OAuth token expiry on the Worker compare against that clock. The gateway now runs chrony, which syncs from Hetzner's time servers (`ntp1.hetzner.de`, `ntp2.hetzner.com`, `ntp3.hetzner.net`) and the Debian pool and answers NTP queries from the private network only. Each Worker's systemd-timesyncd asks the gateway's private address, and the Worker's firewall allows UDP port 123 to the gateway and nothing more.
+
+The time server is chrony rather than a relay in the gateway service because the time is the same for every Worker, so the service has no per-caller decision to make, and chrony serves the private network with one `allow` line where a relay would add a UDP listener to a service that speaks HTTP. NTP opens no way out of the private network: chrony answers each query from its own clock and forwards nothing, so a Worker's packets to port 123 end at the gateway, as its DNS queries do.

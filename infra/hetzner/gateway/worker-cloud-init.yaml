@@ -1,10 +1,11 @@
 #cloud-config
 # Puts a Worker VM without public addresses behind the gateway: the gateway
-# as resolver and forward proxy, gh's HTTP socket forwarded to the gateway,
-# and nftables that allow only the gateway. `gateway.sh worker-user-data`
-# replaces the @@NAME@@ placeholders and sends this file after the Worker file
-# of ../cloud-init.yaml, which creates the usine user and installs the
-# toolchain and harnesses through the proxy set here.
+# as resolver, time server, and forward proxy, gh's HTTP socket forwarded to
+# the gateway, and nftables that allow only the gateway.
+# `gateway.sh worker-user-data` replaces the @@NAME@@ placeholders and sends
+# this file after the Worker file of ../cloud-init.yaml, which creates the
+# usine user and installs the toolchain and harnesses through the proxy set
+# here.
 
 bootcmd:
   # The private network's DHCP offers no resolver, and nothing else may answer.
@@ -36,6 +37,14 @@ write_files:
       NO_PROXY=@@DOMAIN@@
       no_proxy=@@DOMAIN@@
       CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+
+  # The empty NTP= drops the image's time servers, which the Worker cannot reach.
+  - path: /etc/systemd/timesyncd.conf.d/usine-gateway.conf
+    permissions: "0644"
+    content: |
+      [Time]
+      NTP=
+      NTP=@@GATEWAY_IP@@
 
   # gh speaks HTTPS to GH_HOST; through this socket it speaks plain HTTP to the gateway instead, so no certificate is needed.
   - path: /etc/systemd/system/usine-gateway-http.socket
@@ -85,4 +94,5 @@ runcmd:
   - [systemctl, daemon-reload]
   - [systemctl, enable, --now, usine-gateway-http.socket]
   - [systemctl, enable, --now, nftables]
+  - [systemctl, restart, systemd-timesyncd]
   - [systemctl, reload, ssh]

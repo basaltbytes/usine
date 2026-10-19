@@ -32,6 +32,7 @@ render() {
   allowlist=$(encoded < "$here/egress-allowlist")
   sed -e "s|@@DOMAIN@@|$DOMAIN|g" \
     -e "s|@@GATEWAY_IP@@|$GATEWAY_IP|g" \
+    -e "s|@@NETWORK_CIDR@@|$NETWORK_CIDR|g" \
     -e "s|@@GATEWAY_NFTABLES_B64@@|$gateway_rules|" \
     -e "s|@@WORKER_NFTABLES_B64@@|$worker_rules|" \
     -e "s|@@EGRESS_ALLOWLIST_B64@@|$allowlist|" \
