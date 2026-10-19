@@ -99,7 +99,8 @@ describe("ConfigParser", () => {
         "    root: /srv/usine",
         "    gateway:",
         "      domain: gw.internal",
-        "      admin_url: http://127.0.0.1:7070",
+        "      destination: usine-gateway",
+        "      admin_port: 7071",
         "      admin_token_env: USINE_GATEWAY_ADMIN_TOKEN",
         "      llm_providers: [anthropic]",
       ]);
@@ -116,7 +117,8 @@ describe("ConfigParser", () => {
       expect(Option.isNone(second.identityFile) && Option.isNone(second.port)).toBe(true);
       const gateway = Option.getOrNull(second.gateway);
       expect(gateway?.domain).toBe("gw.internal");
-      expect(gateway?.adminUrl.href).toBe("http://127.0.0.1:7070/");
+      expect(gateway?.destination).toBe("usine-gateway");
+      expect(gateway?.adminPort).toBe(7071);
       expect(gateway?.adminTokenEnv).toBe("USINE_GATEWAY_ADMIN_TOKEN");
       expect(gateway?.llmProviders).toEqual(["anthropic"]);
 
@@ -130,24 +132,22 @@ describe("ConfigParser", () => {
       ];
       const valid = [
         "domain: gw.internal",
-        "admin_url: http://127.0.0.1:7070",
+        "destination: root@203.0.113.30",
         "admin_token_env: GATEWAY_TOKEN",
       ];
-      const withoutProviders = yield* parse(gatewayOf(valid));
-      const [only] = withoutProviders.workers;
+      const withDefaults = yield* parse(gatewayOf(valid));
+      const [only] = withDefaults.workers;
       expect(
-        only?.kind === "ssh" && Option.map(only.gateway, ({ llmProviders }) => llmProviders),
-      ).toEqual(Option.some([]));
+        only?.kind === "ssh" &&
+          Option.map(only.gateway, ({ adminPort, llmProviders }) => ({ adminPort, llmProviders })),
+      ).toEqual(Option.some({ adminPort: 7070, llmProviders: [] }));
 
       for (const workers of [
         gatewayOf([...valid, "llm_providers: [openai]"]),
         gatewayOf(["domain: GW.internal", ...valid.slice(1)]),
-        gatewayOf([valid[0] ?? "", "admin_url: ftp://127.0.0.1", valid[2] ?? ""]),
-        gatewayOf([
-          valid[0] ?? "",
-          "admin_url: http://admin:secret@127.0.0.1:7070",
-          valid[2] ?? "",
-        ]),
+        gatewayOf([valid[0] ?? "", "destination: -oProxyCommand=sh", valid[2] ?? ""]),
+        gatewayOf([valid[0] ?? "", valid[2] ?? ""]),
+        gatewayOf([...valid, "admin_port: 0"]),
         gatewayOf([...valid.slice(0, 2), "admin_token_env: sk-ant-0123"]),
         gatewayOf([...valid, "admin_token: secret"]),
         ["  - name: here", "    kind: local", "    root: /srv/usine"],

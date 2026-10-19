@@ -39,10 +39,10 @@ const unreachable = (host: string, command: string, result: CommandResult) =>
 
 /**
  * Verifies the Gateway in front of an SSH Worker without attaching anything:
- * its admin API answers this process with the admin token, the machine's
- * sshd accepts the variables that carry the caller token, and the machine
- * resolves and reaches `git.<domain>`, which refuses a request without a
- * caller token.
+ * the executor's forward to its admin API opens, the admin API answers this
+ * process with the admin token, the machine's sshd accepts the variables
+ * that carry the caller token, and the machine resolves and reaches
+ * `git.<domain>`, which refuses a request without a caller token.
  */
 export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
   commands: RemoteCommands,
@@ -50,17 +50,21 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
   machine: SshMachine,
   gateway: MachineGateway,
 ) {
-  const { admin, settings } = gateway;
+  const { admin, forward, settings } = gateway;
   const gitHost = `git.${settings.domain}`;
-  yield* Effect.annotateCurrentSpan({ worker, domain: settings.domain });
-  const { attachments } = yield* admin.list.pipe(
-    Effect.mapError((error) =>
+  yield* Effect.annotateCurrentSpan({ worker, domain: settings.domain, gateway: forward.gateway });
+  const open = yield* forward.current.pipe(
+    Effect.catchTag("GatewayForwardClosed", (closed) => forward.reopen(closed.generation)),
+    Effect.mapError((closed) =>
       gatewayGap(
         worker,
-        `${error.message}; check that the forward to the Gateway's admin API is open`,
-        error,
+        `Could not open the forward to SSH Worker ${worker}'s Gateway admin API through ${closed.gateway}: ${closed.reason}; run ${forward.command} to see why`,
+        closed,
       ),
     ),
+  );
+  const { attachments } = yield* admin.list.pipe(
+    Effect.mapError((error) => gatewayGap(worker, error.message, error)),
   );
 
   const { sent } = gatewayEnvironment({
@@ -110,7 +114,9 @@ export const verifyGateway = Effect.fn("SshExecutor.verifyGateway")(function* (
   yield* Effect.logInfo("SSH Worker Gateway verified", {
     worker,
     domain: settings.domain,
-    adminUrl: settings.adminUrl.href,
+    gateway: forward.gateway,
+    adminPort: settings.adminPort,
+    forwardPort: open.url.port,
     llmProviders: settings.llmProviders.join(","),
     attachments: attachments.filter((attachment) => attachment.worker === worker).length,
   });

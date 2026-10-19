@@ -1,4 +1,9 @@
-import { GatewayDomain, type GatewayLlmProvider } from "@usine/core/worker";
+import {
+  GatewayAdminPort,
+  GatewayDomain,
+  type GatewayLlmProvider,
+  SshDestination,
+} from "@usine/core/worker";
 import {
   AdminToken,
   adminRoutes,
@@ -10,10 +15,11 @@ import {
   GITHUB_ORIGINS,
   parseEgressAllowlist,
 } from "@usine/gateway";
-import { Effect, Latch, Layer, Option, Redacted, Result, Schema } from "effect";
+import { type Duration, Effect, Latch, Layer, Option, Redacted, Result, Schema } from "effect";
 import { TestClock } from "effect/testing";
 import {
   HttpClient,
+  HttpClientError,
   HttpRouter,
   HttpServer,
   HttpServerRequest,
@@ -25,7 +31,8 @@ import { ADDRESS, executorLayer, type fakeMachine, type mintingProvider } from "
 
 const DOMAIN = GatewayDomain.make("gw.test");
 const ADMIN_TOKEN = "admin-token-for-executor-tests-0123456789";
-const ADMIN_URL = new URL("http://127.0.0.1:7070");
+/** The Gateway's SSH destination, a Host alias as in the operator's SSH configuration. */
+const GATEWAY = SshDestination.make("usine-gateway");
 
 /**
  * The test Worker's address behind the Gateway at `gw.test`, presenting
@@ -41,7 +48,8 @@ export const gatewayAddress = (
   ...ADDRESS,
   gateway: Option.some({
     domain: DOMAIN,
-    adminUrl: ADMIN_URL,
+    destination: GATEWAY,
+    adminPort: GatewayAdminPort.make(7070),
     adminToken: Redacted.make(options.adminToken ?? ADMIN_TOKEN),
     llmProviders: options.llmProviders ?? ["anthropic"],
   }),
@@ -65,6 +73,10 @@ interface AdminCall {
   readonly body: Option.Option<typeof SentAttachRequest.Type>;
   /** How many commands the machine had run when the request was sent, to order the two. */
   readonly machineCalls: number;
+  /** The local port the request was sent to. */
+  readonly port: number;
+  /** Whether a live forward on that port carried the request to the admin API. */
+  readonly delivered: boolean;
 }
 
 const decoder = new TextDecoder();
@@ -78,9 +90,11 @@ const bodyOf = (body: { readonly _tag: string }): AdminCall["body"] =>
 /**
  * A Gateway's real admin API and attachment store, served in memory: each
  * request runs the Gateway's own handlers in the caller's fiber, so the test
- * clock applies to expiries. `calls` records what the executor sent, a
- * detach of an attachment in `refusedDetaches` is answered with a server
- * error, and `settled` waits until no admin request is in flight.
+ * clock applies to expiries. A request reaches the handlers only through a
+ * live forward of `machine` on its port, and fails as a refused connection
+ * otherwise. `calls` records what the executor sent, a detach of an
+ * attachment in `refusedDetaches` is answered with a server error, and
+ * `settled` waits until no admin request is in flight.
  */
 export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
   const calls: Array<AdminCall> = [];
@@ -116,13 +130,28 @@ export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
       const services = yield* Effect.context<Attachments | CallerTokens>();
       return HttpClient.make((request) =>
         Effect.gen(function* () {
-          const path = new URL(request.url).pathname;
+          const url = new URL(request.url);
+          const path = url.pathname;
+          const port = Number(url.port);
+          const forward = machine.state.forwards.find(
+            (candidate) => candidate.port === port && candidate.live,
+          );
+          const delivered = forward?.carries === true;
           calls.push({
             method: request.method,
             path,
             body: bodyOf(request.body),
             machineCalls: machine.state.calls.length,
+            port,
+            delivered,
           });
+          if (!delivered)
+            return yield* new HttpClientError.HttpClientError({
+              reason: new HttpClientError.TransportError({
+                request,
+                description: `connect ECONNREFUSED 127.0.0.1:${String(port)}`,
+              }),
+            });
           const detached = path.slice("/v1/attachments/".length);
           if (request.method === "DELETE" && switches.refusedDetaches.has(detached))
             return HttpServerResponse.toClientResponse(
@@ -183,6 +212,23 @@ export const advance = Effect.fn("GatewayTest.advance")(function* (
     yield* TestClock.adjust("10 seconds");
     yield* gateway.settled;
   }
+});
+
+/**
+ * Waits in real time until `holds` does, moving the test clock by `step`
+ * after each wait when one is given: the executor picks each forward's local
+ * port with real I/O, which the test clock does not drive.
+ */
+export const eventually = Effect.fn("GatewayTest.eventually")(function* (
+  holds: () => boolean,
+  step?: Duration.Input,
+) {
+  for (let turn = 0; turn < 400; turn += 1) {
+    if (holds()) return;
+    yield* Effect.promise(() => new Promise<void>((resolve) => setTimeout(resolve, 5)));
+    if (step !== undefined) yield* TestClock.adjust(step);
+  }
+  return yield* Effect.die(new Error("The awaited condition never held"));
 });
 
 /** The attachments the in-memory Gateway holds. */

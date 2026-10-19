@@ -1,5 +1,6 @@
 import type { SshCommand } from "@usine/agents/child-host";
 import type {
+  GatewayAdminPort,
   GatewayDomain,
   GatewayLlmProvider,
   SshDestination,
@@ -12,6 +13,7 @@ import type { Effect, Option, Redacted } from "effect";
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteMachine } from "../remote/machine.ts";
 import type { GatewayAdmin } from "./gateway/admin.ts";
+import type { GatewayForward } from "./gateway/forward.ts";
 
 /**
  * The Gateway in front of an SSH Worker's machine on a private network
@@ -21,8 +23,10 @@ import type { GatewayAdmin } from "./gateway/admin.ts";
 export interface SshWorkerGateway {
   /** The Gateway's private DNS domain: GitHub at `git.<domain>`, LLM providers at `llm.<domain>`, the forward proxy at `<domain>:3128`. */
   readonly domain: GatewayDomain;
-  /** The Gateway's admin API as this process reaches it, usually a local forward through the SSH connection to the Gateway. */
-  readonly adminUrl: URL;
+  /** What the local `ssh` client connects to for the Gateway: `user@host`, or a Host alias from the SSH configuration. The executor keeps its own forward to the admin API open through it. */
+  readonly destination: SshDestination;
+  /** The admin API's port on the Gateway's loopback interface. */
+  readonly adminPort: GatewayAdminPort;
   /** The admin API's bearer token. */
   readonly adminToken: Redacted.Redacted<string>;
   /** The LLM providers whose credential the Gateway holds. A harness whose provider is not listed uses its login on the machine and reaches the provider through the forward proxy. */
@@ -61,9 +65,10 @@ export interface SshExecutorOptions {
   readonly harnessReadiness?: (machine: SshMachine) => HarnessProbe;
 }
 
-/** A Gateway in front of a machine, with the admin API client the executor attaches through. */
+/** A Gateway in front of a machine, with the executor's forward to its admin API and the client that attaches through it. */
 export interface MachineGateway {
   readonly settings: SshWorkerGateway;
+  readonly forward: GatewayForward;
   readonly admin: GatewayAdmin;
 }
 

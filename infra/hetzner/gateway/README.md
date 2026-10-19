@@ -15,7 +15,7 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 
 The orchestrator reaches a Worker with SSH through the gateway: `ssh -J root@<gateway> <user>@10.42.0.x`. The Hetzner firewall lets only the orchestrator's address reach the gateway's port 22. The gateway's sshd allows local forwarding only, and its nftables rules refuse outbound SSH to anything outside the private network, so the bastion leads to Workers and nowhere else.
 
-The executor reaches the admin API on the gateway's loopback port 7070 through the same SSH connection, for example with `ssh -L 7070:127.0.0.1:7070 root@<gateway>`. It attaches the Attempt's installation token for the Worker and repository there, and passes the caller token it gets back to the Attempt's children through the SSH connection to the Worker.
+The executor reaches the admin API on the gateway's loopback port 7070 through an SSH forward to the gateway that it opens itself, `ssh -N -L 127.0.0.1:<port>:127.0.0.1:7070 <gateway>`, on a local port the kernel picks. It opens the forward when `usine up` starts and opens it again whenever it closes. It attaches the Attempt's installation token for the Worker and repository there, and passes the caller token it gets back to the Attempt's children through the SSH connection to the Worker.
 
 A Worker resolves names with the gateway's dnsmasq, which answers `git.<domain>` and `llm.<domain>` with the gateway's private address and refuses every other name. It answers an AAAA query for the gateway's own names with no address rather than a refusal: musl's resolver, which the Codex binary uses, asks for A and AAAA together and fails the whole lookup when either is refused, so Codex could not resolve the forward proxy at `<domain>:3128` ([#260](https://github.com/basaltbytes/usine/issues/260)). The Worker has no default route and no public address, so it cannot open a connection to the internet even with an address in hand; its nftables rules also allow connections to the gateway only.
 
@@ -136,14 +136,13 @@ Both commands reach their providers through the forward proxy, since `/etc/envir
 
 ## Add the Worker to `usine.yaml`
 
-The orchestrator reaches the Worker through the gateway as its SSH bastion, and the gateway's admin API through a local forward on the same connection. Both go in the orchestrator user's SSH configuration:
+The orchestrator reaches the Worker through the gateway as its SSH bastion, and the gateway's admin API through a forward that the executor opens to the gateway. Both hosts go in the orchestrator user's SSH configuration:
 
 ```
 Host usine-gateway
   HostName 203.0.113.7
   User root
   IdentityFile ~/.ssh/usine_worker
-  LocalForward 7070 127.0.0.1:7070
 
 Host worker-one
   HostName 10.42.0.3
@@ -152,7 +151,7 @@ Host worker-one
   IdentityFile ~/.ssh/usine_worker
 ```
 
-Keep the forward open while `usine up` runs, for example with `ssh -N usine-gateway` under a service manager. Then give the Worker a `gateway`:
+The gateway's entry has no `LocalForward`: it would also apply to the executor's forward, which then exits whenever that port is taken. To reach the admin API by hand, open a forward on the command line, for example `ssh -N -L 7070:127.0.0.1:7070 usine-gateway`; it does not interfere with the executor's. Then give the Worker a `gateway`:
 
 ```yaml
 workers:
@@ -162,12 +161,13 @@ workers:
     root: /home/usine/.usine
     gateway:
       domain: gw.internal
-      admin_url: http://127.0.0.1:7070
+      destination: usine-gateway
       admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
 ```
 
 - `domain` is the gateway's `DOMAIN`.
-- `admin_url` is the admin API as the orchestrator reaches it, here the local forward.
+- `destination` is what the orchestrator's `ssh` connects to for the gateway, here its `Host` alias. The executor opens its forward to the admin API through it when `usine up` starts and opens it again whenever it closes, after a pause of one second that doubles up to one minute, or at once when an admin request needs it. An admin request that finds the forward closed, or gets no answer through it, is sent once more through a new forward.
+- `admin_port` is the admin API's port on the gateway, `USINE_GATEWAY_ADMIN_PORT` in `/etc/usine-gateway/settings.env`. It defaults to 7070, the gateway's own default.
 - `admin_token_env` names the orchestrator's environment variable that contains the admin token from `/etc/usine-gateway/secrets.env`; the token itself never goes in the file. `usine up` stops with the variable's name when it is not set. One way to keep it is a file only the orchestrator user can read:
 
   ```sh
@@ -177,7 +177,7 @@ workers:
 
 - `llm_providers` lists the providers whose credential the gateway holds, and is empty when left out. Without a provider, its harness uses the login on the Worker. With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token instead, preflight checks only the `claude` binary on the Worker, and the Claude Code hosts must come off `egress-allowlist`. Codex always uses its login on the Worker.
 
-Preflight checks that the admin API answers with the token, that the Worker's sshd accepts the caller token's variables, and that the Worker reaches `git.<domain>`, without attaching anything. For each rostered harness that uses its login on the Worker, it checks the login as on a Worker without a gateway, then that the Worker gets an answer from each of the login's hosts through the forward proxy. A host the proxy refuses fails preflight with the host to add to `egress-allowlist`. While an Attempt runs, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, has them back within two minutes.
+Preflight checks that the executor's forward to the admin API opens, and gives the `ssh` command to run to see why when it does not, then that the admin API answers with the token, that the Worker's sshd accepts the caller token's variables, and that the Worker reaches `git.<domain>`, without attaching anything. For each rostered harness that uses its login on the Worker, it checks the login as on a Worker without a gateway, then that the Worker gets an answer from each of the login's hosts through the forward proxy. A host the proxy refuses fails preflight with the host to add to `egress-allowlist`. While an Attempt runs, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, has them back within two minutes.
 
 ## Add the time server to an existing gateway and Worker
 

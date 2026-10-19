@@ -19,7 +19,18 @@ import {
   stubAttemptRuntime,
   StubStorage,
 } from "@usine/durable/testing";
-import { Clock, DateTime, Effect, Layer, Logger, Option, Redacted, Sink, Stream } from "effect";
+import {
+  Clock,
+  DateTime,
+  Deferred,
+  Effect,
+  Layer,
+  Logger,
+  Option,
+  Redacted,
+  Sink,
+  Stream,
+} from "effect";
 import { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type { StandardCommand } from "effect/unstable/process/ChildProcess";
@@ -64,6 +75,19 @@ interface RemoteCall {
   readonly input: string;
 }
 
+/** An SSH client the executor started to forward a local port to a Gateway's admin API. */
+interface FakeForward {
+  readonly command: StandardCommand;
+  /** The local port the client listens on. */
+  readonly port: number;
+  /** Whether the client still runs. */
+  live: boolean;
+  /** Whether requests through the client reach the admin API; false is a dead connection the client has not noticed yet. */
+  carries: boolean;
+  /** Ends the client the way a dropped connection does. */
+  readonly drop: Effect.Effect<void>;
+}
+
 interface FakeMachineState {
   readonly calls: Array<RemoteCall>;
   /** The credential directories on the machine and the token each one contains. */
@@ -92,6 +116,10 @@ interface FakeMachineState {
   readonly refusedHosts: Set<string>;
   /** gh's configuration files written on the machine, by path. */
   readonly files: Map<string, string>;
+  /** Whether the Gateway accepts the SSH connection of a forward to its admin API. */
+  gatewayAcceptsSsh: boolean;
+  /** Every forward the executor started, in order. */
+  readonly forwards: Array<FakeForward>;
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -197,6 +225,8 @@ export const fakeMachine = () => {
     forwardProxyReachable: true,
     refusedHosts: new Set(),
     files: new Map(),
+    gatewayAcceptsSsh: true,
+    forwards: [],
   };
   const respond = (command: StandardCommand, line: string, input: string) => {
     if (state.stalled) return stalledHandle;
@@ -301,12 +331,56 @@ export const fakeMachine = () => {
       return oneShotHandle(`${COMMIT}\n`, 0);
     return oneShotHandle("", 0);
   };
+  // Runs as `ssh -N -L 127.0.0.1:<port>:127.0.0.1:<admin port> <gateway>` does: prints what its LocalCommand echoes once it listens, then runs until it is dropped or killed.
+  const startForward = Effect.fn("FakeMachine.startForward")(function* (command: StandardCommand) {
+    if (!state.gatewayAcceptsSsh)
+      return oneShotHandle(
+        "",
+        255,
+        "ssh: connect to host 203.0.113.30 port 22: Connection refused",
+      );
+    const [, port] = (command.args[command.args.indexOf("-L") + 1] ?? "").split(":");
+    const echo = "LocalCommand=echo ";
+    const opened = command.args.find((arg) => arg.startsWith(echo))?.slice(echo.length) ?? "";
+    const exited = yield* Deferred.make<{ readonly code: number; readonly stderr: string }>();
+    const end = (code: number, stderr: string) =>
+      Effect.suspend(() => {
+        forward.live = false;
+        return Deferred.succeed(exited, { code, stderr });
+      }).pipe(Effect.asVoid);
+    const forward: FakeForward = {
+      command,
+      port: Number(port),
+      live: true,
+      carries: true,
+      drop: end(255, "Connection to 203.0.113.30 closed by remote host."),
+    };
+    state.forwards.push(forward);
+    yield* Effect.addFinalizer(() => end(143, ""));
+    const finished = Deferred.await(exited);
+    return ChildProcessSpawner.makeHandle({
+      pid: ChildProcessSpawner.ProcessId(2),
+      stdin: Sink.drain,
+      stdout: Stream.make(encoder.encode(`${opened}\n`)).pipe(
+        Stream.concat(Stream.drain(Stream.fromEffect(finished))),
+      ),
+      stderr: Stream.fromEffect(finished).pipe(Stream.map(({ stderr }) => encoder.encode(stderr))),
+      all: Stream.empty,
+      exitCode: Effect.map(finished, ({ code }) => ChildProcessSpawner.ExitCode(code)),
+      isRunning: Effect.map(Deferred.isDone(exited), (done) => !done),
+      kill: () => end(143, ""),
+      getInputFd: () => Sink.drain,
+      getOutputFd: () => Stream.empty,
+      unref: Effect.succeed(Effect.void),
+    });
+  });
   const service = ChildProcessSpawner.make(
     Effect.fn("FakeMachine.spawn")(function* (command) {
       if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected pipeline");
       const line = remoteLine(command);
       const input = yield* standardInput(command);
       state.calls.push({ command, line, input });
+      if (command.args.includes("-N")) return yield* startForward(command);
       return respond(command, line, input);
     }),
   );

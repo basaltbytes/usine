@@ -140,7 +140,7 @@ flowchart LR
   end
   O -->|"SSH with ProxyJump"| SSHD
   SSHD -->|SSH| W
-  O -->|"SSH local forward to 7070"| ADMIN
+  O -->|"SSH forward to 7070, opened by usine"| ADMIN
   W -->|"git and gh with the caller token"| RP
   W -->|"HTTPS tunnels to allowlisted hosts"| FP
   W -->|"name lookups"| DNS
@@ -202,14 +202,13 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    codex login --device-auth
    ```
 
-5. Add both hosts to the SSH configuration of the user who runs `usine up`. The executor connects to the Worker through the Gateway as a jump host, and to the admin API through a local forward that you keep open; usine doesn't open it ([#249](https://github.com/basaltbytes/usine/issues/249)).
+5. Add both hosts to the SSH configuration of the user who runs `usine up`. The executor connects to the Worker through the Gateway as a jump host. It also opens its own forward to the Gateway's admin API, on a local port the kernel picks, and opens it again whenever it closes. Don't add a `LocalForward` to the Gateway's entry: it would also apply to the executor's forward, which then exits whenever that port is taken.
 
    ```text title="~/.ssh/config"
    Host usine-gateway
      HostName 203.0.113.30
      User root
      IdentityFile ~/.ssh/usine_worker
-     LocalForward 7070 127.0.0.1:7070
 
    Host worker-one
      HostName 10.42.0.3
@@ -218,17 +217,13 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
      IdentityFile ~/.ssh/usine_worker
    ```
 
-   ```sh title="Orchestrator machine"
-   ssh -N usine-gateway
-   ```
-
 6. Copy the admin token into a file that only you can read, in the instance folder:
 
    ```sh title="Instance folder"
    (umask 077; ssh root@203.0.113.30 "sed -n 's/^USINE_GATEWAY_ADMIN_TOKEN=//p' /etc/usine-gateway/secrets.env" > .usine/gateway-admin-token)
    ```
 
-7. Give the Worker a `gateway` in `usine.yaml`. `destination` is the `Host` alias, `domain` the Gateway's `DOMAIN`, `admin_url` the local forward, and `admin_token_env` the name of the orchestrator's environment variable that contains the admin token. Don't put the token itself in the file.
+7. Give the Worker a `gateway` in `usine.yaml`. The Worker's `destination` is its `Host` alias, `gateway.domain` the Gateway's `DOMAIN`, `gateway.destination` the Gateway's `Host` alias, and `admin_token_env` the name of the orchestrator's environment variable that contains the admin token. Don't put the token itself in the file. `admin_port` is the admin API's port on the Gateway and defaults to 7070, as on the Gateway.
 
    ```yaml title="usine.yaml"
    workers:
@@ -238,7 +233,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
        root: /home/usine/.usine
        gateway:
          domain: gw.internal
-         admin_url: http://127.0.0.1:7070
+         destination: usine-gateway
          admin_token_env: USINE_GATEWAY_ADMIN_TOKEN
    ```
 
@@ -250,7 +245,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    USINE_GATEWAY_ADMIN_TOKEN=$(cat .usine/gateway-admin-token) usine up
    ```
 
-   If the variable isn't set, `usine up` stops with an error that gives the variable's name. If the forward proxy refuses a login host, preflight fails with an error that gives the host to add to `/etc/usine-gateway/egress-allowlist`.
+   If the variable isn't set, `usine up` stops with an error that gives the variable's name. If the forward to the admin API doesn't open, preflight fails with an error that gives the `ssh` command to run to see why. If the forward proxy refuses a login host, preflight fails with an error that gives the host to add to `/etc/usine-gateway/egress-allowlist`.
 
 </Steps>
 
