@@ -126,10 +126,13 @@ Child processes don't inherit the orchestrator's environment. Git and `gh` comma
 
 ## `usine-gateway`
 
-The Gateway host runs a separate binary, `usine-gateway`, from `@usine/gateway`. It takes no arguments, reads its settings from the environment once at startup, and logs one JSON object per line ([`settingsFromEnvironment`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/gateway/src/node/environment.ts#L64)). If a required variable is missing, a value is invalid, or the allowlist can't be read, it exits before it starts listening.
+The Gateway host runs a separate binary, `usine-gateway`, from `@usine/gateway`. It takes no arguments and logs one JSON object per line. It reads the variables below from the environment files that `USINE_GATEWAY_ENVIRONMENT_FILES` names, and from the process environment for any variable no file sets ([`settingsFromEnvironment`](https://github.com/basaltbytes/usine/blob/be90a084707dfe4796b68d26860efa8865aa1b07/packages/gateway/src/node/environment.ts#L212)). If a required variable is missing, a value is invalid, or the allowlist can't be read, it exits before it starts listening.
+
+On SIGHUP, which `systemctl reload usine-gateway` sends, it reads its environment files and its allowlist file again and replaces the egress allowlist and the LLM provider settings: `ANTHROPIC_API_KEY`, `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN`, `OPENAI_API_KEY`, the two upstreams, and `USINE_GATEWAY_EGRESS_ALLOWLIST` ([`reloadOnHangup`](https://github.com/basaltbytes/usine/blob/be90a084707dfe4796b68d26860efa8865aa1b07/packages/gateway/src/node/reload.ts#L226)). The attachments, the admin API, the listeners, and open tunnels stay as they are. An allowlist that does not parse, or invalid provider settings, keep what is in force, and the log says why. The domain, the listeners, the admin token, and the caller key change only with a restart; a reload that finds one of them changed logs `Settings changed that take effect only after a restart` with the variables' names and applies the rest. Variables the process environment set at startup do not change on a reload.
 
 | Variable | Default | Description |
 | --- | --- | --- |
+| `USINE_GATEWAY_ENVIRONMENT_FILES` | none | Environment files separated by `:`, each with one `KEY=value` per line; quote a value that contains `#`. A variable in a later file overrides the same one in an earlier file and in the process environment. Read from the process environment only. |
 | `USINE_GATEWAY_DOMAIN` | required | The private DNS domain; the same value as `gateway.domain` in `usine.yaml`. |
 | `USINE_GATEWAY_ADMIN_TOKEN` | required | Bearer token of the admin API, at least 32 characters. The orchestrator's variable named by `admin_token_env` contains the same value. |
 | `USINE_GATEWAY_CALLER_KEY` | required | HMAC key that signs caller tokens, at least 32 characters. Only the Gateway has it. |
