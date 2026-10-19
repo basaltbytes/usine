@@ -46,6 +46,7 @@ const rowUpdates = (row: ChapterRow): ReadonlyArray<TranscriptUpdate> =>
     Burst: ({ tools }) => tools.map(toolUpdate),
     Delegation: ({ tool }) => [toolUpdate(tool)],
     GitHubChange: () => [],
+    BoardMove: () => [],
     Ending: ({ position, end }) =>
       Option.match(position, {
         onNone: () => [],

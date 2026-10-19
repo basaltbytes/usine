@@ -207,6 +207,13 @@ const Row = ({ row, speaker }: { readonly row: ChapterRow; readonly speaker: str
         <GitHubChangeLine row={change} />
       </ReaderLine>
     ),
+    BoardMove: ({ move }) => (
+      <ReaderLine gutter={<Gutter receivedAt={move.at} />}>
+        <p className="text-xs leading-[1.4rem] wrap-anywhere text-muted-foreground">
+          You moved it from {move.fromLane} to {move.toLane} on the Board
+        </p>
+      </ReaderLine>
+    ),
     Ending: (ending) => (
       <ReaderLine
         gutter={
@@ -232,13 +239,14 @@ const rowSpeaker = (row: ChapterRow): Speaker | null =>
     Delegation: ({ speaker }) => speaker,
     Ending: ({ speaker }) => speaker,
     GitHubChange: () => null,
+    BoardMove: () => null,
   });
 
 const rowSpacing = (row: ChapterRow, previous: ChapterRow | undefined): string => {
   if (row._tag === "Burst") return "mt-0.5";
   if (row._tag === "GitHubChange")
     return previous?._tag === "Burst" || previous?._tag === "GitHubChange" ? "mt-0.5" : "mt-2";
-  return row._tag === "Note" ? "mt-2" : "mt-4";
+  return row._tag === "Note" || row._tag === "BoardMove" ? "mt-2" : "mt-4";
 };
 
 const Meta = ({ label, value }: { readonly label: string; readonly value?: ReactNode }) => (

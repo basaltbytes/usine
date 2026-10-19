@@ -4,6 +4,7 @@ import { Match, Option } from "effect";
 import type { TranscriptTool } from "../model.ts";
 import {
   terminalText,
+  type BoardMoveRow,
   type Chapter,
   type ChapterRow,
   type GitHubChangeRow,
@@ -32,6 +33,7 @@ const rowStart = (row: ChapterRow): number =>
     Delegation: ({ tool }) => toolStart(tool),
     Ending: () => Number.POSITIVE_INFINITY,
     GitHubChange: ({ at }) => Date.parse(at),
+    BoardMove: ({ move }) => Date.parse(move.at),
   });
 
 // A comment or review the outcome links, by the anchor GitHub gives it in its URL.
@@ -61,7 +63,7 @@ const unstated = (outcome: string | null) => (row: GitHubChangeRow) => {
 interface Placed {
   /** The index of the first row that began after the change, or the row count when none did. */
   readonly slot: number;
-  readonly row: GitHubChangeRow;
+  readonly row: GitHubChangeRow | BoardMoveRow;
 }
 
 // Consecutive label changes between the same two rows, recorded within seconds, share one row.
@@ -73,6 +75,13 @@ const changeRows = (
   const placed: Array<Placed> = [];
   for (const change of changes) {
     const slot = slotOf(change.at);
+    if (change._tag === "BoardMoved") {
+      placed.push({
+        slot,
+        row: { _tag: "BoardMove", key: `board-move:${attemptId}:${change.at}`, move: change },
+      });
+      continue;
+    }
     if (change._tag === "Commented" || change._tag === "Reviewed") {
       placed.push({
         slot,
@@ -81,20 +90,21 @@ const changeRows = (
       continue;
     }
     const last = placed.at(-1);
-    const joins =
+    const joining =
       last !== undefined &&
       last.slot === slot &&
+      last.row._tag === "GitHubChange" &&
       last.row.change._tag === "Labels" &&
-      Date.parse(change.at) - Date.parse(last.row.at) <= LABELS_IN_ONE_GO_MILLIS;
-    const labels: LabelChanges =
-      joins && last.row.change._tag === "Labels"
-        ? last.row.change
-        : { _tag: "Labels", removed: [], added: [] };
+      Date.parse(change.at) - Date.parse(last.row.at) <= LABELS_IN_ONE_GO_MILLIS
+        ? { row: last.row, change: last.row.change }
+        : undefined;
+    const labels: LabelChanges = joining?.change ?? { _tag: "Labels", removed: [], added: [] };
     const next: LabelChanges =
       change._tag === "LabelAdded"
         ? { ...labels, added: [...labels.added, change.label] }
         : { ...labels, removed: [...labels.removed, change.label] };
-    if (joins) placed[placed.length - 1] = { slot, row: { ...last.row, change: next } };
+    if (joining !== undefined)
+      placed[placed.length - 1] = { slot, row: { ...joining.row, change: next } };
     else
       placed.push({
         slot,
@@ -128,7 +138,12 @@ const placeInChapter = (
     return found === -1 ? chapter.rows.length : found;
   };
   const lines = changeRows(chapter.attemptId, changes, slotOf).flatMap(({ slot, row }) =>
-    Date.parse(row.at) < loadedFrom ? [] : unstated(outcome)(row).map((kept) => ({ slot, kept })),
+    rowStart(row) < loadedFrom
+      ? []
+      : (row._tag === "BoardMove" ? [row] : unstated(outcome)(row)).map((kept) => ({
+          slot,
+          kept,
+        })),
   );
   if (lines.length === 0) return chapter;
   const placed = (slot: number) => lines.flatMap((line) => (line.slot === slot ? [line.kept] : []));
@@ -144,10 +159,10 @@ const placeInChapter = (
 /**
  * Places each Attempt's GitHub changes among its rows by time, before the first row that
  * began after the change, so a change made by a burst of calls follows that burst's line.
- * Labels changed in one go share one row. A comment or review the Attempt's outcome links,
- * or a label change it states in the row's own words, is shown only as the outcome. An
- * Attempt whose earlier activity is not loaded shows only the changes from its first
- * loaded row on.
+ * Labels changed in one go share one row; the operator's Board move has a row of its own.
+ * A comment or review the Attempt's outcome links, or a label change it states in the
+ * row's own words, is shown only as the outcome. An Attempt whose earlier activity is not
+ * loaded shows only the changes from its first loaded row on.
  */
 export const withGitHubChanges = (
   document: ReaderDocument,
