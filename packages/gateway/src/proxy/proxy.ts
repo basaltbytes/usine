@@ -22,7 +22,7 @@ import {
   withGitHubCredential,
 } from "../github/github.ts";
 import { configuredProvider, llmTarget, withProviderCredential } from "../llm/llm.ts";
-import { GatewaySettings, gatewayHosts } from "../settings.ts";
+import { GatewaySettings, gatewayHosts, SettingsInForce } from "../settings.ts";
 import { endToEndHeaders, forwardRequest } from "./forward.ts";
 
 /**
@@ -98,9 +98,9 @@ const requestTarget = (
 /**
  * The reverse proxy Worker VMs reach on the private network. `git.<domain>`
  * serves GitHub with the attached installation token and `llm.<domain>`
- * serves the LLM providers with the gateway's API keys; every request
- * presents a caller token whose attachment is in force. Any other host is
- * refused: the forward proxy serves the allowlisted ones.
+ * serves the LLM providers with the gateway's API keys in force; every
+ * request presents a caller token whose attachment is in force. Any other
+ * host is refused: the forward proxy serves the allowlisted ones.
  */
 export class GatewayProxy extends Context.Service<
   GatewayProxy,
@@ -117,6 +117,7 @@ export class GatewayProxy extends Context.Service<
     GatewayProxy,
     Effect.gen(function* () {
       const settings = yield* GatewaySettings;
+      const inForce = yield* SettingsInForce;
       const attachments = yield* Attachments;
       const callers = yield* CallerTokens;
       const client = yield* HttpClient.HttpClient;
@@ -215,7 +216,8 @@ export class GatewayProxy extends Context.Service<
             "unsupported-path",
             `The gateway serves /anthropic and /openai on ${hosts.llm}, not ${target.pathname}.`,
           );
-        const provider = configuredProvider(settings.providers, destination.value.provider);
+        const { providers } = yield* inForce.current;
+        const provider = configuredProvider(providers, destination.value.provider);
         if (Option.isNone(provider))
           return yield* refusedCaller(
             claims,

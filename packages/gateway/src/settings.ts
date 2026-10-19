@@ -1,5 +1,5 @@
 import type { GatewayDomain } from "@usine/core/worker";
-import { Context, Schema } from "effect";
+import { Context, Effect, Layer, Ref, Schema } from "effect";
 import type { EgressAllowlist } from "./egress/egress.ts";
 import type { GitHubOrigins } from "./github/github.ts";
 import type { LlmProviders } from "./llm/llm.ts";
@@ -21,9 +21,12 @@ export const AdminToken = Schema.RedactedFromValue(
 export type AdminToken = typeof AdminToken.Type;
 
 /**
- * The gateway's configuration, read once at startup by the platform entry
- * point. Secrets stay `Redacted` and are only unwrapped where they are sent
- * or used to sign.
+ * The gateway's configuration as the platform entry point read it at
+ * startup. Secrets stay `Redacted` and are only unwrapped where they are sent
+ * or used to sign. A reload replaces the egress allowlist and the LLM
+ * providers in `SettingsInForce`, and requests read them there; `egress` and
+ * `providers` here keep their startup values, and the other settings change
+ * only with a restart.
  */
 export class GatewaySettings extends Context.Service<
   GatewaySettings,
@@ -36,6 +39,36 @@ export class GatewaySettings extends Context.Service<
     readonly callerKey: CallerKey;
   }
 >()("@usine/gateway/GatewaySettings") {}
+
+/** The settings a reload replaces without a restart: the egress allowlist and the LLM providers. */
+export interface ReloadableSettings {
+  readonly egress: EgressAllowlist;
+  readonly providers: LlmProviders;
+}
+
+/**
+ * The egress allowlist and LLM providers in force. They start as the ones in
+ * `GatewaySettings`, and a reload replaces them. A request reads them once,
+ * when it is decided, so a tunnel the previous allowlist opened stays open.
+ */
+export class SettingsInForce extends Context.Service<
+  SettingsInForce,
+  {
+    /** The allowlist and providers requests are decided with now. */
+    readonly current: Effect.Effect<ReloadableSettings>;
+    /** Replaces them for every request decided afterwards. */
+    readonly replace: (next: ReloadableSettings) => Effect.Effect<void>;
+  }
+>()("@usine/gateway/SettingsInForce") {
+  static readonly layer = Layer.effect(
+    SettingsInForce,
+    Effect.gen(function* () {
+      const { egress, providers } = yield* GatewaySettings;
+      const inForce = yield* Ref.make<ReloadableSettings>({ egress, providers });
+      return { current: Ref.get(inForce), replace: (next) => Ref.set(inForce, next) };
+    }),
+  );
+}
 
 /** The host names the gateway serves under its domain. */
 export const gatewayHosts = (domain: GatewayDomain) =>

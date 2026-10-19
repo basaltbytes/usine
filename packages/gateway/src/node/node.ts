@@ -1,6 +1,6 @@
 import { createServer } from "node:http";
 import { NodeHttpClient, NodeHttpServer, NodeHttpServerRequest } from "@effect/platform-node";
-import { Context, Effect, Layer, Stream } from "effect";
+import { ConfigProvider, Context, Effect, Layer, Stream } from "effect";
 import {
   HttpMiddleware,
   HttpBody,
@@ -13,23 +13,27 @@ import { adminRoutes } from "../admin/server.ts";
 import { Attachments } from "../attachment/store.ts";
 import { CallerTokens } from "../caller/caller.ts";
 import { GatewayProxy } from "../proxy/proxy.ts";
+import { GatewaySettings, SettingsInForce } from "../settings.ts";
 import { serveEgressProxy } from "./egress-proxy.ts";
 import {
   type GatewayListeners,
   type Listener,
-  listenersFromEnvironment,
-  settingsFromEnvironment,
+  readSettingsSource,
+  readStartupSettings,
 } from "./environment.ts";
+import { gatewayReloadLayer, reloadOnHangup } from "./reload.ts";
 
 export {
   ConflictingAnthropicCredentials,
   DEFAULT_EGRESS_ALLOWLIST_PATH,
+  EnvironmentFileError,
   type GatewayListeners,
   type Listener,
   listenersFromEnvironment,
   settingsFromEnvironment,
 } from "./environment.ts";
 export { EgressProxyListenError } from "./egress-proxy.ts";
+export { GatewayReload } from "./reload.ts";
 
 /** The addresses the gateway's three servers are bound to, with any port 0 replaced by the port the system chose. */
 export class GatewayAddresses extends Context.Service<
@@ -96,9 +100,9 @@ const serveAdmin = Effect.fn("GatewayNode.serveAdmin")(function* (listener: List
 
 /**
  * The gateway on Node: the reverse proxy, the forward proxy, and the admin
- * API on their listeners, sharing one attachment store and caller token
- * signer. Upstream requests use undici, which leaves `content-encoding`
- * alone, so compressed bodies pass through byte for byte.
+ * API on their listeners, sharing one attachment store, caller token signer,
+ * and set of settings in force. Upstream requests use undici, which leaves
+ * `content-encoding` alone, so compressed bodies pass through byte for byte.
  */
 export const gatewayLayer = (listeners: GatewayListeners) =>
   Layer.effect(
@@ -111,7 +115,9 @@ export const gatewayLayer = (listeners: GatewayListeners) =>
     }),
   ).pipe(
     Layer.provide(GatewayProxy.layer),
-    Layer.provideMerge(Layer.mergeAll(Attachments.layer, CallerTokens.layer)),
+    Layer.provideMerge(
+      Layer.mergeAll(Attachments.layer, CallerTokens.layer, SettingsInForce.layer),
+    ),
     Layer.provide(NodeHttpClient.layerUndici),
     // rc.111 reads header redaction settings after the request fiber may have
     // cleared its context. Disable automatic HTTP spans; named gateway spans
@@ -119,9 +125,20 @@ export const gatewayLayer = (listeners: GatewayListeners) =>
     Layer.provide(Layer.succeed(HttpMiddleware.TracerDisabledWhen)(() => true)),
   );
 
-/** The gateway configured from the environment and its allowlist file, as the `usine-gateway` command runs it. */
+/**
+ * The gateway configured from its environment files, the process
+ * environment, and its allowlist file, as the `usine-gateway` command runs
+ * it. On SIGHUP it reloads the egress allowlist and the LLM providers with
+ * `GatewayReload`.
+ */
 export const gatewayFromEnvironment = Layer.unwrap(
   Effect.gen(function* () {
-    return gatewayLayer(yield* listenersFromEnvironment);
+    const base = yield* ConfigProvider.ConfigProvider;
+    const started = yield* readStartupSettings(yield* readSettingsSource(base));
+    return reloadOnHangup.pipe(
+      Layer.provideMerge(gatewayReloadLayer(started, base)),
+      Layer.provideMerge(gatewayLayer(started.listeners)),
+      Layer.provide(Layer.succeed(GatewaySettings)(started.settings)),
+    );
   }),
-).pipe(Layer.provide(settingsFromEnvironment));
+);

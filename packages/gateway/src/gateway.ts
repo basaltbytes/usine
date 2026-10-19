@@ -1,6 +1,7 @@
 import { Layer } from "effect";
 import { Attachments } from "./attachment/store.ts";
 import { CallerTokens } from "./caller/caller.ts";
+import { SettingsInForce } from "./settings.ts";
 
 export { adminRoutes } from "./admin/server.ts";
 export {
@@ -49,12 +50,24 @@ export {
 export { endToEndHeaders } from "./proxy/forward.ts";
 export { GatewayProxy, REFUSAL_HEADER, RefusalReason } from "./proxy/proxy.ts";
 export { GatewayDomain } from "@usine/core/worker";
-export { AdminToken, CallerKey, GatewaySettings, gatewayHosts } from "./settings.ts";
+export {
+  AdminToken,
+  CallerKey,
+  GatewaySettings,
+  gatewayHosts,
+  type ReloadableSettings,
+  SettingsInForce,
+} from "./settings.ts";
 export { UpstreamBase } from "./upstream.ts";
 
 /**
- * The gateway's shared state for one process: the attachment store and the
- * caller token signer. The reverse proxy and the admin API must use the same
- * instance, so provide this layer once to both.
+ * The gateway's shared state for one process: the attachment store, the
+ * caller token signer, and the settings in force. The reverse proxy, the
+ * forward proxy, the admin API, and a reload must use the same instance, so
+ * provide this layer once to all of them.
  */
-export const gatewayServices = Layer.mergeAll(Attachments.layer, CallerTokens.layer);
+export const gatewayServices = Layer.mergeAll(
+  Attachments.layer,
+  CallerTokens.layer,
+  SettingsInForce.layer,
+);
