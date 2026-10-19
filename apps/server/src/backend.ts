@@ -3,6 +3,7 @@ import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { AttemptId } from "@usine/core/attempt";
 import { RunId } from "@usine/core/run";
 import { AgentName } from "@usine/core/agent";
+import type { RunAgainResult } from "@usine/engine/engine";
 import type {
   CurrentInstance,
   InstanceReload,
@@ -50,6 +51,10 @@ export class FactoryBackend extends Context.Service<
     readonly retry: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly agents: Effect.Effect<ReadonlyArray<AgentName>, BackendError>;
     readonly editAndRetry: (runId: RunId, edit: EditAndRetry) => Effect.Effect<void, BackendError>;
+    readonly runAgain: (
+      runId: RunId,
+      edit: EditAndRetry,
+    ) => Effect.Effect<RunAgainResult, BackendError>;
     readonly intervene: (
       runId: RunId,
       input: SessionIntervention,
@@ -83,6 +88,8 @@ export const liveBackendLayer = (
     agents: rosterOf(instances),
     editAndRetry: (runId, edit) =>
       Effect.flatMap(instances.get, (instance) => operator.editAndRetry(instance, runId, edit)),
+    runAgain: (runId, edit) =>
+      Effect.flatMap(instances.get, (instance) => operator.runAgain(instance, runId, edit)),
     intervene: (runId, input) =>
       Effect.flatMap(instances.get, (instance) => operator.intervene(instance, runId, input)),
     cancel: operator.cancel,
@@ -120,6 +127,7 @@ export const needsSetupBackendLayer = (
     resolveFailure: fail,
     agents: rosterOf(instances),
     editAndRetry: fail,
+    runAgain: fail,
     intervene: fail,
     cancel: fail,
     discardLeftovers: fail,

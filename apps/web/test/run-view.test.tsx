@@ -15,6 +15,7 @@ import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
@@ -76,12 +77,14 @@ const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
     task: "Fix issue 33.",
     attempts: [attempt(new SucceededAttemptView())],
     approval: null,
+    runAgain: null,
     resultMessage: "Opened the pull request.",
     pullRequestUrl: null,
     canApprove: false,
     canRetry: false,
     canResolveFailure: false,
     canCancel: false,
+    canRunAgain: false,
     ...fields,
   });
 const detail = (view: RunView, transcript: ReadonlyArray<TranscriptEventView> = []) =>
@@ -389,5 +392,24 @@ describe("Run approval", () => {
 
   it("says nothing about approval for a Run that had none", () => {
     for (const render of [eventDocument, outline]) assert.notInclude(render(run()), "Approved");
+  });
+
+  it("names who ran an earlier Run again, when, and which Run, beside the approval", () => {
+    const openedAt = "2026-09-01T11:59:00.000Z";
+    const from = RunId.make("4f1c9e2a7b3d4c5e");
+    const ranAgain = (requestedBy: RunAgain["requestedBy"]) =>
+      run({ runAgain: new RunAgain({ from, requestedBy }), openedAt });
+    const time = dayTimeLabel(openedAt);
+    for (const render of [eventDocument, outline]) {
+      const named = text(render(ranAgain(philippe)));
+      assert.include(named, `Run again by Philippe · ${time} · from Run 4f1c9e2a`);
+      assert.include(render(ranAgain(philippe)), `dateTime="${openedAt}"`);
+      assert.include(text(render(ranAgain(Option.none()))), `Run again · ${time} · from Run`);
+      assert.include(
+        text(render(new RunView({ ...ranAgain(philippe), approval: fromUi.approval }))),
+        `Approved by Philippe · ${dayTimeLabel(approvedAt)} · from the UI`,
+      );
+      assert.notInclude(render(run()), "Run again");
+    }
   });
 });

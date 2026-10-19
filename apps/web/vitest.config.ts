@@ -123,6 +123,16 @@ export default mergeConfig(
                     });
                   });
                 },
+                // Registered after `interventionResponses`, so it answers run-again requests in its place.
+                runAgainResponse: async ({ page }, body: string) => {
+                  await page.unroute("**/api/runs/intervention-test/run-again");
+                  await page.route("**/api/runs/intervention-test/run-again", async (route) => {
+                    interventionRequests
+                      .get(page)
+                      ?.push({ url: route.request().url(), body: route.request().postDataJSON() });
+                    await route.fulfill({ contentType: "application/json", body });
+                  });
+                },
                 recordedInterventions: async ({ page }) => interventionRequests.get(page) ?? [],
                 delayBoardMove: async ({ page }) => {
                   let receive: (route: Route) => void;

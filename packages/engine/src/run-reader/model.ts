@@ -5,6 +5,7 @@ import { Event } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run } from "@usine/core/run";
+import { RunAgain } from "@usine/core/run/again";
 import { RunApproval } from "@usine/core/run/approval";
 import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
@@ -22,6 +23,8 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   resolvedFailureAttemptId: Schema.Option(AttemptId),
   /** The approval the Run consumed; none until one arrives, and always none for a Loop with `approval: none`. */
   approval: Schema.Option(RunApproval),
+  /** The closed Run the operator ran again to open this one, and who asked; none for a Run its trigger opened. */
+  runAgain: Schema.Option(RunAgain),
   repository: RepositoryName,
   revision: RepositoryRevision,
   task: AttemptTask,
@@ -45,6 +48,8 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
   resolvedFailureAttemptId: Schema.Option(AttemptId),
   /** The approval the Run consumed; none until one arrives, and always none for a Loop with `approval: none`. */
   approval: Schema.Option(RunApproval),
+  /** The closed Run the operator ran again to open this one, and who asked; none for a Run its trigger opened. */
+  runAgain: Schema.Option(RunAgain),
   repository: RepositoryName,
   task: AttemptTask,
   agent: Agent,

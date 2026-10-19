@@ -91,12 +91,14 @@ const runView = (id: RunId, attempts: ReadonlyArray<AttemptView>) =>
     task: "Read the conversation",
     attempts,
     approval: null,
+    runAgain: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,
     canRetry: false,
     canResolveFailure: false,
     canCancel: true,
+    canRunAgain: false,
   });
 let host: HTMLDivElement;
 let root: Root;

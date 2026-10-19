@@ -300,6 +300,23 @@ export const approvals = snakeCase.table(
   ],
 );
 
+/**
+ * The Events the operator recorded by running a closed Run again (#152): the
+ * Run it ran again and the operator login that asked, none while `usine.yaml`
+ * names no operator. The Event's own row says when.
+ */
+export const runAgainEvents = snakeCase.table("usine_run_again_events", {
+  eventId: text()
+    .$type<EventId>()
+    .primaryKey()
+    .references(() => triggerEvents.eventId),
+  fromRunId: text()
+    .$type<RunId>()
+    .notNull()
+    .references(() => runs.runId),
+  requestedBy: text().$type<OperatorLogin>(),
+});
+
 export const ignoredEvents = snakeCase.table(
   "usine_ignored_events",
   {

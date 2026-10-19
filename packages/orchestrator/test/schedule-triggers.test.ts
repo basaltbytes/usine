@@ -131,6 +131,7 @@ const fakeLayer = (
     reconcile: () => Effect.die("unused"),
     drain: () => Effect.void,
     retry: () => Effect.die("unused"),
+    runAgain: () => Effect.die("unused"),
     revoke: () => Effect.die("unused"),
     submit: (submission) =>
       Option.contains(failRepository, submission.repository)

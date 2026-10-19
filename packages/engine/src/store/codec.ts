@@ -11,6 +11,7 @@ import { ItemKey } from "@usine/core/item";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { OperatorLogin } from "@usine/core/operator";
 import { RunId, Run } from "@usine/core/run";
+import { RunAgain } from "@usine/core/run/again";
 import { ApprovalChannel, ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
@@ -59,6 +60,8 @@ export const RunRow = Schema.Struct({
   approvedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   approvalChannel: Schema.NullOr(ApprovalChannel),
   approver: Schema.NullOr(OperatorLogin),
+  againFrom: Schema.NullOr(RunId),
+  againRequestedBy: Schema.NullOr(OperatorLogin),
 });
 export type RunRow = typeof RunRow.Type;
 
@@ -95,9 +98,11 @@ const DiscardRow = Schema.Struct({ reason: IgnoreReason });
 const ProjectionRevisionRow = Schema.Struct({ revision: ProjectionRevision });
 
 const ReopeningRow = Schema.Struct({ ...EventRouteRow.fields, reopening: Schema.Int });
+const ReopenedEventRow = Schema.Struct({ eventId: EventId, dedupKey: DedupKey });
 
 export const decodeEventRoutes = Schema.decodeUnknownEffect(Schema.Array(EventRouteRow));
 export const decodeReopenings = Schema.decodeUnknownEffect(Schema.Array(ReopeningRow));
+export const decodeReopenedEvents = Schema.decodeUnknownEffect(Schema.Array(ReopenedEventRow));
 export const decodeRunRows = Schema.decodeUnknownEffect(Schema.Array(RunRow));
 export const decodeAttemptRows = Schema.decodeUnknownEffect(Schema.Array(AttemptRow));
 export const decodeRunIds = Schema.decodeUnknownEffect(Schema.Array(RunIdRow));
@@ -173,6 +178,12 @@ export const approvalFromRow = (row: RunRow): Option.Option<RunApproval> =>
       }),
   );
 
+export const runAgainFromRow = (row: RunRow): Option.Option<RunAgain> =>
+  Option.map(
+    Option.fromNullishOr(row.againFrom),
+    (from) => new RunAgain({ from, requestedBy: Option.fromNullishOr(row.againRequestedBy) }),
+  );
+
 export const stepFromRow = (row: RunRow): Step =>
   new Step({
     runId: row.runId,
@@ -209,6 +220,7 @@ export const runSummaryFromRow = (
     attempts: storedAttempts.map(attemptFromRow),
     resolvedFailureAttemptId: Option.fromNullishOr(row.resolvedFailureAttemptId),
     approval: approvalFromRow(row),
+    runAgain: runAgainFromRow(row),
     repository: row.repository,
     task: row.task,
     agent: row.agent,

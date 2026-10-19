@@ -14,13 +14,14 @@ export class RunOperationRejectedError extends Schema.TaggedError<RunOperationRe
   "@usine/engine/RunOperationRejectedError",
 )("RunOperationRejectedError", {
   runId: RunId,
-  operation: Schema.Literals(["approve", "retry", "resolveFailure"]),
+  operation: Schema.Literals(["approve", "retry", "resolveFailure", "runAgain"]),
   state: Schema.String,
 }) {}
 
 /**
- * An operator retry would reopen a failed Run while `openRunId`, another Run of
- * the same Loop and Item, is open. Retry again once that Run closes.
+ * An operator retry would reopen a failed Run, or running a closed Run again
+ * would open a new one, while `openRunId`, another Run of the same Loop and
+ * Item, is open. Try again once that Run closes.
  */
 export class RunRetryBlockedError extends Schema.TaggedError<RunRetryBlockedError>(
   "@usine/engine/RunRetryBlockedError",

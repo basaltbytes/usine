@@ -15,10 +15,13 @@ import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { OperatorLogin } from "@usine/core/operator";
+import { EventId } from "@usine/core/event";
 import { RunId } from "@usine/core/run";
+import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import {
+  Claimed,
   RunNotFoundError,
   RunOperationRejectedError,
   RunRetryBlockedError,
@@ -35,6 +38,7 @@ import {
   LabelView,
   RunGitHubChangesView,
   EditAndRetry,
+  LoopNotFoundError,
   SessionIntervention,
   BoardLaneId,
   BoardLaneReadOnlyError,
@@ -98,20 +102,26 @@ const run = new RunView({
   task: "Review issue 31.",
   attempts: [],
   approval: null,
+  runAgain: null,
   resultMessage: null,
   pullRequestUrl: null,
   canApprove: true,
   canRetry: false,
   canResolveFailure: false,
   canCancel: false,
+  canRunAgain: false,
 });
 const detail = new RunDetailView({
   sessionState: [],
-  // An approved Run, so the detail round trip carries a recorded approval.
+  // An approved Run that the operator ran again, so the detail round trip carries both records.
   run: new RunView({
     ...run,
     state: "Queued",
     canApprove: false,
+    runAgain: new RunAgain({
+      from: RunId.make("run-0"),
+      requestedBy: Option.some(OperatorLogin.make("Philippe")),
+    }),
     approval: new ApprovalView({
       approvedAt: "2026-09-01T12:05:00.000Z",
       source: new ApprovalSource({
@@ -322,6 +332,17 @@ describe("operator HTTP API", () => {
       resolveFailure: () => Effect.void,
       agents: Effect.succeed([]),
       editAndRetry: () => Effect.void,
+      runAgain: (id) =>
+        id === runId
+          ? Effect.fail(
+              new RunOperationRejectedError({ runId: id, operation: "runAgain", state: "Running" }),
+            )
+          : Effect.fail(
+              new LoopNotFoundError({
+                loop: loopName,
+                message: `Loop ${loopName} is not loaded, so Run ${id} cannot run again`,
+              }),
+            ),
       intervene: () => Effect.void,
       overview: Effect.succeed(overview),
       detail: (id, request) =>
@@ -400,6 +421,24 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(await blocked.json(), {
         error: "RunRetryBlockedError",
         message: `Cannot retry Run ${runId}: Run run-open of Loop fix-ci is open on the same Item. Retry after it closes, or cancel it first.`,
+      });
+
+      const edit = JSON.stringify({ task: "Look again", agent: agentName });
+      const open = await rejectingApp.handler(
+        new Request(`http://localhost/api/runs/${runId}/run-again`, { method: "POST", body: edit }),
+      );
+      assert.strictEqual(open.status, 409);
+      assert.deepStrictEqual(await open.json(), {
+        error: "RunOperationRejectedError",
+        message: `Run ${runId} is Running. Only a succeeded or canceled Run can run again.`,
+      });
+      const retired = await rejectingApp.handler(
+        new Request("http://localhost/api/runs/run-3/run-again", { method: "POST", body: edit }),
+      );
+      assert.strictEqual(retired.status, 404);
+      assert.deepStrictEqual(await retired.json(), {
+        error: "LoopNotFoundError",
+        message: `Loop ${loopName} is not loaded, so Run run-3 cannot run again`,
       });
 
       const wrongAttempt = AttemptId.make("attempt-from-another-run");
@@ -488,6 +527,11 @@ describe("operator HTTP API", () => {
     const interventions: Array<string> = [];
     const record = (operation: string) => Effect.sync(() => void interventions.push(operation));
     const edits: Array<EditAndRetry> = [];
+    const againEdits: Array<EditAndRetry> = [];
+    const opened = new Claimed({
+      eventId: EventId.make("run-again-event"),
+      runId: RunId.make("run-2"),
+    });
     const inputs: Array<SessionIntervention> = [];
     const live = Layer.succeed(FactoryBackend)({
       resolveFailure: (id, attemptId) =>
@@ -504,6 +548,11 @@ describe("operator HTTP API", () => {
       editAndRetry: (_id, edit) =>
         Effect.sync(() => {
           edits.push(edit);
+        }),
+      runAgain: (_id, edit) =>
+        Effect.sync(() => {
+          againEdits.push(edit);
+          return opened;
         }),
       intervene: (_id, input) =>
         Effect.sync(() => {
@@ -558,6 +607,11 @@ describe("operator HTTP API", () => {
           agent: agentName,
         });
         yield* client.editAndRetry({ params: { runId }, payload: edit });
+        assert.deepStrictEqual(
+          yield* client.runAgain({ params: { runId }, payload: edit }),
+          opened,
+        );
+        assert.deepStrictEqual(againEdits, [edit]);
         const input = new SessionIntervention({
           attemptId: AttemptId.make("attempt/1"),
           target: new ParentTarget(),

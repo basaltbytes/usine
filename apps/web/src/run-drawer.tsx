@@ -21,7 +21,8 @@ import { overviewQuery, projectParams } from "./overview.ts";
 import { RunFacts, RunTitle } from "./run-page/header.tsx";
 import { runItem } from "./run-page/item.ts";
 import { RunActions } from "./run-intervention/actions.tsx";
-import { EditAndRetry } from "./run-intervention/edit-and-retry.tsx";
+import { EditAndRetry, type EditIntent, editApplies } from "./run-intervention/edit-and-retry.tsx";
+import { useOpenRun } from "./open-run.ts";
 import { CurrentActivity } from "./run-transcript/activity.tsx";
 import { readerDocument, type AttemptEnd } from "./run-transcript/document/model.ts";
 import { previewText } from "./run-transcript/document/text.ts";
@@ -120,7 +121,8 @@ export const RunDrawer = ({
 }) => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
   const detail = useRunDetail(runId, open);
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState<EditIntent | null>(null);
+  const openRun = useOpenRun();
   const run = detail.data?.run;
   const item =
     detail.data === undefined
@@ -158,14 +160,20 @@ export const RunDrawer = ({
                 Run {run.id} of {run.loop} on {run.repository}
               </SheetDescription>
               <RunFacts run={run} item={item} shared={open} className="gap-x-4" />
-              <RunActions run={run} onEdit={() => setEditing(true)} />
+              <RunActions run={run} onEdit={setEditing} openRun={openRun} />
             </>
           )}
         </SheetHeader>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
           {detail.isError && <ErrorAlert message={detail.error.message} />}
-          {run !== undefined && editing && run.canRetry && (
-            <EditAndRetry key={run.id} run={run} close={() => setEditing(false)} />
+          {run !== undefined && editing !== null && editApplies(run, editing) && (
+            <EditAndRetry
+              key={`${run.id}:${editing}`}
+              run={run}
+              intent={editing}
+              close={() => setEditing(null)}
+              openRun={openRun}
+            />
           )}
           {detail.data !== undefined && <RunSummary detail={detail.data} />}
           {run !== undefined && (

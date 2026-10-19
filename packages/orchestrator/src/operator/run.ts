@@ -5,6 +5,7 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
 import * as RunState from "@usine/core/run/state";
 import { Effect, Schema } from "effect";
@@ -37,6 +38,11 @@ export class RosterAgentNotFoundError extends Schema.TaggedError<RosterAgentNotF
   "@usine/orchestrator/RosterAgentNotFoundError",
 )("RosterAgentNotFoundError", { agent: AgentName, message: Schema.String }) {}
 
+/** The Run's Loop is not in the loaded instance, so nothing says how a new Run of it opens. */
+export class LoopNotFoundError extends Schema.TaggedError<LoopNotFoundError>(
+  "@usine/orchestrator/LoopNotFoundError",
+)("LoopNotFoundError", { loop: LoopName, message: Schema.String }) {}
+
 /** A Run's approval: when it was given and, once usine recorded it, who gave it through which channel. */
 export class ApprovalView extends Schema.Class<ApprovalView>("@usine/orchestrator/ApprovalView")({
   approvedAt: Schema.String,
@@ -58,6 +64,8 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   attempts: Schema.Array(AttemptView),
   /** The approval the Run consumed; null until one arrives, and always null for a Loop with `approval: none`. */
   approval: Schema.NullOr(ApprovalView),
+  /** The closed Run the operator ran again to open this one, and who asked; null for a Run its trigger opened. Its time is `openedAt`. */
+  runAgain: Schema.NullOr(RunAgain),
   resultMessage: NullableString,
   pullRequestUrl: NullableString,
   canApprove: Schema.Boolean,
@@ -65,6 +73,8 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   /** The latest failed Attempt still requests attention; retry availability is independent. */
   canResolveFailure: Schema.Boolean,
   canCancel: Schema.Boolean,
+  /** The Run succeeded or was canceled, so the operator can open a new Run for its Item state. */
+  canRunAgain: Schema.Boolean,
 }) {}
 
 /** A Run summary with its triggering Event payload and a bounded portion of its transcript. */

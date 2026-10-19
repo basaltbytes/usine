@@ -84,12 +84,14 @@ const run = (
     task: `Work on #${item.number}.`,
     attempts,
     approval: null,
+    runAgain: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: state === "Waiting",
     canRetry: state === "Failed",
     canResolveFailure: state === "Failed",
     canCancel: state === "Waiting" || state === "Queued" || state === "Running",
+    canRunAgain: false,
   });
 
 const task = (

@@ -80,12 +80,14 @@ const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Attemp
     task: "Review issue 33.",
     attempts,
     approval: null,
+    runAgain: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,
     canRetry: state === "Failed",
     canResolveFailure: state === "Failed",
     canCancel: false,
+    canRunAgain: false,
   });
 
 const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) => {

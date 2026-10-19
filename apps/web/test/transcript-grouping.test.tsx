@@ -626,12 +626,14 @@ it("renders a held child from session state when its activity is outside the loa
     task: "Task",
     attempts: [],
     approval: null,
+    runAgain: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,
     canRetry: false,
     canResolveFailure: false,
     canCancel: true,
+    canRunAgain: false,
   });
   const outline = (sessionState: ReadonlyArray<TranscriptEventView>) =>
     renderToStaticMarkup(
