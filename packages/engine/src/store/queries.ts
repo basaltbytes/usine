@@ -674,7 +674,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     if (current === undefined) return Option.none<QueuedEvents>();
     const hold = yield* loopItemQueries(database).hold(current.loop, current.itemKey);
     if (Option.isSome(hold)) {
-      yield* Effect.logInfo("Queued Events wait for the operator question on the Item", {
+      yield* Effect.logInfo("Queued Events wait while an operator hold keeps the Item", {
         runId,
         heldBy: hold.value.runId,
         loop: current.loop,
@@ -722,7 +722,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   // Run: the Run closed before its continuation opened or revoked that Event.
   // An Item awaiting a cycle-budget reset is left out, since none of its
   // queued Events can open a Run before the reset supersedes them, and so is
-  // an Item an operator question holds.
+  // an Item an operator hold keeps.
   const pendingContinuations = Effect.fn("RunStoreQueries.pendingContinuations")(function* () {
     const items = yield* database
       .selectDistinct({ loop: triggerEvents.loopName, itemKey: triggerEvents.itemKey })

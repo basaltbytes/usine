@@ -81,8 +81,9 @@ export const triggerEvents = snakeCase.table(
 /**
  * What each Loop last saw of an Item: the Event a trigger last submitted for it,
  * or none after a sighting that did not match. A Run whose Attempt asked the
- * operator a question holds the Loop on the Item (#241); `heldEventId` is the
- * Item's state after the question, which holds no Run either.
+ * operator a question or reported a blocker holds the Loop on the Item (#241,
+ * #341); `heldEventId` is the Item's state after that stop, which opens no Run
+ * either.
  */
 export const loopItems = snakeCase.table(
   "usine_loop_items",

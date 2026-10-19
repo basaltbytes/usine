@@ -30,6 +30,7 @@ const failureMessage = (failure: AttemptFailure): string =>
     InfraFailure: ({ message }) => message,
     DefectFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,
+    BlockedFailure: ({ message }) => message,
     QuestionFailure: ({ question }) => question,
     RunawayFailure: ({ ceiling }) => `The runaway guard tripped its ${ceiling} ceiling`,
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>

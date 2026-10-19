@@ -12,6 +12,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
   AgentFailure,
   AttemptFailure,
+  BlockedFailure,
   ChildSessionBudgetFailure,
   InfraFailure,
   QuestionFailure,
@@ -77,7 +78,7 @@ export class UnsupportedEffortError extends Schema.TaggedError<UnsupportedEffort
 
 /**
  * The reserved opening of a final answer that reports an unresolved blocker.
- * Text after the marker is the blocker; the session fails with `AgentResultError`.
+ * Text after the marker is the blocker; the session fails with `AgentBlockedError`.
  */
 export const BLOCKED_MARKER = "[usine:blocked]";
 
@@ -92,6 +93,14 @@ export const QUESTION_MARKER = "[usine:question]";
 export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   "@usine/agents/AgentResultError",
 )("AgentResultError", {
+  sessionId: Schema.OptionFromNullOr(AgentSessionId),
+  message: Schema.NonEmptyString,
+}) {}
+
+/** The session finished by reporting a blocker with the reserved marker; `message` is the blocker as the Agent wrote it. */
+export class AgentBlockedError extends Schema.TaggedError<AgentBlockedError>(
+  "@usine/agents/AgentBlockedError",
+)("AgentBlockedError", {
   sessionId: Schema.OptionFromNullOr(AgentSessionId),
   message: Schema.NonEmptyString,
 }) {}
@@ -133,14 +142,19 @@ export const AgentSessionError = Schema.Union([
   PoolUnavailableError,
   UnsupportedEffortError,
   AgentResultError,
+  AgentBlockedError,
   AgentQuestionError,
   ChildSessionBudgetExceededError,
   SessionOperationError,
 ]);
 export type AgentSessionError = typeof AgentSessionError.Type;
 
-/** The reports an Agent ends its work with by opening its final answer with a reserved marker. */
-export type AgentReport = AgentResultError | AgentQuestionError;
+/**
+ * The reports a session ends its work with: a blocker or a question its final
+ * answer opened with a reserved marker, or a failure its harness reported. A
+ * child relays a harness failure to the parent as a blocker.
+ */
+export type AgentReport = AgentResultError | AgentBlockedError | AgentQuestionError;
 
 /**
  * Reads a final answer's reserved marker: `[usine:blocked]` reports a blocker
@@ -151,7 +165,7 @@ export type AgentReport = AgentResultError | AgentQuestionError;
 export const reportedOutcome = (
   sessionId: Option.Option<AgentSessionId>,
   answer: string,
-): Option.Option<AgentReport> => {
+): Option.Option<AgentBlockedError | AgentQuestionError> => {
   const trimmed = answer.trim();
   if (trimmed.startsWith(QUESTION_MARKER)) {
     return Option.some(
@@ -165,7 +179,7 @@ export const reportedOutcome = (
   }
   if (trimmed.startsWith(BLOCKED_MARKER)) {
     return Option.some(
-      new AgentResultError({
+      new AgentBlockedError({
         sessionId,
         message:
           trimmed.slice(BLOCKED_MARKER.length).trim() ||
@@ -193,6 +207,7 @@ export const toAttemptFailure = (error: AgentSessionError): AttemptFailure =>
     PoolUnavailableError: ({ message }) => new AgentFailure({ message }),
     UnsupportedEffortError: ({ message }) => new AgentFailure({ message }),
     AgentResultError: ({ message }) => new AgentFailure({ message }),
+    AgentBlockedError: ({ message }) => new BlockedFailure({ message }),
     AgentQuestionError: ({ message }) => new QuestionFailure({ question: message }),
     ChildSessionBudgetExceededError: ({ attemptedChildren, maxChildren }) =>
       new ChildSessionBudgetFailure({ attemptedChildren, maxChildren }),

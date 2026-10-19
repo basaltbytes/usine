@@ -201,13 +201,16 @@ export const subagentTool = (services: ExtensionServices) => {
     // The child's result carries the same report that ends its stream.
     const forwarding = yield* child.events.pipe(
       Stream.runForEach(forward),
-      Effect.catchTag(["AgentResultError", "AgentQuestionError"], () => Effect.void),
+      Effect.catchTag(
+        ["AgentResultError", "AgentBlockedError", "AgentQuestionError"],
+        () => Effect.void,
+      ),
       Effect.forkScoped,
     );
     const outcome = yield* Effect.raceFirst(
       child.result.pipe(
         Effect.map(Result.succeed),
-        Effect.catchTag(["AgentResultError", "AgentQuestionError"], (report) =>
+        Effect.catchTag(["AgentResultError", "AgentBlockedError", "AgentQuestionError"], (report) =>
           Effect.succeed(Result.fail(report)),
         ),
       ),

@@ -15,6 +15,7 @@ import { DateTime, Effect, Match, Option } from "effect";
 import {
   AgentFailureView,
   AttemptView,
+  BlockedFailureView,
   CanceledAttemptView,
   ChildSessionBudgetFailureView,
   DefectFailureView,
@@ -44,6 +45,7 @@ export const failureView = (failure: AttemptFailure): FailureView =>
     InfraFailure: ({ message }) => new InfraFailureView({ message }),
     DefectFailure: ({ message }) => new DefectFailureView({ message }),
     AgentFailure: ({ message }) => new AgentFailureView({ message }),
+    BlockedFailure: ({ message }) => new BlockedFailureView({ message }),
     QuestionFailure: ({ question }) => new QuestionFailureView({ question }),
     RunawayFailure: ({ ceiling }) => new RunawayFailureView({ ceiling }),
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>

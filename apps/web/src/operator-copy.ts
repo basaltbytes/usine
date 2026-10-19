@@ -142,6 +142,7 @@ export const failureReason = (failure: FailureView): string =>
     InfraFailure: () => "Infrastructure failure",
     DefectFailure: () => "Executor defect; retry explicitly",
     AgentFailure: () => "Agent failure",
+    BlockedFailure: () => "Agent blocked",
     QuestionFailure: () => "Question for you",
     RunawayFailure: () => "Runaway guard",
     ChildSessionBudgetFailure: () => "Child session budget exhausted",
@@ -195,6 +196,7 @@ export const failureMessage = (failure: FailureView): string =>
     InfraFailure: ({ message }) => message,
     DefectFailure: ({ message }) => message,
     AgentFailure: ({ message }) => message,
+    BlockedFailure: ({ message }) => message,
     QuestionFailure: ({ question }) => question,
     RunawayFailure: ({ ceiling }) => `Runaway guard tripped its ${ceiling} ceiling`,
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
@@ -219,7 +221,12 @@ export const needCopy = (need: NeedView): NeedCopy =>
       runId,
     }),
     RunFailureNeed: ({ failure, loop, repository, runId }) => ({
-      title: failure._tag === "QuestionFailure" ? `${loop} asks a question` : failure._tag,
+      title:
+        failure._tag === "QuestionFailure"
+          ? `${loop} asks a question`
+          : failure._tag === "BlockedFailure"
+            ? `${loop} is blocked`
+            : failure._tag,
       detail: failureMessage(failure),
       repository,
       runId,

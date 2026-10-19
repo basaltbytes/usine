@@ -190,12 +190,14 @@ const isTerminal = (notice: TranscriptNotice) =>
     notice.origin.payload._tag === "Failed" ||
     notice.origin.payload._tag === "Interrupted");
 
-/** Agent prose that a terminal outcome repeats: the result, an Agent's own failure report, or its question. */
+/** Agent prose that a terminal outcome repeats: the result, an Agent's own failure report or blocker, or its question. */
 export const terminalText = (end: AttemptEnd): string | null =>
   Match.valueTags(end, {
     Succeeded: ({ message }) => Option.getOrNull(message),
     Failed: ({ failure }) =>
-      failure._tag === "AgentFailure" || failure._tag === "QuestionFailure"
+      failure._tag === "AgentFailure" ||
+      failure._tag === "BlockedFailure" ||
+      failure._tag === "QuestionFailure"
         ? failureMessage(failure)
         : null,
     Canceled: () => null,

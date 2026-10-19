@@ -30,6 +30,18 @@ export class AgentFailure extends Schema.TaggedError<AgentFailure>("AttemptFailu
 ) {}
 
 /**
+ * The agent stopped at a blocker it cannot resolve itself, and `message` is
+ * its report of the blocker and the work left undone. Never auto-retried: as
+ * for a question, the Loop holds the Item until the operator retries or
+ * resolves the Run, or the Item changes again (ADR 0017).
+ */
+export class BlockedFailure extends Schema.TaggedError<BlockedFailure>(
+  "AttemptFailure/BlockedFailure",
+)("BlockedFailure", {
+  message: Schema.NonEmptyString,
+}) {}
+
+/**
  * The agent stopped because it needs an operator decision it cannot make
  * itself, and `question` is what it asks. Never auto-retried: the Loop holds
  * the Item until the operator answers or the Item changes again (ADR 0017).
@@ -66,6 +78,7 @@ export const AttemptFailure = Schema.Union([
   InfraFailure,
   DefectFailure,
   AgentFailure,
+  BlockedFailure,
   QuestionFailure,
   RunawayFailure,
   ChildSessionBudgetFailure,
