@@ -65,7 +65,7 @@ export const queryGraphql = Effect.fn("GitHub.queryGraphql")(function* <
       return yield* new GitHubRateLimitError({
         operation,
         retryAt: DateTime.makeUnsafe(retryAt),
-        message: "GitHub GraphQL asked the poller to wait before retrying",
+        message: "GitHub GraphQL asked usine to wait before retrying",
       });
     }
     // GitHub reports a missing Item as a NOT_FOUND error beside a null
