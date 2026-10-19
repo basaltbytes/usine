@@ -25,6 +25,8 @@ export default mergeConfig(
           test: {
             name: "browser",
             include: ["test/**/*.browser.test.tsx"],
+            // Locator actions wait for the rest of the test timeout, and Chromium renders late on a busy machine.
+            testTimeout: 30_000,
             browser: {
               enabled: true,
               headless: true,

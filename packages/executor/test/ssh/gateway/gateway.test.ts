@@ -172,7 +172,7 @@ describe("SSH Worker behind a Gateway", () => {
       const prepared = yield* executor.prepare(request);
       const [attached] = yield* attachmentsInForce;
       assert(attached !== undefined);
-      yield* advance(45);
+      yield* advance(gateway, 45);
       const renewals = gateway.calls.slice(
         gateway.calls.findIndex(({ method }) => method === "POST") + 1,
       );
@@ -215,7 +215,7 @@ describe("SSH Worker behind a Gateway", () => {
       const store = yield* Attachments;
       yield* store.detach(attached.id);
       assert.deepStrictEqual(yield* attachmentsInForce, []);
-      yield* advance(2);
+      yield* advance(gateway, 2);
       const [restored] = yield* attachmentsInForce;
       assert.strictEqual(
         restored?.id,
