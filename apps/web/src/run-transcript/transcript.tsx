@@ -134,7 +134,7 @@ const Child = ({
         </Badge>
       </CollapsibleTrigger>
       <CollapsibleContent className="space-y-3 px-3 pb-3">
-        <p className="font-mono text-[0.625rem] text-muted-foreground">
+        <p className="font-mono text-xs text-muted-foreground">
           {session.session.brain.harness} · {session.session.brain.model} ·{" "}
           {session.session.brain.effort}
         </p>
