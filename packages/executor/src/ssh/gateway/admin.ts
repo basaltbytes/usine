@@ -7,7 +7,7 @@ import {
   type Detached,
   GatewayAdminApi,
 } from "@usine/gateway/admin";
-import { DateTime, Effect, type Redacted, Result, Schema } from "effect";
+import { Data, DateTime, Effect, type Redacted, Result, Schema } from "effect";
 import { HttpClient, HttpClientError, HttpClientRequest } from "effect/unstable/http";
 import { HttpApiClient } from "effect/unstable/httpapi";
 import type { SshWorkerGateway } from "../model.ts";
@@ -51,17 +51,30 @@ export interface GatewayAdmin {
  */
 const ADMIN_REQUEST_TIMEOUT = "30 seconds";
 
+/**
+ * A request through the open forward got no answer from the admin API.
+ * `since` is when the first request that got none since the last answer was
+ * sent, and `detail` says how this one went unanswered.
+ */
+class GatewayAdminUnanswered extends Data.TaggedError("GatewayAdminUnanswered")<{
+  readonly gateway: string;
+  readonly since: DateTime.Utc;
+  readonly detail: string;
+}> {}
+
 /** Why an admin request failed, from the forward's state or the failure's tag and status only. */
 const reason = (failure: { readonly _tag: string }): string => {
   if (failure instanceof GatewayForwardClosed)
     return `the forward through ${failure.gateway} is closed since ${DateTime.formatIso(failure.since)}: ${failure.reason}`;
+  if (failure instanceof GatewayAdminUnanswered)
+    return `the admin API through ${failure.gateway} has not answered since ${DateTime.formatIso(failure.since)}: ${failure.detail}`;
   if (HttpClientError.isHttpClientError(failure))
     return failure.response === undefined
-      ? `the admin API did not answer (${failure.reason._tag})`
+      ? `no answer (${failure.reason._tag})`
       : `the admin API answered with status ${String(failure.response.status)}`;
   switch (failure._tag) {
     case "TimeoutError":
-      return `the admin API did not answer within ${ADMIN_REQUEST_TIMEOUT}`;
+      return `no answer within ${ADMIN_REQUEST_TIMEOUT}`;
     case "Unauthorized":
       return "the Gateway refused the admin token";
     case "AttachmentAlreadyExpired":
@@ -80,6 +93,15 @@ const unanswered = (failure: { readonly _tag: string }): boolean =>
   failure._tag === "TimeoutError" ||
   (HttpClientError.isHttpClientError(failure) && failure.response === undefined);
 
+/** The log field that says since when the Gateway's admin API has been out of reach, when the failure knows. */
+const sinceFields = (failure: { readonly _tag: string }) => {
+  if (failure instanceof GatewayForwardClosed)
+    return { closedSince: DateTime.formatIso(failure.since) };
+  if (failure instanceof GatewayAdminUnanswered)
+    return { unansweredSince: DateTime.formatIso(failure.since) };
+  return {};
+};
+
 const adminClientAt = (url: URL, adminToken: Redacted.Redacted<string>) =>
   HttpApiClient.make(GatewayAdminApi, {
     baseUrl: url,
@@ -93,7 +115,9 @@ type AdminClient = Effect.Success<ReturnType<typeof adminClientAt>>;
  * the executor's `forward` and sending the admin token as a bearer token on
  * every request. A request that finds the forward closed, or gets no answer
  * through it, reopens the forward and is sent once more; a second failure is
- * the request's failure.
+ * the request's failure. A request that gets no answer says since when the
+ * admin API has answered none, as the forward records it for every Worker
+ * behind the Gateway.
  */
 export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function* (
   worker: WorkerName,
@@ -106,23 +130,44 @@ export const gatewayAdminFor = Effect.fn("SshExecutor.gatewayAdminFor")(function
     E extends { readonly _tag: string },
   >(operation: GatewayAdminOperation, call: (client: AdminClient) => Effect.Effect<A, E>) {
     yield* Effect.annotateCurrentSpan({ worker, operation, gateway: forward.gateway });
-    const through = (open: OpenForward) =>
-      adminClientAt(open.url, gateway.adminToken).pipe(
-        Effect.provideService(HttpClient.HttpClient, http),
-        Effect.flatMap(call),
-        Effect.timeout(ADMIN_REQUEST_TIMEOUT),
+    const through = Effect.fnUntraced(function* (open: OpenForward) {
+      const sentAt = yield* DateTime.now;
+      const sent = yield* Effect.result(
+        adminClientAt(open.url, gateway.adminToken).pipe(
+          Effect.provideService(HttpClient.HttpClient, http),
+          Effect.flatMap(call),
+          Effect.timeout(ADMIN_REQUEST_TIMEOUT),
+        ),
       );
+      if (Result.isFailure(sent) && unanswered(sent.failure))
+        return yield* new GatewayAdminUnanswered({
+          gateway: forward.gateway,
+          since: yield* forward.unanswered(sentAt),
+          detail: reason(sent.failure),
+        });
+      yield* forward.answered;
+      if (Result.isFailure(sent)) return yield* Effect.fail(sent.failure);
+      return sent.success;
+    });
     const retried = (generation: number, failure: { readonly _tag: string }) =>
       Effect.logWarning(
         "A Gateway admin request did not get through; reopening the forward and sending it once more",
-        { worker, operation, gateway: forward.gateway, generation, reason: reason(failure) },
+        {
+          worker,
+          operation,
+          gateway: forward.gateway,
+          generation,
+          reason: reason(failure),
+          ...sinceFields(failure),
+        },
       ).pipe(Effect.andThen(forward.reopen(generation)), Effect.flatMap(through));
 
     const opened = yield* Effect.result(forward.current);
     if (Result.isFailure(opened)) return yield* retried(opened.failure.generation, opened.failure);
     const answered = yield* Effect.result(through(opened.success));
     if (Result.isSuccess(answered)) return answered.success;
-    if (!unanswered(answered.failure)) return yield* Effect.fail(answered.failure);
+    if (!(answered.failure instanceof GatewayAdminUnanswered))
+      return yield* Effect.fail(answered.failure);
     return yield* retried(opened.success.generation, answered.failure);
   });
   const bounded =

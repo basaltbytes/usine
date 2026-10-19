@@ -93,12 +93,13 @@ const bodyOf = (body: { readonly _tag: string }): AdminCall["body"] =>
  * clock applies to expiries. A request reaches the handlers only through a
  * live forward of `machine` on its port, and fails as a refused connection
  * otherwise. `calls` records what the executor sent, a detach of an
- * attachment in `refusedDetaches` is answered with a server error, and
- * `settled` waits until no admin request is in flight.
+ * attachment in `refusedDetaches` is answered with a server error, a request
+ * while `answering` is false meets a stopped admin service and gets no
+ * answer, and `settled` waits until no admin request is in flight.
  */
 export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
   const calls: Array<AdminCall> = [];
-  const switches = { refusedDetaches: new Set<string>() };
+  const switches = { refusedDetaches: new Set<string>(), answering: true };
   let inFlight = 0;
   const idle = Latch.makeUnsafe(true);
   const tracked = <A, E, R>(request: Effect.Effect<A, E, R>) =>
@@ -136,7 +137,7 @@ export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
           const forward = machine.state.forwards.find(
             (candidate) => candidate.port === port && candidate.live,
           );
-          const delivered = forward?.carries === true;
+          const delivered = forward?.carries === true && switches.answering;
           calls.push({
             method: request.method,
             path,
@@ -149,7 +150,10 @@ export const fakeGateway = (machine: ReturnType<typeof fakeMachine>) => {
             return yield* new HttpClientError.HttpClientError({
               reason: new HttpClientError.TransportError({
                 request,
-                description: `connect ECONNREFUSED 127.0.0.1:${String(port)}`,
+                description:
+                  forward?.carries === true
+                    ? "socket hang up"
+                    : `connect ECONNREFUSED 127.0.0.1:${String(port)}`,
               }),
             });
           const detached = path.slice("/v1/attachments/".length);
