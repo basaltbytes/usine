@@ -6,11 +6,12 @@ import { Comment, Commit, PullRequest, type StepResultFact } from "./result.ts";
 
 /**
  * The part of an Attempt's RunSpec that harvesting reads: where its checkout
- * started, what it was given, and when the Worker prepared it.
+ * started, what it was given, when the Worker prepared it, and the bot login
+ * it writes to GitHub as.
  */
 export type HarvestSpec = Pick<
   RunSpec,
-  "attemptId" | "repository" | "revision" | "baseCommit" | "payload" | "preparedAt"
+  "attemptId" | "repository" | "revision" | "baseCommit" | "payload" | "preparedAt" | "botLogin"
 >;
 
 /**
@@ -51,7 +52,11 @@ const decodePayloadItem = Schema.decodeUnknownOption(
   Schema.Struct({ number: ItemNumber, url: Schema.URLFromString }),
 );
 
-/** Asks GitHub for the login of the credential the command runs with. */
+/**
+ * Asks GitHub for the login of the credential the command runs with. GitHub
+ * does not document what it returns for an installation token, so harvesting
+ * asks only when the RunSpec names no bot login.
+ */
 const VIEWER_QUERY = "query=query { viewer { login } }";
 const decodeViewer = Schema.decodeUnknownEffect(
   Schema.fromJsonString(
@@ -211,11 +216,37 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
   return [...facts.values()];
 });
 
+/** The login whose comments harvesting keeps, and where it came from. */
+interface Author {
+  readonly login: string;
+  readonly source: "run-spec" | "viewer";
+}
+
+/** The login GitHub reports for the Attempt's credential, for a RunSpec that names no bot login. */
+const credentialLogin = Effect.fn("StepResult.credentialLogin")(function* <E>(
+  spec: HarvestSpec,
+  item: ItemNumber,
+  run: HarvestCommand<E>,
+) {
+  yield* Effect.logInfo(
+    "The RunSpec names no bot login, so harvesting asks GitHub for the login of the Attempt's credential",
+    { attemptId: spec.attemptId, repository: spec.repository, item },
+  );
+  const { data } = yield* askGitHub(
+    run,
+    ["api", "graphql", "-f", VIEWER_QUERY],
+    decodeViewer,
+    "the credential's login",
+  );
+  return { login: data.viewer.login, source: "viewer" } satisfies Author;
+});
+
 /**
  * The comments and reviews the Attempt posted on its Run's Item: the Item's
  * conversation comments and, on a pull request, its submitted reviews and
- * their diff comments, written by the login of the Attempt's own credential
- * and created or updated since the Worker prepared the checkout.
+ * their diff comments, written by the RunSpec's bot login, or else by the
+ * login GitHub reports for the Attempt's credential, and created or updated
+ * since the Worker prepared the checkout.
  */
 const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
   spec: HarvestSpec,
@@ -241,13 +272,11 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
   const prepared = DateTime.toEpochMillis(spec.preparedAt.value);
   const since = prepared - (prepared % 1_000);
   const sinceParameter = `${DateTime.formatIso(DateTime.makeUnsafe(since)).slice(0, 19)}Z`;
-  const { login } = (yield* askGitHub(
-    run,
-    ["api", "graphql", "-f", VIEWER_QUERY],
-    decodeViewer,
-    "the credential's login",
-  )).data.viewer;
-  yield* Effect.annotateCurrentSpan({ item: number, author: login });
+  const author: Author = Option.isSome(spec.botLogin)
+    ? { login: spec.botLogin.value, source: "run-spec" }
+    : yield* credentialLogin(spec, number, run);
+  const { login } = author;
+  yield* Effect.annotateCurrentSpan({ item: number, author: login, authorSource: author.source });
   const list = (path: string) => [
     "api",
     `repos/${spec.repository}/${path}`,
@@ -316,6 +345,7 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
     repository: spec.repository,
     item: number,
     author: login,
+    authorSource: author.source,
     since: sinceParameter,
     issueComments: issueComments.length,
     reviews: submitted.length,
@@ -356,11 +386,11 @@ const enrichment = <A, E extends { readonly _tag: string; readonly message: stri
  * reviews the Attempt posted on its Run's Item. A new final commit that no
  * remote branch or pull request ref points at was never pushed, so it has no
  * pull request and GitHub is not asked. Comments are those GitHub lists for
- * the login the Attempt's own credential writes as, which is the factory's
- * App or a Worker's GitHub integration, since the Worker prepared the
- * checkout. Both GitHub discoveries are read-only enrichment, so a GitHub
- * failure or a ten-second stall keeps the commits and records none of what it
- * looked for rather than failing completed work.
+ * the bot login the Attempt writes as, the factory's App or a Worker's GitHub
+ * integration, since the Worker prepared the checkout. Both GitHub discoveries
+ * are read-only enrichment, so a GitHub failure or a ten-second stall keeps
+ * the commits and records none of what it looked for rather than failing
+ * completed work.
  */
 export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
   E extends { readonly _tag: string; readonly message: string },

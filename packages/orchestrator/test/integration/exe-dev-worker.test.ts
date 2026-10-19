@@ -19,6 +19,7 @@ import { Config, DateTime, Effect, FileSystem, Layer, Option, Schema } from "eff
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as exeDevLayer } from "../../src/exe-dev.ts";
 import { fixedConfigLayer } from "../support/current-instance.ts";
+import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
 const VmList = Schema.Struct({
@@ -105,6 +106,7 @@ describe("live exe.dev Worker", () => {
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(durableAttemptRuntimeLayer(instanceDirectory)),
         Layer.provide(fixedConfigLayer(config)),
+        Layer.provide(testAppLayer),
       );
 
       yield* Effect.gen(function* () {

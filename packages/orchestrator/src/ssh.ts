@@ -70,7 +70,8 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
  * brains are the instance roster checked at startup, and `options` addresses
  * each Worker's machine (`sshWorkerAddressesOf(config)` for the ones
  * `usine.yaml` declares). The caller provides the `CredentialProvider` that
- * mints each Attempt's single-repository token, the `TriggerCondition` that
+ * mints each Attempt's single-repository token, the `GitHubApp` whose bot
+ * login each Attempt records, the `TriggerCondition` that
  * re-checks queued Events, the `AttemptRuntime` that runs each Attempt's Pi
  * parent in this process, built before the engine so durable storage is
  * resumed before Run recovery, and the `CurrentInstance` whose settings each

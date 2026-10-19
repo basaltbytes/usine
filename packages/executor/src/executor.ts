@@ -8,9 +8,9 @@ import { AttemptFailure } from "@usine/core/attempt/failure";
 import { LoopName, LoopPermissions } from "@usine/core/loop";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { WorkerName, WorkerKind } from "@usine/core/worker";
+import { BotLogin, WorkerName, WorkerKind } from "@usine/core/worker";
 import { StepResult } from "@usine/core/step/result";
-import { Context, Effect, type Option, type Result, Schema, Scope } from "effect";
+import { Context, Effect, Option, type Result, Schema, Scope } from "effect";
 
 /** The Worker operation that failed during readiness checks or an Attempt's lifecycle. */
 export const ExecutorOperation = Schema.Literals([
@@ -189,6 +189,15 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
    * creating one, and launch reattaches to the running parent.
    */
   reattach: Schema.Boolean.pipe(Schema.withConstructorDefault(Effect.succeed(false))),
+  /**
+   * The bot login the Attempt writes to GitHub as, which harvesting matches
+   * the comments it collects against. Preparation copies it into the RunSpec.
+   * None when the caller does not know it; harvesting then asks GitHub which
+   * login the Attempt's credential has.
+   */
+  botLogin: Schema.Option(BotLogin).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<BotLogin>())),
+  ),
 }) {}
 
 /** One Attempt's disposable checkout directory. */

@@ -2,15 +2,13 @@
 
 // Answers `gh api` lookups from the records the test's parent wrote in the checkout:
 // the pull request at the final commit, and the review it posted on pull request 71.
+// It refuses the GraphQL viewer query: the scheduler gives the harvest its bot login.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 const args = process.argv.slice(2).filter((arg) => arg !== "--lookup-fails");
-if (args[0] !== "api") throw new Error("Expected structured GitHub API access");
-if (args[1] === "graphql") {
-  process.stdout.write(JSON.stringify({ data: { viewer: { login: "usine-test[bot]" } } }));
-  process.exit(0);
-}
+if (args[0] !== "api" || args[1] === "graphql")
+  throw new Error("Expected structured GitHub REST access");
 if (!args.includes("--paginate") || !args.includes("--slurp"))
   throw new Error("Expected all pages");
 const listed = /^repos\/acme\/demo\/(?:issues|pulls)\/71\/(comments|reviews)\?/u.exec(args[1]);

@@ -18,6 +18,7 @@ import { AttemptTask, AttemptId } from "../src/attempt/attempt.ts";
 import * as AttemptChannel from "../src/attempt/channel.ts";
 import { AgentFailure, ChildSessionBudgetFailure } from "../src/attempt/failure.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../src/repository.ts";
+import { BotLogin } from "../src/worker.ts";
 import { Comment, Commit, PullRequest, StepResult } from "../src/step/result.ts";
 
 const agent = new Agent({
@@ -48,6 +49,7 @@ const spec = new AttemptChannel.RunSpec({
   parentEffort: "high",
   resume: Option.none(),
   preparedAt: Option.some(DateTime.makeUnsafe("2026-08-30T11:59:00Z")),
+  botLogin: Option.some(BotLogin.make("usine-basaltbytes[bot]")),
 });
 
 describe("attempt channel", () => {
@@ -229,12 +231,15 @@ describe("attempt channel", () => {
     });
     const legacy = Schema.encodeSync(SessionStarted)(new SessionStarted({ session }));
     assert(Option.isNone(Schema.decodeUnknownSync(SessionStarted)(legacy).harnessSession));
-    const storedSpec = Object.fromEntries(
-      Object.entries(Schema.encodeSync(AttemptChannel.RunSpec)(spec)).filter(
-        ([key]) => key !== "preparedAt",
+    const storedSpec = Schema.decodeUnknownSync(AttemptChannel.RunSpec)(
+      Object.fromEntries(
+        Object.entries(Schema.encodeSync(AttemptChannel.RunSpec)(spec)).filter(
+          ([key]) => key !== "preparedAt" && key !== "botLogin",
+        ),
       ),
     );
-    assert(Option.isNone(Schema.decodeUnknownSync(AttemptChannel.RunSpec)(storedSpec).preparedAt));
+    assert(Option.isNone(storedSpec.preparedAt));
+    assert(Option.isNone(storedSpec.botLogin));
     const started = new SessionStarted({
       session,
       harnessSession: Option.some(

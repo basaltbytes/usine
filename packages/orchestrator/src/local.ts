@@ -9,10 +9,10 @@ import { stepExecutorLayer } from "./scheduler.ts";
 
 /**
  * The full engine composition for local Workers. Supply the roster’s brains for
- * startup preflight and provide the credential provider, the `TriggerCondition`
- * that re-checks queued Events, the `AttemptRuntime` that runs each Attempt's
- * Pi parent in this process, and the `CurrentInstance` whose settings each
- * Attempt reads. The runtime is built first, so durable storage is open and
+ * startup preflight and provide the credential provider, the `GitHubApp` whose
+ * bot login each Attempt records, the `TriggerCondition` that re-checks queued
+ * Events, the `AttemptRuntime` that runs each Attempt's Pi parent in this
+ * process, and the `CurrentInstance` whose settings each Attempt reads. The runtime is built first, so durable storage is open and
  * its tasks resumed before the engine recovers Runs.
  */
 export const layer = (

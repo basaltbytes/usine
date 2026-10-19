@@ -3,10 +3,12 @@ import type { LoadedInstance } from "@usine/config/instance";
 import { resolveParentEffort } from "@usine/core/agent";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
+import type { AttemptId } from "@usine/core/attempt";
 import { salvageRefFor } from "@usine/core/attempt/salvage";
-import { WorkerName } from "@usine/core/worker";
+import { BotLogin, WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor, ExecutorError, ExecutorOperationError } from "@usine/executor";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
+import { GitHubApp, type Installation } from "@usine/github/github-app";
 import {
   Array as EffectArray,
   DateTime,
@@ -151,6 +153,10 @@ const validateWorkers = (
 
 const brainLabel = ({ harness, model, effort }: BrainSpec) => `${harness}/${model}/${effort}`;
 
+/** exe.dev Workers write to GitHub through exe.dev's integration, as its bot (ADR 0011). */
+const EXE_DEV_BOT_LOGIN = BotLogin.make("exe-dev-github-integration[bot]");
+const decodeBotLogin = Schema.decodeUnknownOption(BotLogin);
+
 /** How the executor a `stepExecutorLayer` drives takes Workers after startup. */
 export interface StepExecutorOptions {
   /**
@@ -173,18 +179,25 @@ export interface StepExecutorOptions {
  * takes no new Attempt, and each extra slot retires when its Attempt ends; a
  * removed Worker leaves the scheduler when its last Attempt ends. Each Attempt
  * reads its `settings` (child budget, ceilings, parent effort) from the
- * current instance.
+ * current instance, and gets the bot login it writes to GitHub as: exe.dev's
+ * integration bot on exe.dev Workers, the App's bot from `GitHubApp` on the
+ * others, or none when the App's installation cannot be read.
  */
 export const stepExecutorLayer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
   options: StepExecutorOptions = {},
-): Layer.Layer<StepExecutor, ExecutorError | UnsupportedWorkerError, CurrentInstance | Executor> =>
+): Layer.Layer<
+  StepExecutor,
+  ExecutorError | UnsupportedWorkerError,
+  CurrentInstance | Executor | GitHubApp
+> =>
   Layer.effect(
     StepExecutor,
     Effect.gen(function* () {
       const executor = yield* Executor;
       const instances = yield* CurrentInstance;
+      const app = yield* GitHubApp;
       const workers = yield* validateWorkers(executor.kind, config.workers);
       const pool = yield* TxRef.make(slotPoolOf(workers, new Map()));
       const pending = yield* TxPriorityQueue.empty(reservationOrder);
@@ -406,6 +419,30 @@ export const stepExecutorLayer = (
         },
       );
 
+      // A login that cannot be read leaves harvesting to ask GitHub; it never fails the Attempt.
+      const botLoginFor = Effect.fn("WorkerScheduler.botLogin")(function* (attemptId: AttemptId) {
+        if (executor.kind === "exe.dev") return Option.some(EXE_DEV_BOT_LOGIN);
+        const installation = yield* app.installation().pipe(
+          Effect.map(Option.some),
+          Effect.catch((error) =>
+            Effect.logWarning(
+              "Could not read the App's installation; harvesting will ask GitHub for the login of the Attempt's credential",
+              { attemptId, errorTag: error._tag, message: error.message },
+            ).pipe(Effect.as(Option.none<Installation>())),
+          ),
+        );
+        if (Option.isNone(installation)) return Option.none<BotLogin>();
+        const { appSlug } = installation.value;
+        // GitHub's REST API names an App's bot `<slug>[bot]`; its GraphQL API drops the suffix.
+        const login = decodeBotLogin(`${appSlug}[bot]`);
+        if (Option.isNone(login))
+          yield* Effect.logWarning(
+            "The App's slug does not form a bot login; harvesting will ask GitHub for the login of the Attempt's credential",
+            { attemptId, appSlug },
+          );
+        return login;
+      });
+
       const execute: StepExecutor["Service"]["execute"] = Effect.fn("WorkerScheduler.execute")(
         function* (execution, io) {
           yield* Effect.annotateCurrentSpan({
@@ -417,6 +454,7 @@ export const stepExecutorLayer = (
             reattach: execution.reattach,
           });
           const { settings } = (yield* instances.get).config;
+          const botLogin = yield* botLoginFor(execution.attempt.id);
           const prepared = yield* executor
             .prepare(
               new CheckoutRequest({
@@ -437,6 +475,7 @@ export const stepExecutorLayer = (
                 salvageRef: salvageRefFor(execution.run.id, execution.attempt.number),
                 resume: execution.resume,
                 reattach: execution.reattach,
+                botLogin,
               }),
             )
             .pipe(Effect.mapError(asAttemptFailure));

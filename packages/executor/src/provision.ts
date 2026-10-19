@@ -494,6 +494,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         resume: checkout.resume,
         conflictingSalvage: checkout.conflicting,
         preparedAt: Option.some(preparedAt),
+        botLogin: request.botLogin,
       }),
       worktree: WorktreePath.make(layout.worktree),
     }),

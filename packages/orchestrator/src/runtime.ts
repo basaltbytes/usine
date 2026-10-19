@@ -69,6 +69,7 @@ export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
     }),
   ).pipe(
     Layer.provide(credentials),
+    Layer.provide(app),
     Layer.provide(triggerCondition),
     Layer.provide(attemptRuntime),
   );

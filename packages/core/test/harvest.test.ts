@@ -4,6 +4,7 @@ import { AttemptId } from "../src/attempt/attempt.ts";
 import { CommitSha, RepositoryName, RepositoryRevision } from "../src/repository.ts";
 import { type HarvestSpec, harvestFacts } from "../src/step/harvest.ts";
 import type { StepResultFact } from "../src/step/result.ts";
+import { BotLogin } from "../src/worker.ts";
 
 const BASE = CommitSha.make("a".repeat(40));
 const HEAD = CommitSha.make("b".repeat(40));
@@ -16,6 +17,7 @@ const spec: HarvestSpec = {
   baseCommit: BASE,
   payload: { tick: { scheduledAt: "2026-10-19T12:00:00Z" } },
   preparedAt: Option.some(DateTime.makeUnsafe("2026-10-19T12:00:00.250Z")),
+  botLogin: Option.some(BotLogin.make("usine-test[bot]")),
 };
 
 class CommandFailed extends Data.TaggedError("CommandFailed")<{ readonly message: string }> {}
@@ -67,7 +69,7 @@ const NEVER_ASKED: Answer = Effect.die("the final commit was never pushed");
 const BOT = "usine-test[bot]";
 const SINCE = "2026-10-19T12:00:00Z";
 const VIEWER = "gh api graphql -f query=query { viewer { login } }";
-const asViewer: Answer = Effect.succeed([JSON.stringify({ data: { viewer: { login: BOT } } })]);
+const ISSUE_COMMENTS = `gh api repos/acme/demo/issues/12/comments?since=${SINCE}&per_page=100 --paginate --slurp`;
 const pages = (...items: ReadonlyArray<object>): Answer =>
   Effect.succeed([JSON.stringify([items])]);
 const comments = (facts: ReadonlyArray<StepResultFact>) =>
@@ -142,7 +144,7 @@ describe("harvesting an Attempt's facts", () => {
   );
 
   it.effect(
-    "records what the Attempt's own GitHub identity wrote on its pull request since preparation",
+    "records what the RunSpec's bot login wrote on its pull request since preparation",
     () =>
       Effect.gen(function* () {
         const conversation = "https://github.com/acme/demo/pull/71#issuecomment-11";
@@ -152,7 +154,6 @@ describe("harvesting an Attempt's facts", () => {
           [],
           NEVER_ASKED,
           [
-            [VIEWER, asViewer],
             [
               `gh api repos/acme/demo/issues/71/comments?since=${SINCE}&per_page=100 --paginate --slurp`,
               pages(
@@ -237,9 +238,8 @@ describe("harvesting an Attempt's facts", () => {
         [],
         NEVER_ASKED,
         [
-          [VIEWER, asViewer],
           [
-            `gh api repos/acme/demo/issues/12/comments?since=${SINCE}&per_page=100 --paginate --slurp`,
+            ISSUE_COMMENTS,
             pages({ html_url: comment, user: { login: BOT }, updated_at: "2026-10-19T12:04:00Z" }),
           ],
         ],
@@ -247,6 +247,39 @@ describe("harvesting an Attempt's facts", () => {
       );
       assert.deepStrictEqual(comments(facts), [["issue-comment", comment]]);
     }),
+  );
+
+  it.effect(
+    "matches the login GitHub reports for the Attempt's credential when the RunSpec names none",
+    () =>
+      Effect.gen(function* () {
+        const integration = "exe-dev-github-integration[bot]";
+        const comment = "https://github.com/acme/demo/issues/12#issuecomment-42";
+        const { facts, commands } = yield* harvest(
+          [],
+          NEVER_ASKED,
+          [
+            [
+              VIEWER,
+              Effect.succeed([JSON.stringify({ data: { viewer: { login: integration } } })]),
+            ],
+            [
+              ISSUE_COMMENTS,
+              pages(
+                { html_url: comment, user: { login: integration }, updated_at: SINCE },
+                {
+                  html_url: "https://github.com/acme/demo/issues/12#issuecomment-43",
+                  user: { login: BOT },
+                  updated_at: SINCE,
+                },
+              ),
+            ],
+          ],
+          { ...itemRun("issues/12"), botLogin: Option.none() },
+        );
+        assert.include(commands, VIEWER);
+        assert.deepStrictEqual(comments(facts), [["issue-comment", comment]]);
+      }),
   );
 
   it.effect(
@@ -269,8 +302,8 @@ describe("harvesting an Attempt's facts", () => {
       const { facts, warnings } = yield* harvest(
         [],
         NEVER_ASKED,
-        [[VIEWER, Effect.fail(new CommandFailed({ message: "gh exited with code 1" }))]],
-        itemRun("pull/71"),
+        [[ISSUE_COMMENTS, Effect.fail(new CommandFailed({ message: "gh exited with code 1" }))]],
+        itemRun("issues/12"),
       );
       assert.deepStrictEqual(
         facts.map((fact) => fact._tag),

@@ -14,7 +14,14 @@ import * as RunState from "@usine/core/run/state";
 import { Run, RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
-import { CheckoutRequest, CredentialProvider, Executor, ExecutorError } from "@usine/executor";
+import {
+  CheckoutRequest,
+  CredentialProvider,
+  Executor,
+  ExecutorError,
+  ExecutorOperationError,
+} from "@usine/executor";
+import { GitHubApp, InstallationDiscoveryError } from "@usine/github/github-app";
 import { InstanceDirectory } from "@usine/core/instance";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { StepExecution, StepExecutor } from "@usine/engine/step-executor";
@@ -51,6 +58,7 @@ import {
   worksFor,
 } from "@usine/durable/testing";
 import { fixedConfigLayer } from "../support/current-instance.ts";
+import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import { runView } from "../../src/operator/projection.ts";
 import {
@@ -183,6 +191,7 @@ const withGitHubEngine = <A, E, R>(
         stepExecutorLayer(config, []).pipe(
           Layer.provide(executor),
           Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(testAppLayer),
         ),
       ),
       Layer.provide(alwaysHoldsLayer),
@@ -208,6 +217,7 @@ describe("local worker", () => {
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(testAppLayer),
         );
         const error = yield* Effect.void.pipe(Effect.provide(runtime), Effect.flip);
         assert.strictEqual(error._tag, "WorkerCapabilityError");
@@ -346,6 +356,7 @@ describe("local worker", () => {
         const runtime = stepExecutorLayer(budgetConfig, []).pipe(
           Layer.provide(executor),
           Layer.provide(fixedConfigLayer(budgetConfig)),
+          Layer.provide(testAppLayer),
         );
         yield* Effect.gen(function* () {
           const scheduler = yield* StepExecutor;
@@ -656,6 +667,7 @@ describe("local worker", () => {
           Layer.provide(stubAttemptRuntime(new StubStorage())),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(testAppLayer),
         );
         yield* Effect.gen(function* () {
           yield* RunEngine;
@@ -778,8 +790,115 @@ describe("local worker", () => {
     LIVE_TEST_TIMEOUT,
   );
 
+  it.effect(
+    "gives an exe.dev Attempt exe.dev's integration bot, and an Attempt no bot login when the App cannot be read",
+    () =>
+      Effect.gen(function* () {
+        const unreadableApp = Layer.succeed(GitHubApp)({
+          installation: () =>
+            Effect.fail(
+              new InstallationDiscoveryError({
+                reason: "missing",
+                message: "The GitHub App is not installed on an account",
+              }),
+            ),
+          installationToken: () => Effect.die("unused"),
+          projectAccess: () => Effect.die("unused"),
+          workerToken: () => Effect.die("unused"),
+        });
+        const cases = [
+          ["exe.dev", testAppLayer, "exe-dev-github-integration[bot]"],
+          ["local", unreadableApp, null],
+        ] as const;
+        for (const [kind, app, expected] of cases) {
+          const requested: Array<CheckoutRequest> = [];
+          const executor = Layer.succeed(Executor)({
+            kind,
+            recover: () => Effect.die("unused"),
+            isLive: () => Effect.die("unused"),
+            outcome: () => Effect.die("unused"),
+            preflight: () => Effect.void,
+            prepare: (request) => {
+              requested.push(request);
+              return Effect.fail(
+                new ExecutorOperationError({
+                  operation: "prepare",
+                  message: "The test stops after the request",
+                  cause: new Error("stop"),
+                }),
+              );
+            },
+            cancel: () => Effect.die("unused"),
+            intervene: () => Effect.die("unused"),
+          });
+          const single = Schema.decodeUnknownSync(UsineConfig)({
+            version: 1,
+            repos: [{ name: "acme/demo" }],
+            workers: [{ name: "worker", kind, max_concurrent_attempts: 1 }],
+          });
+          yield* Effect.gen(function* () {
+            const selected = submission(9);
+            const runId = RunId.make(`bot-login-${kind}`);
+            yield* (yield* StepExecutor)
+              .execute(
+                new StepExecution({
+                  attempt: new Attempt({
+                    task: selected.task,
+                    agent: selected.agent.name,
+                    operatorIntervened: false,
+                    id: AttemptId.make(`bot-login-${kind}/execute/1`),
+                    runId,
+                    stepName: selected.step,
+                    worker: WorkerName.make("worker"),
+                    number: AttemptNumber.make(1),
+                    brain: testAgent.brain,
+                    parentModel: Option.none(),
+                    startedAt: selected.event.receivedAt,
+                    outcome: Option.none(),
+                    endedAt: Option.none(),
+                    salvage: Option.none(),
+                  }),
+                  event: selected.event,
+                  run: new Run({
+                    id: runId,
+                    eventId: selected.event.id,
+                    loop: selected.loop,
+                    state: RunState.start(new RunState.Pending()),
+                    openedAt: selected.event.receivedAt,
+                  }),
+                  step: new Step({ runId, name: selected.step, result: Option.none() }),
+                  repository: selected.repository,
+                  revision: selected.revision,
+                  task: selected.task,
+                  agent: selected.agent,
+                  parentModel: selected.parentModel,
+                  permissions: selected.permissions,
+                  resume: Option.none(),
+                }),
+                { append: () => Effect.void, salvage: () => Effect.void },
+              )
+              .pipe(Effect.flip);
+          }).pipe(
+            Effect.provide(
+              stepExecutorLayer(single, []).pipe(
+                Layer.provide(executor),
+                Layer.provide(fixedConfigLayer(single)),
+                Layer.provide(app),
+              ),
+            ),
+          );
+          assert.deepStrictEqual(
+            requested.map(({ botLogin }) =>
+              Option.getOrNull(Option.map(botLogin, (login): string => login)),
+            ),
+            [expected],
+          );
+        }
+      }),
+  );
+
   it.live(
-    "succeeds the Run when the parent ended on its answer to the operator after posting a review",
+    "succeeds the Run when the parent ended on its answer to the operator after posting a review as the App's bot",
     () =>
       withGitHubEngine(reviewedParent, "answers", ({ engine }) =>
         Effect.gen(function* () {

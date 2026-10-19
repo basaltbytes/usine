@@ -8,6 +8,7 @@ import { Executor, WorkerCapabilityError } from "@usine/executor";
 import { Effect, FileSystem, Layer, Logger, Path } from "effect";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { stepExecutorLayer } from "../src/scheduler.ts";
+import { testAppLayer } from "./support/github-app.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
 
 const usineYaml = (maxConcurrentAttempts = 1) => `version: 1
@@ -101,7 +102,7 @@ const startWorkers = (preflighted: Array<string>) =>
       stepExecutorLayer(
         config,
         agents.map(({ agent }) => agent.brain),
-      ).pipe(Layer.provide(executor)),
+      ).pipe(Layer.provide(executor), Layer.provide(testAppLayer)),
     );
   });
 
