@@ -39,7 +39,7 @@ export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable
   environment: Schema.Record(Schema.String, Schema.String),
 }) {}
 
-/** What the parent said when it finished. Commits and pull requests are harvested by the executor afterwards. */
+/** What the parent said when it finished. Commits, pull requests, and comments are harvested by the executor afterwards. */
 export class AttemptReport extends Schema.Class<AttemptReport>("@usine/durable/AttemptReport")({
   /** The parent's final message, never empty. The executor records it as the message of the Attempt's StepResult. */
   message: Schema.NonEmptyString,

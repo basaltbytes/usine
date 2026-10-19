@@ -22,6 +22,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { layer as localLayer } from "../../src/local.ts";
 import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { fixedConfigLayer } from "../support/current-instance.ts";
+import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 
 export const TOKEN = "one-attempt-test-token";
@@ -195,6 +196,7 @@ export const localRuntime = (
     Layer.provide(options.attemptRuntime ?? stubAttemptRuntime(new StubStorage())),
     Layer.provide(alwaysHoldsLayer),
     Layer.provide(fixedConfigLayer(config)),
+    Layer.provide(testAppLayer),
   );
 
 export const withLocalEngine = <A, E, R>(

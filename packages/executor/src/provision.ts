@@ -6,7 +6,7 @@ import {
   SalvagePushed,
 } from "@usine/core/attempt/salvage";
 import { RepositoryName, CommitSha, safeSegment } from "@usine/core/repository";
-import { Deferred, Effect, Exit, Option, Ref, Result, Schema } from "effect";
+import { DateTime, Deferred, Effect, Exit, Option, Ref, Result, Schema } from "effect";
 import {
   ExecutorOperationError,
   AttemptWorkspace,
@@ -476,6 +476,7 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
   const checkout = yield* checkOutWorktree(options, baseCommit, salvage);
   yield* Ref.set(release.checkedOut, Option.some(baseCommit));
   const gitHooks = yield* installPrePushHook(options);
+  const preparedAt = yield* DateTime.now;
   return {
     workspace: new AttemptWorkspace({
       worker: request.worker,
@@ -492,6 +493,8 @@ export const provisionWorktree = Effect.fn("Executor.provisionWorktree")(functio
         parentEffort: request.parentEffort,
         resume: checkout.resume,
         conflictingSalvage: checkout.conflicting,
+        preparedAt: Option.some(preparedAt),
+        botLogin: request.botLogin,
       }),
       worktree: WorktreePath.make(layout.worktree),
     }),

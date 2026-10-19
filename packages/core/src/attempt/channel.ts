@@ -5,7 +5,7 @@ import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/
 import { AttemptId, AttemptTask } from "./attempt.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
 import { StepResult } from "../step/result.ts";
-import { WorkerName } from "../worker.ts";
+import { BotLogin, WorkerName } from "../worker.ts";
 import { AttemptFailure } from "./failure.ts";
 import { AttemptSalvage, SalvagePushed } from "./salvage.ts";
 
@@ -52,6 +52,23 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
   conflictingSalvage: Schema.OptionFromNullOr(SalvagePushed).pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
     Schema.withConstructorDefault(Effect.succeed(Option.none<SalvagePushed>())),
+  ),
+  /**
+   * When the Worker prepared the Attempt's checkout. Everything the Attempt
+   * writes on GitHub comes after it, so harvesting reads the Run's Item from
+   * then on. None for an Attempt prepared before this was recorded.
+   */
+  preparedAt: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
+  /**
+   * The bot login the Attempt writes to GitHub as, which harvesting matches
+   * comments against. None when the orchestrator did not know it or the
+   * Attempt was prepared before it was recorded; harvesting then asks GitHub
+   * which login the Attempt's credential has.
+   */
+  botLogin: Schema.OptionFromNullOr(BotLogin).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
   ),
 }) {}
 

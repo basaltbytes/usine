@@ -48,7 +48,7 @@ export interface DurableCheckout {
   readonly host: ChildHost;
   /** The only environment the parent's children and the harvesting commands see (ADR 0011). */
   readonly environment: Record<string, string>;
-  /** Collects the commits and pull requests the checkout holds. */
+  /** Collects the commits and pull requests the checkout holds and the comments the Attempt posted on its Item. */
   readonly harvest: Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
   /** Preserves the checkout when a restart needs to reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;

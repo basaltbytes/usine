@@ -30,6 +30,7 @@ import {
 } from "@usine/durable/testing";
 import { layer as localLayer } from "../../src/local.ts";
 import { fixedConfigLayer } from "../support/current-instance.ts";
+import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import {
   LIVE_TEST_TIMEOUT,
@@ -61,6 +62,7 @@ const durableRuntime = (
     Layer.provideMerge(durableTestingLayer({ database, parent: steps })),
     Layer.provide(alwaysHoldsLayer),
     Layer.provide(fixedConfigLayer(config)),
+    Layer.provide(testAppLayer),
   );
 
 const commitInWorktree = (worktree: string, message: string) =>

@@ -28,6 +28,7 @@ import {
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { stepExecutorLayer } from "../src/scheduler.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
+import { testAppLayer } from "./support/github-app.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
 
 const unused = () => Effect.die("unused");
@@ -57,6 +58,7 @@ describe("Worker scheduler startup", () => {
         stepExecutorLayer(config, []).pipe(
           Layer.provide(executor),
           Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(testAppLayer),
         ),
       ).pipe(Effect.flip, Effect.scoped);
       assert(failure._tag === "ExecutorOperationError", failure._tag);
@@ -173,7 +175,7 @@ const startScheduler = (
         config,
         agents.map(({ agent }) => agent.brain),
         { startupWorkersOnly: options.startupWorkersOnly === true },
-      ).pipe(Layer.provide(executor)),
+      ).pipe(Layer.provide(executor), Layer.provide(testAppLayer)),
     );
     return Context.get(context, StepExecutor);
   });

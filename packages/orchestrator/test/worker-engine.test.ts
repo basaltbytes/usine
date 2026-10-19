@@ -7,6 +7,7 @@ import { Effect, FileSystem, Layer, Schema } from "effect";
 import { workerEngineLayer } from "../src/worker-engine.ts";
 import { credentialLayer } from "./local-worker/support.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
+import { testAppLayer } from "./support/github-app.ts";
 import { alwaysHoldsLayer } from "./support/polling.ts";
 
 // Nothing listens on port 1, so the SSH executor's preflight fails at once.
@@ -30,6 +31,7 @@ const startupFailure = (workers: (typeof UsineConfig.Encoded)["workers"]) =>
         Layer.provide(stubAttemptRuntime(new StubStorage())),
         Layer.provide(alwaysHoldsLayer),
         Layer.provide(fixedConfigLayer(config)),
+        Layer.provide(testAppLayer),
       ),
     ).pipe(Effect.flip);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));

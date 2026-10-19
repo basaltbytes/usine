@@ -270,6 +270,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
           Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(app),
         );
 
         yield* Effect.gen(function* () {
@@ -639,6 +640,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
           Layer.provide(fixedConfigLayer(config)),
+          Layer.provide(app),
         );
 
         yield* Effect.gen(function* () {

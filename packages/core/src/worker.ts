@@ -15,6 +15,18 @@ export const WorkerKind = Schema.Literals(WORKER_KINDS);
 export type WorkerKind = typeof WorkerKind.Type;
 
 /**
+ * The login of the GitHub bot account an Attempt writes as, `<slug>[bot]`:
+ * the factory's App on local and SSH Workers, and exe.dev's GitHub
+ * integration on exe.dev Workers (ADR 0011).
+ */
+export const BotLogin = Schema.String.check(
+  Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\[bot\]$/u, {
+    message: "Expected a GitHub bot login: <slug>[bot]",
+  }),
+).pipe(Schema.brand("BotLogin"));
+export type BotLogin = typeof BotLogin.Type;
+
+/**
  * Where the local `ssh` client connects: a host name, an address, or a Host
  * alias from the operator's SSH configuration, optionally prefixed by a user.
  * It is passed to `ssh` as one argument, so a value that could read as an

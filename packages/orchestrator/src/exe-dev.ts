@@ -10,7 +10,9 @@ import { stepExecutorLayer } from "./scheduler.ts";
 /**
  * The full engine composition for a local orchestrator driving exe.dev
  * Workers; brains are the instance roster checked at startup. The caller
- * provides the `TriggerCondition` that re-checks queued Events, the
+ * provides the `GitHubApp` the scheduler depends on (exe.dev Attempts record
+ * exe.dev's integration bot as their login, not the App's), the
+ * `TriggerCondition` that re-checks queued Events, the
  * `AttemptRuntime` that runs each Attempt's Pi parent in this process, built
  * before the engine so durable storage is resumed before Run recovery, and the
  * `CurrentInstance` whose settings each Attempt reads.

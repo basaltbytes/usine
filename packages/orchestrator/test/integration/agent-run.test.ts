@@ -205,6 +205,7 @@ const runtimeLayer = (
     },
   ).pipe(
     Layer.provide(credentials),
+    Layer.provide(app),
     Layer.provide(triggerCondition),
     Layer.provide(
       durableAttemptRuntimeLayer(runtimeDirectory).pipe(Layer.provide(NodeServices.layer)),
