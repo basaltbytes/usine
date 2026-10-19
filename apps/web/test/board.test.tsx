@@ -7,7 +7,12 @@ import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
-import { LabelLaneSource, LaneName } from "@usine/config/board";
+import {
+  LabelLaneSource,
+  type LaneItemState,
+  LaneName,
+  StateLaneSource,
+} from "@usine/config/board";
 import { GitHubLabelName } from "@usine/config/label";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
@@ -32,6 +37,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
 import { laneUnder, orderLanes, ProjectBoard, runsWithoutCard } from "../src/board/board.tsx";
 import { cardLabels, currentRun, itemFailure, runLineSince } from "../src/board/card.tsx";
+import { foldsByDefault } from "../src/board/column.tsx";
 import { RunLinks } from "../src/components/run-links.tsx";
 import { elapsedLabel, failureMessage, needCopy, timestampLabel } from "../src/operator-copy.ts";
 
@@ -254,23 +260,47 @@ describe("Runs without a Board card", () => {
 });
 
 describe("Board lane order", () => {
-  it("puts the fallback lane first so its cards can be dragged into the authored lanes", () => {
-    const lane = (id: string, origin: "authored" | "proposed" | "fallback") =>
-      new ReadOnlyBoardLaneView({
-        id: BoardLaneId.make(id),
-        name: LaneName.make(id),
-        sources: [],
-        origin,
-        items: [],
-      });
+  const readOnly = (
+    id: string,
+    origin: "authored" | "proposed" | "fallback",
+    states: ReadonlyArray<LaneItemState> = [],
+  ) =>
+    new ReadOnlyBoardLaneView({
+      id: BoardLaneId.make(id),
+      name: LaneName.make(id),
+      sources: states.map((state) => new StateLaneSource({ state })),
+      origin,
+      items: [],
+    });
+  const writable = (id: string) =>
+    new WritableBoardLaneView({
+      id: BoardLaneId.make(id),
+      name: LaneName.make(id),
+      sources: [new LabelLaneSource({ label: GitHubLabelName.make(id) })],
+      labels: [GitHubLabelName.make(id)],
+      origin: "authored",
+      items: [],
+    });
+
+  it("puts the lanes that accept moves first, then the read-only lanes, and the fallback lane last", () => {
     assert.deepStrictEqual(
       orderLanes([
-        lane("ready", "authored"),
-        lane("review", "authored"),
-        lane("unmapped", "fallback"),
+        readOnly("unmapped", "fallback"),
+        readOnly("pull-requests", "authored", ["pr-open"]),
+        writable("ready"),
+        readOnly("done", "authored", ["issue-closed", "pr-merged"]),
+        writable("review"),
       ]).map(({ id }) => id),
-      ["unmapped", "ready", "review"],
+      ["ready", "review", "pull-requests", "done", "unmapped"],
     );
+  });
+
+  it("folds the fallback lane and lanes of closed Items until the operator opens them", () => {
+    assert.isTrue(foldsByDefault(readOnly("unmapped", "fallback")));
+    assert.isTrue(foldsByDefault(readOnly("done", "authored", ["issue-closed", "pr-merged"])));
+    assert.isFalse(foldsByDefault(readOnly("pull-requests", "authored", ["pr-open", "pr-merged"])));
+    assert.isFalse(foldsByDefault(readOnly("backlog", "authored")));
+    assert.isFalse(foldsByDefault(writable("ready")));
   });
 });
 

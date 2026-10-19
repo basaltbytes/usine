@@ -788,6 +788,13 @@ describe("Operator", () => {
           overview.needsYou.map(({ _tag }) => _tag),
           ["ApprovalNeed", "BoardProjectionNeed", "PollFailureNeed", "PreflightFindingNeed"],
         );
+        // The approval names the Item its Run works on, as the card shows it.
+        const approval = overview.needsYou[0];
+        assert(approval?._tag === "ApprovalNeed");
+        assert.deepStrictEqual(
+          approval.item,
+          overview.projects[0]?.board.lanes[0]?.items[0]?.items[0],
+        );
 
         const detail = yield* operator.detail(runId, new ColdTranscriptRequest());
         assert.strictEqual(detail.eventDedupKey, snapshot.event.dedupKey);

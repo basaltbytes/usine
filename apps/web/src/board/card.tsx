@@ -9,8 +9,9 @@ import type {
   RunView,
 } from "@usine/orchestrator/operator";
 import { LabelBadge } from "@/components/label-badge";
-import { stateTone } from "@/components/status-badge";
+import { StateMark } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
@@ -19,6 +20,7 @@ import {
   failureMessage,
   itemKindLabel,
   moveProgressMessage,
+  runActionLabel,
   runActionProgress,
   runLineTimeTitle,
 } from "../operator-copy.ts";
@@ -60,19 +62,28 @@ export const runLineSince = (run: RunView): string | null => {
   }
 };
 
-/** The newest failure among the task's Runs that still request attention, or null when none does. */
-export const itemFailure = (item: BoardTaskView): string | null => {
-  const failedRun =
+/** A failed Run that still requests attention, with the message of its latest failed Attempt. */
+interface RunFailure {
+  readonly run: RunView;
+  readonly message: string;
+}
+
+/** The newest of the task's Runs whose failure still requests attention, or null when none does. */
+const failedRun = (item: BoardTaskView): RunFailure | null => {
+  const run =
     [...item.runs].reverse().find(({ canResolveFailure }) => canResolveFailure) ??
     (item.run?.canResolveFailure ? item.run : null);
-  if (failedRun === null) return null;
-  const attempts = failedRun.attempts;
+  if (run === null) return null;
+  const attempts = run.attempts;
   for (let index = attempts.length - 1; index >= 0; index -= 1) {
     const outcome = attempts[index]?.outcome;
-    if (outcome?._tag === "Failed") return failureMessage(outcome.failure);
+    if (outcome?._tag === "Failed") return { run, message: failureMessage(outcome.failure) };
   }
   return null;
 };
+
+/** The newest failure among the task's Runs that still request attention, or null when none does. */
+export const itemFailure = (item: BoardTaskView): string | null => failedRun(item)?.message ?? null;
 
 /** The labels a card shows: its lane's own labels are left out because the column names them. */
 export const cardLabels = (item: BoardTaskView, lane: BoardLaneView): ReadonlyArray<string> => {
@@ -93,12 +104,12 @@ const CardLabels = ({
   return (
     <div className="flex flex-wrap gap-1">
       {labels.slice(0, VISIBLE_LABELS).map((label) => (
-        <LabelBadge key={label} name={label} label={catalog.get(label)} className="text-xs" />
+        <LabelBadge key={label} name={label} label={catalog.get(label)} />
       ))}
       {hidden.length > 0 && (
         <Badge
           variant="outline"
-          className="text-xs text-muted-foreground"
+          className="text-muted-foreground tabular-nums"
           title={hidden.join(", ")}
           aria-label={`${hidden.length} more: ${hidden.join(", ")}`}
         >
@@ -113,27 +124,20 @@ const RunLine = ({ run }: { readonly run: RunView }) => {
   const now = useNow(30_000);
   const since = runLineSince(run);
   return (
-    <p className="flex min-w-0 items-center gap-2 whitespace-nowrap text-muted-foreground">
-      <span className="truncate font-mono">{run.loop}</span>
-      <span className={cn("flex shrink-0 items-center gap-1.5", stateTone(run.state))}>
-        {run.state === "Running" && (
-          <span
-            aria-hidden="true"
-            className="size-1.5 animate-pulse rounded-full bg-current motion-reduce:animate-none"
-          />
-        )}
-        {run.state}
-      </span>
+    <p className="flex min-w-0 items-center gap-1.5 text-xs whitespace-nowrap text-muted-foreground">
+      <StateMark state={run.state} className="mr-0.5" />
+      <span className="truncate text-foreground">{run.loop}</span>
+      <span className="shrink-0">{run.state}</span>
       {since !== null && (
         <time
-          className="shrink-0 tabular-nums"
+          className="shrink-0 font-mono tabular-nums"
           dateTime={since}
           title={runLineTimeTitle(run.state, since)}
         >
           {elapsedLabel(since, now)}
         </time>
       )}
-      <span className="truncate font-mono">{run.agent}</span>
+      <span className="ml-auto truncate pl-2">{run.agent}</span>
     </p>
   );
 };
@@ -182,60 +186,92 @@ const CardTitle = ({
   );
 };
 
+/** The failure that still needs the operator, with Retry when its Run can be retried. */
+const FailureNote = ({
+  failure,
+  action,
+}: {
+  readonly failure: RunFailure;
+  readonly action: RunActions | null;
+}) => (
+  <div className="flex flex-col items-start gap-1.5 rounded-md bg-destructive/8 px-2 py-1.5 text-xs text-destructive">
+    <p className="line-clamp-2 wrap-anywhere" title={failure.message}>
+      {failure.message}
+    </p>
+    {action !== null && failure.run.canRetry && !action.isPending && (
+      <Button
+        variant="outline"
+        size="xs"
+        className="relative z-10"
+        onClick={() => action.mutate({ runId: failure.run.id, request: { action: "retry" } })}
+      >
+        {runActionLabel.retry}
+      </Button>
+    )}
+  </div>
+);
+
 const CardFace = ({
   item,
   lane,
   catalog,
   openRun,
+  action,
   progress,
-  actionError,
 }: {
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
   readonly openRun: (runId: RunId) => void;
+  /** The card's Run actions, or null on the copy that follows a drag. */
+  readonly action: RunActions | null;
   readonly progress: string | null;
-  readonly actionError: string | null;
 }) => {
-  const failure = itemFailure(item);
+  const failure = failedRun(item);
   const run = currentRun(item);
+  const actionError = action?.error?.message ?? null;
   // Waiting and Failed Runs already show why the card needs the operator; a blocked Item does not.
   const unexplained = item.needsYou && !(run?.canApprove || run?.canResolveFailure);
   return (
-    <div className="flex min-w-0 flex-col gap-2 px-3">
-      <div className="flex flex-col gap-0.5">
-        <p className="flex flex-wrap gap-x-3 pr-7 text-muted-foreground">
-          {item.items.map((member) => (
+    <div className="flex min-w-0 flex-col gap-1.5 px-3">
+      <p className="flex flex-wrap gap-x-3 pr-6 font-mono text-xs text-muted-foreground">
+        {item.items.map((member) =>
+          member.kind === "pr" ? (
             <span key={member.itemKey}>
-              <span className="font-mono">#{member.number}</span> {itemKindLabel(member.kind)}
+              <span aria-hidden="true">#{member.number} PR</span>
+              <span className="sr-only">
+                {itemKindLabel(member.kind)} #{member.number}
+              </span>
             </span>
-          ))}
-        </p>
-        <CardTitle item={item} openRun={openRun} />
-      </div>
+          ) : (
+            <span key={member.itemKey}>
+              #{member.number} {itemKindLabel(member.kind)}
+            </span>
+          ),
+        )}
+      </p>
+      <CardTitle item={item} openRun={openRun} />
       <CardLabels labels={cardLabels(item, lane)} catalog={catalog} />
       {run !== null && <RunLine run={run} />}
       {progress !== null && (
-        <p role="status" className="text-muted-foreground">
+        <p role="status" className="text-xs text-muted-foreground">
           {progress}
         </p>
       )}
-      {failure !== null && (
-        <p className="line-clamp-2 text-destructive wrap-anywhere" title={failure}>
-          {failure}
-        </p>
+      {failure !== null && <FailureNote failure={failure} action={action} />}
+      {actionError !== null && (
+        <p className="text-xs text-destructive wrap-anywhere">{actionError}</p>
       )}
-      {actionError !== null && <p className="text-destructive wrap-anywhere">{actionError}</p>}
-      {item.conflicting && <p className="text-destructive">Conflicts with base</p>}
-      {unexplained && <p className="text-needs-you">Needs you</p>}
+      {item.conflicting && <p className="text-xs text-destructive">Conflicts with base</p>}
+      {unexplained && <p className="text-xs text-needs-you">Needs you</p>}
     </div>
   );
 };
 
 const cardClass = (needsYou: boolean) =>
   cn(
-    "relative gap-0 py-3 hover:ring-foreground/20 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
-    needsYou && "ring-needs-you/50 hover:ring-needs-you/70",
+    "relative gap-0 py-2.5 transition-[box-shadow] hover:ring-foreground/15 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring/70",
+    needsYou && "ring-needs-you/45 hover:ring-needs-you/65",
   );
 
 /** A Task card in its lane: draggable to another lane, with its actions behind one menu button. */
@@ -271,14 +307,14 @@ export const BoardCard = ({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn("relative", isDragging && "opacity-40")}
+      className={cn("group/task relative", isDragging && "opacity-40")}
     >
       <Card
         ref={setActivatorNodeRef}
         size="sm"
         className={cn(
           cardClass(item.needsYou),
-          draggable && "touch-none focus-visible:ring-2 focus-visible:ring-ring",
+          draggable && "touch-none focus-visible:ring-2 focus-visible:ring-ring/70",
         )}
         {...(draggable && attributes)}
         {...(draggable && listeners)}
@@ -288,8 +324,8 @@ export const BoardCard = ({
           lane={lane}
           catalog={catalog}
           openRun={openRun}
+          action={action}
           progress={progressMessage(action, phase)}
-          actionError={action.error?.message ?? null}
         />
       </Card>
       <CardMenu
@@ -298,7 +334,7 @@ export const BoardCard = ({
         moves={moves}
         openRun={openRun}
         action={action}
-        className="absolute top-2.5 right-2"
+        className="absolute top-1.5 right-1.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/task:opacity-100 [@media(hover:hover)]:group-focus-within/task:opacity-100 [@media(hover:hover)]:aria-expanded:opacity-100"
       />
     </div>
   );
@@ -314,14 +350,14 @@ export const DraggedCard = ({
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
 }) => (
-  <Card size="sm" className={cn(cardClass(item.needsYou), "cursor-grabbing shadow-lg")}>
+  <Card size="sm" className={cn(cardClass(item.needsYou), "cursor-grabbing shadow-raised")}>
     <CardFace
       item={item}
       lane={lane}
       catalog={catalog}
       openRun={() => {}}
+      action={null}
       progress={null}
-      actionError={null}
     />
   </Card>
 );

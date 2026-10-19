@@ -1,0 +1,476 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-19T07:56:47+00:00",
+  "title": "Design System: usine",
+  "extensions": {
+    "colorMeta": {
+      "crust": {
+        "role": "neutral",
+        "displayName": "Crust",
+        "canonical": "#11111b",
+        "purpose": "Text on mauve; scrim colour.",
+        "tonalRamp": [
+          "#11111b",
+          "#181825",
+          "#1e1e2e",
+          "#313244",
+          "#45475a",
+          "#6c7086",
+          "#a6adc8",
+          "#bac2de",
+          "#cdd6f4"
+        ]
+      },
+      "mantle": {
+        "role": "neutral",
+        "displayName": "Mantle",
+        "canonical": "#181825",
+        "purpose": "Page ground, sidebar, cards, inputs.",
+        "tonalRamp": [
+          "#11111b",
+          "#181825",
+          "#1e1e2e",
+          "#313244",
+          "#45475a",
+          "#6c7086",
+          "#a6adc8",
+          "#bac2de",
+          "#cdd6f4"
+        ]
+      },
+      "base": {
+        "role": "neutral",
+        "displayName": "Base",
+        "canonical": "#1e1e2e",
+        "purpose": "Inset work panel and sticky lane headings.",
+        "tonalRamp": [
+          "#11111b",
+          "#181825",
+          "#1e1e2e",
+          "#313244",
+          "#45475a",
+          "#6c7086",
+          "#a6adc8",
+          "#bac2de",
+          "#cdd6f4"
+        ]
+      },
+      "surface0": {
+        "role": "neutral",
+        "displayName": "Surface0",
+        "canonical": "#313244",
+        "purpose": "Popovers, menus, secondary buttons, active sidebar row.",
+        "tonalRamp": [
+          "#11111b",
+          "#181825",
+          "#1e1e2e",
+          "#313244",
+          "#45475a",
+          "#6c7086",
+          "#a6adc8",
+          "#bac2de",
+          "#cdd6f4"
+        ]
+      },
+      "surface1": {
+        "role": "neutral",
+        "displayName": "Surface1",
+        "canonical": "#45475a",
+        "purpose": "Hover on secondary buttons, menu focus, scrollbar thumb.",
+        "tonalRamp": [
+          "#11111b",
+          "#181825",
+          "#1e1e2e",
+          "#313244",
+          "#45475a",
+          "#6c7086",
+          "#a6adc8",
+          "#bac2de",
+          "#cdd6f4"
+        ]
+      },
+      "overlay0": {
+        "role": "neutral",
+        "displayName": "Overlay0",
+        "canonical": "#6c7086",
+        "purpose": "Graphics only: idle flow arrows, canceled and offline dots.",
+        "tonalRamp": [
+          "#11111b",
+          "#181825",
+          "#1e1e2e",
+          "#313244",
+          "#45475a",
+          "#6c7086",
+          "#a6adc8",
+          "#bac2de",
+          "#cdd6f4"
+        ]
+      },
+      "subtext0": {
+        "role": "neutral",
+        "displayName": "Subtext0",
+        "canonical": "#a6adc8",
+        "purpose": "Secondary text, counts, meta.",
+        "tonalRamp": [
+          "#11111b",
+          "#181825",
+          "#1e1e2e",
+          "#313244",
+          "#45475a",
+          "#6c7086",
+          "#a6adc8",
+          "#bac2de",
+          "#cdd6f4"
+        ]
+      },
+      "subtext1": {
+        "role": "neutral",
+        "displayName": "Subtext1",
+        "canonical": "#bac2de",
+        "purpose": "Sidebar text.",
+        "tonalRamp": [
+          "#11111b",
+          "#181825",
+          "#1e1e2e",
+          "#313244",
+          "#45475a",
+          "#6c7086",
+          "#a6adc8",
+          "#bac2de",
+          "#cdd6f4"
+        ]
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Text",
+        "canonical": "#cdd6f4",
+        "purpose": "Primary text.",
+        "tonalRamp": [
+          "#11111b",
+          "#181825",
+          "#1e1e2e",
+          "#313244",
+          "#45475a",
+          "#6c7086",
+          "#a6adc8",
+          "#bac2de",
+          "#cdd6f4"
+        ]
+      },
+      "mauve": {
+        "role": "primary",
+        "displayName": "Mauve",
+        "canonical": "#cba6f7",
+        "purpose": "The one action colour: primary buttons, focus, links, caret, selection.",
+        "tonalRamp": [
+          "#180031",
+          "#330b52",
+          "#512d74",
+          "#714d97",
+          "#936fbb",
+          "#b691e1",
+          "#dbb5ff",
+          "#ffdbff"
+        ]
+      },
+      "blue": {
+        "role": "secondary",
+        "displayName": "Blue",
+        "canonical": "#89b4fa",
+        "purpose": "Running, Pending, Queued Runs; active flow arrows.",
+        "tonalRamp": [
+          "#000039",
+          "#00205a",
+          "#1b3f7c",
+          "#3a60a0",
+          "#5a82c5",
+          "#7ba6eb",
+          "#9ecaff",
+          "#c3f0ff"
+        ]
+      },
+      "peach": {
+        "role": "secondary",
+        "displayName": "Peach",
+        "canonical": "#fab387",
+        "purpose": "Waiting Runs and Needs you.",
+        "tonalRamp": [
+          "#270000",
+          "#480e00",
+          "#6a2f00",
+          "#8d4f23",
+          "#b27046",
+          "#d79368",
+          "#feb78b",
+          "#ffdcaf"
+        ]
+      },
+      "red": {
+        "role": "secondary",
+        "displayName": "Red",
+        "canonical": "#f38ba8",
+        "purpose": "Failed Runs, errors, destructive actions.",
+        "tonalRamp": [
+          "#2d0007",
+          "#51001f",
+          "#75183c",
+          "#9a3b5a",
+          "#c05e7b",
+          "#e7809d",
+          "#ffa4c1",
+          "#ffc9e6"
+        ]
+      },
+      "green": {
+        "role": "secondary",
+        "displayName": "Green",
+        "canonical": "#a6e3a1",
+        "purpose": "Succeeded Runs and the live dot.",
+        "tonalRamp": [
+          "#001400",
+          "#003100",
+          "#155013",
+          "#387035",
+          "#599355",
+          "#7cb777",
+          "#9fdc9a",
+          "#c4ffbe"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "rgb(255 255 255 / 7%)",
+        "purpose": "Every border and card ring."
+      },
+      "input-stroke": {
+        "role": "neutral",
+        "displayName": "Input stroke",
+        "canonical": "rgb(255 255 255 / 10%)",
+        "purpose": "Input and outline-button stroke."
+      },
+      "sidebar-hairline": {
+        "role": "neutral",
+        "displayName": "Sidebar hairline",
+        "canonical": "rgb(255 255 255 / 6%)",
+        "purpose": "Sidebar borders."
+      },
+      "scrim": {
+        "role": "neutral",
+        "displayName": "Scrim",
+        "canonical": "rgb(17 17 27 / 72%)",
+        "purpose": "Backdrop under sheets and dialogs."
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Screen titles such as the Project name."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section and registry card titles."
+      },
+      "label-strong": {
+        "displayName": "Label strong",
+        "purpose": "Wordmark, sheet and alert titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Default UI text, buttons, menu items, card titles, lane names."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "Meta, Run lines, chips, counts, sidebar group names."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Item numbers, elapsed times, ids, code."
+      }
+    },
+    "shadows": [
+      {
+        "name": "raised",
+        "value": "0 8px 24px -6px rgb(0 0 0 / 50%), 0 2px 6px -2px rgb(0 0 0 / 35%)",
+        "purpose": "Menus, popovers, and the dragged card."
+      }
+    ],
+    "motion": [
+      {
+        "name": "control",
+        "value": "100ms ease",
+        "purpose": "Button and input colour, border, and ring changes."
+      },
+      {
+        "name": "menu",
+        "value": "100ms fade and 95% zoom in and out, 8px slide from the anchor side",
+        "purpose": "Dropdown menus and popovers."
+      },
+      {
+        "name": "running-pulse",
+        "value": "Tailwind animate-pulse, off under prefers-reduced-motion",
+        "purpose": "The state dot of a Running Run only."
+      },
+      {
+        "name": "sidebar",
+        "value": "200ms linear",
+        "purpose": "Sidebar collapse."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ],
+    "layout": {
+      "sidebarWidth": "232px",
+      "headerHeight": "48px",
+      "panelInset": "8px",
+      "laneWidth": "272px",
+      "laneGap": "12px",
+      "railWidth": "40px",
+      "gutter": "16px, 20px from md"
+    }
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "The one mauve action per context, such as Approve.",
+      "html": "<button class=\"ds-btn-primary\">Approve</button>",
+      "css": ".ds-btn-primary { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border-radius:6px; border:1px solid transparent; font:500 13px/20px 'Inter Variable', system-ui, sans-serif; transition: color .1s, background-color .1s, border-color .1s, box-shadow .1s; cursor:pointer; background:var(--primary,#cba6f7); color:var(--primary-foreground,#11111b); } .ds-btn-primary:hover { background:color-mix(in oklab, var(--primary,#cba6f7) 88%, transparent); } .ds-btn-primary:focus-visible { outline:none; box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 70%, transparent); } .ds-btn-primary:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "Secondary actions on cards and Needs you items, such as Retry or Discard leftovers.",
+      "html": "<button class=\"ds-btn-outline\">Discard leftovers</button>",
+      "css": ".ds-btn-outline { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border-radius:6px; border:1px solid transparent; font:500 13px/20px 'Inter Variable', system-ui, sans-serif; transition: color .1s, background-color .1s, border-color .1s, box-shadow .1s; cursor:pointer; background:color-mix(in oklab, var(--secondary,#313244) 50%, transparent); border-color:var(--input,rgb(255 255 255 / 10%)); color:var(--foreground,#cdd6f4); } .ds-btn-outline:hover { background:var(--secondary,#313244); } .ds-btn-outline:focus-visible { outline:none; box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 70%, transparent); } .ds-btn-outline:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Low-weight actions and icon buttons, such as Cancel Run.",
+      "html": "<button class=\"ds-btn-ghost\">Cancel Run</button>",
+      "css": ".ds-btn-ghost { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border-radius:6px; border:1px solid transparent; font:500 13px/20px 'Inter Variable', system-ui, sans-serif; transition: color .1s, background-color .1s, border-color .1s, box-shadow .1s; cursor:pointer; background:transparent; color:var(--foreground,#cdd6f4); } .ds-btn-ghost:hover { background:color-mix(in oklab, var(--muted,#313244) 70%, transparent); } .ds-btn-ghost:focus-visible { outline:none; box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 70%, transparent); } .ds-btn-ghost:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Destructive Button",
+      "kind": "button",
+      "refersTo": "button-destructive",
+      "description": "Irreversible actions; red text on a red tint, never a solid red fill.",
+      "html": "<button class=\"ds-btn-destructive\">Discard</button>",
+      "css": ".ds-btn-destructive { display:inline-flex; align-items:center; gap:6px; height:28px; padding:0 10px; border-radius:6px; border:1px solid transparent; font:500 13px/20px 'Inter Variable', system-ui, sans-serif; transition: color .1s, background-color .1s, border-color .1s, box-shadow .1s; cursor:pointer; background:color-mix(in oklab, var(--destructive,#f38ba8) 15%, transparent); color:var(--destructive,#f38ba8); } .ds-btn-destructive:hover { background:color-mix(in oklab, var(--destructive,#f38ba8) 25%, transparent); } .ds-btn-destructive:focus-visible { outline:none; box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 70%, transparent); } .ds-btn-destructive:active { transform: translateY(1px); }"
+    },
+    {
+      "name": "Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Single-line field on mantle with a 10% stroke and a mauve focus.",
+      "html": "<input class=\"ds-input\" placeholder=\"Filter lanes\" />",
+      "css": ".ds-input { height:28px; width:240px; padding:2px 8px; border-radius:6px; border:1px solid var(--input,rgb(255 255 255 / 10%)); background:var(--card,#181825); color:var(--foreground,#cdd6f4); caret-color:var(--primary,#cba6f7); font:400 13px/20px 'Inter Variable', system-ui, sans-serif; transition: border-color .1s, box-shadow .1s; } .ds-input::placeholder { color:var(--muted-foreground,#a6adc8); } .ds-input:focus-visible { outline:none; border-color:color-mix(in oklab, var(--ring,#cba6f7) 70%, transparent); box-shadow:0 0 0 2px color-mix(in oklab, var(--ring,#cba6f7) 25%, transparent); }"
+    },
+    {
+      "name": "Label Chip",
+      "kind": "chip",
+      "refersTo": "label-chip",
+      "description": "A GitHub label as a pill tinted in its own colour: text in the colour, border at 40%, fill at 12%.",
+      "html": "<span class=\"ds-chip\" style=\"--c:#0e8a16\">ready-for-agent</span> <span class=\"ds-chip\" style=\"--c:#d73a4a\">bug</span>",
+      "css": ".ds-chip { display:inline-flex; align-items:center; height:20px; padding:0 8px; border-radius:9999px; border:1px solid color-mix(in srgb, var(--c) 40%, transparent); background:color-mix(in srgb, var(--c) 12%, transparent); color:color-mix(in srgb, var(--c) 70%, white); font:500 12px/16px 'Inter Variable', system-ui, sans-serif; white-space:nowrap; }"
+    },
+    {
+      "name": "Sidebar",
+      "kind": "nav",
+      "refersTo": "sidebar",
+      "description": "Mantle column with the wordmark, Projects with Needs you counts, and Configuration.",
+      "html": "<nav class=\"ds-nav\"><div class=\"ds-nav-mark\">usine</div><div class=\"ds-nav-group\">Projects</div><a class=\"ds-nav-row ds-active\" href=\"#\">basaltbytes/usine<span class=\"ds-nav-count\">1</span></a><div class=\"ds-nav-group\">Configuration</div><a class=\"ds-nav-row\" href=\"#\">Loops</a></nav>",
+      "css": ".ds-nav { width:232px; padding:8px; background:var(--sidebar,#181825); color:var(--sidebar-foreground,#bac2de); font:400 13px/20px 'Inter Variable', system-ui, sans-serif; } .ds-nav-mark { padding:8px; font-size:14px; font-weight:600; letter-spacing:-0.01em; color:var(--foreground,#cdd6f4); } .ds-nav-group { padding:12px 8px 4px; font-size:12px; line-height:16px; color:var(--muted-foreground,#a6adc8); } .ds-nav-row { display:flex; align-items:center; height:32px; padding:0 8px; border-radius:6px; color:inherit; text-decoration:none; } .ds-nav-row:hover { background:color-mix(in oklab, var(--sidebar-accent,#313244) 60%, transparent); color:var(--foreground,#cdd6f4); } .ds-nav-row:focus-visible { outline:none; box-shadow:0 0 0 2px var(--sidebar-ring,#cba6f7); } .ds-active { background:var(--sidebar-accent,#313244); color:var(--foreground,#cdd6f4); font-weight:500; } .ds-nav-count { margin-left:auto; font-size:12px; font-weight:500; color:var(--needs-you,#fab387); font-variant-numeric:tabular-nums; }"
+    },
+    {
+      "name": "Task Card",
+      "kind": "card",
+      "refersTo": "task-card",
+      "description": "A Task in its lane: mono Item numbers, two-line title, labels, and the Run line with its state dot.",
+      "html": "<article class=\"ds-card\"><p class=\"ds-card-ids\">#304 Issue</p><h3 class=\"ds-card-title\">Document the public API of @usine/config in TSDoc</h3><p class=\"ds-run\"><span class=\"ds-dot\"></span><span class=\"ds-run-loop\">start-dev</span><span>Waiting</span><time class=\"ds-mono\">3m</time><span class=\"ds-run-agent\">developer</span></p></article>",
+      "css": ".ds-card { width:272px; display:flex; flex-direction:column; gap:6px; padding:10px 12px; border-radius:8px; background:var(--card,#181825); color:var(--card-foreground,#cdd6f4); box-shadow:0 0 0 1px var(--border,rgb(255 255 255 / 7%)); font:400 13px/20px 'Inter Variable', system-ui, sans-serif; transition: box-shadow .15s; } .ds-card:hover { box-shadow:0 0 0 1px color-mix(in oklab, var(--foreground,#cdd6f4) 15%, transparent); } .ds-card:focus-within { box-shadow:0 0 0 2px color-mix(in oklab, var(--ring,#cba6f7) 70%, transparent); } .ds-card-ids, .ds-mono { margin:0; font:400 12px/16px 'JetBrains Mono Variable', ui-monospace, monospace; color:var(--muted-foreground,#a6adc8); font-variant-numeric:tabular-nums; } .ds-card-title { margin:0; font-size:13px; line-height:1.375; font-weight:500; } .ds-run { margin:0; display:flex; align-items:center; gap:6px; font-size:12px; line-height:16px; color:var(--muted-foreground,#a6adc8); white-space:nowrap; } .ds-dot { width:6px; height:6px; margin-right:2px; border-radius:9999px; background:var(--run-waiting,#fab387); } .ds-run-loop { color:var(--foreground,#cdd6f4); } .ds-run-agent { margin-left:auto; }"
+    },
+    {
+      "name": "Needs You Item",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "A peach-tinted row asking for the operator, with its actions at the right.",
+      "html": "<div class=\"ds-need\"><div class=\"ds-need-text\"><span class=\"ds-need-title\">start-dev waits for approval</span><span class=\"ds-need-sub\">#304 Document the public API of @usine/config in TSDoc</span></div><button class=\"ds-need-btn\">Approve</button></div>",
+      "css": ".ds-need { display:flex; align-items:center; gap:12px; min-height:56px; padding:10px 14px; border-radius:8px; border:1px solid color-mix(in oklab, var(--needs-you,#fab387) 25%, transparent); background:color-mix(in oklab, var(--needs-you,#fab387) 5%, transparent); font:400 13px/20px 'Inter Variable', system-ui, sans-serif; color:var(--foreground,#cdd6f4); transition: background-color .15s; } .ds-need:hover { background:color-mix(in oklab, var(--needs-you,#fab387) 8%, transparent); } .ds-need-text { display:flex; flex-direction:column; gap:2px; flex:1; } .ds-need-title { font-weight:500; } .ds-need-sub { font-size:12px; line-height:16px; opacity:.75; } .ds-need-btn { height:28px; padding:0 10px; border:0; border-radius:6px; background:var(--primary,#cba6f7); color:var(--primary-foreground,#11111b); font:500 13px/20px 'Inter Variable', system-ui, sans-serif; cursor:pointer; } .ds-need-btn:focus-visible { outline:none; box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 70%, transparent); }"
+    },
+    {
+      "name": "Flow Arrow",
+      "kind": "custom",
+      "refersTo": null,
+      "description": "The arrow between two authored lanes, named after the Loops at work on the left lane's Tasks.",
+      "html": "<p class=\"ds-flow\"><span>start-dev</span><svg viewBox=\"0 0 22 8\" width=\"22\" height=\"8\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M0.5 4h18M15.5 1l3 3-3 3\"/></svg></p>",
+      "css": ".ds-flow { margin:0; display:inline-flex; align-items:center; gap:6px; font:400 12px/16px 'Inter Variable', system-ui, sans-serif; color:var(--run-active,#89b4fa); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "A Linear-grade kanban on Catppuccin Mocha, with a floor plan between the bays",
+    "overview": "**Creative North Star: \"A Linear-grade kanban on Catppuccin Mocha, with a floor plan between the bays\"**\n\nThe operator UI is a dense, quiet work tool held to the craft of Linear, the Vercel dashboard, and Raycast. It reads as a standard kanban: a dark sidebar, one inset work panel, lanes of cards. It improves on the stock shadcn look by being cleaner, with fewer pills, fewer boxes on boxes, one type scale, and one action colour.\n\nThe factory idea appears only where it carries information. Thin arrows between authored lanes name the Loops at work on the left lane's Tasks, and an empty lane shows a dashed outline. The rest of the screen has no factory imagery, no logo, and no ornament.\n\nThe world is dark only. The `.dark` block in `src/index.css` is what ships; `:root` holds a Catppuccin Latte fallback that no screen is designed against.",
+    "keyCharacteristics": [
+      "Three grounds: mantle for the page, sidebar, and cards; base for the work panel; surface0 for anything that floats.",
+      "1px white hairlines at 7% instead of filled boxes.",
+      "Mauve is the only action colour; state colours belong to Run state.",
+      "Inter on a five-size scale, body at 13px; JetBrains Mono only for machine text.",
+      "Flat at rest; one shadow for things that float."
+    ],
+    "rules": [
+      {
+        "name": "The One Action Colour Rule",
+        "body": "Mauve marks what the operator can act on or has focused. State never borrows mauve, and actions never borrow a state colour except destructive red.",
+        "section": "colors"
+      },
+      {
+        "name": "The State Tone Rule",
+        "body": "Blue running, peach waiting and Needs you, red failed, green succeeded, overlay0 canceled. A state is shown as a 6px dot in its tone next to the state's word, so colour is never the only signal.",
+        "section": "colors"
+      },
+      {
+        "name": "The Five Sizes Rule",
+        "body": "Text is 12, 13, 14, 16, or 20px. `@theme` resets `--text-*`, so any other Tailwind size generates nothing.",
+        "section": "typography"
+      },
+      {
+        "name": "The Machine Text Rule",
+        "body": "JetBrains Mono is for ids, numbers, times, and code. Headings and labels are Inter.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat At Rest Rule",
+        "body": "Nothing on the Board casts a shadow unless it floats. Hover on a card raises its ring from 7% to 15% white, not a shadow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** put new screens in the base work panel on the mantle ground, with mantle cards and surface0 popovers.",
+      "**Do** use mauve only for actions, focus, links, and selection.",
+      "**Do** show state as a 6px dot in the state's tone beside the state's word; pulse the dot only while Running, and not under reduced motion.",
+      "**Do** keep text on the 12/13/14/16/20 scale and use mono only for ids, numbers, times, and code.",
+      "**Do** separate surfaces with 7% white hairlines and keep them flat; use the Raised shadow only for menus, popovers, and dragged items.",
+      "**Do** render GitHub labels as tinted pills in their own colour."
+    ],
+    "donts": [
+      "**Don't** add a second accent colour or use a state colour for decoration.",
+      "**Don't** use overlay0 for text; it fails contrast on these grounds.",
+      "**Don't** wrap Run states in pill badges or nest a filled box inside another filled box.",
+      "**Don't** set headings in mono or use uppercase, letter-spaced labels above headings.",
+      "**Don't** add factory imagery that carries no information; the floor plan is limited to flow arrows and dashed empty lanes.",
+      "**Don't** design screens against the light `:root` palette; it is a fallback."
+    ]
+  }
+}

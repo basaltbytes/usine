@@ -246,11 +246,11 @@ export const RunDrawer = ({
                 />
               </TabsContent>
               <TabsContent value="task" className="min-h-0 overflow-y-auto p-4 sm:p-6">
-                <h3 className="mb-3 font-heading text-sm">Task</h3>
+                <h3 className="mb-3 text-md font-semibold">Task</h3>
                 <Markdown className="max-w-prose">{run.task}</Markdown>
               </TabsContent>
               <TabsContent value="event" className="min-h-0 overflow-y-auto p-4 sm:p-6">
-                <h3 className="mb-3 font-heading text-sm">Triggering Event</h3>
+                <h3 className="mb-3 text-md font-semibold">Triggering Event</h3>
                 <p className="mb-3 font-mono text-muted-foreground wrap-anywhere">
                   {detail.data.eventDedupKey}
                 </p>
@@ -262,7 +262,7 @@ export const RunDrawer = ({
                 <p className="mb-4 font-mono text-muted-foreground wrap-anywhere">Run {run.id}</p>
                 {meters.length > 0 && (
                   <div className="mb-4 space-y-2">
-                    <h3 className="font-heading text-sm">Account rate windows</h3>
+                    <h3 className="text-md font-semibold">Account rate windows</h3>
                     <div className="flex flex-wrap gap-2">
                       {meters.map((meter) => (
                         <Badge key={meter.pool} variant="outline" className="font-mono">
@@ -319,7 +319,7 @@ export const RunDrawer = ({
                 </ItemGroup>
                 {run.resultMessage !== null && (
                   <section className="mt-6">
-                    <h3 className="mb-3 font-heading text-sm">Result</h3>
+                    <h3 className="mb-3 text-md font-semibold">Result</h3>
                     <Markdown className="max-w-prose">{run.resultMessage}</Markdown>
                   </section>
                 )}

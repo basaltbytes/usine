@@ -135,6 +135,7 @@ const overview = new ReadyOverview({
       repository: repositoryName,
       runId,
       loop: loopName,
+      item: null,
     }),
   ],
 });

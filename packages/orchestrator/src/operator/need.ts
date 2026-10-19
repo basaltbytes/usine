@@ -9,7 +9,7 @@ import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleFailure } from "../schedule-triggers.ts";
 import { FailureView } from "./attempt.ts";
-import { BoardProjectionError } from "./board.ts";
+import { BoardItemLink, BoardProjectionError } from "./board.ts";
 
 /** An operator approval is required before this Run can proceed. */
 export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
@@ -19,6 +19,9 @@ export class ApprovalNeed extends Schema.TaggedClass<ApprovalNeed>(
   repository: RepositoryName,
   runId: RunId,
   loop: LoopName,
+  /** The Item the Run would work on, as its Board card shows it; null when no card on the
+   * Project's Board holds that Item, such as for a schedule Run. */
+  item: Schema.NullOr(BoardItemLink),
 }) {}
 
 /**
