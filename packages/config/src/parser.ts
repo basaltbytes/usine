@@ -67,9 +67,13 @@ class AgentFrontmatter extends Schema.Class<AgentFrontmatter>("@usine/config/Age
   harness: Harness,
   model: ModelId,
   effort: Effort,
-  parent_model: Schema.OptionFromOptionalKey(ModelId),
-  parent_effort: Schema.OptionFromOptionalKey(Effort),
+  parentModel: Schema.OptionFromOptionalKey(ModelId),
+  parentEffort: Schema.OptionFromOptionalKey(Effort),
 }) {}
+
+const AuthoredAgentFrontmatter = AgentFrontmatter.pipe(
+  Schema.encodeKeys({ parentModel: "parent_model", parentEffort: "parent_effort" }),
+);
 
 interface Interpolation {
   readonly source: Source;
@@ -216,7 +220,7 @@ const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
       const name = yield* agentName(file);
       const markdown = yield* splitMarkdown(file, source);
       const yaml = yield* parseYaml(file, markdown.yaml);
-      const frontmatter = yield* Schema.decodeUnknownEffect(AgentFrontmatter)(yaml, {
+      const frontmatter = yield* Schema.decodeUnknownEffect(AuthoredAgentFrontmatter)(yaml, {
         onExcessProperty: "error",
       }).pipe(Effect.mapError((error) => schemaError(file, error)));
       const persona = yield* Schema.decodeUnknownEffect(AgentPersona)(markdown.body).pipe(
@@ -227,8 +231,8 @@ const parseAgentFile = Effect.fn("ConfigParser.parseAgentFile")(
         harness: frontmatter.harness,
         model: frontmatter.model,
         effort: frontmatter.effort,
-        parentModel: frontmatter.parent_model,
-        parentEffort: frontmatter.parent_effort,
+        parentModel: frontmatter.parentModel,
+        parentEffort: frontmatter.parentEffort,
         persona,
       });
     }),

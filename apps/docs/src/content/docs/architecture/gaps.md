@@ -20,7 +20,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 ## Configuration
 
 - [#40][]: the UI has no configuration form or raw editor, and the surgical YAML writer has no production caller ([writer.ts][]).
-- [#281][]: `AgentFrontmatter` declares `parent_model` and `parent_effort` as snake_case fields and copies them into camelCase by hand, instead of renaming them with `Schema.encodeKeys` ([parser.ts:44][], [parser.ts:203][]).
 - [#331][]: a reload refuses any change to `workers` or `webhooks`, so changing a Worker's `max_concurrent_attempts` still needs a restart.
 - [#332][]: a reload doesn't preflight the harness of a new or changed Agent; its first Attempt fails with `AgentFailure` instead.
 
@@ -118,8 +117,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [up.ts:122]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L122
 [cli.ts:23]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/cli.ts#L23
 [writer.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/yaml/writer.ts
-[parser.ts:44]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L44
-[parser.ts:203]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L203
 [operator.ts:556]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/operator/operator.ts#L556
 [polling.ts:222]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/polling.ts#L222
 [store.ts:284]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/store/store.ts#L284
@@ -185,7 +182,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#277]: https://github.com/basaltbytes/usine/issues/277
 [#278]: https://github.com/basaltbytes/usine/issues/278
 [#279]: https://github.com/basaltbytes/usine/issues/279
-[#281]: https://github.com/basaltbytes/usine/issues/281
 [#331]: https://github.com/basaltbytes/usine/issues/331
 [#332]: https://github.com/basaltbytes/usine/issues/332
 [#333]: https://github.com/basaltbytes/usine/issues/333
