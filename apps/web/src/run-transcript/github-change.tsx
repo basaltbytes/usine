@@ -6,12 +6,12 @@ import { LabelBadge } from "@/components/label-badge";
 import { timestampLabel } from "../operator-copy.ts";
 import type { GitHubChangeRow, LabelChanges } from "./document/model.ts";
 
-const reviewed: Record<ReviewedView["state"], (item: ReactNode) => ReactNode> = {
+const reviewed = {
   APPROVED: (item) => <>Approved {item}</>,
   CHANGES_REQUESTED: (item) => <>Requested changes on {item}</>,
   COMMENTED: (item) => <>Reviewed {item}</>,
   DISMISSED: (item) => <>Reviewed {item}, since dismissed</>,
-};
+} satisfies Record<ReviewedView["state"], (item: ReactNode) => ReactNode>;
 
 /** The Item number in a comment or review URL, linking to that comment or review. */
 const ItemLink = ({ url, what }: { readonly url: string; readonly what: string }) => {
