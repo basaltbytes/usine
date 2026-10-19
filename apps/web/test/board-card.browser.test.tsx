@@ -32,6 +32,8 @@ const Board = () => {
 };
 
 const lane = (name: string) => page.getByLabelText(`${name} lane`);
+/** Done holds only closed Items, so it opens folded into a rail. */
+const openDone = () => lane("Done").getByRole("button", { name: "Done 1" }).click();
 const actions = (number: number) =>
   page.getByRole("button", { name: `Actions for issue #${number}`, exact: true });
 const cardOf = (title: RegExp) => {
@@ -101,9 +103,47 @@ it("heads each lane with the labels in their GitHub colors and the Item states t
   expect(
     getComputedStyle(sources("Review").getByText("review", { exact: true }).element()).borderColor,
   ).toBe("rgba(217, 63, 11, 0.4)");
+  await openDone();
   const closed = sources("Done").getByText("issue-closed", { exact: true }).element();
   expect(closed.getAttribute("style")).toBeNull();
   expect(closed.classList).toContain("text-muted-foreground");
+});
+
+it("puts the lanes that accept moves first and folds the lane of closed Items into a rail", async () => {
+  const names = [...document.querySelectorAll("section[aria-label$=' lane']")].map((section) =>
+    section.getAttribute("aria-label"),
+  );
+  expect(names).toEqual([
+    "Backlog lane",
+    "Ready lane",
+    "In progress lane",
+    "Review lane",
+    "Done lane",
+  ]);
+  const rail = lane("Done").getByRole("button", { name: "Done 1" });
+  await expect.element(rail).toHaveAttribute("aria-expanded", "false");
+  expect(lane("Done").element().getBoundingClientRect().width).toBeLessThanOrEqual(40);
+  await openDone();
+  await expect.element(lane("Done").getByText(/^Show the salvage branch/u)).toBeVisible();
+  await lane("Done").getByRole("button", { name: "Fold Done", exact: true }).click();
+  await expect.element(lane("Done").getByRole("button", { name: "Done 1" })).toBeVisible();
+});
+
+it("shows a card's menu button on hover or focus and while its menu is open", async () => {
+  const opacity = () => getComputedStyle(actions(12).element()).opacity;
+  await userEvent.hover(page.getByRole("heading", { level: 1 }));
+  await expect.poll(opacity).toBe("0");
+  await userEvent.hover(page.elementLocator(cardOf(/^Document the cycle budget/u)));
+  await expect.poll(opacity).toBe("1");
+  await userEvent.unhover(page.elementLocator(cardOf(/^Document the cycle budget/u)));
+  await expect.poll(opacity).toBe("0");
+  actions(12).element().focus();
+  await expect.poll(opacity).toBe("1");
+  await userEvent.keyboard("{Enter}");
+  await expect.element(page.getByRole("menu")).toBeVisible();
+  // Focus is in the menu now, away from the card and its button.
+  expect(actions(12).element().matches(":focus-within, :hover")).toBe(false);
+  await expect.poll(opacity).toBe("1");
 });
 
 it("shows the number and kind, a title clamped to two lines, and only labels the lane does not name", async () => {
@@ -132,7 +172,14 @@ const markAnimation = (row: HTMLElement) => {
 
 it("times a running Run from its current Attempt, on one line with a pulsing mark", async () => {
   const running = cardOf(/^Redesign the Board/u);
-  expect(running.textContent).toContain("#9 Issue#31 Pull request");
+  expect(running.textContent).toContain("#9 Issue#31 PR");
+  await expect
+    .element(page.elementLocator(running).getByText("Pull request #31", { exact: true }))
+    .toBeInTheDocument();
+  const ids = running.querySelector("p");
+  expect(ids?.getBoundingClientRect().height).toBeLessThanOrEqual(
+    Number.parseFloat(getComputedStyle(ids ?? running).lineHeight) + 1,
+  );
   const row = runLine(running, "Running");
   expect(row.textContent).toBe("implementRunning6mdeveloper");
   const state = page.elementLocator(running).getByText("Running", { exact: true }).element();
@@ -184,6 +231,7 @@ it("draws the flow between adjacent authored label lanes, named after the Loops 
 });
 
 it("leaves canceled and succeeded Runs off the card", async () => {
+  await openDone();
   for (const card of [cardOf(/^Cache the label catalog/u), cardOf(/^Show the salvage branch/u)]) {
     expect(card.querySelector("time")).toBeNull();
     expect(card.textContent).not.toMatch(/Canceled|Succeeded|implement/u);

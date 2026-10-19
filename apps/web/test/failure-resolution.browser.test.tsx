@@ -3,7 +3,7 @@ import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/rea
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
-import { ItemKey } from "@usine/core/item";
+import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -12,6 +12,7 @@ import {
   AgentFailureView,
   ApprovalNeed,
   AttemptView,
+  BoardItemLink,
   BoardView,
   FactoryOverview,
   FailedAttemptView,
@@ -85,6 +86,13 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
     repository: RepositoryName.make("another/project"),
     runId: RunId.make("other-run"),
     loop,
+    item: new BoardItemLink({
+      itemKey: ItemKey.make("github:another/project:7"),
+      kind: "issue",
+      number: ItemNumber.make(7),
+      title: "Write the release notes",
+      url: "https://github.com/another/project/issues/7",
+    }),
   });
   const before = new ReadyOverview({
     projects: [
@@ -165,7 +173,13 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
     await expect
       .element(needs.getByRole("button", { name: /AgentFailure/ }))
       .not.toBeInTheDocument();
-    await expect.element(needs.getByRole("button", { name: /Approval required/ })).toBeVisible();
+    await expect
+      .element(
+        needs.getByRole("button", {
+          name: /implement waits for approval.*#7 Write the release notes/,
+        }),
+      )
+      .toBeVisible();
     await expect.element(needs.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
     await expect
       .element(needs.getByRole("button", { name: "Cancel Run", exact: true }))

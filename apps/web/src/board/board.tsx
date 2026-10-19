@@ -41,12 +41,12 @@ import { BoardColumn } from "./column.tsx";
 import { laneFlows } from "./flow.tsx";
 import { type BoardMoveProgress, useBoardMoves } from "./moves.ts";
 
-/** The fallback lane collects every unrouted Item and comes first, so a drag into an
- * authored lane does not cross every column. Authored and proposed lanes keep their
- * configured order. */
+/** The lanes that accept moves come first, so work in flight opens the Board; the read-only lanes
+ * follow. Each group keeps its configured order, and the fallback lane stays last. */
 export const orderLanes = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<BoardLaneView> => [
+  ...lanes.filter(({ _tag }) => _tag === "WritableBoardLane"),
+  ...lanes.filter(({ _tag, origin }) => _tag !== "WritableBoardLane" && origin !== "fallback"),
   ...lanes.filter(({ origin }) => origin === "fallback"),
-  ...lanes.filter(({ origin }) => origin !== "fallback"),
 ];
 
 /** A drop lands on a lane or on one of its cards; either way the lane is the target. */
@@ -100,7 +100,8 @@ const UncardedRuns = ({
   readonly runs: ReadonlyArray<RunView>;
   readonly openRun: (runId: RunId) => void;
 }) => (
-  <Card className="max-w-5xl">
+  // Pinned to the left edge of the Board's scroll area, at most as wide as what it shows.
+  <Card className="sticky left-4 w-[min(64rem,calc(100cqw-2rem))] md:left-5 md:w-[min(64rem,calc(100cqw-2.5rem))]">
     <CardHeader>
       <CardTitle>Runs without a card</CardTitle>
       <CardDescription>
@@ -194,8 +195,8 @@ export const ProjectBoard = ({
     if (lane !== undefined) moveItem(active.item, lane);
   };
   return (
-    <div className="flex flex-col gap-4 px-4 pt-5 pb-2 md:px-5">
-      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+    <div className="flex min-h-96 flex-1 flex-col gap-4 pt-5">
+      <header className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 md:px-5">
         <h1 className="text-xl font-semibold wrap-anywhere">{project.repository}</h1>
         <p className="text-sm text-muted-foreground tabular-nums">
           {lanes.length} lane{lanes.length === 1 ? "" : "s"}, {itemCount} item
@@ -204,7 +205,7 @@ export const ProjectBoard = ({
         {project.status === "needs-you" && <NeedsYouBadge />}
       </header>
       {project.board.lanes.some(({ origin }) => origin === "proposed") && (
-        <p className="max-w-3xl text-muted-foreground">
+        <p className="mx-4 max-w-3xl text-muted-foreground md:mx-5">
           Proposed lanes are read-only. To enable moves, configure this project’s lanes in{" "}
           <code>repos[].lanes</code> in <code>usine.yaml</code> with the labels the Board may
           exchange, then reload the configuration from Configuration &gt; Loops.
@@ -212,11 +213,12 @@ export const ProjectBoard = ({
       )}
       {project.board.failures.length > 0 && (
         <ErrorAlert
-          className="max-w-3xl"
+          className="mx-4 max-w-3xl md:mx-5"
           title={`${project.board.failures.length} Item projection${project.board.failures.length === 1 ? " was" : "s were"} quarantined`}
           message={project.board.failures.map((failure) => failure.message).join("\n")}
         />
       )}
+      {error !== null && <ErrorAlert className="mx-4 max-w-3xl md:mx-5" message={error.message} />}
       <DndContext
         sensors={sensors}
         collisionDetection={dropCollision}
@@ -226,28 +228,33 @@ export const ProjectBoard = ({
         onDragCancel={endDrag}
       >
         <div
-          className="-mx-4 flex gap-3 overflow-x-auto px-4 pt-1 pb-4 overscroll-x-contain md:-mx-5 md:px-5"
+          className="@container min-h-0 flex-1 overflow-auto overscroll-contain"
           aria-label={`${project.repository} project board`}
         >
-          {lanes.map((lane) => (
-            <BoardColumn
-              key={lane.id}
-              lane={lane}
-              lanes={lanes}
-              flow={flows.get(lane.id)}
-              catalog={catalog}
-              targeted={
-                active !== null &&
-                over === lane.id &&
-                lane.id !== active.lane.id &&
-                lane._tag === "WritableBoardLane"
-              }
-              pending={pending}
-              moves={moves}
-              openRun={openRun}
-              onMove={moveItem}
-            />
-          ))}
+          <div className="flex w-max min-w-full flex-col gap-6 px-4 pb-4 md:px-5">
+            <div className="flex gap-3">
+              {lanes.map((lane) => (
+                <BoardColumn
+                  key={lane.id}
+                  lane={lane}
+                  lanes={lanes}
+                  flow={flows.get(lane.id)}
+                  catalog={catalog}
+                  targeted={
+                    active !== null &&
+                    over === lane.id &&
+                    lane.id !== active.lane.id &&
+                    lane._tag === "WritableBoardLane"
+                  }
+                  pending={pending}
+                  moves={moves}
+                  openRun={openRun}
+                  onMove={moveItem}
+                />
+              ))}
+            </div>
+            {uncarded.length > 0 && <UncardedRuns runs={uncarded} openRun={openRun} />}
+          </div>
         </div>
         <DragOverlay>
           {active !== null && (
@@ -255,8 +262,6 @@ export const ProjectBoard = ({
           )}
         </DragOverlay>
       </DndContext>
-      {error !== null && <ErrorAlert className="max-w-3xl" message={error.message} />}
-      {uncarded.length > 0 && <UncardedRuns runs={uncarded} openRun={openRun} />}
     </div>
   );
 };

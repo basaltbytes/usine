@@ -97,9 +97,9 @@ export const needCopy = (need: NeedView): NeedCopy =>
       repository: ask.repository,
       runId: null,
     }),
-    ApprovalNeed: ({ loop, repository, runId }) => ({
-      title: "Approval required",
-      detail: `${loop} is waiting to run.`,
+    ApprovalNeed: ({ loop, repository, runId, item }) => ({
+      title: `${loop} waits for approval`,
+      detail: item === null ? "Open the Run to read its task." : `#${item.number} ${item.title}`,
       repository,
       runId,
     }),
@@ -141,7 +141,7 @@ export const needCopy = (need: NeedView): NeedCopy =>
     }),
     UnconfiguredWorkerNeed: ({ worker, attempts }) => ({
       title: "Worker not configured",
-      detail: `usine.yaml no longer declares Worker ${worker}, so startup doesn't reconcile its ${attempts} recorded ${attempts === 1 ? "Attempt" : "Attempts"} and any checkout they left stays on it. Declare the Worker again and restart usine up, or discard the leftovers to stop tracking them.`,
+      detail: `usine.yaml no longer declares Worker ${worker}, so startup doesn't reconcile its ${attempts} recorded ${attempts === 1 ? "Attempt" : "Attempts"}. Declare the Worker again and restart usine up, or discard the leftovers.`,
       repository: null,
       runId: null,
     }),

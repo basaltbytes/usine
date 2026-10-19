@@ -18,6 +18,7 @@ export const UnconfiguredWorkerAsk = ({ need }: { readonly need: UnconfiguredWor
   return (
     <NeedItem
       copy={needCopy(need)}
+      fullDetail
       error={discard.isError ? discard.error.message : null}
       actions={
         <>

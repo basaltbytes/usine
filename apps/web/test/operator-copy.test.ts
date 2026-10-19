@@ -159,6 +159,6 @@ describe("unconfigured Worker copy in Needs you", () => {
     assert.include(copy.detail, "114 recorded Attempts");
     assert.include(copy.detail, "Declare the Worker again");
     assert.include(copy.detail, "discard the leftovers");
-    assert.include(needCopy(need(1)).detail, "1 recorded Attempt and");
+    assert.include(needCopy(need(1)).detail, "1 recorded Attempt.");
   });
 });

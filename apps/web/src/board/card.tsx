@@ -235,11 +235,20 @@ const CardFace = ({
   return (
     <div className="flex min-w-0 flex-col gap-1.5 px-3">
       <p className="flex flex-wrap gap-x-3 pr-6 font-mono text-xs text-muted-foreground">
-        {item.items.map((member) => (
-          <span key={member.itemKey}>
-            #{member.number} {itemKindLabel(member.kind)}
-          </span>
-        ))}
+        {item.items.map((member) =>
+          member.kind === "pr" ? (
+            <span key={member.itemKey}>
+              <span aria-hidden="true">#{member.number} PR</span>
+              <span className="sr-only">
+                {itemKindLabel(member.kind)} #{member.number}
+              </span>
+            </span>
+          ) : (
+            <span key={member.itemKey}>
+              #{member.number} {itemKindLabel(member.kind)}
+            </span>
+          ),
+        )}
       </p>
       <CardTitle item={item} openRun={openRun} />
       <CardLabels labels={cardLabels(item, lane)} catalog={catalog} />
@@ -298,7 +307,7 @@ export const BoardCard = ({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Translate.toString(transform), transition }}
-      className={cn("relative", isDragging && "opacity-40")}
+      className={cn("group/task relative", isDragging && "opacity-40")}
     >
       <Card
         ref={setActivatorNodeRef}
@@ -325,7 +334,7 @@ export const BoardCard = ({
         moves={moves}
         openRun={openRun}
         action={action}
-        className="absolute top-1.5 right-1.5"
+        className="absolute top-1.5 right-1.5 transition-opacity [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover/task:opacity-100 [@media(hover:hover)]:group-focus-within/task:opacity-100 [@media(hover:hover)]:aria-expanded:opacity-100"
       />
     </div>
   );
