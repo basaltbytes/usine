@@ -241,13 +241,33 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
               closedSince: DateTime.formatIso(since),
             }),
         });
+        // The state leaves Open before anything else runs, so no request reads a port the client no longer holds.
+        const closedNow = (reason: string) =>
+          DateTime.now.pipe(
+            Effect.flatMap((since) =>
+              Ref.set(state, {
+                _tag: "Closed",
+                generation,
+                closed: new GatewayForwardClosed({
+                  gateway,
+                  generation: generation.number,
+                  since,
+                  reason,
+                }),
+              }),
+            ),
+          );
         return yield* Effect.raceFirst(
           handle.exitCode.pipe(
             Effect.flatMap((code) => reported(Number(code))),
             Effect.catch((error) => Effect.succeed(`lost the SSH client: ${error.message}`)),
+            Effect.tap(closedNow),
             Effect.map(exited),
           ),
-          Deferred.await(generation.replace).pipe(Effect.as(REPLACED)),
+          Deferred.await(generation.replace).pipe(
+            Effect.andThen(closedNow("replaced at a request's demand")),
+            Effect.as(REPLACED),
+          ),
         );
       }),
     ).pipe(
