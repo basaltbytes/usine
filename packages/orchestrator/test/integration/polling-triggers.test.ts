@@ -119,7 +119,7 @@ const makeInstance = (repository: RepositoryName, label: string): LoadedInstance
 
 const runtimeLayer = (directory: InstanceDirectory, app: GitHubApp["Service"]) => {
   const executor = Layer.succeed(StepExecutor)({
-    workers: [WorkerName.make("local")],
+    workers: Effect.succeed([WorkerName.make("local")]),
     isLive: () => Effect.succeed(false),
     outcome: () => Effect.succeed(Option.none()),
     recover: () => Effect.void,

@@ -35,6 +35,7 @@ it("reloads the configuration from the Loops page and shows what changed or why 
     agents: noChanges,
     labels: noChanges,
     repos: noChanges,
+    workers: noChanges,
     settingsChanged: false,
     operatorChanged: false,
     quarantinedLoops: [],

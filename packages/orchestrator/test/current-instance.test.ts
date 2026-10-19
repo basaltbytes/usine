@@ -170,24 +170,41 @@ describe("CurrentInstance", () => {
     ),
   );
 
-  it.live(
-    "rejects a reload whose workers block changed, because Workers change only at startup",
-    () =>
-      withFolder((root) =>
-        Effect.gen(function* () {
-          const instances = yield* CurrentInstance;
-          const running = yield* instances.get;
-          yield* writeInstanceFiles(root, [
-            ["usine.yaml", usineYaml(2)],
-            ["loops/triage.md", loopFile("developer")],
-          ]);
-          const failure = yield* Effect.flip(instances.reload);
-          assert(failure._tag === "RestartRequiredError", failure._tag);
-          assert.deepStrictEqual(failure.blocks, ["workers"]);
-          assert.include(failure.message, "restart usine up");
-          assert.strictEqual(yield* instances.get, running);
-        }),
-      ),
+  it.live("rejects a workers change while no Worker runs, as in setup mode", () =>
+    withFolder((root) =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        const running = yield* instances.get;
+        yield* writeInstanceFiles(root, [
+          ["usine.yaml", usineYaml(2)],
+          ["loops/triage.md", loopFile("developer")],
+        ]);
+        const failure = yield* Effect.flip(instances.reload);
+        assert(failure._tag === "RestartRequiredError", failure._tag);
+        assert.deepStrictEqual(failure.blocks, ["workers"]);
+        assert.deepStrictEqual(failure.fields, ["workers"]);
+        assert.include(failure.message, "restart usine up");
+        assert.strictEqual(yield* instances.get, running);
+      }),
+    ),
+  );
+
+  it.live("rejects a reload whose webhooks block changed while Workers run", () =>
+    withFolder((root) =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        yield* startWorkers([]);
+        const running = yield* instances.get;
+        yield* writeInstanceFiles(root, [
+          ["usine.yaml", `${usineYaml(2)}webhooks:\n  mode: deliveries\n`],
+        ]);
+        const failure = yield* Effect.flip(instances.reload);
+        assert(failure._tag === "RestartRequiredError", failure._tag);
+        assert.deepStrictEqual(failure.fields, ["webhooks"]);
+        assert.include(failure.message, "the webhooks block changed");
+        assert.strictEqual(yield* instances.get, running);
+      }).pipe(Effect.scoped),
+    ),
   );
 
   it.live("leaves out a Loop that no longer loads and reports it as quarantined", () =>

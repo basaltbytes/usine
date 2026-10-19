@@ -60,7 +60,7 @@ describe("durable run engine", () => {
             parentModel: Option.some(ModelId.make("openai/changed-parent")),
           });
           const executor = Layer.succeed(StepExecutor)({
-            workers: [WorkerName.make("local")],
+            workers: Effect.succeed([WorkerName.make("local")]),
             isLive: () => Effect.succeed(false),
             outcome: () => Effect.succeed(Option.none()),
             recover: () => Effect.void,
@@ -128,7 +128,7 @@ describe("durable run engine", () => {
         const delivered: Array<AttemptId> = [];
         const started = yield* Deferred.make<void>();
         const executor = Layer.succeed(StepExecutor)({
-          workers: [WorkerName.make("local")],
+          workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
@@ -698,7 +698,7 @@ describe("durable run engine", () => {
         // A 0-capacity scheduler parks the run in `reserve` forever; only a
         // cancel that reaches the parked reservation ends it.
         const executor = Layer.succeed(StepExecutor)({
-          workers: [WorkerName.make("local")],
+          workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,

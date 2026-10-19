@@ -45,12 +45,14 @@ export class StepExecutor extends Context.Service<
   StepExecutor,
   {
     /**
-     * The Workers this executor runs Attempts on. Startup reconciliation does
-     * not call `recover` for an Attempt recorded on any other Worker: its
-     * checkout stays where it is until that Worker is configured again or the
-     * operator discards its leftovers.
+     * The Workers this executor runs Attempts on now: the configured ones, and
+     * a Worker a reload removed until its last Attempt ends. Startup
+     * reconciliation does not call `recover` for an Attempt recorded on any
+     * other Worker: its checkout stays where it is until that Worker is
+     * configured again or the operator discards its leftovers, which the
+     * engine refuses for a Worker in this list.
      */
-    readonly workers: ReadonlyArray<WorkerName>;
+    readonly workers: Effect.Effect<ReadonlyArray<WorkerName>>;
     /**
      * Whether the Attempt's parent task outlived an orchestrator restart, so its Run reattaches
      * it instead of opening the next Attempt: the task still runs, or it finished and its result

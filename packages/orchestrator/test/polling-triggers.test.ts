@@ -191,7 +191,7 @@ const claimedRun = (cycle: Effect.Success<ReturnType<PollingTriggers["Service"][
 };
 
 const gatedExecutor = Layer.succeed(StepExecutor)({
-  workers: [WorkerName.make("local")],
+  workers: Effect.succeed([WorkerName.make("local")]),
   isLive: () => Effect.succeed(false),
   outcome: () => Effect.succeed(Option.none()),
   recover: () => Effect.void,
@@ -519,7 +519,7 @@ describe("PollingTriggers", () => {
       const finishing = yield* Deferred.make<void>();
       let executions = 0;
       const executor = Layer.succeed(StepExecutor)({
-        workers: [WorkerName.make("local")],
+        workers: Effect.succeed([WorkerName.make("local")]),
         isLive: () => Effect.succeed(false),
         outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,
@@ -1583,7 +1583,7 @@ describe("PollingTriggers", () => {
         const models: Array<string> = [];
         const permissions: Array<string> = [];
         const executor = Layer.succeed(StepExecutor)({
-          workers: [WorkerName.make("local")],
+          workers: Effect.succeed([WorkerName.make("local")]),
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,

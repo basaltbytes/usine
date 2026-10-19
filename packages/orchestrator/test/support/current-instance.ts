@@ -8,7 +8,7 @@ export const fixedInstance = (instance: LoadedInstance): CurrentInstance["Servic
   get: Effect.succeed(instance),
   changes: Stream.concat(Stream.make(instance), Stream.never),
   reload: Effect.die("this test's instance is never reloaded"),
-  registerPreflight: () => Effect.void,
+  registerWorkers: () => Effect.void,
 });
 
 /** The layer of `fixedInstance(instance)`. */

@@ -205,6 +205,7 @@ const reloaded = new InstanceReload({
   agents: { added: [], removed: [], changed: [agentName] },
   labels: noChanges,
   repos: noChanges,
+  workers: noChanges,
   settingsChanged: true,
   operatorChanged: false,
   quarantinedLoops: [
@@ -507,9 +508,12 @@ describe("operator HTTP API", () => {
         message:
           "usine.yaml is invalid (yaml): Unexpected flow-map-end token. The running configuration is unchanged.",
       });
+      const restartMessage =
+        "usine.yaml changed in a way that applies only when usine up restarts: Worker local changed its kind from local to ssh. The running configuration is unchanged; restart usine up to apply the change.";
       reloadFailure = new RestartRequiredError({
         blocks: ["workers"],
-        message: "The workers block of usine.yaml changed. Restart usine up to apply it.",
+        fields: ["workers.local.kind"],
+        message: restartMessage,
       });
       const restart = await rejectingApp.handler(
         new Request("http://localhost/api/instance/reload", { method: "POST" }),
@@ -517,12 +521,13 @@ describe("operator HTTP API", () => {
       assert.strictEqual(restart.status, 409);
       assert.deepStrictEqual(await restart.json(), {
         error: "RestartRequiredError",
-        message: "The workers block of usine.yaml changed. Restart usine up to apply it.",
+        message: restartMessage,
       });
       const preflightMessage =
-        "Worker preflight failed for Agent reviewer. Worker local: Claude Code is not logged in. The running configuration is unchanged; fix the Worker or the Agent file, then reload again.";
+        "Worker preflight failed for Agent reviewer. Worker local: Claude Code is not logged in. The running configuration is unchanged; fix the Worker, usine.yaml, or the Agent file, then reload again.";
       reloadFailure = new ReloadPreflightError({
         agents: [AgentName.make("reviewer")],
+        workers: [],
         message: preflightMessage,
         cause: new WorkerCapabilityError({
           worker: WorkerName.make("local"),

@@ -35,7 +35,7 @@ describe("Run evidence reader", () => {
       const model = ModelId.make("evidence-model");
       const starts = yield* Queue.unbounded<Effect.Effect<void, AttemptFailure>>();
       const executor = Layer.succeed(StepExecutor)({
-        workers: [WorkerName.make("local")],
+        workers: Effect.succeed([WorkerName.make("local")]),
         isLive: () => Effect.succeed(false),
         outcome: () => Effect.succeed(Option.none()),
         recover: () => Effect.void,
