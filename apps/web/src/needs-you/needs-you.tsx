@@ -96,7 +96,7 @@ const NeedEntry = ({ need }: { readonly need: NeedView }) => {
 export const NeedsYou = ({ needs }: { readonly needs: ReadonlyArray<NeedView> }) =>
   needs.length === 0 ? null : (
     <section aria-label="Items needing intervention" className="px-4 pt-4 md:px-5">
-      <ul className="grid max-w-7xl grid-cols-1 gap-2.5 lg:grid-cols-2">
+      <ul className="grid max-w-7xl grid-cols-1 items-start gap-2.5 lg:grid-cols-2">
         {needs.map((need) => (
           <NeedEntry key={need.id} need={need} />
         ))}
