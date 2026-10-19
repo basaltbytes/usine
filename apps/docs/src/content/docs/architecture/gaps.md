@@ -91,7 +91,6 @@ See [Workers and the Gateway](/architecture/workers-and-gateway/) for how each W
 - [#249][]: the executor doesn't open or maintain the SSH forward to a Gateway's admin API; the operator must do it.
 - [#254][]: Workers behind the Gateway have no time source.
 - [#261][]: harness turns behind the Gateway request hosts outside the egress allowlist.
-- [#262][]: `usine-gateway` exits with status 130 when systemd stops it.
 - [#264][]: infrastructure changes are applied to a running Gateway only by hand, and never to a running Worker.
 
 ## Agent behaviour in the dogfood Loops
@@ -169,7 +168,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#257]: https://github.com/basaltbytes/usine/issues/257
 [#258]: https://github.com/basaltbytes/usine/issues/258
 [#261]: https://github.com/basaltbytes/usine/issues/261
-[#262]: https://github.com/basaltbytes/usine/issues/262
 [#264]: https://github.com/basaltbytes/usine/issues/264
 [#266]: https://github.com/basaltbytes/usine/issues/266
 [#270]: https://github.com/basaltbytes/usine/issues/270
