@@ -6,7 +6,7 @@ import {
   WorkerUnresponsive,
 } from "@usine/core/attempt/channel";
 import type { WorkerName } from "@usine/core/worker";
-import { DateTime, Effect, Match, Option, Ref } from "effect";
+import { DateTime, Effect, Fiber, Match, Option, Ref, type Scope, Semaphore } from "effect";
 import type { RemoteCommands } from "./commands.ts";
 
 /** How long the executor waits between two probes of a Worker while an Attempt runs on it. */
@@ -30,16 +30,16 @@ type Liveness =
       readonly unanswered: number;
     };
 
-/** The liveness after a probe, and the notice it gives the Attempt's transcript, if any. */
+/** The liveness after a probe, and the notice it gives the Attempts' transcripts, if any. */
 interface Observation {
   readonly liveness: Liveness;
   readonly notice: Option.Option<WorkerNotice>;
 }
 
 /**
- * The liveness after a probe at `now`, and the notice for the Attempt's
- * transcript: one when the Worker stops answering, one when it answers again,
- * and none while it stays as it was.
+ * The liveness after a probe at `now`, and the notice for the Attempts'
+ * transcripts: one when the Worker stops answering, one when it answers
+ * again, and none while it stays as it was.
  */
 const observe = (
   worker: WorkerName,
@@ -76,32 +76,50 @@ const lastLine = (text: string): string =>
     .filter((line) => line !== "")
     .at(-1) ?? "";
 
-/** What `watchWorker` needs to probe one Attempt's Worker and report on it. */
-export interface WorkerWatch {
+/** An Attempt that hears about the liveness of the Worker it runs on. */
+interface WorkerWatcher {
   readonly attemptId: AttemptId;
-  readonly worker: WorkerName;
-  /** The machine's own child host; the probe sends no Attempt secret. */
-  readonly shell: RemoteShell;
   /** Records a notice in the Attempt's transcript. */
   readonly report: (notice: WorkerNotice) => Effect.Effect<void>;
 }
 
-/**
- * Runs `true` on the Worker's machine over a new SSH connection every minute
- * until interrupted, and reports through `watch.report` and a log line when
- * the machine stops answering and when it answers again. It never stops or
- * fails the Attempt, whatever the Worker does (ADR 0013).
- */
-export const watchWorker = (commands: RemoteCommands, watch: WorkerWatch): Effect.Effect<never> =>
+/** What `WorkerWatches.watch` needs to probe an Attempt's Worker and report on it. */
+interface WorkerWatch extends WorkerWatcher {
+  readonly worker: WorkerName;
+  /** The machine's own child host; the probe sends no Attempt secret. */
+  readonly shell: RemoteShell;
+}
+
+/** The liveness watches of one executor: one per Worker while any Attempt runs on it. */
+export interface WorkerWatches {
+  /**
+   * Adds the Attempt to its Worker's watch until the caller's scope closes.
+   * The first Attempt on a Worker starts the watch, and the last one to
+   * leave ends it. The watch runs `true` on the Worker's machine over a new
+   * SSH connection every minute, and reports through the `report` of every
+   * Attempt on the Worker and a log line when the machine stops answering
+   * and when it answers again. It never stops or fails an Attempt, whatever
+   * the Worker does (ADR 0013).
+   */
+  readonly watch: (watch: WorkerWatch) => Effect.Effect<void, never, Scope.Scope>;
+}
+
+/** Probes one Worker every minute until interrupted, and reports to the Attempts `watchers` returns at each probe. */
+const watchWorker = (
+  commands: RemoteCommands,
+  worker: WorkerName,
+  machineShell: RemoteShell,
+  watchers: () => ReadonlyArray<WorkerWatcher>,
+): Effect.Effect<never> =>
   Effect.gen(function* () {
-    const host = watch.shell.destination;
+    const host = machineShell.destination;
     const shell = new RemoteShell({
       ssh: {
-        command: watch.shell.ssh.command,
-        args: [...watch.shell.ssh.args, "-o", `ConnectTimeout=${CONNECT_TIMEOUT_SECONDS}`],
+        command: machineShell.ssh.command,
+        args: [...machineShell.ssh.args, "-o", `ConnectTimeout=${CONNECT_TIMEOUT_SECONDS}`],
       },
-      sshEnvironment: watch.shell.sshEnvironment,
-      destination: watch.shell.destination,
+      sshEnvironment: machineShell.sshEnvironment,
+      destination: machineShell.destination,
     });
     const liveness = yield* Ref.make<Liveness>({
       _tag: "Answering",
@@ -130,16 +148,18 @@ export const watchWorker = (commands: RemoteCommands, watch: WorkerWatch): Effec
       Effect.catch((error) => Effect.succeed<Probe>({ _tag: "Unanswered", reason: error.message })),
     );
 
-    const check = Effect.fn("RemoteExecutor.probeWorker")(function* () {
-      yield* Effect.annotateCurrentSpan({ attemptId: watch.attemptId, worker: watch.worker, host });
+    // The watch outlives the Attempt whose launch started it, so each probe is its own trace.
+    const check = Effect.fn("RemoteExecutor.probeWorker", { root: true })(function* () {
+      yield* Effect.annotateCurrentSpan({ worker, host });
       const result = yield* probe;
       const previous = yield* Ref.get(liveness);
-      const next = observe(watch.worker, previous, result, yield* DateTime.now);
+      const next = observe(worker, previous, result, yield* DateTime.now);
       yield* Ref.set(liveness, next.liveness);
+      const watching = watchers();
       const fields = {
-        attemptId: watch.attemptId,
-        worker: watch.worker,
+        worker,
         host,
+        attemptIds: watching.map(({ attemptId }) => attemptId),
         lastAnsweredAt: DateTime.formatIso(previous.lastAnsweredAt),
       };
       yield* Match.valueTags(result, {
@@ -162,14 +182,78 @@ export const watchWorker = (commands: RemoteCommands, watch: WorkerWatch): Effec
             },
           ),
       });
-      if (Option.isSome(next.notice)) yield* watch.report(next.notice.value);
+      if (Option.isSome(next.notice)) {
+        const notice = next.notice.value;
+        yield* Effect.forEach(watching, ({ report }) => report(notice), { discard: true });
+      }
     });
 
-    yield* Effect.logDebug("Watching the Worker while the Attempt runs", {
-      attemptId: watch.attemptId,
-      worker: watch.worker,
-      host,
-      interval: PROBE_INTERVAL,
-    });
     return yield* Effect.sleep(PROBE_INTERVAL).pipe(Effect.andThen(check()), Effect.forever);
+  });
+
+/** One Worker's running watch and the Attempts it reports to. */
+interface Watched {
+  readonly watchers: Map<AttemptId, WorkerWatcher>;
+  readonly fiber: Fiber.Fiber<never>;
+}
+
+/**
+ * The liveness watches of an executor that reaches its Workers' machines
+ * with `commands`. Each watch runs in the caller's scope, so the executor's
+ * layer ends any watch still running when it closes.
+ */
+export const workerWatchesFor = (
+  commands: RemoteCommands,
+): Effect.Effect<WorkerWatches, never, Scope.Scope> =>
+  Effect.gen(function* () {
+    const scope = yield* Effect.scope;
+    const lock = yield* Semaphore.make(1);
+    const watched = new Map<WorkerName, Watched>();
+
+    const join = (watch: WorkerWatch) =>
+      Semaphore.withPermit(
+        lock,
+        Effect.gen(function* () {
+          const fields = { attemptId: watch.attemptId, worker: watch.worker };
+          const existing = watched.get(watch.worker);
+          if (existing !== undefined) {
+            existing.watchers.set(watch.attemptId, watch);
+            return yield* Effect.logDebug("The Attempt joins its Worker's liveness watch", {
+              ...fields,
+              attempts: existing.watchers.size,
+            });
+          }
+          const watchers = new Map<AttemptId, WorkerWatcher>([[watch.attemptId, watch]]);
+          const fiber = yield* watchWorker(commands, watch.worker, watch.shell, () => [
+            ...watchers.values(),
+          ]).pipe(Effect.forkIn(scope));
+          watched.set(watch.worker, { watchers, fiber });
+          yield* Effect.logDebug("Watching the Worker while Attempts run on it", {
+            ...fields,
+            host: watch.shell.destination,
+            interval: PROBE_INTERVAL,
+          });
+        }),
+      );
+
+    const leave = (watch: WorkerWatch) =>
+      Semaphore.withPermit(
+        lock,
+        Effect.gen(function* () {
+          const existing = watched.get(watch.worker);
+          if (existing === undefined) return;
+          existing.watchers.delete(watch.attemptId);
+          if (existing.watchers.size > 0) return;
+          watched.delete(watch.worker);
+          yield* Fiber.interrupt(existing.fiber);
+          yield* Effect.logDebug("Stopped watching the Worker; no Attempt runs on it", {
+            attemptId: watch.attemptId,
+            worker: watch.worker,
+          });
+        }),
+      );
+
+    return {
+      watch: (watch) => Effect.acquireRelease(join(watch), () => leave(watch)),
+    } satisfies WorkerWatches;
   });
