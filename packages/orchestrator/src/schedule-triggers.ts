@@ -34,6 +34,7 @@ import {
   Result,
   Schema,
 } from "effect";
+import { reloadedFrom, type WatchedInstance } from "./reloads.ts";
 import {
   configFileErrorLogFields,
   DEFAULT_BRANCH_REVISION,
@@ -212,8 +213,14 @@ export class ScheduleTriggers extends Context.Service<
     readonly tick: (
       instance: LoadedInstance,
     ) => Effect.Effect<ScheduleCycle, EnginePersistenceError>;
-    /** Repeats ticks until interrupted, reading the instance from `current` before each one. */
-    readonly run: (current: Effect.Effect<LoadedInstance>) => Effect.Effect<never>;
+    /**
+     * Repeats ticks until interrupted, reading the instance from
+     * `instances.get` before each one. Between ticks it sleeps until the
+     * earliest next Tick, for at most a minute; an accepted reload, seen on
+     * `instances.changes`, ends the sleep so the next tick evaluates the
+     * reloaded Loops at once.
+     */
+    readonly run: (instances: WatchedInstance) => Effect.Effect<never>;
     readonly latest: Effect.Effect<Option.Option<ScheduleCycle>>;
   }
 >()("@usine/orchestrator/ScheduleTriggers") {
@@ -488,11 +495,28 @@ export class ScheduleTriggers extends Context.Service<
         return cycle;
       });
 
+      const waitForNextTick = (
+        instances: WatchedInstance,
+        evaluated: LoadedInstance,
+        sleepMs: number,
+      ): Effect.Effect<void> =>
+        Effect.raceFirst(
+          Effect.sleep(Duration.millis(sleepMs)),
+          reloadedFrom(instances, evaluated).pipe(
+            Effect.andThen(
+              Effect.logInfo(
+                "Instance reloaded; evaluating schedules now instead of after the sleep",
+              ),
+            ),
+          ),
+        );
+
       // `run` never returns, so wrapping it in Effect.fn would open a span that
       // never closes; `tick` opens the span for each cycle.
-      const run = (current: Effect.Effect<LoadedInstance>): Effect.Effect<never> =>
+      const run = (instances: WatchedInstance): Effect.Effect<never> =>
         Effect.gen(function* () {
-          const result = yield* Effect.result(tick(yield* current));
+          const instance = yield* instances.get;
+          const result = yield* Effect.result(tick(instance));
           if (Result.isFailure(result)) {
             yield* Effect.logError("Schedule cycle could not read Loop runtime state; retrying", {
               errorTag: result.failure._tag,
@@ -500,7 +524,7 @@ export class ScheduleTriggers extends Context.Service<
               operation: result.failure.operation,
               sleepMs: IDLE_WAKE_MILLIS,
             });
-            yield* Effect.sleep(Duration.millis(IDLE_WAKE_MILLIS));
+            yield* waitForNextTick(instances, instance, IDLE_WAKE_MILLIS);
             return;
           }
           const cycle = result.success;
@@ -529,7 +553,7 @@ export class ScheduleTriggers extends Context.Service<
           } else {
             yield* Effect.logInfo("Schedule cycle complete", summary);
           }
-          yield* Effect.sleep(Duration.millis(sleepMs));
+          yield* waitForNextTick(instances, instance, sleepMs);
         }).pipe(Effect.forever);
 
       return { latest: Ref.get(latestCycle), run, tick };

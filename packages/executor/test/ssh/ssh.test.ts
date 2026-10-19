@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest";
 import { RemoteShell } from "@usine/agents/child-host";
+import { AttemptId } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
-import type { AttemptSalvage } from "@usine/core/attempt/salvage";
+import { type AttemptSalvage, SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
@@ -409,6 +410,103 @@ describe("SSH Worker", () => {
         assert.include(warnings[1], "The Worker still does not answer");
         assert.include(warnings[2], "The Worker answers again");
       }).pipe(Effect.provide(logs.layer));
+    },
+  );
+
+  it.effect(
+    "probes a Worker once per minute however many Attempts run on it, and reports to each of them",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const second = new CheckoutRequest({
+        ...request,
+        attemptId: AttemptId.make("remote-run/execute/2"),
+        salvageRef: SalvageRef.make("usine/salvage/remote-run/2"),
+      });
+      const attempts = [request.attemptId, second.attemptId];
+      const outbound = new Map<AttemptId, Array<AttemptChannel.OutboundPayload>>();
+      const sinkFor = (attemptId: AttemptId) => {
+        const payloads: Array<AttemptChannel.OutboundPayload> = [];
+        outbound.set(attemptId, payloads);
+        return {
+          append: (_direction: AttemptChannel.Direction, envelope: AttemptChannel.Envelope) =>
+            Effect.sync(() => {
+              if (envelope._tag === "OutboundEnvelope") payloads.push(envelope.payload);
+            }),
+          salvage: () => Effect.void,
+        };
+      };
+      const noticesOf = (attemptId: AttemptId) =>
+        (outbound.get(attemptId) ?? []).filter(
+          (payload) => payload._tag === "WorkerUnresponsive" || payload._tag === "WorkerResponsive",
+        );
+      const probes = () => machine.state.calls.filter(({ line }) => line === "exec 'true'").length;
+      return Effect.gen(function* () {
+        const signals = new Map<
+          AttemptId,
+          { working: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
+        >();
+        for (const attemptId of attempts)
+          signals.set(attemptId, {
+            working: yield* Deferred.make<void>(),
+            done: yield* Deferred.make<void>(),
+          });
+        const signalsOf = (attemptId: AttemptId) => {
+          const found = signals.get(attemptId);
+          assert(found !== undefined);
+          return found;
+        };
+        const parent: StubParent = (context) =>
+          Effect.suspend(() => {
+            const { working, done } = signalsOf(context.request.spec.attemptId);
+            return Deferred.succeed(working, undefined).pipe(
+              Effect.andThen(Deferred.await(done)),
+              Effect.andThen(completes(context)),
+            );
+          });
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const first = yield* (yield* executor.prepare(request))
+            .launch(sinkFor(request.attemptId))
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(signalsOf(request.attemptId).working);
+          const other = yield* (yield* executor.prepare(second))
+            .launch(sinkFor(second.attemptId))
+            .pipe(Effect.forkChild);
+          yield* Deferred.await(signalsOf(second.attemptId).working);
+
+          const before = probes();
+          yield* TestClock.adjust("1 minute");
+          assert.strictEqual(probes(), before + 1, "one probe for both Attempts");
+
+          machine.state.stalled = true;
+          yield* TestClock.adjust("1 minute");
+          yield* TestClock.adjust("45 seconds");
+          assert.strictEqual(probes(), before + 2);
+          for (const attemptId of attempts) {
+            const notices = noticesOf(attemptId);
+            assert.lengthOf(notices, 1, `${attemptId} is told the Worker stopped answering`);
+            assert.strictEqual(notices[0]?._tag, "WorkerUnresponsive");
+          }
+
+          machine.state.stalled = false;
+          yield* TestClock.adjust("1 minute");
+          for (const attemptId of attempts)
+            assert.strictEqual(noticesOf(attemptId)[1]?._tag, "WorkerResponsive");
+
+          yield* Deferred.succeed(signalsOf(request.attemptId).done, undefined);
+          yield* Fiber.join(first);
+          const afterFirst = probes();
+          yield* TestClock.adjust("1 minute");
+          assert.strictEqual(probes(), afterFirst + 1, "the watch goes on for the other Attempt");
+
+          yield* Deferred.succeed(signalsOf(second.attemptId).done, undefined);
+          yield* Fiber.join(other);
+          const afterBoth = probes();
+          yield* TestClock.adjust("10 minutes");
+          assert.strictEqual(probes(), afterBoth, "probing ends with the last Attempt");
+        }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, parent)));
+      });
     },
   );
 

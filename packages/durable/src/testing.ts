@@ -16,6 +16,7 @@ import {
   type AgentSessionError,
   ChildBackend,
   type ChildRequest,
+  type OnDelivery,
   reportText,
   type RunningSession,
   SessionResult,
@@ -94,8 +95,13 @@ export interface StubChild {
   readonly request: ChildRequest;
   /** Adds one event to the child's stream. */
   readonly emit: (event: AgentSessionEvent) => Effect.Effect<void>;
-  /** Finishes with `message` as the child's report; under a Hold the report waits for the release. */
+  /**
+   * Finishes with `message` as the child's report; under a Hold the report
+   * waits for the release. The turn it ends read every queued operator message.
+   */
   readonly reply: (message: string) => Effect.Effect<void>;
+  /** Reads the operator messages the child queued while it worked, as a harness does at its next boundary. */
+  readonly readQueued: Effect.Effect<void>;
   /** Finishes with a blocked report, which fails the Attempt unless the parent relays it. */
   readonly block: (message: string) => Effect.Effect<void>;
   /** Finishes by asking the operator `question`, which fails the Attempt unless the parent relays it. */
@@ -122,7 +128,24 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
   const interrupted = yield* Deferred.make<void>();
   const interventions: Array<AttemptChannel.OperatorAction> = [];
   let held = false;
+  let paused = false;
   let pending = Option.none<string>();
+  const queued: Array<OnDelivery> = [];
+
+  const stateNow = (isQueued: boolean) =>
+    new AttemptChannel.InterventionState({ held, paused, queued: isQueued });
+  const readQueued = Effect.suspend(() =>
+    Effect.forEach(queued.splice(0), (onDelivery) => onDelivery(Option.some(stateNow(false))), {
+      discard: true,
+    }),
+  );
+  yield* Effect.addFinalizer(() =>
+    Effect.suspend(() =>
+      Effect.forEach(queued.splice(0), (onDelivery) => onDelivery(Option.none()), {
+        discard: true,
+      }),
+    ),
+  );
 
   const emit = (event: AgentSessionEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
   const finish = (message: string) =>
@@ -133,13 +156,18 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
       yield* Deferred.succeed(result, new SessionResult({ message }));
     });
   const reply = (message: string) =>
-    Effect.suspend(() => {
-      if (!held) return finish(message);
-      pending = Option.some(message);
-      return emit(new SessionIdle({ session }));
-    });
+    readQueued.pipe(
+      Effect.andThen(
+        Effect.suspend(() => {
+          if (!held) return finish(message);
+          pending = Option.some(message);
+          return emit(new SessionIdle({ session }));
+        }),
+      ),
+    );
   const report = (error: AgentReport) =>
     Effect.gen(function* () {
+      yield* readQueued;
       yield* emit(new TextOutput({ session, text: reportText(error) }));
       yield* Queue.fail(events, error);
       yield* Deferred.fail(result, error);
@@ -148,19 +176,27 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     report(new AgentBlockedError({ sessionId: Option.some(session.id), message }));
   const ask = (question: string) =>
     report(new AgentQuestionError({ sessionId: Option.some(session.id), message: question }));
-  const intervene = (action: AttemptChannel.OperatorAction) =>
+  // A message to an idle or paused child starts its next turn; a working child queues it.
+  const intervene = (action: AttemptChannel.OperatorAction, onDelivery: OnDelivery) =>
     Effect.gen(function* () {
       interventions.push(action);
-      if (action._tag === "OperatorMessage") {
-        held = true;
-        yield* emit(new SessionResumed({ session }));
-      } else if (action._tag === "Steer") {
+      if (action._tag === "OperatorMessage" || action._tag === "Steer") {
+        if (action._tag === "OperatorMessage") held = true;
+        const stopped = Option.isSome(pending) || paused;
+        paused = false;
+        if (!stopped) {
+          queued.push(onDelivery);
+          return stateNow(true);
+        }
+        pending = Option.none();
         yield* emit(new SessionResumed({ session }));
       } else if (action._tag === "Release") {
         held = false;
         if (Option.isSome(pending)) yield* finish(pending.value);
+      } else {
+        paused = true;
       }
-      return new AttemptChannel.InterventionState({ held, paused: action._tag === "Interrupt" });
+      return stateNow(false);
     });
 
   yield* emit(new SessionStarted({ session }));
@@ -179,6 +215,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     request,
     emit,
     reply,
+    readQueued,
     block,
     ask,
     interrupted: Deferred.await(interrupted),

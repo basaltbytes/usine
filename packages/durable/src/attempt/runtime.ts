@@ -199,15 +199,24 @@ const makeAttemptRuntime = Effect.gen(function* () {
       document.held = update(document.held);
     });
 
+  /**
+   * Applies operator input to a live child. A message the working child reads
+   * only at its next boundary is reported queued and recorded, and the child's
+   * report of whether it read it reaches the relay for the second receipt.
+   */
   const routeChild = Effect.fn("AttemptRuntime.routeChild")(function* (
     hub: AttemptHub,
     target: AttemptChannel.ChildTarget,
-    action: AttemptChannel.OperatorAction,
+    intervention: AttemptChannel.Intervention,
+    inputSequence: AttemptChannel.Sequence,
   ) {
     const child = hub.children.get(target.sessionId);
     if (child === undefined) return yield* refuse("This session is no longer live");
+    const action = intervention.action;
     const state = yield* child
-      .intervene(action)
+      .intervene(action, (delivered) =>
+        hubs.delivery(hub, { _tag: "Delivery", inputSequence, intervention, delivered }),
+      )
       .pipe(Effect.mapError((error) => refuse(error.message)));
     if (action._tag === "OperatorMessage" || action._tag === "Release") {
       yield* hold(hub, (held) =>
@@ -215,6 +224,26 @@ const makeAttemptRuntime = Effect.gen(function* () {
           ? [...held.filter((id) => id !== target.sessionId), target.sessionId]
           : held.filter((id) => id !== target.sessionId),
       );
+    }
+    if (state.queued) {
+      hub.childInputs.add(inputSequence);
+      yield* durable.use("record the queued operator input", (harness, context) =>
+        harness.commit(async (tx) => {
+          const record = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
+          record.queuedInputs = [
+            ...(record.queuedInputs ?? []),
+            {
+              inputSequence,
+              child: target.sessionId,
+              intervention: encodeIntervention(intervention),
+            },
+          ];
+        }, context),
+      );
+      yield* Effect.logInfo("The working child reads the operator input at its next boundary", {
+        sessionId: target.sessionId,
+        action: action._tag,
+      });
     }
     return state;
   });
@@ -381,7 +410,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
           const target = intervention.target;
           const applied = yield* (
             target._tag === "Child"
-              ? routeChild(hub, target, intervention.action)
+              ? routeChild(hub, target, intervention, inputSequence)
               : routeParent(hub, intervention, inputSequence)
           ).pipe(
             Effect.catchTag("DurableHarnessError", (error) => Effect.fail(refuse(error.message))),

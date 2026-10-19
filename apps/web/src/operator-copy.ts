@@ -15,6 +15,7 @@ import type {
 import { Match } from "effect";
 import type { BoardMoveProgress } from "./board/moves.ts";
 import type { RunActionRequest } from "./run-actions.ts";
+import type { QueuedFor } from "./run-transcript/model.ts";
 
 export interface NeedCopy {
   readonly title: string;
@@ -208,8 +209,11 @@ export const failureMessage = (failure: FailureView): string =>
       `This Attempt used its ${maxChildren}-child session budget; child ${attemptedChildren} did not start`,
   });
 
-/** Under an operator message the parent has not read yet. */
-export const queuedMessageLabel = "Queued until the parent's current delegation returns";
+/** Under an operator message the session it went to has not read yet. */
+export const queuedMessageLabel = (session: QueuedFor): string =>
+  session === "parent"
+    ? "Queued until the parent's current delegation returns"
+    : "Queued until the child finishes its current step";
 
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
   `The previous Attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision; this Attempt starts without it, and the branch keeps it`;

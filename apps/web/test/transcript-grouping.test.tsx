@@ -6,6 +6,7 @@ import {
   ParentSession,
   SessionFinished,
   SessionIdle,
+  SessionStarted,
   TextOutput,
   ToolFinished,
   ToolStarted,
@@ -690,12 +691,12 @@ it("shows an operator message to a delegating parent once, queued until the pare
       .chapters.flatMap((chapter) => chapter.rows)
       .flatMap((row) =>
         row._tag === "Message" && row.speaker.name === "Philippe"
-          ? [[row.sequence, row.queued, row.undelivered]]
+          ? [[Number(row.sequence), row.queued, row.undelivered]]
           : [],
       );
 
-  assert.deepStrictEqual(operatorRows(delegating), [[2, true, false]]);
-  assert.deepStrictEqual(operatorRows([...delegating, applied(5, false)]), [[2, false, false]]);
+  assert.deepStrictEqual(operatorRows(delegating), [[2, "parent", false]]);
+  assert.deepStrictEqual(operatorRows([...delegating, applied(5, false)]), [[2, null, false]]);
   const stopped = receipt(
     5,
     new InterventionRejected({
@@ -704,5 +705,51 @@ it("shows an operator message to a delegating parent once, queued until the pare
       message: "The parent stopped before it read this message.",
     }),
   );
-  assert.deepStrictEqual(operatorRows([...delegating, stopped]), [[2, false, true]]);
+  assert.deepStrictEqual(operatorRows([...delegating, stopped]), [[2, null, true]]);
+});
+
+it("shows a message to a working child queued in the child's section until the child reads it", () => {
+  const child = new ChildSession({
+    id: AgentSessionId.make("working-child"),
+    parentId: parent.id,
+    agent: parent.agent,
+    brain,
+  });
+  const intervention = new Intervention({
+    operator: "Philippe",
+    target: new ChildTarget({ sessionId: child.id }),
+    action: new OperatorMessage({ message: "Use pnpm, not npm." }),
+  });
+  const applied = (sequence: number, queued: boolean) =>
+    new TranscriptEventView({
+      sequence: TranscriptSequence.make(sequence),
+      attemptId: attempt,
+      receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
+      direction: "outbound",
+      payload: new InterventionApplied({
+        inputSequence: Sequence.make(1),
+        intervention,
+        state: new InterventionState({ held: true, paused: false, queued }),
+      }),
+    });
+  const working = [
+    record(1, new SessionStarted({ session: child })),
+    record(2, new TextOutput({ session: child, text: "Running the tests." })),
+    applied(3, true),
+  ];
+  const queuedOf = (events: ReadonlyArray<TranscriptEventView>) => {
+    const session = projectTranscript(events, []).sessions.find(
+      (candidate) => candidate.session.id === child.id,
+    );
+    assert(session !== undefined);
+    assert.isTrue(session.held);
+    return session.entries.flatMap((entry) =>
+      entry._tag === "Notice" && entry.origin._tag === "Operator" ? [entry.queued] : [],
+    );
+  };
+
+  assert.deepStrictEqual(queuedOf(working), ["child"]);
+  assert.include(render(working), "Queued until the child finishes its current step");
+  assert.deepStrictEqual(queuedOf([...working, applied(6, false)]), [null]);
+  assert.notInclude(render([...working, applied(6, false)]), "Queued until");
 });

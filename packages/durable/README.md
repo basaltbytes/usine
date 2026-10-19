@@ -39,6 +39,7 @@ A child is not resumed after a restart. Its tool call settles as interrupted wit
 - Parent `Steer` or `OperatorMessage` while a turn runs: joins the turn after its current tool round. Until then its `InterventionApplied` says `queued`, and a second receipt for the same input sequence reports that the parent read it, or an `InterventionRejected` that it never will. To a paused or waiting parent, it starts the next turn.
 - Parent `Interrupt`: aborts the current turn, children included, withdraws queued input, and holds the parent until a `Steer`, an `OperatorMessage`, or a `Release` resumes it with a new turn.
 - Child actions go to the live child; an `OperatorMessage` places a Hold, and the child's report reaches the parent only after `Release`.
+- Child `Steer` or `OperatorMessage` while the child works: its `InterventionApplied` says `queued` until the child reads it at its next step. `AttemptRecordDoc.queuedInputs` keeps it, and a second receipt for the same input sequence reports that the child read it, with the child's state, or an `InterventionRejected` when the child stopped first, including a child lost to a restart. To an idle or paused child, the message starts its next turn.
 
 `AttemptReport.answeredOperator` says the parent's last turn replied to operator input without delegating after it. `harvestedResult(report, facts)` builds the Attempt's `StepResult`, and fails with an `AgentFailure` for such a report when the checkout holds no facts.
 

@@ -58,6 +58,14 @@ export interface GatewayForward {
    * replaced it already, waits for the forward as it is now instead.
    */
   readonly reopen: (generation: number) => Effect.Effect<OpenForward, GatewayForwardClosed>;
+  /**
+   * Records that a request sent through the open forward at `sentAt` got no
+   * answer from the Gateway's admin API, and returns when the first request
+   * that got none since the last answer was sent.
+   */
+  readonly unanswered: (sentAt: DateTime.Utc) => Effect.Effect<DateTime.Utc>;
+  /** Records that the Gateway's admin API answered a request, so the next unanswered one starts a new silence. */
+  readonly answered: Effect.Effect<void>;
 }
 
 /** One SSH client of the forward, with the signals between it, the requests, and the next client. */
@@ -392,5 +400,16 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
     );
   });
 
-  return { gateway, command, current, reopen } satisfies GatewayForward;
+  const silentSince = yield* Ref.make(Option.none<DateTime.Utc>());
+  const unanswered = (sentAt: DateTime.Utc) =>
+    Ref.modify(silentSince, (since) => {
+      const first = Option.match(since, {
+        onNone: () => sentAt,
+        onSome: (earlier) => DateTime.min(earlier, sentAt),
+      });
+      return [first, Option.some(first)] as const;
+    });
+  const answered = Ref.set(silentSince, Option.none());
+
+  return { gateway, command, current, reopen, unanswered, answered } satisfies GatewayForward;
 });

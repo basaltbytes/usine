@@ -65,7 +65,9 @@ const LiveSummary = ({ detail }: { readonly detail: RunDetailView }) => {
             </time>
           </p>
           <p className="line-clamp-6 text-md wrap-anywhere">{previewText(message.text)}</p>
-          {message.queued && <p className="text-xs text-muted-foreground">{queuedMessageLabel}</p>}
+          {message.queued !== null && (
+            <p className="text-xs text-muted-foreground">{queuedMessageLabel(message.queued)}</p>
+          )}
         </section>
       )}
     </div>

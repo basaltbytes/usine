@@ -177,7 +177,7 @@ The files are in `infra/hetzner/gateway/`, and `infra/hetzner/gateway/README.md`
    ./infra/hetzner/gateway/gateway.sh install -i ~/.ssh/usine_worker ./usine-core-0.3.0.tgz ./usine-gateway-0.0.0.tgz
    ```
 
-   On first boot the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root only. To let the Gateway call Anthropic with its own key, add `ANTHROPIC_API_KEY` to that file and restart the service with `systemctl restart usine-gateway`. A restarted Gateway loses its attachments; the executor stores each running Attempt's attachment again within two minutes.
+   On first boot the VM generates its admin token and caller key in `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. To let the Gateway call Anthropic with its own key, add `ANTHROPIC_API_KEY` to that file and reload the service with `systemctl reload usine-gateway`. A reload keeps the attachments, so running Attempts go on; the journal's `Reloaded the gateway settings` line names the keys that changed. The domain, the listeners, the admin token, and the caller key change only with `systemctl restart usine-gateway`. A restarted Gateway loses its attachments; the executor stores each running Attempt's attachment again within two minutes.
 
 3. Create the Worker on the private network, without public addresses. `worker-user-data` combines `infra/hetzner/cloud-init.yaml` with `infra/hetzner/gateway/worker-cloud-init.yaml`, which configures the Worker's resolver, apt, and environment to use the Gateway, forwards gh's socket to it, configures sshd to accept the caller token variables, and allows connections only to the Gateway. The type `cx33` has the 8 GB a Worker needs.
 

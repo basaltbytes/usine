@@ -28,7 +28,7 @@ import {
   type WorkspaceOps,
 } from "../provision.ts";
 import { workerLeftoversFor } from "./leftovers.ts";
-import { watchWorker } from "./liveness.ts";
+import { workerWatchesFor } from "./liveness.ts";
 import type { RemoteAccess, RemoteMachine, RemoteWorker } from "./machine.ts";
 import { abandonedWorktreeSweepFor } from "./sweep.ts";
 
@@ -62,6 +62,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     const workerLeftovers = yield* workerLeftoversFor(commands, worker.machineFor, worker.reclaim);
     const session = yield* durableSessionFor({ interruptGrace: worker.interruptGrace });
     const runtime = yield* AttemptRuntime;
+    const workerWatches = yield* workerWatchesFor(commands);
 
     const stopChildren = Effect.fn(span("stopChildren"))(function* (
       operation: ExecutorOperation,
@@ -414,14 +415,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         launch: (io: AttemptChannel.Sink) =>
           Effect.scoped(
             Effect.gen(function* () {
-              yield* Effect.forkScoped(
-                watchWorker(commands, {
-                  attemptId: request.attemptId,
-                  worker: request.worker,
-                  shell: machine.shell,
-                  report: (notice) => runtime.notify(request.attemptId, notice),
-                }),
-              );
+              yield* workerWatches.watch({
+                attemptId: request.attemptId,
+                worker: request.worker,
+                shell: machine.shell,
+                report: (notice) => runtime.notify(request.attemptId, notice),
+              });
               return yield* session.launch(prepared, io, {
                 host: access.shell,
                 environment: withGitHooks(access.environment, provisioned.gitHooks),

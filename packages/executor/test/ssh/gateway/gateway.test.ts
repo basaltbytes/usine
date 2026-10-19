@@ -360,6 +360,43 @@ describe("SSH Worker behind a Gateway", () => {
     },
   );
 
+  it.effect(
+    "says since when the admin API has not answered while its forward is open, until it answers again",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const gateway = fakeGateway(machine);
+      const logs = capturedLogs();
+      const unanswered = (since: string) =>
+        `Could not attach on the admin API of Gateway usine-gateway for Worker eu-one: the admin API through usine-gateway has not answered since ${since}: no answer (TransportError)`;
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        gateway.switches.answering = false;
+        const first = yield* executor.prepare(request).pipe(Effect.flip);
+        assert.include(first.message, unanswered("1970-01-01T00:00:00.000Z"));
+
+        yield* TestClock.adjust("1 minute");
+        const second = yield* executor.prepare(request).pipe(Effect.flip);
+        assert.include(second.message, unanswered("1970-01-01T00:00:00.000Z"));
+        const retry = logs.lines
+          .filter((line) => line.includes("A Gateway admin request did not get through"))
+          .at(-1);
+        assert.include(retry, '"unansweredSince":"1970-01-01T00:00:00.000Z"');
+
+        gateway.switches.answering = true;
+        yield* (yield* executor.prepare(request)).launch(sink);
+        yield* TestClock.adjust("1 minute");
+        gateway.switches.answering = false;
+        const third = yield* executor.prepare(request).pipe(Effect.flip);
+        assert.include(third.message, unanswered("1970-01-01T00:02:00.000Z"));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(gatewayRuntime(machine, credentials, gateway)),
+        Effect.provide(logs.layer),
+      );
+    },
+  );
+
   it.effect("renews the same attachment with a fresh token before it expires", () => {
     const machine = fakeMachine();
     // Fifteen-minute tokens are renewed every ten minutes.

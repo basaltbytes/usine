@@ -54,6 +54,18 @@ export const ItemNotification = Schema.Struct({
   threadId: Schema.String,
   turnId: Schema.String,
 });
+/** A user message the thread recorded: a turn's input, or input steered into a running turn once the model reads it. */
+export const UserMessageItem = Schema.Struct({
+  type: Schema.Literal("userMessage"),
+  content: Schema.Array(Schema.Json),
+});
+const UserTextInput = Schema.Struct({ type: Schema.Literal("text"), text: Schema.String });
+/** The text of a recorded user message, as the executor sent it. */
+export const userMessageText = (item: typeof UserMessageItem.Type): string =>
+  item.content
+    .filter(Schema.is(UserTextInput))
+    .map(({ text }) => text)
+    .join("");
 /** Completed assistant prose; phase distinguishes a final answer from commentary. */
 export const AgentMessageItem = Schema.Struct({
   type: Schema.Literal("agentMessage"),
