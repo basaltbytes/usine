@@ -89,6 +89,14 @@ export const BLOCKED_MARKER = "[usine:blocked]";
  */
 export const QUESTION_MARKER = "[usine:question]";
 
+/**
+ * The reserved opening of a report that relays a harness failure, such as a
+ * child's failed Codex turn, to the parent. Text after the marker is the
+ * failure; the session fails with `AgentResultError`, which ends the Attempt
+ * with `AgentFailure`.
+ */
+export const FAILED_MARKER = "[usine:failed]";
+
 /** The session finished and reported that the work itself failed. */
 export class AgentResultError extends Schema.TaggedError<AgentResultError>(
   "@usine/agents/AgentResultError",
@@ -152,20 +160,20 @@ export type AgentSessionError = typeof AgentSessionError.Type;
 /**
  * The reports a session ends its work with: a blocker or a question its final
  * answer opened with a reserved marker, or a failure its harness reported. A
- * child relays a harness failure to the parent as a blocker.
+ * child relays each to the parent with its own marker.
  */
 export type AgentReport = AgentResultError | AgentBlockedError | AgentQuestionError;
 
 /**
- * Reads a final answer's reserved marker: `[usine:blocked]` reports a blocker
- * and `[usine:question]` asks the operator. Only an answer that opens with a
- * marker counts, whether its details follow on the same line or the next; ordinary
- * prose and later mentions are unchanged.
+ * Reads a final answer's reserved marker: `[usine:blocked]` reports a blocker,
+ * `[usine:question]` asks the operator, and `[usine:failed]` relays a failure.
+ * Only an answer that opens with a marker counts, whether its details follow
+ * on the same line or the next; ordinary prose and later mentions are unchanged.
  */
 export const reportedOutcome = (
   sessionId: Option.Option<AgentSessionId>,
   answer: string,
-): Option.Option<AgentBlockedError | AgentQuestionError> => {
+): Option.Option<AgentReport> => {
   const trimmed = answer.trim();
   if (trimmed.startsWith(QUESTION_MARKER)) {
     return Option.some(
@@ -187,12 +195,27 @@ export const reportedOutcome = (
       }),
     );
   }
+  if (trimmed.startsWith(FAILED_MARKER)) {
+    return Option.some(
+      new AgentResultError({
+        sessionId,
+        message:
+          trimmed.slice(FAILED_MARKER.length).trim() || "Agent reported a failure without details.",
+      }),
+    );
+  }
   return Option.none();
 };
 
 /** The final answer that relays `report` to whoever awaits it, opening with its marker. */
-export const reportText = (report: AgentReport): string =>
-  `${report._tag === "AgentQuestionError" ? QUESTION_MARKER : BLOCKED_MARKER}\n${report.message}`;
+export const reportText = (report: AgentReport): string => {
+  const marker = Match.valueTags(report, {
+    AgentResultError: () => FAILED_MARKER,
+    AgentBlockedError: () => BLOCKED_MARKER,
+    AgentQuestionError: () => QUESTION_MARKER,
+  });
+  return `${marker}\n${report.message}`;
+};
 
 /**
  * Maps session errors onto the retry taxonomy: an SDK or process failure is

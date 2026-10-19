@@ -5,6 +5,7 @@ import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
+  AgentFailure,
   BlockedFailure,
   InfraFailure,
   QuestionFailure,
@@ -1157,5 +1158,42 @@ describe("durable AttemptRuntime", () => {
         ),
       );
     }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "ends the Attempt with AgentFailure for a child's harness failure, relayed verbatim or not",
+    () =>
+      Effect.gen(function* () {
+        // The parent returns its last subagent result verbatim, as its guidance asks for a report.
+        const relay: ParentStep = (context) => {
+          const result = [...context.messages].reverse().find(({ role }) => role === "toolResult");
+          const parts = result?.role === "toolResult" ? result.content : [];
+          return answer(
+            parts.flatMap((part) => (part.type === "text" ? [part.text] : [])).join(""),
+          );
+        };
+        for (const [attempt, parentAnswer] of [
+          ["run/step/17", relay],
+          ["run/step/18", answer("The child's harness failed.")],
+        ] as const) {
+          const database = yield* temporaryDatabase;
+          yield* Effect.gen(function* () {
+            const runtime = yield* AttemptRuntime;
+            const execution = yield* Effect.forkChild(
+              runtime.execute(attemptRequest(attempt), recordingSink().sink),
+            );
+            yield* (yield* (yield* StubChildren).next).fail("Codex turn failed: stream closed.");
+            const failure = yield* Fiber.join(execution).pipe(Effect.flip);
+            assert.deepStrictEqual(
+              failure,
+              new AgentFailure({ message: "Codex turn failed: stream closed." }),
+            );
+          }).pipe(
+            Effect.provide(
+              layer({ database, parent: [delegate("Run the Codex turn"), parentAnswer] }),
+            ),
+          );
+        }
+      }).pipe(Effect.scoped),
   );
 });

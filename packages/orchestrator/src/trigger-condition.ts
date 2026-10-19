@@ -17,10 +17,10 @@ const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
  * Item, using the Loops and registry of the current instance. The stored
  * projection is not enough: the Run that just closed may have changed the
  * Item after the poll that recorded the Event and before the next poll. An
- * Item GitHub no longer has answers `false`, as for an Item that stopped
- * matching. Any other failure, or a check that exceeds five seconds, answers
- * `true`, so the Run opens as it did before the check existed; the next poll
- * revokes it if the Item moved on.
+ * Item GitHub no longer has answers `item-gone`, so the engine revokes its
+ * Events and marks its projection gone. Any other failure, or a check that
+ * exceeds five seconds, answers `matches`, so the Run opens as it did before
+ * the check existed; the next poll revokes it if the Item moved on.
  */
 export const triggerConditionLayer: Layer.Layer<
   TriggerCondition,
@@ -43,9 +43,9 @@ export const triggerConditionLayer: Layer.Layer<
       const loop = instance.loops.find(({ name }) => name === submission.loop);
       if (loop === undefined) {
         yield* Effect.logInfo("Queued Event belongs to a Loop that is no longer loaded", fields);
-        return false;
+        return "no-longer-matches";
       }
-      if (loop.trigger.on === "schedule") return true;
+      if (loop.trigger.on === "schedule") return "matches";
       const repository = instance.config.repos.find(
         ({ name }) =>
           canonicalRepositoryName(name) === canonicalRepositoryName(submission.repository),
@@ -55,7 +55,7 @@ export const triggerConditionLayer: Layer.Layer<
           ...fields,
           managed: repository !== undefined,
         });
-        return false;
+        return "no-longer-matches";
       }
       const item = decodeItemKey(submission.itemKey);
       if (Option.isNone(item)) {
@@ -63,7 +63,7 @@ export const triggerConditionLayer: Layer.Layer<
           "Queued Event's Item key is not a GitHub Item; opening as before",
           fields,
         );
-        return true;
+        return "matches";
       }
       const [, , number] = item.value;
       const changed =
@@ -82,10 +82,10 @@ export const triggerConditionLayer: Layer.Layer<
         contentHash: snapshot.contentHash,
         holds,
       });
-      return holds;
+      return holds ? "matches" : "no-longer-matches";
     });
 
-    const holds = Effect.fn("TriggerCondition.holds")(
+    const recheck = Effect.fn("TriggerCondition.recheck")(
       function* (submission: Submission) {
         yield* Effect.annotateCurrentSpan({
           loop: submission.loop,
@@ -106,7 +106,7 @@ export const triggerConditionLayer: Layer.Layer<
               item: error.item,
               errorTag: error._tag,
               message: error.message,
-            }).pipe(Effect.as(false)),
+            }).pipe(Effect.as("item-gone" as const)),
           ),
           Effect.catch((error) =>
             Effect.logWarning("Trigger re-check failed; opening the queued Event as before", {
@@ -116,11 +116,11 @@ export const triggerConditionLayer: Layer.Layer<
               ...(error._tag === "TimeoutError"
                 ? { errorTag: error._tag, message: "Trigger re-check exceeded five seconds" }
                 : repositoryFailureLogFields(error)),
-            }).pipe(Effect.as(true)),
+            }).pipe(Effect.as("matches" as const)),
           ),
         ),
     );
 
-    return { holds };
+    return { recheck };
   }),
 );

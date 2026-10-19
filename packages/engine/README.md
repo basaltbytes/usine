@@ -18,7 +18,7 @@ The default adapter stores usine's Event ledger and Run records in `<instance>/.
 
 - Approval-gated Runs wait for an approval Event before their first Attempt.
 - Infrastructure failures retry automatically, with a cap of three Attempts. Agent, defect, and guard failures wait for an operator retry.
-- A newer Event supersedes a pending, waiting, or queued Run. A running Attempt finishes first, then the engine opens only the newest queued Event for that Item. Before that Event opens, `TriggerCondition` (`@usine/engine/trigger-condition`, supplied by the deployment) re-evaluates the Loop's trigger against the Item's current state: an Event whose trigger no longer holds is recorded as ignored (revoked) and never opens a Run, so a Run that changes its own Item before it flips the labels gating its trigger does not spawn a second Run.
+- A newer Event supersedes a pending, waiting, or queued Run. A running Attempt finishes first, then the engine opens only the newest queued Event for that Item. Before that Event opens, `TriggerCondition` (`@usine/engine/trigger-condition`, supplied by the deployment) re-evaluates the Loop's trigger against the Item's current state: an Event whose trigger no longer holds is recorded as ignored (revoked) and never opens a Run, so a Run that changes its own Item before it flips the labels gating its trigger does not spawn a second Run. When the check answers that the Item's source no longer has it, the Events are revoked the same way and `ItemProjectionWriter.markGone` records the Item as gone, so the Board stops showing it as open.
 - Revoke stops pending, waiting, and queued Runs. Operator cancellation can also stop a running Attempt.
 - The engine records what each Loop last saw of an Item: the Event a trigger submitted, or a sighting that did not match. A canceled, superseded, or revoked Run keeps its Event while the Item stays in that state, and so does a queued Event that a revoke ignored. When the Loop saw the Item not matching or with other content and the Item then comes back, the Event opens again as a reopening whose dedup key is `["reopened", n, <original key>]`, so its Run has its own id and existing Run ids do not change. Succeeded and failed Runs always keep their Event, and a queued Event that a newer Event superseded stays ignored.
 - `RunEngine.runAgain(runId, request)` opens a new Run for the Item state of a succeeded or canceled Run, with the request's task, Agent, Step, approval requirement, and cycle limit. Its Event has the dedup key `["operator-run-again", n, <trigger key>]`, numbered with the trigger Event's reopenings, so a later sighting of the unchanged Item joins the new Run. The Item's cycle budget can block it (`CycleBlocked`), and the Loop's approval gate applies once it opens. It fails with `RunOperationRejectedError` for a Run in another state and `RunRetryBlockedError` while another Run of the Loop is open on the Item. `RunSnapshot.runAgain` names the Run that was run again and who asked.
@@ -62,9 +62,9 @@ const StepExecutorLive = Layer.succeed(StepExecutor)({
   interrupt: () => Effect.void,
 })
 
-// Re-checks a queued Event's trigger before its Run opens; this one always holds.
+// Re-checks a queued Event's trigger before its Run opens; this one always matches.
 const TriggerConditionLive = Layer.succeed(TriggerCondition)({
-  holds: () => Effect.succeed(true),
+  recheck: () => Effect.succeed("matches"),
 })
 
 const EngineLive = layer(InstanceDirectory.make("/path/to/instance")).pipe(

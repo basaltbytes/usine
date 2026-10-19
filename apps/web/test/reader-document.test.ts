@@ -213,6 +213,10 @@ describe("checkpoints", () => {
       ),
       "Baseline lint and knip fail.",
     );
+    assert.equal(
+      checkpointText("[usine:failed]\nCodex turn failed: stream closed."),
+      "Codex turn failed: stream closed.",
+    );
     assert.equal(checkpointText("## Plan\n\n1. Read the issue"), "Plan");
     assert.equal(
       checkpointText("```bash\npnpm lint\n```\nSee the [log](https://example.com) for details."),

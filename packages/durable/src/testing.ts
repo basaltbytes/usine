@@ -13,6 +13,7 @@ import {
   AgentBlockedError,
   AgentQuestionError,
   type AgentReport,
+  AgentResultError,
   type AgentSessionError,
   ChildBackend,
   type ChildRequest,
@@ -106,6 +107,8 @@ export interface StubChild {
   readonly block: (message: string) => Effect.Effect<void>;
   /** Finishes by asking the operator `question`, which fails the Attempt unless the parent relays it. */
   readonly ask: (question: string) => Effect.Effect<void>;
+  /** Finishes with a harness failure, which fails the Attempt with `AgentFailure` unless the parent reports otherwise. */
+  readonly fail: (message: string) => Effect.Effect<void>;
   /** Completes once the parent's tool call interrupted the child (abort, cancel, or shutdown). */
   readonly interrupted: Effect.Effect<void>;
   /** The operator actions delivered to this child so far. */
@@ -176,6 +179,8 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     report(new AgentBlockedError({ sessionId: Option.some(session.id), message }));
   const ask = (question: string) =>
     report(new AgentQuestionError({ sessionId: Option.some(session.id), message: question }));
+  const fail = (message: string) =>
+    report(new AgentResultError({ sessionId: Option.some(session.id), message }));
   // A message to an idle or paused child starts its next turn; a working child queues it.
   const intervene = (action: AttemptChannel.OperatorAction, onDelivery: OnDelivery) =>
     Effect.gen(function* () {
@@ -218,6 +223,7 @@ const launchStub = Effect.fn("StubChildBackend.launch")(function* (request: Chil
     readQueued,
     block,
     ask,
+    fail,
     interrupted: Deferred.await(interrupted),
     interventions: Effect.sync(() => [...interventions]),
   };

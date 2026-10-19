@@ -18,7 +18,7 @@ import {
   ChildSessionCount,
   SessionFinished,
 } from "@usine/core/agent/session";
-import { Deferred, Effect, Exit, Fiber, Option, Result, Stream } from "effect";
+import { Deferred, Effect, Exit, Fiber, Match, Option, Result, Stream } from "effect";
 import { durableError } from "../harness.ts";
 import { AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import type { AttemptHub } from "./hubs.ts";
@@ -234,7 +234,11 @@ export const subagentTool = (services: ExtensionServices) => {
     const text = yield* Result.match(outcome, {
       onFailure: (report) =>
         Effect.gen(function* () {
-          const kind = report._tag === "AgentQuestionError" ? "question" : "blocked";
+          const kind = Match.valueTags(report, {
+            AgentResultError: () => "failed" as const,
+            AgentBlockedError: () => "blocked" as const,
+            AgentQuestionError: () => "question" as const,
+          });
           yield* Effect.logInfo("Child session returned a reserved report to the Pi parent", {
             sessionId: session.id,
             kind,

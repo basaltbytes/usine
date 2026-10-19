@@ -195,20 +195,28 @@ describe("Board projection", () => {
     }),
   );
 
-  it.effect("leaves a closed issue unmapped instead of placing it by a leftover label", () =>
-    Effect.gen(function* () {
-      const config = Schema.decodeUnknownSync(UsineConfig)({
-        version: 1,
-        repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
-      });
-      const managed = config.repos[0];
-      assert(managed !== undefined);
-      const board = yield* projectBoard(managed, [], [closedItem], []);
-      assert.deepStrictEqual(board.lanes[0]?.items, []);
-      const unmapped = board.lanes.find(({ origin }) => origin === "fallback");
-      assert.strictEqual(unmapped?.items[0]?.itemKey, itemKey);
-      assert.strictEqual(unmapped?.items[0]?.state, "issue-closed");
-    }),
+  it.effect(
+    "leaves a closed issue, or an open one GitHub no longer has, unmapped instead of placing it by a leftover label",
+    () =>
+      Effect.gen(function* () {
+        const config = Schema.decodeUnknownSync(UsineConfig)({
+          version: 1,
+          repos: [{ name: repository, lanes: [{ name: "Ready", sources: [{ label: ready }] }] }],
+        });
+        const managed = config.repos[0];
+        assert(managed !== undefined);
+        const gone = new ItemProjection({
+          ...itemWithLabels([ready]),
+          goneAt: Option.some(DateTime.makeUnsafe("2026-09-04T08:00:00Z")),
+        });
+        for (const settled of [closedItem, gone]) {
+          const board = yield* projectBoard(managed, [], [settled], []);
+          assert.deepStrictEqual(board.lanes[0]?.items, []);
+          const unmapped = board.lanes.find(({ origin }) => origin === "fallback");
+          assert.strictEqual(unmapped?.items[0]?.itemKey, itemKey);
+          assert.strictEqual(unmapped?.items[0]?.state, "issue-closed");
+        }
+      }),
   );
 
   it.effect("moves an open pull request GitHub no longer has to its closed lane", () =>

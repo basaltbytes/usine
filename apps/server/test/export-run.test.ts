@@ -141,7 +141,9 @@ const seed = (directory: string) =>
     Effect.provide(
       layer(InstanceDirectory.make(directory)).pipe(
         Layer.provide(executor),
-        Layer.provide(Layer.succeed(TriggerCondition)({ holds: () => Effect.succeed(true) })),
+        Layer.provide(
+          Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+        ),
       ),
     ),
   );

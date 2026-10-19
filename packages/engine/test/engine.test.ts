@@ -19,6 +19,7 @@ import { layerWithDatabase, ReconcileInterval, RunEngine } from "../src/engine/e
 import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
+import type { TriggerRecheck } from "../src/trigger-condition.ts";
 import { runIdFor, Submission } from "../src/engine/submission.ts";
 import {
   approvalEvent,
@@ -488,7 +489,7 @@ describe("durable run engine", () => {
       Effect.gen(function* () {
         const finish = yield* Deferred.make<void>();
         const checking = yield* Deferred.make<void>();
-        const answer = yield* Deferred.make<boolean>();
+        const answer = yield* Deferred.make<TriggerRecheck>();
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
           Deferred.await(finish).pipe(
             Effect.andThen(new AgentFailure({ message: "needs the operator" })),
@@ -515,7 +516,7 @@ describe("durable run engine", () => {
           const retrying = yield* Effect.forkChild(engine.retry(failing.runId), {
             startImmediately: true,
           });
-          yield* Deferred.succeed(answer, false);
+          yield* Deferred.succeed(answer, "no-longer-matches");
           yield* Fiber.join(retrying);
           const finished = yield* waitFor(
             engine,
@@ -667,7 +668,7 @@ describe("durable run engine", () => {
           }),
         ).pipe(Layer.provide(executorLayer(plans)));
         const condition = conditionLayer(
-          Ref.update(checks, (count) => count + 1).pipe(Effect.as(true)),
+          Ref.update(checks, (count) => count + 1).pipe(Effect.as("matches" as const)),
         );
         yield* Effect.gen(function* () {
           const engine = yield* RunEngine;
@@ -819,7 +820,7 @@ const flakyEngineLayer = (
 ) =>
   layerWithDatabase(flakyDatabase(directory, failures)).pipe(
     Layer.provide(executor),
-    Layer.provide(conditionLayer(Effect.succeed(true))),
+    Layer.provide(conditionLayer(Effect.succeed("matches"))),
     Layer.provide(NodeServices.layer),
   );
 

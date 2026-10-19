@@ -410,9 +410,11 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
   Crypto.Crypto | StepExecutor | TriggerCondition | DatabaseRequirements
 > => {
   const store = RunStore.layer.pipe(Layer.provide(database));
+  const itemWriter = ItemProjectionWriter.layer.pipe(Layer.provide(database));
   const driver = RunDriver.layer.pipe(
     Layer.provideMerge(store),
     Layer.provideMerge(AttemptAdmission.layer),
+    Layer.provide(itemWriter),
   );
   const runEngine = Layer.effect(RunEngine, makeRunEngine).pipe(Layer.provide(driver));
   return Layer.mergeAll(
@@ -422,7 +424,7 @@ export const layerWithDatabase = <DatabaseError, DatabaseRequirements>(
     RunReader.layer.pipe(Layer.provide(database)),
     CursorStore.layer.pipe(Layer.provide(database)),
     ItemProjectionReader.layer.pipe(Layer.provide(database)),
-    ItemProjectionWriter.layer.pipe(Layer.provide(database)),
+    itemWriter,
     RepositoryLabelProjectionReader.layer.pipe(Layer.provide(database)),
     RepositoryLabelProjectionWriter.layer.pipe(Layer.provide(database)),
     LoopControl.layer.pipe(Layer.provide(database)),

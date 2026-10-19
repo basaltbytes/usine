@@ -115,20 +115,20 @@ describe("TriggerCondition", () => {
   it.effect("keeps the queued Event's turn when the fresh snapshot cannot be fetched", () =>
     Effect.gen(function* () {
       const condition = yield* TriggerCondition;
-      const holds = yield* condition.holds(
+      const recheck = yield* condition.recheck(
         submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
       );
-      assert.strictEqual(holds, true);
+      assert.strictEqual(recheck, "matches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
   );
 
-  it.effect("drops a queued Event whose Item GitHub no longer has", () =>
+  it.effect("reports the Item gone when GitHub no longer has it", () =>
     Effect.gen(function* () {
       const condition = yield* TriggerCondition;
-      const holds = yield* condition.holds(
+      const recheck = yield* condition.recheck(
         submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
       );
-      assert.strictEqual(holds, false);
+      assert.strictEqual(recheck, "item-gone");
     }).pipe(
       Effect.provide(
         layerWith({
@@ -160,7 +160,7 @@ describe("TriggerCondition", () => {
       };
       const fiber = yield* Effect.gen(function* () {
         const condition = yield* TriggerCondition;
-        return yield* condition.holds(
+        return yield* condition.recheck(
           submissionFor(issueLoop.name, '["github","basaltbytes/usine",28]'),
         );
       }).pipe(Effect.provide(layerWith(github)), Effect.forkChild);
@@ -169,7 +169,7 @@ describe("TriggerCondition", () => {
       yield* TestClock.adjust("4 seconds");
       assert.isUndefined(fiber.pollUnsafe());
       yield* TestClock.adjust("1 second");
-      assert.strictEqual(yield* Fiber.join(fiber), true);
+      assert.strictEqual(yield* Fiber.join(fiber), "matches");
       assert.isTrue(yield* Deferred.isDone(interrupted));
     }),
   );
@@ -177,10 +177,10 @@ describe("TriggerCondition", () => {
   it.effect("never re-fetches for a schedule Tick, which has no standing condition", () =>
     Effect.gen(function* () {
       const condition = yield* TriggerCondition;
-      const holds = yield* condition.holds(
+      const recheck = yield* condition.recheck(
         submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]'),
       );
-      assert.strictEqual(holds, true);
+      assert.strictEqual(recheck, "matches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
   );
 
@@ -198,12 +198,12 @@ describe("TriggerCondition", () => {
         const submission = submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]');
         yield* Effect.gen(function* () {
           const condition = yield* TriggerCondition;
-          assert.strictEqual(yield* condition.holds(submission), true);
+          assert.strictEqual(yield* condition.recheck(submission), "matches");
           yield* SubscriptionRef.set(
             current,
             new LoadedInstance({ ...instance, loops: [issueLoop] }),
           );
-          assert.strictEqual(yield* condition.holds(submission), false);
+          assert.strictEqual(yield* condition.recheck(submission), "no-longer-matches");
         }).pipe(Effect.provide(layerWith(failingGitHub, reloadable)));
       }),
   );
@@ -211,10 +211,10 @@ describe("TriggerCondition", () => {
   it.effect("drops a queued Event whose Loop is no longer loaded", () =>
     Effect.gen(function* () {
       const condition = yield* TriggerCondition;
-      const holds = yield* condition.holds(
+      const recheck = yield* condition.recheck(
         submissionFor(LoopName.make("retired"), '["github","basaltbytes/usine",28]'),
       );
-      assert.strictEqual(holds, false);
+      assert.strictEqual(recheck, "no-longer-matches");
     }).pipe(Effect.provide(layerWith(failingGitHub))),
   );
 });

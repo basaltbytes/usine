@@ -7,6 +7,7 @@ import {
   Cause,
   Context,
   Crypto,
+  DateTime,
   Effect,
   Fiber,
   FiberMap,
@@ -15,6 +16,7 @@ import {
   Result,
   Schedule,
 } from "effect";
+import { ItemProjectionWriter } from "../item-projection/item-projection.ts";
 import { StepExecutor } from "../step-executor.ts";
 import { RunStore } from "../store/store.ts";
 import { TriggerCondition } from "../trigger-condition.ts";
@@ -27,7 +29,7 @@ import type {
   RunStoreError,
 } from "./error.ts";
 import type { FinishDecision } from "./lifecycle.ts";
-import { runIdFor } from "./submission.ts";
+import { runIdFor, type Submission } from "./submission.ts";
 
 // The executor's sinks speak AttemptFailure: a write the store could not make
 // fails the Attempt as infrastructure, and a missing or rejected Run is a defect.
@@ -108,7 +110,8 @@ export class RunDriver extends Context.Service<
     /**
      * Gives the newest queued Event of the closed Run's Item its turn. The
      * trigger is re-evaluated against the Item's current state first, because
-     * the queued Event may describe state the closed Run itself changed.
+     * the queued Event may describe state the closed Run itself changed. An
+     * Item its source no longer has also has its projection marked gone.
      */
     readonly continueWithNewest: (closedRunId: RunId) => Effect.Effect<void, RunStoreError>;
     /**
@@ -126,6 +129,7 @@ export class RunDriver extends Context.Service<
       const executor = yield* StepExecutor;
       const admission = yield* AttemptAdmission;
       const condition = yield* TriggerCondition;
+      const items = yield* ItemProjectionWriter;
       const crypto = yield* Crypto.Crypto;
       const fibers = yield* FiberMap.make<RunId>();
 
@@ -178,6 +182,26 @@ export class RunDriver extends Context.Service<
         yield* Effect.logInfo("The closed Run's fiber stopped", { runId });
       });
 
+      const markItemGone = Effect.fn("RunDriver.markItemGone")(function* (
+        closedRunId: RunId,
+        submission: Submission,
+      ) {
+        yield* Effect.annotateCurrentSpan({ runId: closedRunId, itemKey: submission.itemKey });
+        return yield* items.markGone(submission.itemKey, yield* DateTime.now).pipe(
+          retryingStore(closedRunId, "mark the Item's projection gone"),
+          Effect.catch((error) =>
+            Effect.logWarning(
+              "Could not mark the gone Item's projection; its Board card stays in place",
+              {
+                completedRunId: closedRunId,
+                itemKey: submission.itemKey,
+                errorTag: error._tag,
+              },
+            ).pipe(Effect.as(false)),
+          ),
+        );
+      });
+
       const continueWithNewest = Effect.fn("RunDriver.continueWithNewest")(function* (
         closedRunId: RunId,
       ) {
@@ -193,15 +217,24 @@ export class RunDriver extends Context.Service<
           loop: submission.loop,
           itemKey: submission.itemKey,
         };
-        if (!(yield* condition.holds(submission))) {
+        const recheck = yield* condition.recheck(submission);
+        if (recheck !== "matches") {
           // Only the queue observed before the remote check belongs to this result.
           const revoked = yield* store
             .revokeQueued(queued.value)
             .pipe(retryingStore(closedRunId, "revoke the queued Events"));
-          yield* Effect.logInfo("Queued Event no longer matches its trigger; revoked", {
-            ...fields,
-            revokedEvents: revoked,
-          });
+          if (recheck === "no-longer-matches") {
+            yield* Effect.logInfo("Queued Event no longer matches its trigger; revoked", {
+              ...fields,
+              revokedEvents: revoked,
+            });
+            return;
+          }
+          const projectionMarkedGone = yield* markItemGone(closedRunId, submission);
+          yield* Effect.logInfo(
+            "Queued Event's Item is gone from its source; revoked its queued Events",
+            { ...fields, revokedEvents: revoked, projectionMarkedGone },
+          );
           return;
         }
         const runId = yield* runIdFor(submission).pipe(

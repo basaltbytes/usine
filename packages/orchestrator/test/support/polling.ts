@@ -24,7 +24,7 @@ export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
 
 /** A queued Event always keeps its turn: the engine's pre-check behavior. */
 export const alwaysHoldsLayer = Layer.succeed(TriggerCondition)({
-  holds: () => Effect.succeed(true),
+  recheck: () => Effect.succeed("matches"),
 });
 
 export const emptyCycleBudgets: CycleBudgets["Service"] = {

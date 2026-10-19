@@ -1,5 +1,5 @@
 // The reserved markers an Agent's final answer opens with (see @usine/agents).
-const MARKER = /^\s*\[usine:(blocked|question)\]/u;
+const MARKER = /^\s*\[usine:(blocked|question|failed)\]/u;
 
 /** The reserved marker an Agent message opens with: a blocker, an operator question, or none. */
 export const answerMarker = (text: string): "blocked" | "question" | null => {
