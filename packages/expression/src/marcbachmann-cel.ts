@@ -418,7 +418,27 @@ const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
   );
 });
 
-/** The ExpressionEngine implementation on @marcbachmann/cel-js. */
+/**
+ * Provides {@link ExpressionEngine} on `@marcbachmann/cel-js`, pinned to 8.0.0 as
+ * the CEL seam requires
+ * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
+ * The layer has no requirements. Before evaluation it converts JSON integers to
+ * `bigint` where the {@link Environment} declares `int`: on a variable, on a
+ * field of a declared object type, or as the item type of a `list<T>`, at any
+ * depth. It also reads absent nullable fields of declared object types as
+ * `null`. It does not convert values inside a `map<K,V>`, so reading a JSON
+ * integer from a `map<string,int>` fails evaluation because the value is a
+ * `double`. Declare such map values as `double`.
+ *
+ * `uint` is not supported for `context` values. An expression that reads a
+ * variable, non-nullable object field, or list item declared `uint` passes
+ * checking but fails evaluation, because the value arrives as a signed
+ * integer. A nullable field is evaluated as `dyn`, so a `uint` value read
+ * from it, or from a list it holds, arrives as the signed integer: comparing
+ * it with a `uint` literal works, but `uint` arithmetic on it fails
+ * evaluation. Declare such values as `int`. A `uint` result fails
+ * `evaluateScalar` (see {@link Scalar}).
+ */
 export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {
   relatedStringLiterals,
   checkBoolean,

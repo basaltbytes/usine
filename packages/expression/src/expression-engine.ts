@@ -1,7 +1,12 @@
 import { Context, type Effect, Schema } from "effect";
 import type { Environment } from "./environment.ts";
 
-/** Non-blank CEL source text. */
+/**
+ * The text of one CEL expression, such as a Loop's `if:` selection condition or
+ * the inside of a `{{ }}` prompt interpolation. Decoding rejects empty and
+ * whitespace-only text. Syntax and types are checked later, by an
+ * {@link ExpressionEngine} operation against an {@link Environment}.
+ */
 export const Source = Schema.String.check(
   Schema.isPattern(/\S/u, { message: "Expected a non-blank CEL expression" }),
 ).pipe(Schema.brand("ExpressionSource"));
@@ -9,7 +14,18 @@ export type Source = typeof Source.Type;
 
 const Position = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
 
-/** Whether checking failed during parsing, type resolution, or result-type validation. */
+/**
+ * The stage at which checking rejected an expression:
+ *
+ * - `parse_error`: the source is not valid CEL syntax.
+ * - `type_error`: the source parses but names an unknown variable or field, or
+ *   combines values of incompatible types.
+ * - `unexpected_result_type`: the source type-checks but its result type does
+ *   not fit the operation, such as a non-`bool` selection condition.
+ * - `check_failed`: the CEL implementation rejected the {@link Environment}
+ *   itself, for example a type name that no object type declares, or failed
+ *   without a detail.
+ */
 export const CheckErrorCode = Schema.Literals([
   "check_failed",
   "parse_error",
@@ -18,29 +34,66 @@ export const CheckErrorCode = Schema.Literals([
 ]);
 export type CheckErrorCode = typeof CheckErrorCode.Type;
 
-/** The expression failed to parse, to type-check, or to produce the expected result type. */
+/**
+ * The expression failed to parse, to type-check, or to produce the expected
+ * result type. Checking reads only the {@link Environment}, never a payload, so
+ * the same expression fails the same way until it or its Environment changes.
+ */
 export class ExpressionCheckError extends Schema.TaggedError<ExpressionCheckError>(
   "@usine/expression/ExpressionCheckError",
 )("ExpressionCheckError", {
+  /** The expression that failed checking, exactly as the caller passed it. */
   source: Source,
+  /** The stage that rejected the expression. Branch on this rather than on `message`. */
   code: CheckErrorCode,
+  /**
+   * A readable description from the CEL implementation, for operators. It can
+   * span several lines with an excerpt of `source` that marks the failing spot.
+   * Its wording is not part of the contract.
+   */
   message: Schema.NonEmptyString,
+  /**
+   * The zero-based character offset in `source` where the failure starts, when
+   * the CEL implementation reports one. Parse and type errors usually carry it;
+   * `unexpected_result_type` and `check_failed` never do.
+   */
   position: Schema.Option(Position),
 }) {}
 
-/** Evaluation failed on an expression that had already checked. */
+/**
+ * Evaluation failed on an expression that had already checked. The cause lies in
+ * the values read at runtime: a root variable or object key is missing from
+ * `context`, a value does not have its declared type, or an operation such as
+ * division by zero or a list index out of range failed.
+ */
 export class ExpressionEvaluationError extends Schema.TaggedError<ExpressionEvaluationError>(
   "@usine/expression/ExpressionEvaluationError",
 )("ExpressionEvaluationError", {
+  /** The expression whose evaluation failed, exactly as the caller passed it. */
   source: Source,
+  /**
+   * A readable description of the runtime failure, for operators. It can span
+   * several lines with an excerpt of `source` that marks the failing spot. Its
+   * wording is not part of the contract.
+   */
   message: Schema.NonEmptyString,
 }) {}
 
-/** The failures callers can receive when checking or evaluating a CEL expression. */
+/**
+ * Either failure an evaluating {@link ExpressionEngine} operation can return.
+ * Match on `_tag` to tell a check failure from an evaluation failure.
+ */
 export const ExpressionError = Schema.Union([ExpressionCheckError, ExpressionEvaluationError]);
 export type ExpressionError = typeof ExpressionError.Type;
 
-/** Values prompt interpolation can render. CEL ints stay bigint. */
+/**
+ * A value one prompt interpolation can render: a string, number, bigint,
+ * boolean, or `null`. CEL `int` results arrive as `bigint`, and CEL `double`
+ * results as `number`. A CEL `uint` result, such as `1u` or `uint(1)`, is not a
+ * `Scalar`: `checkScalar` accepts it, but `evaluateScalar` fails with
+ * {@link ExpressionEvaluationError}. Convert it with `string(...)` or
+ * `double(...)` to render it.
+ */
 export const Scalar = Schema.Union([
   Schema.String,
   Schema.Number,
@@ -85,7 +138,11 @@ export interface ExpressionEngineService {
   ) => Effect.Effect<Scalar, ExpressionError>;
 }
 
-/** Evaluates Loop conditions and prompt expressions against their declared payload context. */
+/**
+ * The service tag for checking and evaluating Loop selection conditions and
+ * prompt interpolations. Provide it with an adapter layer such as
+ * `MarcbachmannCelLayer` from `@usine/expression/marcbachmann-cel`.
+ */
 export class ExpressionEngine extends Context.Service<ExpressionEngine, ExpressionEngineService>()(
   "@usine/expression/ExpressionEngine",
 ) {}
