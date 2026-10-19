@@ -3,7 +3,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import { ChildTarget, ParentTarget } from "@usine/core/attempt/channel";
 import type { RunDetailView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
-import { useId, useMemo, useRef, useState } from "react";
+import { useCallback, useId, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { SessionComposer } from "../run-intervention/session-composer.tsx";
 import { Conversation, type ReaderRequest } from "../run-transcript/conversation.tsx";
@@ -12,6 +12,7 @@ import {
   type Chapter,
   type ChapterRow,
   type ReaderDocument,
+  type ReadingPlace,
 } from "../run-transcript/document/model.ts";
 import { projectTranscript } from "../run-transcript/model.ts";
 import {
@@ -94,6 +95,16 @@ export const RunWorkspace = ({
   };
   const [selectedError, setSelectedError] = useState<string | null>(null);
   const [outlineOpen, setOutlineOpen] = useState(false);
+  const [place, setPlace] = useState<ReadingPlace | null>(null);
+  const follow = useCallback(
+    (next: ReadingPlace) =>
+      setPlace((previous) =>
+        previous?.attemptId === next.attemptId && previous.checkpointKey === next.checkpointKey
+          ? previous
+          : next,
+      ),
+    [],
+  );
 
   const live = [...document.chapters].reverse().find((chapter) => chapter.live);
   const liveSessions = live?.sessions.filter(({ status }) => status === "Live") ?? [];
@@ -119,28 +130,34 @@ export const RunWorkspace = ({
       next.sessionKey === null
         ? undefined
         : chapter.rows.find((row) => rowSession(row) === next.sessionKey);
+    // The outline opens the chosen Attempt at once; the reader confirms it once it lands.
+    follow({ attemptId: chapter.attemptId, checkpointKey: null });
     show({ messageId: first?.key ?? chapter.key, tool: null });
   };
   const selectError = (error: TranscriptUpdate) => {
     setSelectedError(error.key);
     const chapter = chapterOf(document, error.key);
-    if (chapter !== undefined)
+    if (chapter !== undefined) {
       setChosen({ _tag: "Attempt", attemptId: chapter.attemptId, sessionKey: null });
+      follow({ attemptId: chapter.attemptId, checkpointKey: null });
+    }
     show(updateTarget(error));
   };
-  const reading = selection._tag === "Attempt";
+  const showsReader = selection._tag === "Attempt";
+  const shownAttempt =
+    selection._tag === "Attempt" ? (place?.attemptId ?? selection.attemptId) : null;
   const selectionName =
-    selection._tag === "Attempt"
-      ? Option.match(
+    shownAttempt === null
+      ? selection._tag
+      : Option.match(
           Option.flatMap(
             Option.fromNullishOr(
-              document.chapters.find(({ attemptId }) => attemptId === selection.attemptId),
+              document.chapters.find(({ attemptId }) => attemptId === shownAttempt),
             ),
             ({ attempt }) => attempt,
           ),
           { onNone: () => "Attempt", onSome: ({ number }) => `Attempt ${number}` },
-        )
-      : selection._tag;
+        );
   return (
     <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
       <button
@@ -165,6 +182,7 @@ export const RunWorkspace = ({
         eventPreview={eventPreview(run.loop, detail.eventPayload)}
         document={document}
         selection={selection}
+        reading={place}
         composerSession={composer?.key ?? null}
         onSelect={select}
         onCheckpoint={(checkpoint, chapter) => {
@@ -174,6 +192,7 @@ export const RunWorkspace = ({
               : { _tag: "Attempt", attemptId: chapter.attemptId, sessionKey: null },
           );
           setOutlineOpen(false);
+          follow({ attemptId: chapter.attemptId, checkpointKey: checkpoint.key });
           show({ messageId: checkpoint.key, tool: null });
         }}
         errors={
@@ -199,7 +218,7 @@ export const RunWorkspace = ({
       >
         {selection._tag === "Task" && <TaskDocument task={run.task} />}
         {selection._tag === "Event" && <EventDocument detail={detail} />}
-        <div className={cn("flex min-h-0 flex-1 flex-col", !reading && "hidden")}>
+        <div className={cn("flex min-h-0 flex-1 flex-col", !showsReader && "hidden")}>
           <Conversation
             runId={run.id}
             document={document}
@@ -207,11 +226,12 @@ export const RunWorkspace = ({
             revision={revision}
             runTask={run.task}
             history={history}
-            active={reading}
+            active={showsReader}
             request={request}
+            onReading={follow}
           />
         </div>
-        {reading && composer !== undefined && (
+        {showsReader && composer !== undefined && (
           <div className="shrink-0 border-t">
             <div className="mx-auto w-full max-w-[38.5rem] px-4 py-3 sm:px-2">
               <ReaderLine>

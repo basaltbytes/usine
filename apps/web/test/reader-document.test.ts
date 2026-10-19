@@ -28,9 +28,11 @@ import { assert, describe, it } from "vitest";
 import {
   chapterCheckpoints,
   readerDocument,
+  readingOrder,
+  readingPlace,
   type ChapterRow,
 } from "../src/run-transcript/document/model.ts";
-import { checkpointText } from "../src/run-transcript/document/text.ts";
+import { checkpointLabel, checkpointText } from "../src/run-transcript/document/text.ts";
 import { projectTranscript } from "../src/run-transcript/model.ts";
 
 const brain = new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5"), effort: "medium" });
@@ -243,5 +245,73 @@ describe("checkpoints", () => {
       ],
     );
     assert.equal(chapterCheckpoints(chapter)[2]?.key, "event:5");
+  });
+
+  it("labels a long sentence at a clause or a whole word, never mid-word", () => {
+    assert.equal(checkpointLabel("Blocker posted on #247."), "Blocker posted on #247.");
+    assert.equal(
+      checkpointLabel("Tests pass on main, so the change can start now."),
+      "Tests pass on main",
+    );
+    assert.equal(
+      checkpointLabel(
+        "The baseline gate is blocked by the Worker's memory configuration: Oxc requests a buffer.",
+      ),
+      "The baseline gate is blocked by…",
+    );
+    assert.equal(
+      checkpointLabel(
+        "I'll use the tackle-issue skill to implement #247, run the required checks.",
+      ),
+      "I'll use the tackle-issue skill…",
+    );
+    assert.equal(
+      checkpointLabel("Lint, formatting, knip, build, and type checks passed."),
+      "Lint, formatting, knip, build…",
+    );
+    assert.equal(
+      checkpointLabel("Antidisestablishmentarianismwithoutanyspaces ends here."),
+      "Antidisestablishmentarianismwithoutanyspaces…",
+    );
+  });
+});
+
+describe("reading place", () => {
+  const failure = new AgentFailureView({ message: "Blocked" });
+  const second = AttemptId.make("attempt-2");
+  const events = [
+    said(3, "First message."),
+    said(4, "Second message."),
+    record(5, new FailedTranscriptView({ failure })),
+    new TranscriptEventView({
+      sequence: TranscriptSequence.make(6),
+      attemptId: second,
+      receivedAt: at(6),
+      direction: "outbound",
+      payload: new AttemptChannel.SessionEvent({
+        event: new TextOutput({ session: child, text: "Retry message." }),
+      }),
+    }),
+  ];
+  const attempts = [
+    attempt(new FailedAttemptView({ failure })),
+    new AttemptView({ ...attempt(null), id: second, number: AttemptNumber.make(2) }),
+  ];
+  const order = readingOrder(document(events, attempts));
+
+  it("follows the first row in view and marks the last checkpoint at or above it", () => {
+    assert.deepEqual(readingPlace(order, ["event:4", "event:5"]), {
+      attemptId,
+      checkpointKey: "event:4",
+    });
+    assert.deepEqual(readingPlace(order, [`attempt:${second}`, "event:6"]), {
+      attemptId: second,
+      checkpointKey: null,
+    });
+    assert.deepEqual(readingPlace(order, ["event:6", `activity:${second}`]), {
+      attemptId: second,
+      checkpointKey: "event:6",
+    });
+    assert.isNull(readingPlace(order, []));
   });
 });

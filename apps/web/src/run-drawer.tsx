@@ -119,6 +119,10 @@ export const RunDrawer = ({
   const detail = useRunDetail(runId, open);
   const [editing, setEditing] = useState(false);
   const run = detail.data?.run;
+  const item =
+    detail.data === undefined
+      ? Option.none()
+      : runItem(detail.data.run, overview, detail.data.eventPayload);
   return (
     <Sheet
       open={open}
@@ -141,7 +145,7 @@ export const RunDrawer = ({
             <>
               <RunTitle
                 run={run}
-                item={runItem(run, overview, detail.data.eventPayload)}
+                item={item}
                 heading={(title) => (
                   <SheetTitle className="text-lg font-semibold wrap-anywhere">{title}</SheetTitle>
                 )}
@@ -149,7 +153,7 @@ export const RunDrawer = ({
               <SheetDescription className="sr-only">
                 Run {run.id} of {run.loop} on {run.repository}
               </SheetDescription>
-              <RunFacts run={run} className="gap-x-4" />
+              <RunFacts run={run} item={item} className="gap-x-4" />
               <RunActions run={run} onEdit={() => setEditing(true)} />
             </>
           )}

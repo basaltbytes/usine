@@ -90,17 +90,15 @@ const detail = (view: RunView, transcript: ReadonlyArray<TranscriptEventView> = 
     sessionState: [],
     earlierTranscript: [],
   });
-const header = (view: RunView) =>
-  renderToStaticMarkup(
+const header = (view: RunView, payload: Schema.Json = detail(view).eventPayload) => {
+  const item = runItem(view, undefined, payload);
+  return renderToStaticMarkup(
     <>
-      <RunTitle
-        run={view}
-        item={runItem(view, undefined, detail(view).eventPayload)}
-        heading={(title: ReactNode) => <h1>{title}</h1>}
-      />
-      <RunFacts run={view} />
+      <RunTitle run={view} item={item} heading={(title: ReactNode) => <h1>{title}</h1>} />
+      <RunFacts run={view} item={item} />
     </>,
   );
+};
 
 describe("Run header", () => {
   it("links the Item and produced PR to GitHub in new tabs", () => {
@@ -145,6 +143,21 @@ describe("Run header", () => {
       eventPreview("start-dev", detail(view).eventPayload),
       "start-dev matched issue #33: open, labelled ready-for-agent",
     );
+  });
+
+  it("shows the Item as the Run's pull request when the Item is one and the Run produced none", () => {
+    const markup = header(run(), {
+      number: 33,
+      title: "Board lanes",
+      url: "https://github.com/basaltbytes/usine/pull/33",
+      state: "OPEN",
+    });
+    assert.notInclude(markup, "No pull request");
+    assert.lengthOf(
+      markup.match(/href="https:\/\/github.com\/basaltbytes\/usine\/pull\/33"/gu) ?? [],
+      2,
+    );
+    assert.include(markup, "#33</span>");
   });
 
   it("names a schedule Run by its Loop, without an Item link", () => {

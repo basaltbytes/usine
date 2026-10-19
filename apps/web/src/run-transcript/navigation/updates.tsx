@@ -1,11 +1,7 @@
 import { ArrowDownIcon } from "@phosphor-icons/react";
 import { useEffect, useLayoutEffect } from "react";
 import { Button } from "@/components/ui/button";
-import {
-  MessageScrollerButton,
-  useMessageScroller,
-  useMessageScrollerScrollable,
-} from "@/components/ui/message-scroller";
+import { useMessageScroller, useMessageScrollerScrollable } from "@/components/ui/message-scroller";
 
 /** Observes the visible conversation and offers a way back to the latest activity. */
 export const UpdateNavigation = ({
@@ -35,29 +31,22 @@ export const UpdateNavigation = ({
     if (pendingLatest && scrollToEnd({ behavior: "instant" })) onReachedLatest();
   }, [pendingLatest, scrollToEnd, onReachedLatest]);
 
-  if (count > 0)
-    return (
-      <Button
-        variant="secondary"
-        size="sm"
-        className="absolute bottom-4 inset-s-1/2 -translate-x-1/2 gap-1.5 border border-border shadow-raised"
-        onClick={onLatest}
-      >
-        <ArrowDownIcon aria-hidden="true" />
-        {count} new {count === 1 ? "update" : "updates"}
-      </Button>
-    );
+  // A band of its own at the reader's foot, so the control never covers the outcome or salvage line.
   return (
-    <MessageScrollerButton
-      size="sm"
-      className="gap-1.5 shadow-raised"
-      aria-label="Jump to latest"
-      onClick={(event) => {
-        event.preventDefault();
-        onLatest();
-      }}
-    >
-      <ArrowDownIcon aria-hidden="true" /> Jump to latest
-    </MessageScrollerButton>
+    <div className="flex h-10 shrink-0 items-center justify-center">
+      {count > 0 ? (
+        <Button variant="secondary" size="sm" className="gap-1.5" onClick={onLatest}>
+          <ArrowDownIcon aria-hidden="true" />
+          {count} new {count === 1 ? "update" : "updates"}
+        </Button>
+      ) : (
+        end && (
+          <Button variant="ghost" size="sm" className="gap-1.5" onClick={onLatest}>
+            <ArrowDownIcon aria-hidden="true" />
+            Jump to latest
+          </Button>
+        )
+      )}
+    </div>
   );
 };

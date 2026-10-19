@@ -639,6 +639,7 @@ it("renders a held child from session state when its activity is outside the loa
         eventPreview="Event"
         document={readerDocument(projectTranscript(page, [], sessionState), [], page)}
         selection={{ _tag: "Attempt", attemptId: attempt, sessionKey: null }}
+        reading={null}
         composerSession={null}
         onSelect={() => {}}
         onCheckpoint={() => {}}

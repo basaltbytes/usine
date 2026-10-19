@@ -24,7 +24,10 @@ import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
+  AgentFailureView,
   AttemptView,
+  FailedAttemptView,
+  FailedTranscriptView,
   RunDetailView,
   RunView,
   TranscriptEventView,
@@ -725,6 +728,81 @@ it.each(["claude", "codex"] as const)(
       .toBeVisible();
   },
 );
+
+const failure = new AgentFailureView({ message: "The first Attempt was blocked." });
+const firstAttempt = new AttemptView({
+  ...liveAttempt,
+  id: AttemptId.make("first"),
+  outcome: new FailedAttemptView({ failure }),
+  endedAt: new Date(Date.UTC(2026, 8, 6, 11, 50, 0)).toISOString(),
+});
+const retried = new AttemptView({ ...liveAttempt, number: AttemptNumber.make(2) });
+const earlierAttempt = Array.from({ length: 20 }, (_, index) => {
+  const event = message(index + 1);
+  return new TranscriptEventView({ ...event, attemptId: firstAttempt.id });
+});
+const failedEnvelope = new TranscriptEventView({
+  sequence: TranscriptSequence.make(21),
+  attemptId: firstAttempt.id,
+  receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, 21)).toISOString(),
+  direction: "outbound",
+  payload: new FailedTranscriptView({ failure }),
+});
+const twoAttempts = [
+  ...earlierAttempt,
+  failedEnvelope,
+  ...Array.from({ length: 25 }, (_, index) => message(index + 22)),
+];
+
+it("opens the outline on the Attempt being read and marks its checkpoint without moving the reader", async () => {
+  mount(twoAttempts, runId, undefined, [firstAttempt, retried]);
+  await expect.poll(atLatest).toBeLessThan(9);
+  const outline = page.getByRole("navigation", { name: "Run outline" });
+  const first = outline.getByRole("button", { name: "Attempt 1, failed" });
+  const second = outline.getByRole("button", { name: "Attempt 2, running" });
+  await expect.element(second).toHaveAttribute("aria-expanded", "true");
+  await expect.element(first).toHaveAttribute("aria-expanded", "false");
+  await moveTo(8, 0);
+  await expect.element(first).toHaveAttribute("aria-expanded", "true");
+  await expect.element(second).toHaveAttribute("aria-expanded", "false");
+  await expect
+    .element(outline.getByRole("button", { name: "Message 8", exact: true }))
+    .toHaveAttribute("aria-current", "location");
+  await expect.poll(() => offset(8)).toBeCloseTo(0, 0);
+  await moveTo(40, 0);
+  await expect.element(second).toHaveAttribute("aria-expanded", "true");
+  await expect
+    .element(outline.getByRole("button", { name: "Message 40", exact: true }))
+    .toHaveAttribute("aria-current", "location");
+});
+
+it("opens a finished Run on a narrow screen at its outcome's own line", async () => {
+  await page.viewport(390, 844);
+  mount([...earlierAttempt, failedEnvelope], runId, undefined, [firstAttempt]);
+  // The row, with its time line stacked above the note on a narrow screen.
+  const outcome = () =>
+    [...host.querySelectorAll<HTMLElement>("[data-message-id]")].find(
+      (element) => element.dataset.messageId === "event:21",
+    );
+  await expect
+    .poll(() => {
+      const element = outcome();
+      return element === undefined
+        ? Number.NaN
+        : element.getBoundingClientRect().top - viewport().getBoundingClientRect().top;
+    })
+    .toBeLessThan(24);
+  expect(
+    (outcome()?.getBoundingClientRect().top ?? -1) - viewport().getBoundingClientRect().top,
+  ).toBeGreaterThanOrEqual(0);
+  await expect
+    .element(
+      page
+        .getByRole("region", { name: "Run conversation" })
+        .getByText("The first Attempt was blocked."),
+    )
+    .toBeVisible();
+});
 
 it("shows that a Pi child has no saved harness session to resume", async () => {
   const child = new ChildSession({

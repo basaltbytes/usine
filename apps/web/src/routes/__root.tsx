@@ -158,7 +158,7 @@ const Shell = () => {
               </AlertDescription>
             </Alert>
           )}
-          <NeedsYou needs={data.needsYou} />
+          <NeedsYou needs={data.needsYou} compact={params.run !== undefined} />
           <Outlet />
         </div>
         {shownRun !== undefined && (

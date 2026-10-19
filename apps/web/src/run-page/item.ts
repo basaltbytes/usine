@@ -7,6 +7,8 @@ export interface RunItem {
   readonly number: number;
   readonly url: string;
   readonly title: Option.Option<string>;
+  /** The Item is itself a pull request, so it is the Run's pull request when the Run produced none. */
+  readonly pullRequest: boolean;
 }
 
 /** The issue or pull request snapshot an Item trigger's Event carries; other fields are ignored. */
@@ -66,18 +68,17 @@ export const runItem = (
       .flatMap(({ items }) => items)
       .flatMap(({ items }) => items)
       .find(({ itemKey }) => itemKey === run.itemKey);
+    const event = Option.getOrUndefined(
+      Option.filter(
+        payload === undefined ? Option.none<EventItem>() : eventItem(payload),
+        (snapshot) => snapshot.number === number,
+      ),
+    );
     return {
       number,
-      url: `https://github.com/${repository}/issues/${number}`,
-      title: Option.orElse(Option.fromNullishOr(carded?.title), () =>
-        Option.map(
-          Option.filter(
-            payload === undefined ? Option.none<EventItem>() : eventItem(payload),
-            (event) => event.number === number,
-          ),
-          ({ title }) => title,
-        ),
-      ),
+      url: carded?.url ?? event?.url ?? `https://github.com/${repository}/issues/${number}`,
+      title: Option.fromNullishOr(carded?.title ?? event?.title),
+      pullRequest: carded === undefined ? event?.kind === "Pull request" : carded.kind === "pr",
     };
   });
 

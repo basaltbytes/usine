@@ -1,13 +1,19 @@
 import type { RunId } from "@usine/core/run";
 import type { TranscriptSequence } from "@usine/engine/transcript";
-import { useCallback, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   MessageScroller,
   MessageScrollerContent,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScrollerVisibility,
 } from "@/components/ui/message-scroller";
-import type { ReaderDocument } from "./document/model.ts";
+import {
+  readingOrder,
+  readingPlace,
+  type ReaderDocument,
+  type ReadingPlace,
+} from "./document/model.ts";
 import { TranscriptDisclosureProvider } from "./grouping/disclosure.tsx";
 import { PreserveReadingPosition } from "./scroll-position.tsx";
 import { Transcript, type TranscriptHistory } from "./transcript.tsx";
@@ -30,8 +36,37 @@ export interface ReaderRequest {
   readonly target: ReaderTarget;
 }
 
-/** A Run's Attempts as one document that follows incoming activity until the reader scrolls away. */
-export const Conversation = ({
+// A narrow reader opening on a finished Run starts at its outcome's own line, not mid-message.
+const narrowEntry = (document: ReaderDocument): ReaderTarget | null => {
+  const last = document.chapters.at(-1);
+  if (last === undefined || last.live || !window.matchMedia("(max-width: 1023px)").matches)
+    return null;
+  const row = [...last.rows].reverse().find(({ _tag }) => _tag === "Ending" || _tag === "Message");
+  return row === undefined ? null : { messageId: row.key, tool: null };
+};
+
+/** Reports where the operator is reading while the reader is shown. */
+const TrackReading = ({
+  document,
+  active,
+  onReading,
+}: {
+  readonly document: ReaderDocument;
+  readonly active: boolean;
+  readonly onReading: (place: ReadingPlace) => void;
+}) => {
+  const { visibleMessageIds } = useMessageScrollerVisibility();
+  const order = useMemo(() => readingOrder(document), [document]);
+  const place = readingPlace(order, visibleMessageIds);
+  const attemptId = place?.attemptId;
+  const checkpointKey = place?.checkpointKey ?? null;
+  useEffect(() => {
+    if (active && attemptId !== undefined) onReading({ attemptId, checkpointKey });
+  }, [active, attemptId, checkpointKey, onReading]);
+  return null;
+};
+
+const Reader = ({
   runId,
   document,
   through,
@@ -40,6 +75,7 @@ export const Conversation = ({
   history,
   active,
   request,
+  onReading,
 }: {
   readonly runId: RunId;
   readonly document: ReaderDocument;
@@ -52,6 +88,8 @@ export const Conversation = ({
   /** False while the reader is hidden, so it neither captures nor acknowledges. */
   readonly active: boolean;
   readonly request: ReaderRequest | null;
+  /** Receives the Attempt and checkpoint being read as the reader scrolls. */
+  readonly onReading: (place: ReadingPlace) => void;
 }) => {
   const [saved] = useState(() => readerMemory(() => window.localStorage).read(runId, Date.now()));
   const [pendingRestore, setPendingRestore] = useState<ReadingAnchor | null>(
@@ -74,7 +112,9 @@ export const Conversation = ({
   const [unread, setUnread] = useState(() =>
     initializeUnread(saved === null ? through : saved.readThrough),
   );
-  const [pendingTarget, setPendingTarget] = useState<ReaderTarget | null>(null);
+  const [pendingTarget, setPendingTarget] = useState<ReaderTarget | null>(() =>
+    saved === null ? narrowEntry(document) : null,
+  );
   const [pendingLatest, setPendingLatest] = useState(false);
   const [handled, setHandled] = useState<number | null>(null);
   if (request !== null && request.id !== handled) {
@@ -145,7 +185,7 @@ export const Conversation = ({
                   navigate();
               }}
             >
-              <MessageScrollerContent className="mx-auto w-full max-w-[38.5rem] gap-0 px-4 pt-5 pb-16 sm:px-2 [&>*]:-mx-2 [&>*]:px-2">
+              <MessageScrollerContent className="mx-auto w-full max-w-[38.5rem] gap-0 px-4 pt-5 pb-8 sm:px-2 [&>*]:-mx-2 [&>*]:px-2">
                 <Transcript document={document} runTask={runTask} history={history} />
               </MessageScrollerContent>
             </MessageScrollerViewport>
@@ -176,6 +216,7 @@ export const Conversation = ({
             initialPosition={saved?.position ?? { _tag: "Latest" }}
           />
           <RevealTarget target={pendingTarget} onRevealed={revealed} />
+          <TrackReading document={document} active={active} onReading={onReading} />
           <UpdateNavigation
             count={unread.keys.size}
             active={active}
@@ -190,3 +231,9 @@ export const Conversation = ({
     </TranscriptDisclosureProvider>
   );
 };
+
+/**
+ * A Run's Attempts as one document that follows incoming activity until the reader scrolls
+ * away, reporting the Attempt and checkpoint being read so the outline can follow.
+ */
+export const Conversation = memo(Reader);

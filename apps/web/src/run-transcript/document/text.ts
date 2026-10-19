@@ -45,3 +45,22 @@ export const checkpointText = (text: string): string => {
   const first = lines[0] ?? "";
   return /^(.*?[.!?…])(?=\s|$)/u.exec(first)?.[1] ?? first;
 };
+
+// What fits on one outline row at 13px beside its indentation, and the shortest clause that
+// still names the message on its own rather than the first item of a list.
+const LABEL_LENGTH = 32;
+const CLAUSE_LENGTH = 12;
+
+/**
+ * Shortens a checkpoint's sentence to one outline row without cutting a word: a long
+ * sentence gives its first clause when that clause fits, otherwise its first words with an ellipsis.
+ */
+export const checkpointLabel = (sentence: string): string => {
+  if (sentence.length <= LABEL_LENGTH) return sentence;
+  const clause = /^(.+?)(?:[,;:]\s|\s[—–-]\s)/u.exec(sentence)?.[1];
+  if (clause !== undefined && clause.length >= CLAUSE_LENGTH && clause.length <= LABEL_LENGTH)
+    return clause;
+  const boundary = sentence.slice(0, LABEL_LENGTH + 1).lastIndexOf(" ");
+  const words = boundary > 0 ? sentence.slice(0, boundary) : (sentence.split(" ")[0] ?? sentence);
+  return `${words.replace(/[\s,;:.—–-]+$/u, "")}…`;
+};

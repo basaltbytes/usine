@@ -1,6 +1,7 @@
 import { Option } from "effect";
 import { StateMark } from "@/components/status-badge";
 import { useNow } from "@/hooks/use-now";
+import { cn } from "@/lib/utils";
 import type { Chapter } from "./document/model.ts";
 import { sessionActivityLabel, type TranscriptSession } from "./model.ts";
 import { presentTool } from "./tool/presentation.ts";
@@ -13,6 +14,27 @@ export const elapsedActivity = (startedAt: string, now: number): string => {
   return minutes < 60
     ? `${minutes}m ${seconds % 60}s`
     : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
+};
+
+/** Time elapsed since an instant, refreshed every second. */
+export const Elapsed = ({
+  since,
+  className,
+}: {
+  readonly since: string;
+  readonly className?: string;
+}) => {
+  const now = useNow(1_000);
+  return (
+    <time
+      dateTime={since}
+      aria-live="off"
+      className={cn("font-mono tabular-nums", className)}
+      title={`Since ${since}`}
+    >
+      {elapsedActivity(since, now)}
+    </time>
+  );
 };
 
 interface Activity {

@@ -21,16 +21,17 @@ export const RunPage = ({ runId }: { readonly runId: RunId }) => {
   if (detail.data === undefined)
     return <p className="px-4 py-5 text-muted-foreground md:px-5">Loading Run…</p>;
   const run = detail.data.run;
+  const item = runItem(run, overview, detail.data.eventPayload);
   return (
     <main className="flex min-h-[36rem] flex-1 flex-col">
       <header className="flex flex-col gap-3 px-4 pt-4 pb-4 md:px-5 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
         <div className="min-w-0 space-y-1.5">
           <RunTitle
             run={run}
-            item={runItem(run, overview, detail.data.eventPayload)}
+            item={item}
             heading={(title) => <h1 className="text-xl font-semibold wrap-anywhere">{title}</h1>}
           />
-          <RunFacts run={run} />
+          <RunFacts run={run} item={item} />
         </div>
         <RunActions run={run} onEdit={() => setEditing(true)} className="lg:shrink-0" />
       </header>

@@ -13,7 +13,13 @@ import type {
   TranscriptTool,
 } from "../model.ts";
 import { presentTool } from "../tool/presentation.ts";
-import { answerMarker, checkpointText, comparableText, withoutMarker } from "./text.ts";
+import {
+  answerMarker,
+  checkpointLabel,
+  checkpointText,
+  comparableText,
+  withoutMarker,
+} from "./text.ts";
 
 /** A row's place in the durable transcript. */
 interface RowPosition {
@@ -122,8 +128,17 @@ export interface ReaderDocument {
 export interface Checkpoint {
   readonly key: string;
   readonly sessionKey: string | null;
+  /** The message's first sentence. */
   readonly text: string;
+  /** The sentence shortened to one outline row at a clause or word boundary. */
+  readonly label: string;
   readonly tone: "plain" | "failed";
+}
+
+/** Where the operator is reading: the Attempt at the reading line and the last checkpoint at or above it. */
+export interface ReadingPlace {
+  readonly attemptId: AttemptId;
+  readonly checkpointKey: string | null;
 }
 
 const speakerOf = (session: TranscriptSession): Speaker => ({
@@ -399,34 +414,74 @@ export const readerDocument = (
 /** The rows the outline lists for a chapter: each message, then the Attempt's outcome. */
 export const chapterCheckpoints = (chapter: Chapter): ReadonlyArray<Checkpoint> =>
   chapter.rows.flatMap((row): ReadonlyArray<Checkpoint> => {
+    const named = (
+      sessionKey: string | null,
+      text: string,
+      tone: Checkpoint["tone"],
+    ): ReadonlyArray<Checkpoint> => [
+      { key: row.key, sessionKey, text, label: checkpointLabel(text), tone },
+    ];
     if (row._tag === "Message" && !row.undelivered)
-      return [
-        {
-          key: row.key,
-          sessionKey: row.speaker.sessionKey,
-          text: checkpointText(row.text),
-          tone: row.blocked ? "failed" : "plain",
-        },
-      ];
+      return named(
+        row.speaker.sessionKey,
+        checkpointText(row.text),
+        row.blocked ? "failed" : "plain",
+      );
     if (row._tag !== "Ending") return [];
+    const sessionKey = row.speaker?.sessionKey ?? null;
+    return Match.valueTags(row.end, {
+      Succeeded: ({ message }) =>
+        named(
+          sessionKey,
+          Option.match(message, { onNone: () => "Succeeded", onSome: checkpointText }),
+          "plain",
+        ),
+      Failed: ({ failure }) => named(sessionKey, checkpointText(failureMessage(failure)), "failed"),
+      Canceled: () => named(sessionKey, "Canceled", "plain"),
+    });
+  });
+
+/** The reader's rows in document order, each with its Attempt and whether the outline lists it. */
+export type ReadingOrder = ReadonlyArray<{
+  readonly id: string;
+  readonly attemptId: AttemptId;
+  readonly checkpoint: boolean;
+}>;
+
+/** Orders every row the reader can show, including each Attempt's heading, history, and activity rows. */
+export const readingOrder = (document: ReaderDocument): ReadingOrder =>
+  document.chapters.flatMap((chapter) => {
+    const checkpoints = new Set(chapterCheckpoints(chapter).map(({ key }) => key));
+    const own = (id: string, checkpoint = false) => ({
+      id,
+      attemptId: chapter.attemptId,
+      checkpoint,
+    });
     return [
-      {
-        key: row.key,
-        sessionKey: row.speaker?.sessionKey ?? null,
-        ...Match.valueTags(row.end, {
-          Succeeded: ({ message }) => ({
-            text: Option.match(message, {
-              onNone: () => "Succeeded",
-              onSome: checkpointText,
-            }),
-            tone: "plain" as const,
-          }),
-          Failed: ({ failure }) => ({
-            text: checkpointText(failureMessage(failure)),
-            tone: "failed" as const,
-          }),
-          Canceled: () => ({ text: "Canceled", tone: "plain" as const }),
-        }),
-      },
+      own(chapter.key),
+      own(`history:${chapter.attemptId}`),
+      own(`empty:${chapter.attemptId}`),
+      ...chapter.rows.map((row) => own(row.key, checkpoints.has(row.key))),
+      own(`activity:${chapter.attemptId}`),
     ];
   });
+
+/**
+ * Finds the reading place from the reader's rows in view: the first of them in
+ * document order sets the Attempt, and the last checkpoint at or above it is marked.
+ * Above an Attempt's first checkpoint, nothing in that Attempt is marked.
+ */
+export const readingPlace = (
+  order: ReadingOrder,
+  visible: ReadonlyArray<string>,
+): ReadingPlace | null => {
+  const shown = new Set(visible);
+  const first = order.findIndex(({ id }) => shown.has(id));
+  const at = order[first];
+  if (at === undefined) return null;
+  const marked = order
+    .slice(0, first + 1)
+    .reverse()
+    .find((entry) => entry.attemptId === at.attemptId && entry.checkpoint);
+  return { attemptId: at.attemptId, checkpointKey: marked?.id ?? null };
+};
