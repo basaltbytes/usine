@@ -6,7 +6,7 @@ The gateway serves three things:
 
 - **A reverse proxy** for Worker VMs on the private network. `git.<domain>` serves git smart HTTP at `/OWNER/REPO.git` and the GitHub REST and GraphQL API under `/api/` the way GitHub Enterprise Server does, so `gh` works with `GH_HOST=git.<domain>`. It adds the installation token the executor attached for that Worker and repository. `llm.<domain>` serves the Anthropic API under `/anthropic` and an OpenAI-compatible API under `/openai`, with the gateway's API key. Every other host is refused; the forward proxy serves the allowlisted ones.
 - **A forward proxy** for `HTTPS_PROXY` and `HTTP_PROXY`: `CONNECT` on port 443 for HTTPS and absolute-form requests for plain HTTP mirrors, to the hosts on the allowlist only. A tunnel opens only when the client's TLS ClientHello names the CONNECT host itself; a ClientHello that names another host, names none, or uses encrypted ClientHello, and bytes that are not TLS, end the tunnel (`server-name-mismatch`, `server-name-missing`, `not-tls`). It resolves each name itself and refuses a name that resolves to a private, loopback, or link-local address. Before a plain HTTP request leaves for another host, it removes the `X-Usine-Gateway-Token` header and any `Authorization` or `x-api-key` value that is a caller token, and leaves a Worker's other credentials alone.
-- **An admin API** for the executor: attach a credential for a Worker and a repository, renew it, detach it, list attachments. It requires the gateway's admin token as a bearer token. Attachments are kept in memory; the executor attaches again when it renews or restarts.
+- **An admin API** for the executor: attach a credential for a Worker and a repository, renew it, detach it, list attachments. It requires the gateway's admin token as a bearer token. Attachments are kept in memory; the executor attaches again when it renews or restarts. A [reload](#reload) keeps them.
 
 Every refused request is logged at warning level as `Gateway refused a request` with the reason, the host, the client address, and the Worker when the caller token names one. Forwarded requests are logged at info level with the Worker, repository, method, path, and status. No token, key, or request body is logged.
 
@@ -32,10 +32,10 @@ At Hetzner Cloud, `gateway.sh install` runs either one on the gateway VM and res
 
 | Import | Contents |
 | --- | --- |
-| `@usine/gateway` | The platform-free core: `GatewaySettings`, `Attachments`, `CallerTokens`, `GatewayProxy` (the reverse proxy as an `HttpServerRequest` handler), `adminRoutes` (the admin API for an `HttpRouter`), `gatewayServices`, the egress allowlist parser, and the domain records. It needs an `HttpClient` that leaves `content-encoding` alone. |
+| `@usine/gateway` | The platform-free core: `GatewaySettings`, `SettingsInForce` (the allowlist and LLM providers a reload replaces), `Attachments`, `CallerTokens`, `GatewayProxy` (the reverse proxy as an `HttpServerRequest` handler), `adminRoutes` (the admin API for an `HttpRouter`), `gatewayServices`, the egress allowlist parser, and the domain records. It needs an `HttpClient` that leaves `content-encoding` alone. |
 | `@usine/gateway/admin` | `GatewayAdminApi`, the admin API contract, for `HttpApiClient.make` in the executor, with the records a client sends and reads: `AttachRequest`, `InstallationCredential`, `Attached`, `AttachmentId`, `CallerToken`, `Detached`, and `AttachmentList`, and `GATEWAY_TOKEN_HEADER`. |
-| `@usine/gateway/node` | `gatewayLayer` (the three servers on Node, with undici upstream), `gatewayFromEnvironment`, `settingsFromEnvironment`, and `GatewayAddresses`. |
-| `usine-gateway` | The command the gateway VM runs; it reads the environment below and logs one JSON object per line. |
+| `@usine/gateway/node` | `gatewayLayer` (the three servers on Node, with undici upstream), `gatewayFromEnvironment`, `settingsFromEnvironment`, `GatewayAddresses`, and `GatewayReload`. |
+| `usine-gateway` | The command the gateway VM runs; it reads the settings below, reloads on SIGHUP, and logs one JSON object per line. |
 
 `GatewayDomain` is re-exported from `@usine/core/worker`. Gateway environment settings and Worker configuration use the same lowercase DNS domain schema.
 
@@ -76,8 +76,11 @@ A client that sends every request through `HTTPS_PROXY`, as Claude Code does, st
 
 ## Configuration
 
+`usine-gateway` reads these variables from the environment files that `USINE_GATEWAY_ENVIRONMENT_FILES` names, and from the process environment for any variable no file sets. Without `USINE_GATEWAY_ENVIRONMENT_FILES`, it reads the process environment alone.
+
 | Variable | Meaning |
 | --- | --- |
+| `USINE_GATEWAY_ENVIRONMENT_FILES` | Environment files separated by `:`, such as `/etc/usine-gateway/settings.env:/etc/usine-gateway/secrets.env`, each with one `KEY=value` per line; quote a value that contains `#`. A variable in a later file overrides the same one in an earlier file and in the process environment. Read from the process environment only. |
 | `USINE_GATEWAY_DOMAIN` | The private domain, such as `gw.internal`. Required. |
 | `USINE_GATEWAY_ADMIN_TOKEN` | The admin API's bearer token, at least 32 characters. Required. |
 | `USINE_GATEWAY_CALLER_KEY` | The HMAC key for caller tokens, at least 32 characters. Required. Changing it invalidates every caller token. |
@@ -91,6 +94,24 @@ A client that sends every request through `HTTPS_PROXY`, as Claude Code does, st
 | `USINE_GATEWAY_ANTHROPIC_UPSTREAM`, `USINE_GATEWAY_OPENAI_UPSTREAM` | Upstream base URLs, default `https://api.anthropic.com` and `https://api.openai.com`; the OpenAI one can name any OpenAI-compatible provider. |
 
 A provider without a credential is refused with `provider-not-configured`.
+
+## Reload
+
+On SIGHUP, `usine-gateway` reads its environment files and its allowlist file again, and replaces the egress allowlist and the LLM provider settings: `ANTHROPIC_API_KEY`, `USINE_GATEWAY_ANTHROPIC_SUBSCRIPTION_TOKEN`, `OPENAI_API_KEY`, the two upstreams, and `USINE_GATEWAY_EGRESS_ALLOWLIST`. Under systemd, `ExecReload=kill -HUP $MAINPID` in the unit makes `systemctl reload usine-gateway` send it.
+
+A reload leaves the attachments, the admin API, the listening sockets, and open tunnels as they are, so running Attempts keep their GitHub and LLM requests. A tunnel the previous allowlist opened stays open until a side closes it; each new `CONNECT` and plain HTTP request is judged by the new allowlist, and each LLM request after the reload is sent with the new key.
+
+The domain, the listeners, the admin token, and the caller key change only with a restart. The servers stay bound to the addresses they started with, the executor holds the admin token the gateway started with, and a new caller key would refuse every caller token in use, which interrupts running Attempts as a restart does. A reload that finds one of them changed logs `Settings changed that take effect only after a restart` at warning level with the variables' names, and goes on with the rest.
+
+Each reload ends with `Reloaded the gateway settings`, which gives the environment files, the allowlist path and its rule count, whether the allowlist and the providers were reloaded or kept, and the names of the provider settings that changed (`changed`), never their values. A reload keeps what is in force when what it reads cannot be used:
+
+| What is wrong | What the reload keeps | Log line, at error level |
+| --- | --- | --- |
+| The allowlist cannot be read or does not parse | The previous allowlist | `Kept the previous egress allowlist`, with the path, the line, and what is wrong with it |
+| A provider setting is invalid, or both Anthropic credentials are set | The previous providers | `Kept the previous LLM providers` |
+| An environment file cannot be read | Everything | `Kept the gateway settings: an environment file could not be read`, with the path |
+
+`systemctl reload` returns once it has sent the signal, before the reload ends; the journal has the result. Variables the process environment set at startup do not change, so a gateway started without environment files reloads its allowlist only.
 
 ## Tests
 

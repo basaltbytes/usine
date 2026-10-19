@@ -15,7 +15,7 @@ import { ClientHelloReader, comparableHost } from "../egress/client-hello.ts";
 import { type EgressPermitted, EgressRefused } from "../egress/egress.ts";
 import { endToEndHeaders } from "../proxy/forward.ts";
 import { REFUSAL_HEADER } from "../proxy/proxy.ts";
-import { GatewaySettings, gatewayHosts } from "../settings.ts";
+import { GatewaySettings, gatewayHosts, SettingsInForce } from "../settings.ts";
 import type { Listener } from "./environment.ts";
 
 /**
@@ -246,7 +246,8 @@ const statusLine = (status: number, reason: string, body: string, refusal: Optio
  * `llm.<domain>` on port 80: those go to the reverse proxy at `gateway`. A
  * caller token in `Proxy-Authorization` is optional and only names the Worker
  * in logs. Every refusal is logged with the host, the reason, and the client
- * address.
+ * address. Each request is judged by the allowlist in force when it arrives,
+ * so a tunnel stays open after a reload removes its host.
  */
 export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
   listener: Listener,
@@ -254,6 +255,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
 ) {
   const settings = yield* GatewaySettings;
   const ownHosts: ReadonlySet<string> = new Set(Object.values(gatewayHosts(settings.domain)));
+  const inForce = yield* SettingsInForce;
   const callers = yield* CallerTokens;
   const blocked = privateAddresses();
   const scope = yield* Effect.scope;
@@ -305,10 +307,11 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     return first.address;
   });
 
-  const decide = (host: string, port: number): Effect.Effect<EgressPermitted, EgressRefused> => {
-    const decision = settings.egress.decide(host, port);
-    return decision._tag === "EgressRefused" ? Effect.fail(decision) : Effect.succeed(decision);
-  };
+  const decide = (host: string, port: number): Effect.Effect<EgressPermitted, EgressRefused> =>
+    Effect.flatMap(inForce.current, ({ egress }) => {
+      const decision = egress.decide(host, port);
+      return decision._tag === "EgressRefused" ? Effect.fail(decision) : Effect.succeed(decision);
+    });
 
   /** Where a request for `host` on `port` goes: the reverse proxy for the gateway's own names, else the resolved allowed host. */
   const destination = (
@@ -406,7 +409,7 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
       return yield* splice(client, opened.success);
     }
 
-    const decision = settings.egress.decide(host, port);
+    const decision = (yield* inForce.current).egress.decide(host, port);
     // Plain HTTP goes through the absolute-form relay, which sees the host it is sent to; a tunnel on another port could carry anything.
     if (decision._tag === "EgressRefused" || port !== 443) {
       const refused =

@@ -93,15 +93,42 @@ pnpm --filter @usine/core --filter @usine/gateway pack
 
 Run `install` again with another version or new tarballs to upgrade the gateway.
 
-The VM generates its admin token and caller key at first boot in `/etc/usine-gateway/secrets.env`, readable by root only. Add API keys to the same file and restart the service:
+The VM generates its admin token and caller key at first boot in `/etc/usine-gateway/secrets.env`, readable by root and the `usine-gateway` group. The service reads `settings.env` and `secrets.env` itself, at startup and on every reload, from the paths its unit sets in `USINE_GATEWAY_ENVIRONMENT_FILES`. Add API keys to the same file and reload the service:
 
 ```sh
-ssh root@<gateway> 'echo ANTHROPIC_API_KEY=sk-ant-... >> /etc/usine-gateway/secrets.env && systemctl restart usine-gateway'
+ssh root@<gateway> 'echo ANTHROPIC_API_KEY=sk-ant-... >> /etc/usine-gateway/secrets.env && systemctl reload usine-gateway'
 ```
 
 `NAME`, `LOCATION`, `SERVER_TYPE`, `IMAGE`, `NETWORK_CIDR`, `SUBNET_CIDR`, `GATEWAY_IP`, `DOMAIN`, and `LABEL` override the defaults at the top of `gateway.sh`. Logs are in the journal, one JSON object per line: `journalctl -u usine-gateway -o cat`.
 
 An existing gateway whose `/etc/dnsmasq.d/usine-gateway.conf` has no `local=/<domain>/` line needs it, then `systemctl restart dnsmasq`; without it Codex on a Worker cannot resolve the forward proxy ([#260](https://github.com/basaltbytes/usine/issues/260)).
+
+## Change the allowlist or an API key
+
+The gateway reads its allowlist from `/etc/usine-gateway/egress-allowlist` on the VM; `create` copies `egress-allowlist` there once. Edit that file, or `secrets.env`, then reload the service and read the result in the journal:
+
+```sh
+ssh root@<gateway> 'systemctl reload usine-gateway && sleep 1 && journalctl -u usine-gateway -o cat -n 5'
+```
+
+A reload keeps the attachments, so the GitHub and LLM requests of running Attempts go on without a refusal. A restart forgets them, and the gateway refuses those requests until the executor stores the attachments again, within two minutes. `systemctl reload` returns once it has sent the signal: the `Reloaded the gateway settings` line in the journal gives the allowlist's rule count and the names of the API keys that changed, never their values. An allowlist that does not parse keeps the previous one, and the journal says which line is wrong. Tunnels already open stay open; new connections are judged by the new allowlist. The domain, the listeners, the admin token, and the caller key change only with `systemctl restart usine-gateway`, and a reload that finds one of them changed logs it as needing a restart. See [Reload](../../../packages/gateway/README.md#reload) in the package README.
+
+A gateway created before reload existed has `EnvironmentFile=` lines in its unit and a `secrets.env` only root can read. Install a gateway build that reloads first: an earlier `usine-gateway` ignores `USINE_GATEWAY_ENVIRONMENT_FILES` and exits on SIGHUP. Then, as root on the gateway, let the service read `secrets.env`:
+
+```sh
+chgrp usine-gateway /etc/usine-gateway/secrets.env && chmod 0640 /etc/usine-gateway/secrets.env
+```
+
+In `/etc/systemd/system/usine-gateway.service`, replace the two `EnvironmentFile=` lines with these, and restart the service once:
+
+```ini
+Environment=USINE_GATEWAY_ENVIRONMENT_FILES=/etc/usine-gateway/settings.env:/etc/usine-gateway/secrets.env
+ExecReload=kill -HUP $MAINPID
+```
+
+```sh
+systemctl daemon-reload && systemctl restart usine-gateway
+```
 
 ## Create a Worker behind it
 

@@ -5,7 +5,7 @@ import { Layer, Option, Redacted, Result, Schema } from "effect";
 import { parseEgressAllowlist } from "../src/egress/egress.ts";
 import { GITHUB_ORIGINS, type GitHubOrigins } from "../src/github/github.ts";
 import type { LlmProviders } from "../src/llm/llm.ts";
-import { AdminToken, CallerKey, GatewaySettings } from "../src/settings.ts";
+import { AdminToken, CallerKey, GatewaySettings, SettingsInForce } from "../src/settings.ts";
 
 const DOMAIN = GatewayDomain.make("gw.test");
 export const WORKER = WorkerName.make("worker-one");
@@ -20,20 +20,24 @@ const CALLER_KEY_VALUE = "caller-key-for-tests-0123456789abcdef";
 /** The allowlist tests run with; `localhost` is listed so the private-address check can be seen refusing it. */
 const TEST_ALLOWLIST = ["registry.npmjs.org", "*.githubusercontent.com", "localhost"].join("\n");
 
-/** Settings for tests, with the providers a test needs. */
+/** Settings for tests, with the providers a test needs, and the same settings in force. */
 export const settingsLayer = (
   providers: LlmProviders,
   callerKey: string = CALLER_KEY_VALUE,
   github: GitHubOrigins = GITHUB_ORIGINS,
 ) =>
-  Layer.succeed(GatewaySettings)({
-    domain: DOMAIN,
-    github,
-    providers,
-    egress: Result.getOrThrow(parseEgressAllowlist(TEST_ALLOWLIST)),
-    adminToken: Schema.decodeSync(AdminToken)(ADMIN_TOKEN_VALUE),
-    callerKey: Schema.decodeSync(CallerKey)(callerKey),
-  });
+  SettingsInForce.layer.pipe(
+    Layer.provideMerge(
+      Layer.succeed(GatewaySettings)({
+        domain: DOMAIN,
+        github,
+        providers,
+        egress: Result.getOrThrow(parseEgressAllowlist(TEST_ALLOWLIST)),
+        adminToken: Schema.decodeSync(AdminToken)(ADMIN_TOKEN_VALUE),
+        callerKey: Schema.decodeSync(CallerKey)(callerKey),
+      }),
+    ),
+  );
 
 export const NO_PROVIDERS: LlmProviders = { anthropic: Option.none(), openai: Option.none() };
 
