@@ -3,7 +3,13 @@ import type { AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage"
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { InstanceReload } from "@usine/orchestrator/current-instance";
-import type { BoardItemLink, FailureView, NeedView, RunView } from "@usine/orchestrator/operator";
+import type {
+  BoardItemLink,
+  FailureView,
+  LoopView,
+  NeedView,
+  RunView,
+} from "@usine/orchestrator/operator";
 import { Match } from "effect";
 import type { BoardMoveProgress } from "./board/moves.ts";
 import type { RunActionRequest } from "./run-actions.ts";
@@ -29,6 +35,35 @@ export const runActionLabel = {
 
 export const itemKindLabel = (kind: BoardItemLink["kind"]): string =>
   kind === "pr" ? "Pull request" : "Issue";
+
+/** What opens a Loop's Runs, named like the Item kinds on Board cards. */
+export const triggerLabel = (trigger: LoopView["trigger"]): string => {
+  switch (trigger) {
+    case "issue":
+      return "Issue";
+    case "pr":
+      return "PR";
+    case "schedule":
+      return "Schedule";
+    default:
+      return trigger;
+  }
+};
+
+/** A Project's open Runs by what they are doing, such as `2 running, 1 waiting`, or `None`. Pending
+ * Runs count as queued. */
+export const openRunsLabel = (runs: ReadonlyArray<Pick<RunView, "state">>): string => {
+  const count = (states: ReadonlyArray<RunView["state"]>) =>
+    runs.filter(({ state }) => states.includes(state)).length;
+  const open = (
+    [
+      [count(["Running"]), "running"],
+      [count(["Pending", "Queued"]), "queued"],
+      [count(["Waiting"]), "waiting"],
+    ] as const
+  ).flatMap(([total, word]) => (total === 0 ? [] : [`${total} ${word}`]));
+  return open.length === 0 ? "None" : open.join(", ");
+};
 
 /** How long ago `since` happened, in the largest whole unit: `now`, `12m`, `3h`, or `2d`. */
 export const elapsedLabel = (since: string, now: number = Date.now()): string => {

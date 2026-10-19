@@ -1,10 +1,12 @@
 import { cn } from "@/lib/utils";
 
-/** Run, Attempt, and Project states share one semantic tone scale (ADR 0015). */
+/** Run, Attempt, Project, and Loop states share one semantic tone scale (ADR 0015). A Loop that is
+ * not paused is `live`, like the trigger streams in the sidebar. */
 const stateTone = (state: string): string => {
   switch (state) {
     case "Succeeded":
     case "clear":
+    case "live":
       return "text-run-succeeded";
     case "Running":
     case "Pending":
@@ -18,6 +20,7 @@ const stateTone = (state: string): string => {
     case "Failed":
       return "text-run-failed";
     case "Canceled":
+    case "paused":
       return "text-run-canceled";
     default:
       return "text-muted-foreground";
@@ -44,16 +47,25 @@ export const StateMark = ({
   />
 );
 
-export const StatusBadge = ({ state }: { readonly state: string }) => (
+/** A state's mark and word; `label` replaces the word when the state's key is not its sentence-case name. */
+export const StatusBadge = ({
+  state,
+  label = state,
+}: {
+  readonly state: string;
+  readonly label?: string;
+}) => (
   <span className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground">
     <StateMark state={state} />
-    {state}
+    {label}
   </span>
 );
 
 export const NeedsYouBadge = ({ count }: { readonly count?: number }) => (
   <span className="inline-flex items-center gap-1.5 text-xs font-medium text-needs-you tabular-nums">
     <StateMark state="needs-you" />
-    {count === undefined || count === 0 ? "Needs you" : `${count} need you`}
+    {count === undefined || count === 0
+      ? "Needs you"
+      : `${count} need${count === 1 ? "s" : ""} you`}
   </span>
 );
