@@ -399,6 +399,122 @@ describe("durable AttemptRuntime", () => {
   );
 
   it.live(
+    "reports a message to a working child queued until the child reads it, then delivered",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/31");
+          const recording = recordingSink();
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const child = yield* (yield* StubChildren).next;
+          const operator = (action: AttemptChannel.OperatorAction) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({
+                operator: "philippe",
+                target: new AttemptChannel.ChildTarget({ sessionId: child.request.session.id }),
+                action,
+              }),
+            );
+          yield* operator(new AttemptChannel.OperatorMessage({ message: "Use pnpm, not npm." }));
+          assert.deepStrictEqual(receipts(recording.outbound()), [
+            ["OperatorMessage", 1, "queued"],
+          ]);
+          yield* child.readQueued;
+          yield* Effect.gen(function* () {
+            while (receipts(recording.outbound()).length < 2) yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          yield* operator(new AttemptChannel.Release());
+          yield* child.reply("Switched the scripts to pnpm.");
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "The child switched to pnpm.");
+          const outbound = recording.outbound();
+          assertAdmitted(request.spec.attemptId, outbound);
+          assert.deepStrictEqual(receipts(outbound), [
+            ["OperatorMessage", 1, "queued"],
+            ["OperatorMessage", 1, "delivered"],
+            ["Release", 2, "delivered"],
+          ]);
+          assert.deepStrictEqual(
+            outbound.flatMap(({ payload }) =>
+              payload._tag === "InterventionApplied" ? [payload.state.held] : [],
+            ),
+            [true, true, false],
+          );
+          // The child never stopped working, so nothing says it resumed.
+          assert.notInclude(trace(outbound), "child.SessionResumed");
+          const record = yield* (yield* DurableHarness).use("read the record", (harness, context) =>
+            harness.snapshot(AttemptRecordDoc, request.spec.attemptId, context),
+          );
+          assert.deepStrictEqual(record?.queuedInputs ?? [], []);
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [delegate("Fix the flaky test"), answer("The child switched to pnpm.")],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "reports a message to a working child rejected when the child stops before reading it",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/32");
+          const recording = recordingSink();
+          const operator = (
+            target: AttemptChannel.SessionTarget,
+            action: AttemptChannel.OperatorAction,
+          ) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({ operator: "philippe", target, action }),
+            );
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const child = yield* (yield* StubChildren).next;
+          yield* operator(
+            new AttemptChannel.ChildTarget({ sessionId: child.request.session.id }),
+            new AttemptChannel.Steer({ message: "Skip the docs." }),
+          );
+          const parent = new AttemptChannel.ParentTarget();
+          yield* operator(parent, new AttemptChannel.Interrupt());
+          yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
+          const steerReceipts = () =>
+            receipts(recording.outbound()).filter(([action]) => action === "Steer");
+          yield* Effect.gen(function* () {
+            while (steerReceipts().length < 2) yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          yield* operator(parent, new AttemptChannel.Release());
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "Continued after the release.");
+          assertAdmitted(request.spec.attemptId, recording.outbound());
+          assert.deepStrictEqual(steerReceipts(), [
+            ["Steer", 1, "queued"],
+            ["Steer", 1, "rejected"],
+          ]);
+          const record = yield* (yield* DurableHarness).use("read the record", (harness, context) =>
+            harness.snapshot(AttemptRecordDoc, request.spec.attemptId, context),
+          );
+          assert.deepStrictEqual(record?.queuedInputs ?? [], []);
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [delegate("Fix the flaky test"), answer("Continued after the release.")],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
     "holds a parent the operator messaged while it delegated, then continues the task once released",
     () =>
       Effect.gen(function* () {

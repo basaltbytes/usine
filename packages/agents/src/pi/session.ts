@@ -141,6 +141,23 @@ const messageText = (message: PiMessage): string | undefined => {
   return text || undefined;
 };
 
+const PiUserMessage = Schema.Struct({
+  role: Schema.Literal("user"),
+  content: Schema.Union([Schema.String, Schema.Array(Schema.Json)]),
+});
+
+/** The text of a user message, as Pi compares it with the messages it queued; none for any other message. */
+export const piUserMessageText = (message: PiMessage): Option.Option<string> => {
+  if (!Schema.is(PiUserMessage)(message)) return Option.none();
+  if (Schema.is(Schema.String)(message.content)) return Option.some(message.content);
+  return Option.some(
+    message.content
+      .filter(Schema.is(PiTextBlock))
+      .map(({ text }) => text)
+      .join(""),
+  );
+};
+
 export const lastPiMessageText = (messages: ReadonlyArray<PiMessage>): string | undefined => {
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index];

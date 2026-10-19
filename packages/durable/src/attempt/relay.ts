@@ -25,7 +25,7 @@ import type { AttemptRequest } from "../attempt-runtime.ts";
 import type { DurableHarness, DurableHarnessError } from "../harness.ts";
 import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import { entryEvents, usageTokens } from "./events.ts";
-import type { AttemptHub, AttemptHubs, RelayItem, RelayProgress } from "./hubs.ts";
+import type { AttemptHub, AttemptHubs, ChildDelivery, RelayItem, RelayProgress } from "./hubs.ts";
 import { settledOf } from "./outcome.ts";
 import { parentSession, parentSessionId } from "./parent.ts";
 
@@ -178,12 +178,47 @@ const deliveredState = (durable: DurableHarness["Service"], hub: AttemptHub) =>
       }),
   );
 
+/** Drops an operator input from the ones waiting for their second receipt. */
+const forgetQueuedInput = (
+  durable: DurableHarness["Service"],
+  hub: AttemptHub,
+  inputSequence: number,
+) =>
+  durable.use("forget the delivered operator input", (harness, context) =>
+    harness.commit(async (tx) => {
+      const record = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
+      record.queuedInputs = (record.queuedInputs ?? []).filter(
+        (queuedInput) => queuedInput.inputSequence !== inputSequence,
+      );
+    }, context),
+  );
+
+/** The second receipt of an operator input a child queued and never read. */
+const childStoppedFirst = (
+  durable: DurableHarness["Service"],
+  hub: AttemptHub,
+  inputSequence: AttemptChannel.Sequence,
+  intervention: AttemptChannel.Intervention,
+) =>
+  emitPayload(
+    durable,
+    hub,
+    new AttemptChannel.InterventionRejected({
+      inputSequence,
+      intervention,
+      message: "The child stopped before it read this message. Send it again if it still applies.",
+    }),
+  );
+
 /**
- * Sends the second receipt of each queued operator input the parent has
- * stopped waiting on: applied once the parent read it, rejected when the
+ * Sends the second receipt of each queued operator input whose session has
+ * stopped waiting on it: applied once the parent read it, rejected when the
  * parent stopped first. While the Attempt is `live`, an input still queued
- * keeps waiting; once it has `ended`, none ever will be read. The caller holds
- * the hub's routing permit, so this receipt always follows the queued one.
+ * keeps waiting; once it has `ended`, none ever will be read. A child of this
+ * process reports its own inputs through `relayChildDelivery`; an input
+ * queued by a child of a process that stopped is rejected, since that child
+ * is gone. The caller holds the hub's routing permit, so this receipt always
+ * follows the queued one.
  */
 export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
   durable: DurableHarness["Service"],
@@ -192,6 +227,31 @@ export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
 ) {
   const queued = (yield* readRecord(durable, hub.attemptId))?.queuedInputs ?? [];
   for (const input of queued) {
+    if ("child" in input) {
+      if (attempt === "live" && hub.childInputs.has(input.inputSequence)) {
+        yield* Effect.logDebug("A queued operator input still waits for its child", {
+          inputSequence: input.inputSequence,
+          sessionId: input.child,
+        });
+        continue;
+      }
+      hub.childInputs.delete(input.inputSequence);
+      const intervention = yield* decodeIntervention(input.intervention).pipe(Effect.orDie);
+      yield* childStoppedFirst(
+        durable,
+        hub,
+        AttemptChannel.Sequence.make(input.inputSequence),
+        intervention,
+      );
+      yield* Effect.logWarning("The child stopped before it read a queued operator input", {
+        inputSequence: input.inputSequence,
+        sessionId: input.child,
+        action: intervention.action._tag,
+        attempt,
+      });
+      yield* forgetQueuedInput(durable, hub, input.inputSequence);
+      continue;
+    }
     const status = yield* durable.use("read a queued operator input", async (harness, context) => {
       const submission = await harness.submission(input.submission, context);
       return submission === undefined ? undefined : (await submission.status(context)).status;
@@ -235,15 +295,51 @@ export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
         submissionStatus: status ?? "missing",
       });
     }
-    yield* durable.use("forget the delivered operator input", (harness, context) =>
-      harness.commit(async (tx) => {
-        const record = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
-        record.queuedInputs = (record.queuedInputs ?? []).filter(
-          (queuedInput) => queuedInput.inputSequence !== input.inputSequence,
-        );
-      }, context),
-    );
+    yield* forgetQueuedInput(durable, hub, input.inputSequence);
   }
+});
+
+/**
+ * Sends the second receipt of an operator input a child queued, once the
+ * child reports it: applied with the child's state when it read the input,
+ * rejected when it stopped first. A report for an input whose second receipt
+ * was sent already changes nothing. The caller holds the hub's routing permit,
+ * so this receipt always follows the queued one.
+ */
+const relayChildDelivery = Effect.fn("AttemptRelay.childDelivery")(function* (
+  durable: DurableHarness["Service"],
+  hub: AttemptHub,
+  delivery: ChildDelivery,
+) {
+  const { inputSequence, intervention } = delivery;
+  hub.childInputs.delete(inputSequence);
+  const queued = (yield* readRecord(durable, hub.attemptId))?.queuedInputs ?? [];
+  if (!queued.some((input) => input.inputSequence === inputSequence)) {
+    return yield* Effect.logDebug("A child reported an operator input already settled", {
+      inputSequence,
+    });
+  }
+  const fields = {
+    inputSequence,
+    action: intervention.action._tag,
+    sessionId: intervention.target._tag === "Child" ? intervention.target.sessionId : "parent",
+  };
+  if (Option.isSome(delivery.delivered)) {
+    yield* emitPayload(
+      durable,
+      hub,
+      new AttemptChannel.InterventionApplied({
+        inputSequence,
+        intervention,
+        state: delivery.delivered.value,
+      }),
+    );
+    yield* Effect.logInfo("The child read a queued operator input", fields);
+  } else {
+    yield* childStoppedFirst(durable, hub, inputSequence, intervention);
+    yield* Effect.logWarning("The child stopped before it read a queued operator input", fields);
+  }
+  yield* forgetQueuedInput(durable, hub, inputSequence);
 });
 
 /**
@@ -367,6 +463,8 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
 
   const deliveries = (attempt: "live" | "ended") =>
     hub.routing.withPermits(1)(relayDeliveries(durable, hub, attempt));
+  const childDelivery = (delivery: ChildDelivery) =>
+    hub.routing.withPermits(1)(relayChildDelivery(durable, hub, delivery));
 
   const relayEntries = Effect.fn("AttemptRelay.entries")(function* (bound: Option.Option<EntryId>) {
     const started = yield* ensureStarted;
@@ -491,6 +589,8 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       yield* relayEvent(item.event);
     } else if (item._tag === "Notice") {
       yield* relayNotice(item.notice);
+    } else if (item._tag === "Delivery") {
+      yield* childDelivery(item);
     } else {
       yield* ensureStarted;
       const task = yield* readTask;
@@ -503,6 +603,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
         if (remaining._tag === "Entry") yield* relayEntries(Option.some(remaining.entry));
         else if (remaining._tag === "Event") yield* relayEvent(remaining.event);
         else if (remaining._tag === "Notice") yield* relayNotice(remaining.notice);
+        else if (remaining._tag === "Delivery") yield* childDelivery(remaining);
       }
       yield* relayEntries(Option.none());
       return yield* finish(task);

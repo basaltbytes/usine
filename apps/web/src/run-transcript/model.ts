@@ -58,12 +58,15 @@ type NoticeOrigin =
   | { readonly _tag: "Operator"; readonly operator: string }
   | { readonly _tag: "Envelope"; readonly payload: TranscriptEventView["payload"] };
 
+/** Which session holds an operator input it reads only when its current step ends. */
+export type QueuedFor = "parent" | "child";
+
 /** Prose or a lifecycle notice retained in the conversation. */
 export interface TranscriptNotice extends TranscriptPosition, NoticeContent {
   readonly _tag: "Notice";
   readonly origin: NoticeOrigin;
-  /** Operator input the session has accepted but reads only when its current tool call returns. */
-  readonly queued: boolean;
+  /** The session that accepted this operator input but reads it only when its current step ends, if any. */
+  readonly queued: QueuedFor | null;
 }
 
 interface ToolStart {
@@ -126,7 +129,7 @@ const notice = (
   event: Pick<TranscriptEventView, "sequence" | "receivedAt" | "attemptId">,
   content: NoticeContent,
   origin: NoticeOrigin,
-): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content, origin, queued: false });
+): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content, origin, queued: null });
 
 /** A count of a harness's provider retries in words: `1 retry`, `27 retries`. */
 export const retriesLabel = (retries: number): string =>
@@ -239,7 +242,12 @@ const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
   const { action, operator, target } = record.payload.intervention;
   const rejected = record.payload._tag === "InterventionRejected";
   const message = action._tag === "OperatorMessage" || action._tag === "Steer";
-  const queued = record.payload._tag === "InterventionApplied" && record.payload.state.queued;
+  const queued: QueuedFor | null =
+    record.payload._tag === "InterventionApplied" && record.payload.state.queued
+      ? target._tag === "Parent"
+        ? "parent"
+        : "child"
+      : null;
   const released = `${operator} released the ${target._tag === "Parent" ? "parent" : "child"}`;
   const entry = notice(
     record,

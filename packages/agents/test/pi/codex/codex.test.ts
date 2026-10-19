@@ -15,13 +15,19 @@ import {
   Schema,
   Stream,
 } from "effect";
-import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
+import {
+  Interrupt,
+  type InterventionState,
+  OperatorMessage,
+  Release,
+} from "@usine/core/attempt/channel";
 import { TestClock } from "effect/testing";
 import { type ChildHost, LocalProcess, RemoteShell } from "../../../src/child-host/child-host.ts";
 import {
   AgentResultError,
   ChildRequest,
   CodexChildBackend,
+  type OnDelivery,
   PoolUnavailableError,
   toAttemptFailure,
   SessionOperationError,
@@ -36,6 +42,9 @@ import {
   type CodexNotification,
 } from "../../../src/pi/codex/app-server.ts";
 import { codexChildBackendLayer } from "../../../src/pi/codex/codex.ts";
+
+/** Ignores whether a queued operator message is read; the test does not observe it. */
+const noDelivery: OnDelivery = () => Effect.void;
 
 const request = (
   model = "gpt-5.6-terra",
@@ -167,9 +176,9 @@ describe("Codex child backend", () => {
               ),
             ),
           );
-          const refused = yield* Effect.flip(running.intervene(new Interrupt()));
+          const refused = yield* Effect.flip(running.intervene(new Interrupt(), noDelivery));
           assert.strictEqual(refused._tag, "SessionOperationError");
-          yield* running.intervene(new Interrupt());
+          yield* running.intervene(new Interrupt(), noDelivery);
           assert.strictEqual(calls.filter(({ method }) => method === "turn/interrupt").length, 2);
           yield* Queue.offer(notifications, {
             method: "turn/completed",
@@ -178,7 +187,10 @@ describe("Codex child backend", () => {
           yield* Queue.take(idle);
           assert.strictEqual(result.pollUnsafe(), undefined);
           assert.strictEqual(closes, 0);
-          yield* running.intervene(new OperatorMessage({ message: "Continue with my correction" }));
+          yield* running.intervene(
+            new OperatorMessage({ message: "Continue with my correction" }),
+            noDelivery,
+          );
           assert.strictEqual(turns, 2);
           yield* Queue.offer(notifications, {
             method: "item/completed",
@@ -194,13 +206,69 @@ describe("Codex child backend", () => {
           });
           yield* Queue.take(idle);
           assert.strictEqual(result.pollUnsafe(), undefined);
-          yield* running.intervene(new Release());
+          yield* running.intervene(new Release(), noDelivery);
           assert.strictEqual((yield* Fiber.join(result)).message, "Corrected result");
           assert.strictEqual(closes, 1);
           assert.strictEqual(calls.filter(({ method }) => method === "thread/start").length, 1);
         }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
       }).pipe(Effect.scoped),
   );
+  it.effect("reports a message steered into a running turn read once Codex records it", () =>
+    Effect.gen(function* () {
+      const notifications = yield* Queue.make<CodexNotification, Cause.Done>();
+      const calls: Array<{ readonly method: string; readonly params: Schema.Json }> = [];
+      const responses: Readonly<Record<string, Schema.Json>> = successfulResponses([
+        { id: "gpt-5.6-terra", model: "gpt-5.6-terra" },
+      ]);
+      const server = Layer.succeed(CodexAppServer)({
+        open: () =>
+          Effect.succeed({
+            notifications: Stream.fromQueue(notifications),
+            notify: () => Effect.void,
+            close: Queue.end(notifications),
+            request: (_operation, method, params) =>
+              Effect.sync(() => {
+                calls.push({ method, params });
+                return responses[method] ?? {};
+              }),
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* CodexChildBackend).launch(request());
+        const reads: Array<Option.Option<InterventionState>> = [];
+        const state = yield* running.intervene(
+          new OperatorMessage({ message: "Run the linter too." }),
+          (delivered) =>
+            Effect.sync(() => {
+              reads.push(delivered);
+            }),
+        );
+        assert.deepStrictEqual([state.held, state.queued], [true, true]);
+        assert.strictEqual(calls.filter(({ method }) => method === "turn/steer").length, 1);
+        yield* Queue.offer(notifications, {
+          method: "item/started",
+          params: {
+            threadId: "thread-1",
+            turnId: "turn-1",
+            item: {
+              type: "userMessage",
+              id: "steered",
+              clientId: null,
+              content: [{ type: "text", text: "Run the linter too.", text_elements: [] }],
+            },
+          },
+        });
+        for (let spin = 0; reads.length === 0; spin += 1) {
+          if (spin > 1_000) return assert.fail("the read was never reported");
+          yield* Effect.yieldNow;
+        }
+        const [read] = reads;
+        assert(read !== undefined && Option.isSome(read));
+        assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
+      }).pipe(Effect.provide(codexChildBackendLayer), Effect.provide(server));
+    }).pipe(Effect.scoped),
+  );
+
   for (const status of ["completed", "interrupted"] as const) {
     it.effect(`waits for shutdown before publishing ${status} work`, () =>
       Effect.gen(function* () {

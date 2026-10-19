@@ -14,12 +14,22 @@ import type * as AttemptChannel from "@usine/core/attempt/channel";
  */
 export type AttemptResult = { message: string; answeredOperator?: boolean };
 
-/** An operator input submitted to the busy parent that it has not read yet. */
-type QueuedInput = {
-  inputSequence: number;
-  submission: SubmissionId;
-  intervention: typeof AttemptChannel.Intervention.Encoded;
-};
+/**
+ * An operator input a session accepted and has not read yet: one submitted to
+ * the busy parent, with its pi-durable submission, or one a working child
+ * queued, with the child's session id.
+ */
+type QueuedInput =
+  | {
+      inputSequence: number;
+      submission: SubmissionId;
+      intervention: typeof AttemptChannel.Intervention.Encoded;
+    }
+  | {
+      inputSequence: number;
+      child: string;
+      intervention: typeof AttemptChannel.Intervention.Encoded;
+    };
 
 /**
  * One Attempt's durable record, keyed by Attempt id. It outlives the task, so

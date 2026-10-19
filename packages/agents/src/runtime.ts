@@ -224,11 +224,23 @@ export interface RunningSession {
   readonly steer: (message: string) => Effect.Effect<void, AgentSessionError>;
   /** Requests that this session stop its current work. */
   readonly interrupt: Effect.Effect<void, AgentSessionError>;
-  /** Applies a nonterminal operator action; child messages hold completion until release. */
+  /**
+   * Applies a nonterminal operator action; child messages hold completion
+   * until release. A message the harness reads only at its next boundary
+   * comes back `queued`, and `onDelivery` is called once for it: with the
+   * session's state when the harness reads it, or with none when the session
+   * stops first.
+   */
   readonly intervene: (
     action: AttemptChannel.OperatorAction,
+    onDelivery: OnDelivery,
   ) => Effect.Effect<AttemptChannel.InterventionState, AgentSessionError>;
 }
+
+/** Told once whether a queued operator message was read: the session's state then, or none when it stopped first. */
+export type OnDelivery = (
+  delivered: Option.Option<AttemptChannel.InterventionState>,
+) => Effect.Effect<void>;
 
 /** Launches coding sessions for tasks delegated by an Attempt's parent. */
 export interface ChildBackendService {

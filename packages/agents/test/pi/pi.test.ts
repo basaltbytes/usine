@@ -18,6 +18,7 @@ import {
   toAttemptFailure,
   UnknownModelError,
   WorkingDirectory,
+  type OnDelivery,
 } from "@usine/agents/runtime";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import {
@@ -30,6 +31,9 @@ import {
 } from "@usine/agents/pi";
 import { environmentBashTool } from "../../src/pi/sdk.ts";
 import { resolvePiPool } from "../../src/pi/authentication.ts";
+
+/** Ignores whether a queued operator message is read; the test does not observe it. */
+const noDelivery: OnDelivery = () => Effect.void;
 
 describe("Pi pool resolution", () => {
   it("maps ChatGPT subscription authentication to the ChatGPT pool", () => {
@@ -154,6 +158,7 @@ describe("Pi child backend", () => {
         const first = yield* Queue.take(turns);
         const state = yield* running.intervene(
           new AttemptChannel.OperatorMessage({ message: "Wait for my review" }),
+          noDelivery,
         );
         assert.strictEqual(state.held, true);
         first.complete();
@@ -161,22 +166,85 @@ describe("Pi child backend", () => {
         assert.strictEqual(result.pollUnsafe(), undefined);
         yield* running.intervene(
           new AttemptChannel.OperatorMessage({ message: "Now fix the edge case" }),
+          noDelivery,
         );
         const second = yield* Queue.take(turns);
         assert.strictEqual(second.text, "Now fix the edge case");
         second.complete();
         yield* Queue.take(idle);
         assert.strictEqual(result.pollUnsafe(), undefined);
-        yield* running.intervene(new AttemptChannel.Release());
+        yield* running.intervene(new AttemptChannel.Release(), noDelivery);
         assert.strictEqual((yield* Fiber.join(result)).message, "Pi session completed");
         assert.strictEqual(opens, 1);
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk));
     }).pipe(Effect.scoped),
   );
 
+  it.effect("reports a message to a working Pi child read once Pi starts it in the turn", () =>
+    Effect.gen(function* () {
+      const listeners: Array<(event: PiSessionEvent) => void> = [];
+      const steered: Array<string> = [];
+      const sdk = Layer.succeed(PiSdk)({
+        start: () =>
+          Promise.resolve({
+            _tag: "Started",
+            model: childRequest.session.brain.model,
+            pool: "apiKeys",
+            session: {
+              messages: [],
+              dispose: () => {},
+              abort: () => Promise.resolve(),
+              subscribe: (listener) => {
+                listeners.push(listener);
+                return () => {};
+              },
+              steer: (text) => {
+                steered.push(text);
+                return Promise.resolve("queued" as const);
+              },
+              prompt: () => new Promise<void>(() => {}),
+            },
+          }),
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* PiChildBackend).launch(childRequest);
+        const reads: Array<Option.Option<AttemptChannel.InterventionState>> = [];
+        const state = yield* running.intervene(
+          new AttemptChannel.OperatorMessage({ message: "Use pnpm, not npm." }),
+          (delivered) =>
+            Effect.sync(() => {
+              reads.push(delivered);
+            }),
+        );
+        assert.deepStrictEqual([state.held, state.queued], [true, true]);
+        assert.deepStrictEqual(steered, ["Use pnpm, not npm."]);
+        assert.deepStrictEqual(reads, []);
+        for (const listener of listeners)
+          listener({
+            type: "message_start",
+            message: {
+              role: "user",
+              content: [{ type: "text", text: "Use pnpm, not npm." }],
+              timestamp: 0,
+            },
+          });
+        for (let spin = 0; reads.length === 0; spin += 1) {
+          if (spin > 1_000) return assert.fail("the read was never reported");
+          yield* Effect.yieldNow;
+        }
+        const [read] = reads;
+        assert(read !== undefined && Option.isSome(read));
+        assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
+      }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk));
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("normalizes session events and forwards input and controls", () => {
     let options: PiStartOptions | undefined;
-    let listener: ((event: PiSessionEvent) => void) | undefined;
+    const listeners: Array<(event: PiSessionEvent) => void> = [];
+    const publish = (event: PiSessionEvent) => {
+      for (const listener of listeners) listener(event);
+    };
     let prompt = "";
     let steer = "";
     let interrupted = false;
@@ -191,15 +259,15 @@ describe("Pi child backend", () => {
         prompt = value;
         // Operational SDK events with no normalized shape are logged and
         // skipped; they must never enter the queue or break the bridge.
-        listener?.({
+        publish({
           type: "auto_retry_start",
           attempt: 1,
           maxAttempts: 3,
           delayMs: 250,
           errorMessage: "overloaded",
         });
-        listener?.({ type: "auto_retry_end", success: true, attempt: 1 });
-        listener?.({
+        publish({ type: "auto_retry_end", success: true, attempt: 1 });
+        publish({
           type: "message_end",
           message: fauxAssistantMessage("Pi child done."),
         });
@@ -210,7 +278,7 @@ describe("Pi child backend", () => {
         return Promise.resolve();
       },
       subscribe: (found) => {
-        listener = found;
+        listeners.push(found);
         return () => undefined;
       },
     };

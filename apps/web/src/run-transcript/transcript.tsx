@@ -125,7 +125,9 @@ const Message = ({
         <p className="text-md whitespace-pre-wrap wrap-anywhere">{row.text}</p>
       )}
       {row.undelivered && <p className="text-xs text-destructive">Not delivered</p>}
-      {row.queued && <p className="text-xs text-muted-foreground">{queuedMessageLabel}</p>}
+      {row.queued !== null && (
+        <p className="text-xs text-muted-foreground">{queuedMessageLabel(row.queued)}</p>
+      )}
     </div>
   </ReaderLine>
 );

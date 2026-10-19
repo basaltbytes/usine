@@ -15,6 +15,7 @@ import { conflictingSalvageMessage, failureMessage } from "../../operator-copy.t
 import { poolMeters, type PoolMeter } from "../cache.ts";
 import {
   type NoticeTone,
+  type QueuedFor,
   retriesLabel,
   type TranscriptEntry,
   type TranscriptNotice,
@@ -57,8 +58,8 @@ export interface MessageRow extends RowPosition {
   readonly format: "markdown" | "plain";
   /** Operator input the session refused; the text includes the refusal. */
   readonly undelivered: boolean;
-  /** Operator input the parent reads only when its current delegation returns. */
-  readonly queued: boolean;
+  /** The session that reads this operator input only when its current step ends, if any. */
+  readonly queued: QueuedFor | null;
   /** The message opens with the reserved blocker marker. */
   readonly blocked: boolean;
 }
@@ -317,7 +318,7 @@ const chapterRows = (
           text: withoutMarker(entry.detail),
           format: entry.format,
           undelivered: false,
-          queued: false,
+          queued: null,
           blocked: answerMarker(entry.detail) === "blocked",
         });
         continue;

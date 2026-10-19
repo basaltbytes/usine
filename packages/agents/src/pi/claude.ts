@@ -418,12 +418,13 @@ const makeClaudeChild = Effect.gen(function* () {
       const conversation = yield* sessionConversation({
         session: request.session,
         channel,
-        send: (message) =>
+        // A message sent during a turn waits in Claude's queue until a tool call returns or the turn ends.
+        send: (message, activity) =>
           Effect.try({
             try: () => input.offer(userMessage(message)),
             catch: (cause) =>
               operationError("steer", request, "Could not send a message to Claude", cause),
-          }),
+          }).pipe(Effect.as(activity === "idle" ? ("read" as const) : ("queued" as const))),
         pause: Effect.void,
         beforeFinish: Effect.void,
       });
@@ -569,6 +570,10 @@ const makeClaudeChild = Effect.gen(function* () {
               );
               return;
             }
+            const stillQueued = message.queued_turn_count;
+            // Claude read every queued message but the ones it still holds as turns of their own.
+            if (stillQueued !== undefined)
+              yield* conversation.read((queued) => queued.length - stillQueued);
             if (message.queued_turn_count !== undefined && message.queued_turn_count > 0) {
               yield* Effect.logInfo("Claude child has queued user turns", {
                 sessionId: request.session.id,

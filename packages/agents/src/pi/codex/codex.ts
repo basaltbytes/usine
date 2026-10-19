@@ -25,6 +25,8 @@ import {
   AgentMessageItem,
   ToolItem,
   TurnCompleted,
+  UserMessageItem,
+  userMessageText,
   RateLimitsUpdated,
   ErrorNotification,
   TurnActivity,
@@ -272,9 +274,13 @@ const makeCodexChild = Effect.gen(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         if (interrupting) {
           pendingMessages.push(message);
-          return;
+          return "queued" as const;
         }
-        if (!turnActive) return yield* startTurn(message);
+        if (!turnActive) {
+          yield* startTurn(message);
+          return "read" as const;
+        }
+        // Codex records steered input as a user message once the running turn reads it.
         yield* connection.request(
           "steer",
           "turn/steer",
@@ -284,6 +290,7 @@ const makeCodexChild = Effect.gen(function* () {
             input: [{ type: "text", text: message, text_elements: [] }],
           }),
         );
+        return "queued" as const;
       });
       const conversation = yield* sessionConversation({
         session,
@@ -341,6 +348,11 @@ const makeCodexChild = Effect.gen(function* () {
                 params,
               );
               if (Option.isNone(notification)) return;
+              const item = notification.value.item;
+              if (Schema.is(UserMessageItem)(item)) {
+                const text = userMessageText(item);
+                return yield* conversation.read((queued) => queued.indexOf(text) + 1);
+              }
               if (notification.value.turnId !== turnId) {
                 return yield* Effect.logDebug("Skipping a Codex item from another turn", {
                   sessionId: session.id,
@@ -466,6 +478,7 @@ const makeCodexChild = Effect.gen(function* () {
                 const nextMessage = pendingMessages.shift();
                 if (nextMessage !== undefined) {
                   yield* startTurn(nextMessage);
+                  yield* conversation.read((queued) => queued.indexOf(nextMessage) + 1);
                   for (const message of pendingMessages.splice(0)) yield* steer(message);
                   return;
                 }
@@ -524,7 +537,7 @@ const makeCodexChild = Effect.gen(function* () {
         events: Stream.fromQueue(channel.events),
         interrupt,
         result: Deferred.await(channel.result),
-        steer,
+        steer: (message: string) => steer(message).pipe(Effect.asVoid),
         intervene: conversation.intervene,
       } satisfies RunningSession;
     },

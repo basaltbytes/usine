@@ -15,7 +15,12 @@ import {
   Scope,
   Stream,
 } from "effect";
-import { Interrupt, OperatorMessage, Release } from "@usine/core/attempt/channel";
+import {
+  Interrupt,
+  type InterventionState,
+  OperatorMessage,
+  Release,
+} from "@usine/core/attempt/channel";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -25,6 +30,7 @@ import {
   AgentResultError,
   ChildBackend,
   ChildRequest,
+  type OnDelivery,
   SessionOperationError,
   UnknownModelError,
   WorkingDirectory,
@@ -36,6 +42,9 @@ import {
   type ClaudeQueryOptions,
   type ClaudeUserMessage,
 } from "../../src/pi/claude.ts";
+
+/** Ignores whether a queued operator message is read; the test does not observe it. */
+const noDelivery: OnDelivery = () => Effect.void;
 
 const RECORD_SSH = fileURLToPath(new URL("../fixtures/record-ssh.mjs", import.meta.url));
 
@@ -213,6 +222,56 @@ describe("Claude child backend", () => {
     },
   );
 
+  it.effect("reports a message sent during a turn read once no queued turn holds it", () =>
+    Effect.gen(function* () {
+      const messages = yield* Queue.make<Schema.Json, Cause.Done>();
+      const context = yield* Effect.context<never>();
+      const output = Stream.toAsyncIterableWith(Stream.fromQueue(messages), context);
+      const sdk = Layer.succeed(ClaudeSdk)({
+        open: () => ({
+          close: () => {
+            Effect.runForkWith(context)(Queue.end(messages));
+          },
+          interrupt: () => Promise.resolve(),
+          supportedModels: () => Promise.resolve([{ value: "claude-sonnet-4-6" }]),
+          [Symbol.asyncIterator]: () => output[Symbol.asyncIterator](),
+        }),
+      });
+      yield* Effect.gen(function* () {
+        const running = yield* (yield* ChildBackend).launch(request());
+        const reads: Array<Option.Option<InterventionState>> = [];
+        const state = yield* running.intervene(
+          new OperatorMessage({ message: "Review with me" }),
+          (delivered) =>
+            Effect.sync(() => {
+              reads.push(delivered);
+            }),
+        );
+        assert.deepStrictEqual([state.held, state.queued], [true, true]);
+        yield* Queue.offer(messages, { type: "system", subtype: "init", session_id: "claude-1" });
+        yield* Queue.offer(messages, {
+          type: "result",
+          subtype: "success",
+          result: "First answer",
+          queued_turn_count: 1,
+        });
+        yield* Queue.offer(messages, {
+          type: "result",
+          subtype: "success",
+          result: "Reviewed answer",
+          queued_turn_count: 0,
+        });
+        for (let spin = 0; reads.length === 0; spin += 1) {
+          if (spin > 1_000) return assert.fail("the read was never reported");
+          yield* Effect.yieldNow;
+        }
+        const [read] = reads;
+        assert(read !== undefined && Option.isSome(read));
+        assert.deepStrictEqual([read.value.held, read.value.queued], [true, false]);
+      }).pipe(Effect.provide(claudeChildLayer), Effect.provide(sdk));
+    }).pipe(Effect.scoped),
+  );
+
   it.effect("keeps a held Claude conversation open until release and records one launch", () =>
     Effect.gen(function* () {
       const messages = yield* Queue.make<Schema.Json, Cause.Done>();
@@ -248,7 +307,7 @@ describe("Claude child backend", () => {
         assert(input !== undefined);
         const entered = input;
         yield* Effect.promise(() => entered.next());
-        yield* running.intervene(new OperatorMessage({ message: "Review with me" }));
+        yield* running.intervene(new OperatorMessage({ message: "Review with me" }), noDelivery);
         assert.strictEqual(
           (yield* Effect.promise(() => entered.next())).value?.message.content,
           "Review with me",
@@ -273,7 +332,10 @@ describe("Claude child backend", () => {
         });
         yield* Queue.take(idle);
         assert.strictEqual(result.pollUnsafe(), undefined);
-        yield* running.intervene(new OperatorMessage({ message: "One more adjustment" }));
+        yield* running.intervene(
+          new OperatorMessage({ message: "One more adjustment" }),
+          noDelivery,
+        );
         assert.strictEqual(
           (yield* Effect.promise(() => entered.next())).value?.message.content,
           "One more adjustment",
@@ -295,7 +357,7 @@ describe("Claude child backend", () => {
           state: "idle",
         });
         yield* Queue.take(idle);
-        yield* running.intervene(new Release());
+        yield* running.intervene(new Release(), noDelivery);
         assert.strictEqual((yield* Fiber.join(result)).message, "Adjusted answer");
         assert.strictEqual((yield* Effect.promise(() => entered.next())).done, true);
         assert.deepStrictEqual(
@@ -329,7 +391,7 @@ describe("Claude child backend", () => {
       const running = yield* Effect.gen(function* () {
         return yield* (yield* ChildBackend).launch(request());
       }).pipe(Scope.provide(owner), Effect.provide(claudeChildLayer), Effect.provide(sdk));
-      yield* running.intervene(new Interrupt());
+      yield* running.intervene(new Interrupt(), noDelivery);
       const hook = options?.hooks?.PreToolUse?.[0]?.hooks[0];
       assert(hook !== undefined);
       const settled = hook(
