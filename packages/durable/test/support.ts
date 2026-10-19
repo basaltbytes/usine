@@ -10,7 +10,7 @@ import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { CommitSha, RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
-import { Effect, Option, Result } from "effect";
+import { DateTime, Effect, Option, Result } from "effect";
 import { AttemptRequest } from "../src/attempt-runtime.ts";
 import { PARENT_MODEL } from "../src/testing.ts";
 
@@ -47,6 +47,7 @@ export const attemptRequest = (
       maxChildren: ChildSessionBudget.make(maxChildren),
       parentEffort: "medium",
       resume: Option.none(),
+      preparedAt: Option.some(DateTime.makeUnsafe("2026-10-19T12:00:00Z")),
     }),
     worker: WorkerName.make("local"),
     cwd: "/workspace/usine",

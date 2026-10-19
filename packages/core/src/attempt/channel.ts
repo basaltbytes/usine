@@ -53,6 +53,14 @@ export class RunSpec extends Schema.Class<RunSpec>("AttemptChannel/RunSpec")({
     Schema.withDecodingDefaultKey(Effect.succeed(null)),
     Schema.withConstructorDefault(Effect.succeed(Option.none<SalvagePushed>())),
   ),
+  /**
+   * When the Worker prepared the Attempt's checkout. Everything the Attempt
+   * writes on GitHub comes after it, so harvesting reads the Run's Item from
+   * then on. None for an Attempt prepared before this was recorded.
+   */
+  preparedAt: Schema.OptionFromNullOr(Schema.DateTimeUtcFromString).pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(null)),
+  ),
 }) {}
 
 /**

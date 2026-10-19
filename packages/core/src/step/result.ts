@@ -16,9 +16,19 @@ export class PullRequest extends Schema.TaggedClass<PullRequest>("StepResult/Pul
   },
 ) {}
 
-/** A GitHub comment the agent created or updated during the Attempt. */
+/**
+ * Where a comment sits on GitHub: `issue-comment` in the conversation of an
+ * issue or pull request, `review` a submitted pull request review, and
+ * `review-comment` on a line of a pull request's diff, a reply in a review
+ * thread included.
+ */
+export const CommentKind = Schema.Literals(["issue-comment", "review", "review-comment"]);
+export type CommentKind = typeof CommentKind.Type;
+
+/** A GitHub comment or review the agent created or updated on the Run's Item during the Attempt. */
 export class Comment extends Schema.TaggedClass<Comment>("StepResult/Comment")("Comment", {
   url: Schema.URLFromString,
+  kind: CommentKind,
 }) {}
 
 /** A commit or GitHub artifact recorded as an outcome of the Agent's work. */
