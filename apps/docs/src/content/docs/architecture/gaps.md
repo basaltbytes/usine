@@ -89,7 +89,6 @@ See [Workers and the Gateway](/architecture/workers-and-gateway/) for how each W
 - [#240][]: a tunnel opened to an allowed name can be reused for other names on the same certificate (HTTP/2 coalescing, domain fronting).
 - [#243][]: Attempts on one machine behind the Gateway can read each other's caller tokens.
 - [#249][]: the executor doesn't open or maintain the SSH forward to a Gateway's admin API; the operator must do it.
-- [#251][]: a refused admin request logs its endpoint as `HttpApiEndpoint`.
 - [#254][]: Workers behind the Gateway have no time source.
 - [#255][]: a tunnel that the client closes before its ClientHello is logged as a `not-tls` refusal.
 - [#261][]: harness turns behind the Gateway request hosts outside the egress allowlist.
@@ -167,7 +166,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#243]: https://github.com/basaltbytes/usine/issues/243
 [#248]: https://github.com/basaltbytes/usine/issues/248
 [#249]: https://github.com/basaltbytes/usine/issues/249
-[#251]: https://github.com/basaltbytes/usine/issues/251
 [#254]: https://github.com/basaltbytes/usine/issues/254
 [#255]: https://github.com/basaltbytes/usine/issues/255
 [#257]: https://github.com/basaltbytes/usine/issues/257

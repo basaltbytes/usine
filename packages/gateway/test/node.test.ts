@@ -38,7 +38,7 @@ const gatewayRecordingRefusals = gateway.pipe(
       [
         Logger.make(({ message }) => {
           const line = JSON.stringify(message);
-          if (line.includes("Gateway refused a request")) refusals.push(line);
+          if (line.includes("Gateway refused")) refusals.push(line);
         }),
       ],
       { mergeWithExisting: true },
@@ -297,15 +297,17 @@ describe("the Node gateway", () => {
 
   it.live("the admin API refuses a wrong admin token and an expired attachment", () =>
     Effect.gen(function* () {
+      refusals.length = 0;
       const intruder = yield* admin("not-the-admin-token-0123456789abcdef");
       const refused = yield* Effect.flip(intruder.attachments.list());
       assert.strictEqual(refused._tag, "Unauthorized");
+      assert.include(yield* refusalLogged("bad-admin-token"), '"endpoint":"list"');
       const client = yield* admin(ADMIN_TOKEN_VALUE);
       const expired = yield* Effect.flip(
         client.attachments.attach({ payload: yield* attachment(-1) }),
       );
       assert.strictEqual(expired._tag, "AttachmentAlreadyExpired");
-    }).pipe(Effect.provide(gateway)),
+    }).pipe(Effect.provide(gatewayRecordingRefusals)),
   );
 
   it.live(
