@@ -73,7 +73,7 @@ The engine retries an Attempt automatically only after an `InfraFailure`, such a
 | Failure                     | Cause                                                                                                      |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | `InfraFailure`              | Infrastructure failed around the Agent, and the Run has used its three automatic Attempts.                 |
-| `AgentFailure`              | A harness isn't ready on the Worker, or the parent's model, effort, or credential is unusable. |
+| `AgentFailure`              | A harness isn't ready on the Worker, a child's harness failed during its turn, or the parent's model, effort, or credential is unusable. |
 | `BlockedFailure`            | The Agent hit a blocker it can't resolve and reported it with `[usine:blocked]`. See [Clear a blocker](#clear-a-blocker). |
 | `QuestionFailure`           | The Agent needs a decision from you and asked it with `[usine:question]`. See [Answer a question](#answer-a-question). |
 | `DefectFailure`             | A defect in usine at the execution boundary.                                                               |

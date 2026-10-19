@@ -44,11 +44,17 @@ export type AttemptRecord = {
   /** Child spawn requests so far, including requests rejected by the child-session budget. */
   children: number;
   /**
-   * The first blocked report or operator question of a child; it fails the
-   * Attempt unless the parent relays one itself. Records written before
-   * questions existed have no `kind` and hold a blocker.
+   * The first report of a child: a blocker, an operator question, or a
+   * harness failure (`failed`). It fails the Attempt unless the parent relays
+   * one itself. Records written before questions existed have no `kind` and
+   * hold a blocker; records written before `failed` existed hold a harness
+   * failure as a blocker.
    */
-  childBlocker: { sessionId: string; message: string; kind?: "blocked" | "question" } | null;
+  childBlocker: {
+    sessionId: string;
+    message: string;
+    kind?: "blocked" | "question" | "failed";
+  } | null;
   childBudgetExceeded: { attempted: number; max: number } | null;
   /** The next outbound and inbound attempt channel sequences. */
   nextOutbound: number;

@@ -23,6 +23,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
 import type { RunSpec } from "@usine/core/attempt/channel";
 import {
+  AgentFailure,
   type AttemptFailure,
   BlockedFailure,
   ChildSessionBudgetFailure,
@@ -81,16 +82,17 @@ const commit = (
 
 /**
  * The failure a child's recorded report ends the Attempt with when the parent
- * did not relay one. Every report that is not a question reached the parent as
- * a blocker.
+ * did not relay one. A harness failure posted nothing on the Item, so it ends
+ * the Attempt with `AgentFailure`, which does not hold the Item.
  */
 const childReportFailure = ({
   message,
   kind,
-}: NonNullable<AttemptRecord["childBlocker"]>): AttemptFailure =>
-  kind === "question"
-    ? new QuestionFailure({ question: message })
-    : new BlockedFailure({ message });
+}: NonNullable<AttemptRecord["childBlocker"]>): AttemptFailure => {
+  if (kind === "question") return new QuestionFailure({ question: message });
+  if (kind === "failed") return new AgentFailure({ message });
+  return new BlockedFailure({ message });
+};
 
 const finalAnswer = Effect.fn("AttemptTask.finalAnswer")(function* (
   runtime: Runtime,
