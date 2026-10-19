@@ -3,6 +3,7 @@ import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import type { TranscriptSequence } from "@usine/engine/transcript";
 import type {
   AttemptView,
+  BoardMovedView,
   CommentedView,
   FailureView,
   LabelView,
@@ -122,8 +123,22 @@ export interface GitHubChangeRow {
   readonly change: LabelChanges | CommentedView | ReviewedView;
 }
 
+/** The operator's Board move of the Run's Item while the Attempt was at work, among the rows around its time. */
+export interface BoardMoveRow {
+  readonly _tag: "BoardMove";
+  readonly key: string;
+  readonly move: BoardMovedView;
+}
+
 /** One row of an Attempt as the reader shows it. */
-export type ChapterRow = MessageRow | NoteRow | Burst | DelegationRow | EndingRow | GitHubChangeRow;
+export type ChapterRow =
+  | MessageRow
+  | NoteRow
+  | Burst
+  | DelegationRow
+  | EndingRow
+  | GitHubChangeRow
+  | BoardMoveRow;
 
 /** One Attempt of a Run: its sessions, its rows in transcript order, and its account readings. */
 export interface Chapter {

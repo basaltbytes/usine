@@ -29,6 +29,7 @@ import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   AgentFailureView,
   AttemptView,
+  BoardMovedView,
   CanceledAttemptView,
   ColdTranscriptRequest,
   CommentedView,
@@ -58,6 +59,7 @@ import { Transcript } from "../src/run-transcript/transcript.tsx";
 import { CurrentActivity } from "../src/run-transcript/activity.tsx";
 import { readerDocument } from "../src/run-transcript/document/model.ts";
 import { withGitHubChanges } from "../src/run-transcript/document/github-changes.ts";
+import { LaneName } from "@usine/config/board";
 import { GitHubLabelName } from "@usine/config/label";
 import { TranscriptDisclosureProvider } from "../src/run-transcript/grouping/disclosure.tsx";
 import { MessageScrollerProvider } from "../src/components/ui/message-scroller.tsx";
@@ -221,7 +223,7 @@ describe("run transcript", () => {
     );
   });
 
-  it("shows an Agent's GitHub change as one line, labels in their GitHub colors and the comment linked", () => {
+  it("shows an Agent's GitHub change as one line, labels in their GitHub colors and the comment linked, and the operator's Board move as theirs", () => {
     const events = [event(1, "Removing the claim and handing over for review.")];
     const label = (name: string, color: string) =>
       new LabelView({ name: GitHubLabelName.make(name), color, description: null });
@@ -240,6 +242,11 @@ describe("run transcript", () => {
               at: "2026-09-01T12:00:02.000Z",
               label: label("ready-for-review", "0e8a16"),
             }),
+            new BoardMovedView({
+              at: "2026-09-01T12:00:04.250Z",
+              fromLane: LaneName.make("Review"),
+              toLane: LaneName.make("Findings"),
+            }),
             new CommentedView({ at: "2026-09-01T12:00:07.000Z", url: comment }),
           ],
         ],
@@ -255,6 +262,7 @@ describe("run transcript", () => {
     );
     const text = markup.replace(/<[^>]+>/gu, "");
     assert.include(text, "Removed agent-in-progress, added ready-for-review");
+    assert.include(text, "You moved it from Review to Findings on the Board");
     assert.include(text, "Commented on #247");
     assert.include(markup, "border-color:#fbca0466");
     assert.include(markup, "border-color:#0e8a1666");

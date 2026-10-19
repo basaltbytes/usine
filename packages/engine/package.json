@@ -20,6 +20,10 @@
       "types": "./dist/cycle-budget/cycle-budget.d.ts",
       "default": "./dist/cycle-budget/cycle-budget.js"
     },
+    "./board-moves": {
+      "types": "./dist/board-moves/board-moves.d.ts",
+      "default": "./dist/board-moves/board-moves.js"
+    },
     "./engine": {
       "types": "./dist/engine/engine.d.ts",
       "default": "./dist/engine/engine.js"

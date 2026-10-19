@@ -7,6 +7,7 @@ import {
   CycleLimit,
   LoopCycleCount,
 } from "@usine/core/cycle-budget";
+import { BoardMoves } from "@usine/engine/board-moves";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentName, Agent, AgentPersona } from "@usine/core/agent";
@@ -451,6 +452,10 @@ const testLayer = (
   const history = Layer.succeed(GitHubItemHistory)({
     appChanges: () => Effect.die("unused"),
   });
+  const boardMoves = Layer.succeed(BoardMoves)({
+    record: () => Effect.void,
+    onItem: () => Effect.die("unused"),
+  });
   const dependencies = Layer.mergeAll(
     budgets,
     runs,
@@ -458,6 +463,7 @@ const testLayer = (
     controls,
     github,
     history,
+    boardMoves,
     itemReader,
     repositoryLabelReader,
     polling,

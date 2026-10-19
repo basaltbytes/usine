@@ -7,6 +7,7 @@ import { Intervention } from "@usine/core/attempt/channel";
 import type { LoadedInstance } from "@usine/config/instance";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
+import { BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
 import { CycleBudgets, type CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
@@ -443,6 +444,7 @@ const makeOperator = Effect.gen(function* () {
   const items = yield* ItemProjectionReader;
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const github = yield* GitHubItemWriter;
+  const boardMoves = yield* BoardMoves;
   const polling = yield* PollingTriggers;
   const githubChanges = yield* RunGitHubChanges;
 
@@ -585,7 +587,20 @@ const makeOperator = Effect.gen(function* () {
         return yield* new BoardLaneReadOnly({ repository: move.repository, lane: move.toLane });
       }
       const mutation = labelMutationForBoardMove(board, target);
-      const changed = { number: move.item, updatedAt: yield* DateTime.now };
+      const movedAt = yield* DateTime.now;
+      // Recorded before the write, so the Run reader never takes the swap for an Agent's.
+      yield* boardMoves.record(
+        new BoardMoveRecord({
+          repository: move.repository,
+          itemKey: movedItem.itemKey,
+          at: movedAt,
+          fromLane: source.name,
+          toLane: target.name,
+          added: mutation.add,
+          removed: mutation.remove,
+        }),
+      );
+      const changed = { number: move.item, updatedAt: movedAt };
       const item =
         movedItem.source === "pr" ? new ChangedPullRequest(changed) : new ChangedIssue(changed);
       const applied = yield* github.updateLabels(move.repository, move.item, mutation).pipe(
@@ -694,14 +709,18 @@ export class Operator extends Context.Service<
      * Worker `usine.yaml` declares is left unchanged.
      */
     readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<void, OperatorError>;
-    /** Swaps lane labels on GitHub and hints an authoritative refresh of its Board position and Loop matches. */
+    /**
+     * Records the move, swaps lane labels on GitHub, and hints an authoritative refresh
+     * of its Board position and Loop matches. A move that cannot be recorded is not sent.
+     */
     readonly moveBoardItem: (
       instance: LoadedInstance,
       move: BoardMove,
     ) => Effect.Effect<void, BoardMoveError>;
     /**
-     * What each of the Run's Attempts changed on its GitHub Item, read from the Item's
-     * timeline: the App's label, comment, and review changes while the Attempt was at work.
+     * What changed on the Run's GitHub Item while each of its Attempts was at work, read
+     * from the Item's timeline: the Agent's label, comment, and review changes, and the
+     * operator's Board moves.
      */
     readonly githubChanges: (
       runId: RunId,
@@ -730,6 +749,7 @@ export {
   LabelRemovedView,
   CommentedView,
   ReviewedView,
+  BoardMovedView,
   GitHubChangeView,
   AttemptGitHubChangesView,
   RunGitHubChangesView,

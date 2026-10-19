@@ -13,6 +13,7 @@ import {
   RepositoryLabelProjectionWriter,
 } from "../repository-label-projection/repository-label-projection.ts";
 import { LoopControl } from "../loop-control/loop-control.ts";
+import { BoardMoves } from "../board-moves/board-moves.ts";
 import { CycleBudgets } from "../cycle-budget/cycle-budget.ts";
 import { layerWithDatabase, type RunEngine } from "../engine/engine.ts";
 import type { InstanceDirectory } from "@usine/core/instance";
@@ -74,6 +75,7 @@ export const localSqliteLayer = (instanceDirectory: InstanceDirectory) => {
 export const layer = (
   instanceDirectory: InstanceDirectory,
 ): Layer.Layer<
+  | BoardMoves
   | CursorStore
   | CycleBudgets
   | ItemProjectionReader

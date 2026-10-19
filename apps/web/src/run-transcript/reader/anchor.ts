@@ -60,6 +60,7 @@ export const readingRows = (document: ReaderDocument): ReadonlyArray<ReadingRow>
         case "Delegation":
           return toolRows(row.tool, []);
         case "GitHubChange":
+        case "BoardMove":
           return [];
         case "Burst": {
           const keys = row.tools.map((tool) => tool.key);

@@ -39,6 +39,7 @@ const rowKeys = (row: ChapterRow): ReadonlyArray<string> => {
       return [row.key, row.tool.key];
     case "Ending":
     case "GitHubChange":
+    case "BoardMove":
       return [row.key];
     case "Message":
     case "Note":
@@ -59,6 +60,7 @@ const rowSession = (row: ChapterRow): string | null => {
     case "Ending":
       return row.speaker?.sessionKey ?? null;
     case "GitHubChange":
+    case "BoardMove":
       return null;
   }
 };
@@ -105,7 +107,8 @@ export const RunWorkspace = ({
     detail.transcript.length +
     run.attempts.filter(({ outcome }) => outcome !== null).length +
     document.chapters.reduce(
-      (count, { rows }) => count + rows.filter(({ _tag }) => _tag === "GitHubChange").length,
+      (count, { rows }) =>
+        count + rows.filter(({ _tag }) => _tag === "GitHubChange" || _tag === "BoardMove").length,
       0,
     );
   const [chosen, setChosen] = useState<OutlineSelection | null>(null);

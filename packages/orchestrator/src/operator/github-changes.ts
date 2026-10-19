@@ -1,6 +1,8 @@
-import { GitHubLabelName } from "@usine/config/label";
+import { LaneName } from "@usine/config/board";
+import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import { type Attempt, AttemptId } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
+import { type BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
 import type { RunStoreError } from "@usine/engine/engine";
 import { RunReader } from "@usine/engine/run-reader";
 import { TranscriptPageQuery } from "@usine/engine/transcript";
@@ -9,6 +11,8 @@ import {
   GitHubItemHistory,
   type GitHubItemNotFoundError,
   type ItemChange,
+  type LabelAdded,
+  type LabelRemoved,
   ReviewState,
 } from "@usine/github/item-history";
 import type { RepositoryLabel } from "@usine/github/polling";
@@ -36,16 +40,29 @@ export class ReviewedView extends Schema.TaggedClass<ReviewedView>(
   "@usine/orchestrator/ReviewedView",
 )("Reviewed", { at: Schema.String, url: Schema.String, state: ReviewState }) {}
 
-/** One change an Attempt's Agent made on the Run's GitHub Item; `at` is when GitHub recorded it. */
+/**
+ * The operator moved the Run's Item between Board lanes while an Attempt was at work.
+ * The factory wrote the label swap as the same App the Agent writes as; `at` is when
+ * the operator made the move.
+ */
+export class BoardMovedView extends Schema.TaggedClass<BoardMovedView>(
+  "@usine/orchestrator/BoardMovedView",
+)("BoardMoved", { at: Schema.String, fromLane: LaneName, toLane: LaneName }) {}
+
+/**
+ * One change on the Run's GitHub Item while an Attempt was at work: a change the
+ * Attempt's Agent made, `at` when GitHub recorded it, or the operator's Board move.
+ */
 export const GitHubChangeView = Schema.Union([
   LabelAddedView,
   LabelRemovedView,
   CommentedView,
   ReviewedView,
+  BoardMovedView,
 ]);
 export type GitHubChangeView = typeof GitHubChangeView.Type;
 
-/** What one Attempt's Agent changed on the Run's GitHub Item, oldest first. */
+/** What changed on the Run's GitHub Item while one Attempt was at work, oldest first. */
 export class AttemptGitHubChangesView extends Schema.Class<AttemptGitHubChangesView>(
   "@usine/orchestrator/AttemptGitHubChangesView",
 )({ attemptId: AttemptId, changes: Schema.Array(GitHubChangeView) }) {}
@@ -64,6 +81,10 @@ export type RunGitHubChangesError = RunStoreError | GitHubAppError | GitHubItemN
 const CACHE_CAPACITY = 1_000;
 /** GitHub's timeline can trail a write by seconds, so an Attempt is cached once it ended this long ago. */
 const SETTLE_MILLIS = 60_000;
+/** How far GitHub's clock may run behind the orchestrator's when it records a Board move's label change. */
+const CLOCK_SKEW_MILLIS = 1_000;
+/** A Board move's label writes all reach GitHub within this long after the move is recorded. */
+const MOVE_SPAN_MILLIS = 10_000;
 
 /** When an Attempt was at work on its Item; `end` is none while it runs. */
 interface AttemptWindow {
@@ -99,6 +120,47 @@ const attribute = (windows: ReadonlyArray<AttemptWindow>, changes: ReadonlyArray
   return { attributed, ambiguous };
 };
 
+/**
+ * Whether a recorded Board move made this label change: the move sent the same label
+ * the same way, and GitHub recorded the change between the second the move was
+ * recorded, less the clock skew, and the end of the move's span.
+ */
+const madeBy = (change: LabelAdded | LabelRemoved) => (move: BoardMoveRecord) => {
+  const recorded = DateTime.toEpochMillis(move.at);
+  const earliest = recorded - CLOCK_SKEW_MILLIS;
+  const at = DateTime.toEpochMillis(change.at);
+  const name = canonicalLabelName(change.label.name);
+  return (
+    earliest - (earliest % 1_000) <= at &&
+    at <= recorded + MOVE_SPAN_MILLIS &&
+    (change._tag === "LabelAdded" ? move.added : move.removed).some(
+      (label) => canonicalLabelName(label) === name,
+    )
+  );
+};
+
+/**
+ * Splits the App's changes into the operator's Board moves that made some of them
+ * and the changes no move made. A move with no change on the timeline, such as a
+ * write GitHub refused, is left out.
+ */
+const separateBoardMoves = (
+  moves: ReadonlyArray<BoardMoveRecord>,
+  changes: ReadonlyArray<ItemChange>,
+) => {
+  const made = new Set<BoardMoveRecord>();
+  const rest: Array<ItemChange> = [];
+  for (const change of changes) {
+    const move =
+      change._tag === "LabelAdded" || change._tag === "LabelRemoved"
+        ? moves.find(madeBy(change))
+        : undefined;
+    if (move === undefined) rest.push(change);
+    else made.add(move);
+  }
+  return { moves: moves.filter((move) => made.has(move)), rest };
+};
+
 const labelView = (label: RepositoryLabel) =>
   new LabelView({
     name: GitHubLabelName.make(label.name),
@@ -116,10 +178,18 @@ const changeView = (change: ItemChange): GitHubChangeView =>
     Reviewed: ({ at, url, state }) => new ReviewedView({ at: DateTime.formatIso(at), url, state }),
   });
 
+const moveView = (move: BoardMoveRecord) =>
+  new BoardMovedView({
+    at: DateTime.formatIso(move.at),
+    fromLane: LaneName.make(move.fromLane),
+    toLane: LaneName.make(move.toLane),
+  });
+
 const makeRunGitHubChanges = Effect.gen(function* () {
   const reader = yield* RunReader;
   const history = yield* GitHubItemHistory;
-  const cache = yield* Ref.make(new Map<AttemptId, ReadonlyArray<ItemChange>>());
+  const boardMoves = yield* BoardMoves;
+  const cache = yield* Ref.make(new Map<AttemptId, ReadonlyArray<GitHubChangeView>>());
 
   // Attempts that ended before end times were recorded end at their last transcript row.
   const windowOf = Effect.fn("RunGitHubChanges.windowOf")(function* (attempt: Attempt) {
@@ -153,14 +223,11 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     const [, , number] = item.value;
     const repository = snapshot.repository;
     yield* Effect.annotateCurrentSpan({ repository, item: number });
-    const view = (changes: ReadonlyMap<AttemptId, ReadonlyArray<ItemChange>>) =>
+    const view = (changes: ReadonlyMap<AttemptId, ReadonlyArray<GitHubChangeView>>) =>
       new RunGitHubChangesView({
         attempts: snapshot.attempts.map(
           ({ id }) =>
-            new AttemptGitHubChangesView({
-              attemptId: id,
-              changes: (changes.get(id) ?? []).map(changeView),
-            }),
+            new AttemptGitHubChangesView({ attemptId: id, changes: changes.get(id) ?? [] }),
         ),
       });
     const cached = yield* Ref.get(cache);
@@ -182,7 +249,7 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     );
     const windows = (yield* Effect.forEach([...onItem.values()], windowOf)).flatMap(Option.toArray);
     const now = yield* Clock.currentTimeMillis;
-    const fresh = new Map<AttemptId, ReadonlyArray<ItemChange>>();
+    const fresh = new Map<AttemptId, ReadonlyArray<GitHubChangeView>>();
     const settled: Array<AttemptId> = [];
     const placeable = missing.flatMap((attempt) => {
       const window = windows.find(({ attemptId }) => attemptId === attempt.id);
@@ -194,8 +261,19 @@ const makeRunGitHubChanges = Effect.gen(function* () {
     if (placeable.length > 0) {
       const earliest = Math.min(...placeable.map(({ start }) => start));
       const since = DateTime.makeUnsafe(earliest - (earliest % 1_000));
-      const changes = yield* history.appChanges(repository, number, since);
-      const { attributed, ambiguous } = attribute(windows, changes);
+      // A move recorded shortly before the earliest window can still land in it.
+      const [changes, recorded] = yield* Effect.all(
+        [
+          history.appChanges(repository, number, since),
+          boardMoves.onItem(
+            snapshot.itemKey,
+            DateTime.subtract(since, { milliseconds: MOVE_SPAN_MILLIS }),
+          ),
+        ],
+        { concurrency: "unbounded" },
+      );
+      const { moves, rest } = separateBoardMoves(recorded, changes);
+      const { attributed, ambiguous } = attribute(windows, rest);
       if (ambiguous.length > 0)
         yield* Effect.logInfo(
           "Left out GitHub changes that overlapping Attempts on the Item could each have made",
@@ -208,7 +286,23 @@ const makeRunGitHubChanges = Effect.gen(function* () {
           },
         );
       for (const window of placeable) {
-        fresh.set(window.attemptId, attributed.get(window.attemptId) ?? []);
+        const own = [
+          ...(attributed.get(window.attemptId) ?? []).map((change) => ({
+            at: DateTime.toEpochMillis(change.at),
+            view: changeView(change),
+          })),
+          ...moves.flatMap((move) => {
+            const at = DateTime.toEpochMillis(move.at);
+            const during =
+              window.start <= at &&
+              Option.match(window.end, { onNone: () => true, onSome: (last) => at <= last });
+            return during ? [{ at, view: moveView(move) }] : [];
+          }),
+        ];
+        fresh.set(
+          window.attemptId,
+          own.sort((left, right) => left.at - right.at).map(({ view }) => view),
+        );
         if (Option.isSome(window.end) && now - window.end.value >= SETTLE_MILLIS)
           settled.push(window.attemptId);
       }
@@ -218,6 +312,8 @@ const makeRunGitHubChanges = Effect.gen(function* () {
         item: number,
         since: DateTime.formatIso(since),
         appChanges: changes.length,
+        boardMoves: recorded.length,
+        boardMoveChanges: changes.length - rest.length,
         placed: placeable.reduce(
           (count, { attemptId }) => count + (attributed.get(attemptId)?.length ?? 0),
           0,
@@ -239,11 +335,13 @@ const makeRunGitHubChanges = Effect.gen(function* () {
 });
 
 /**
- * What each of a Run's Attempts changed on the Run's GitHub Item: labels added and
- * removed, comments, and reviews by the factory's App while the Attempt was at work.
- * A read asks GitHub once for the Attempts not yet cached. An Attempt's changes are
- * kept in memory a minute after it ends, after which its window and GitHub's record
- * no longer change.
+ * What changed on the Run's GitHub Item while each of a Run's Attempts was at work:
+ * the labels the Agent added and removed, its comments, and its reviews, all by the
+ * factory's App, and the operator's Board moves. A label change that a recorded Board
+ * move made is the operator's, never the Agent's; moves made before moves were
+ * recorded read as the Agent's. A read asks GitHub once for the Attempts not yet
+ * cached. An Attempt's changes are kept in memory a minute after it ends, after which
+ * its window and GitHub's record no longer change.
  */
 export class RunGitHubChanges extends Context.Service<
   RunGitHubChanges,

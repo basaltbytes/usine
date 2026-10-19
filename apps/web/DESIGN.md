@@ -244,7 +244,7 @@ The Run page fills the panel below the breadcrumb (`Projects › repository › 
 - **Reader:** a column at most 616px wide, centred in the space beside the outline, with 20px above and 32px below. Each row is a 72px time-and-speaker gutter, a 24px gap, and content at most 504px wide, which holds about 72 characters of 14px prose. Below `sm` the gutter becomes one line of time and speaker above the content. The reader opens on the latest Attempt; below `lg`, a finished Run opens at its outcome.
 - **Foot band:** a 40px band under the reader holds Jump to latest or the new-updates count, so the control never covers the outcome or the salvage line. A live Attempt's message composer sits below it behind a hairline, on the reader's grid.
 
-Attempts in the reader are separated by 40px, a hairline, and 32px; rows within one are 16px apart, fold lines 2px, notes 8px, and a GitHub change line 2px under a fold line or another change line and 8px under prose.
+Attempts in the reader are separated by 40px, a hairline, and 32px; rows within one are 16px apart, fold lines 2px, notes and Board move lines 8px, and a GitHub change line 2px under a fold line or another change line and 8px under prose.
 
 Spacing is a 4px grid used mainly at 4, 6, 8, 10, 12, 16, 20, and 24px. Cards stack 8px apart with 6px between their internal rows.
 
@@ -341,6 +341,9 @@ One quiet 12px line in place of a burst of tool calls between two messages: a ca
 
 ### GitHub change line
 One quiet 12px subtext0 line for a change an Agent made on the Run's GitHub Item, placed where it happened: under the fold line of the calls that made it, before the next message. A 14px GitHub mark sits where a fold line has its caret, 8px before the text. Labels read `Removed`, their chips, `, added`, their chips, each chip in its GitHub colour as on the Board; a comment reads `Commented on` and the Item number in mono mauve linking to the comment, and a review `Approved`, `Requested changes on`, or `Reviewed` the same way. The text runs on a 20px line so chips sit on its baseline, 28px tall at least like a fold line. It has no fill and no hover; its tooltip gives the time GitHub recorded the change.
+
+### Board move line
+The operator's Board move made while the Attempt worked the Item, placed by its time like a GitHub change line but set as an operator note: the time in the gutter in 12px mono, then one 12px subtext0 line, `You moved it from Review to Findings on the Board`. It has no GitHub mark, since the operator made it, and no chips, since the lane names say what moved.
 
 ### Attempt heading and meta line
 Each Attempt opens with its name in 14px semibold, then one 12px subtext0 line, wrapping, with 20px between facts: the Worker, the parent's harness and model, each child's Agent, harness, model, and effort, with values in mono text colour. These facts appear here once and on no message.

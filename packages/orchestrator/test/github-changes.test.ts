@@ -13,6 +13,7 @@ import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
 import { Step, StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
+import { BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
 import { RunReader, RunSnapshot, RunSummary } from "@usine/engine/run-reader";
 import { TranscriptEntry, TranscriptSequence } from "@usine/engine/transcript";
 import {
@@ -169,11 +170,31 @@ const appChanges: ReadonlyArray<ItemChange> = [
   // Between Attempts: no Attempt was at work.
   comment("2026-10-16T09:00:00Z", 1),
   new LabelAdded({ at: time("2026-10-16T09:46:55Z"), label: label("agent-in-progress", "fbca04") }),
+  // The Agent removes a label seconds before the Board move below also removes it.
+  new LabelRemoved({
+    at: time("2026-10-16T09:47:05Z"),
+    label: label("agent-in-progress", "fbca04"),
+  }),
+  // The Board move's label, recorded at the second the move was.
+  new LabelAdded({ at: time("2026-10-16T09:47:10Z"), label: label("ready-for-review", "0e8a16") }),
+  // The Agent's label, inside the move's span but not one the move sent.
+  new LabelAdded({ at: time("2026-10-16T09:47:11Z"), label: label("needs-operator", "d93f0b") }),
   comment("2026-10-16T09:48:00Z", 6212798620),
   comment("2026-10-16T13:03:00Z", 2),
   // While the review Run's Attempt also worked the Item.
   comment("2026-10-16T13:05:08Z", 6216129425),
 ];
+
+// The operator moved the card while the second Attempt worked the Item.
+const boardMove = new BoardMoveRecord({
+  repository,
+  itemKey,
+  at: time("2026-10-16T09:47:10.250Z"),
+  fromLane: "In progress",
+  toLane: "Review",
+  added: ["ready-for-review"],
+  removed: ["agent-in-progress", "ready-for-agent"],
+});
 
 const testLayer = (current: Ref.Ref<RunSnapshot>, requests: Ref.Ref<ReadonlyArray<string>>) => {
   const reader = Layer.succeed(RunReader)({
@@ -207,61 +228,77 @@ const testLayer = (current: Ref.Ref<RunSnapshot>, requests: Ref.Ref<ReadonlyArra
         Effect.as(appChanges.filter(({ at }) => DateTime.isGreaterThanOrEqualTo(at, since))),
       ),
   });
-  return RunGitHubChanges.layer.pipe(Layer.provide(Layer.merge(reader, history)));
+  const boardMoves = Layer.succeed(BoardMoves)({
+    record: () => Effect.die("unused"),
+    onItem: (key, since) =>
+      Effect.succeed(
+        [boardMove].filter(
+          (move) => move.itemKey === key && DateTime.isGreaterThanOrEqualTo(move.at, since),
+        ),
+      ),
+  });
+  return RunGitHubChanges.layer.pipe(Layer.provide(Layer.mergeAll(reader, history, boardMoves)));
 };
 
 const summary = (view: RunGitHubChangesView) =>
   view.attempts.map(({ changes }) =>
-    changes.map((change) =>
-      change._tag === "LabelAdded" || change._tag === "LabelRemoved"
+    changes.map((change) => {
+      if (change._tag === "BoardMoved")
+        return `${change.at} ${change._tag} ${change.fromLane} -> ${change.toLane}`;
+      return change._tag === "LabelAdded" || change._tag === "LabelRemoved"
         ? `${change.at} ${change._tag} ${change.label.name} #${change.label.color}`
-        : `${change.at} ${change._tag} ${change.url.split("#")[1]}`,
-    ),
+        : `${change.at} ${change._tag} ${change.url.split("#")[1]}`;
+    }),
   );
 
 describe("RunGitHubChanges", () => {
-  it.effect("places the App's changes in the one Attempt at work and caches settled Attempts", () =>
-    Effect.gen(function* () {
-      const current = yield* Ref.make(snapshot([first, second, third]));
-      const requests = yield* Ref.make<ReadonlyArray<string>>([]);
-      yield* TestClock.setTime(DateTime.toEpochMillis(time("2026-10-16T13:10:00Z")));
-      yield* Effect.gen(function* () {
-        const changes = yield* RunGitHubChanges;
-        const read = yield* changes.read(runId);
-        assert.deepStrictEqual(summary(read), [
-          [
-            "2026-10-15T19:30:39.000Z LabelRemoved ready-for-agent #1f883d",
-            "2026-10-15T19:31:31.000Z LabelAdded agent-in-progress #fbca04",
-            "2026-10-15T19:55:08.000Z Commented issuecomment-6201011438",
-            "2026-10-15T19:55:11.000Z LabelRemoved agent-in-progress #fbca04",
-          ],
-          [
-            "2026-10-16T09:46:55.000Z LabelAdded agent-in-progress #fbca04",
-            "2026-10-16T09:48:00.000Z Commented issuecomment-6212798620",
-          ],
-          ["2026-10-16T13:03:00.000Z Commented issuecomment-2"],
-        ]);
-        assert.deepStrictEqual(yield* Ref.get(requests), ["2026-10-15T19:30:39.000Z"]);
+  it.effect(
+    "places the App's changes in the one Attempt at work, a Board move's as the operator's, and caches settled Attempts",
+    () =>
+      Effect.gen(function* () {
+        const current = yield* Ref.make(snapshot([first, second, third]));
+        const requests = yield* Ref.make<ReadonlyArray<string>>([]);
+        yield* TestClock.setTime(DateTime.toEpochMillis(time("2026-10-16T13:10:00Z")));
+        yield* Effect.gen(function* () {
+          const changes = yield* RunGitHubChanges;
+          const read = yield* changes.read(runId);
+          assert.deepStrictEqual(summary(read), [
+            [
+              "2026-10-15T19:30:39.000Z LabelRemoved ready-for-agent #1f883d",
+              "2026-10-15T19:31:31.000Z LabelAdded agent-in-progress #fbca04",
+              "2026-10-15T19:55:08.000Z Commented issuecomment-6201011438",
+              "2026-10-15T19:55:11.000Z LabelRemoved agent-in-progress #fbca04",
+            ],
+            [
+              "2026-10-16T09:46:55.000Z LabelAdded agent-in-progress #fbca04",
+              "2026-10-16T09:47:05.000Z LabelRemoved agent-in-progress #fbca04",
+              "2026-10-16T09:47:10.250Z BoardMoved In progress -> Review",
+              "2026-10-16T09:47:11.000Z LabelAdded needs-operator #d93f0b",
+              "2026-10-16T09:48:00.000Z Commented issuecomment-6212798620",
+            ],
+            ["2026-10-16T13:03:00.000Z Commented issuecomment-2"],
+          ]);
+          assert.deepStrictEqual(yield* Ref.get(requests), ["2026-10-15T19:30:39.000Z"]);
 
-        // Ended Attempts come from the cache; GitHub is asked only about the live one.
-        assert.deepStrictEqual(summary(yield* changes.read(runId)), summary(read));
-        assert.deepStrictEqual((yield* Ref.get(requests)).slice(1), ["2026-10-16T13:02:00.000Z"]);
+          // Ended Attempts come from the cache; GitHub is asked only about the live one.
+          assert.deepStrictEqual(summary(yield* changes.read(runId)), summary(read));
+          assert.deepStrictEqual((yield* Ref.get(requests)).slice(1), ["2026-10-16T13:02:00.000Z"]);
 
-        // A just-ended Attempt is asked about again until GitHub's record has settled.
-        yield* Ref.set(
-          current,
-          snapshot([
-            first,
-            second,
-            attempt(runId, 3, "2026-10-16T13:02:00.345Z", { endedAt: "2026-10-16T13:09:30Z" }),
-          ]),
-        );
-        yield* changes.read(runId);
-        yield* TestClock.adjust("1 minute");
-        yield* changes.read(runId);
-        yield* changes.read(runId);
-        assert.strictEqual((yield* Ref.get(requests)).length, 4);
-      }).pipe(Effect.provide(testLayer(current, requests)));
-    }),
+          // A just-ended Attempt is asked about again until GitHub's record has settled.
+          yield* Ref.set(
+            current,
+            snapshot([
+              first,
+              second,
+              attempt(runId, 3, "2026-10-16T13:02:00.345Z", { endedAt: "2026-10-16T13:09:30Z" }),
+            ]),
+          );
+          yield* changes.read(runId);
+          yield* TestClock.adjust("1 minute");
+          yield* changes.read(runId);
+          yield* changes.read(runId);
+          assert.strictEqual((yield* Ref.get(requests)).length, 4);
+        }).pipe(Effect.provide(testLayer(current, requests)));
+      }),
   );
 });

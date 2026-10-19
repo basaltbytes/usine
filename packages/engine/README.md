@@ -12,6 +12,8 @@ The default adapter stores usine's Event ledger and Run records in `<instance>/.
 
 `RepositoryLabelProjectionReader` and `RepositoryLabelProjectionWriter` store the complete label catalog observed during repository polling. Repositories with no Items can still receive proposed Board lanes, and the catalog remains available after a restart. Catalog writes update the projection revision only when the label set changes.
 
+`BoardMoves` (`@usine/engine/board-moves`) keeps the operator's Board moves: for each, the repository, the Item, when the factory sent it, the source and destination lanes, and the labels added and removed. The orchestrator records a move before it sends the labels, so a label change the factory's App made for the operator is not taken for an Agent's. `BoardMoves.onItem(itemKey, since)` returns an Item's moves from `since` on, oldest first. Moves do not change the projection revision.
+
 ## Runtime rules
 
 - Approval-gated Runs wait for an approval Event before their first Attempt.
