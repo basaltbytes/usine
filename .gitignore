@@ -12,3 +12,6 @@ apps/docs/src/content/docs/reference/api/
 **/.impeccable/review/
 **/.impeccable/build/
 **/.impeccable/config.local.json
+
+# Impeccable platform binaries (downloaded per machine)
+**/skills/impeccable/scripts/bin/
