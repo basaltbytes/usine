@@ -55,9 +55,7 @@ const rowUpdates = (row: ChapterRow): ReadonlyArray<TranscriptUpdate> =>
   });
 
 /** Indexes the rows the reader shows, once each; account meters and omitted repeats are excluded. */
-export const indexTranscriptUpdates = (
-  document: ReaderDocument,
-): ReadonlyArray<TranscriptUpdate> =>
+export const indexTranscriptUpdates = (document: ReaderDocument): ReadonlyArray<TranscriptUpdate> =>
   document.chapters
     .flatMap((chapter) => chapter.rows.flatMap(rowUpdates))
     .sort((left, right) => left.sequence - right.sequence);

@@ -58,7 +58,6 @@ import { MessageScrollerProvider } from "../src/components/ui/message-scroller.t
 import { presentTool, type ToolSection } from "../src/run-transcript/tool/presentation.ts";
 import { fetchRunDetail } from "../src/run-transcript/fetch.ts";
 
-
 const attemptId = AttemptId.make("attempt-31");
 const brain = new BrainSpec({
   harness: "codex",
@@ -274,7 +273,10 @@ describe("run transcript", () => {
       "Second child says hello",
     ].map((text) => markup.indexOf(text));
     assert.notInclude(order, -1);
-    assert.deepEqual(order, [...order].sort((left, right) => left - right));
+    assert.deepEqual(
+      order,
+      [...order].sort((left, right) => left - right),
+    );
   });
 
   it("updates a tool call in place while retaining full input, output, and elapsed time", () => {

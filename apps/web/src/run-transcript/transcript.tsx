@@ -99,7 +99,13 @@ const Gutter = ({
   </>
 );
 
-const Message = ({ row, speaker }: { readonly row: MessageRow; readonly speaker: string | null }) => (
+const Message = ({
+  row,
+  speaker,
+}: {
+  readonly row: MessageRow;
+  readonly speaker: string | null;
+}) => (
   <ReaderLine
     gutter={
       <Gutter
@@ -122,7 +128,13 @@ const Message = ({ row, speaker }: { readonly row: MessageRow; readonly speaker:
 );
 
 /** The task a session handed to a child, with the delegation's panels one fold away. */
-const Delegation = ({ row, speaker }: { readonly row: DelegationRow; readonly speaker: string | null }) => {
+const Delegation = ({
+  row,
+  speaker,
+}: {
+  readonly row: DelegationRow;
+  readonly speaker: string | null;
+}) => {
   const disclosure = useToolDisclosure(row.tool.key);
   const view = presentTool(row.tool);
   const given = view.input.find((section) => section._tag === "Text" && section.label === "Task");
@@ -227,7 +239,13 @@ const Value = ({ children }: { readonly children: ReactNode }) => (
 );
 
 /** Names the Attempt's Worker, parent model, each child's harness, model and effort, and account readings, once. */
-const AttemptMeta = ({ chapter, runTask }: { readonly chapter: Chapter; readonly runTask: string }) => {
+const AttemptMeta = ({
+  chapter,
+  runTask,
+}: {
+  readonly chapter: Chapter;
+  readonly runTask: string;
+}) => {
   const attempt = Option.getOrUndefined(chapter.attempt);
   const parent = chapter.sessions.find(({ session }) => session._tag === "ParentSession");
   const parentModel = Option.orElse(chapter.parentModel, () =>
@@ -238,7 +256,12 @@ const AttemptMeta = ({ chapter, runTask }: { readonly chapter: Chapter; readonly
       chapter.sessions
         .filter(({ session }) => session._tag === "ChildSession")
         .map(({ session }) => [
-          JSON.stringify([session.agent, session.brain.harness, session.brain.model, session.brain.effort]),
+          JSON.stringify([
+            session.agent,
+            session.brain.harness,
+            session.brain.model,
+            session.brain.effort,
+          ]),
           session,
         ]),
     ).values(),

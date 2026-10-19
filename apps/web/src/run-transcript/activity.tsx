@@ -48,7 +48,7 @@ export const describeActivity = (session: TranscriptSession): Activity => {
 };
 
 /** The session that best says what a live Attempt is doing: its most recently active live child, else its parent. */
-export const currentSession = (
+const currentSession = (
   sessions: ReadonlyArray<TranscriptSession>,
 ): TranscriptSession | undefined => {
   const live = sessions.filter(({ status }) => status === "Live");

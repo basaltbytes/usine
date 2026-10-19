@@ -105,88 +105,88 @@ export const Conversation = ({
       initialState={new Map(saved?.disclosures.map(({ key, ...choice }) => [key, choice]))}
       onInspect={inspect}
     >
-    <MessageScrollerProvider
-      autoScroll={active && pendingRestore === null && allowLatest}
-      defaultScrollPosition={defaultPosition}
-      scrollEdgeThreshold={8}
-    >
-      <MessageScroller className="min-h-0 flex-1">
-        <PreserveReadingPosition
-          active={active && pendingRestore === null}
-          viewportRef={viewportRef}
-          revision={revision}
-        >
-          <MessageScrollerViewport
-            ref={viewportRef}
-            aria-label="Run conversation"
-            preserveScrollOnPrepend={false}
-            onWheel={navigate}
-            onTouchMove={navigate}
-            onPointerDown={(event) => {
-              if (event.target === event.currentTarget) navigate();
-              else setPendingRestore(null);
-            }}
-            onKeyDown={(event) => {
-              // Let focused buttons activate on Space without changing the reader's follow intention.
-              const activatesButton =
-                event.key === " " &&
-                event.target instanceof Element &&
-                event.target.closest('button, [role="button"]') !== null;
-              if (event.key === "Enter" || activatesButton) {
-                setPendingRestore(null);
-                return;
-              }
-              if (
-                !event.defaultPrevented &&
-                ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "].includes(
-                  event.key,
-                )
-              )
-                navigate();
-            }}
+      <MessageScrollerProvider
+        autoScroll={active && pendingRestore === null && allowLatest}
+        defaultScrollPosition={defaultPosition}
+        scrollEdgeThreshold={8}
+      >
+        <MessageScroller className="min-h-0 flex-1">
+          <PreserveReadingPosition
+            active={active && pendingRestore === null}
+            viewportRef={viewportRef}
+            revision={revision}
           >
-            <MessageScrollerContent className="mx-auto w-full max-w-[38.5rem] gap-0 px-4 pt-5 pb-16 sm:px-2 [&>*]:-mx-2 [&>*]:px-2">
-              <Transcript document={document} runTask={runTask} history={history} />
-            </MessageScrollerContent>
-          </MessageScrollerViewport>
-        </PreserveReadingPosition>
-        <RestoreReader
-          target={pendingRestore}
-          rows={rows}
-          viewportRef={viewportRef}
-          active={active}
-          history={{
-            earlier: latest,
-            loading: history.loading,
-            error: history.error,
-            load: () => {
-              if (latest !== undefined) history.load(latest);
-            },
-          }}
-          onRestored={restored}
-        />
-        <RememberReader
-          runId={runId}
-          rows={rows}
-          viewportRef={viewportRef}
-          readThrough={unread.readThrough}
-          active={active}
-          restoring={pendingRestore !== null}
-          allowLatest={allowLatest}
-          initialPosition={saved?.position ?? { _tag: "Latest" }}
-        />
-        <RevealTarget target={pendingTarget} onRevealed={revealed} />
-        <UpdateNavigation
-          count={unread.keys.size}
-          active={active}
-          pendingLatest={pendingLatest}
-          revealing={pendingTarget !== null}
-          onObserve={observe}
-          onLatest={jumpLatest}
-          onReachedLatest={reachedLatest}
-        />
-      </MessageScroller>
-    </MessageScrollerProvider>
+            <MessageScrollerViewport
+              ref={viewportRef}
+              aria-label="Run conversation"
+              preserveScrollOnPrepend={false}
+              onWheel={navigate}
+              onTouchMove={navigate}
+              onPointerDown={(event) => {
+                if (event.target === event.currentTarget) navigate();
+                else setPendingRestore(null);
+              }}
+              onKeyDown={(event) => {
+                // Let focused buttons activate on Space without changing the reader's follow intention.
+                const activatesButton =
+                  event.key === " " &&
+                  event.target instanceof Element &&
+                  event.target.closest('button, [role="button"]') !== null;
+                if (event.key === "Enter" || activatesButton) {
+                  setPendingRestore(null);
+                  return;
+                }
+                if (
+                  !event.defaultPrevented &&
+                  ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "].includes(
+                    event.key,
+                  )
+                )
+                  navigate();
+              }}
+            >
+              <MessageScrollerContent className="mx-auto w-full max-w-[38.5rem] gap-0 px-4 pt-5 pb-16 sm:px-2 [&>*]:-mx-2 [&>*]:px-2">
+                <Transcript document={document} runTask={runTask} history={history} />
+              </MessageScrollerContent>
+            </MessageScrollerViewport>
+          </PreserveReadingPosition>
+          <RestoreReader
+            target={pendingRestore}
+            rows={rows}
+            viewportRef={viewportRef}
+            active={active}
+            history={{
+              earlier: latest,
+              loading: history.loading,
+              error: history.error,
+              load: () => {
+                if (latest !== undefined) history.load(latest);
+              },
+            }}
+            onRestored={restored}
+          />
+          <RememberReader
+            runId={runId}
+            rows={rows}
+            viewportRef={viewportRef}
+            readThrough={unread.readThrough}
+            active={active}
+            restoring={pendingRestore !== null}
+            allowLatest={allowLatest}
+            initialPosition={saved?.position ?? { _tag: "Latest" }}
+          />
+          <RevealTarget target={pendingTarget} onRevealed={revealed} />
+          <UpdateNavigation
+            count={unread.keys.size}
+            active={active}
+            pendingLatest={pendingLatest}
+            revealing={pendingTarget !== null}
+            onObserve={observe}
+            onLatest={jumpLatest}
+            onReachedLatest={reachedLatest}
+          />
+        </MessageScroller>
+      </MessageScrollerProvider>
     </TranscriptDisclosureProvider>
   );
 };

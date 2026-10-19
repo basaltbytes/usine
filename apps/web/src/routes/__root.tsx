@@ -139,7 +139,7 @@ const Shell = () => {
           <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
           <Breadcrumb>
             <BreadcrumbList>
-              <Crumbs project={project} runId={params.runId} />
+              <Crumbs project={project} runId={params.run} />
             </BreadcrumbList>
           </Breadcrumb>
         </header>

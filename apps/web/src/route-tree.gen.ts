@@ -14,7 +14,7 @@ import { Route as ConfigurationIndexRouteImport } from './routes/configuration/i
 import { Route as ConfigurationLoopsRouteImport } from './routes/configuration/loops'
 import { Route as ProjectsOwnerNameRouteImport } from './routes/projects/$owner/$name'
 import { Route as ProjectsOwnerNameIndexRouteImport } from './routes/projects/$owner/$name/index'
-import { Route as ProjectsOwnerNameRunsRunIdRouteImport } from './routes/projects/$owner/$name/runs/$runId'
+import { Route as ProjectsOwnerNameRunsRunRouteImport } from './routes/projects/$owner/$name/runs/$run'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -41,10 +41,10 @@ const ProjectsOwnerNameIndexRoute = ProjectsOwnerNameIndexRouteImport.update({
   path: '/',
   getParentRoute: () => ProjectsOwnerNameRoute,
 } as any)
-const ProjectsOwnerNameRunsRunIdRoute =
-  ProjectsOwnerNameRunsRunIdRouteImport.update({
-    id: '/runs/$runId',
-    path: '/runs/$runId',
+const ProjectsOwnerNameRunsRunRoute =
+  ProjectsOwnerNameRunsRunRouteImport.update({
+    id: '/runs/$run',
+    path: '/runs/$run',
     getParentRoute: () => ProjectsOwnerNameRoute,
   } as any)
 
@@ -54,14 +54,14 @@ export interface FileRoutesByFullPath {
   '/configuration/': typeof ConfigurationIndexRoute
   '/projects/$owner/$name': typeof ProjectsOwnerNameRouteWithChildren
   '/projects/$owner/$name/': typeof ProjectsOwnerNameIndexRoute
-  '/projects/$owner/$name/runs/$runId': typeof ProjectsOwnerNameRunsRunIdRoute
+  '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/configuration/loops': typeof ConfigurationLoopsRoute
   '/configuration': typeof ConfigurationIndexRoute
   '/projects/$owner/$name': typeof ProjectsOwnerNameIndexRoute
-  '/projects/$owner/$name/runs/$runId': typeof ProjectsOwnerNameRunsRunIdRoute
+  '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -70,7 +70,7 @@ export interface FileRoutesById {
   '/configuration/': typeof ConfigurationIndexRoute
   '/projects/$owner/$name': typeof ProjectsOwnerNameRouteWithChildren
   '/projects/$owner/$name/': typeof ProjectsOwnerNameIndexRoute
-  '/projects/$owner/$name/runs/$runId': typeof ProjectsOwnerNameRunsRunIdRoute
+  '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -80,14 +80,14 @@ export interface FileRouteTypes {
     | '/configuration/'
     | '/projects/$owner/$name'
     | '/projects/$owner/$name/'
-    | '/projects/$owner/$name/runs/$runId'
+    | '/projects/$owner/$name/runs/$run'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/configuration/loops'
     | '/configuration'
     | '/projects/$owner/$name'
-    | '/projects/$owner/$name/runs/$runId'
+    | '/projects/$owner/$name/runs/$run'
   id:
     | '__root__'
     | '/'
@@ -95,7 +95,7 @@ export interface FileRouteTypes {
     | '/configuration/'
     | '/projects/$owner/$name'
     | '/projects/$owner/$name/'
-    | '/projects/$owner/$name/runs/$runId'
+    | '/projects/$owner/$name/runs/$run'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -142,11 +142,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsOwnerNameIndexRouteImport
       parentRoute: typeof ProjectsOwnerNameRoute
     }
-    '/projects/$owner/$name/runs/$runId': {
-      id: '/projects/$owner/$name/runs/$runId'
-      path: '/runs/$runId'
-      fullPath: '/projects/$owner/$name/runs/$runId'
-      preLoaderRoute: typeof ProjectsOwnerNameRunsRunIdRouteImport
+    '/projects/$owner/$name/runs/$run': {
+      id: '/projects/$owner/$name/runs/$run'
+      path: '/runs/$run'
+      fullPath: '/projects/$owner/$name/runs/$run'
+      preLoaderRoute: typeof ProjectsOwnerNameRunsRunRouteImport
       parentRoute: typeof ProjectsOwnerNameRoute
     }
   }
@@ -154,12 +154,12 @@ declare module '@tanstack/react-router' {
 
 interface ProjectsOwnerNameRouteChildren {
   ProjectsOwnerNameIndexRoute: typeof ProjectsOwnerNameIndexRoute
-  ProjectsOwnerNameRunsRunIdRoute: typeof ProjectsOwnerNameRunsRunIdRoute
+  ProjectsOwnerNameRunsRunRoute: typeof ProjectsOwnerNameRunsRunRoute
 }
 
 const ProjectsOwnerNameRouteChildren: ProjectsOwnerNameRouteChildren = {
   ProjectsOwnerNameIndexRoute: ProjectsOwnerNameIndexRoute,
-  ProjectsOwnerNameRunsRunIdRoute: ProjectsOwnerNameRunsRunIdRoute,
+  ProjectsOwnerNameRunsRunRoute: ProjectsOwnerNameRunsRunRoute,
 }
 
 const ProjectsOwnerNameRouteWithChildren =

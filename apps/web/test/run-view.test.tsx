@@ -246,7 +246,9 @@ describe("drawer summary", () => {
     const succeeded = summary(run());
     assert.include(succeeded, "Succeeded");
     assert.include(succeeded, "Opened the pull request.");
-    const canceled = summary(run({ state: "Canceled", attempts: [attempt(new CanceledAttemptView())] }));
+    const canceled = summary(
+      run({ state: "Canceled", attempts: [attempt(new CanceledAttemptView())] }),
+    );
     assert.include(canceled, "Canceled");
     assert.include(canceled, "No salvage branch.");
   });
@@ -272,10 +274,15 @@ describe("drawer summary", () => {
         payload,
       });
     const markup = summary(run({ state: "Running", attempts: [attempt(null)], canCancel: true }), [
-      event(1, new SessionEvent({ event: new TextOutput({ session: child, text: "First step." }) })),
+      event(
+        1,
+        new SessionEvent({ event: new TextOutput({ session: child, text: "First step." }) }),
+      ),
       event(
         2,
-        new SessionEvent({ event: new TextOutput({ session: child, text: "Running the **tests** now." }) }),
+        new SessionEvent({
+          event: new TextOutput({ session: child, text: "Running the **tests** now." }),
+        }),
       ),
       event(
         3,

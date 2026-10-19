@@ -8,7 +8,7 @@ import { failureMessage, failureReason } from "../operator-copy.ts";
 import type { AttemptEnd } from "./document/model.ts";
 
 /** A failed Attempt's typed reason and message on a red tint. */
-export const FailureNote = ({
+const FailureNote = ({
   failure,
   className,
 }: {
@@ -40,9 +40,8 @@ export const SalvageLine = ({ salvage }: { readonly salvage: AttemptSalvage | nu
           ),
           Retained: ({ path, message }) => (
             <>
-              Salvage incomplete; unfinished work stays at{" "}
-              <span className="font-mono">{path}</span> and is retried at every startup while its
-              Worker is configured. Last error: {message}
+              Salvage incomplete; unfinished work stays at <span className="font-mono">{path}</span>{" "}
+              and is retried at every startup while its Worker is configured. Last error: {message}
             </>
           ),
         })}

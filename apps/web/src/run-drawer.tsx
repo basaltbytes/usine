@@ -162,8 +162,8 @@ export const RunDrawer = ({
           {detail.data !== undefined && <RunSummary detail={detail.data} />}
           {run !== undefined && (
             <Link
-              to="/projects/$owner/$name/runs/$runId"
-              params={{ ...projectParams(run.repository), runId: run.id }}
+              to="/projects/$owner/$name/runs/$run"
+              params={{ ...projectParams(run.repository), run: run.id }}
               search={({ run: _run, ...rest }) => rest}
               className={buttonVariants({ variant: "outline" })}
             >

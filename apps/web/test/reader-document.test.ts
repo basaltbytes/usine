@@ -56,10 +56,7 @@ const record = (sequence: number, payload: TranscriptEventView["payload"]) =>
     payload,
   });
 const said = (sequence: number, text: string, session: AgentSession = child) =>
-  record(
-    sequence,
-    new AttemptChannel.SessionEvent({ event: new TextOutput({ session, text }) }),
-  );
+  record(sequence, new AttemptChannel.SessionEvent({ event: new TextOutput({ session, text }) }));
 const delegation = [
   record(
     2,
@@ -87,10 +84,14 @@ const attempt = (outcome: AttemptView["outcome"]) =>
     endedAt: null,
     salvage: null,
   });
-const document = (events: ReadonlyArray<TranscriptEventView>, attempts: ReadonlyArray<AttemptView>) =>
-  readerDocument(projectTranscript(events, attempts), attempts, events);
+const document = (
+  events: ReadonlyArray<TranscriptEventView>,
+  attempts: ReadonlyArray<AttemptView>,
+) => readerDocument(projectTranscript(events, attempts), attempts, events);
 const shown = (rows: ReadonlyArray<ChapterRow>) =>
-  rows.flatMap((row) => (row._tag === "Message" ? [`${row.speaker.name}: ${row.text}`] : [row._tag]));
+  rows.flatMap((row) =>
+    row._tag === "Message" ? [`${row.speaker.name}: ${row.text}`] : [row._tag],
+  );
 
 const report =
   "Baseline lint fails on this Worker.\n\nRecorded the [blocker on #247](https://github.com/basaltbytes/usine/issues/247).";
@@ -147,7 +148,10 @@ describe("repeated final messages", () => {
     const events = [
       said(3, "Finishing pass for PR #320 is complete, with every check passing."),
       said(4, summary, parent),
-      record(5, new AttemptChannel.Final({ result: new StepResult({ message: summary, facts: [] }) })),
+      record(
+        5,
+        new AttemptChannel.Final({ result: new StepResult({ message: summary, facts: [] }) }),
+      ),
     ];
     const chapter = document(events, [attempt(null)]).chapters[0];
     assert.isDefined(chapter);
@@ -192,13 +196,12 @@ describe("checkpoints", () => {
       "#247 confirms that both schemas use the same pattern.",
     );
     assert.equal(
-      checkpointText("[usine:blocked]\n\nBaseline **lint** and `knip` fail. Changing it needs sudo."),
+      checkpointText(
+        "[usine:blocked]\n\nBaseline **lint** and `knip` fail. Changing it needs sudo.",
+      ),
       "Baseline lint and knip fail.",
     );
-    assert.equal(
-      checkpointText("## Plan\n\n1. Read the issue"),
-      "Plan",
-    );
+    assert.equal(checkpointText("## Plan\n\n1. Read the issue"), "Plan");
     assert.equal(
       checkpointText("```bash\npnpm lint\n```\nSee the [log](https://example.com) for details."),
       "See the log for details.",

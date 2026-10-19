@@ -115,7 +115,8 @@ export const durationLabel = (milliseconds: number): string => {
 /** How a Run stands, in one phrase: `Failed after 3 Attempts`, `Waiting for approval`, `Running Attempt 2`. */
 export const runStateLine = (run: Pick<RunView, "state" | "attempts">): string => {
   const attempts = run.attempts.length;
-  const after = attempts === 0 ? "" : ` after ${attempts} ${attempts === 1 ? "Attempt" : "Attempts"}`;
+  const after =
+    attempts === 0 ? "" : ` after ${attempts} ${attempts === 1 ? "Attempt" : "Attempts"}`;
   switch (run.state) {
     case "Pending":
       return "Pending";

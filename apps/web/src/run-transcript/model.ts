@@ -23,7 +23,7 @@ interface TranscriptPosition {
 }
 
 /** What a notice reports: a session's own event, an operator input receipt, or an Attempt envelope. */
-export type NoticeOrigin =
+type NoticeOrigin =
   | {
       readonly _tag: "Session";
       readonly session: AgentSession;
@@ -172,7 +172,9 @@ const sessionEntries = (
         isError: false,
       }),
     });
-    entries.push(notice(at, content, { _tag: "Session", session: group.session, event: event._tag }));
+    entries.push(
+      notice(at, content, { _tag: "Session", session: group.session, event: event._tag }),
+    );
   }
   return [...entries, ...tools.values()].sort((left, right) => left.sequence - right.sequence);
 };

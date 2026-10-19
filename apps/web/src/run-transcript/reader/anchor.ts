@@ -28,7 +28,10 @@ const toolRows = (
     openKeys: [],
     groupKeys,
   };
-  return [row, { ...row, surface: "result", elementId: `${tool.key}:result`, openKeys: [tool.key] }];
+  return [
+    row,
+    { ...row, surface: "result", elementId: `${tool.key}:result`, openKeys: [tool.key] },
+  ];
 };
 
 const plainRow = (key: string, sequence: TranscriptSequence): ReadingRow => ({

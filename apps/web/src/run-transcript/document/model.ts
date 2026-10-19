@@ -16,7 +16,7 @@ import { presentTool } from "../tool/presentation.ts";
 import { answerMarker, checkpointText, comparableText, withoutMarker } from "./text.ts";
 
 /** A row's place in the durable transcript. */
-export interface RowPosition {
+interface RowPosition {
   readonly key: string;
   readonly sequence: TranscriptSequence;
   /** Newest durable event represented by this row, including a paired tool result. */
@@ -45,7 +45,7 @@ export interface MessageRow extends RowPosition {
 }
 
 /** A lifecycle line, such as a session waiting for the operator or a requested cancel. */
-export interface NoteRow extends RowPosition {
+interface NoteRow extends RowPosition {
   readonly _tag: "Note";
   readonly speaker: Speaker | null;
   readonly text: string;
@@ -81,7 +81,7 @@ export type AttemptEnd =
   | { readonly _tag: "Canceled"; readonly salvage: AttemptSalvage | null };
 
 /** The Attempt's outcome, in place of a final message that would repeat it. */
-export interface EndingRow {
+interface EndingRow {
   readonly _tag: "Ending";
   readonly key: string;
   /** The terminal envelope's place, when that envelope is loaded. */
@@ -304,13 +304,11 @@ const chapterRows = (
       _tag: "Ending",
       key: envelope?.key ?? `ending:${attemptId}`,
       position,
-      receivedAt: Option.orElse(
-        Option.fromNullishOr(replaced?.receivedAt),
-        () =>
-          Option.orElse(
-            Option.map(position, ({ receivedAt }) => receivedAt),
-            () => Option.fromNullishOr(attempt?.endedAt),
-          ),
+      receivedAt: Option.orElse(Option.fromNullishOr(replaced?.receivedAt), () =>
+        Option.orElse(
+          Option.map(position, ({ receivedAt }) => receivedAt),
+          () => Option.fromNullishOr(attempt?.endedAt),
+        ),
       ),
       speaker: replaced?.speaker ?? null,
       end,

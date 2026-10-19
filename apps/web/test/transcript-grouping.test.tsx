@@ -155,7 +155,13 @@ it("times a burst from its first start to its last result and counts failed and 
     ),
     record(
       28,
-      new ToolFinished({ session: parent, callId: "gate", tool: "Bash", output: "no", isError: true }),
+      new ToolFinished({
+        session: parent,
+        callId: "gate",
+        tool: "Bash",
+        output: "no",
+        isError: true,
+      }),
     ),
     record(
       29,
@@ -221,18 +227,18 @@ it("keeps completed calls within their parent session, child session and Attempt
 
 it("groups failed commands with the adjacent completed commands and preserves their errors", () => {
   const projection = groups([
-        finished(1, "before", "shell"),
-        record(
-          2,
-          new ToolFinished({
-            session: parent,
-            callId: "failed",
-            tool: "shell",
-            output: "Access denied",
-            isError: true,
-          }),
-        ),
-        finished(3, "after", "shell"),
+    finished(1, "before", "shell"),
+    record(
+      2,
+      new ToolFinished({
+        session: parent,
+        callId: "failed",
+        tool: "shell",
+        output: "Access denied",
+        isError: true,
+      }),
+    ),
+    finished(3, "after", "shell"),
   ]);
   assert.lengthOf(projection, 1);
   const group = projection[0];

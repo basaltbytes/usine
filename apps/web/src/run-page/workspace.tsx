@@ -19,7 +19,10 @@ import {
   updateTarget,
   type ReaderTarget,
 } from "../run-transcript/navigation/errors.tsx";
-import { indexTranscriptUpdates, type TranscriptUpdate } from "../run-transcript/navigation/model.ts";
+import {
+  indexTranscriptUpdates,
+  type TranscriptUpdate,
+} from "../run-transcript/navigation/model.ts";
 import { ReaderLine, type TranscriptHistory } from "../run-transcript/transcript.tsx";
 import { EventDocument, TaskDocument } from "./documents.tsx";
 import { eventPreview } from "./item.ts";
@@ -185,7 +188,9 @@ export const RunWorkspace = ({
         }
         className={cn(
           "shrink-0 overflow-y-auto px-3 pb-4 lg:block lg:w-72 lg:border-r",
-          outlineOpen ? "mx-4 mb-3 max-h-[60svh] rounded-md border md:mx-5 lg:mx-0 lg:mb-0 lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-l-0" : "hidden",
+          outlineOpen
+            ? "mx-4 mb-3 max-h-[60svh] rounded-md border md:mx-5 lg:mx-0 lg:mb-0 lg:max-h-none lg:rounded-none lg:border-y-0 lg:border-l-0"
+            : "hidden",
         )}
       />
       <section

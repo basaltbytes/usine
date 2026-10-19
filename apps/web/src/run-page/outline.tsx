@@ -35,13 +35,16 @@ const entry =
 const chapterState = (chapter: Chapter): string =>
   chapter.live
     ? "Running"
-    : Option.match(Option.flatMap(chapter.attempt, ({ outcome }) => Option.fromNullishOr(outcome)), {
-        onNone: () => {
-          const ending = chapter.rows.at(-1);
-          return ending?._tag === "Ending" ? ending.end._tag : "Ended";
+    : Option.match(
+        Option.flatMap(chapter.attempt, ({ outcome }) => Option.fromNullishOr(outcome)),
+        {
+          onNone: () => {
+            const ending = chapter.rows.at(-1);
+            return ending?._tag === "Ending" ? ending.end._tag : "Ended";
+          },
+          onSome: ({ _tag }) => _tag,
         },
-        onSome: ({ _tag }) => _tag,
-      });
+      );
 
 /** An Attempt's span, from its start to its recorded end. */
 const chapterSpan = (chapter: Chapter): Option.Option<string> =>
