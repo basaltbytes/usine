@@ -317,7 +317,10 @@ describe("Worker scheduler on reload", () => {
           yield* onSpare.release.pipe(Effect.withLogger(logsIn(lines)));
           yield* assertWaiting(waiting, "the removed Worker's slot is gone");
           assert.lengthOf(
-            logged(lines, "The last Attempt on a removed Worker ended; the Worker leaves the scheduler"),
+            logged(
+              lines,
+              "The last Attempt on a removed Worker ended; the Worker leaves the scheduler",
+            ),
             1,
           );
           assert.deepStrictEqual(yield* scheduler.workers, [local]);
@@ -327,68 +330,72 @@ describe("Worker scheduler on reload", () => {
     ),
   );
 
-  it.live("a Worker a reload adds is preflighted with every rostered brain, then takes Attempts", () =>
-    withWorkers(localWorkers([["local", 1]]), (root) =>
-      Effect.gen(function* () {
-        const instances = yield* CurrentInstance;
-        const preflighted: Array<string> = [];
-        const scheduler = yield* startScheduler(preflighted);
-        const agent = yield* developer;
-        yield* scheduler.reserve(submission(agent, 1));
-        const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 2)));
-        preflighted.length = 0;
+  it.live(
+    "a Worker a reload adds is preflighted with every rostered brain, then takes Attempts",
+    () =>
+      withWorkers(localWorkers([["local", 1]]), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const preflighted: Array<string> = [];
+          const scheduler = yield* startScheduler(preflighted);
+          const agent = yield* developer;
+          yield* scheduler.reserve(submission(agent, 1));
+          const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 2)));
+          preflighted.length = 0;
 
-        yield* writeInstanceFiles(root, [
-          [
-            "usine.yaml",
-            usineYaml(
-              localWorkers([
-                ["local", 1],
-                ["spare", 2],
-              ]),
-            ),
-          ],
-        ]);
-        const report = yield* instances.reload;
-        assert.deepStrictEqual(report.workers.added, [spare]);
-        assert.deepStrictEqual(preflighted, ["spare x2: gpt-5.6-sol"]);
-        assert.strictEqual((yield* leaseOf(waiting)).worker, spare);
-      }).pipe(Effect.scoped),
-    ),
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              usineYaml(
+                localWorkers([
+                  ["local", 1],
+                  ["spare", 2],
+                ]),
+              ),
+            ],
+          ]);
+          const report = yield* instances.reload;
+          assert.deepStrictEqual(report.workers.added, [spare]);
+          assert.deepStrictEqual(preflighted, ["spare x2: gpt-5.6-sol"]);
+          assert.strictEqual((yield* leaseOf(waiting)).worker, spare);
+        }).pipe(Effect.scoped),
+      ),
   );
 
-  it.live("refuses a reload whose added Worker fails preflight, and the Worker takes no Attempt", () =>
-    withWorkers(localWorkers([["local", 1]]), (root) =>
-      Effect.gen(function* () {
-        const instances = yield* CurrentInstance;
-        const running = yield* instances.get;
-        const scheduler = yield* startScheduler([], { failing: ["gpu"] });
-        const agent = yield* developer;
-        yield* scheduler.reserve(submission(agent, 1));
-        const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 2)));
+  it.live(
+    "refuses a reload whose added Worker fails preflight, and the Worker takes no Attempt",
+    () =>
+      withWorkers(localWorkers([["local", 1]]), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const running = yield* instances.get;
+          const scheduler = yield* startScheduler([], { failing: ["gpu"] });
+          const agent = yield* developer;
+          yield* scheduler.reserve(submission(agent, 1));
+          const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 2)));
 
-        yield* writeInstanceFiles(root, [
-          [
-            "usine.yaml",
-            usineYaml(
-              localWorkers([
-                ["local", 1],
-                ["gpu", 1],
-              ]),
-            ),
-          ],
-        ]);
-        const failure = yield* Effect.flip(instances.reload);
-        assert(failure._tag === "ReloadPreflightError", failure._tag);
-        assert.deepStrictEqual(failure.workers, [WorkerName.make("gpu")]);
-        assert.deepStrictEqual(failure.agents, []);
-        assert.include(failure.message, "Worker gpu, which the reload adds or gives more slots");
-        assert.include(failure.message, "less than 1.5 GiB per Attempt");
-        assert.strictEqual(yield* instances.get, running);
-        assert.deepStrictEqual(yield* scheduler.workers, [local]);
-        yield* assertWaiting(waiting, "the refused Worker has no slot");
-      }).pipe(Effect.scoped),
-    ),
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              usineYaml(
+                localWorkers([
+                  ["local", 1],
+                  ["gpu", 1],
+                ]),
+              ),
+            ],
+          ]);
+          const failure = yield* Effect.flip(instances.reload);
+          assert(failure._tag === "ReloadPreflightError", failure._tag);
+          assert.deepStrictEqual(failure.workers, [WorkerName.make("gpu")]);
+          assert.deepStrictEqual(failure.agents, []);
+          assert.include(failure.message, "Worker gpu, which the reload adds or gives more slots");
+          assert.include(failure.message, "less than 1.5 GiB per Attempt");
+          assert.strictEqual(yield* instances.get, running);
+          assert.deepStrictEqual(yield* scheduler.workers, [local]);
+          yield* assertWaiting(waiting, "the refused Worker has no slot");
+        }).pipe(Effect.scoped),
+      ),
   );
 
   it.live("refuses a reload that renames a Worker or changes its kind, naming the field", () =>
@@ -421,10 +428,7 @@ describe("Worker scheduler on reload", () => {
           assert.include(renamed.message, "restart usine up");
 
           yield* writeInstanceFiles(root, [
-            [
-              "usine.yaml",
-              usineYaml(`${localWorkers([["local", 1]])}${sshWorker("spare", 1)}`),
-            ],
+            ["usine.yaml", usineYaml(`${localWorkers([["local", 1]])}${sshWorker("spare", 1)}`)],
           ]);
           const rekinded = yield* Effect.flip(instances.reload);
           assert(rekinded._tag === "RestartRequiredError", rekinded._tag);

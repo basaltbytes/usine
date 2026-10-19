@@ -7,7 +7,7 @@ sidebar:
 
 `usine.yaml` is at the top of the instance folder, next to the `loops/` and `agents/` folders. It contains the registry of managed repositories, the labels usine creates, the Board lanes, factory-wide settings, and the Workers that run Attempts.
 
-The orchestrator reads it when `usine up` starts and at each reload ([CLI](/reference/configuration/cli/#reload)). A reload applies `labels`, `repos`, `settings`, and `operator` to new work. It refuses a change to `workers` or `webhooks`, which take effect at the next start.
+The orchestrator reads it when `usine up` starts and at each reload ([CLI](/reference/configuration/cli/#reload)). A reload applies `labels`, `repos`, `settings`, and `operator` to new work, and resizes, adds, or removes Workers ([`workers`](#workers)). It refuses a change to `webhooks` and the `workers` changes listed below, which take effect at the next start.
 
 The parser is strict:
 
@@ -236,7 +236,22 @@ Every kind takes these keys:
 | `kind` | `local`, `ssh`, `exe.dev` | required | Selects the Worker adapter and the other keys it accepts. |
 | `max_concurrent_attempts` | integer ≥ 1 | `1` | Attempts the Worker runs at the same time. The Worker's memory must carry them; see below. |
 
-Runs wait for a free Worker slot in the order their Events arrived ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/scheduler.ts#L87)). At startup, `usine up` runs Preflight on every Worker for every harness in the Agent roster. A failed Preflight stops startup.
+Runs wait for a free Worker slot in the order their Events arrived, and take a slot of the first Worker in this list that has one free ([`stepExecutorLayer`](https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/scheduler.ts)). At startup, `usine up` runs Preflight on every Worker for every harness in the Agent roster. A failed Preflight stops startup.
+
+A reload ([CLI](/reference/configuration/cli/#reload)) applies these `workers` changes without stopping running Attempts:
+
+| Change | What the reload does |
+| --- | --- |
+| A Worker's `max_concurrent_attempts` goes up | Runs Preflight on the Worker with the new count and every rostered harness, then its new slots take waiting Runs at once. |
+| A Worker's `max_concurrent_attempts` goes down | The Worker starts no new Attempt until it runs fewer Attempts than the new count. Running Attempts finish, and each extra slot retires when its Attempt ends. |
+| A new Worker | Runs Preflight on it with every rostered harness; it takes Attempts once that passes. A new `ssh` Worker needs a restart, except one `usine up` started with and a reload removed, added back with the same keys. |
+| A removed Worker | It starts no new Attempt, and its running Attempts finish. Its leftovers can be discarded from Needs you once the last one ends. An `ssh` Worker's Gateway forward stays open until `usine up` stops. |
+
+A failed Preflight refuses the whole reload with `ReloadPreflightError`. These changes need a restart, and the reload refuses them with `RestartRequiredError`, which names the field, such as `workers.worker-2.destination`:
+
+- a Worker's `kind`, or any key other than `name` and `max_concurrent_attempts`: `destination`, `identity_file`, `port`, `root`, or `gateway`;
+- a renamed Worker: one Worker removed and one added with the same `kind` and other keys;
+- a new Worker whose `kind` differs from the running Workers'.
 
 Preflight also divides the Worker's memory by `max_concurrent_attempts`. It fails the `memory` check, which stops startup, when an Attempt would get less than 1.5 GiB, or when the Worker has no swap and `max_concurrent_attempts` is more than 1. Below 3 GiB per Attempt it logs a warning with a value to use. The limits come from two Attempts that thrashed a 4 GB Worker without swap until sshd stopped answering ([#270](https://github.com/basaltbytes/usine/issues/270)). Local Workers on Linux and SSH Workers report memory and swap in `/proc/meminfo`. On macOS, preflight reads the physical memory and counts swap as present, because macOS adds swap files as memory runs short.
 

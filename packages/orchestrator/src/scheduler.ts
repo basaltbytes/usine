@@ -77,7 +77,10 @@ const slotPoolOf = (workers: ReadonlyArray<ConfigWorker>, previous: SlotPool): S
   return new Map([
     ...workers.map(
       ({ name, maxConcurrentAttempts }) =>
-        [name, { capacity: maxConcurrentAttempts, leased: previous.get(name)?.leased ?? 0 }] as const,
+        [
+          name,
+          { capacity: maxConcurrentAttempts, leased: previous.get(name)?.leased ?? 0 },
+        ] as const,
     ),
     ...[...previous]
       .filter(([name, { leased }]) => !declared.has(name) && leased > 0)
@@ -254,7 +257,10 @@ export const stepExecutorLayer = (
         loaded: LoadedInstance,
       ) {
         const change = workersChange(running.config.workers, loaded.config.workers);
-        const restart = [...change.restart, ...EffectArray.getSomes(change.added.map(unservedChange))];
+        const restart = [
+          ...change.restart,
+          ...EffectArray.getSomes(change.added.map(unservedChange)),
+        ];
         if (EffectArray.isReadonlyArrayNonEmpty(restart)) {
           return yield* restartRequired(restart);
         }
@@ -337,8 +343,7 @@ export const stepExecutorLayer = (
         } satisfies WorkerLease;
       });
 
-      // One transaction takes the earliest reservation and a slot of the first
-      // Worker with one free, and waits until both exist.
+      // The transaction retries until a reservation and a free slot both exist, then takes both.
       const nextAssignment = Effect.tx(
         Effect.gen(function* () {
           const current = yield* TxRef.get(pool);

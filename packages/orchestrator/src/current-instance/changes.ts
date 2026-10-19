@@ -178,7 +178,7 @@ export const changedWorkerSettings = (
 };
 
 /** A Worker that a reload keeps with a new `max_concurrent_attempts`. */
-export interface ResizedWorker {
+interface ResizedWorker {
   /** The Worker's reloaded entry. */
   readonly worker: ConfigWorker;
   /** Its `max_concurrent_attempts` in the running instance. */
