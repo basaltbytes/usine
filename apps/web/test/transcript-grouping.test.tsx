@@ -625,6 +625,7 @@ it("renders a held child from session state when its activity is outside the loa
     openedAt: "2026-09-12",
     task: "Task",
     attempts: [],
+    approval: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,

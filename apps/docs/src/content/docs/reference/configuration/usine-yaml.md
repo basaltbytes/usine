@@ -127,7 +127,7 @@ A solid arrow is a reference that must resolve: usine quarantines a Loop whose A
 | Key | Type | Default | Description |
 | --- | --- | --- | --- |
 | `version` | `1` | required | Schema version. Any other value is an error. |
-| `operator` | GitHub login | none | The login recorded as the author of operator interventions. |
+| `operator` | GitHub login | none | The login recorded as the author of operator interventions and approvals given in the web UI. |
 | `labels` | list of [labels](#labels) | `[]` | Labels created in every managed repository. |
 | `repos` | list of [repositories](#repos) | required | The registry. An empty list is valid. |
 | `settings` | [settings](#settings) | `{}` | Polling, Attempt limits, and parent defaults. |
@@ -136,7 +136,7 @@ A solid arrow is a reference that must resolve: usine quarantines a Loop whose A
 
 ## `operator`
 
-A GitHub login: 1 to 39 letters, digits, or hyphens, starting and ending with a letter or digit ([`OperatorLogin`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L26)). When the operator steers, interrupts, or messages a session from the UI, the transcript records this login as the sender. Without it the transcript records `local operator` ([`operator.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/operator/operator.ts#L485)).
+A GitHub login: 1 to 39 letters, digits, or hyphens, starting and ending with a letter or digit ([`OperatorLogin`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/factory.ts#L26)). When the operator steers, interrupts, or messages a session from the UI, the transcript records this login as the sender. Without it the transcript records `local operator` ([`operator.ts`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/operator/operator.ts#L485)). When the operator approves a Run from the UI, usine records this login as the approver, and records no approver without it.
 
 ## `labels`
 

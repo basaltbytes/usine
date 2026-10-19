@@ -5,6 +5,7 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { ApprovalSource } from "@usine/core/run/approval";
 import * as RunState from "@usine/core/run/state";
 import { Effect, Schema } from "effect";
 import { AttemptView } from "./attempt.ts";
@@ -36,6 +37,13 @@ export class RosterAgentNotFoundError extends Schema.TaggedError<RosterAgentNotF
   "@usine/orchestrator/RosterAgentNotFoundError",
 )("RosterAgentNotFoundError", { agent: AgentName, message: Schema.String }) {}
 
+/** A Run's approval: when it was given and, once usine recorded it, who gave it through which channel. */
+export class ApprovalView extends Schema.Class<ApprovalView>("@usine/orchestrator/ApprovalView")({
+  approvedAt: Schema.String,
+  /** Null for approvals given before usine recorded who approved. */
+  source: Schema.NullOr(ApprovalSource),
+}) {}
+
 /** A Run summary with its Attempts, result links, and currently available operator actions. */
 export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView")({
   id: RunId,
@@ -48,6 +56,8 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   openedAt: Schema.String,
   task: Schema.String,
   attempts: Schema.Array(AttemptView),
+  /** The approval the Run consumed; null until one arrives, and always null for a Loop with `approval: none`. */
+  approval: Schema.NullOr(ApprovalView),
   resultMessage: NullableString,
   pullRequestUrl: NullableString,
   canApprove: Schema.Boolean,

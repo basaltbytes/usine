@@ -20,7 +20,9 @@ import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { OperatorLogin } from "@usine/core/operator";
 import { RunId } from "@usine/core/run";
+import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
@@ -634,7 +636,7 @@ describe("run store", () => {
     ),
   );
 
-  it.live("an approved Run is Queued until its attempt starts", () =>
+  it.live("an approved Run records its source once and is Queued until its attempt starts", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const directory = InstanceDirectory.make(
@@ -665,23 +667,45 @@ describe("run store", () => {
       });
       const runId = RunId.make("queued-run");
 
+      // A UI approval while `usine.yaml` names no operator records its channel only.
+      const unnamed = new ApprovalSource({ channel: "ui", approver: Option.none() });
+      const recorded = Option.some(
+        new RunApproval({ approvedAt: approval.receivedAt, source: Option.some(unnamed) }),
+      );
+
       yield* Effect.gen(function* () {
         const store = yield* RunStore;
+        const reader = yield* RunReader;
         const state = () => store.snapshot(runId).pipe(Effect.map(({ run }) => run.state._tag));
         yield* store.recordAndClaim(submission, runId);
         yield* store.parkForApproval(runId);
         assert.strictEqual(yield* state(), "Waiting");
 
-        yield* store.approve(runId, approval);
+        yield* store.approve(runId, approval, unnamed);
         assert.strictEqual(yield* state(), "Queued");
         // Re-delivery of the same approval is a no-op, not a rejection.
-        yield* store.approve(runId, approval);
+        yield* store.approve(
+          runId,
+          approval,
+          new ApprovalSource({
+            channel: "github-ask",
+            approver: Option.some(OperatorLogin.make("Philippe")),
+          }),
+        );
         assert.strictEqual(yield* state(), "Queued");
+        assert.deepStrictEqual((yield* store.snapshot(runId)).approval, recorded);
+        const [listed] = yield* reader.list({ closedLimit: 10 });
+        assert.deepStrictEqual(listed?.approval, recorded);
+        const [history] = yield* reader.forItems([submission.itemKey]);
+        assert.deepStrictEqual(history?.approval, recorded);
 
         const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
         assert.strictEqual(started._tag, "AttemptStarted");
         assert.strictEqual(yield* state(), "Running");
-      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(
+        Effect.provide(Layer.mergeAll(RunStore.layer, RunReader.layer)),
+        Effect.provide(localSqliteLayer(directory)),
+      );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 

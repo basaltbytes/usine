@@ -13,6 +13,7 @@ import { Markdown } from "@/components/markdown";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { ReaderLine } from "../run-transcript/transcript.tsx";
+import { ApprovalLine } from "./approval.tsx";
 import { eventItem } from "./item.ts";
 
 const Page = ({ label, children }: { readonly label: string; readonly children: ReactNode }) => (
@@ -36,7 +37,10 @@ export const TaskDocument = ({ task }: { readonly task: string }) => (
   </Page>
 );
 
-/** The triggering Event: the Item it carried, when it carried one, and its complete payload under Raw details. */
+/**
+ * The triggering Event: the Item it carried, when it carried one, who approved the Run when its
+ * Loop requires approval, and the Event's complete payload under Raw details.
+ */
 export const EventDocument = ({
   detail,
 }: {
@@ -49,9 +53,12 @@ export const EventDocument = ({
         <h2 className="text-lg font-semibold">Event</h2>
         {Option.match(item, {
           onNone: () => (
-            <p className="mt-2 text-md">
-              {detail.run.loop} opened this Run on {detail.run.repository}.
-            </p>
+            <>
+              <p className="mt-2 text-md">
+                {detail.run.loop} opened this Run on {detail.run.repository}.
+              </p>
+              <ApprovalLine approval={detail.run.approval} className="mt-2 block text-sm" />
+            </>
           ),
           onSome: (event) => (
             <div className="mt-2 space-y-3">
@@ -86,6 +93,7 @@ export const EventDocument = ({
                   ),
                 })}
               </dl>
+              <ApprovalLine approval={detail.run.approval} className="block text-sm" />
               {Option.match(event.body, {
                 onNone: () => null,
                 onSome: (body) => (

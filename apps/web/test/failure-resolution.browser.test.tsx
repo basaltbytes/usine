@@ -74,6 +74,7 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
         salvage: null,
       }),
     ],
+    approval: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,

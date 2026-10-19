@@ -109,6 +109,7 @@ it("edits failed task text and selects the replacement roster agent", async () =
     openedAt: "2026-09-12T00:00:00Z",
     task: "Original task",
     attempts: [],
+    approval: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,

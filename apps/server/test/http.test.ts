@@ -13,7 +13,9 @@ import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
+import { OperatorLogin } from "@usine/core/operator";
 import { RunId } from "@usine/core/run";
+import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import {
   RunNotFoundError,
@@ -24,6 +26,7 @@ import { CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   ApprovalNeed,
+  ApprovalView,
   EditAndRetry,
   SessionIntervention,
   BoardLaneId,
@@ -87,6 +90,7 @@ const run = new RunView({
   openedAt: "2026-09-01T12:00:00.000Z",
   task: "Review issue 31.",
   attempts: [],
+  approval: null,
   resultMessage: null,
   pullRequestUrl: null,
   canApprove: true,
@@ -96,7 +100,19 @@ const run = new RunView({
 });
 const detail = new RunDetailView({
   sessionState: [],
-  run,
+  // An approved Run, so the detail round trip carries a recorded approval.
+  run: new RunView({
+    ...run,
+    state: "Queued",
+    canApprove: false,
+    approval: new ApprovalView({
+      approvedAt: "2026-09-01T12:05:00.000Z",
+      source: new ApprovalSource({
+        channel: "ui",
+        approver: Option.some(OperatorLogin.make("Philippe")),
+      }),
+    }),
+  }),
   eventDedupKey: "issue:31",
   eventPayload: { number: 31 },
   transcript: [

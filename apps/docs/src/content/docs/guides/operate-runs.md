@@ -62,7 +62,7 @@ Workers take Runs in the order their Events arrived, and each Worker runs up to 
 
 ## Approve
 
-A Loop with `approval: required` keeps each new Run in `Waiting`. The Run appears in **Needs you** as **Approval required**, and its card shows that a Run is waiting for approval. Open the Run, read its **Task** and **Event**, and select **Approve**. The Run becomes `Queued` and starts when a Worker slot is free.
+A Loop with `approval: required` keeps each new Run in `Waiting`. The Run appears in **Needs you** as **Approval required**, and its card shows that a Run is waiting for approval. Open the Run, read its **Task** and **Event**, and select **Approve**. The Run becomes `Queued` and starts when a Worker slot is free. On the Run page, the **Event** then shows who approved the Run, when, and from where, such as **Approved by octocat · 15 Oct 19:30 · from the UI**, where the name is the `operator` login in `usine.yaml`. A Run approved before usine recorded approvers shows **Approved** without a name.
 
 If the Item changes before you approve and still matches the Loop, a new waiting Run replaces this one, and usine cancels this one as superseded. If the Item no longer matches, usine cancels the waiting Run as revoked.
 
@@ -190,7 +190,7 @@ It copies `.usine/runtime.sqlite` to that path and `.usine/durable.sqlite` next 
 
 To restore, stop the orchestrator, move `.usine/runtime.sqlite` and `.usine/durable.sqlite` aside with their `-wal` and `-shm` files, copy both files of one backup into their places, and start `usine up` with the same configuration and usine version. An older backup also contains an older record of Events, so work done after the backup can run again.
 
-`usine export-run` writes one Run to a JSON file: its Event, effective task and Agent, revision, Step result, every Attempt, and the whole transcript, read in one transaction.
+`usine export-run` writes one Run to a JSON file: its Event, its approval, effective task and Agent, revision, Step result, every Attempt, and the whole transcript, read in one transaction.
 
 ```sh title="Instance folder"
 usine export-run <run id>

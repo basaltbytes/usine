@@ -21,6 +21,7 @@ import { DedupKey, EventId, Event } from "@usine/core/event";
 import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId, Run } from "@usine/core/run";
+import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { AgentFile, InvalidAgent } from "@usine/config/agent";
@@ -30,7 +31,8 @@ import { IssueTrigger } from "@usine/config/trigger";
 import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate, QuarantinedLoop } from "@usine/config/loop";
 import { LoopName } from "@usine/core/loop";
-import { OperatorLogin, UsineConfig } from "@usine/config/factory";
+import { UsineConfig } from "@usine/config/factory";
+import { OperatorLogin } from "@usine/core/operator";
 import {
   AgentSessionId,
   ChildSession,
@@ -78,7 +80,7 @@ import {
 import { FailureView } from "../src/operator/attempt.ts";
 import { Operator } from "../src/operator/operator.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
-import { EditAndRetry, SessionIntervention } from "../src/operator/run.ts";
+import { ApprovalView, EditAndRetry, SessionIntervention } from "../src/operator/run.ts";
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { failureView } from "../src/operator/projection.ts";
@@ -140,6 +142,7 @@ const instance = new LoadedInstance({
 
 const snapshot = new RunSnapshot({
   resolvedFailureAttemptId: Option.none(),
+  approval: Option.none(),
   event: new Event({
     id: EventId.make("event-operator-test"),
     dedupKey: DedupKey.make("event-operator-test"),
@@ -263,6 +266,7 @@ const transcript = [
 interface RecordedApproval {
   readonly runId: RunId;
   readonly event: Event;
+  readonly source: ApprovalSource;
 }
 
 const testLayer = (
@@ -296,7 +300,8 @@ const testLayer = (
   const runs = Layer.succeed(RunEngine)({
     resolveFailure: () => Effect.void,
     intervene: commands.intervene,
-    approve: (id, event) => Ref.update(approved, (entries) => [...entries, { runId: id, event }]),
+    approve: (id, event, source) =>
+      Ref.update(approved, (entries) => [...entries, { runId: id, event, source }]),
     cancel: () => Effect.void,
     discardLeftovers: () => Effect.die("unused"),
     inspect: () => Effect.succeed(runSnapshot),
@@ -713,13 +718,20 @@ describe("Operator", () => {
         const movedLabels = yield* Ref.make<ItemLabelMutation | null>(null);
         const overviewReads = yield* Ref.make(0);
         const projectionRevision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const askAnswer = new ApprovalSource({
+          channel: "github-ask",
+          approver: Option.some(OperatorLogin.make("Philippe")),
+        });
         const queued = new RunSnapshot({
           ...snapshot,
           run: new Run({ ...snapshot.run, state: new RunState.Queued() }),
+          approval: Option.some(
+            new RunApproval({ approvedAt: now, source: Option.some(askAnswer) }),
+          ),
         });
         yield* Effect.gen(function* () {
           const operator = yield* Operator;
-          const rejected = yield* operator.approve(runId).pipe(Effect.flip);
+          const rejected = yield* operator.approve(instance, runId).pipe(Effect.flip);
           assert(rejected._tag === "RunOperationRejectedError");
           assert.strictEqual(rejected.state, "Queued");
           assert.deepStrictEqual(yield* Ref.get(approved), []);
@@ -731,6 +743,13 @@ describe("Operator", () => {
           assert.strictEqual(run.state, "Queued");
           assert.strictEqual(run.canApprove, false);
           assert.strictEqual(run.canCancel, true);
+          // The overview and the detail both say who approved, when, and from where.
+          const shown = new ApprovalView({
+            approvedAt: DateTime.formatIso(now),
+            source: askAnswer,
+          });
+          assert.deepStrictEqual(run.approval, shown);
+          assert.deepStrictEqual((yield* operator.detail(runId)).run.approval, shown);
           // The fixture's malformed Item, poll failure, and preflight finding still need the
           // operator; the Run does not.
           assert.deepStrictEqual(
@@ -850,11 +869,27 @@ describe("Operator", () => {
           .pipe(Effect.flip);
         assert.strictEqual(wrongAttempt._tag, "TranscriptAttemptNotFoundError");
 
-        yield* operator.approve(runId);
+        assert.strictEqual(overview.projects[0]?.runs[0]?.approval, null);
+        const configured = new LoadedInstance({
+          ...instance,
+          config: new UsineConfig({
+            ...instance.config,
+            operator: Option.some(OperatorLogin.make("Philippe")),
+          }),
+        });
+        yield* operator.approve(configured, runId);
         const approvals = yield* Ref.get(approved);
         const recorded = approvals[0];
         assert(recorded !== undefined);
         assert.strictEqual(recorded.runId, runId);
+        // The UI has no sign-in, so it approves as the operator `usine.yaml` names.
+        assert.deepStrictEqual(
+          recorded.source,
+          new ApprovalSource({
+            channel: "ui",
+            approver: Option.some(OperatorLogin.make("Philippe")),
+          }),
+        );
         // The approval Event the waiting run consumes is recorded whole: a
         // deterministic identity for idempotent re-approval and a typed payload.
         assert.strictEqual<string>(recorded.event.id, recorded.event.dedupKey);

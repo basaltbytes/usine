@@ -9,6 +9,7 @@ import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
@@ -1548,6 +1549,7 @@ describe("PollingTriggers", () => {
         yield* engine.approve(
           openRun,
           new Event({ id: EventId.make(dedupKey), dedupKey, payload: {}, receivedAt: updatedAt }),
+          new ApprovalSource({ channel: "ui", approver: Option.none() }),
         );
         yield* waitForState(engine, openRun, "Succeeded");
         assert.deepStrictEqual(models, ["gpt-5.6-sol"]);

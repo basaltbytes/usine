@@ -10,6 +10,7 @@ import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
+import type { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
@@ -46,6 +47,7 @@ import { Submission } from "../engine/submission.ts";
 import { cycleQueries } from "../cycle-budget/queries.ts";
 import {
   type RunRow,
+  approvalFromRow,
   attemptFromRow,
   decodeAttemptRows,
   decodeDiscards,
@@ -100,6 +102,8 @@ const eventRouteSelection = {
   parentModel: triggerEvents.parentModel,
 } as const;
 
+const approvalEvents = alias(events, "approval_event");
+
 const runSelection = {
   itemKey: triggerEvents.itemKey,
   runId: runs.runId,
@@ -115,6 +119,9 @@ const runSelection = {
   parentModel: runs.parentModel,
   stepName: steps.stepName,
   result: steps.result,
+  approvedAt: approvalEvents.receivedAt,
+  approvalChannel: approvals.channel,
+  approver: approvals.approver,
 } as const;
 
 const attemptSelection = {
@@ -168,14 +175,17 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* decodeEventRoutes(rows);
   });
 
-  const runRows = Effect.fn("RunStoreQueries.runRows")(function* (runId: RunId) {
-    const rows = yield* database
+  const selectRuns = () =>
+    database
       .select(runSelection)
       .from(runs)
       .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
       .innerJoin(steps, eq(steps.runId, runs.runId))
-      .where(eq(runs.runId, runId))
-      .execute();
+      .leftJoin(approvals, eq(approvals.runId, runs.runId))
+      .leftJoin(approvalEvents, eq(approvalEvents.eventId, approvals.eventId));
+
+  const runRows = Effect.fn("RunStoreQueries.runRows")(function* (runId: RunId) {
+    const rows = yield* selectRuns().where(eq(runs.runId, runId)).execute();
     return yield* decodeRunRows(rows);
   });
 
@@ -265,6 +275,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       step: stepFromRow(storedRun),
       attempts: storedAttempts.map(attemptFromRow),
       resolvedFailureAttemptId: Option.fromNullishOr(storedRun.resolvedFailureAttemptId),
+      approval: approvalFromRow(storedRun),
       repository: storedRun.repository,
       revision: storedRun.revision,
       task: storedRun.task,
@@ -301,11 +312,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     const storedRuns = (yield* Effect.forEach(
       EffectArray.chunksOf([...new Set(itemKeys)], 100),
       (keys) =>
-        database
-          .select(runSelection)
-          .from(runs)
-          .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-          .innerJoin(steps, eq(steps.runId, runs.runId))
+        selectRuns()
           .where(inArray(triggerEvents.itemKey, keys))
           .execute()
           .pipe(Effect.flatMap(decodeRunRows)),
@@ -319,20 +326,12 @@ export const queriesFor = (database: RunDatabaseClient) => {
   // Waiting run never falls out of the operator's view while history stays bounded.
   const runSummaries = Effect.fn("RunStoreQueries.runSummaries")(function* (closedLimit: number) {
     const [openRuns, closedRuns] = yield* Effect.all([
-      database
-        .select(runSelection)
-        .from(runs)
-        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-        .innerJoin(steps, eq(steps.runId, runs.runId))
+      selectRuns()
         .where(openState)
         .orderBy(desc(runs.openedAt), desc(runs.runId))
         .execute()
         .pipe(Effect.flatMap(decodeRunRows)),
-      database
-        .select(runSelection)
-        .from(runs)
-        .innerJoin(triggerEvents, eq(triggerEvents.eventId, runs.eventId))
-        .innerJoin(steps, eq(steps.runId, runs.runId))
+      selectRuns()
         .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
         .orderBy(desc(runs.openedAt), desc(runs.runId))
         .limit(closedLimit)
@@ -485,6 +484,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
   const recordApproval = Effect.fn("RunStoreQueries.recordApproval")(function* (
     runId: RunId,
     approval: Event,
+    source: ApprovalSource,
   ) {
     yield* database
       .insert(events)
@@ -496,7 +496,15 @@ export const queriesFor = (database: RunDatabaseClient) => {
       })
       .onConflictDoNothing()
       .execute();
-    yield* database.insert(approvals).values({ runId, eventId: approval.id }).execute();
+    yield* database
+      .insert(approvals)
+      .values({
+        runId,
+        eventId: approval.id,
+        channel: source.channel,
+        approver: Option.getOrNull(source.approver),
+      })
+      .execute();
   });
 
   const createRun = Effect.fn("RunStoreQueries.createRun")(function* (

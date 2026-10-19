@@ -1,5 +1,6 @@
 import { Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
+import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName } from "@usine/core/repository";
 import {
   GatewayDomain,
@@ -21,15 +22,6 @@ export const RegistryTag = nonBlankString("Expected a non-blank registry tag").p
 );
 
 export type RegistryTag = typeof RegistryTag.Type;
-
-/** GitHub login identifying the human operator for this factory. */
-export const OperatorLogin = Schema.String.check(
-  Schema.isPattern(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$/u, {
-    message: "Expected a GitHub login",
-  }),
-).pipe(Schema.brand("OperatorLogin"));
-
-export type OperatorLogin = typeof OperatorLogin.Type;
 
 const PositiveInt = Schema.Int.check(Schema.isGreaterThanOrEqualTo(1));
 

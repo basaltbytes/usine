@@ -3,6 +3,7 @@ import type { BillingPool } from "@usine/core/agent/session";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import type { ApprovalChannel } from "@usine/core/run/approval";
 import type { InstanceReload } from "@usine/orchestrator/current-instance";
 import type {
   BoardItemLink,
@@ -171,6 +172,12 @@ export const runLineTimeTitle = (state: RunView["state"], since: string): string
   if (state === "Failed") return `Failed at ${timestampLabel(since)}`;
   return openedTitle(since);
 };
+
+/** Where an approval came from, worded to follow its time on the approval line. */
+export const approvalChannelLabel = {
+  ui: "from the UI",
+  "github-ask": "from the GitHub Ask",
+} as const satisfies Record<ApprovalChannel, string>;
 
 /** The card's status while one of its Run actions is being sent. */
 export const runActionProgress = {

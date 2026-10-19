@@ -12,12 +12,15 @@ import { SessionEvent } from "@usine/core/attempt/channel";
 import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
+import { OperatorLogin } from "@usine/core/operator";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   AgentFailureView,
+  ApprovalView,
   AttemptView,
   CanceledAttemptView,
   FailedAttemptView,
@@ -32,9 +35,14 @@ import { Option, Schema } from "effect";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
+import { dayTimeLabel } from "../src/operator-copy.ts";
 import { RunSummary } from "../src/run-drawer.tsx";
+import { EventDocument } from "../src/run-page/documents.tsx";
 import { RunFacts, RunTitle } from "../src/run-page/header.tsx";
 import { eventPreview, runItem } from "../src/run-page/item.ts";
+import { Outline } from "../src/run-page/outline.tsx";
+import { readerDocument } from "../src/run-transcript/document/model.ts";
+import { projectTranscript } from "../src/run-transcript/model.ts";
 import { SalvageLine } from "../src/run-transcript/outcome.tsx";
 
 const repository = RepositoryName.make("basaltbytes/usine");
@@ -67,6 +75,7 @@ const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
     openedAt: "2026-09-01T11:59:00.000Z",
     task: "Fix issue 33.",
     attempts: [attempt(new SucceededAttemptView())],
+    approval: null,
     resultMessage: "Opened the pull request.",
     pullRequestUrl: null,
     canApprove: false,
@@ -330,5 +339,55 @@ describe("drawer summary", () => {
     assert.include(markup, "Running the tests now.");
     assert.notInclude(markup, "First step.");
     assert.notInclude(markup, "Run conversation");
+  });
+});
+
+describe("Run approval", () => {
+  const approvedAt = "2026-09-01T11:59:30.000Z";
+  const approved = (source: ApprovalView["source"]) =>
+    run({ approval: new ApprovalView({ approvedAt, source }) });
+  const philippe = Option.some(OperatorLogin.make("Philippe"));
+  const fromUi = approved(new ApprovalSource({ channel: "ui", approver: philippe }));
+  const fromAsk = approved(new ApprovalSource({ channel: "github-ask", approver: philippe }));
+  // Approved before usine recorded who approved.
+  const unrecorded = approved(null);
+  const eventDocument = (view: RunView) =>
+    renderToStaticMarkup(<EventDocument detail={detail(view)} />);
+  const outline = (view: RunView) =>
+    renderToStaticMarkup(
+      <Outline
+        run={view}
+        eventPreview={eventPreview(view.loop, detail(view).eventPayload)}
+        document={readerDocument(projectTranscript([], view.attempts), view.attempts, [])}
+        selection={{ _tag: "Event" }}
+        reading={null}
+        composerSession={null}
+        onSelect={() => {}}
+        onCheckpoint={() => {}}
+        errors={null}
+      />,
+    );
+  const text = (markup: string) => markup.replaceAll(/<[^>]+>/gu, "");
+
+  it("names the approver, time, and channel in the Event entry and the Event document", () => {
+    const time = dayTimeLabel(approvedAt);
+    for (const render of [eventDocument, outline]) {
+      assert.include(text(render(fromUi)), `Approved by Philippe · ${time} · from the UI`);
+      assert.include(text(render(fromAsk)), `Approved by Philippe · ${time} · from the GitHub Ask`);
+      assert.include(render(fromAsk), `dateTime="${approvedAt}"`);
+    }
+  });
+
+  it("says only Approved and when for an approval recorded before its source was", () => {
+    for (const render of [eventDocument, outline]) {
+      const markup = text(render(unrecorded));
+      assert.include(markup, `Approved · ${dayTimeLabel(approvedAt)}`);
+      assert.notInclude(markup, "Approved by");
+      assert.notInclude(markup, "from the");
+    }
+  });
+
+  it("says nothing about approval for a Run that had none", () => {
+    for (const render of [eventDocument, outline]) assert.notInclude(render(run()), "Approved");
   });
 });

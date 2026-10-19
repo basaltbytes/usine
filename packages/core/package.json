@@ -67,6 +67,10 @@
       "types": "./dist/loop.d.ts",
       "default": "./dist/loop.js"
     },
+    "./operator": {
+      "types": "./dist/operator.d.ts",
+      "default": "./dist/operator.js"
+    },
     "./repository": {
       "types": "./dist/repository.d.ts",
       "default": "./dist/repository.js"
@@ -78,6 +82,10 @@
     "./run/state": {
       "types": "./dist/run/state.d.ts",
       "default": "./dist/run/state.js"
+    },
+    "./run/approval": {
+      "types": "./dist/run/approval.d.ts",
+      "default": "./dist/run/approval.js"
     },
     "./step": {
       "types": "./dist/step/step.d.ts",

@@ -89,7 +89,7 @@ The orchestrator continuing an open Attempt after a restart when its Pi parent's
 _Avoid_: retry (starts a new Attempt), takeover (operator intervention in a live session)
 
 **Approval**:
-An operator's go-ahead for a run gated by its loop — recorded as an Event the waiting run consumes, not a flag.
+An operator's go-ahead for a run gated by its loop — recorded as an Event the waiting run consumes, not a flag, together with the operator login that gave it and its channel: the web UI or a 👍 on the Ask.
 _Avoid_: confirmation, sign-off
 
 **Ask**:
