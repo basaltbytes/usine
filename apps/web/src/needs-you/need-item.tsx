@@ -24,12 +24,25 @@ export const NeedItem = ({
   readonly compact?: boolean;
 }) => {
   const wraps = fullDetail && !compact;
-  const title = <span className="truncate text-sm font-medium text-foreground">{copy.title}</span>;
+  // A compact entry keeps its title whole: below sm the detail wraps to two lines under it,
+  // from sm the entry is one line with the detail shortened beside the title.
+  const title = (
+    <span
+      className={cn(
+        "text-sm font-medium text-foreground",
+        compact ? "sm:shrink-0 sm:whitespace-nowrap" : "truncate",
+      )}
+    >
+      {copy.title}
+    </span>
+  );
   const detail = (
     <span
       className={cn(
         "text-xs text-foreground/75",
-        compact ? "min-w-0 flex-1 truncate" : "block",
+        compact
+          ? "min-w-0 line-clamp-2 sm:block sm:flex-1 sm:text-ellipsis sm:whitespace-nowrap"
+          : "block",
         !wraps && !compact && "truncate",
       )}
       title={wraps ? undefined : copy.detail}
@@ -38,8 +51,8 @@ export const NeedItem = ({
     </span>
   );
   const text = compact ? (
-    <span className="flex min-w-0 items-baseline gap-3">
-      <span className="flex max-w-[45%] shrink-0 items-baseline">{title}</span>
+    <span className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
+      {title}
       {detail}
     </span>
   ) : (
