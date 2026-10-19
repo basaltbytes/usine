@@ -13,3 +13,7 @@ The structure was settled ([ADR 0008](./0008-web-ui-projects-kanban-spine.md)); 
 ## Amendment (2026-09-02, #78)
 
 The token and component source moved to the shadcn registry: a preset generated in `apps/web/components.json` supplies the neutrals, radii, and type (Geist for text, Geist Mono for headings and identifiers), with the dark `foreground`, `primary`, and `secondary` tokens pulled to Catppuccin Mocha text, mauve, and surface0. Archivo and IBM Plex Mono are gone; the palette, dark-first stance, flat ruled sections, and semantic run-state colors stand. `apps/web/README.md` carries the working rules.
+
+## Amendment (2026-10-19)
+
+The operator rejected the shadcn-default look the registry preset produced: pill badges everywhere, 12px text everywhere, and mono headings made usine indistinguishable from any other app built on the same kit. Of five directions sketched for the Board, the operator chose the category standard, a kanban at the craft level of Linear, the Vercel dashboard, and Raycast, over four bolder ones, because an operator scanning Runs is served by a convention they already read fluently, executed cleanly, more than by a novel layout. Geist and Geist Mono gave way to Inter for all text and JetBrains Mono for ids, numbers, times, and code. Catppuccin Mocha stays the palette. Factory references survive only as floor-plan structure: lanes read as bays, and an arrow between two authored bays names the Loops at work in the left one, because there the reference carries information about where work flows; everywhere else it would be costume.
