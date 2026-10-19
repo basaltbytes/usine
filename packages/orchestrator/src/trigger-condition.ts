@@ -16,9 +16,11 @@ const decodeItemKey = Schema.decodeUnknownOption(GitHubItemKey);
  * Re-evaluates a queued Event's trigger against a fresh GitHub snapshot of its
  * Item, using the Loops and registry of the current instance. The stored
  * projection is not enough: the Run that just closed may have changed the
- * Item after the poll that recorded the Event and before the next poll. A
- * check that fails or exceeds five seconds answers `true`, so the Run opens as it did
- * before the check existed; the next poll revokes it if the Item moved on.
+ * Item after the poll that recorded the Event and before the next poll. An
+ * Item GitHub no longer has answers `false`, as for an Item that stopped
+ * matching. Any other failure, or a check that exceeds five seconds, answers
+ * `true`, so the Run opens as it did before the check existed; the next poll
+ * revokes it if the Item moved on.
  */
 export const triggerConditionLayer: Layer.Layer<
   TriggerCondition,
@@ -95,15 +97,27 @@ export const triggerConditionLayer: Layer.Layer<
         return yield* evaluate(submission).pipe(Effect.timeout("5 seconds"));
       },
       (effect, submission) =>
-        Effect.catch(effect, (error) =>
-          Effect.logWarning("Trigger re-check failed; opening the queued Event as before", {
-            loop: submission.loop,
-            repository: submission.repository,
-            itemKey: submission.itemKey,
-            ...(error._tag === "TimeoutError"
-              ? { errorTag: error._tag, message: "Trigger re-check exceeded five seconds" }
-              : repositoryFailureLogFields(error)),
-          }).pipe(Effect.as(true)),
+        effect.pipe(
+          Effect.catchTag("GitHubItemNotFoundError", (error) =>
+            Effect.logInfo("Queued Event's Item is gone from GitHub; its Events are revoked", {
+              loop: submission.loop,
+              repository: submission.repository,
+              itemKey: submission.itemKey,
+              item: error.item,
+              errorTag: error._tag,
+              message: error.message,
+            }).pipe(Effect.as(false)),
+          ),
+          Effect.catch((error) =>
+            Effect.logWarning("Trigger re-check failed; opening the queued Event as before", {
+              loop: submission.loop,
+              repository: submission.repository,
+              itemKey: submission.itemKey,
+              ...(error._tag === "TimeoutError"
+                ? { errorTag: error._tag, message: "Trigger re-check exceeded five seconds" }
+                : repositoryFailureLogFields(error)),
+            }).pipe(Effect.as(true)),
+          ),
         ),
     );
 
