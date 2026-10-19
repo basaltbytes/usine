@@ -33,8 +33,10 @@ import {
   Ref,
   Schema,
   Scope,
+  SubscriptionRef,
 } from "effect";
 import { TestClock } from "effect/testing";
+import { fixedInstance } from "./support/current-instance.ts";
 import { alwaysHoldsLayer } from "./support/polling.ts";
 import {
   ScheduleCronFailure,
@@ -325,7 +327,7 @@ describe("ScheduleTriggers", () => {
 
       yield* Effect.gen(function* () {
         const schedules = yield* ScheduleTriggers;
-        const fiber = yield* Effect.forkChild(schedules.run(Effect.succeed(instance)));
+        const fiber = yield* Effect.forkChild(schedules.run(fixedInstance(instance)));
         // Wait on the observable outcome, not on a scheduler-op budget.
         for (let spin = 0; (yield* Ref.get(submissions)).length === 0; spin += 1) {
           if (spin > 1_000) return yield* Effect.die("the first cycle never submitted");
@@ -351,6 +353,47 @@ describe("ScheduleTriggers", () => {
               tick: {
                 scheduledAt: "2026-08-31T10:01:00.000Z",
                 scheduledAtLocal: "2026-08-31T10:01:00.000+00:00[UTC]",
+                cron: "* * * * *",
+                tz: "UTC",
+              },
+            },
+          ],
+        );
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(fakeLayer(submissions)));
+    }),
+  );
+
+  it.effect("evaluates a schedule Loop that a reload adds without waiting for the sleep", () =>
+    Effect.gen(function* () {
+      const config = configWith([{ name: "basaltbytes/usine" }]);
+      const loop = scheduleLoop(config, { cron: "* * * * *" });
+      const submissions = yield* Ref.make<ReadonlyArray<Submission>>([]);
+      yield* TestClock.setTime(Date.parse("2026-08-31T10:00:30.000Z"));
+
+      yield* Effect.gen(function* () {
+        const schedules = yield* ScheduleTriggers;
+        const current = yield* SubscriptionRef.make(instanceWith(config, []));
+        const fiber = yield* Effect.forkChild(
+          schedules.run({
+            get: SubscriptionRef.get(current),
+            changes: SubscriptionRef.changes(current),
+          }),
+        );
+        yield* TestClock.adjust("1 second");
+        assert.strictEqual((yield* Ref.get(submissions)).length, 0);
+        yield* SubscriptionRef.set(current, instanceWith(config, [loop]));
+        for (let spin = 0; (yield* Ref.get(submissions)).length === 0; spin += 1) {
+          if (spin > 1_000) return yield* Effect.die("the reloaded Loop was never evaluated");
+          yield* Effect.yieldNow;
+        }
+        assert.deepStrictEqual(
+          (yield* Ref.get(submissions)).map(({ event }) => event.payload),
+          [
+            {
+              tick: {
+                scheduledAt: "2026-08-31T10:00:00.000Z",
+                scheduledAtLocal: "2026-08-31T10:00:00.000+00:00[UTC]",
                 cron: "* * * * *",
                 tz: "UTC",
               },
