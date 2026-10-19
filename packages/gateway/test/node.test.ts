@@ -21,7 +21,7 @@ import { serveEgressProxy } from "../src/node/egress-proxy.ts";
 import { GatewayAddresses, gatewayLayer, type Listener } from "../src/node/node.ts";
 import { UpstreamBase } from "../src/upstream.ts";
 import { ADMIN_TOKEN_VALUE, NO_PROVIDERS, REPOSITORY, WORKER, settingsLayer } from "./fixtures.ts";
-import { rawThroughTunnel, tlsThroughTunnel } from "./tunnel.ts";
+import { abandonedTunnel, rawThroughTunnel, tlsThroughTunnel } from "./tunnel.ts";
 
 const LOOPBACK = { host: "127.0.0.1", port: 0 };
 
@@ -30,15 +30,15 @@ const gateway = gatewayLayer({ proxy: LOOPBACK, egress: LOOPBACK, admin: LOOPBAC
   Layer.provideMerge(FetchHttpClient.layer),
 );
 
-const refusals: Array<string> = [];
+/** The gateway's log lines, each with its level, for the tests that provide `gatewayRecordingLogs`. */
+const gatewayLines: Array<string> = [];
 
-const gatewayRecordingRefusals = gateway.pipe(
+const gatewayRecordingLogs = gateway.pipe(
   Layer.provide(
     Logger.layer(
       [
-        Logger.make(({ message }) => {
-          const line = JSON.stringify(message);
-          if (line.includes("Gateway refused")) refusals.push(line);
+        Logger.make(({ logLevel, message }) => {
+          gatewayLines.push(JSON.stringify({ level: logLevel, message }));
         }),
       ],
       { mergeWithExisting: true },
@@ -56,7 +56,7 @@ const logged = (lines: ReadonlyArray<string>, needle: string) =>
   }).pipe(Effect.retry({ schedule: Schedule.spaced("20 millis"), times: 100 }));
 
 /** The refusal logged with `reason`. */
-const refusalLogged = (reason: string) => logged(refusals, `"reason":"${reason}"`);
+const refusalLogged = (reason: string) => logged(gatewayLines, `"reason":"${reason}"`);
 
 /** What the forward proxy needs on its own, without the reverse proxy and admin API. */
 const egressServices = CallerTokens.layer.pipe(Layer.provideMerge(settingsLayer(NO_PROVIDERS)));
@@ -297,7 +297,7 @@ describe("the Node gateway", () => {
 
   it.live("the admin API refuses a wrong admin token and an expired attachment", () =>
     Effect.gen(function* () {
-      refusals.length = 0;
+      gatewayLines.length = 0;
       const intruder = yield* admin("not-the-admin-token-0123456789abcdef");
       const refused = yield* Effect.flip(intruder.attachments.list());
       assert.strictEqual(refused._tag, "Unauthorized");
@@ -307,7 +307,7 @@ describe("the Node gateway", () => {
         client.attachments.attach({ payload: yield* attachment(-1) }),
       );
       assert.strictEqual(expired._tag, "AttachmentAlreadyExpired");
-    }).pipe(Effect.provide(gatewayRecordingRefusals)),
+    }).pipe(Effect.provide(gatewayRecordingLogs)),
   );
 
   it.live(
@@ -336,7 +336,7 @@ describe("the Node gateway", () => {
 
   it.live("a tunnel carries only a TLS connection that asks for the CONNECT host itself", () =>
     Effect.gen(function* () {
-      refusals.length = 0;
+      gatewayLines.length = 0;
       const { egress } = yield* GatewayAddresses;
       // An allowed CONNECT host, then a ClientHello for another tenant of its CDN address.
       assert.strictEqual(
@@ -366,7 +366,19 @@ describe("the Node gateway", () => {
         "refused",
       );
       yield* refusalLogged("private-address");
-    }).pipe(Effect.provide(gatewayRecordingRefusals)),
+    }).pipe(Effect.provide(gatewayRecordingLogs)),
+  );
+
+  it.live("logs a tunnel the client closes before sending anything as abandoned, not refused", () =>
+    Effect.gen(function* () {
+      gatewayLines.length = 0;
+      const { egress } = yield* GatewayAddresses;
+      assert.strictEqual(yield* abandonedTunnel(egress, "registry.npmjs.org:443"), "closed");
+      const abandoned = yield* logged(gatewayLines, "The client abandoned a tunnel");
+      assert.include(abandoned, '"level":"Info"');
+      assert.include(abandoned, '"host":"registry.npmjs.org"');
+      assert.isFalse(gatewayLines.some((line) => line.includes("Gateway refused")));
+    }).pipe(Effect.provide(gatewayRecordingLogs)),
   );
 
   it.live("closes the downstream and logs a failure when an upstream body is truncated", () =>

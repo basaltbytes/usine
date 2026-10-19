@@ -66,3 +66,11 @@ export const rawThroughTunnel = (proxy: Listener, authority: string, bytes: stri
     socket.once("close", () => done("closed"));
     socket.write(bytes);
   });
+
+/** Closes a tunnel once the proxy answers 200, before writing anything into it, and reports when the proxy closes it too. */
+export const abandonedTunnel = (proxy: Listener, authority: string) =>
+  tunnel(proxy, authority, (socket, done) => {
+    socket.on("error", () => socket.destroy());
+    socket.once("close", () => done("closed"));
+    socket.end();
+  });

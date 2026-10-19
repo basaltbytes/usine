@@ -79,6 +79,9 @@ class TunnelRefused extends Data.TaggedError("TunnelRefused")<{
   readonly serverName: Option.Option<string>;
 }> {}
 
+/** The client closed a tunnel before it sent any byte, so there was nothing to check or refuse. */
+class TunnelAbandoned extends Data.TaggedError("TunnelAbandoned") {}
+
 /** A fatal TLS `unrecognized_name` alert (RFC 8446, section 6), so a client reports why its handshake ended. */
 const UNRECOGNIZED_NAME_ALERT = Buffer.from([0x15, 0x03, 0x03, 0x00, 0x02, 0x02, 0x70]);
 
@@ -91,7 +94,8 @@ const notTls = (detail: string) =>
  * Buffers a tunnel's first bytes, `head` included, until they contain a whole
  * TLS ClientHello, at most 16 KiB and five seconds, parsing only when enough
  * bytes have arrived, then pauses the client so nothing more is read before
- * the upstream connection exists.
+ * the upstream connection exists. A client that closes the tunnel before
+ * sending any byte fails as `TunnelAbandoned`.
  */
 const clientHello = (client: Duplex, head: Buffer) =>
   Effect.callback<
@@ -100,7 +104,7 @@ const clientHello = (client: Duplex, head: Buffer) =>
       readonly serverName: Option.Option<string>;
       readonly encryptedClientHello: boolean;
     },
-    TunnelRefused
+    TunnelRefused | TunnelAbandoned
   >((resume) => {
     const reader = new ClientHelloReader();
     const stop = () => {
@@ -124,7 +128,13 @@ const clientHello = (client: Duplex, head: Buffer) =>
     }
     function onEnd() {
       stop();
-      resume(Effect.fail(notTls("the client closed the tunnel before sending a ClientHello")));
+      resume(
+        Effect.fail(
+          reader.bytes.length === 0
+            ? new TunnelAbandoned()
+            : notTls("the client closed the tunnel before its ClientHello was complete"),
+        ),
+      );
     }
     client.on("data", onData);
     client.once("end", onEnd);
@@ -437,6 +447,15 @@ export const serveEgressProxy = Effect.fn("EgressProxy.serve")(function* (
     );
     if (opened._tag === "Failure") {
       const failure = opened.failure;
+      if (failure._tag === "TunnelAbandoned") {
+        client.destroy();
+        return yield* Effect.logInfo("The client abandoned a tunnel before sending anything", {
+          host,
+          port,
+          client: from,
+          ...who,
+        });
+      }
       if (failure._tag === "TunnelRefused") {
         closeRefused(client, failure);
         return yield* Effect.logWarning("Gateway refused a request", {
