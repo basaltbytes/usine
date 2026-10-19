@@ -221,7 +221,7 @@ Quote the `cron` value, because YAML reads a leading `*` as an alias. A schedule
 
 ## Pause a Loop
 
-The **Loops** page under **Configuration** lists every loaded Loop with its trigger, its Agent, and a **Pause** button. **Reload configuration** at the top of the page loads the Loop and Agent files again after you edit them ([Run a factory](/guides/#change-the-configuration)). A paused Loop opens no new Runs, and the Runs it already opened continue. usine keeps the paused flag in the runtime store, so it persists across restarts, and never writes it to the Loop file. When you unpause an issue or pr Loop, the next poll reads the repository's Items from the start, so usine evaluates the Items that changed while the Loop was paused.
+The **Loops** page under **Configuration** lists every loaded Loop with its trigger, its Agent, its state, and a **Pause** button, or **Resume** once the Loop is paused. **Reload configuration** at the top of the page loads the Loop and Agent files again after you edit them ([Run a factory](/guides/#change-the-configuration)). A paused Loop opens no new Runs, and the Runs it already opened continue. usine keeps the paused flag in the runtime store, so it persists across restarts, and never writes it to the Loop file. When you unpause an issue or pr Loop, the next poll reads the repository's Items from the start, so usine evaluates the Items that changed while the Loop was paused.
 
 The HTTP API has the same switch: `POST /api/loops/<name>/pause` and `POST /api/loops/<name>/unpause`. To retire a Loop permanently, delete or rename its file and reload the configuration.
 
