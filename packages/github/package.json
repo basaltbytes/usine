@@ -15,6 +15,10 @@
   "type": "module",
   "sideEffects": false,
   "exports": {
+    "./item-history": {
+      "types": "./dist/item-history.d.ts",
+      "default": "./dist/item-history.js"
+    },
     "./item-writer": {
       "types": "./dist/item-writer.d.ts",
       "default": "./dist/item-writer.js"

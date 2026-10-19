@@ -1,7 +1,14 @@
 import type { AttemptId } from "@usine/core/attempt";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
 import type { TranscriptSequence } from "@usine/engine/transcript";
-import type { AttemptView, FailureView, TranscriptEventView } from "@usine/orchestrator/operator";
+import type {
+  AttemptView,
+  CommentedView,
+  FailureView,
+  LabelView,
+  ReviewedView,
+  TranscriptEventView,
+} from "@usine/orchestrator/operator";
 import { Match, Option } from "effect";
 import { conflictingSalvageMessage, failureMessage } from "../../operator-copy.ts";
 import { poolMeters, type PoolMeter } from "../cache.ts";
@@ -99,8 +106,24 @@ interface EndingRow {
   readonly end: AttemptEnd;
 }
 
+/** Labels an Agent removed from and added to the Run's Item in one go. */
+export interface LabelChanges {
+  readonly _tag: "Labels";
+  readonly removed: ReadonlyArray<LabelView>;
+  readonly added: ReadonlyArray<LabelView>;
+}
+
+/** A change an Attempt's Agent made on the Run's GitHub Item, among the rows around its time. */
+export interface GitHubChangeRow {
+  readonly _tag: "GitHubChange";
+  readonly key: string;
+  /** When GitHub recorded the change; for labels changed in one go, the first of them. */
+  readonly at: string;
+  readonly change: LabelChanges | CommentedView | ReviewedView;
+}
+
 /** One row of an Attempt as the reader shows it. */
-export type ChapterRow = MessageRow | NoteRow | Burst | DelegationRow | EndingRow;
+export type ChapterRow = MessageRow | NoteRow | Burst | DelegationRow | EndingRow | GitHubChangeRow;
 
 /** One Attempt of a Run: its sessions, its rows in transcript order, and its account readings. */
 export interface Chapter {
@@ -152,8 +175,8 @@ const isTerminal = (notice: TranscriptNotice) =>
     notice.origin.payload._tag === "Failed" ||
     notice.origin.payload._tag === "Interrupted");
 
-// Agent prose that a terminal outcome repeats: the result, an Agent's own failure report, or its question.
-const terminalText = (end: AttemptEnd): string | null =>
+/** Agent prose that a terminal outcome repeats: the result, an Agent's own failure report, or its question. */
+export const terminalText = (end: AttemptEnd): string | null =>
   Match.valueTags(end, {
     Succeeded: ({ message }) => Option.getOrNull(message),
     Failed: ({ failure }) =>

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { NodeHttpPlatform, NodeHttpServer } from "@effect/platform-node";
 import { FactoryConfigError, ConfigFileError, InstancePath } from "@usine/config/file";
 import { LoadedInstance } from "@usine/config/instance";
+import { GitHubLabelName } from "@usine/config/label";
 import { QuarantinedLoop } from "@usine/config/loop";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
@@ -24,9 +25,15 @@ import {
 } from "@usine/engine/engine";
 import { CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { TranscriptSequence } from "@usine/engine/transcript";
+import { GitHubItemNotFoundError } from "@usine/github/item-history";
 import {
   ApprovalNeed,
   ApprovalView,
+  AttemptGitHubChangesView,
+  CommentedView,
+  LabelRemovedView,
+  LabelView,
+  RunGitHubChangesView,
   EditAndRetry,
   SessionIntervention,
   BoardLaneId,
@@ -152,6 +159,27 @@ const overview = new ReadyOverview({
       runId,
       loop: loopName,
       item: null,
+    }),
+  ],
+});
+const githubChanges = new RunGitHubChangesView({
+  attempts: [
+    new AttemptGitHubChangesView({
+      attemptId: AttemptId.make("attempt/1"),
+      changes: [
+        new LabelRemovedView({
+          at: "2026-10-15T19:55:11.000Z",
+          label: new LabelView({
+            name: GitHubLabelName.make("agent-in-progress"),
+            color: "fbca04",
+            description: "An usine development run is working this issue",
+          }),
+        }),
+        new CommentedView({
+          at: "2026-10-15T19:55:08.000Z",
+          url: "https://github.com/basaltbytes/usine/issues/247#issuecomment-6201011438",
+        }),
+      ],
     }),
   ],
 });
@@ -302,6 +330,14 @@ describe("operator HTTP API", () => {
               new TranscriptAttemptNotFoundError({ runId: id, attemptId: request.attemptId }),
             )
           : Effect.fail(new RunNotFoundError({ runId: id })),
+      githubChanges: () =>
+        Effect.fail(
+          new GitHubItemNotFoundError({
+            operation: "fetch-item-timeline",
+            item: 247,
+            message: "GitHub has no issue or pull request 247 in basaltbytes/usine",
+          }),
+        ),
       approve: (id: RunId) =>
         Effect.fail(
           new RunOperationRejectedError({ runId: id, operation: "approve", state: "Running" }),
@@ -337,6 +373,15 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(await missing.json(), {
         error: "RunNotFoundError",
         message: "Run run-2 was not found.",
+      });
+
+      const gone = await rejectingApp.handler(
+        new Request(`http://localhost/api/runs/${runId}/github-changes`),
+      );
+      assert.strictEqual(gone.status, 404);
+      assert.deepStrictEqual(await gone.json(), {
+        error: "GitHubItemNotFoundError",
+        message: "GitHub has no issue or pull request 247 in basaltbytes/usine",
       });
 
       const rejected = await rejectingApp.handler(
@@ -477,6 +522,7 @@ describe("operator HTTP API", () => {
           return detail;
         });
       },
+      githubChanges: () => Effect.succeed(githubChanges),
       approve: (id) =>
         id === runId
           ? record(`approve:${id}`)
@@ -532,6 +578,7 @@ describe("operator HTTP API", () => {
           assert.deepStrictEqual(yield* client.detail({ params: { runId }, query }), detail);
         }
         assert.deepStrictEqual(observed, requests);
+        assert.deepStrictEqual(yield* client.githubChanges({ params: { runId } }), githubChanges);
         assert.deepStrictEqual(
           yield* client.resetCycleBudget({
             payload: { askId: CycleBudgetAskId.make("current-ask") },

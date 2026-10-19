@@ -7,7 +7,7 @@
 
 Both token requests use a one-hour maximum lifetime. Expiry validation tolerates up to three minutes of clock skew while capping the local lease at one hour; expired tokens are rejected. Token values and the App private key stay inside Effect `Redacted` values.
 
-Import `GitHubApp`, credentials, access results, and typed App errors from `@usine/github/github-app`. `@usine/github/polling` provides `GitHubPolling` with its cursors, change-detection results, and payload snapshots. Item and label writes use `/item-writer` and `/label-writer`; local credential loading uses `/local-secrets`.
+Import `GitHubApp`, credentials, access results, and typed App errors from `@usine/github/github-app`. `@usine/github/polling` provides `GitHubPolling` with its cursors, change-detection results, and payload snapshots. Item and label writes use `/item-writer` and `/label-writer`, the App's own changes on an Item come from `/item-history`, and local credential loading uses `/local-secrets`.
 
 `/polling` also exports `RepositoryLabel`, `RepositoryLabelCatalog`, and
 `RepositoryLabelsNotModified` for reading label catalogs and handling conditional
@@ -100,6 +100,8 @@ Change-detection results distinguish `nextPollAt`, the earliest next conditional
 The REST cursor overlaps its watermark by five seconds. Repeated items are expected; the engine's permanent Event ledger owns deduplication. Provide `GitHubPollingLayer` with `GitHubApp`, an Effect HTTP client, and `Crypto.Crypto`. The package root remains platform-free.
 
 `GitHubItemWriter.updateLabels(repository, item, mutation)` adds destination lane labels and removes only explicitly lane-owned labels from an issue or pull request. It never replaces the complete applied-label set or deletes repository label definitions, so unrelated and concurrently added labels survive stale or truncated Item projections. The service requires `GitHubApp` and an Effect HTTP client.
+
+`GitHubItemHistory.appChanges(repository, item, since)` from `@usine/github/item-history` reads an issue's or pull request's timeline through GraphQL, from `since` onward, and returns what the factory's own App did there, oldest first: `LabelAdded`, `LabelRemoved`, `Commented`, and `Reviewed` (a submitted review with its state). Each change carries the time GitHub recorded and, for a label, the label's current name, color, and description; comments and reviews carry their URL. Changes by every other user or bot are left out. The App is recognized by its slug, which `GitHubApp.installation()` returns as `Installation.appSlug`: GraphQL reports the App's writes with a `Bot` actor of that login. The walk reads up to ten pages of 100 timeline items and fails with `InvalidGitHubResponseError` rather than return part of a longer timeline; an Item the repository no longer has fails with `GitHubItemNotFoundError`. The service requires `GitHubApp` and an Effect HTTP client.
 
 `GitHubLabelWriter.create(repository, label)` creates one repository label through `POST /repos/{owner}/{repo}/labels` using the installation-wide App token. Provide a name; color and description are optional. Reconciliation policy belongs to the orchestrator, so this service exposes creation only and never edits or deletes label definitions.
 

@@ -17,6 +17,7 @@ import {
 } from "./transcript.ts";
 import { FactoryOverview } from "./overview.ts";
 import { RunDetailView, EditAndRetry, SessionIntervention } from "./run.ts";
+import { RunGitHubChangesView } from "./github-changes.ts";
 
 const errorStatuses = {
   SchemaError: 400,
@@ -27,6 +28,7 @@ const errorStatuses = {
   BoardProjectNotFoundError: 404,
   BoardItemNotFoundError: 404,
   BoardLaneNotFoundError: 404,
+  GitHubItemNotFoundError: 404,
   RunOperationRejectedError: 409,
   RunRetryBlockedError: 409,
   RunInterventionRejectedError: 409,
@@ -177,6 +179,10 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         params: runParams,
         query: transcriptQuery,
         success: RunDetailView,
+      }),
+      HttpApiEndpoint.get("githubChanges", "/api/runs/:runId/github-changes", {
+        params: runParams,
+        success: RunGitHubChangesView,
       }),
       HttpApiEndpoint.post("approve", "/api/runs/:runId/approve", {
         params: runParams,

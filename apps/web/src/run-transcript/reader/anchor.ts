@@ -59,6 +59,8 @@ export const readingRows = (document: ReaderDocument): ReadonlyArray<ReadingRow>
           });
         case "Delegation":
           return toolRows(row.tool, []);
+        case "GitHubChange":
+          return [];
         case "Burst": {
           const keys = row.tools.map((tool) => tool.key);
           return [

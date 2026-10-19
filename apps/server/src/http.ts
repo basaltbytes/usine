@@ -38,6 +38,8 @@ const operatorFailure = (error: BackendError) => {
         return `Item ${error.repository}#${error.item} was not found on the Board.`;
       case "BoardLaneNotFoundError":
         return `Board Lane ${error.lane} was not found.`;
+      case "GitHubItemNotFoundError":
+        return error.message;
       case "BoardLaneReadOnlyError":
         return `Board Lane ${error.lane} is read-only. Configure label-backed lanes in usine.yaml to enable moves.`;
       case "InstallationDiscoveryError":
@@ -151,6 +153,9 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     )
     .handle("detail", ({ params, query }) =>
       fromBackend((backend) => backend.detail(params.runId, query)),
+    )
+    .handle("githubChanges", ({ params }) =>
+      fromBackend((backend) => backend.githubChanges(params.runId)),
     )
     .handle("approve", ({ params }) =>
       fromBackend((backend) => backend.approve(params.runId)).pipe(acknowledge),

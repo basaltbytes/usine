@@ -144,6 +144,11 @@ components:
     rounded: "{rounded.md}"
     padding: "4px 8px"
     height: "28px"
+  github-change-line:
+    textColor: "{colors.subtext0}"
+    typography: "{typography.caption}"
+    padding: "4px 0"
+    height: "28px"
   failure-note:
     textColor: "{colors.text}"
     typography: "{typography.body}"
@@ -239,7 +244,7 @@ The Run page fills the panel below the breadcrumb (`Projects › repository › 
 - **Reader:** a column at most 616px wide, centred in the space beside the outline, with 20px above and 32px below. Each row is a 72px time-and-speaker gutter, a 24px gap, and content at most 504px wide, which holds about 72 characters of 14px prose. Below `sm` the gutter becomes one line of time and speaker above the content. The reader opens on the latest Attempt; below `lg`, a finished Run opens at its outcome.
 - **Foot band:** a 40px band under the reader holds Jump to latest or the new-updates count, so the control never covers the outcome or the salvage line. A live Attempt's message composer sits below it behind a hairline, on the reader's grid.
 
-Attempts in the reader are separated by 40px, a hairline, and 32px; rows within one are 16px apart, fold lines 2px, notes 8px.
+Attempts in the reader are separated by 40px, a hairline, and 32px; rows within one are 16px apart, fold lines 2px, notes 8px, and a GitHub change line 2px under a fold line or another change line and 8px under prose.
 
 Spacing is a 4px grid used mainly at 4, 6, 8, 10, 12, 16, 20, and 24px. Cards stack 8px apart with 6px between their internal rows.
 
@@ -288,7 +293,7 @@ Compact and quiet; most actions are 28px tall.
 - **Focus / press:** a 2px mauve ring at 70%; pressing moves the button down 1px. Transitions run 100ms.
 
 ### Chips
-- **Label chip:** a 20px pill in the GitHub label's own colour: text in the colour (dark colours lifted toward white for contrast), border at 40% alpha, fill at 12%. Used for lane sources and card labels, three per card, then a muted `+n` chip.
+- **Label chip:** a 20px pill in the GitHub label's own colour: text in the colour (dark colours lifted toward white for contrast), border at 40% alpha, fill at 12%. Used for lane sources and card labels, three per card, then a muted `+n` chip, and in GitHub change lines.
 - **Plain chip:** hairline outline with muted text, for Item states as lane sources.
 - Run state is not a chip; it is the dot and word described in Colors.
 
@@ -334,6 +339,9 @@ Shared by the Run page and the drawer. The Item number in 12px mono mauve, linki
 ### Fold line
 One quiet 12px line in place of a burst of tool calls between two messages: a caret, what the calls did (`Ran 5 commands · baseline gate, pnpm lint`), failed calls counted in red and running ones in blue, then ` · ` and the span in mono. It is a ghost button, 28px tall at least, bleeding 8px past the reader's text on each side; hover turns its text to text colour. Open, the caret turns and the line keeps no fill at rest (surface0 at 70% on hover), with each call's panel below it, 4px apart. A single tool call folds the same way.
 
+### GitHub change line
+One quiet 12px subtext0 line for a change an Agent made on the Run's GitHub Item, placed where it happened: under the fold line of the calls that made it, before the next message. A 14px GitHub mark sits where a fold line has its caret, 8px before the text. Labels read `Removed`, their chips, `, added`, their chips, each chip in its GitHub colour as on the Board; a comment reads `Commented on` and the Item number in mono mauve linking to the comment, and a review `Approved`, `Requested changes on`, or `Reviewed` the same way. The text runs on a 20px line so chips sit on its baseline, 28px tall at least like a fold line. It has no fill and no hover; its tooltip gives the time GitHub recorded the change.
+
 ### Attempt heading and meta line
 Each Attempt opens with its name in 14px semibold, then one 12px subtext0 line, wrapping, with 20px between facts: the Worker, the parent's harness and model, each child's Agent, harness, model, and effort, with values in mono text colour. These facts appear here once and on no message.
 
@@ -347,7 +355,7 @@ An Attempt ends with its outcome in the reader's content column, the gutter show
 A short summary of one Run over any screen. A right sheet, full width on phones and at most 448px from `sm`. The header (Run header, facts, actions) sits on a hairline with 20px padding; below it, 20px sides and 16px top and bottom, 20px between blocks, one summary: a sentence for a Pending, Waiting, or Queued Run; for a Running Run the current activity and the latest message (speaker, mono clock time, at most six lines of 14px); for a finished Run its outcome as above. An outline Open Run page button ends it, and an expand icon button (24px ghost, the same as Close) sits just before Close in the top-right corner with the same destination and an `Open Run page` tooltip. The drawer has no conversation and no tabs.
 
 ### Named Rules
-**The Said Once Rule.** A Run's reader shows each fact once: Worker and models in the Attempt's meta line, never per message; a final message that the outcome repeats only as the outcome; a parent's copy of a child's message not at all.
+**The Said Once Rule.** A Run's reader shows each fact once: Worker and models in the Attempt's meta line, never per message; a final message that the outcome repeats only as the outcome; a parent's copy of a child's message not at all; a GitHub comment or review the outcome links, or a label change the outcome states in the line's words, only as the outcome.
 
 ## Do's and Don'ts
 

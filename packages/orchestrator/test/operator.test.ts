@@ -67,6 +67,7 @@ import {
   RepositoryLabelProjection,
   RepositoryLabelProjectionReader,
 } from "@usine/engine/repository-label-projection";
+import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter, type ItemLabelMutation } from "@usine/github/item-writer";
 import { Source } from "@usine/expression/expression-engine";
 import { DateTime, Effect, Layer, Match, Option, Ref, Schema } from "effect";
@@ -447,12 +448,16 @@ const testLayer = (
       ),
     ),
   });
+  const history = Layer.succeed(GitHubItemHistory)({
+    appChanges: () => Effect.die("unused"),
+  });
   const dependencies = Layer.mergeAll(
     budgets,
     runs,
     reader,
     controls,
     github,
+    history,
     itemReader,
     repositoryLabelReader,
     polling,
