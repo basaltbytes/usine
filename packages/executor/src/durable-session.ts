@@ -3,8 +3,13 @@ import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
-import { StepResult, type StepResultFact } from "@usine/core/step/result";
-import { type AttemptReport, AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
+import type { StepResult, StepResultFact } from "@usine/core/step/result";
+import {
+  type AttemptReport,
+  AttemptRequest,
+  AttemptRuntime,
+  harvestedResult,
+} from "@usine/durable/attempt-runtime";
 import {
   Cause,
   Deferred,
@@ -166,10 +171,20 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       )
         return yield* new AgentFailure({ message: "The Attempt's parent task was canceled" });
       const report = yield* executed;
-      const result = new StepResult({ message: report.message, facts: yield* checkout.harvest });
+      const facts = yield* checkout.harvest;
+      const harvested = harvestedResult(report, facts);
+      if (Result.isFailure(harvested)) {
+        yield* Effect.logWarning(
+          "The parent's last turn answered the operator and the checkout holds no facts; the Attempt fails",
+          { attemptId },
+        );
+        return yield* harvested.failure;
+      }
+      const result = harvested.success;
       yield* Effect.logInfo("The Attempt's parent task finished", {
         attemptId,
         facts: result.facts.length,
+        answeredOperator: report.answeredOperator,
       });
       yield* runtime.recordResult(attemptId, result).pipe(
         Effect.tapError((error) =>

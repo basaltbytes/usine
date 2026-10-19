@@ -22,16 +22,20 @@ export const SessionComposer = ({
   attemptId,
   target,
   paused,
+  held,
 }: {
   readonly runId: RunId;
   readonly attemptId: AttemptId;
   readonly target: SessionTarget;
   readonly paused: boolean;
+  readonly held: boolean;
 }) => {
   const [message, setMessage] = useState("");
   const id = useId();
   const queryClient = useQueryClient();
   const child = target._tag === "Child";
+  // A parent can be released only from a pause or a Hold.
+  const releasable = child || paused || held;
   const mutation = useMutation({
     mutationFn: (action: OperatorAction) =>
       api((client) =>
@@ -82,23 +86,22 @@ export const SessionComposer = ({
         >
           Pause session
         </Button>
-        {child && (
+        {releasable && (
           <Button
             size="sm"
             variant="secondary"
             disabled={mutation.isPending}
             onClick={() => mutation.mutate(new Release())}
           >
-            Release child
+            {child ? "Release child" : "Release parent"}
           </Button>
         )}
       </div>
-      {child && (
-        <p className="text-xs text-muted-foreground">
-          Sending a message keeps this child open. Release it when you’re ready for its result to
-          return to the parent.
-        </p>
-      )}
+      <p className="text-xs text-muted-foreground">
+        {child
+          ? "Sending a message keeps this child open. Release it when you’re ready for its result to return to the parent."
+          : "Sending a message keeps the parent waiting for you after it answers. Release it when you’re ready for it to continue the task."}
+      </p>
       {mutation.isError && <ErrorAlert message={mutation.error.message} />}
     </div>
   );

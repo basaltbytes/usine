@@ -171,7 +171,7 @@ export const subagentTool = (services: ExtensionServices) => {
             sessionId: session.id,
           }).pipe(
             Effect.andThen(
-              services.hubs.child(hub, new SessionFinished({ session: child.session })),
+              services.hubs.event(hub, new SessionFinished({ session: child.session })),
             ),
           )
         : Effect.void,
@@ -180,7 +180,7 @@ export const subagentTool = (services: ExtensionServices) => {
       api.details({ childSessionId: session.id }, context),
     );
     const forward = (event: AgentSessionEvent) =>
-      services.hubs.child(hub, event).pipe(
+      services.hubs.event(hub, event).pipe(
         Effect.andThen(
           event._tag === "TextOutput"
             ? Effect.try({
@@ -252,7 +252,7 @@ export const subagentTool = (services: ExtensionServices) => {
               sessionId: session.id,
             });
           }
-          yield* services.hubs.child(hub, new SessionFinished({ session: child.session }));
+          yield* services.hubs.event(hub, new SessionFinished({ session: child.session }));
           return reportText(report);
         }),
       onSuccess: (result) =>

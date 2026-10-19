@@ -57,6 +57,8 @@ export interface MessageRow extends RowPosition {
   readonly format: "markdown" | "plain";
   /** Operator input the session refused; the text includes the refusal. */
   readonly undelivered: boolean;
+  /** Operator input the parent reads only when its current delegation returns. */
+  readonly queued: boolean;
   /** The message opens with the reserved blocker marker. */
   readonly blocked: boolean;
 }
@@ -315,6 +317,7 @@ const chapterRows = (
           text: withoutMarker(entry.detail),
           format: entry.format,
           undelivered: false,
+          queued: false,
           blocked: answerMarker(entry.detail) === "blocked",
         });
         continue;
@@ -385,6 +388,7 @@ const chapterRows = (
             text: entry.detail,
             format: entry.format,
             undelivered: entry.tone === "failed",
+            queued: entry.queued,
             blocked: false,
           }
         : { _tag: "Note", ...at, speaker: null, text: noteText(entry), tone: entry.tone },

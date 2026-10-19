@@ -16,7 +16,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { clockLabel, timestampLabel } from "./operator-copy.ts";
+import { clockLabel, queuedMessageLabel, timestampLabel } from "./operator-copy.ts";
 import { overviewQuery, projectParams } from "./overview.ts";
 import { RunFacts, RunTitle } from "./run-page/header.tsx";
 import { runItem } from "./run-page/item.ts";
@@ -65,6 +65,7 @@ const LiveSummary = ({ detail }: { readonly detail: RunDetailView }) => {
             </time>
           </p>
           <p className="line-clamp-6 text-md wrap-anywhere">{previewText(message.text)}</p>
+          {message.queued && <p className="text-xs text-muted-foreground">{queuedMessageLabel}</p>}
         </section>
       )}
     </div>

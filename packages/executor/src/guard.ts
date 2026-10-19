@@ -1,5 +1,5 @@
 import type { AttemptId } from "@usine/core/attempt";
-import { AgentSessionId } from "@usine/core/agent/session";
+import type { AgentSession, AgentSessionId } from "@usine/core/agent/session";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import { Clock, Effect, Option, Queue } from "effect";
@@ -57,36 +57,52 @@ const tokenWatcher = (attemptId: AttemptId, tokens: Ceiling, warn: Warn): Observ
     });
 };
 
+/** Holds by session: the parent, which operator input addresses without an id, or a child by its id. */
+const holdKey = (session: AttemptChannel.SessionTarget | AgentSession): string => {
+  switch (session._tag) {
+    case "Parent":
+    case "ParentSession":
+      return "parent";
+    case "Child":
+      return session.sessionId;
+    case "ChildSession":
+      return session.id;
+  }
+};
+
 /**
- * Counts unsupervised milliseconds: `observe` tracks which children are held,
- * and `watch` warns at the ceiling's warning point, then trips at its limit.
+ * Counts unsupervised milliseconds: `observe` tracks which sessions are held,
+ * the parent included, and `watch` warns at the ceiling's warning point, then
+ * trips at its limit.
  */
 const wallClockWatcher = Effect.fn("AttemptGuard.wallClockWatcher")(function* (
   attemptId: AttemptId,
   wallClock: Ceiling,
   warn: Warn,
 ) {
-  const ended = new Set<AgentSessionId>();
-  const holds = new Set<AgentSessionId>();
+  const ended = new Set<string>();
+  const holds = new Set<string>();
   const changes = yield* Queue.make<boolean>();
   const observe: Observer = (envelope) =>
     Effect.gen(function* () {
       const wasHeld = holds.size > 0;
       const payload = envelope.payload;
-      if (payload._tag === "InterventionApplied" && payload.intervention.target._tag === "Child") {
-        const id = payload.intervention.target.sessionId;
-        if (payload.state.held && !ended.has(id)) holds.add(id);
-        else holds.delete(id);
+      if (payload._tag === "InterventionApplied") {
+        const key = holdKey(payload.intervention.target);
+        if (payload.state.held && !ended.has(key)) holds.add(key);
+        else holds.delete(key);
       }
       if (payload._tag === "SessionEvent" && payload.event._tag === "SessionFinished") {
-        ended.add(payload.event.session.id);
-        holds.delete(payload.event.session.id);
+        const key = holdKey(payload.event.session);
+        ended.add(key);
+        holds.delete(key);
       }
       const isHeld = holds.size > 0;
       if (wasHeld !== isHeld) {
         yield* Effect.logInfo("Attempt wall-clock supervision changed", {
           attemptId,
-          heldChildren: holds.size,
+          heldSessions: holds.size,
+          parentHeld: holds.has("parent"),
         });
         yield* Queue.offer(changes, isHeld);
       }

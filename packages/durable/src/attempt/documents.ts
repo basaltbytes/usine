@@ -2,11 +2,24 @@ import {
   type ConversationId,
   defineDoc,
   defineDocFamily,
+  type SubmissionId,
   type TaskId,
 } from "@earendil-works/pi-durable";
+import type * as AttemptChannel from "@usine/core/attempt/channel";
 
-/** What a completed `usine.attempt` task returns: the parent's final message. */
-export type AttemptResult = { message: string };
+/**
+ * What a completed `usine.attempt` task returns: the parent's final message,
+ * and whether its last turn answered operator input without delegating after
+ * it. Results recorded before `answeredOperator` existed have none.
+ */
+export type AttemptResult = { message: string; answeredOperator?: boolean };
+
+/** An operator input submitted to the busy parent that it has not read yet. */
+type QueuedInput = {
+  inputSequence: number;
+  submission: SubmissionId;
+  intervention: typeof AttemptChannel.Intervention.Encoded;
+};
 
 /**
  * One Attempt's durable record, keyed by Attempt id. It outlives the task, so
@@ -42,6 +55,8 @@ export type AttemptRecord = {
    * it instead of ending it as canceled.
    */
   storageFailure?: string;
+  /** Operator inputs whose queued receipt was sent and whose delivery receipt was not, oldest first. */
+  queuedInputs?: QueuedInput[];
 };
 
 export const ATTEMPT_RECORD_KIND = "usine.attempt";
@@ -68,14 +83,18 @@ export const AttemptRecordDoc = defineDocFamily<AttemptRecord, null>({
 
 /**
  * Operator supervision of one running Attempt (ADR 0018): whether the parent
- * is interrupted, the operator messages waiting to resume it, and the children
- * under a Hold. Retired with the task.
+ * is interrupted, the operator messages waiting to start its next turn, and
+ * the sessions under a Hold by id, the parent's included. Retired with the task.
  */
 export type Hold = {
   paused: boolean;
   guidance: string[];
   held: string[];
 };
+
+/** The turn a released parent resumes with when the operator sent no message of their own. */
+export const RELEASE_GUIDANCE =
+  "The operator released you without further guidance. Continue the task; if it is already done, give your final answer.";
 
 export const HoldDoc = defineDoc<Hold>({
   kind: "usine.hold",

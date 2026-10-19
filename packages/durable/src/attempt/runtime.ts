@@ -1,6 +1,5 @@
-import { LiveDoc } from "@earendil-works/pi-durable";
+import { type ConversationId, LiveDoc } from "@earendil-works/pi-durable";
 import { ChildBackend } from "@usine/agents/runtime";
-import { SessionIdle, SessionResumed } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
@@ -8,18 +7,14 @@ import type { StepResult } from "@usine/core/step/result";
 import { Effect, Layer, Option, Result, Schema } from "effect";
 import { type AttemptRequest, AttemptRuntime, type FinishedAttempt } from "../attempt-runtime.ts";
 import { DurableHarness, type DurableHarnessError } from "../harness.ts";
-import { AttemptRecordDoc, type Hold, HoldDoc } from "./documents.ts";
+import { AttemptRecordDoc, type Hold, HoldDoc, RELEASE_GUIDANCE } from "./documents.ts";
 import { usineExtension } from "./extension.ts";
 import { type AttemptHub, attemptHubs } from "./hubs.ts";
 import { encodeResult, finishedOf } from "./outcome.ts";
 import { parentSessionId } from "./parent.ts";
 import { repairUnreadableConversations } from "./repair.ts";
-import { appendInbound, emitPayload, readRecord, relayAttempt } from "./relay.ts";
+import { appendInbound, emitPayload, readRecord, relayAttempt, relayDeliveries } from "./relay.ts";
 import { readStoredRequest, taskInput } from "./request.ts";
-
-/** The operator message that resumes an interrupted parent the operator released without guidance. */
-const RELEASE_GUIDANCE =
-  "The operator released the interrupt without further guidance. Continue the task.";
 
 /** The operator input could not be applied; the transcript records why and the Attempt continues. */
 class InterventionRefused extends Schema.TaggedError<InterventionRefused>(
@@ -32,6 +27,8 @@ const infra = (error: DurableHarnessError) =>
   new InfraFailure({ message: error.message, cause: error });
 
 const LIVE_STATUSES: ReadonlyArray<string> = ["pending", "running", "waiting"];
+
+const encodeIntervention = Schema.encodeSync(AttemptChannel.Intervention);
 
 const makeAttemptRuntime = Effect.gen(function* () {
   const durable = yield* DurableHarness;
@@ -222,84 +219,139 @@ const makeAttemptRuntime = Effect.gen(function* () {
     return state;
   });
 
+  /**
+   * Commits a change to the Hold that also depends on whether the parent is
+   * working on a turn, read in the same commit; none means the task already
+   * returned.
+   */
+  const superviseParent = <A>(
+    hub: AttemptHub,
+    parent: ConversationId,
+    change: (document: Hold, busy: boolean) => A,
+  ) =>
+    durable.use("update the parent's Hold", (harness, context) =>
+      harness.commit(async (tx) => {
+        const current = await tx.task(hub.taskId);
+        if (current === undefined || !LIVE_STATUSES.includes(current.state.status)) {
+          return Option.none<A>();
+        }
+        const live = await tx.doc(LiveDoc, parent);
+        return Option.some(change(await tx.doc(HoldDoc, hub.taskId), live.run !== undefined));
+      }, context),
+    );
+
+  /**
+   * Applies operator input to the Pi parent (ADR 0018). An operator message
+   * places a Hold, so the parent's answers wait for the operator until a
+   * release; a steer does not. Input to a working parent joins its current
+   * turn after the running tool call returns, and is reported queued until
+   * then; input to a waiting parent starts its next turn.
+   */
   const routeParent = Effect.fn("AttemptRuntime.routeParent")(function* (
     hub: AttemptHub,
-    action: AttemptChannel.OperatorAction,
+    intervention: AttemptChannel.Intervention,
     inputSequence: AttemptChannel.Sequence,
   ) {
-    if (Option.isNone(hub.session) || Option.isNone(hub.parent)) {
-      return yield* refuse("The parent has not started yet");
-    }
-    const session = hub.session.value;
+    if (Option.isNone(hub.parent)) return yield* refuse("The parent has not started yet");
     const parent = hub.parent.value;
-    const resumed = new AttemptChannel.InterventionState({ held: false, paused: false });
-    const paused = new AttemptChannel.InterventionState({ held: false, paused: true });
-    const guide = (message: string) =>
-      supervise(hub, (document) => {
-        if (!document.paused) return false;
-        document.guidance = [...document.guidance, message];
-        document.paused = false;
-        return true;
+    const parentId = parentSessionId(hub.attemptId);
+    const action = intervention.action;
+    const stateOf = (document: Hold, queued: boolean) =>
+      new AttemptChannel.InterventionState({
+        held: document.held.includes(parentId),
+        paused: document.paused,
+        queued,
       });
     if (action._tag === "Interrupt") {
       const marked = yield* supervise(hub, (document) => {
         const already = document.paused;
         document.paused = true;
-        return already;
+        return { already, state: stateOf(document, false) };
       });
       if (Option.isNone(marked)) return yield* refuse("This session has already returned");
-      if (marked.value) return paused;
+      if (marked.value.already) return marked.value.state;
       yield* Effect.logInfo("Interrupting the Pi parent; it holds until the operator resumes it");
       yield* durable.use("abort the parent's turn", async (harness, context) => {
         const conversation = await harness.conversation(parent, context);
         await conversation?.abort(context);
       });
-      yield* emitPayload(
-        durable,
-        hub,
-        new AttemptChannel.SessionEvent({ event: new SessionIdle({ session }) }),
-      );
-      return paused;
+      // The abort withdrew any queued operator input; its receipt says so.
+      yield* relayDeliveries(durable, hub, "live");
+      return marked.value.state;
     }
     if (action._tag === "Release") {
-      const released = yield* guide(RELEASE_GUIDANCE);
+      const released = yield* superviseParent(hub, parent, (document, busy) => {
+        if (!document.paused && !document.held.includes(parentId)) {
+          return { _tag: "NotSupervised" } as const;
+        }
+        document.held = document.held.filter((id) => id !== parentId);
+        // An interrupted turn may settle after this commit, so it needs the guidance to resume.
+        if (document.paused) {
+          document.guidance = [...document.guidance, RELEASE_GUIDANCE];
+          document.paused = false;
+        }
+        return { _tag: "Released", busy, state: stateOf(document, false) } as const;
+      });
       if (Option.isNone(released)) return yield* refuse("This session has already returned");
-      if (!released.value) {
-        return yield* refuse("Only an interrupted parent or a held child can be released");
+      if (released.value._tag === "NotSupervised") {
+        return yield* refuse("Only a paused or held session can be released");
       }
-      yield* Effect.logInfo("Released the interrupted Pi parent");
-    } else {
-      const guided = yield* guide(action.message);
-      if (Option.isNone(guided)) return yield* refuse("This session has already returned");
-      if (guided.value) {
-        yield* Effect.logInfo("Resuming the interrupted Pi parent with operator guidance");
-      } else {
-        const busy = yield* durable.use("read the parent's run", async (harness, context) => {
-          const live = await harness.snapshot(LiveDoc, parent, context);
-          return live?.run !== undefined;
-        });
-        if (!busy) return yield* refuse("This session has already returned");
-        yield* durable.use("steer the parent", async (harness, context) => {
-          const conversation = await harness.conversation(parent, context);
-          await conversation?.submit(
-            {
-              type: "input",
-              content: action.message,
-              whenBusy: "steer",
-              requestId: `intervention:${hub.attemptId}:${inputSequence}`,
-            },
-            context,
-          );
-        });
-        yield* Effect.logInfo("Steered the busy Pi parent");
-      }
+      yield* Effect.logInfo(
+        released.value.busy
+          ? "Released the working Pi parent; its next answer ends the Attempt"
+          : "Released the waiting Pi parent; it continues the task",
+      );
+      return released.value.state;
     }
-    yield* emitPayload(
-      durable,
-      hub,
-      new AttemptChannel.SessionEvent({ event: new SessionResumed({ session }) }),
+    const holds = action._tag === "OperatorMessage";
+    const routed = yield* superviseParent(hub, parent, (document, busy) => {
+      if (holds && !document.held.includes(parentId)) document.held = [...document.held, parentId];
+      if (busy && !document.paused)
+        return { _tag: "Steer", state: stateOf(document, true) } as const;
+      document.guidance = [...document.guidance, action.message];
+      document.paused = false;
+      return { _tag: "NextTurn", state: stateOf(document, false) } as const;
+    });
+    if (Option.isNone(routed)) return yield* refuse("This session has already returned");
+    if (routed.value._tag === "NextTurn") {
+      yield* Effect.logInfo("The Pi parent takes the operator input as its next turn", {
+        holds,
+      });
+      return routed.value.state;
+    }
+    const requestId = `intervention:${hub.attemptId}:${inputSequence}`;
+    yield* durable.use("steer the parent", async (harness, context) => {
+      const conversation = await harness.conversation(parent, context);
+      await conversation?.submit(
+        { type: "input", content: action.message, whenBusy: "steer", requestId },
+        context,
+      );
+    });
+    const queued = yield* durable.use("record the queued operator input", (harness, context) =>
+      harness.commit(async (tx) => {
+        const submission = await tx.submissionByRequest(parent, requestId);
+        if (submission?.status !== "queued") return false;
+        const record = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
+        record.queuedInputs = [
+          ...(record.queuedInputs ?? []),
+          {
+            inputSequence,
+            submission: submission.id,
+            intervention: encodeIntervention(intervention),
+          },
+        ];
+        return true;
+      }, context),
     );
-    return resumed;
+    if (queued) {
+      yield* Effect.logInfo(
+        "The working Pi parent reads the operator input when its running tool call returns",
+        { holds },
+      );
+      return routed.value.state;
+    }
+    yield* Effect.logInfo("The Pi parent read the operator input at once", { holds });
+    return new AttemptChannel.InterventionState({ ...routed.value.state, queued: false });
   });
 
   const intervene = Effect.fn("AttemptRuntime.intervene")(
@@ -330,7 +382,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
           const applied = yield* (
             target._tag === "Child"
               ? routeChild(hub, target, intervention.action)
-              : routeParent(hub, intervention.action, inputSequence)
+              : routeParent(hub, intervention, inputSequence)
           ).pipe(
             Effect.catchTag("DurableHarnessError", (error) => Effect.fail(refuse(error.message))),
             Effect.result,
@@ -364,6 +416,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
             action: intervention.action._tag,
             held: applied.success.held,
             paused: applied.success.paused,
+            queued: applied.success.queued,
           });
         }),
       );

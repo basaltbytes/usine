@@ -250,8 +250,10 @@ export interface StubParentContext {
   readonly reattached: boolean;
 }
 
-/** A stub parent's work after Started; its result is the parent's final message. */
-export type StubParent = (context: StubParentContext) => Effect.Effect<string, AttemptFailure>;
+/** A stub parent's work after Started; its result is the parent's final message, or its whole report. */
+export type StubParent = (
+  context: StubParentContext,
+) => Effect.Effect<string | AttemptReport, AttemptFailure>;
 
 type StubTaskState =
   | { readonly _tag: "live" }
@@ -363,7 +365,7 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           } else {
             yield* event(new TextOutput({ session, text: "Resumed after a restart" }));
           }
-          const message = yield* parent({
+          const finished = yield* parent({
             request,
             emit,
             session,
@@ -377,9 +379,14 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
               ),
             ),
           );
+          const report =
+            finished instanceof AttemptReport ? finished : new AttemptReport({ message: finished });
           yield* event(new SessionFinished({ session }));
-          yield* emit(new AttemptChannel.Final({ result: new StepResult({ message, facts: [] }) }));
-          const report = new AttemptReport({ message });
+          yield* emit(
+            new AttemptChannel.Final({
+              result: new StepResult({ message: report.message, facts: [] }),
+            }),
+          );
           task.state = { _tag: "finished", report, result: Option.none() };
           return report;
         }).pipe(Effect.ensuring(Effect.sync(() => attached.delete(request.spec.attemptId))));

@@ -281,6 +281,7 @@ export const RunWorkspace = ({
                       : new ChildTarget({ sessionId: composer.session.id })
                   }
                   paused={composer.paused}
+                  held={composer.held}
                 />
               </ReaderLine>
             </div>

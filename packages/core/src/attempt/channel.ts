@@ -101,14 +101,17 @@ export class Interrupt extends Schema.TaggedClass<Interrupt>("AttemptChannel/Int
 /** Stops the entire Attempt, including every held or paused session. Used by cancellation and guardrails. */
 export class Cancel extends Schema.TaggedClass<Cancel>("AttemptChannel/Cancel")("Cancel", {}) {}
 
-/** An operator turn joined to the target session, distinct from a Steer so a takeover can record and hold it (ADR 0018). */
+/** An operator turn joined to the target session, distinct from a Steer so a takeover can record and hold it, parent and child alike (ADR 0018). */
 export class OperatorMessage extends Schema.TaggedClass<OperatorMessage>(
   "AttemptChannel/OperatorMessage",
 )("OperatorMessage", {
   message: Schema.NonEmptyString,
 }) {}
 
-/** Ends a held child's takeover, letting its idle result return to the awaiting parent (ADR 0018). */
+/**
+ * Ends a takeover (ADR 0018): a held child's idle result returns to the
+ * awaiting parent, and a held or paused parent continues the task.
+ */
 export class Release extends Schema.TaggedClass<Release>("AttemptChannel/Release")("Release", {}) {}
 
 /** Nonterminal operator controls; cancellation is an Attempt operation. */
@@ -146,9 +149,23 @@ export class InterventionState extends Schema.Class<InterventionState>(
 )({
   held: Schema.Boolean,
   paused: Schema.Boolean,
+  /**
+   * The session accepted the message but reads it only when its current tool
+   * call returns, such as a parent waiting on a child. A later receipt for the
+   * same input sequence reports the delivery, or a rejection when the session
+   * stopped first. Receipts recorded before this field existed decode as false.
+   */
+  queued: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
 }) {}
 
-/** Acknowledges delivery and records the resulting Hold or pause in the transcript. */
+/**
+ * Acknowledges an operator input and records the resulting Hold or pause in
+ * the transcript. A queued input gets a second receipt with the same input
+ * sequence once the session reads it.
+ */
 export class InterventionApplied extends Schema.TaggedClass<InterventionApplied>(
   "AttemptChannel/InterventionApplied",
 )("InterventionApplied", {

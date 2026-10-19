@@ -35,9 +35,12 @@ A child is not resumed after a restart. Its tool call settles as interrupted wit
 
 `intervene(attemptId, intervention)` needs a live `execute` for the Attempt; it records the inbound envelope, applies the action, and records the result.
 
-- Parent `Steer` or `OperatorMessage` while a turn runs: joins the turn after its current tool round.
-- Parent `Interrupt`: aborts the current turn, children included, and holds the parent until a `Steer`, an `OperatorMessage`, or a `Release` resumes it with a new turn.
+- Parent `OperatorMessage`: places a Hold on the parent. While the Hold lasts, each answer of the parent waits for the operator instead of ending the Attempt; `Release` ends the Hold, and a waiting parent then continues the task with a new turn. A `Steer` places no Hold.
+- Parent `Steer` or `OperatorMessage` while a turn runs: joins the turn after its current tool round. Until then its `InterventionApplied` says `queued`, and a second receipt for the same input sequence reports that the parent read it, or an `InterventionRejected` that it never will. To a paused or waiting parent, it starts the next turn.
+- Parent `Interrupt`: aborts the current turn, children included, withdraws queued input, and holds the parent until a `Steer`, an `OperatorMessage`, or a `Release` resumes it with a new turn.
 - Child actions go to the live child; an `OperatorMessage` places a Hold, and the child's report reaches the parent only after `Release`.
+
+`AttemptReport.answeredOperator` says the parent's last turn replied to operator input without delegating after it. `harvestedResult(report, facts)` builds the Attempt's `StepResult`, and fails with an `AgentFailure` for such a report when the checkout holds no facts.
 
 `cancel(attemptId)` aborts the task bottom-up, children first, waits until it is terminal, and makes `execute` end with `Interrupted`.
 
@@ -67,4 +70,4 @@ const attempts = layer({
 - `PARENT_MODEL` is the scripted model's id, `faux/faux-1`. It accepts every effort up to `high`; leaving `RunSpec.parentModel` empty selects it too.
 - `StubChildren.next` waits for the next launched child. A `StubChild` exposes its `request`, `emit(event)`, `reply(message)`, `block(message)`, `interrupted`, and the `interventions` it received. A child under a Hold returns its reply only after `Release`.
 - `fauxParent(steps)` and `stubChildBackendLayer` are the two halves, for composing `DurableHarness` with another storage.
-- `stubAttemptRuntime(storage, parent)` is an in-memory `AttemptRuntime` for executor and engine tests that need no parent model: `parent` scripts each Attempt's final message (`completes`, `worksFor(millis)`, or your own `StubParent`), and building it again on the same `StubStorage` simulates a restart.
+- `stubAttemptRuntime(storage, parent)` is an in-memory `AttemptRuntime` for executor and engine tests that need no parent model: `parent` scripts each Attempt's final message or `AttemptReport` (`completes`, `worksFor(millis)`, or your own `StubParent`), and building it again on the same `StubStorage` simulates a restart.

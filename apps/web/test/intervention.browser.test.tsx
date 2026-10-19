@@ -91,11 +91,17 @@ afterEach(() => {
   host.remove();
 });
 
-it("addresses parent and child messages independently and exposes an explicit child release", async () => {
+it("addresses parent and child messages independently and exposes an explicit release for each", async () => {
   mount(
     <>
       <section aria-label="Parent">
-        <SessionComposer runId={runId} attemptId={attemptId} target={new ParentTarget()} paused />
+        <SessionComposer
+          runId={runId}
+          attemptId={attemptId}
+          target={new ParentTarget()}
+          paused
+          held
+        />
       </section>
       <section aria-label="Child">
         <SessionComposer
@@ -103,6 +109,7 @@ it("addresses parent and child messages independently and exposes an explicit ch
           attemptId={attemptId}
           target={new ChildTarget({ sessionId: AgentSessionId.make("child-2") })}
           paused={false}
+          held={false}
         />
       </section>
     </>,
@@ -122,7 +129,8 @@ it("addresses parent and child messages independently and exposes an explicit ch
     .click();
   await expect.element(page.getByRole("button", { name: "Release child" })).toBeEnabled();
   await page.getByRole("button", { name: "Release child" }).click();
-  await expect.poll(async () => (await commands.recordedInterventions()).length).toBe(4);
+  await page.getByRole("button", { name: "Release parent" }).click();
+  await expect.poll(async () => (await commands.recordedInterventions()).length).toBe(5);
   expect((await commands.recordedInterventions()).map(({ body }) => body)).toEqual([
     {
       attemptId,
@@ -136,6 +144,7 @@ it("addresses parent and child messages independently and exposes an explicit ch
     },
     { attemptId, target: { _tag: "Child", sessionId: "child-2" }, action: { _tag: "Interrupt" } },
     { attemptId, target: { _tag: "Child", sessionId: "child-2" }, action: { _tag: "Release" } },
+    { attemptId, target: { _tag: "Parent" }, action: { _tag: "Release" } },
   ]);
 });
 
@@ -245,8 +254,13 @@ it("retains unsent guidance and displays a delivery failure", async () => {
       attemptId={attemptId}
       target={new ParentTarget()}
       paused={false}
+      held={false}
     />,
   );
+  // A parent that is neither paused nor held has nothing to release.
+  await expect
+    .element(page.getByRole("button", { name: "Release parent" }))
+    .not.toBeInTheDocument();
   await page.getByLabelText("Message the parent").fill("Keep this guidance");
   await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect.element(page.getByText("Worker is disconnected", { exact: true })).toBeVisible();

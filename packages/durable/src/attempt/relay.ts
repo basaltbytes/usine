@@ -7,6 +7,7 @@ import {
   type Page,
   type TaskRecord,
   UsageDoc,
+  UserEntry,
 } from "@earendil-works/pi-durable";
 import { ModelId } from "@usine/core/agent/brain";
 import {
@@ -19,14 +20,14 @@ import {
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
 import { StepResult } from "@usine/core/step/result";
-import { DateTime, Deferred, Effect, Option, Queue, Result } from "effect";
+import { DateTime, Deferred, Effect, Option, Queue, Result, Schema } from "effect";
 import type { AttemptRequest } from "../attempt-runtime.ts";
 import type { DurableHarness, DurableHarnessError } from "../harness.ts";
-import { type AttemptRecord, AttemptRecordDoc } from "./documents.ts";
+import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import { entryEvents, usageTokens } from "./events.ts";
 import type { AttemptHub, AttemptHubs, RelayItem, RelayProgress } from "./hubs.ts";
 import { settledOf } from "./outcome.ts";
-import { parentSession } from "./parent.ts";
+import { parentSession, parentSessionId } from "./parent.ts";
 
 const PAGE = 64;
 
@@ -162,6 +163,89 @@ export const appendInbound = (
     }),
   );
 
+const decodeIntervention = Schema.decodeUnknownEffect(AttemptChannel.Intervention);
+
+/** The parent's supervision state once it read an input; a retired Hold reads as none. */
+const deliveredState = (durable: DurableHarness["Service"], hub: AttemptHub) =>
+  Effect.map(
+    durable.use("read the Hold", (harness, context) =>
+      harness.snapshot(HoldDoc, hub.taskId, context),
+    ),
+    (hold) =>
+      new AttemptChannel.InterventionState({
+        held: hold?.held.includes(parentSessionId(hub.attemptId)) ?? false,
+        paused: hold?.paused ?? false,
+      }),
+  );
+
+/**
+ * Sends the second receipt of each queued operator input the parent has
+ * stopped waiting on: applied once the parent read it, rejected when the
+ * parent stopped first. While the Attempt is `live`, an input still queued
+ * keeps waiting; once it has `ended`, none ever will be read. The caller holds
+ * the hub's routing permit, so this receipt always follows the queued one.
+ */
+export const relayDeliveries = Effect.fn("AttemptRelay.deliveries")(function* (
+  durable: DurableHarness["Service"],
+  hub: AttemptHub,
+  attempt: "live" | "ended",
+) {
+  const queued = (yield* readRecord(durable, hub.attemptId))?.queuedInputs ?? [];
+  for (const input of queued) {
+    const status = yield* durable.use("read a queued operator input", async (harness, context) => {
+      const submission = await harness.submission(input.submission, context);
+      return submission === undefined ? undefined : (await submission.status(context)).status;
+    });
+    if (status === "queued" && attempt === "live") {
+      yield* Effect.logDebug("A queued operator input still waits for the parent", {
+        inputSequence: input.inputSequence,
+      });
+      continue;
+    }
+    const intervention = yield* decodeIntervention(input.intervention).pipe(Effect.orDie);
+    const inputSequence = AttemptChannel.Sequence.make(input.inputSequence);
+    if (status === "placed" || status === "done") {
+      yield* emitPayload(
+        durable,
+        hub,
+        new AttemptChannel.InterventionApplied({
+          inputSequence,
+          intervention,
+          state: yield* deliveredState(durable, hub),
+        }),
+      );
+      yield* Effect.logInfo("The parent read a queued operator input", {
+        inputSequence,
+        action: intervention.action._tag,
+      });
+    } else {
+      yield* emitPayload(
+        durable,
+        hub,
+        new AttemptChannel.InterventionRejected({
+          inputSequence,
+          intervention,
+          message:
+            "The parent stopped before it read this message. Send it again if it still applies.",
+        }),
+      );
+      yield* Effect.logWarning("The parent stopped before it read a queued operator input", {
+        inputSequence,
+        action: intervention.action._tag,
+        submissionStatus: status ?? "missing",
+      });
+    }
+    yield* durable.use("forget the delivered operator input", (harness, context) =>
+      harness.commit(async (tx) => {
+        const record = await tx.doc(AttemptRecordDoc, hub.attemptId, null);
+        record.queuedInputs = (record.queuedInputs ?? []).filter(
+          (queuedInput) => queuedInput.inputSequence !== input.inputSequence,
+        );
+      }, context),
+    );
+  }
+});
+
 /**
  * Relays one Attempt to `io` until its terminal envelope is sent: `Started`,
  * the parent's committed entries, the children's events, and the executor's
@@ -229,7 +313,6 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
   let session = Option.map(Option.fromNullishOr(loaded.parentModel), (model) =>
     parentSession(spec, ModelId.make(model)),
   );
-  hub.session = session;
   if (loaded.parentConversation !== null) hubs.bindParent(hub, loaded.parentConversation);
 
   const ensureStarted = Effect.gen(function* () {
@@ -243,7 +326,6 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     if (record.parentConversation !== null) hubs.bindParent(hub, record.parentConversation);
     const started = parentSession(spec, ModelId.make(record.parentModel));
     session = Option.some(started);
-    hub.session = session;
     if (progress().outbound.state === "AwaitingStarted") {
       yield* emitPayload(
         durable,
@@ -283,10 +365,14 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     );
   });
 
+  const deliveries = (attempt: "live" | "ended") =>
+    hub.routing.withPermits(1)(relayDeliveries(durable, hub, attempt));
+
   const relayEntries = Effect.fn("AttemptRelay.entries")(function* (bound: Option.Option<EntryId>) {
     const started = yield* ensureStarted;
     if (Option.isNone(started) || Option.isNone(hub.parent)) return;
     const parent = hub.parent.value;
+    let placedInput = false;
     let next = Option.none<Cursor>();
     do {
       const query = entryQuery(progress().entry + 1, bound);
@@ -301,6 +387,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
         },
       );
       for (const entry of found.items) {
+        if (entry.kind === UserEntry.kind) placedInput = true;
         const events = entryEvents(entry, started.value);
         if (events.length === 0) {
           progress().entry = entry.id;
@@ -316,13 +403,14 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       next = Option.fromNullishOr(found.next);
     } while (Option.isSome(next));
     yield* relayTokens(started.value);
+    if (placedInput) yield* deliveries("live");
   });
 
-  const relayChild = Effect.fn("AttemptRelay.child")(function* (event: AgentSessionEvent) {
+  const relayEvent = Effect.fn("AttemptRelay.event")(function* (event: AgentSessionEvent) {
     const started = yield* ensureStarted;
     if (Option.isNone(started)) {
       return yield* Effect.logWarning(
-        "Dropped a child event that arrived before the parent started",
+        "Dropped a session event that arrived before the parent started",
         {
           event: event._tag,
         },
@@ -353,6 +441,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
   ) {
     const settled = settledOf(task);
     const started = yield* ensureStarted;
+    yield* deliveries("ended");
     if (Result.isSuccess(settled)) {
       if (Option.isSome(started)) {
         yield* emitPayload(
@@ -386,6 +475,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
   yield* relayEntries(
     firstEntry?._tag === "Entry" ? Option.some(entryId(firstEntry.entry - 1)) : Option.none(),
   );
+  yield* deliveries("live");
   pending.push({ _tag: "Wake" });
 
   const take = Effect.suspend(() => {
@@ -397,8 +487,8 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     const item = yield* take;
     if (item._tag === "Entry") {
       yield* relayEntries(Option.some(item.entry));
-    } else if (item._tag === "Child") {
-      yield* relayChild(item.event);
+    } else if (item._tag === "Event") {
+      yield* relayEvent(item.event);
     } else if (item._tag === "Notice") {
       yield* relayNotice(item.notice);
     } else {
@@ -411,7 +501,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       const rest = [...pending.splice(0), ...(yield* Queue.clear(hub.queue))];
       for (const remaining of rest) {
         if (remaining._tag === "Entry") yield* relayEntries(Option.some(remaining.entry));
-        else if (remaining._tag === "Child") yield* relayChild(remaining.event);
+        else if (remaining._tag === "Event") yield* relayEvent(remaining.event);
         else if (remaining._tag === "Notice") yield* relayNotice(remaining.notice);
       }
       yield* relayEntries(Option.none());

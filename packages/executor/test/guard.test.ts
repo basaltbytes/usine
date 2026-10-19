@@ -83,13 +83,16 @@ const setup = (
         });
         yield* Deferred.await(written);
       });
-    const hold = (session: ChildSession, held: boolean) =>
+    const hold = (session: ChildSession | "parent", held: boolean) =>
       emit(
         new AttemptChannel.InterventionApplied({
           inputSequence: AttemptChannel.Sequence.make(sequence + 1),
           intervention: new AttemptChannel.Intervention({
             operator: "Philippe",
-            target: new AttemptChannel.ChildTarget({ sessionId: session.id }),
+            target:
+              session === "parent"
+                ? new AttemptChannel.ParentTarget()
+                : new AttemptChannel.ChildTarget({ sessionId: session.id }),
             action: held
               ? new AttemptChannel.OperatorMessage({ message: "Review this with me" })
               : new AttemptChannel.Release(),
@@ -108,7 +111,7 @@ const setup = (
 
 describe("Attempt guard", () => {
   it.effect(
-    "preserves the remaining time across concurrent Holds, warns once at 80% of unsupervised time, and trips at the end",
+    "preserves the remaining time across concurrent Holds, the parent's included, warns once at 80% of unsupervised time, and trips at the end",
     () =>
       Effect.gen(function* () {
         const { result, emit, hold, warnings } = yield* setup({
@@ -124,9 +127,15 @@ describe("Attempt guard", () => {
         yield* TestClock.adjust("2 hours");
         assert.strictEqual(result.pollUnsafe(), undefined);
         assert.deepStrictEqual(warnings, []);
+        // A parent waiting for the operator under its Hold is supervised too.
+        yield* hold("parent", true);
         yield* emit(
           new AttemptChannel.SessionEvent({ event: new SessionFinished({ session: second }) }),
         );
+        yield* TestClock.adjust("2 hours");
+        assert.strictEqual(result.pollUnsafe(), undefined);
+        assert.deepStrictEqual(warnings, []);
+        yield* hold("parent", false);
         // A late delivery receipt cannot reopen the Hold of a terminated child.
         yield* hold(second, true);
         yield* TestClock.adjust("39 seconds");

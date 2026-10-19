@@ -1,10 +1,10 @@
 import { ChildHost } from "@usine/agents/child-host";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptId } from "@usine/core/attempt";
-import { AttemptFailure } from "@usine/core/attempt/failure";
-import { StepResult } from "@usine/core/step/result";
+import { AgentFailure, AttemptFailure } from "@usine/core/attempt/failure";
+import { StepResult, type StepResultFact } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
-import { Context, type Effect, type Option, Schema } from "effect";
+import { Context, Effect, type Option, Result, Schema } from "effect";
 
 /**
  * What durable storage keeps of an Attempt's request: what identifies its
@@ -43,7 +43,36 @@ export class AttemptRequest extends Schema.Class<AttemptRequest>("@usine/durable
 export class AttemptReport extends Schema.Class<AttemptReport>("@usine/durable/AttemptReport")({
   /** The parent's final message, never empty. The executor records it as the message of the Attempt's StepResult. */
   message: Schema.NonEmptyString,
+  /**
+   * The parent's last turn replied to operator input and delegated nothing
+   * after it, so the message may answer the operator rather than report the
+   * task. `harvestedResult` reads it; reports recorded before it existed decode as false.
+   */
+  answeredOperator: Schema.Boolean.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed(false)),
+    Schema.withConstructorDefault(Effect.succeed(false)),
+  ),
 }) {}
+
+/**
+ * The Attempt's result from the parent's report and the facts harvested from
+ * its checkout. A parent whose last turn answered the operator, with no
+ * commit, pull request, or comment to show for the Attempt, did not finish
+ * its task: the Attempt fails with an `AgentFailure` that quotes the answer,
+ * so the operator decides what happens next instead of the Run succeeding
+ * (ADR 0018, amendment of 2026-10-19).
+ */
+export const harvestedResult = (
+  report: AttemptReport,
+  facts: ReadonlyArray<StepResultFact>,
+): Result.Result<StepResult, AgentFailure> =>
+  report.answeredOperator && facts.length === 0
+    ? Result.fail(
+        new AgentFailure({
+          message: `The parent ended on its answer to the operator and the Attempt delivered no commit, pull request, or comment. Its answer: ${report.message}`,
+        }),
+      )
+    : Result.succeed(new StepResult({ message: report.message, facts }));
 
 /** The parent reported success, and no harvested result was recorded: the Attempt's checkout still has to be harvested. */
 export class ParentReported extends Schema.TaggedClass<ParentReported>(
