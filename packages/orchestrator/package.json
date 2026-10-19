@@ -86,7 +86,7 @@
     "test:integration": "vitest run test/integration/polling-triggers.test.ts",
     "test:integration:agent": "vitest run test/integration/agent-run.test.ts",
     "test:exe-dev": "vitest run test/integration/exe-dev-worker.test.ts",
-    "test:ssh": "vitest run test/integration/ssh-worker.test.ts"
+    "test:ssh": "vitest run --disable-console-intercept test/integration/ssh-worker.test.ts"
   },
   "dependencies": {
     "@effect/platform-node": "catalog:",

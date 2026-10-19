@@ -76,7 +76,6 @@ See [Workers and the Gateway](/architecture/workers-and-gateway/) for how each W
 - [#230][]: the tests haven't run an SSH Worker with real Claude Code and Codex children.
 - [#231][]: Attempts on one SSH Worker without a Gateway can read each other's GitHub token.
 - [#229][]: the harness versions pinned in `infra/hetzner/cloud-init.yaml` must be updated by hand to match the versions usine supports.
-- [#257][]: the live SSH preflight test cases don't show each harness's outcome.
 - [#270][]: two Attempts at once thrash a 4 GB Worker until sshd stops responding.
 - [#278][]: local and direct SSH preflight don't check the GitHub credential; only the exe.dev preflight raises the `credentials` capability ([exe-dev/preflight.ts:123][]).
 
@@ -165,7 +164,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#248]: https://github.com/basaltbytes/usine/issues/248
 [#249]: https://github.com/basaltbytes/usine/issues/249
 [#254]: https://github.com/basaltbytes/usine/issues/254
-[#257]: https://github.com/basaltbytes/usine/issues/257
 [#258]: https://github.com/basaltbytes/usine/issues/258
 [#261]: https://github.com/basaltbytes/usine/issues/261
 [#264]: https://github.com/basaltbytes/usine/issues/264

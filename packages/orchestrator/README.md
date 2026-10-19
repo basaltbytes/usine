@@ -112,7 +112,7 @@ const EngineLive = Layer.unwrap(
 )
 ```
 
-The live SSH check runs one Attempt end to end on a real machine, with a scripted parent whose commands use the machine's gh and git with the minted token, and preflights Claude Code and Codex there. It skips unless `USINE_SSH_INTEGRATION_DESTINATION` is set, and needs a GitHub App instance directory whose installation covers the repository:
+The live SSH check runs one Attempt end to end on a real machine, with a scripted parent whose commands use the machine's gh and git with the minted token, and preflights Claude Code and Codex there, printing each harness's outcome: `ready`, or why its login is missing. It skips unless `USINE_SSH_INTEGRATION_DESTINATION` is set, and needs a GitHub App instance directory whose installation covers the repository:
 
 ```sh
 export USINE_SSH_INTEGRATION_DESTINATION=usine@203.0.113.7
