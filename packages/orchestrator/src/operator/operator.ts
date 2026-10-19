@@ -68,6 +68,11 @@ import {
   RosterAgentNotFoundError,
 } from "./run.ts";
 import { readTranscript, runView } from "./projection.ts";
+import {
+  RunGitHubChanges,
+  type RunGitHubChangesError,
+  type RunGitHubChangesView,
+} from "./github-changes.ts";
 
 export type BoardMoveError =
   | BoardItemNotFoundError
@@ -81,7 +86,8 @@ export type OperatorError =
   | RunEngineError
   | TranscriptAttemptNotFoundError
   | BoardMoveError
-  | CycleBudgetResetRejectedError;
+  | CycleBudgetResetRejectedError
+  | RunGitHubChangesError;
 export type OperatorObservationError = RunStoreError | TranscriptAttemptNotFoundError;
 
 /** How many settled Runs the overview keeps beside the open ones. */
@@ -438,6 +444,7 @@ const makeOperator = Effect.gen(function* () {
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const github = yield* GitHubItemWriter;
   const polling = yield* PollingTriggers;
+  const githubChanges = yield* RunGitHubChanges;
 
   const approve = Effect.fn("Operator.approve")(function* (instance: LoadedInstance, runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
@@ -634,6 +641,7 @@ const makeOperator = Effect.gen(function* () {
     cancel,
     discardLeftovers: (worker: WorkerName) => runs.discardLeftovers(worker).pipe(Effect.asVoid),
     moveBoardItem,
+    githubChanges: githubChanges.read,
     pause,
     retry,
     resolveFailure: runs.resolveFailure,
@@ -691,6 +699,13 @@ export class Operator extends Context.Service<
       instance: LoadedInstance,
       move: BoardMove,
     ) => Effect.Effect<void, BoardMoveError>;
+    /**
+     * What each of the Run's Attempts changed on its GitHub Item, read from the Item's
+     * timeline: the App's label, comment, and review changes while the Attempt was at work.
+     */
+    readonly githubChanges: (
+      runId: RunId,
+    ) => Effect.Effect<RunGitHubChangesView, RunGitHubChangesError>;
     /** Pauses new work for a Loop while its existing Runs continue. */
     readonly pause: (loop: LoopName) => Effect.Effect<LoopRuntimeState, EnginePersistenceError>;
     /** Allows the Loop's triggers to open new Runs again. */
@@ -698,7 +713,7 @@ export class Operator extends Context.Service<
   }
 >()("@usine/orchestrator/Operator") {
   static readonly layer = Layer.effect(Operator, makeOperator).pipe(
-    Layer.provide(OperatorObservation.layer),
+    Layer.provide(Layer.merge(OperatorObservation.layer, RunGitHubChanges.layer)),
   );
 }
 
@@ -710,6 +725,15 @@ export {
   NeedsSetupOverview,
   FactoryOverview,
 } from "./overview.ts";
+export {
+  LabelAddedView,
+  LabelRemovedView,
+  CommentedView,
+  ReviewedView,
+  GitHubChangeView,
+  AttemptGitHubChangesView,
+  RunGitHubChangesView,
+} from "./github-changes.ts";
 export {
   ApprovalView,
   RunStateTag,

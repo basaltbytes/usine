@@ -19,6 +19,7 @@ import { StepExecutor } from "@usine/engine/step-executor";
 import { layer as localEngineLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { Source } from "@usine/expression/expression-engine";
+import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import {
   GitHubApiError,
@@ -209,6 +210,9 @@ describe("Board self-writes", () => {
             ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
             inertLabelReconcilerLayer,
             Layer.succeed(GitHubPolling, github),
+            Layer.succeed(GitHubItemHistory)({
+              appChanges: () => Effect.die("Board moves read no Item history"),
+            }),
             Layer.succeed(ScheduleTriggers)({
               latest: Effect.succeed(Option.none()),
               run: () => Effect.never,

@@ -14,6 +14,7 @@ import {
   type FactoryOverview,
   NeedsSetupOverview,
   type RunDetailView,
+  type RunGitHubChangesView,
   type TranscriptRequest,
   type Operator,
   type OperatorError,
@@ -39,6 +40,7 @@ export class FactoryBackend extends Context.Service<
       runId: RunId,
       request: TranscriptRequest,
     ) => Effect.Effect<RunDetailView, BackendError>;
+    readonly githubChanges: (runId: RunId) => Effect.Effect<RunGitHubChangesView, BackendError>;
     readonly approve: (runId: RunId) => Effect.Effect<void, BackendError>;
     readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, BackendError>;
     readonly resolveFailure: (
@@ -72,6 +74,7 @@ export const liveBackendLayer = (
   Layer.succeed(FactoryBackend)({
     overview: Effect.flatMap(instances.get, operator.overview),
     detail: operator.detail,
+    githubChanges: operator.githubChanges,
     approve: (runId) =>
       Effect.flatMap(instances.get, (instance) => operator.approve(instance, runId)),
     resetCycleBudget: operator.resetCycleBudget,
@@ -110,6 +113,7 @@ export const needsSetupBackendLayer = (
   return Layer.succeed(FactoryBackend)({
     overview,
     detail: observation.detail,
+    githubChanges: fail,
     approve: fail,
     resetCycleBudget: fail,
     retry: fail,

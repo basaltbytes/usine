@@ -6,6 +6,7 @@ import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
 import { observationLayer as localObservationLayer } from "@usine/engine/local-sqlite";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApp } from "@usine/github/github-app";
+import { GitHubItemHistory } from "@usine/github/item-history";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import { GitHubLabelWriter } from "@usine/github/label-writer";
 import { GitHubPolling } from "@usine/github/polling";
@@ -75,6 +76,10 @@ export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),
   );
+  const itemHistory = GitHubItemHistory.layer.pipe(
+    Layer.provide(app),
+    Layer.provide(FetchHttpClient.layer),
+  );
   const labelWriter = GitHubLabelWriter.layer.pipe(
     Layer.provide(app),
     Layer.provide(FetchHttpClient.layer),
@@ -93,7 +98,7 @@ export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
     Layer.provide(dependencies),
   );
   const services = Layer.mergeAll(Operator.layer, Orchestrator.layer).pipe(
-    Layer.provide(Layer.mergeAll(dependencies, triggers)),
+    Layer.provide(Layer.mergeAll(dependencies, triggers, itemHistory)),
   );
   return Layer.mergeAll(dependencies, triggers, services);
 };
