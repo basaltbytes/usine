@@ -14,6 +14,7 @@ import {
   type ReaderDocument,
   type ReadingPlace,
 } from "../run-transcript/document/model.ts";
+import { withGitHubChanges } from "../run-transcript/document/github-changes.ts";
 import { projectTranscript } from "../run-transcript/model.ts";
 import {
   ErrorControls,
@@ -26,6 +27,7 @@ import {
 } from "../run-transcript/navigation/model.ts";
 import { ReaderLine, type TranscriptHistory } from "../run-transcript/transcript.tsx";
 import { EventDocument, TaskDocument } from "./documents.tsx";
+import { useRunGitHubChanges } from "./github-changes.ts";
 import { eventPreview } from "./item.ts";
 import { Outline, type OutlineSelection } from "./outline.tsx";
 
@@ -36,6 +38,7 @@ const rowKeys = (row: ChapterRow): ReadonlyArray<string> => {
     case "Delegation":
       return [row.key, row.tool.key];
     case "Ending":
+    case "GitHubChange":
       return [row.key];
     case "Message":
     case "Note":
@@ -46,10 +49,19 @@ const rowKeys = (row: ChapterRow): ReadonlyArray<string> => {
 const chapterOf = (document: ReaderDocument, key: string): Chapter | undefined =>
   document.chapters.find((chapter) => chapter.rows.some((row) => rowKeys(row).includes(key)));
 
-const rowSession = (row: ChapterRow): string | null =>
-  row._tag === "Burst" || row._tag === "Delegation" || row._tag === "Message"
-    ? row.speaker.sessionKey
-    : (row.speaker?.sessionKey ?? null);
+const rowSession = (row: ChapterRow): string | null => {
+  switch (row._tag) {
+    case "Burst":
+    case "Delegation":
+    case "Message":
+      return row.speaker.sessionKey;
+    case "Note":
+    case "Ending":
+      return row.speaker?.sessionKey ?? null;
+    case "GitHubChange":
+      return null;
+  }
+};
 
 /** The Run page below its header: the outline of the Run's parts, the reader, and the composer of a live Attempt. */
 export const RunWorkspace = ({
@@ -61,14 +73,25 @@ export const RunWorkspace = ({
 }) => {
   const run = detail.run;
   const outlineId = useId();
+  const githubChanges = useRunGitHubChanges(run);
   const document = useMemo(
     () =>
-      readerDocument(
-        projectTranscript(detail.transcript, run.attempts, detail.sessionState),
-        run.attempts,
-        detail.transcript,
+      withGitHubChanges(
+        readerDocument(
+          projectTranscript(detail.transcript, run.attempts, detail.sessionState),
+          run.attempts,
+          detail.transcript,
+        ),
+        new Map(githubChanges.data?.attempts.map(({ attemptId, changes }) => [attemptId, changes])),
+        new Set(detail.earlierTranscript.map(({ attemptId }) => attemptId)),
       ),
-    [detail.transcript, detail.sessionState, run.attempts],
+    [
+      detail.transcript,
+      detail.sessionState,
+      detail.earlierTranscript,
+      run.attempts,
+      githubChanges.data,
+    ],
   );
   const errors = useMemo(
     () => indexTranscriptUpdates(document).filter((update) => update.isError),
@@ -79,7 +102,12 @@ export const RunWorkspace = ({
     null,
   );
   const revision =
-    detail.transcript.length + run.attempts.filter(({ outcome }) => outcome !== null).length;
+    detail.transcript.length +
+    run.attempts.filter(({ outcome }) => outcome !== null).length +
+    document.chapters.reduce(
+      (count, { rows }) => count + rows.filter(({ _tag }) => _tag === "GitHubChange").length,
+      0,
+    );
   const [chosen, setChosen] = useState<OutlineSelection | null>(null);
   const latest = document.chapters.at(-1);
   const selection: OutlineSelection =
@@ -218,6 +246,11 @@ export const RunWorkspace = ({
       >
         {selection._tag === "Task" && <TaskDocument task={run.task} />}
         {selection._tag === "Event" && <EventDocument detail={detail} />}
+        {showsReader && githubChanges.isError && (
+          <p className="mx-auto w-full max-w-[38.5rem] px-4 pt-3 text-xs text-muted-foreground sm:px-2">
+            GitHub changes are not shown: {githubChanges.error.message}
+          </p>
+        )}
         <div className={cn("flex min-h-0 flex-1 flex-col", !showsReader && "hidden")}>
           <Conversation
             runId={run.id}

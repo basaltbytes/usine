@@ -27,6 +27,7 @@ import type {
   ReaderDocument,
   Speaker,
 } from "./document/model.ts";
+import { GitHubChangeLine } from "./github-change.tsx";
 import { burstSpan, ToolBurst } from "./grouping/burst.tsx";
 import { Outcome } from "./outcome.tsx";
 import { presentTool } from "./tool/presentation.ts";
@@ -201,6 +202,11 @@ const Row = ({ row, speaker }: { readonly row: ChapterRow; readonly speaker: str
       </ReaderLine>
     ),
     Delegation: (delegation) => <Delegation row={delegation} speaker={speaker} />,
+    GitHubChange: (change) => (
+      <ReaderLine>
+        <GitHubChangeLine row={change} />
+      </ReaderLine>
+    ),
     Ending: (ending) => (
       <ReaderLine
         gutter={
@@ -225,7 +231,15 @@ const rowSpeaker = (row: ChapterRow): Speaker | null =>
     Burst: ({ speaker }) => speaker,
     Delegation: ({ speaker }) => speaker,
     Ending: ({ speaker }) => speaker,
+    GitHubChange: () => null,
   });
+
+const rowSpacing = (row: ChapterRow, previous: ChapterRow | undefined): string => {
+  if (row._tag === "Burst") return "mt-0.5";
+  if (row._tag === "GitHubChange")
+    return previous?._tag === "Burst" || previous?._tag === "GitHubChange" ? "mt-0.5" : "mt-2";
+  return row._tag === "Note" ? "mt-2" : "mt-4";
+};
 
 const Meta = ({ label, value }: { readonly label: string; readonly value?: ReactNode }) => (
   <span>
@@ -409,11 +423,11 @@ const ChapterView = ({
           </ReaderLine>
         </MessageScrollerItem>
       )}
-      {rows.map(({ row, speaker }) => (
+      {rows.map(({ row, speaker }, index) => (
         <MessageScrollerItem
           key={row.key}
           messageId={row.key}
-          className={row._tag === "Burst" ? "mt-0.5" : row._tag === "Note" ? "mt-2" : "mt-4"}
+          className={rowSpacing(row, rows[index - 1]?.row)}
         >
           <Row row={row} speaker={speaker} />
         </MessageScrollerItem>

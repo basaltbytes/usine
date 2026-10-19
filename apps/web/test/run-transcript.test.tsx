@@ -31,6 +31,10 @@ import {
   AttemptView,
   CanceledAttemptView,
   ColdTranscriptRequest,
+  CommentedView,
+  LabelAddedView,
+  LabelRemovedView,
+  LabelView,
   FailedTranscriptView,
   RunDetailView,
   RunView,
@@ -53,6 +57,8 @@ import { projectTranscript, type TranscriptTool } from "../src/run-transcript/mo
 import { Transcript } from "../src/run-transcript/transcript.tsx";
 import { CurrentActivity } from "../src/run-transcript/activity.tsx";
 import { readerDocument } from "../src/run-transcript/document/model.ts";
+import { withGitHubChanges } from "../src/run-transcript/document/github-changes.ts";
+import { GitHubLabelName } from "@usine/config/label";
 import { TranscriptDisclosureProvider } from "../src/run-transcript/grouping/disclosure.tsx";
 import { MessageScrollerProvider } from "../src/components/ui/message-scroller.tsx";
 import { presentTool, type ToolSection } from "../src/run-transcript/tool/presentation.ts";
@@ -213,6 +219,46 @@ describe("run transcript", () => {
       })),
       [{ pool: "chatgptPlan", used: [31] }],
     );
+  });
+
+  it("shows an Agent's GitHub change as one line, labels in their GitHub colors and the comment linked", () => {
+    const events = [event(1, "Removing the claim and handing over for review.")];
+    const label = (name: string, color: string) =>
+      new LabelView({ name: GitHubLabelName.make(name), color, description: null });
+    const comment = "https://github.com/basaltbytes/usine/issues/247#issuecomment-6216970836";
+    const document = withGitHubChanges(
+      readerDocument(projectTranscript(events, [liveAttempt]), [liveAttempt], events),
+      new Map([
+        [
+          attemptId,
+          [
+            new LabelRemovedView({
+              at: "2026-09-01T12:00:02.000Z",
+              label: label("agent-in-progress", "fbca04"),
+            }),
+            new LabelAddedView({
+              at: "2026-09-01T12:00:02.000Z",
+              label: label("ready-for-review", "0e8a16"),
+            }),
+            new CommentedView({ at: "2026-09-01T12:00:07.000Z", url: comment }),
+          ],
+        ],
+      ]),
+      new Set(),
+    );
+    const markup = renderMarkup(
+      <TranscriptDisclosureProvider initialState={new Map()}>
+        <MessageScrollerProvider>
+          <Transcript document={document} runTask="Review the task" history={history} />
+        </MessageScrollerProvider>
+      </TranscriptDisclosureProvider>,
+    );
+    const text = markup.replace(/<[^>]+>/gu, "");
+    assert.include(text, "Removed agent-in-progress, added ready-for-review");
+    assert.include(text, "Commented on #247");
+    assert.include(markup, "border-color:#fbca0466");
+    assert.include(markup, "border-color:#0e8a1666");
+    assert.include(markup, `href="${comment}"`);
   });
 
   it("keeps a finished child's handoff when its launch is outside the loaded page", () => {

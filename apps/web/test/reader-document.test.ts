@@ -13,11 +13,16 @@ import {
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { StepResult } from "@usine/core/step/result";
+import { GitHubLabelName } from "@usine/config/label";
 import { WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   AgentFailureView,
   AttemptView,
+  CommentedView,
+  LabelAddedView,
+  LabelRemovedView,
+  LabelView,
   FailedAttemptView,
   FailedTranscriptView,
   InfraFailureView,
@@ -25,6 +30,7 @@ import {
 } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { assert, describe, it } from "vitest";
+import { withGitHubChanges } from "../src/run-transcript/document/github-changes.ts";
 import {
   chapterCheckpoints,
   readerDocument,
@@ -313,5 +319,96 @@ describe("reading place", () => {
       checkpointKey: "event:6",
     });
     assert.isNull(readingPlace(order, []));
+  });
+});
+
+describe("GitHub changes", () => {
+  const command = (sequence: number, callId: string, finished: boolean) =>
+    record(
+      sequence,
+      new AttemptChannel.SessionEvent({
+        event: finished
+          ? new ToolFinished({
+              session: child,
+              callId,
+              tool: "command",
+              output: "",
+              isError: false,
+            })
+          : new ToolStarted({
+              session: child,
+              callId,
+              tool: "command",
+              input: { command: "/bin/bash -lc 'gh issue edit 247'" },
+            }),
+      }),
+    );
+  const label = (name: string, color: string) =>
+    new LabelView({ name: GitHubLabelName.make(name), color, description: null });
+  const blocker = "https://github.com/basaltbytes/usine/issues/247#issuecomment-6201011438";
+  const failure = new AgentFailureView({
+    message: `Baseline lint fails.\n\nRecorded the [signed blocker on #247](${blocker}) and removed \`agent-in-progress\`.`,
+  });
+  const events = [
+    record(1, new AttemptChannel.Started({ parentModel: ModelId.make("gpt-5") })),
+    ...delegation,
+    said(3, "I'll use the tackle-issue skill."),
+    command(4, "claim", false),
+    command(6, "claim", true),
+    said(7, "The baseline gate is blocked."),
+    command(8, "blocker", false),
+    command(10, "blocker", true),
+    said(11, `[usine:blocked]\n${failure.message}`),
+    record(12, new FailedTranscriptView({ failure })),
+  ];
+  const changes = [
+    new LabelRemovedView({ at: at(5), label: label("ready-for-agent", "1f883d") }),
+    new LabelAddedView({ at: at(5), label: label("agent-in-progress", "fbca04") }),
+    new CommentedView({ at: at(9), url: blocker }),
+    new LabelRemovedView({ at: at(9), label: label("agent-in-progress", "fbca04") }),
+    new LabelAddedView({ at: at(9), label: label("needs-operator", "d93f0b") }),
+  ];
+  const described = (rows: ReadonlyArray<ChapterRow>) =>
+    rows.map((row) => {
+      if (row._tag === "Message") return `${row.speaker.name}: ${row.text}`;
+      if (row._tag !== "GitHubChange") return row._tag;
+      if (row.change._tag !== "Labels") return `GitHub ${row.change._tag} ${row.change.url}`;
+      const names = (labels: ReadonlyArray<LabelView>) => labels.map(({ name }) => name).join(" ");
+      return `GitHub removed [${names(row.change.removed)}] added [${names(row.change.added)}]`;
+    });
+  const failed = [attempt(new FailedAttemptView({ failure }))];
+
+  it("follows the burst that made each change, swaps labels on one line, and leaves the outcome's own words to it", () => {
+    const chapter = withGitHubChanges(
+      document(events, failed),
+      new Map([[attemptId, changes]]),
+      new Set(),
+    ).chapters[0];
+    assert.isDefined(chapter);
+    assert.deepEqual(described(chapter.rows), [
+      "Delegation",
+      "developer: I'll use the tackle-issue skill.",
+      "Burst",
+      "GitHub removed [ready-for-agent] added [agent-in-progress]",
+      "developer: The baseline gate is blocked.",
+      "Burst",
+      "GitHub removed [] added [needs-operator]",
+      "Ending",
+    ]);
+  });
+
+  it("waits for earlier activity before placing a change made before the first loaded row", () => {
+    const chapter = withGitHubChanges(
+      document(events.slice(5), failed),
+      new Map([[attemptId, changes]]),
+      new Set([attemptId]),
+    ).chapters[0];
+    assert.isDefined(chapter);
+    assert.deepEqual(described(chapter.rows), [
+      "developer: The baseline gate is blocked.",
+      "Burst",
+      "GitHub removed [] added [needs-operator]",
+      "Ending",
+    ]);
   });
 });
