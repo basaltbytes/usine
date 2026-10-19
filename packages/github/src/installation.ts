@@ -11,10 +11,18 @@ export type InstallationId = typeof InstallationId.Type;
 export const RepositoryId = PositiveInt.pipe(Schema.brand("GitHubRepositoryId"));
 export type RepositoryId = typeof RepositoryId.Type;
 
-/** The discovered App installation and the account that owns it. */
+/**
+ * The App's URL name. GitHub's GraphQL API reports the App's own changes with a
+ * `Bot` actor whose login is this slug (the REST login adds `[bot]`).
+ */
+export const AppSlug = Schema.NonEmptyString.pipe(Schema.brand("GitHubAppSlug"));
+export type AppSlug = typeof AppSlug.Type;
+
+/** The discovered App installation, the account that owns it, and the App's slug. */
 export class Installation extends Schema.Class<Installation>("@usine/github/Installation")({
   id: InstallationId,
   accountLogin: Schema.NonEmptyString,
+  appSlug: AppSlug,
 }) {}
 
 /** Token access to every repository covered by the installation. */

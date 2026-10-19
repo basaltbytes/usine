@@ -31,6 +31,7 @@ import {
   InvalidGitHubResponseError,
 } from "./error.ts";
 import {
+  AppSlug,
   Installation,
   InstallationDiscoveryError,
   InstallationId,
@@ -55,10 +56,11 @@ interface Lease {
 
 const InstallationResponse = Schema.Struct({
   id: InstallationId,
+  appSlug: AppSlug,
   account: Schema.Struct({ login: Schema.NonEmptyString }),
   permissions: Schema.Record(Schema.String, Schema.String),
   suspendedAt: Schema.NullOr(Schema.String),
-}).pipe(Schema.encodeKeys({ suspendedAt: "suspended_at" }));
+}).pipe(Schema.encodeKeys({ appSlug: "app_slug", suspendedAt: "suspended_at" }));
 
 const InstallationsResponse = Schema.Array(InstallationResponse);
 
@@ -179,7 +181,11 @@ export class GitHubApp extends Context.Service<
             message: `The GitHub App installation is missing permissions: ${missing.join(", ")}`,
           });
         }
-        return new Installation({ id: found.id, accountLogin: found.account.login });
+        return new Installation({
+          id: found.id,
+          accountLogin: found.account.login,
+          appSlug: found.appSlug,
+        });
       });
 
       const mintToken = Effect.fn("GitHubApp.mintToken")(function* (
@@ -325,6 +331,7 @@ export {
   AppAuthenticationError,
 } from "./credentials.ts";
 export {
+  AppSlug,
   InstallationId,
   RepositoryId,
   Installation,

@@ -5,6 +5,7 @@ import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstab
 import { GitHubApp } from "../src/github-app.ts";
 import { GitHubLabelWriter, NewRepositoryLabel } from "../src/label-writer.ts";
 import {
+  AppSlug,
   Installation,
   InstallationId,
   InstallationToken,
@@ -20,7 +21,13 @@ const token = new InstallationToken({
 });
 const appLayer = Layer.succeed(GitHubApp)({
   installation: () =>
-    Effect.succeed(new Installation({ id: InstallationId.make(77), accountLogin: "basaltbytes" })),
+    Effect.succeed(
+      new Installation({
+        id: InstallationId.make(77),
+        accountLogin: "basaltbytes",
+        appSlug: AppSlug.make("usine-basaltbytes"),
+      }),
+    ),
   installationToken: () => Effect.succeed(token),
   projectAccess: () => Effect.die("unused"),
   workerToken: () => Effect.die("unused"),

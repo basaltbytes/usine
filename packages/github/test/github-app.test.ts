@@ -31,6 +31,7 @@ const JwtClaims = Schema.Struct({
 });
 const installation = {
   id: 77,
+  app_slug: "usine-basaltbytes",
   account: { login: "basaltbytes" },
   permissions,
   suspended_at: null,
@@ -113,6 +114,8 @@ describe("GitHubApp", () => {
         assert.strictEqual(wide.scope._tag, "InstallationWide");
         assert.strictEqual(Redacted.value(wide.value), "installation-secret");
         assert(!String(wide).includes("installation-secret"));
+        // The slug is the App's bot login, which attributes timeline changes to the factory.
+        assert.strictEqual((yield* app.installation()).appSlug, "usine-basaltbytes");
 
         const access = yield* app.projectAccess([
           RepositoryName.make("BasaltBytes/Usine"),

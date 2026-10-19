@@ -1,0 +1,265 @@
+import { ItemNumber } from "@usine/core/item";
+import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
+import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
+import { HttpClient } from "effect/unstable/http";
+import { GitHubItemNotFoundError, type GitHubAppError } from "./error.ts";
+import { GitHubApp } from "./github-app.ts";
+import { queryGraphql } from "./graphql.ts";
+import { invalidResponse } from "./http.ts";
+import type { AppSlug } from "./installation.ts";
+import { RepositoryLabel, RepositoryLabelColor, RepositoryLabelName } from "./polling/labels.ts";
+
+/** Caps one timeline walk; more changes than this since `since` fail rather than return part of them. */
+const MAX_TIMELINE_PAGES = 10;
+
+/** The factory's App added a label to the Item; `label` is the label as GitHub defines it now. */
+export class LabelAdded extends Schema.TaggedClass<LabelAdded>("@usine/github/LabelAdded")(
+  "LabelAdded",
+  { at: Schema.DateTimeUtc, label: RepositoryLabel },
+) {}
+
+/** The factory's App removed a label from the Item; `label` is the label as GitHub defines it now. */
+export class LabelRemoved extends Schema.TaggedClass<LabelRemoved>("@usine/github/LabelRemoved")(
+  "LabelRemoved",
+  { at: Schema.DateTimeUtc, label: RepositoryLabel },
+) {}
+
+/** The factory's App commented on the Item; `url` opens the comment on GitHub. */
+export class Commented extends Schema.TaggedClass<Commented>("@usine/github/Commented")(
+  "Commented",
+  { at: Schema.DateTimeUtc, url: Schema.NonEmptyString },
+) {}
+
+/** How a submitted pull request review stands on GitHub. */
+export const ReviewState = Schema.Literals([
+  "APPROVED",
+  "CHANGES_REQUESTED",
+  "COMMENTED",
+  "DISMISSED",
+]);
+export type ReviewState = typeof ReviewState.Type;
+
+/** The factory's App submitted a review of the pull request; `url` opens the review on GitHub. */
+export class Reviewed extends Schema.TaggedClass<Reviewed>("@usine/github/Reviewed")("Reviewed", {
+  at: Schema.DateTimeUtc,
+  url: Schema.NonEmptyString,
+  state: ReviewState,
+}) {}
+
+/** One change the factory's App made on an issue or pull request, at the time GitHub recorded it. */
+export const ItemChange = Schema.Union([LabelAdded, LabelRemoved, Commented, Reviewed]);
+export type ItemChange = typeof ItemChange.Type;
+
+const LABEL_AND_COMMENT_NODES = `
+      __typename
+      ... on LabeledEvent { createdAt actor { __typename login } label { name color description } }
+      ... on UnlabeledEvent { createdAt actor { __typename login } label { name color description } }
+      ... on IssueComment { createdAt url author { __typename login } }`;
+
+const ITEM_TIMELINE_QUERY = `
+  query UsineItemTimeline($owner: String!, $name: String!, $number: Int!, $since: DateTime!, $after: String) {
+    repository(owner: $owner, name: $name) {
+      issueOrPullRequest(number: $number) {
+        ... on Issue {
+          timelineItems(first: 100, after: $after, since: $since, itemTypes: [LABELED_EVENT, UNLABELED_EVENT, ISSUE_COMMENT]) {
+            pageInfo { hasNextPage endCursor }
+            nodes {${LABEL_AND_COMMENT_NODES}
+            }
+          }
+        }
+        ... on PullRequest {
+          timelineItems(first: 100, after: $after, since: $since, itemTypes: [LABELED_EVENT, UNLABELED_EVENT, ISSUE_COMMENT, PULL_REQUEST_REVIEW]) {
+            pageInfo { hasNextPage endCursor }
+            nodes {${LABEL_AND_COMMENT_NODES}
+              ... on PullRequestReview { createdAt submittedAt url state author { __typename login } }
+            }
+          }
+        }
+      }
+    }
+  }
+`;
+
+const Actor = Schema.NullOr(Schema.Struct({ __typename: Schema.String, login: Schema.String }));
+const TimelineLabel = Schema.Struct({
+  name: RepositoryLabelName,
+  color: RepositoryLabelColor,
+  description: Schema.NullOr(Schema.String),
+});
+const LabelEventNode = <Tag extends "LabeledEvent" | "UnlabeledEvent">(tag: Tag) =>
+  Schema.Struct({
+    __typename: Schema.Literal(tag),
+    createdAt: Schema.DateTimeUtcFromString,
+    actor: Actor,
+    label: TimelineLabel,
+  });
+const TimelineNode = Schema.Union([
+  LabelEventNode("LabeledEvent"),
+  LabelEventNode("UnlabeledEvent"),
+  Schema.Struct({
+    __typename: Schema.Literal("IssueComment"),
+    createdAt: Schema.DateTimeUtcFromString,
+    url: Schema.NonEmptyString,
+    author: Actor,
+  }),
+  Schema.Struct({
+    __typename: Schema.Literal("PullRequestReview"),
+    createdAt: Schema.DateTimeUtcFromString,
+    submittedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+    url: Schema.NonEmptyString,
+    state: Schema.Literals([...ReviewState.literals, "PENDING"]),
+    author: Actor,
+  }),
+]);
+type TimelineNode = typeof TimelineNode.Type;
+
+const TimelineData = Schema.Struct({
+  repository: Schema.OptionFromNullOr(
+    Schema.Struct({
+      issueOrPullRequest: Schema.OptionFromNullOr(
+        Schema.Struct({
+          timelineItems: Schema.Struct({
+            pageInfo: Schema.Struct({
+              hasNextPage: Schema.Boolean,
+              endCursor: Schema.NullOr(Schema.String),
+            }),
+            nodes: Schema.Array(Schema.NullOr(TimelineNode)),
+          }),
+        }),
+      ),
+    }),
+  ),
+});
+
+const appChange = (slug: AppSlug, node: TimelineNode): ReadonlyArray<ItemChange> => {
+  const byApp = (actor: typeof Actor.Type) =>
+    actor !== null && actor.__typename === "Bot" && actor.login === slug;
+  const label = (from: typeof TimelineLabel.Type) =>
+    new RepositoryLabel({
+      name: from.name,
+      color: from.color,
+      description: Option.fromNullishOr(from.description),
+    });
+  switch (node.__typename) {
+    case "LabeledEvent":
+      return byApp(node.actor)
+        ? [new LabelAdded({ at: node.createdAt, label: label(node.label) })]
+        : [];
+    case "UnlabeledEvent":
+      return byApp(node.actor)
+        ? [new LabelRemoved({ at: node.createdAt, label: label(node.label) })]
+        : [];
+    case "IssueComment":
+      return byApp(node.author) ? [new Commented({ at: node.createdAt, url: node.url })] : [];
+    case "PullRequestReview": {
+      const state = node.state;
+      // A pending review is a draft only its author sees; it changed nothing on GitHub yet.
+      if (!byApp(node.author) || state === "PENDING") return [];
+      return [new Reviewed({ at: node.submittedAt ?? node.createdAt, url: node.url, state })];
+    }
+  }
+};
+
+/** Reads what the factory's GitHub App changed on an Item, from the Item's GitHub timeline. */
+export class GitHubItemHistory extends Context.Service<
+  GitHubItemHistory,
+  {
+    /**
+     * The labels the App added or removed, its comments, and its submitted reviews on
+     * one issue or pull request at or after `since`, oldest first. Changes by every
+     * other actor are left out. Labels carry their current GitHub name, color, and
+     * description. Fails with `GitHubItemNotFoundError` when the repository answers
+     * but has no such Item.
+     */
+    readonly appChanges: (
+      repository: RepositoryName,
+      item: ItemNumber,
+      since: DateTime.Utc,
+    ) => Effect.Effect<ReadonlyArray<ItemChange>, GitHubAppError | GitHubItemNotFoundError>;
+  }
+>()("@usine/github/GitHubItemHistory") {
+  static readonly layer: Layer.Layer<GitHubItemHistory, never, GitHubApp | HttpClient.HttpClient> =
+    Layer.effect(
+      GitHubItemHistory,
+      Effect.gen(function* () {
+        const app = yield* GitHubApp;
+        const http = yield* HttpClient.HttpClient;
+
+        const timelinePage = Effect.fn("GitHubItemHistory.timelinePage")(function* (
+          repository: RepositoryName,
+          item: ItemNumber,
+          since: string,
+          after: string | null,
+        ) {
+          const token = yield* app.installationToken();
+          const { name, owner } = splitRepositoryName(repository);
+          const data = yield* queryGraphql(
+            http,
+            token,
+            "fetch-item-timeline",
+            ITEM_TIMELINE_QUERY,
+            { owner, name, number: item, since, after },
+            TimelineData,
+          );
+          if (Option.isNone(data.repository))
+            return yield* invalidResponse(
+              "fetch-item-timeline",
+              `repository ${repository} came back null: deleted, renamed, or access lost`,
+            );
+          const found = data.repository.value.issueOrPullRequest;
+          if (Option.isNone(found))
+            return yield* new GitHubItemNotFoundError({
+              operation: "fetch-item-timeline",
+              item,
+              message: `GitHub has no issue or pull request ${item} in ${repository}: deleted, transferred, or access lost`,
+            });
+          const { pageInfo, nodes } = found.value.timelineItems;
+          if (!pageInfo.hasNextPage) return { nodes, next: Option.none<string>() };
+          if (pageInfo.endCursor === null)
+            return yield* invalidResponse(
+              "fetch-item-timeline",
+              "GitHub reported another timeline page without a cursor",
+            );
+          return { nodes, next: Option.some(pageInfo.endCursor) };
+        });
+
+        const appChanges = Effect.fn("GitHubItemHistory.appChanges")(function* (
+          repository: RepositoryName,
+          item: ItemNumber,
+          since: DateTime.Utc,
+        ) {
+          yield* Effect.annotateCurrentSpan({ repository, item });
+          const { appSlug } = yield* app.installation();
+          const sinceIso = DateTime.formatIso(since);
+          const nodes: Array<TimelineNode | null> = [];
+          let next = Option.none<string>();
+          let pages = 0;
+          do {
+            const page = yield* timelinePage(repository, item, sinceIso, Option.getOrNull(next));
+            nodes.push(...page.nodes);
+            next = page.next;
+            pages += 1;
+          } while (Option.isSome(next) && pages < MAX_TIMELINE_PAGES);
+          if (Option.isSome(next))
+            return yield* invalidResponse(
+              "fetch-item-timeline",
+              `the timeline of ${repository}#${item} since ${sinceIso} exceeded ${MAX_TIMELINE_PAGES} pages`,
+            );
+          const changes = nodes.flatMap((node) => (node === null ? [] : appChange(appSlug, node)));
+          yield* Effect.logDebug("Read the App's changes from an Item timeline", {
+            repository,
+            item,
+            since: sinceIso,
+            pages,
+            timelineItems: nodes.length,
+            appChanges: changes.length,
+          });
+          return changes;
+        });
+
+        return { appChanges };
+      }),
+    );
+}
+
+export { GitHubItemNotFoundError } from "./error.ts";
