@@ -3,23 +3,18 @@ import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
 import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../github-app.ts";
+import { queryGraphql } from "../graphql.ts";
 import {
   API_ROOT,
   authorized,
   invalidResponse,
   pollIntervalMillis,
   rateLimitResetMillis,
-  rateLimitRetryEpoch,
   retryAfterMillis,
   statusError,
   transportError,
 } from "../http.ts";
-import {
-  GitHubItemNotFoundError,
-  GitHubRateLimitError,
-  type GitHubAppError,
-  type GitHubOperation,
-} from "../error.ts";
+import { GitHubItemNotFoundError, type GitHubAppError, type GitHubOperation } from "../error.ts";
 import {
   ChangedIssue,
   ChangedPullRequest,
@@ -53,8 +48,6 @@ const RATE_LIMIT_PRESSURE_THRESHOLD = 100;
 const MAX_CHANGE_PAGES = 10;
 /** Caps one repository's label walk so a pathological catalog cannot run unbounded. */
 const MAX_LABEL_PAGES = 100;
-/** GraphQL rate limiting sometimes omits reset headers. Wait at least this long then. */
-const GRAPHQL_RATE_LIMIT_FALLBACK_MS = 60_000;
 
 const RestChangedItem = Schema.Struct({
   number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -76,19 +69,6 @@ const catalogLabel = ({
   description,
 }: (typeof RestRepositoryLabels.Type)[number]): RepositoryLabel =>
   new RepositoryLabel({ name, color, description: Option.fromNullishOr(description) });
-
-/** The GraphQL transport envelope. `errors` arrives on HTTP 200 and must be read. */
-const GraphqlEnvelope = Schema.Struct({
-  data: Schema.optionalKey(Schema.Unknown),
-  errors: Schema.optionalKey(
-    Schema.Array(
-      Schema.Struct({
-        message: Schema.String,
-        type: Schema.optionalKey(Schema.String),
-      }),
-    ),
-  ),
-});
 
 const IssueData = Schema.Struct({
   repository: Schema.OptionFromNullOr(
@@ -414,41 +394,13 @@ export class GitHubPolling extends Context.Service<
       ) {
         const token = yield* app.installationToken();
         const { name, owner } = splitRepositoryName(repository);
-        const request = HttpClientRequest.post(`${API_ROOT}/graphql`).pipe(
-          HttpClientRequest.bodyJsonUnsafe({ query, variables: { owner, name, number } }),
-          authorized(token.value),
-        );
-        const response = yield* execute(operation, request);
-        const now = yield* Clock.currentTimeMillis;
-        if (response.status !== 200) return yield* statusError(operation, response, now);
-        const envelope = yield* HttpClientResponse.schemaBodyJson(GraphqlEnvelope)(response).pipe(
-          Effect.mapError((error) => invalidResponse(operation, error.message)),
-        );
-        // GraphQL reports failures on HTTP 200. Rate limiting becomes a typed wait, and anything else keeps its messages for diagnosis.
-        if (envelope.errors !== undefined && envelope.errors.length > 0) {
-          const rateLimited = envelope.errors.some((error) => error.type === "RATE_LIMITED");
-          if (rateLimited) {
-            const retryAt = Option.getOrElse(
-              rateLimitRetryEpoch(response.headers, now),
-              () => now + GRAPHQL_RATE_LIMIT_FALLBACK_MS,
-            );
-            return yield* new GitHubRateLimitError({
-              operation,
-              retryAt: DateTime.makeUnsafe(retryAt),
-              message: "GitHub GraphQL asked the poller to wait before retrying",
-            });
-          }
-          // GitHub reports a missing Item as a NOT_FOUND error beside a null
-          // field, which `dataSchema` decodes as absent for the caller to judge.
-          if (!envelope.errors.every((error) => error.type === "NOT_FOUND")) {
-            return yield* invalidResponse(
-              operation,
-              `GraphQL errors: ${envelope.errors.map((error) => error.message).join("; ")}`,
-            );
-          }
-        }
-        return yield* Schema.decodeUnknownEffect(dataSchema)(envelope.data).pipe(
-          Effect.mapError((error) => invalidResponse(operation, error.message)),
+        return yield* queryGraphql(
+          http,
+          token,
+          operation,
+          query,
+          { owner, name, number },
+          dataSchema,
         );
       });
 
