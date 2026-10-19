@@ -79,13 +79,13 @@ const harnessUnavailable: HarnessProbe = (brain) =>
     }),
   );
 
-/** A parent that commits (unless it only updates its PR) and records the PR the fake `gh` reports. */
+/** A parent that commits and pushes (unless it only updates its PR) and records the PR the fake `gh` reports. */
 const pullRequestParent =
   (operation: "create" | "update"): StubParent =>
   ({ request }) =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
-      if (operation === "create")
+      if (operation === "create") {
         yield* run(
           "git",
           [
@@ -100,6 +100,12 @@ const pullRequestParent =
           ],
           request.cwd,
         );
+        yield* run(
+          "git",
+          ["push", "origin", "HEAD:refs/heads/usine/implement-the-issue"],
+          request.cwd,
+        );
+      }
       const head = (yield* output("git", ["rev-parse", "HEAD"], request.cwd)).trim();
       yield* fileSystem.writeFileString(
         `${request.cwd}/.test-pull-request.json`,

@@ -95,6 +95,18 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
     });
     return [];
   }
+  // A pull request's head is the tip of its branch and of refs/pull/<n>/head;
+  // GitHub answers HTTP 422 for a commit that was never pushed.
+  if (head !== spec.baseCommit) {
+    const refs = yield* run("git", ["ls-remote", "origin", "refs/heads/*", "refs/pull/*/head"]);
+    if (!refs.some((ref) => ref.startsWith(`${head}\t`))) {
+      yield* Effect.logDebug("No remote branch or pull request has the Attempt's final commit", {
+        attemptId: spec.attemptId,
+        head,
+      });
+      return [];
+    }
+  }
   const output = yield* run("gh", [
     "api",
     `repos/${spec.repository}/commits/${head}/pulls?per_page=100`,
@@ -128,8 +140,10 @@ const harvestPullRequests = Effect.fn("StepResult.harvestPullRequests")(function
 
 /**
  * The facts an Attempt's checkout holds once its agent has finished: new
- * commits, then the pull requests at its final commit. Pull request discovery
- * is read-only enrichment, so a GitHub failure or a ten-second stall keeps the
+ * commits, then the pull requests at its final commit. A new final commit
+ * that no remote branch or pull request ref points at was never pushed, so it
+ * has no pull request and GitHub is not asked. Pull request discovery is
+ * read-only enrichment, so a GitHub failure or a ten-second stall keeps the
  * commits and records no pull request rather than failing completed work.
  */
 export const harvestFacts = Effect.fn("StepResult.harvest")(function* <

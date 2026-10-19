@@ -20,7 +20,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 ## Configuration
 
 - [#40][]: the UI has no configuration form or raw editor, and the surgical YAML writer has no production caller ([writer.ts][]).
-- [#281][]: `AgentFrontmatter` declares `parent_model` and `parent_effort` as snake_case fields and copies them into camelCase by hand, instead of renaming them with `Schema.encodeKeys` ([parser.ts:44][], [parser.ts:203][]).
 - [#331][]: a reload refuses any change to `workers` or `webhooks`, so changing a Worker's `max_concurrent_attempts` still needs a restart.
 - [#332][]: a reload doesn't preflight the harness of a new or changed Agent; its first Attempt fails with `AgentFailure` instead.
 
@@ -59,8 +58,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 
 ## Harnesses
 
-- [#227][]: pull request harvest logs a warning whenever an Attempt's final commit was never pushed.
-- [#256][]: Claude preflight on a logged-out Worker doesn't tell you to run `claude auth login`.
 - [#258][]: the Codex app-server requests github.com and api.github.com on a Worker behind the Gateway.
 - [#266][]: a Codex child that can't connect to its provider reconnects silently for as long as the Attempt runs.
 - [#277][]: `StepResult` allows a `Comment` fact, but `harvestFacts` never records one ([harvest.ts:135][]).
@@ -78,7 +75,6 @@ See [Workers and the Gateway](/architecture/workers-and-gateway/) for how each W
 - [#230][]: the tests haven't run an SSH Worker with real Claude Code and Codex children.
 - [#231][]: Attempts on one SSH Worker without a Gateway can read each other's GitHub token.
 - [#229][]: the harness versions pinned in `infra/hetzner/cloud-init.yaml` must be updated by hand to match the versions usine supports.
-- [#257][]: the live SSH preflight test cases don't show each harness's outcome.
 - [#270][]: two Attempts at once thrash a 4 GB Worker until sshd stops responding.
 - [#278][]: local and direct SSH preflight don't check the GitHub credential; only the exe.dev preflight raises the `credentials` capability ([exe-dev/preflight.ts:123][]).
 
@@ -91,11 +87,8 @@ See [Workers and the Gateway](/architecture/workers-and-gateway/) for how each W
 - [#240][]: a tunnel opened to an allowed name can be reused for other names on the same certificate (HTTP/2 coalescing, domain fronting).
 - [#243][]: Attempts on one machine behind the Gateway can read each other's caller tokens.
 - [#249][]: the executor doesn't open or maintain the SSH forward to a Gateway's admin API; the operator must do it.
-- [#251][]: a refused admin request logs its endpoint as `HttpApiEndpoint`.
 - [#254][]: Workers behind the Gateway have no time source.
-- [#255][]: a tunnel that the client closes before its ClientHello is logged as a `not-tls` refusal.
 - [#261][]: harness turns behind the Gateway request hosts outside the egress allowlist.
-- [#262][]: `usine-gateway` exits with status 130 when systemd stops it.
 - [#264][]: infrastructure changes are applied to a running Gateway only by hand, and never to a running Worker.
 
 ## Agent behaviour in the dogfood Loops
@@ -117,8 +110,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [up.ts:122]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/up.ts#L122
 [cli.ts:23]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/apps/server/src/cli.ts#L23
 [writer.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/yaml/writer.ts
-[parser.ts:44]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L44
-[parser.ts:203]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/config/src/parser.ts#L203
 [operator.ts:556]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/operator/operator.ts#L556
 [polling.ts:222]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/polling/polling.ts#L222
 [store.ts:284]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/engine/src/store/store.ts#L284
@@ -154,7 +145,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#217]: https://github.com/basaltbytes/usine/issues/217
 [#223]: https://github.com/basaltbytes/usine/issues/223
 [#226]: https://github.com/basaltbytes/usine/issues/226
-[#227]: https://github.com/basaltbytes/usine/issues/227
 [#228]: https://github.com/basaltbytes/usine/issues/228
 [#229]: https://github.com/basaltbytes/usine/issues/229
 [#230]: https://github.com/basaltbytes/usine/issues/230
@@ -169,21 +159,15 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#243]: https://github.com/basaltbytes/usine/issues/243
 [#248]: https://github.com/basaltbytes/usine/issues/248
 [#249]: https://github.com/basaltbytes/usine/issues/249
-[#251]: https://github.com/basaltbytes/usine/issues/251
 [#254]: https://github.com/basaltbytes/usine/issues/254
-[#255]: https://github.com/basaltbytes/usine/issues/255
-[#256]: https://github.com/basaltbytes/usine/issues/256
-[#257]: https://github.com/basaltbytes/usine/issues/257
 [#258]: https://github.com/basaltbytes/usine/issues/258
 [#261]: https://github.com/basaltbytes/usine/issues/261
-[#262]: https://github.com/basaltbytes/usine/issues/262
 [#264]: https://github.com/basaltbytes/usine/issues/264
 [#266]: https://github.com/basaltbytes/usine/issues/266
 [#270]: https://github.com/basaltbytes/usine/issues/270
 [#277]: https://github.com/basaltbytes/usine/issues/277
 [#278]: https://github.com/basaltbytes/usine/issues/278
 [#279]: https://github.com/basaltbytes/usine/issues/279
-[#281]: https://github.com/basaltbytes/usine/issues/281
 [#331]: https://github.com/basaltbytes/usine/issues/331
 [#332]: https://github.com/basaltbytes/usine/issues/332
 [#333]: https://github.com/basaltbytes/usine/issues/333

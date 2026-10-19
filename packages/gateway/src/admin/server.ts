@@ -41,7 +41,7 @@ const authorization = Layer.effect(
           if (!sameDigest(expected, presented)) {
             yield* Effect.logWarning("Gateway refused an admin request", {
               reason: "bad-admin-token",
-              endpoint: endpoint.name,
+              endpoint: endpoint.identifier,
             });
             return yield* new HttpApiError.Unauthorized({});
           }
