@@ -1,14 +1,19 @@
 import type { UsineConfig } from "@usine/config/factory";
 import { LoadedInstance } from "@usine/config/instance";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Stream } from "effect";
 import { CurrentInstance } from "../../src/current-instance/current-instance.ts";
 
 /** A current instance that never changes; a test that reloads it has a bug. */
+export const fixedInstance = (instance: LoadedInstance): CurrentInstance["Service"] => ({
+  get: Effect.succeed(instance),
+  changes: Stream.concat(Stream.make(instance), Stream.never),
+  reload: Effect.die("this test's instance is never reloaded"),
+  registerPreflight: () => Effect.void,
+});
+
+/** The layer of `fixedInstance(instance)`. */
 export const fixedInstanceLayer = (instance: LoadedInstance) =>
-  Layer.succeed(CurrentInstance)({
-    get: Effect.succeed(instance),
-    reload: Effect.die("this test's instance is never reloaded"),
-  });
+  Layer.succeed(CurrentInstance)(fixedInstance(instance));
 
 /** A fixed instance with `config` and no Agents or Loops, for Worker and engine tests. */
 export const fixedConfigLayer = (config: UsineConfig) =>

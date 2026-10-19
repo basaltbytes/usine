@@ -4,8 +4,10 @@ import { GitHubLabelName } from "@usine/config/label";
 import { AgentName } from "@usine/core/agent";
 import { InstanceDirectory } from "@usine/core/instance";
 import { LoopName } from "@usine/core/loop";
-import { Effect, FileSystem, Logger, Path } from "effect";
+import { Executor, WorkerCapabilityError } from "@usine/executor";
+import { Effect, FileSystem, Layer, Logger, Path } from "effect";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
+import { stepExecutorLayer } from "../src/scheduler.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
 
 const usineYaml = (maxConcurrentAttempts = 1) => `version: 1
@@ -17,14 +19,17 @@ workers:
   - name: local
     kind: local
     max_concurrent_attempts: ${maxConcurrentAttempts}
+  - name: spare
+    kind: local
+    max_concurrent_attempts: 1
 `;
 
-const agentFile = (model: string) => `---
-harness: codex
+const agentFile = (model: string, harness = "codex", persona = "Implement the issue.") => `---
+harness: ${harness}
 model: ${model}
 effort: high
 ---
-Implement the issue.
+${persona}
 `;
 
 const loopFile = (agent: string) => `---
@@ -60,6 +65,44 @@ const withFolder = <A, E>(
 const warningsIn = (messages: Array<unknown>) =>
   Logger.make<unknown, void>(({ logLevel, message }) => {
     if (logLevel === "Warn") messages.push(Array.isArray(message) ? message[0] : message);
+  });
+
+const unused = () => Effect.die("unused");
+
+/**
+ * Starts the Worker scheduler on the current instance with an executor whose
+ * preflight records `worker: harness/model` for each brain it checks and fails
+ * on a `claude` brain, as on Workers where Claude Code is logged out.
+ */
+const startWorkers = (preflighted: Array<string>) =>
+  Effect.gen(function* () {
+    const { config, agents } = yield* (yield* CurrentInstance).get;
+    const executor = Layer.succeed(Executor)({
+      kind: "local",
+      recover: unused,
+      isLive: unused,
+      outcome: unused,
+      prepare: unused,
+      cancel: unused,
+      intervene: unused,
+      preflight: (worker, brains) =>
+        Effect.gen(function* () {
+          preflighted.push(...brains.map(({ harness, model }) => `${worker}: ${harness}/${model}`));
+          if (brains.some(({ harness }) => harness === "claude"))
+            return yield* new WorkerCapabilityError({
+              worker,
+              capability: "harness-login",
+              message: "Claude Code is not logged in.",
+              cause: "claude auth status: logged out",
+            });
+        }),
+    });
+    yield* Layer.build(
+      stepExecutorLayer(
+        config,
+        agents.map(({ agent }) => agent.brain),
+      ).pipe(Layer.provide(executor)),
+    );
   });
 
 describe("CurrentInstance", () => {
@@ -164,6 +207,50 @@ describe("CurrentInstance", () => {
         assert.deepStrictEqual(current.loops, []);
         assert.strictEqual(current.quarantinedLoops[0]?.file, "loops/start-dev.md");
       }),
+    ),
+  );
+
+  it.live("preflights on every Worker only the brains a reload adds", () =>
+    withFolder((root) =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        const preflighted: Array<string> = [];
+        yield* startWorkers(preflighted);
+        preflighted.length = 0;
+
+        yield* writeInstanceFiles(root, [
+          ["agents/developer.md", agentFile("gpt-5.6-sol", "codex", "Implement and test it.")],
+          ["loops/triage.md", loopFile("developer")],
+        ]);
+        const sameBrains = yield* instances.reload;
+        assert.deepStrictEqual(sameBrains.agents.changed, [AgentName.make("developer")]);
+        assert.deepStrictEqual(preflighted, [], "a reload that keeps every brain preflights none");
+
+        yield* writeInstanceFiles(root, [["agents/developer.md", agentFile("gpt-5.7-sol")]]);
+        yield* instances.reload;
+        assert.sameMembers(preflighted, ["local: codex/gpt-5.7-sol", "spare: codex/gpt-5.7-sol"]);
+        assert.strictEqual((yield* instances.get).agents[0]?.model, "gpt-5.7-sol");
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.live("refuses a reload whose new Agent fails Worker preflight and keeps the roster", () =>
+    withFolder((root) =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        yield* startWorkers([]);
+        const running = yield* instances.get;
+        yield* writeInstanceFiles(root, [
+          ["agents/reviewer.md", agentFile("claude-fable-5-1", "claude")],
+          ["loops/review.md", loopFile("reviewer")],
+        ]);
+        const failure = yield* Effect.flip(instances.reload);
+        assert(failure._tag === "ReloadPreflightError", failure._tag);
+        assert.deepStrictEqual(failure.agents, [AgentName.make("reviewer")]);
+        assert.include(failure.message, "Claude Code is not logged in");
+        assert.include(failure.message, "The running configuration is unchanged");
+        assert.strictEqual(yield* instances.get, running);
+      }).pipe(Effect.scoped),
     ),
   );
 });

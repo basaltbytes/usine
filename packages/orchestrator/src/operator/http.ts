@@ -38,6 +38,7 @@ const errorStatuses = {
   CycleBudgetResetRejectedError: 409,
   BoardLaneReadOnlyError: 409,
   RestartRequiredError: 409,
+  ReloadPreflightError: 409,
   FactoryConfigError: 422,
   EnginePersistenceError: 500,
   AttemptCancellationError: 500,

@@ -90,7 +90,7 @@ Every valid Agent file is added to the roster. usine leaves out a file that fail
 
 ### Preflight
 
-When `usine up` starts, it checks every rostered harness, model, and effort on every Worker before it runs any Attempt. A failed check stops startup. A reload doesn't run these checks; an Attempt checks its own Agent's harness when it starts, and a failed check fails it with `AgentFailure` ([`verifyHarness`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/preflight/preflight.ts#L35)).
+When `usine up` starts, it checks every rostered harness, model, and effort on every Worker before it runs any Attempt. A failed check stops startup. A reload runs the same checks on every Worker for each harness, model, and effort that no Agent of the running roster uses, before it replaces the roster. A failed check refuses the reload with `ReloadPreflightError`, and the running roster stays. In setup mode no Worker runs, so a reload checks nothing and the next `usine up` checks the whole roster. An Attempt also checks its own Agent's harness when it starts, and a failed check fails it with `AgentFailure` ([`verifyHarness`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/agents/src/preflight/preflight.ts#L35)).
 
 | `harness` | Runs | Preflight checks |
 | --- | --- | --- |

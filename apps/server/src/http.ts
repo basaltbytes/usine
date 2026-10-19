@@ -62,6 +62,7 @@ const operatorFailure = (error: BackendError) => {
           ? `Could not read ${error.file}: ${error.message.replace(/\.$/u, "")}. The running configuration is unchanged.`
           : `${error.file} is invalid (${error.stage}): ${error.message.replace(/\.$/u, "")}. The running configuration is unchanged.`;
       case "RestartRequiredError":
+      case "ReloadPreflightError":
         return error.message;
     }
   })();

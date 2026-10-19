@@ -7,6 +7,7 @@ import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, Executor, ExecutorError, ExecutorOperationError } from "@usine/executor";
 import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
 import {
+  Array as EffectArray,
   DateTime,
   Deferred,
   Effect,
@@ -81,9 +82,12 @@ const validateWorkers = (
 
 /**
  * Schedules Attempts FIFO over the configured Workers and adapts the Executor
- * to the engine's StepExecutor port. The Workers in `config` and the `brains`
- * they preflight are fixed when the layer builds; each Attempt reads its
- * `settings` (child budget, ceilings, parent effort) from the current instance.
+ * to the engine's StepExecutor port. The Workers in `config` are fixed when
+ * the layer builds. Each one preflights `brains` and the current roster
+ * before the layer is ready, and the same preflight is registered with the
+ * current instance, so a reload checks the brains it adds on every Worker.
+ * Each Attempt reads its `settings` (child budget, ceilings, parent effort)
+ * from the current instance.
  */
 export const stepExecutorLayer = (
   config: UsineConfig,
@@ -95,23 +99,31 @@ export const stepExecutorLayer = (
       const executor = yield* Executor;
       const instances = yield* CurrentInstance;
       const workers = yield* validateWorkers(executor.kind, config.workers);
-      yield* Effect.forEach(
-        workers,
-        ({ name, maxConcurrentAttempts }) =>
-          executor.preflight(name, brains, maxConcurrentAttempts).pipe(
-            // The operation error has no Worker field; startup reports must name the Worker.
-            Effect.mapError((error) =>
-              error._tag === "ExecutorOperationError"
-                ? new ExecutorOperationError({
-                    operation: error.operation,
-                    message: `Worker ${name}: ${error.message}`,
-                    cause: error.cause,
-                  })
-                : error,
+      const preflight = Effect.fn("WorkerScheduler.preflight")(function* (
+        roster: ReadonlyArray<BrainSpec>,
+      ) {
+        yield* Effect.forEach(
+          workers,
+          ({ name, maxConcurrentAttempts }) =>
+            executor.preflight(name, roster, maxConcurrentAttempts).pipe(
+              // The operation error has no Worker field; reports must name the Worker.
+              Effect.mapError((error) =>
+                error._tag === "ExecutorOperationError"
+                  ? new ExecutorOperationError({
+                      operation: error.operation,
+                      message: `Worker ${name}: ${error.message}`,
+                      cause: error.cause,
+                    })
+                  : error,
+              ),
             ),
-          ),
-        { concurrency: "unbounded", discard: true },
-      );
+          { concurrency: "unbounded", discard: true },
+        );
+      });
+      yield* instances.registerPreflight(preflight);
+      // A reload can change the roster after the caller read `brains` and before the registration.
+      const { agents } = yield* instances.get;
+      yield* preflight(EffectArray.dedupe([...brains, ...agents.map(({ agent }) => agent.brain)]));
 
       const available = yield* Queue.make<WorkerName>();
       yield* Queue.offerAll(

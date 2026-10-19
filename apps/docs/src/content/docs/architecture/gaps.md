@@ -21,13 +21,11 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 
 - [#40][]: the UI has no configuration form or raw editor, and the surgical YAML writer has no production caller ([writer.ts][]).
 - [#331][]: a reload refuses any change to `workers` or `webhooks`, so changing a Worker's `max_concurrent_attempts` still needs a restart.
-- [#332][]: a reload doesn't preflight the harness of a new or changed Agent; its first Attempt fails with `AgentFailure` instead.
 
 ## Triggers and polling
 
 - [#37][]: usine parses `webhooks.mode` but never reads it, there is no `POST /webhooks/github`, and Board moves are the only Hint source ([operator.ts:556][]).
 - [#158][]: every poll fetches every known open pull request again, instead of only after the base branch changes ([polling.ts:222][]).
-- [#333][]: after a reload, new Loops apply only when the current poll wait ends, up to one `poll_interval` later.
 
 ## Asks and notifications
 
@@ -167,5 +165,3 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#278]: https://github.com/basaltbytes/usine/issues/278
 [#279]: https://github.com/basaltbytes/usine/issues/279
 [#331]: https://github.com/basaltbytes/usine/issues/331
-[#332]: https://github.com/basaltbytes/usine/issues/332
-[#333]: https://github.com/basaltbytes/usine/issues/333

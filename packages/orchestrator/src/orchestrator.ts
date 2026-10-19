@@ -9,7 +9,7 @@ const makeOrchestrator = Effect.gen(function* () {
   const instances = yield* CurrentInstance;
 
   const run: Effect.Effect<never> = Effect.raceFirst(
-    polling.run(instances.get),
+    polling.run(instances),
     schedules.run(instances.get),
   );
 
@@ -20,7 +20,11 @@ const makeOrchestrator = Effect.gen(function* () {
 export class Orchestrator extends Context.Service<
   Orchestrator,
   {
-    /** Evaluates the triggers until interrupted; each cycle reads the current instance, so a reload applies from the next one. */
+    /**
+     * Evaluates the triggers until interrupted. Each cycle reads the current
+     * instance, so a reload applies from the next one, and an accepted reload
+     * starts the next poll cycle without waiting for `poll_interval`.
+     */
     readonly run: Effect.Effect<never>;
   }
 >()("@usine/orchestrator/Orchestrator") {
