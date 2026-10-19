@@ -1,6 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreDependencies": ["@effect/platform-node-shared"],
+  "ignoreDependencies": ["@earendil-works/pi-codemode", "@effect/platform-node-shared"],
   "workspaces": {
     ".": {
       "entry": [],
