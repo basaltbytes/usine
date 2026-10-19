@@ -79,6 +79,7 @@ const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Attemp
     openedAt: "2026-09-01T12:00:00.000Z",
     task: "Review issue 33.",
     attempts,
+    approval: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,

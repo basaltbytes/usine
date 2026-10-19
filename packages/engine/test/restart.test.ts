@@ -23,6 +23,7 @@ import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import {
   approvalEvent,
+  uiApproval,
   type AttemptPlan,
   committedBeforeCrash,
   engineLayer,
@@ -99,7 +100,7 @@ describe("engine restart", () => {
         assert.strictEqual(parked.run.state._tag, "Waiting");
         assert.strictEqual(parked.attempts.length, 0);
 
-        yield* secondEngine.approve(accepted.runId, approvalEvent(12));
+        yield* secondEngine.approve(accepted.runId, approvalEvent(12), uiApproval);
         const finished = yield* waitFor(
           secondEngine,
           accepted.runId,
@@ -537,7 +538,7 @@ describe("engine restart", () => {
           Effect.gen(function* () {
             yield* store.recordAndClaim(gated, runId);
             yield* store.parkForApproval(runId);
-            yield* store.approve(runId, approvalEvent(51));
+            yield* store.approve(runId, approvalEvent(51), uiApproval);
           }),
         );
         yield* Effect.gen(function* () {

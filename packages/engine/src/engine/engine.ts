@@ -4,6 +4,7 @@ import { Intervention } from "@usine/core/attempt/channel";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
+import { ApprovalSource } from "@usine/core/run/approval";
 import type { WorkerName } from "@usine/core/worker";
 import { Context, Crypto, type Duration, Effect, Layer, Match, Option, Result } from "effect";
 import { RunDatabase } from "../database/database.ts";
@@ -66,8 +67,18 @@ const makeRunEngine = Effect.gen(function* () {
     return claim.result;
   }, Effect.uninterruptible);
 
-  const approve = Effect.fn("RunEngine.approve")(function* (runId: RunId, approval: Event) {
-    if (yield* store.approve(runId, approval)) {
+  const approve = Effect.fn("RunEngine.approve")(function* (
+    runId: RunId,
+    approval: Event,
+    source: ApprovalSource,
+  ) {
+    if (yield* store.approve(runId, approval, source)) {
+      yield* Effect.logInfo("Run approved", {
+        runId,
+        eventId: approval.id,
+        channel: source.channel,
+        approver: Option.getOrElse(source.approver, () => "none"),
+      });
       yield* driver.resume(runId);
       return;
     }
@@ -287,8 +298,16 @@ export class RunEngine extends Context.Service<
   {
     /** Stops admitting Attempts, including retries, and waits for admitted work to settle. Interrupting this wait keeps admission closed until restart. */
     readonly drain: () => Effect.Effect<void>;
-    /** Records the operator's approval Event and opens the Run's gate; execution still waits for a Worker slot. */
-    readonly approve: (runId: RunId, approval: Event) => Effect.Effect<void, RunEngineError>;
+    /**
+     * Records the operator's approval Event with who gave it through which
+     * channel, once, and opens the Run's gate; execution still waits for a
+     * Worker slot. A repeated approval keeps the first one's source.
+     */
+    readonly approve: (
+      runId: RunId,
+      approval: Event,
+      source: ApprovalSource,
+    ) => Effect.Effect<void, RunEngineError>;
     /** Cancels an open Run and interrupts its active Attempt. An already closed Run is unchanged. */
     readonly cancel: (runId: RunId) => Effect.Effect<void, RunEngineError>;
     /**

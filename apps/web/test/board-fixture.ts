@@ -83,6 +83,7 @@ const run = (
     openedAt: minutesAgo(minutes),
     task: `Work on #${item.number}.`,
     attempts,
+    approval: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: state === "Waiting",

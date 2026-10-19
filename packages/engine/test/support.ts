@@ -7,8 +7,10 @@ import { Event, DedupKey, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
+import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
+import { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
@@ -93,6 +95,12 @@ export const submission = (options: {
     parentModel: Option.none(),
   });
 };
+
+/** The web UI's approval, acting as the operator `usine.yaml` names. */
+export const uiApproval = new ApprovalSource({
+  channel: "ui",
+  approver: Option.some(OperatorLogin.make("operator")),
+});
 
 export const approvalEvent = (number: number) => {
   const second = String(number).padStart(2, "0");

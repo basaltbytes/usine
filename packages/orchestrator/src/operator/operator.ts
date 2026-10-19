@@ -10,6 +10,7 @@ import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { CycleBudgets, type CycleBudgetResetRejectedError } from "@usine/engine/cycle-budget";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
+import { ApprovalSource } from "@usine/core/run/approval";
 import type { WorkerName } from "@usine/core/worker";
 import {
   RunEngine,
@@ -438,7 +439,7 @@ const makeOperator = Effect.gen(function* () {
   const github = yield* GitHubItemWriter;
   const polling = yield* PollingTriggers;
 
-  const approve = Effect.fn("Operator.approve")(function* (runId: RunId) {
+  const approve = Effect.fn("Operator.approve")(function* (instance: LoadedInstance, runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
     const current = yield* runs.inspect(runId);
     if (current.run.state._tag !== "Waiting") {
@@ -462,6 +463,7 @@ const makeOperator = Effect.gen(function* () {
         payload: { runId, decision: "approved" },
         receivedAt,
       }),
+      new ApprovalSource({ channel: "ui", approver: instance.config.operator }),
     );
     yield* Effect.logInfo("Operator approved Run", { runId });
   });
@@ -648,8 +650,15 @@ export class Operator extends Context.Service<
   OperatorObservation["Service"] & {
     /** Answers the Item's current cycle Ask; polling refreshes its state before more Runs open. */
     readonly resetCycleBudget: (askId: CycleBudgetAskId) => Effect.Effect<void, OperatorError>;
-    /** Records approval for a waiting Run; execution still waits for Worker capacity. */
-    readonly approve: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /**
+     * Records the web UI's approval of a waiting Run as given by the operator
+     * login `usine.yaml` names, or by no named approver when it names none;
+     * execution still waits for Worker capacity.
+     */
+    readonly approve: (
+      instance: LoadedInstance,
+      runId: RunId,
+    ) => Effect.Effect<void, OperatorError>;
     /** Resolves attention for the failed Attempt displayed to the operator; stale requests are rejected. */
     readonly resolveFailure: (
       runId: RunId,
@@ -702,6 +711,7 @@ export {
   FactoryOverview,
 } from "./overview.ts";
 export {
+  ApprovalView,
   RunStateTag,
   RunView,
   RunDetailView,

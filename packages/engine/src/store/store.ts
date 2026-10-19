@@ -6,6 +6,7 @@ import { Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId, Run } from "@usine/core/run";
+import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
 import { StepResult } from "@usine/core/step/result";
@@ -553,8 +554,12 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("resolve Run failure"));
 
-  const approve = Effect.fn("RunStore.approve")(function* (runId: RunId, approval: Event) {
-    yield* Effect.annotateCurrentSpan({ runId, eventId: approval.id });
+  const approve = Effect.fn("RunStore.approve")(function* (
+    runId: RunId,
+    approval: Event,
+    source: ApprovalSource,
+  ) {
+    yield* Effect.annotateCurrentSpan({ runId, eventId: approval.id, channel: source.channel });
     return yield* database.transaction((transaction) =>
       Effect.gen(function* () {
         const tx = queriesFor(transaction);
@@ -567,7 +572,7 @@ const makeRunStore = Effect.gen(function* () {
             state: current.run.state._tag,
           });
         }
-        yield* tx.recordApproval(runId, approval);
+        yield* tx.recordApproval(runId, approval, source);
         yield* tx.updateState(runId, RunState.approve(current.run.state));
         return true;
       }),
@@ -783,8 +788,16 @@ const makeRunStore = Effect.gen(function* () {
 export class RunStore extends Context.Service<
   RunStore,
   {
-    /** Records the approval and lets the waiting Run queue for a Worker. True when this call recorded it; a repeated approval changes nothing. */
-    readonly approve: (runId: RunId, approval: Event) => Effect.Effect<boolean, RunStoreError>;
+    /**
+     * Records the approval Event with who gave it through which channel, and
+     * lets the waiting Run queue for a Worker. True when this call recorded it;
+     * a repeated approval changes nothing, its source included.
+     */
+    readonly approve: (
+      runId: RunId,
+      approval: Event,
+      source: ApprovalSource,
+    ) => Effect.Effect<boolean, RunStoreError>;
     readonly appendTranscript: (
       direction: AttemptChannel.Direction,
       envelope: AttemptChannel.Envelope,

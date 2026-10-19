@@ -9,6 +9,8 @@ import { Event, EventId } from "@usine/core/event";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
+import { OperatorLogin } from "@usine/core/operator";
+import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import { Deferred, Effect, Fiber, Layer, Logger, Option, Ref } from "effect";
 import { RunDatabase, type RunDatabaseClient } from "../src/database/database.ts";
@@ -20,6 +22,7 @@ import { StepExecutor } from "../src/step-executor.ts";
 import { runIdFor, Submission } from "../src/engine/submission.ts";
 import {
   approvalEvent,
+  uiApproval,
   type AttemptPlan,
   conditionLayer,
   engineLayer,
@@ -260,46 +263,60 @@ describe("durable run engine", () => {
     ),
   );
 
-  it.live("deduplicates permanently and opens an approval gate only once", () =>
-    withInstance((directory) =>
-      Effect.gen(function* () {
-        const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
-          Effect.succeed(stepResult("approved result")),
-        ]);
-        const runtime = engineLayer(directory, executorLayer(plans));
+  it.live(
+    "deduplicates permanently and opens an approval gate only once, recording its source",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Effect.succeed(stepResult("approved result")),
+          ]);
+          const runtime = engineLayer(directory, executorLayer(plans));
 
-        yield* Effect.gen(function* () {
-          const engine = yield* RunEngine;
-          const event = submission({ number: 2, approval: "required" });
-          const first = yield* engine.submit(event);
-          const duplicate = yield* engine.submit(event);
-          assert.strictEqual(first._tag, "Claimed");
-          assert.strictEqual(duplicate._tag, "Claimed");
-          if (first._tag !== "Claimed" || duplicate._tag !== "Claimed") return;
-          assert.strictEqual(duplicate.runId, first.runId);
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const event = submission({ number: 2, approval: "required" });
+            const first = yield* engine.submit(event);
+            const duplicate = yield* engine.submit(event);
+            assert.strictEqual(first._tag, "Claimed");
+            assert.strictEqual(duplicate._tag, "Claimed");
+            if (first._tag !== "Claimed" || duplicate._tag !== "Claimed") return;
+            assert.strictEqual(duplicate.runId, first.runId);
 
-          const waiting = yield* waitFor(
-            engine,
-            first.runId,
-            ({ run }) => run.state._tag === "Waiting",
-          );
-          assert.strictEqual(waiting.attempts.length, 0);
+            const waiting = yield* waitFor(
+              engine,
+              first.runId,
+              ({ run }) => run.state._tag === "Waiting",
+            );
+            assert.strictEqual(waiting.attempts.length, 0);
+            assert(Option.isNone(waiting.approval));
 
-          const approval = approvalEvent(2);
-          yield* engine.approve(first.runId, approval);
-          const finished = yield* waitFor(
-            engine,
-            first.runId,
-            ({ run }) => run.state._tag === "Succeeded",
-          );
-          assert.strictEqual(finished.attempts.length, 1);
+            const approval = approvalEvent(2);
+            const askAnswer = new ApprovalSource({
+              channel: "github-ask",
+              approver: Option.some(OperatorLogin.make("Philippe")),
+            });
+            yield* engine.approve(first.runId, approval, askAnswer);
+            const finished = yield* waitFor(
+              engine,
+              first.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            assert.strictEqual(finished.attempts.length, 1);
+            const recorded = Option.some(
+              new RunApproval({ approvedAt: approval.receivedAt, source: Option.some(askAnswer) }),
+            );
+            assert.deepStrictEqual(finished.approval, recorded);
 
-          // Re-delivery of the same approval Event is an idempotent join.
-          yield* engine.approve(first.runId, approval);
-          assert.strictEqual((yield* engine.inspect(first.runId)).attempts.length, 1);
-        }).pipe(Effect.provide(runtime));
-      }),
-    ),
+            // Re-delivery of the same approval Event is an idempotent join, and
+            // a later approval from another channel does not rewrite who approved.
+            yield* engine.approve(first.runId, approval, uiApproval);
+            const rejoined = yield* engine.inspect(first.runId);
+            assert.strictEqual(rejoined.attempts.length, 1);
+            assert.deepStrictEqual(rejoined.approval, recorded);
+          }).pipe(Effect.provide(runtime));
+        }),
+      ),
   );
 
   it.live("auto-retries only typed infrastructure failures", () =>
@@ -752,7 +769,9 @@ describe("durable run engine", () => {
           assert(parked._tag === "Claimed");
           yield* waitFor(engine, parked.runId, ({ run }) => run.state._tag === "Waiting");
           yield* engine.cancel(parked.runId);
-          const rejected = yield* Effect.flip(engine.approve(parked.runId, approvalEvent(50)));
+          const rejected = yield* Effect.flip(
+            engine.approve(parked.runId, approvalEvent(50), uiApproval),
+          );
           assert.strictEqual(rejected._tag, "RunOperationRejectedError");
           const canceled = yield* engine.inspect(parked.runId);
           assert.strictEqual(canceled.run.state._tag, "Canceled");

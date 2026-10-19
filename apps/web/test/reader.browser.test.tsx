@@ -90,6 +90,7 @@ const runView = (id: RunId, attempts: ReadonlyArray<AttemptView>) =>
     openedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, 0)).toISOString(),
     task: "Read the conversation",
     attempts,
+    approval: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: false,

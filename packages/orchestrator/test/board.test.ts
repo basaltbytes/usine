@@ -122,6 +122,7 @@ const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succ
     openedAt: "2026-09-01T12:00:00.000Z",
     task: "Build the Board.",
     attempts: [],
+    approval: null,
     resultMessage: null,
     pullRequestUrl: null,
     canApprove: state === "Waiting",

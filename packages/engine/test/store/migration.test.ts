@@ -9,8 +9,9 @@ import { Agent } from "@usine/core/agent";
 import { BrainSpec } from "@usine/core/agent/brain";
 
 import { RunId } from "@usine/core/run";
+import { RunApproval } from "@usine/core/run/approval";
 
-import { Effect, FileSystem, Layer, Option, Schema } from "effect";
+import { DateTime, Effect, FileSystem, Layer, Option, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 
 import { RunDatabase } from "../../src/database/database.ts";
@@ -322,6 +323,76 @@ describe("Attempt salvage check migration", () => {
           const after = (yield* sql`SELECT revision FROM usine_projection_revision`)[0]?.revision;
           assert(Schema.is(Schema.Int)(before));
           assert.strictEqual(after, before + 1);
+        }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+      }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});
+
+describe("Run approval source migration", () => {
+  it.live(
+    "reads an earlier approval as approved with no source and rejects an Ask approval without its approver",
+    () =>
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const directory = InstanceDirectory.make(
+          yield* fs.makeTempDirectoryScoped({ prefix: "usine-approval-source-upgrade-" }),
+        );
+        const historical = yield* fs.makeTempDirectoryScoped({
+          prefix: "usine-approval-source-migrations-",
+        });
+        const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
+        for (const name of yield* fs.readDirectory(source)) {
+          if (name >= "20261019104043_run_approval_source") continue;
+          yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
+        }
+        yield* fs.makeDirectory(`${directory}/.usine`);
+        const previousDatabase = Layer.effect(
+          RunDatabase,
+          Effect.gen(function* () {
+            const database = yield* SQLiteDrizzle.makeWithDefaults();
+            yield* migrate(database, {
+              migrationsFolder: historical,
+              migrationsTable: "usine_migrations",
+            });
+            return database;
+          }),
+        ).pipe(
+          Layer.provideMerge(
+            SqliteClient.layer({ filename: `${directory}/.usine/runtime.sqlite` }),
+          ),
+        );
+        const runId = RunId.make("approved-before-upgrade");
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            yield* seedPendingRun(runId);
+            const sql = yield* SqlClient.SqlClient;
+            yield* sql`INSERT INTO usine_events (event_id, dedup_key, payload_json, received_at)
+              VALUES ('approval-before-upgrade', 'approval-before-upgrade', '{}', '2026-10-01T00:05:00.000Z')`;
+            yield* sql`INSERT INTO usine_approvals (run_id, event_id) VALUES (${runId}, 'approval-before-upgrade')`;
+            yield* sql`UPDATE usine_runs SET state_json = '{"_tag":"Queued"}' WHERE run_id = ${runId}`;
+          }).pipe(Effect.provide(previousDatabase)),
+        );
+        yield* Effect.gen(function* () {
+          const store = yield* RunStore;
+          const snapshot = yield* store.snapshot(runId);
+          assert.strictEqual(snapshot.run.state._tag, "Queued");
+          assert.deepStrictEqual(
+            snapshot.approval,
+            Option.some(
+              new RunApproval({
+                approvedAt: DateTime.makeUnsafe("2026-10-01T00:05:00.000Z"),
+                source: Option.none(),
+              }),
+            ),
+          );
+          const sql = yield* SqlClient.SqlClient;
+          assert.deepStrictEqual(yield* sql`PRAGMA foreign_key_check`, []);
+          assert.strictEqual((yield* sql`PRAGMA foreign_keys`)[0]?.foreign_keys, 1);
+          const rejected =
+            yield* sql`UPDATE usine_approvals SET channel = 'github-ask' WHERE run_id = ${runId}`.pipe(
+              Effect.flip,
+            );
+          assert.include(String(rejected.reason.cause), "CHECK constraint failed");
         }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );

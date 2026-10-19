@@ -72,7 +72,8 @@ export const liveBackendLayer = (
   Layer.succeed(FactoryBackend)({
     overview: Effect.flatMap(instances.get, operator.overview),
     detail: operator.detail,
-    approve: operator.approve,
+    approve: (runId) =>
+      Effect.flatMap(instances.get, (instance) => operator.approve(instance, runId)),
     resetCycleBudget: operator.resetCycleBudget,
     retry: operator.retry,
     resolveFailure: operator.resolveFailure,

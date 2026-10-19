@@ -6,8 +6,10 @@ import { DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { CycleLimit, CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { LoopName, APPROVAL_REQUIREMENTS, type ApprovalRequirement } from "@usine/core/loop";
+import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { APPROVAL_CHANNELS, type ApprovalChannel } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { sql } from "drizzle-orm";
@@ -269,17 +271,33 @@ export const attemptTranscripts = snakeCase.table(
   ],
 );
 
-export const approvals = snakeCase.table("usine_approvals", {
-  runId: text()
-    .$type<RunId>()
-    .primaryKey()
-    .references(() => runs.runId),
-  eventId: text()
-    .$type<EventId>()
-    .notNull()
-    .unique()
-    .references(() => events.eventId),
-});
+/**
+ * The approval Event each approved Run consumed, with its source. Approvals
+ * recorded before sources were stored have neither `channel` nor `approver`; a
+ * UI approval while `usine.yaml` names no operator has a channel and no approver.
+ */
+export const approvals = snakeCase.table(
+  "usine_approvals",
+  {
+    runId: text()
+      .$type<RunId>()
+      .primaryKey()
+      .references(() => runs.runId),
+    eventId: text()
+      .$type<EventId>()
+      .notNull()
+      .unique()
+      .references(() => events.eventId),
+    channel: text({ enum: APPROVAL_CHANNELS }).$type<ApprovalChannel>(),
+    approver: text().$type<OperatorLogin>(),
+  },
+  (table) => [
+    check(
+      "usine_approvals_source",
+      sql`(${table.channel} is null and ${table.approver} is null) or ${table.channel} = 'ui' or (${table.channel} = 'github-ask' and ${table.approver} is not null)`,
+    ),
+  ],
+);
 
 export const ignoredEvents = snakeCase.table(
   "usine_ignored_events",

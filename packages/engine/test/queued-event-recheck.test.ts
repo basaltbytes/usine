@@ -7,6 +7,7 @@ import { TriggerCondition } from "../src/trigger-condition.ts";
 import { runIdFor } from "../src/engine/submission.ts";
 import {
   approvalEvent,
+  uiApproval,
   type AttemptPlan,
   conditionLayer,
   engineLayer,
@@ -53,7 +54,7 @@ describe("queued Event trigger re-check", () => {
           assert.strictEqual(first._tag, "Claimed");
           if (first._tag !== "Claimed") return;
           yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
-          yield* engine.approve(first.runId, approvalEvent(20));
+          yield* engine.approve(first.runId, approvalEvent(20), uiApproval);
           yield* waitFor(
             engine,
             first.runId,
@@ -183,7 +184,7 @@ describe("queued Event trigger re-check", () => {
           assert.strictEqual(first._tag, "Claimed");
           if (first._tag !== "Claimed") return;
           yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Waiting");
-          yield* engine.approve(first.runId, approvalEvent(22));
+          yield* engine.approve(first.runId, approvalEvent(22), uiApproval);
           yield* waitFor(
             engine,
             first.runId,
@@ -204,7 +205,7 @@ describe("queued Event trigger re-check", () => {
             ({ run }) => run.state._tag === "Waiting",
           );
           assert.strictEqual(parked.attempts.length, 0);
-          yield* engine.approve(secondRunId, approvalEvent(23));
+          yield* engine.approve(secondRunId, approvalEvent(23), uiApproval);
           const finished = yield* waitFor(
             engine,
             secondRunId,

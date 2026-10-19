@@ -9,7 +9,9 @@ import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ApprovalRequirement, LoopName } from "@usine/core/loop";
 import { ItemKey } from "@usine/core/item";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
+import { OperatorLogin } from "@usine/core/operator";
 import { RunId, Run } from "@usine/core/run";
+import { ApprovalChannel, ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
@@ -54,6 +56,9 @@ export const RunRow = Schema.Struct({
   openedAt: Schema.DateTimeUtcFromString,
   stepName: StepName,
   result: Schema.NullOr(StepResult),
+  approvedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  approvalChannel: Schema.NullOr(ApprovalChannel),
+  approver: Schema.NullOr(OperatorLogin),
 });
 export type RunRow = typeof RunRow.Type;
 
@@ -154,6 +159,20 @@ export const runFromRow = (row: RunRow): Run =>
     openedAt: row.openedAt,
   });
 
+export const approvalFromRow = (row: RunRow): Option.Option<RunApproval> =>
+  Option.map(
+    Option.fromNullishOr(row.approvedAt),
+    (approvedAt) =>
+      new RunApproval({
+        approvedAt,
+        source: Option.map(
+          Option.fromNullishOr(row.approvalChannel),
+          (channel) =>
+            new ApprovalSource({ channel, approver: Option.fromNullishOr(row.approver) }),
+        ),
+      }),
+  );
+
 export const stepFromRow = (row: RunRow): Step =>
   new Step({
     runId: row.runId,
@@ -189,6 +208,7 @@ export const runSummaryFromRow = (
     step: stepFromRow(row),
     attempts: storedAttempts.map(attemptFromRow),
     resolvedFailureAttemptId: Option.fromNullishOr(row.resolvedFailureAttemptId),
+    approval: approvalFromRow(row),
     repository: row.repository,
     task: row.task,
     agent: row.agent,

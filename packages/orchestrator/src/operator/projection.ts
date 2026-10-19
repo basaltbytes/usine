@@ -32,7 +32,7 @@ import {
   TranscriptPageCursor,
   TranscriptEventView,
 } from "./transcript.ts";
-import { RunView } from "./run.ts";
+import { ApprovalView, RunView } from "./run.ts";
 
 /** How many newest rows one cold drawer open loads per Attempt. */
 const COLD_TRANSCRIPT_LIMIT = 500;
@@ -93,6 +93,14 @@ export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<LoopName>
     openedAt: DateTime.formatIso(snapshot.run.openedAt),
     task: snapshot.task,
     attempts: snapshot.attempts.map(attemptView),
+    approval: Option.match(snapshot.approval, {
+      onNone: () => null,
+      onSome: ({ approvedAt, source }) =>
+        new ApprovalView({
+          approvedAt: DateTime.formatIso(approvedAt),
+          source: Option.getOrNull(source),
+        }),
+    }),
     resultMessage: result?.message ?? null,
     pullRequestUrl: pullRequest?.url.toString() ?? null,
     ...actions,
