@@ -11,7 +11,7 @@ import { SessionOperationError, WorkingDirectory } from "../runtime.ts";
 import { CodexAppServer, codexAppServerLive } from "../pi/codex/app-server.ts";
 import { initializeCodex, verifyCodexAccount } from "../pi/codex/account.ts";
 import { PiSdk, piSdkLive, usePiStart } from "../pi/sdk.ts";
-import { probeCommand } from "./command.ts";
+import { probeCommand, probeFailed, probeOutput } from "./command.ts";
 
 /** Baseline Codex CLI version used by the pinned app-server protocol conformance gate. */
 export const CODEX_CLI_VERSION = "0.144.0";
@@ -24,6 +24,10 @@ const ClaudeAuthentication = Schema.Struct({
   authMethod: Schema.String,
   apiProvider: Schema.String,
 });
+const decodeClaudeAuthentication = Schema.decodeUnknownOption(
+  Schema.fromJsonString(ClaudeAuthentication),
+);
+const CLAUDE_AUTH_STATUS = ["auth", "status", "--json"];
 
 /**
  * Verifies a rostered brain where `host` runs children, through supplied
@@ -73,11 +77,30 @@ export const verifyHarness = Effect.fn("HarnessPreflight.verify")(
       }
       case "claude": {
         yield* probe("binary", "claude", ["--version"]);
-        const response = yield* probe("login", "claude", ["auth", "status", "--json"]);
-        const auth = yield* Schema.decodeUnknownEffect(Schema.fromJsonString(ClaudeAuthentication))(
-          response,
-        ).pipe(Effect.mapError(() => loginError("Claude returned an unrecognized login status")));
-        if (!auth.loggedIn || auth.authMethod !== "claude.ai" || auth.apiProvider !== "firstParty")
+        const status = yield* probeOutput(
+          host,
+          environment,
+          "claude",
+          "login",
+          "claude",
+          CLAUDE_AUTH_STATUS,
+        );
+        // Claude exits 1 when nobody is logged in, after printing the same status.
+        const auth =
+          status.exitCode === 0 || status.exitCode === 1
+            ? decodeClaudeAuthentication(status.stdout)
+            : Option.none();
+        if (Option.isNone(auth))
+          return yield* status.exitCode === 0
+            ? loginError("Claude returned an unrecognized login status")
+            : probeFailed("claude", "login", "claude", CLAUDE_AUTH_STATUS);
+        const { loggedIn, authMethod, apiProvider } = auth.value;
+        if (
+          status.exitCode !== 0 ||
+          !loggedIn ||
+          authMethod !== "claude.ai" ||
+          apiProvider !== "firstParty"
+        )
           return yield* loginError(
             "Claude requires a subscription login; run claude auth login on the Worker",
           );

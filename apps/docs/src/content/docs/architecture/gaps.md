@@ -59,7 +59,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 ## Harnesses
 
 - [#227][]: pull request harvest logs a warning whenever an Attempt's final commit was never pushed.
-- [#256][]: Claude preflight on a logged-out Worker doesn't tell you to run `claude auth login`.
 - [#258][]: the Codex app-server requests github.com and api.github.com on a Worker behind the Gateway.
 - [#266][]: a Codex child that can't connect to its provider reconnects silently for as long as the Attempt runs.
 - [#277][]: `StepResult` allows a `Comment` fact, but `harvestFacts` never records one ([harvest.ts:135][]).
@@ -171,7 +170,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#251]: https://github.com/basaltbytes/usine/issues/251
 [#254]: https://github.com/basaltbytes/usine/issues/254
 [#255]: https://github.com/basaltbytes/usine/issues/255
-[#256]: https://github.com/basaltbytes/usine/issues/256
 [#257]: https://github.com/basaltbytes/usine/issues/257
 [#258]: https://github.com/basaltbytes/usine/issues/258
 [#261]: https://github.com/basaltbytes/usine/issues/261
