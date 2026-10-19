@@ -169,7 +169,12 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
     await expect
       .element(drawer.getByText("Work was completed separately", { exact: false }))
       .toBeVisible();
-    await expect.element(drawer.getByRole("link", { name: "Open Run page" })).toBeVisible();
+    // The labelled button in the body and the expand icon beside Close lead to the same page.
+    const toPage = drawer.getByRole("link", { name: "Open Run page" });
+    await expect.poll(() => toPage.elements().length).toBe(2);
+    expect(new Set(toPage.elements().map((link) => link.getAttribute("href")))).toEqual(
+      new Set(["/projects/resolution/project/runs/resolution-run"]),
+    );
     await page.getByRole("button", { name: "Close", exact: true }).click();
     const needs = page.getByRole("region", { name: "Items needing intervention" });
     await expect

@@ -90,12 +90,21 @@ const detail = (view: RunView, transcript: ReadonlyArray<TranscriptEventView> = 
     sessionState: [],
     earlierTranscript: [],
   });
-const header = (view: RunView, payload: Schema.Json = detail(view).eventPayload) => {
+const header = (
+  view: RunView,
+  payload: Schema.Json = detail(view).eventPayload,
+  shared = false,
+) => {
   const item = runItem(view, undefined, payload);
   return renderToStaticMarkup(
     <>
-      <RunTitle run={view} item={item} heading={(title: ReactNode) => <h1>{title}</h1>} />
-      <RunFacts run={view} item={item} />
+      <RunTitle
+        run={view}
+        item={item}
+        shared={shared}
+        heading={(title: ReactNode) => <h1>{title}</h1>}
+      />
+      <RunFacts run={view} item={item} shared={shared} />
     </>,
   );
 };
@@ -158,6 +167,13 @@ describe("Run header", () => {
       2,
     );
     assert.include(markup, "#33</span>");
+  });
+
+  it("names the title and state for the drawer-to-page transition only where they are shared", () => {
+    const shared = header(run(), detail(run()).eventPayload, true);
+    assert.include(shared, "view-transition-name:run-title");
+    assert.include(shared, "view-transition-name:run-state");
+    assert.notInclude(header(run()), "view-transition-name");
   });
 
   it("names a schedule Run by its Loop, without an Item link", () => {

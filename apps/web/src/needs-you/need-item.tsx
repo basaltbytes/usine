@@ -69,7 +69,7 @@ export const NeedItem = ({
   return (
     <li
       className={cn(
-        "relative flex min-w-0 flex-wrap items-center gap-x-3 rounded-lg border border-needs-you/25 bg-needs-you/5 transition-colors has-[[data-need-open]:hover]:bg-needs-you/8",
+        "relative flex min-w-0 flex-wrap items-center gap-x-3 rounded-lg border border-needs-you/25 bg-needs-you/5 transition-colors duration-(--duration-fast) ease-out-expo motion-safe:animate-in motion-safe:fade-in has-[[data-need-open]:hover]:bg-needs-you/8",
         compact ? "gap-y-1 px-3 py-1" : "min-h-14 gap-y-2 px-3.5 py-2.5",
       )}
     >

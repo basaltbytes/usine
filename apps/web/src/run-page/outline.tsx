@@ -5,6 +5,7 @@ import { Option } from "effect";
 import { useEffect, useRef, type ReactNode } from "react";
 import { StateMark } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
+import { Collapsible, CollapsibleContent } from "@/components/ui/collapsible";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { dayTimeLabel, durationLabel } from "../operator-copy.ts";
@@ -109,7 +110,23 @@ const Checkpoints = ({
   readonly onCheckpoint: (checkpoint: Checkpoint) => void;
 }) =>
   checkpoints.length === 0 ? null : (
-    <ol className="mt-0.5 ml-2 space-y-px border-l pl-0.5">
+    <ol className="relative mt-0.5 ml-2 space-y-px border-l pl-0.5">
+      {/* One mark per rail slides to the checkpoint being read; rows are 26px with 1px between. */}
+      <span
+        aria-hidden="true"
+        className="pointer-events-none absolute top-0 -left-px h-4.5 w-px bg-foreground transition-[transform,opacity] duration-(--duration-base) ease-out-expo"
+        style={{
+          transform: `translateY(${
+            Math.max(
+              0,
+              checkpoints.findIndex(({ key }) => key === current),
+            ) *
+              27 +
+            4
+          }px)`,
+          opacity: checkpoints.some(({ key }) => key === current) ? 1 : 0,
+        }}
+      />
       {checkpoints.map((checkpoint) => (
         <li key={checkpoint.key}>
           <button
@@ -119,7 +136,7 @@ const Checkpoints = ({
             aria-current={checkpoint.key === current ? "location" : undefined}
             onClick={() => onCheckpoint(checkpoint)}
             className={cn(
-              "relative block h-6.5 w-full truncate rounded-md pr-1 pl-1.5 text-left outline-none hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/70 aria-[current=location]:font-medium aria-[current=location]:before:absolute aria-[current=location]:before:inset-y-1 aria-[current=location]:before:-left-[3px] aria-[current=location]:before:w-px aria-[current=location]:before:bg-foreground",
+              "block h-6.5 w-full truncate rounded-md pr-1 pl-1.5 text-left outline-none transition-colors duration-(--duration-fast) ease-out-expo hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring/70 aria-[current=location]:font-medium",
               checkpoint.tone === "failed"
                 ? "text-destructive"
                 : "text-muted-foreground aria-[current=location]:text-foreground",
@@ -309,22 +326,24 @@ export const Outline = ({
                 ),
               })}
             </button>
-            {expanded && (
-              <ChapterTree
-                chapter={chapter}
-                selectedSession={
-                  composerSession ??
-                  (selection._tag === "Attempt" && selection.attemptId === chapter.attemptId
-                    ? selection.sessionKey
-                    : null)
-                }
-                current={current}
-                onSession={(sessionKey) =>
-                  onSelect({ _tag: "Attempt", attemptId: chapter.attemptId, sessionKey })
-                }
-                onCheckpoint={(checkpoint) => onCheckpoint(checkpoint, chapter)}
-              />
-            )}
+            <Collapsible open={expanded}>
+              <CollapsibleContent className="collapsible-motion">
+                <ChapterTree
+                  chapter={chapter}
+                  selectedSession={
+                    composerSession ??
+                    (selection._tag === "Attempt" && selection.attemptId === chapter.attemptId
+                      ? selection.sessionKey
+                      : null)
+                  }
+                  current={current}
+                  onSession={(sessionKey) =>
+                    onSelect({ _tag: "Attempt", attemptId: chapter.attemptId, sessionKey })
+                  }
+                  onCheckpoint={(checkpoint) => onCheckpoint(checkpoint, chapter)}
+                />
+              </CollapsibleContent>
+            </Collapsible>
           </div>
         );
       })}

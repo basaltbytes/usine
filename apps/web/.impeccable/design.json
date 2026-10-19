@@ -315,6 +315,51 @@
         "name": "sidebar",
         "value": "200ms linear",
         "purpose": "Sidebar collapse."
+      },
+      {
+        "name": "ease-out-expo",
+        "value": "cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "The one easing curve: --ease-out-expo, for every arrival and state change."
+      },
+      {
+        "name": "duration-fast",
+        "value": "150ms",
+        "purpose": "--duration-fast: small marks, fades, and every exit. 0ms under reduced motion."
+      },
+      {
+        "name": "duration-base",
+        "value": "200ms",
+        "purpose": "--duration-base: panels opening, the sheet slide, the overlay fade, the reading mark. 0ms under reduced motion."
+      },
+      {
+        "name": "duration-view",
+        "value": "250ms",
+        "purpose": "--duration-view: the drawer-to-page view transition. 0ms and no view transition animation under reduced motion."
+      },
+      {
+        "name": "drawer-to-page",
+        "value": "View Transitions API via TanStack Router viewTransition; shared names run-title and run-state; root cross-fade; 250ms ease-out-expo",
+        "purpose": "The one authored moment: the Run header glides from the drawer into the Run page."
+      },
+      {
+        "name": "sheet",
+        "value": "slide and overlay fade, 200ms ease-out-expo in, 150ms out",
+        "purpose": "The Run drawer and the mobile sidebar sheet."
+      },
+      {
+        "name": "collapsible-panel",
+        "value": "height from 0 to --collapsible-panel-height with opacity, 200ms ease-out-expo, 150ms closing (collapsible-motion utility)",
+        "purpose": "Fold lines, delegations, and outline Attempts opening."
+      },
+      {
+        "name": "reading-mark",
+        "value": "translateY and opacity, 200ms ease-out-expo",
+        "purpose": "The outline's reading-position mark sliding along a checkpoint rail."
+      },
+      {
+        "name": "needs-you-arrival",
+        "value": "fade-in, 150ms ease-out-expo",
+        "purpose": "A new Needs you entry."
       }
     ],
     "breakpoints": [

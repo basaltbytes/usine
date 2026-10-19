@@ -115,6 +115,66 @@
   --text-xl--line-height: 1.75rem;
   --text-xl--letter-spacing: -0.01em;
   --shadow-raised: 0 8px 24px -6px rgb(0 0 0 / 50%), 0 2px 6px -2px rgb(0 0 0 / 35%);
+  /* Motion decelerates hard and settles: arrivals and state changes share one curve. */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Motion durations: fast for small state marks and fades, base for panels and the sheet, view
+   for the drawer-to-page transition. Reduced motion sets them all to zero. */
+:root {
+  --duration-fast: 150ms;
+  --duration-base: 200ms;
+  --duration-view: 250ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --duration-fast: 0ms;
+    --duration-base: 0ms;
+    --duration-view: 0ms;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* A Base UI Collapsible panel that grows and fades open from its measured height and closes faster.
+   Base UI returns the height to auto once open, so content inside can still grow. */
+@utility collapsible-motion {
+  height: var(--collapsible-panel-height);
+  overflow: hidden;
+  transition:
+    height var(--duration-base) var(--ease-out-expo),
+    opacity var(--duration-base) var(--ease-out-expo);
+  &[data-starting-style],
+  &[data-ending-style] {
+    height: 0;
+    opacity: 0;
+  }
+  &[data-ending-style] {
+    transition-duration: var(--duration-fast);
+  }
+}
+
+/* Opening the Run page from the drawer: the Run's title and state line glide into place while the
+   rest of the screen cross-fades. */
+::view-transition-group(*),
+::view-transition-old(*),
+::view-transition-new(*) {
+  animation-duration: var(--duration-view);
+  animation-timing-function: var(--ease-out-expo);
+}
+
+/* The title wraps differently in the drawer and on the page: its snapshots keep their own size and
+   cross-fade as they move, instead of stretching to the other box. */
+::view-transition-old(run-title),
+::view-transition-new(run-title),
+::view-transition-old(run-state),
+::view-transition-new(run-state) {
+  inline-size: auto;
+  block-size: auto;
 }
 
 @theme inline {

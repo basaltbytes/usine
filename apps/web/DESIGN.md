@@ -253,6 +253,24 @@ Depth comes from tonal layering: mantle page, base panel, mantle cards, surface0
 ### Named Rules
 **The Flat At Rest Rule.** Nothing on the Board casts a shadow unless it floats. Hover on a card raises its ring from 7% to 15% white, not a shadow.
 
+## Motion
+
+Motion explains a change and stays short. One curve and three durations, defined as tokens in `src/index.css`:
+
+- **`--ease-out-expo`** (`cubic-bezier(0.16, 1, 0.3, 1)`): every arrival and state change decelerates hard and settles.
+- **`--duration-fast`** (150ms): small fades, hover colour, and every exit.
+- **`--duration-base`** (200ms): panels opening, the sheet sliding in, the overlay fading, the reading mark.
+- **`--duration-view`** (250ms): the drawer-to-page view transition, the one authored moment.
+
+Content is visible without motion. Under `prefers-reduced-motion: reduce` all three durations are zero and view transitions are off.
+
+- **Drawer to Run page:** Open Run page navigates with a view transition. The Run header's title (`run-title`) and state (`run-state`) carry the same `view-transition-name` in the open drawer and on the page, so they glide from the drawer into the page while the rest of the screen cross-fades. Browsers without view transitions navigate at once.
+- **Sheet:** slides in and its overlay fades in over 200ms; both leave in 150ms.
+- **Panels:** fold lines, delegations, and an outline Attempt opening to its sessions grow from 0 to Base UI's `--collapsible-panel-height` while fading in (the `collapsible-motion` utility); closing runs at 150ms.
+- **Reading mark:** one 1px mark per checkpoint rail slides to the checkpoint at the reading line over 200ms.
+- **Needs you:** a new entry fades in over 150ms.
+- **Controls:** button colour, border, and ring changes run 100ms.
+
 ## Shapes
 
 Corners step with nesting: the work panel 10px, cards, lane rails, menus, and Needs you items 8px, buttons, inputs, and menu items 6px, extra-small buttons 4px. Chips are full pills. Borders are 1px hairlines, drawn as rings on cards so they do not change the box. The only dashed line is the outline of an empty lane.
@@ -311,7 +329,7 @@ A 22 by 8 one-pixel arrow at the end of an authored lane's heading, crossing the
 Shared by the Run page and the drawer. The Item number in 12px mono mauve, linking to GitHub, on the title's baseline 10px before it; the title in 20px semibold on the page and 16px in the drawer. Under it, the facts line in 13px subtext0 with 20px between facts: the state mark and the state line (`Failed after 3 Attempts`) in medium text colour, the pull request link or `No pull request`, `Loop` and `Agent` with their values in text colour. The actions that apply follow, as buttons.
 
 ### Run outline
-13px entries with a 6px radius; hover fills surface0 at 60% and the part being read fills surface0. Task and Event come first, each with a two-line 12px preview, then a 10px space and the Attempts. An Attempt entry carries its state mark at the left, its name, and a caret that turns when it opens; under them its start time and duration in 12px mono, the duration counting while the Attempt is live. The open Attempt lists its sessions as 28px rows (Parent, then each child by Agent), a live session's state at the right in its tone (peach waiting or paused, blue working with its elapsed time), and each session's checkpoints as 26px rows on a hairline rail: one-line previews in subtext0, a failed or blocked one in red. The checkpoint at the reading line turns text colour and medium, with a 1px text-colour bar on the rail. When the Run has errors, a hairline and a red count with previous and next buttons close the outline.
+13px entries with a 6px radius; hover fills surface0 at 60% and the part being read fills surface0. Task and Event come first, each with a two-line 12px preview, then a 10px space and the Attempts. An Attempt entry carries its state mark at the left, its name, and a caret that turns when it opens; under them its start time and duration in 12px mono, the duration counting while the Attempt is live. The open Attempt lists its sessions as 28px rows (Parent, then each child by Agent), a live session's state at the right in its tone (peach waiting or paused, blue working with its elapsed time), and each session's checkpoints as 26px rows on a hairline rail: one-line previews in subtext0, a failed or blocked one in red. The checkpoint at the reading line turns text colour and medium, with an 18px, 1px text-colour mark on the rail that slides from checkpoint to checkpoint as the reader scrolls. When the Run has errors, a hairline and a red count with previous and next buttons close the outline.
 
 ### Fold line
 One quiet 12px line in place of a burst of tool calls between two messages: a caret, what the calls did (`Ran 5 commands · baseline gate, pnpm lint`), failed calls counted in red and running ones in blue, then ` · ` and the span in mono. It is a ghost button, 28px tall at least, bleeding 8px past the reader's text on each side; hover turns its text to text colour. Open, the caret turns and the line keeps no fill at rest (surface0 at 70% on hover), with each call's panel below it, 4px apart. A single tool call folds the same way.
@@ -326,7 +344,7 @@ An Attempt ends with its outcome in the reader's content column, the gutter show
 - **Succeeded / Canceled:** the state mark and the word in 13px medium; a success follows with the result message in 14px.
 
 ### Run drawer
-A short summary of one Run over any screen. A right sheet, full width on phones and at most 448px from `sm`. The header (Run header, facts, actions) sits on a hairline with 20px padding; below it, 20px sides and 16px top and bottom, 20px between blocks, one summary: a sentence for a Pending, Waiting, or Queued Run; for a Running Run the current activity and the latest message (speaker, mono clock time, at most six lines of 14px); for a finished Run its outcome as above. An outline Open Run page button ends it. The drawer has no conversation and no tabs.
+A short summary of one Run over any screen. A right sheet, full width on phones and at most 448px from `sm`. The header (Run header, facts, actions) sits on a hairline with 20px padding; below it, 20px sides and 16px top and bottom, 20px between blocks, one summary: a sentence for a Pending, Waiting, or Queued Run; for a Running Run the current activity and the latest message (speaker, mono clock time, at most six lines of 14px); for a finished Run its outcome as above. An outline Open Run page button ends it, and an expand icon button (24px ghost, the same as Close) sits just before Close in the top-right corner with the same destination and an `Open Run page` tooltip. The drawer has no conversation and no tabs.
 
 ### Named Rules
 **The Said Once Rule.** A Run's reader shows each fact once: Worker and models in the Attempt's meta line, never per message; a final message that the outcome repeats only as the outcome; a parent's copy of a child's message not at all.

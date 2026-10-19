@@ -72,7 +72,7 @@ export const ToolBurst = ({ burst }: { readonly burst: Burst }) => {
           </span>
         </span>
       </CollapsibleTrigger>
-      <CollapsibleContent className="space-y-1 pt-1 pb-2">
+      <CollapsibleContent className="collapsible-motion -mx-2 space-y-1 px-2 pt-1 pb-2">
         {/* The burst row already skips rendering while far from view; its calls keep real heights. */}
         {burst.tools.map((tool) => (
           <MessageScrollerItem

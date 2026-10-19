@@ -1,3 +1,4 @@
+import { ArrowsOutSimpleIcon } from "@phosphor-icons/react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import type { RunId } from "@usine/core/run";
@@ -6,6 +7,8 @@ import { Option } from "effect";
 import { useMemo, useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
 import { buttonVariants } from "@/components/ui/button";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import {
   Sheet,
   SheetContent,
@@ -135,7 +138,7 @@ export const RunDrawer = ({
         aria-label="Run detail"
         className="gap-0 data-[side=right]:w-full data-[side=right]:sm:max-w-md"
       >
-        <SheetHeader className="shrink-0 gap-3 border-b px-5 pt-5 pb-4 pr-12">
+        <SheetHeader className="shrink-0 gap-3 border-b px-5 pt-5 pb-4 pr-20">
           {run === undefined || detail.data === undefined ? (
             <>
               <SheetTitle>Loading…</SheetTitle>
@@ -146,6 +149,7 @@ export const RunDrawer = ({
               <RunTitle
                 run={run}
                 item={item}
+                shared={open}
                 heading={(title) => (
                   <SheetTitle className="text-lg font-semibold wrap-anywhere">{title}</SheetTitle>
                 )}
@@ -153,7 +157,7 @@ export const RunDrawer = ({
               <SheetDescription className="sr-only">
                 Run {run.id} of {run.loop} on {run.repository}
               </SheetDescription>
-              <RunFacts run={run} item={item} className="gap-x-4" />
+              <RunFacts run={run} item={item} shared={open} className="gap-x-4" />
               <RunActions run={run} onEdit={() => setEditing(true)} />
             </>
           )}
@@ -169,12 +173,35 @@ export const RunDrawer = ({
               to="/projects/$owner/$name/runs/$run"
               params={{ ...projectParams(run.repository), run: run.id }}
               search={({ run: _run, ...rest }) => rest}
+              viewTransition
               className={buttonVariants({ variant: "outline" })}
             >
               Open Run page
             </Link>
           )}
         </div>
+        {run !== undefined && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Link
+                  to="/projects/$owner/$name/runs/$run"
+                  params={{ ...projectParams(run.repository), run: run.id }}
+                  search={({ run: _run, ...rest }) => rest}
+                  viewTransition
+                  aria-label="Open Run page"
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "icon-sm" }),
+                    "absolute top-4 right-11",
+                  )}
+                />
+              }
+            >
+              <ArrowsOutSimpleIcon aria-hidden="true" />
+            </TooltipTrigger>
+            <TooltipContent side="bottom">Open Run page</TooltipContent>
+          </Tooltip>
+        )}
       </SheetContent>
     </Sheet>
   );

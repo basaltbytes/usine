@@ -171,7 +171,7 @@ const Delegation = ({
             })}
           </span>
         </CollapsibleTrigger>
-        <ToolContent className="pl-0">
+        <ToolContent className="collapsible-motion pl-0">
           <ToolDetails entry={row.tool} view={view} />
         </ToolContent>
       </Tool>
