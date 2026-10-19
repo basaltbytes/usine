@@ -1,6 +1,6 @@
 import type { ConversationId, EntryId, TaskId } from "@earendil-works/pi-durable";
 import type { RunningSession } from "@usine/agents/runtime";
-import type { AgentSessionEvent, AgentSessionId, ParentSession } from "@usine/core/agent/session";
+import type { AgentSessionEvent, AgentSessionId } from "@usine/core/agent/session";
 import type { AttemptId } from "@usine/core/attempt";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { Deferred, Effect, Option, Queue, Semaphore } from "effect";
@@ -11,7 +11,7 @@ import { ATTEMPT_RECORD_KIND, type AttemptRecord } from "./documents.ts";
 /** Activity waiting to be relayed, in the order it happened in this process. */
 export type RelayItem =
   | { readonly _tag: "Entry"; readonly entry: EntryId }
-  | { readonly _tag: "Child"; readonly event: AgentSessionEvent }
+  | { readonly _tag: "Event"; readonly event: AgentSessionEvent }
   | { readonly _tag: "Notice"; readonly notice: AttemptChannel.WorkerNotice }
   | { readonly _tag: "Wake" };
 
@@ -41,8 +41,6 @@ export interface AttemptHub {
   /** Live children by id, so an operator message can be addressed to one. */
   readonly children: Map<AgentSessionId, RunningSession>;
   parent: Option.Option<ConversationId>;
-  /** The parent as session events record it, known once its model is resolved. */
-  session: Option.Option<ParentSession>;
   channel: Option.Option<AttachedChannel>;
   /**
    * Completed with the request of the `execute` call relaying this Attempt, and
@@ -58,8 +56,8 @@ export interface AttemptHubs {
   readonly find: (attemptId: AttemptId) => Option.Option<AttemptHub>;
   /** Routes the parent conversation's entries to the hub from now on. */
   readonly bindParent: (hub: AttemptHub, parent: ConversationId) => void;
-  /** Queues one child event behind everything that happened before it. */
-  readonly child: (hub: AttemptHub, event: AgentSessionEvent) => Effect.Effect<void>;
+  /** Queues one session event that no parent entry stands for, a child's or the parent's own, behind everything that happened before it. */
+  readonly event: (hub: AttemptHub, event: AgentSessionEvent) => Effect.Effect<void>;
   /** Queues one notice about the Attempt's Worker behind everything that happened before it. */
   readonly notice: (hub: AttemptHub, notice: AttemptChannel.WorkerNotice) => Effect.Effect<void>;
   /** Routes commits to hubs: parent entries in order, task and record changes as wake-ups; wakes every hub after a reopen or the stop. */
@@ -93,7 +91,6 @@ export const attemptHubs = Effect.gen(function* () {
           routing: yield* Semaphore.make(1),
           children: new Map(),
           parent: Option.none(),
-          session: Option.none(),
           channel: Option.none(),
           attached: yield* Deferred.make<AttemptRequest>(),
         };
@@ -149,8 +146,8 @@ export const attemptHubs = Effect.gen(function* () {
     hub,
     find: (attemptId) => Option.fromNullishOr(byAttempt.get(attemptId)),
     bindParent,
-    child: (target, event) =>
-      Queue.offer(target.queue, { _tag: "Child", event }).pipe(Effect.asVoid),
+    event: (target, event) =>
+      Queue.offer(target.queue, { _tag: "Event", event }).pipe(Effect.asVoid),
     notice: (target, notice) =>
       Queue.offer(target.queue, { _tag: "Notice", notice }).pipe(Effect.asVoid),
     listener,

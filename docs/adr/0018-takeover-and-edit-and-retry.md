@@ -23,3 +23,15 @@ Takeover is conversing inside a live session. The attempt channel's inbound enve
 ## Amendment (2026-10-08, #176): interventions reach the parent through the durable runtime
 
 On local Workers the Pi parent and its children are durable conversations in the orchestrator process, so there is no channel to write inbound frames to. Steer, interrupt, operator messages, and release go to `AttemptRuntime.intervene`, which delivers them to the parent or the addressed child and records the inbound envelope and its receipt in the transcript with the task's own sequence numbers. The transcript records are the same as before, so Holds, the operator-intervened flag, and the runaway guard's wall-clock pause keep working unchanged. The executor rejects input only for an Attempt with no live session in this orchestrator, which includes an Attempt still waiting to be reattached after a restart. exe.dev keeps delivering interventions through the run host's channel.
+
+## Amendment (2026-10-19, #159): the parent has a Hold
+
+An operator message to the Pi parent places a Hold, as on a child. The parent's next answer no longer ends the Attempt: the parent waits for the operator, another message starts its next turn, and a release resumes it with the instruction to continue the task. A release while the parent works only ends the Hold, so its next answer ends the Attempt. A steer places no Hold.
+
+The decision above said the parent has no hold semantics because it returns to no one. Since #176 the parent's last answer is the Attempt's result, so the parent returns to the Run. A dogfood Run on 2026-09-17 showed the cost of having no hold, the option rejected for children above: the operator's question reached the parent when its child returned, the parent answered it as its last turn, and the Run recorded `Succeeded` without resuming the task. The Hold keeps the exchange multi-round on the parent for the same reason it does on a child. The alternative, a persona rule that treats an operator message as a side conversation, leaves the outcome to the model, and in that Run the model ended its turn on the answer. The persona now also says that a reply to the operator is never the final answer, but the Hold does not depend on it.
+
+pi-durable places a steer after the running tool call returns, and the parent's only tool is a delegation that can run for a long time. It cannot deliver a user turn into a call in progress without aborting the child, so a message to a delegating parent is queued. Its receipt says so, and a second receipt with the same input sequence reports when the parent reads it, or that it never will, as when the operator pauses the parent and the abort withdraws the message.
+
+The parent's report also records whether its last turn replied to operator input without delegating after it. The executor fails such an Attempt with an `AgentFailure` when the checkout holds no commit, pull request, or comment, so a parent that ends on its answer to the operator, after a steer or a release, never makes the Run `Succeeded` with nothing delivered.
+
+The runaway guard's wall-clock pause covers the parent's Hold as it covers a child's.

@@ -40,7 +40,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 
 ## Run engine and recovery
 
-- [#159][]: an operator message to a Pi parent that is waiting on a child waits for the child, then ends the Attempt as `Succeeded`.
 - [#177][]: a reattached Attempt keeps its own Worker while the scheduler reserved a slot on another one ([store.ts:284][]).
 - [#178][]: the runaway guard loses an Attempt's elapsed time and its finished sessions' tokens across a reattach.
 - [#180][]: the checkout of an Attempt closed between a restart and its reattach isn't reconciled until the next startup.
@@ -126,7 +125,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#115]: https://github.com/basaltbytes/usine/issues/115
 [#154]: https://github.com/basaltbytes/usine/issues/154
 [#158]: https://github.com/basaltbytes/usine/issues/158
-[#159]: https://github.com/basaltbytes/usine/issues/159
 [#177]: https://github.com/basaltbytes/usine/issues/177
 [#178]: https://github.com/basaltbytes/usine/issues/178
 [#179]: https://github.com/basaltbytes/usine/issues/179

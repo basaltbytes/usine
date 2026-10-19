@@ -26,6 +26,7 @@ import {
   InterventionState,
   ChildTarget,
   OperatorMessage,
+  ParentTarget,
 } from "@usine/core/attempt/channel";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import { RunView, TranscriptEventView } from "@usine/orchestrator/operator";
@@ -655,4 +656,53 @@ it("renders a held child from session state when its activity is outside the loa
   assert.include(reachable, 'aria-label="Resume details for developer"');
   assert.notInclude(outline([]), "Held, waiting for you");
   assert.notInclude(outline([]), "Resume details for developer");
+});
+
+it("shows an operator message to a delegating parent once, queued until the parent reads it or stops", () => {
+  const intervention = new Intervention({
+    operator: "Philippe",
+    target: new ParentTarget(),
+    action: new OperatorMessage({ message: "What failed earlier?" }),
+  });
+  const receipt = (sequence: number, payload: InterventionApplied | InterventionRejected) =>
+    new TranscriptEventView({
+      sequence: TranscriptSequence.make(sequence),
+      attemptId: attempt,
+      receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, sequence)).toISOString(),
+      direction: "outbound",
+      payload,
+    });
+  const applied = (sequence: number, queued: boolean) =>
+    receipt(
+      sequence,
+      new InterventionApplied({
+        inputSequence: Sequence.make(1),
+        intervention,
+        state: new InterventionState({ held: true, paused: false, queued }),
+      }),
+    );
+  const delegating = [
+    record(1, new TextOutput({ session: parent, text: "Delegating the fix." })),
+    applied(2, true),
+  ];
+  const operatorRows = (events: ReadonlyArray<TranscriptEventView>) =>
+    document(events)
+      .chapters.flatMap((chapter) => chapter.rows)
+      .flatMap((row) =>
+        row._tag === "Message" && row.speaker.name === "Philippe"
+          ? [[row.sequence, row.queued, row.undelivered]]
+          : [],
+      );
+
+  assert.deepStrictEqual(operatorRows(delegating), [[2, true, false]]);
+  assert.deepStrictEqual(operatorRows([...delegating, applied(5, false)]), [[2, false, false]]);
+  const stopped = receipt(
+    5,
+    new InterventionRejected({
+      inputSequence: Sequence.make(1),
+      intervention,
+      message: "The parent stopped before it read this message.",
+    }),
+  );
+  assert.deepStrictEqual(operatorRows([...delegating, stopped]), [[2, false, true]]);
 });

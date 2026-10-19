@@ -23,7 +23,12 @@ export type Settled = Result.Result<AttemptReport, AttemptFailure>;
 const failureJson = Schema.fromJsonString(AttemptFailure);
 const encodeFailure = Schema.encodeSync(failureJson);
 const decodeFailure = Schema.decodeUnknownOption(failureJson);
-const decodeMessage = Schema.decodeUnknownOption(Schema.Struct({ message: Schema.NonEmptyString }));
+const decodeResult = Schema.decodeUnknownOption(
+  Schema.Struct({
+    message: Schema.NonEmptyString,
+    answeredOperator: Schema.optionalKey(Schema.Boolean),
+  }),
+);
 
 const failureMessage = (failure: AttemptFailure): string =>
   Match.valueTags(failure, {
@@ -46,9 +51,13 @@ export const failedOutcome = (failure: AttemptFailure): NextTaskState<never, Att
   },
 });
 
-export const completedOutcome = (message: string): NextTaskState<never, AttemptResult> => ({
+/** The task outcome of a parent that finished with `message`; `settledOf` reads it back as its `AttemptReport`. */
+export const completedOutcome = (
+  message: string,
+  answeredOperator: boolean,
+): NextTaskState<never, AttemptResult> => ({
   status: "terminal",
-  outcome: { status: "completed", result: { message } },
+  outcome: { status: "completed", result: { message, answeredOperator } },
 });
 
 /** The Attempt's outcome as its task recorded it, mapped to the report or failure `execute` returns. */
@@ -61,7 +70,7 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
   }
   switch (outcome.status) {
     case "completed":
-      return Option.match(decodeMessage(outcome.result), {
+      return Option.match(decodeResult(outcome.result), {
         onNone: () =>
           Result.fail(
             new DefectFailure({
@@ -69,7 +78,10 @@ export const settledOf = (task: TaskRecord<JsonValue, JsonValue, unknown>): Sett
               cause: outcome.result,
             }),
           ),
-        onSome: ({ message }) => Result.succeed(new AttemptReport({ message })),
+        onSome: ({ message, answeredOperator }) =>
+          Result.succeed(
+            new AttemptReport({ message, answeredOperator: answeredOperator ?? false }),
+          ),
       });
     case "failed":
       return Result.fail(
@@ -103,7 +115,7 @@ const resultJson = Schema.fromJsonString(StepResult);
 
 /** The harvested result as the Attempt's record keeps it. */
 export const encodeResult = Schema.encodeSync(resultJson);
-const decodeResult = Schema.decodeUnknownOption(resultJson);
+const decodeHarvested = Schema.decodeUnknownOption(resultJson);
 
 /**
  * What a finished Attempt left, read from its record and its task: none until
@@ -119,7 +131,7 @@ export const finishedOf = (
     Result.match(settledOf(task), {
       onFailure: (failure): FinishedAttempt => new ParentFailed({ failure }),
       onSuccess: (report) =>
-        Option.match(Option.flatMap(Option.fromUndefinedOr(record.result), decodeResult), {
+        Option.match(Option.flatMap(Option.fromUndefinedOr(record.result), decodeHarvested), {
           onNone: (): FinishedAttempt => new ParentReported({ report }),
           onSome: (result) => new ResultRecorded({ result }),
         }),

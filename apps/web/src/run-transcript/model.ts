@@ -62,6 +62,8 @@ type NoticeOrigin =
 export interface TranscriptNotice extends TranscriptPosition, NoticeContent {
   readonly _tag: "Notice";
   readonly origin: NoticeOrigin;
+  /** Operator input the session has accepted but reads only when its current tool call returns. */
+  readonly queued: boolean;
 }
 
 interface ToolStart {
@@ -124,7 +126,7 @@ const notice = (
   event: Pick<TranscriptEventView, "sequence" | "receivedAt" | "attemptId">,
   content: NoticeContent,
   origin: NoticeOrigin,
-): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content, origin });
+): TranscriptNotice => ({ _tag: "Notice", ...position(event), ...content, origin, queued: false });
 
 /** A count of a harness's provider retries in words: `1 retry`, `27 retries`. */
 export const retriesLabel = (retries: number): string =>
@@ -234,10 +236,12 @@ const sessionEntries = (
 };
 
 const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
-  const { action, operator } = record.payload.intervention;
+  const { action, operator, target } = record.payload.intervention;
   const rejected = record.payload._tag === "InterventionRejected";
   const message = action._tag === "OperatorMessage" || action._tag === "Steer";
-  return notice(
+  const queued = record.payload._tag === "InterventionApplied" && record.payload.state.queued;
+  const released = `${operator} released the ${target._tag === "Parent" ? "parent" : "child"}`;
+  const entry = notice(
     record,
     {
       kind: message ? "message" : "status",
@@ -246,7 +250,7 @@ const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
         : message
           ? operator
           : action._tag === "Release"
-            ? `${operator} released the child`
+            ? released
             : `${operator} paused the session`,
       detail: rejected
         ? `${message ? `${action.message}\n\n` : ""}${record.payload.message}`
@@ -258,6 +262,7 @@ const interventionNotice = (record: InterventionRecord): TranscriptNotice => {
     },
     { _tag: "Operator", operator },
   );
+  return { ...entry, queued };
 };
 
 /** Folds durable transcript events into conversation rows without reading time or changing stored data. */

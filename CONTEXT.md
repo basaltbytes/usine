@@ -97,11 +97,11 @@ The factory's request for an operator answer on a blocked run, posted where the 
 _Avoid_: notification (how an ask travels, not what it is), prompt, request, question (one shape of ask, not the concept)
 
 **Takeover**:
-The operator stepping into a live session of a running attempt — operator messages join the session as user turns, Pi parent and harness children alike. Taking over a child places a Hold. Lives in the transcript, never the Event ledger.
+The operator stepping into a live session of a running attempt: operator messages join the session as user turns, Pi parent and harness children alike. Taking over a session places a Hold. Lives in the transcript, never the Event ledger.
 _Avoid_: attach (the mechanism, not the concept), remote control, child takeover (long form)
 
 **Hold**:
-The per-child state a takeover creates — an idle held child defers returning its result to the awaiting parent until the operator releases it. Implicit on the first operator message to the child, ended by an explicit release; several children can be held at once.
+The per-session state a takeover creates: until the operator releases it, an idle held child defers returning its result to the awaiting parent, and an idle held Pi parent defers ending the Attempt and waits for the operator. Implicit on the first operator message to the session, ended by an explicit release, after which a held parent continues the task; several sessions can be held at once.
 _Avoid_: claim, lock, pause (the loop-level switch)
 
 **Edit-and-retry**:

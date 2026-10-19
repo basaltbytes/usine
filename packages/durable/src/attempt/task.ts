@@ -6,16 +6,22 @@ import {
   type ConversationId,
   defineTask,
   type EntryId,
+  type EntryRecord,
   type Extension,
   type NextTaskState,
   type RunningTask,
+  type TaskId,
   type TaskRuntime,
   type ToolRegistration,
+  ToolResultEntry,
   type Tx,
+  UserEntry,
 } from "@earendil-works/pi-durable";
 import { assemblePrompt } from "@usine/agents/prompt";
 import { reportedOutcome, toAttemptFailure } from "@usine/agents/runtime";
+import { ModelId } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
+import type { RunSpec } from "@usine/core/attempt/channel";
 import {
   type AttemptFailure,
   BlockedFailure,
@@ -23,13 +29,25 @@ import {
   InfraFailure,
   QuestionFailure,
 } from "@usine/core/attempt/failure";
-import { ChildSessionBudget, ChildSessionCount } from "@usine/core/agent/session";
+import {
+  ChildSessionBudget,
+  ChildSessionCount,
+  SessionIdle,
+  SessionResumed,
+} from "@usine/core/agent/session";
 import { Effect, Option, Result } from "effect";
 import { durableError } from "../harness.ts";
-import { type AttemptRecord, type AttemptResult, AttemptRecordDoc, HoldDoc } from "./documents.ts";
+import {
+  type AttemptRecord,
+  type AttemptResult,
+  AttemptRecordDoc,
+  type Hold,
+  HoldDoc,
+  RELEASE_GUIDANCE,
+} from "./documents.ts";
 import { assistantText } from "./events.ts";
 import { completedOutcome, failedOutcome } from "./outcome.ts";
-import { parentSessionId, resolveParent } from "./parent.ts";
+import { parentSession, parentSessionId, resolveParent } from "./parent.ts";
 import { type AttemptTaskInput, storedRequestOf } from "./request.ts";
 import type { ExtensionServices } from "./services.ts";
 import { firstAccepted } from "./watch.ts";
@@ -94,6 +112,27 @@ const finalAnswer = Effect.fn("AttemptTask.finalAnswer")(function* (
   return "Pi session completed";
 });
 
+/**
+ * Whether the answer replies to operator input: the newest user input before
+ * it is not the Attempt's prompt, and no tool result lies between them.
+ */
+const repliesToOperator = (
+  entries: ReadonlyArray<EntryRecord>,
+  answer: EntryId,
+  prompt: Option.Option<EntryId>,
+): boolean => {
+  for (const entry of [...entries].reverse()) {
+    if (entry.id >= answer) continue;
+    if (entry.kind === ToolResultEntry.kind) return false;
+    if (entry.kind === UserEntry.kind) return !Option.contains(prompt, entry.id);
+  }
+  return false;
+};
+
+/** The operator holds the parent: it is interrupted, has guidance waiting, or is under a Hold. */
+const supervised = (hold: Readonly<Hold>, attemptId: AttemptId): boolean =>
+  hold.paused || hold.guidance.length > 0 || hold.held.includes(parentSessionId(attemptId));
+
 const budgetExceeded = (runtime: Runtime, context: ChordContext, attemptId: AttemptId) =>
   call("watch the child-session budget", async (signal) => {
     const scoped = withAbortSignal(signal, context);
@@ -110,8 +149,8 @@ const budgetExceeded = (runtime: Runtime, context: ChordContext, attemptId: Atte
 /**
  * Builds the `usine.attempt` task. It resolves the parent's model, creates the
  * parent conversation it owns, and submits one turn at a time: the assembled
- * prompt, then operator guidance after an interrupt. The submission's request
- * id makes each turn exactly-once across restarts.
+ * prompt, then operator guidance after an interrupt or under a Hold. The
+ * submission's request id makes each turn exactly-once across restarts.
  */
 export const attemptTask = (
   services: ExtensionServices,
@@ -175,6 +214,37 @@ export const attemptTask = (
     });
   });
 
+  /** Queues a parent lifecycle event for the relay; no parent entry stands for waiting on the operator. */
+  const announce = Effect.fn("AttemptTask.announce")(function* (
+    spec: RunSpec,
+    taskId: TaskId,
+    runtime: Runtime,
+    context: ChordContext,
+    lifecycle: "Idle" | "Resumed",
+  ) {
+    const record = yield* call("read the Attempt record", () =>
+      runtime.snapshot(AttemptRecordDoc, spec.attemptId, context),
+    );
+    const model = record?.parentModel ?? null;
+    if (model === null) {
+      return yield* Effect.logWarning(
+        "The parent has no resolved model; its lifecycle event is dropped",
+        { lifecycle },
+      );
+    }
+    const session = parentSession(spec, ModelId.make(model));
+    const hub = yield* services.hubs.hub(spec.attemptId, taskId);
+    yield* services.hubs.event(
+      hub,
+      lifecycle === "Idle" ? new SessionIdle({ session }) : new SessionResumed({ session }),
+    );
+  });
+
+  /**
+   * Waits while the operator supervises the parent, then commits its next
+   * turn: the oldest operator guidance, or the release guidance once the
+   * operator ended the pause and the Hold without a message.
+   */
   const awaitGuidance = Effect.fn("AttemptTask.awaitGuidance")(function* (
     task: RunningTask<
       AttemptTaskInput,
@@ -184,29 +254,40 @@ export const attemptTask = (
     runtime: Runtime,
     context: ChordContext,
   ) {
+    const { spec } = yield* storedRequestOf(task.input);
     const { parent, turn } = task.state.checkpoint;
+    const parentId = parentSessionId(spec.attemptId);
+    const released = (hold: Readonly<Hold>) => !hold.paused && !hold.held.includes(parentId);
+    const current = yield* call("read the Hold", () => runtime.snapshot(HoldDoc, task.id, context));
+    // Guidance that is already waiting resumes the parent at once, so it never waits.
+    const waits = (current?.guidance.length ?? 0) === 0;
+    if (waits) yield* announce(spec, task.id, runtime, context, "Idle");
     while (true) {
       yield* call("wait for operator guidance", async (signal) => {
         const scoped = withAbortSignal(signal, context);
         const watch = await runtime.watchDoc(HoldDoc, task.id, scoped);
         if (watch === undefined) throw new Error("The Attempt task has no Hold document");
-        return firstAccepted(watch, (hold) => hold.guidance.length > 0, scoped);
+        return firstAccepted(watch, (hold) => hold.guidance.length > 0 || released(hold), scoped);
       });
-      let resumed = false;
+      let resumed = Option.none<"Guidance" | "Release">();
       yield* commit(runtime, context, "take operator guidance", async (tx) => {
         const hold = await tx.doc(HoldDoc, task.id);
         const [next, ...rest] = hold.guidance;
-        if (next === undefined) return undefined;
+        if (next === undefined && !released(hold)) return undefined;
         hold.guidance = rest;
         hold.paused = false;
-        resumed = true;
+        resumed = Option.some(next === undefined ? "Release" : "Guidance");
         return {
           status: "running",
-          checkpoint: { phase: "run", parent, turn: turn + 1, message: next },
+          checkpoint: { phase: "run", parent, turn: turn + 1, message: next ?? RELEASE_GUIDANCE },
         };
       });
-      if (resumed) {
-        yield* Effect.logInfo("Resuming the Pi parent with operator guidance", { turn: turn + 1 });
+      if (Option.isSome(resumed)) {
+        yield* Effect.logInfo("Resuming the Pi parent", {
+          turn: turn + 1,
+          resumedBy: resumed.value,
+        });
+        if (waits) yield* announce(spec, task.id, runtime, context, "Resumed");
         return;
       }
     }
@@ -285,6 +366,14 @@ export const attemptTask = (
     const settled = ended.settled;
     if (settled.type === "input" && settled.status === "done") {
       const answer = yield* finalAnswer(runtime, context, parent, settled.answer);
+      const view = yield* call("read the parent's transcript", () =>
+        runtime.context(parent, context),
+      );
+      const answeredOperator = repliesToOperator(
+        view.entries,
+        settled.answer,
+        turn === 1 ? Option.some(settled.entry) : Option.none(),
+      );
       const record = yield* call("read the Attempt record", () =>
         runtime.snapshot(AttemptRecordDoc, spec.attemptId, context),
       );
@@ -299,32 +388,30 @@ export const attemptTask = (
       const outcome = Option.orElse(own, () => Option.map(relayed, childReportFailure));
       let finished = false;
       yield* commit(runtime, context, "record the parent's answer", async (tx) => {
-        const hold = await tx.doc(HoldDoc, task.id);
-        if (hold.paused || hold.guidance.length > 0) return undefined;
+        if (supervised(await tx.doc(HoldDoc, task.id), spec.attemptId)) return undefined;
         finished = true;
         return Option.match(outcome, {
-          onNone: () => completedOutcome(answer),
+          onNone: () => completedOutcome(answer, answeredOperator),
           onSome: failedOutcome,
         });
       });
       if (finished) {
         yield* Effect.logInfo("Pi parent finished", {
           turn,
+          answeredOperator,
           report: Option.match(outcome, { onNone: () => "none", onSome: ({ _tag }) => _tag }),
         });
         return;
       }
       yield* Effect.logInfo(
-        "Pi parent answered while interrupted; holding its answer for the operator",
-        {
-          turn,
-        },
+        "Pi parent answered under operator supervision; holding its answer for the operator",
+        { turn, answeredOperator },
       );
       return yield* awaitGuidance(task, runtime, context);
     }
     if (settled.status === "unanswered" && settled.reason === "aborted") {
       const hold = yield* call("read the Hold", () => runtime.snapshot(HoldDoc, task.id, context));
-      if (hold !== undefined && (hold.paused || hold.guidance.length > 0)) {
+      if (hold !== undefined && supervised(hold, spec.attemptId)) {
         yield* Effect.logInfo("Pi parent turn was interrupted; waiting for operator guidance", {
           turn,
         });

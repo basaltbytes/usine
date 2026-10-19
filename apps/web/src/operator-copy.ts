@@ -208,6 +208,9 @@ export const failureMessage = (failure: FailureView): string =>
       `This Attempt used its ${maxChildren}-child session budget; child ${attemptedChildren} did not start`,
   });
 
+/** Under an operator message the parent has not read yet. */
+export const queuedMessageLabel = "Queued until the parent's current delegation returns";
+
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
   `The previous Attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision; this Attempt starts without it, and the branch keeps it`;
 

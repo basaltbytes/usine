@@ -10,12 +10,14 @@ import {
   QuestionFailure,
   RunawayFailure,
 } from "@usine/core/attempt/failure";
-import { StepResult } from "@usine/core/step/result";
+import { CommitSha } from "@usine/core/repository";
+import { Commit, StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { Context, DateTime, Effect, Exit, Fiber, Layer, Logger, Option } from "effect";
+import { Context, DateTime, Effect, Exit, Fiber, Layer, Logger, Option, Result } from "effect";
 import {
   AttemptReport,
   AttemptRuntime,
+  harvestedResult,
   ParentFailed,
   ParentReported,
   ResultRecorded,
@@ -60,6 +62,21 @@ const capturedLogs = () => {
 };
 
 const REPORTED = /pi-durable reported/u;
+
+/** Each operator input's receipts in order: its action, input sequence, and what the receipt says. */
+const receipts = (envelopes: ReadonlyArray<AttemptChannel.OutboundEnvelope>) =>
+  envelopes.flatMap(({ payload }) => {
+    if (payload._tag === "InterventionRejected")
+      return [[payload.intervention.action._tag, payload.inputSequence, "rejected"]];
+    if (payload._tag !== "InterventionApplied") return [];
+    return [
+      [
+        payload.intervention.action._tag,
+        payload.inputSequence,
+        payload.state.queued ? "queued" : "delivered",
+      ],
+    ];
+  });
 
 describe("durable AttemptRuntime", () => {
   it.live("relays one whole Attempt and reports the parent's final answer", () =>
@@ -329,52 +346,157 @@ describe("durable AttemptRuntime", () => {
     }).pipe(Effect.scoped),
   );
 
-  it.live("applies a steer to a busy parent at its next turn", () =>
-    Effect.gen(function* () {
-      const database = yield* temporaryDatabase;
-      const seen: Array<string> = [];
-      const steered: ParentStep = (context) => {
-        for (const message of context.messages) {
-          if (message.role !== "user") continue;
-          seen.push(JSON.stringify(message.content));
-        }
-        return answer("Used pnpm as asked.");
-      };
-      yield* Effect.gen(function* () {
-        const runtime = yield* AttemptRuntime;
-        const request = attemptRequest("run/step/3");
-        const recording = recordingSink();
-        const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
-        const child = yield* (yield* StubChildren).next;
-        yield* runtime.intervene(
-          request.spec.attemptId,
-          new AttemptChannel.Intervention({
-            operator: "philippe",
-            target: new AttemptChannel.ParentTarget(),
-            action: new AttemptChannel.Steer({ message: "Use pnpm, not npm." }),
-          }),
+  it.live(
+    "reports a steer to a delegating parent queued until the child returns, then delivered",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const seen: Array<string> = [];
+        const steered: ParentStep = (context) => {
+          for (const message of context.messages) {
+            if (message.role !== "user") continue;
+            seen.push(JSON.stringify(message.content));
+          }
+          return answer("Used pnpm as asked.");
+        };
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/3");
+          const recording = recordingSink();
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const child = yield* (yield* StubChildren).next;
+          yield* runtime.intervene(
+            request.spec.attemptId,
+            new AttemptChannel.Intervention({
+              operator: "philippe",
+              target: new AttemptChannel.ParentTarget(),
+              action: new AttemptChannel.Steer({ message: "Use pnpm, not npm." }),
+            }),
+          );
+          assert.deepStrictEqual(receipts(recording.outbound()), [["Steer", 1, "queued"]]);
+          yield* child.reply("Child done.");
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "Used pnpm as asked.");
+          assert.include(seen.at(-1), "Use pnpm, not npm.");
+          const inbound = recording.inbound();
+          assert.deepStrictEqual(
+            inbound.map(({ sequence, payload }) => [sequence, payload._tag]),
+            [[1, "Steer"]],
+          );
+          assert.deepStrictEqual(receipts(recording.outbound()), [
+            ["Steer", 1, "queued"],
+            ["Steer", 1, "delivered"],
+          ]);
+          // The parent never stopped working, so nothing says it resumed.
+          assert.notInclude(trace(recording.outbound()), "parent.SessionResumed");
+          // Its last turn only answered the steer, which the executor must not take for the task's result.
+          assert.isTrue(report.answeredOperator);
+          assertAdmitted(request.spec.attemptId, recording.outbound());
+        }).pipe(
+          Effect.provide(layer({ database, parent: [delegate("Fix the flaky test"), steered] })),
         );
-        yield* child.reply("Child done.");
-        const report = yield* Fiber.join(execution);
-        assert.strictEqual(report.message, "Used pnpm as asked.");
-        assert.include(seen.at(-1), "Use pnpm, not npm.");
-        const inbound = recording.inbound();
-        assert.deepStrictEqual(
-          inbound.map(({ sequence, payload }) => [sequence, payload._tag]),
-          [[1, "Steer"]],
-        );
-        const applied = recording
-          .outbound()
-          .flatMap(({ payload }) => (payload._tag === "InterventionApplied" ? [payload] : []));
-        assert.strictEqual(applied.length, 1);
-        assert.strictEqual(applied[0]?.inputSequence, 1);
-        assert.isFalse(applied[0]?.state.paused);
-        assertAdmitted(request.spec.attemptId, recording.outbound());
-      }).pipe(
-        Effect.provide(layer({ database, parent: [delegate("Fix the flaky test"), steered] })),
-      );
-    }).pipe(Effect.scoped),
+      }).pipe(Effect.scoped),
   );
+
+  it.live(
+    "holds a parent the operator messaged while it delegated, then continues the task once released",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        const resumedWith: Array<string> = [];
+        const afterRelease: ParentStep = (context) => {
+          const last = context.messages.at(-1);
+          if (last?.role === "user") resumedWith.push(JSON.stringify(last.content));
+          return delegate("Open the pull request");
+        };
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const children = yield* StubChildren;
+          const request = attemptRequest("run/step/12");
+          const recording = recordingSink();
+          const operator = (action: AttemptChannel.OperatorAction) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({
+                operator: "philippe",
+                target: new AttemptChannel.ParentTarget(),
+                action,
+              }),
+            );
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const fixer = yield* children.next;
+          yield* operator(new AttemptChannel.OperatorMessage({ message: "What failed earlier?" }));
+          yield* fixer.reply("Fixed the flaky test.");
+          yield* Effect.gen(function* () {
+            while (!trace(recording.outbound()).includes("parent.SessionIdle"))
+              yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          // The parent answered the operator; under the Hold that answer ends nothing.
+          yield* Effect.sleep("300 millis");
+          assert.isUndefined(execution.pollUnsafe());
+          assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+          yield* operator(new AttemptChannel.Release());
+          yield* (yield* children.next).reply("Opened pull request 7.");
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "Opened the pull request.");
+          assert.isFalse(report.answeredOperator);
+          assert.deepStrictEqual(resumedWith.length, 1);
+          assert.include(resumedWith[0], "Continue the task");
+          const outbound = recording.outbound();
+          assertAdmitted(request.spec.attemptId, outbound);
+          assert.deepStrictEqual(receipts(outbound), [
+            ["OperatorMessage", 1, "queued"],
+            ["OperatorMessage", 1, "delivered"],
+            ["Release", 2, "delivered"],
+          ]);
+          assert.deepStrictEqual(
+            outbound.flatMap(({ payload }) =>
+              payload._tag === "InterventionApplied" ? [payload.state.held] : [],
+            ),
+            [true, true, false],
+          );
+          assert.deepStrictEqual(
+            trace(outbound).filter((step) => step.startsWith("parent.Session")),
+            [
+              "parent.SessionStarted",
+              "parent.SessionIdle",
+              "parent.SessionResumed",
+              "parent.SessionFinished",
+            ],
+          );
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [
+                delegate("Fix the flaky test"),
+                answer("The first run hit a flaky timeout; the child fixed it."),
+                afterRelease,
+                answer("Opened the pull request."),
+              ],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it("fails an Attempt whose parent ended on its answer to the operator with nothing delivered", () => {
+    const report = new AttemptReport({
+      message: "The child returned no details.",
+      answeredOperator: true,
+    });
+    const failed = harvestedResult(report, []);
+    assert(Result.isFailure(failed));
+    assert.include(failed.failure.message, "The child returned no details.");
+    const commit = new Commit({
+      sha: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
+      summary: "Fix the flaky test",
+    });
+    assert.deepStrictEqual(
+      harvestedResult(report, [commit]),
+      Result.succeed(new StepResult({ message: report.message, facts: [commit] })),
+    );
+  });
 
   it.live("holds an interrupted parent until the operator releases it", () =>
     Effect.gen(function* () {
@@ -394,6 +516,7 @@ describe("durable AttemptRuntime", () => {
           );
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         const child = yield* (yield* StubChildren).next;
+        yield* operator(new AttemptChannel.OperatorMessage({ message: "Skip the docs." }));
         yield* operator(new AttemptChannel.Interrupt());
         yield* child.interrupted.pipe(Effect.timeout("5 seconds"));
         yield* Effect.sleep("300 millis");
@@ -404,8 +527,16 @@ describe("durable AttemptRuntime", () => {
         assert.strictEqual(report.message, "Continued after the release.");
         const outbound = recording.outbound();
         assertAdmitted(request.spec.attemptId, outbound);
+        // The pause withdrew the queued message, so its second receipt says it was not read.
+        assert.deepStrictEqual(receipts(outbound), [
+          ["OperatorMessage", 1, "queued"],
+          ["OperatorMessage", 1, "rejected"],
+          ["Interrupt", 2, "delivered"],
+          ["Release", 3, "delivered"],
+        ]);
         const states = outbound.flatMap(({ payload }) =>
-          payload._tag === "InterventionApplied"
+          payload._tag === "InterventionApplied" &&
+          payload.intervention.action._tag !== "OperatorMessage"
             ? [[payload.intervention.action._tag, payload.state.paused]]
             : [],
         );

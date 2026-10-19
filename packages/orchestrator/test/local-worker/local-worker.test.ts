@@ -39,6 +39,7 @@ import {
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { fileURLToPath } from "node:url";
 import { type HarnessProbe, layer as localExecutorLayer } from "@usine/executor/local";
+import { AttemptReport } from "@usine/durable/attempt-runtime";
 import { layer as localLayer } from "../../src/local.ts";
 import {
   completes,
@@ -714,6 +715,38 @@ describe("local worker", () => {
             }),
         );
       }),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "fails the Run when the parent ended on its answer to the operator and delivered nothing",
+    () =>
+      withLocalEngine(
+        {
+          attemptRuntime: stubAttemptRuntime(new StubStorage(), () =>
+            Effect.succeed(
+              new AttemptReport({
+                message: "The delegated attempt returned no technical failure details.",
+                answeredOperator: true,
+              }),
+            ),
+          ),
+        },
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(8));
+            assert(accepted._tag === "Claimed");
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            const outcome = snapshot.attempts[0]?.outcome;
+            assert(outcome !== undefined && Option.isSome(outcome));
+            assert(outcome.value._tag === "Failed");
+            assert.strictEqual(outcome.value.failure._tag, "AgentFailure");
+            assert.include(
+              outcome.value.failure._tag === "AgentFailure" ? outcome.value.failure.message : "",
+              "The delegated attempt returned no technical failure details.",
+            );
+          }),
+      ),
     LIVE_TEST_TIMEOUT,
   );
 
