@@ -20,7 +20,7 @@ import type { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import { RunStore } from "../src/store/store.ts";
-import { TriggerCondition } from "../src/trigger-condition.ts";
+import { TriggerCondition, type TriggerRecheck } from "../src/trigger-condition.ts";
 
 export const stepResult = (message: string) => new StepResult({ message, facts: [] });
 export const testAgent = new Agent({
@@ -38,8 +38,8 @@ export const testAgent = new Agent({
 export type AttemptPlan = Effect.Effect<StepResult, AttemptFailure>;
 
 /** A `TriggerCondition` that gives every queued Event the same answer. */
-export const conditionLayer = (holds: Effect.Effect<boolean>) =>
-  Layer.succeed(TriggerCondition)({ holds: () => holds });
+export const conditionLayer = (recheck: Effect.Effect<TriggerRecheck>) =>
+  Layer.succeed(TriggerCondition)({ recheck: () => recheck });
 
 /**
  * The local engine over a scripted `StepExecutor`. Queued Events keep their
@@ -48,7 +48,7 @@ export const conditionLayer = (holds: Effect.Effect<boolean>) =>
 export const engineLayer = (
   directory: InstanceDirectory,
   executor: Layer.Layer<StepExecutor>,
-  condition: Layer.Layer<TriggerCondition> = conditionLayer(Effect.succeed(true)),
+  condition: Layer.Layer<TriggerCondition> = conditionLayer(Effect.succeed("matches")),
 ) => layer(directory).pipe(Layer.provide(executor), Layer.provide(condition));
 
 export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>

@@ -1,9 +1,18 @@
 import { assert, describe, it } from "@effect/vitest";
 import { SqliteClient } from "@effect/sql-sqlite-node";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { RepositoryName } from "@usine/core/repository";
 import { Deferred, Effect, Layer, Option, Path, Ref, Schedule, Schema } from "effect";
 import { SqlClient } from "effect/unstable/sql";
 import { RunEngine } from "../src/engine/engine.ts";
-import { TriggerCondition } from "../src/trigger-condition.ts";
+import {
+  ItemContentHash,
+  ItemProjection,
+  ItemProjectionReader,
+  ItemProjectionSource,
+  ItemProjectionWriter,
+} from "../src/item-projection/item-projection.ts";
+import { TriggerCondition, type TriggerRecheck } from "../src/trigger-condition.ts";
 import { runIdFor } from "../src/engine/submission.ts";
 import {
   approvalEvent,
@@ -31,7 +40,7 @@ describe("queued Event trigger re-check", () => {
         const runtime = engineLayer(
           directory,
           executorLayer(plans),
-          conditionLayer(Effect.succeed(false)),
+          conditionLayer(Effect.succeed("no-longer-matches")),
         );
         const path = yield* Path.Path;
         const database = path.join(directory, ".usine", "runtime.sqlite");
@@ -83,13 +92,67 @@ describe("queued Event trigger re-check", () => {
     ),
   );
 
-  it.live("preserves newer queued work when an older trigger re-check returns false", () =>
+  it.live(
+    "revokes the queued Events of an Item its source no longer has and marks its projection gone",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const gate = yield* Deferred.make<void>();
+          const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
+            Deferred.await(gate).pipe(Effect.as(stepResult("first result"))),
+          ]);
+          const runtime = engineLayer(
+            directory,
+            executorLayer(plans),
+            conditionLayer(Effect.succeed("item-gone")),
+          );
+          const repository = RepositoryName.make("basaltbytes/usine");
+          yield* Effect.gen(function* () {
+            const engine = yield* RunEngine;
+            const projections = yield* ItemProjectionReader;
+            yield* (yield* ItemProjectionWriter).upsert(
+              new ItemProjection({
+                itemKey: ItemKey.make("item-1"),
+                repository,
+                source: ItemProjectionSource.make("issue"),
+                number: ItemNumber.make(1),
+                contentHash: ItemContentHash.make("issue-1:open"),
+                payload: { state: "OPEN" },
+              }),
+            );
+            const first = yield* engine.submit(submission({ number: 40 }));
+            assert(first._tag === "Claimed");
+            yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Running");
+            const second = submission({ number: 41 });
+            assert.strictEqual((yield* engine.submit(second))._tag, "Queued");
+
+            yield* Deferred.succeed(gate, undefined);
+            yield* waitFor(engine, first.runId, ({ run }) => run.state._tag === "Succeeded");
+            const [projection] = yield* projections.list(repository, { limit: 1 }).pipe(
+              Effect.repeat({
+                while: ([item]) => item === undefined || Option.isNone(item.goneAt),
+                schedule: Schedule.spaced("10 millis"),
+                times: 500,
+              }),
+            );
+            // The Board reads the Item as gone, with its last payload kept.
+            assert(projection !== undefined && Option.isSome(projection.goneAt));
+            assert.deepStrictEqual(projection.payload, { state: "OPEN" });
+            const resubmitted = yield* engine.submit(second);
+            assert(resubmitted._tag === "Ignored");
+            assert.strictEqual(resubmitted.reason, "revoked");
+          }).pipe(Effect.provide(runtime));
+        }),
+      ),
+  );
+
+  it.live("preserves newer queued work when an older trigger re-check does not match", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const finishFirst = yield* Deferred.make<void>();
         const finishThird = yield* Deferred.make<void>();
         const checking = yield* Deferred.make<void>();
-        const checked = yield* Deferred.make<boolean>();
+        const checked = yield* Deferred.make<TriggerRecheck>();
         const second = submission({ number: 31 });
         const fourth = submission({ number: 33 });
         const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>([
@@ -101,12 +164,12 @@ describe("queued Event trigger re-check", () => {
           directory,
           executorLayer(plans),
           Layer.succeed(TriggerCondition)({
-            holds: (candidate) =>
+            recheck: (candidate) =>
               candidate.event.id === second.event.id
                 ? Deferred.succeed(checking, undefined).pipe(
                     Effect.andThen(Deferred.await(checked)),
                   )
-                : Effect.succeed(true),
+                : Effect.succeed("matches"),
           }),
         );
         const path = yield* Path.Path;
@@ -123,7 +186,7 @@ describe("queued Event trigger re-check", () => {
           assert(third._tag === "Claimed");
           yield* waitFor(engine, third.runId, ({ run }) => run.state._tag === "Running");
           assert.strictEqual((yield* engine.submit(fourth))._tag, "Queued");
-          yield* Deferred.succeed(checked, false);
+          yield* Deferred.succeed(checked, "no-longer-matches");
 
           // Wait for B's delayed revocation to commit before allowing C to close.
           const revoked = Effect.gen(function* () {

@@ -45,7 +45,7 @@ A loop whose `if:` or prompt fails to evaluate on an item affects only that loop
 
 Polling cursors live in the engine's `CursorStore`. When a loop starts watching a repository or its trigger expression changes, the orchestrator discards that repository's efficiency cursor and performs a cold poll, while the permanent Event ledger absorbs repeated state.
 
-Before opening a queued Event's Run, the orchestrator re-checks its trigger against the Item's current GitHub state. The re-check has a five-second limit. A failed or timed-out check logs a warning and lets the queued Event proceed; subsequent polling can revoke a Run whose Item no longer matches.
+Before opening a queued Event's Run, the orchestrator re-checks its trigger against the Item's current GitHub state. The re-check has a five-second limit. A failed or timed-out check logs a warning and lets the queued Event proceed; subsequent polling can revoke a Run whose Item no longer matches. When GitHub no longer has the Item, the engine revokes its queued Events and marks its projection gone, so its Board card leaves the open lanes.
 
 PR-triggered Attempts fetch and check out the immutable `headRefOid` saved in their Event payload. A later push creates a new Event with its new head commit. Issue and schedule Attempts use the repository's default branch.
 

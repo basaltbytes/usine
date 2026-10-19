@@ -59,7 +59,9 @@ describe("Run evidence reader", () => {
       });
       const writer = layer(directory).pipe(
         Layer.provide(executor),
-        Layer.provide(Layer.succeed(TriggerCondition)({ holds: () => Effect.succeed(true) })),
+        Layer.provide(
+          Layer.succeed(TriggerCondition)({ recheck: () => Effect.succeed("matches") }),
+        ),
       );
       yield* Effect.gen(function* () {
         const engine = yield* RunEngine;

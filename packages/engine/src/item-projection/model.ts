@@ -12,8 +12,9 @@ export type ItemContentHash = typeof ItemContentHash.Type;
 
 /**
  * The latest payload a trigger observed for one Item, whatever the source
- * adapter. `goneAt` is when a poll found that GitHub no longer has the Item;
- * the payload is then the last one GitHub returned. None while GitHub has it.
+ * adapter. `goneAt` is when a poll or a queued Event's re-check found that
+ * GitHub no longer has the Item; the payload is then the last one GitHub
+ * returned. None while GitHub has it.
  */
 export class ItemProjection extends Schema.Class<ItemProjection>("@usine/engine/ItemProjection")({
   itemKey: ItemKey,
