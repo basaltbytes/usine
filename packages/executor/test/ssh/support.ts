@@ -5,6 +5,7 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
+import { LoopName, type LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, CommitSha, RepositoryRevision } from "@usine/core/repository";
 import {
   SshDestination,
@@ -50,6 +51,8 @@ const SALVAGE_COMMIT = CommitSha.make("fedcba9876543210fedcba9876543210fedcba98"
 export const WORKER_ROOT = "/srv/usine/workers/eu-one";
 export const WORKTREE = `${WORKER_ROOT}/attempts/remote-run_execute_1`;
 export const CREDENTIALS = `${WORKER_ROOT}/credentials/remote-run_execute_1`;
+/** The checkout's own git directory inside the cached clone. */
+export const GIT_DIRECTORY = `${WORKER_ROOT}/repos/acme_demo.git/worktrees/remote-run_execute_1`;
 /** Every token the fake provider mints starts with this, so a leak is found by substring. */
 export const TOKEN_PREFIX = "ghs_ssh-worker-test-token-";
 export const TEST_AGENT = new Agent({
@@ -320,6 +323,7 @@ export const fakeMachine = () => {
     if (line.startsWith("cd ") && line.includes("&& exec 'git' 'branch' '--show-current'"))
       return oneShotHandle("", 0);
     if (line.includes("exec 'git' '-C' ")) {
+      if (line.includes("'--absolute-git-dir'")) return oneShotHandle(`${GIT_DIRECTORY}\n`, 0);
       if (line.includes("'rev-parse'"))
         return oneShotHandle(`${state.salvageCommitted ? SALVAGE_COMMIT : COMMIT}\n`, 0);
       if (line.includes("'status'"))
@@ -387,27 +391,31 @@ export const fakeMachine = () => {
   return { state, layer: Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, service) };
 };
 
-/** Mints a distinct one-hour token on each request, as the GitHub App does. */
+/** Mints a distinct one-hour token on each request, as the GitHub App does, and records the permission level asked for. */
 export const mintingProvider = (lifetimeMillis = 3_600_000) => {
   const minted: Array<string> = [];
+  const permissions: Array<LoopPermissions> = [];
   const layer = Layer.succeed(CredentialProvider)({
-    issue: () =>
+    issue: (_repository, _attemptId, level) =>
       Effect.gen(function* () {
         const token = `${TOKEN_PREFIX}${minted.length + 1}`;
         minted.push(token);
+        permissions.push(level);
         return new WorkerCredential({
           value: Redacted.make(token),
           expiresAt: DateTime.makeUnsafe((yield* Clock.currentTimeMillis) + lifetimeMillis),
         });
       }),
   });
-  return { minted, layer };
+  return { minted, permissions, layer };
 };
 
 export const request = new CheckoutRequest({
   attemptId: ATTEMPT_ID,
   worker: WORKER,
   repository: REPOSITORY,
+  loop: LoopName.make("implement"),
+  permissions: "write",
   revision: RepositoryRevision.make("main"),
   payload: { issue: { number: 42 } },
   task: AttemptTask.make("Complete the remote task"),

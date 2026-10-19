@@ -5,7 +5,13 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { CycleLimit, CycleBudgetAskId } from "@usine/core/cycle-budget";
-import { LoopName, APPROVAL_REQUIREMENTS, type ApprovalRequirement } from "@usine/core/loop";
+import {
+  LoopName,
+  APPROVAL_REQUIREMENTS,
+  type ApprovalRequirement,
+  LOOP_PERMISSIONS,
+  type LoopPermissions,
+} from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -47,6 +53,11 @@ export const triggerEvents = snakeCase.table(
     loopName: text().$type<LoopName>().notNull(),
     stepName: text().$type<StepName>().notNull(),
     approval: text({ enum: APPROVAL_REQUIREMENTS }).$type<ApprovalRequirement>().notNull(),
+    // The Loop's permission level when the Event matched; every Attempt of its Run uses it.
+    permissions: text({ enum: LOOP_PERMISSIONS })
+      .$type<LoopPermissions>()
+      .notNull()
+      .default("write"),
     cycleLimit: integer().$type<CycleLimit>(),
     // Item allowance observed before fetching this Event's trigger input.
     cycleGeneration: integer().notNull().default(0),

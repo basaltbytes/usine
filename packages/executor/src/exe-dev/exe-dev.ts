@@ -1,7 +1,7 @@
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Effect, Layer } from "effect";
+import { Effect, Layer, Option } from "effect";
 import type { ChildProcessSpawner } from "effect/unstable/process";
 import { CredentialUnavailableError, Executor } from "../executor.ts";
 import type { RemoteAccess, RemoteGrant, RemoteMachine } from "../remote/machine.ts";
@@ -66,7 +66,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
           cause: new Error("repository integration missing"),
         });
       return {
-        acquire: (attemptId, worker, machine) =>
+        acquire: (attemptId, worker, _permissions, machine) =>
           credentialGrants
             .acquire(attemptId, worker, repository, integration)
             .pipe(Effect.as(edgeAccess(machine))),
@@ -83,6 +83,9 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       harnessProbe: (machine) => machines.harnessProbe(machine.shell),
       repositoryUrl: (_machine, repository) => `https://${EDGE_GITHUB_HOST}/${repository}.git`,
       grantFor,
+      readOnlyAccessGap: Option.some(
+        "exe.dev's GitHub integration grants the access of exe.dev's own GitHub App and cannot narrow it to read-only",
+      ),
       reclaim: () => Effect.void,
       // The grace covers an SSH round trip plus the agent flushing its final
       // events, not just a local pipe.

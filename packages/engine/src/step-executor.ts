@@ -4,6 +4,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptTask, type AttemptId } from "@usine/core/attempt";
 import { SalvagePushed } from "@usine/core/attempt/salvage";
 import { Event } from "@usine/core/event";
+import { LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { Run } from "@usine/core/run";
 import { Step } from "@usine/core/step";
@@ -25,6 +26,8 @@ export class StepExecution extends Schema.Class<StepExecution>("@usine/engine/St
   task: AttemptTask,
   agent: Agent,
   parentModel: Schema.Option(ModelId),
+  /** What the Attempt may do to `repository`: the Run's Loop permission level (ADR 0011). */
+  permissions: LoopPermissions,
   /** The newest pushed salvage of an earlier Attempt of this Run, which this Attempt's checkout resumes from. */
   resume: Schema.Option(SalvagePushed),
   /** The Attempt was open when the orchestrator stopped and its parent task is still live: execution reattaches to it instead of starting it. */

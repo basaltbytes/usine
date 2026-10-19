@@ -113,15 +113,23 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
 
     const grantFor = (repository: RepositoryName) =>
       Effect.succeed({
-        acquire: (attemptId, worker, machine, operation) =>
+        acquire: (attemptId, worker, permissions, machine, operation) =>
           Effect.gen(function* () {
             yield* reclaim(worker);
             if (Option.isNone(machine.gateway))
-              return yield* credentials.acquire(attemptId, worker, repository, machine, operation);
+              return yield* credentials.acquire(
+                attemptId,
+                worker,
+                repository,
+                permissions,
+                machine,
+                operation,
+              );
             return yield* attachments.acquire(
               attemptId,
               worker,
               repository,
+              permissions,
               machine,
               machine.gateway.value,
               operation,
@@ -143,6 +151,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
           onSome: ({ settings }) => gatewayRepositoryUrl(settings.domain, repository),
         }),
       grantFor,
+      readOnlyAccessGap: Option.none(),
       reclaim,
       // The grace covers an SSH round trip plus the agent flushing its final
       // events, not just a local pipe.

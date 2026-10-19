@@ -57,6 +57,7 @@ class LoopFrontmatter extends Schema.Class<LoopFrontmatter>("@usine/config/LoopF
   step: StepName.pipe(Schema.withDecodingDefaultKey(Effect.succeed("run"))),
   agent: AgentName,
   maxCycles: LoopFile.fields.maxCycles,
+  permissions: LoopFile.fields.permissions,
 }) {}
 
 const AuthoredLoopFrontmatter = LoopFrontmatter.pipe(
@@ -270,6 +271,7 @@ const makeParseLoopFile = (engine: ExpressionEngine["Service"]) =>
           selector: frontmatter.selector,
           approval: frontmatter.approval,
           maxCycles: frontmatter.maxCycles,
+          permissions: frontmatter.permissions,
           step: frontmatter.step,
           agent: frontmatter.agent,
           body,

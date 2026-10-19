@@ -40,6 +40,7 @@ import {
   verifyHarnessReadiness,
 } from "../harness-preflight.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
+import { withGitHooks } from "../pre-push-hook.ts";
 import {
   SwapOnDemand,
   verifyLinuxMemory,
@@ -232,7 +233,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       if (!(yield* workerLeftovers(attempt.worker)).has(worktree)) return;
       if (!(yield* fileSystem.exists(worktree))) return;
       const cache = path.join(root, "repos", cacheDirectoryName(attempt.repository));
-      if (attempt.succeeded) {
+      if (attempt.succeeded || attempt.permissions === "read") {
         return yield* recoverWorktree(
           {
             attempt,
@@ -249,6 +250,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           const credential = yield* credentials(
             attempt.repository,
             attempt.attemptId,
+            attempt.permissions,
             baseEnvironment,
           );
           const git = credentialedGit(credential);
@@ -346,10 +348,17 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         worker: request.worker,
         host: "local",
         repository: request.repository,
+        loop: request.loop,
+        permissions: request.permissions,
         reattach: request.reattach,
       });
       yield* verifyHarnessReadiness(request.worker, [request.agent.brain], harnessReadiness);
-      const credential = yield* credentials(request.repository, request.attemptId, baseEnvironment);
+      const credential = yield* credentials(
+        request.repository,
+        request.attemptId,
+        request.permissions,
+        baseEnvironment,
+      );
       const workerRoot = path.join(workersRoot, request.worker);
       const cache = path.join(workerRoot, "repos", cacheDirectoryName(request.repository));
       const worktree = path.join(workerRoot, "attempts", safeSegment(request.attemptId));
@@ -362,6 +371,8 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           worker: request.worker,
           repository: request.repository,
           revision: request.revision,
+          loop: request.loop,
+          permissions: request.permissions,
           cache,
           worktree,
         },
@@ -381,6 +392,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         cacheExists: fileSystem.exists(cache),
         promoteStaging: fileSystem.rename(`${cache}.cloning`, cache),
         git: credentialedGit(credential),
+        writeExecutable: (target, content) =>
+          fileSystem
+            .makeDirectory(path.dirname(target), { recursive: true })
+            .pipe(Effect.andThen(fileSystem.writeFileString(target, content, { mode: 0o755 }))),
       };
       const acquire = Effect.gen(function* () {
         if (!request.reattach)
@@ -423,7 +438,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
         reattach: request.reattach,
         worktree,
       });
-      const environment = attemptEnvironment(prepared.workspace, credential);
+      const environment = withGitHooks(
+        attemptEnvironment(prepared.workspace, credential),
+        prepared.gitHooks,
+      );
       return {
         workspace: prepared.workspace,
         launch: (io: AttemptChannel.Sink) =>

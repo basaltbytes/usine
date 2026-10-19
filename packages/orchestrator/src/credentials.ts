@@ -5,7 +5,8 @@ import { Effect, Layer, Option, SynchronizedRef } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 
 /**
- * Mints renewable single-repository GitHub App tokens for each Attempt. Project
+ * Mints renewable single-repository GitHub App tokens for each Attempt, at
+ * the permission level of the Attempt's Loop (ADR 0011). Project
  * access is discovered on the first mint and cached, so a GitHub outage cannot
  * block startup. A repository added to the installation, or to the current
  * instance's registry by a reload, is found by the refresh that follows a miss.
@@ -79,24 +80,28 @@ export const gitHubCredentialLayer: Layer.Layer<
     });
 
     return CredentialProvider.of({
-      issue: Effect.fn("GitHubCredentialProvider.issue")(function* (repository, attemptId) {
-        const project = yield* projectFor(repository);
-        const token = yield* app.workerToken(project).pipe(
-          Effect.mapError(
-            (cause) =>
-              new CredentialUnavailableError({
-                repository,
-                message: `Could not mint a worker token for ${repository}`,
-                cause,
-              }),
-          ),
-        );
-        yield* Effect.logInfo("Minted a single-repository worker token", {
-          repository,
-          attemptId,
-        });
-        return new WorkerCredential({ value: token.value, expiresAt: token.expiresAt });
-      }),
+      issue: Effect.fn("GitHubCredentialProvider.issue")(
+        function* (repository, attemptId, permissions) {
+          yield* Effect.annotateCurrentSpan({ repository, attemptId, permissions });
+          const project = yield* projectFor(repository);
+          const token = yield* app.workerToken(project, permissions).pipe(
+            Effect.mapError(
+              (cause) =>
+                new CredentialUnavailableError({
+                  repository,
+                  message: `Could not mint a worker token for ${repository}`,
+                  cause,
+                }),
+            ),
+          );
+          yield* Effect.logInfo("Minted a single-repository worker token", {
+            repository,
+            attemptId,
+            permissions,
+          });
+          return new WorkerCredential({ value: token.value, expiresAt: token.expiresAt });
+        },
+      ),
     });
   }),
 );

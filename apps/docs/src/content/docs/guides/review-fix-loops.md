@@ -23,6 +23,8 @@ Agents that use the same GitHub App share its author identity, and GitHub doesn'
 
 Before posting a result or changing outcome labels, verify that the PR still has the reviewed head. If the head changed, leave the PR queued for a new review. A success label records an Agent's result but doesn't satisfy GitHub's required-review rule. The operator gives any required independent approval and merges the PR.
 
+Set [`permissions: read`](/reference/configuration/loop-files/#permissions) on review Loops so the reviewer's GitHub token cannot push to the branch it reviews, and say in the prompt that a reviewer that notices it broke a rule reports its findings on the required commit and does not retry the review on a later head.
+
 ## Authored example
 
 Declare `ready-for-review`, `agent-review-findings`, `review-passed`, and `ready-to-merge` in `usine.yaml`'s `labels` list, and define the `reviewer` and `developer` Agents. Add a `selector` to these Loops if the instance manages repositories that shouldn't use them.
@@ -36,6 +38,7 @@ trigger:
     item.labels.nodes.exists(label, label.name == "ready-for-review")
 approval: none
 max_cycles: 3
+permissions: read
 step: review
 agent: reviewer
 ---

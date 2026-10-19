@@ -194,6 +194,7 @@ const snapshot = new RunSnapshot({
     persona: agentFile.persona,
   }),
   parentModel: Option.none(),
+  permissions: "write",
 });
 
 const parent = new ParentSession({
@@ -668,7 +669,7 @@ describe("Operator", () => {
   );
 
   it.effect(
-    "runs a Run again with its Loop file's gate and budget, the selected roster Agent, and the configured operator",
+    "runs a Run again with its Loop file's gate, budget, and permissions, the selected roster Agent, and the configured operator",
     () =>
       Effect.gen(function* () {
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
@@ -688,7 +689,7 @@ describe("Operator", () => {
             operator: Option.some(OperatorLogin.make("Philippe")),
           }),
           agents: [agentFile, reviewer],
-          loops: [new LoopFile({ ...loop, maxCycles: CycleLimit.make(5) })],
+          loops: [new LoopFile({ ...loop, maxCycles: CycleLimit.make(5), permissions: "read" })],
         });
         const opened = new Claimed({
           eventId: EventId.make("run-again-event"),
@@ -708,6 +709,7 @@ describe("Operator", () => {
                 step: loop.step,
                 approval: "required",
                 cycleLimit: Option.some(CycleLimit.make(5)),
+                permissions: "read",
                 context: new AttemptContext({
                   task: AttemptTask.make("Finish the review"),
                   agent: reviewer.agent,

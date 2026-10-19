@@ -126,10 +126,10 @@ describe("GitHubApp", () => {
         const covered = access[0];
         assert(covered instanceof CoveredProject);
 
-        const worker = yield* app.workerToken(covered);
+        const worker = yield* app.workerToken(covered, "write");
         assert.strictEqual(worker.scope._tag, "SingleRepository");
         assert.strictEqual(Redacted.value(worker.value), "worker-secret");
-        yield* app.workerToken(covered);
+        yield* app.workerToken(covered, "write");
 
         // One lease serves both orchestrator calls. Each worker call mints afresh.
         const discoveries = requests.filter((request) =>
@@ -182,6 +182,55 @@ describe("GitHubApp", () => {
     },
   );
 
+  it.live("mints a worker token that can push only for a write Loop", () => {
+    const expiresAt = new Date(Date.now() + 50 * 60 * 1_000).toISOString();
+    const bodies: Array<typeof TokenRequestBody.Type> = [];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        bodies.push(requestJson(request));
+        return jsonResponse(request, {
+          token: "worker-secret",
+          expires_at: expiresAt,
+          repositories: [{ id: 99, full_name: "basaltbytes/usine" }],
+        });
+      }),
+    );
+    const project = new CoveredProject({
+      installationId: InstallationId.make(77),
+      repository: RepositoryName.make("basaltbytes/usine"),
+      repositoryId: RepositoryId.make(99),
+    });
+
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const read = yield* app.workerToken(project, "read");
+      const write = yield* app.workerToken(project, "write");
+      assert(read.scope._tag === "SingleRepository" && write.scope._tag === "SingleRepository");
+      assert.strictEqual(read.scope.permissions, "read");
+      assert.strictEqual(write.scope.permissions, "write");
+      // A read Loop still posts reviews and comments, so only contents drops to read.
+      assert.deepStrictEqual(
+        bodies.map(({ permissions }) => permissions),
+        [
+          {
+            checks: "read",
+            contents: "read",
+            issues: "write",
+            metadata: "read",
+            pull_requests: "write",
+          },
+          {
+            checks: "read",
+            contents: "write",
+            issues: "write",
+            metadata: "read",
+            pull_requests: "write",
+          },
+        ],
+      );
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
   it.live("renews the shared lease once its token is about to expire", () => {
     const expiresAt = new Date(Date.now() + 3 * 60 * 1_000).toISOString();
     let mints = 0;
@@ -228,6 +277,7 @@ describe("GitHubApp", () => {
             repository: RepositoryName.make("basaltbytes/usine"),
             repositoryId: RepositoryId.make(99),
           }),
+          "write",
         )
         .pipe(Effect.flip);
       assert.strictEqual(failure._tag, "InvalidGitHubResponseError");
@@ -254,6 +304,7 @@ describe("GitHubApp", () => {
           repository: RepositoryName.make("basaltbytes/usine"),
           repositoryId: RepositoryId.make(99),
         }),
+        "write",
       );
       const shared = yield* app.installationToken();
       assert.strictEqual(DateTime.toEpochMillis(worker.expiresAt), now + 60 * 60_000);
@@ -282,6 +333,7 @@ describe("GitHubApp", () => {
             repository: RepositoryName.make("basaltbytes/usine"),
             repositoryId: RepositoryId.make(99),
           }),
+          "write",
         )
         .pipe(Effect.flip);
       assert.strictEqual(failure._tag, "InvalidGitHubResponseError");

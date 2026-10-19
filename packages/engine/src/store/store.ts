@@ -393,6 +393,7 @@ const makeRunStore = Effect.gen(function* () {
       task: current.task,
       agent: current.agent,
       parentModel: current.parentModel,
+      permissions: current.permissions,
       resume,
       reattach,
     });

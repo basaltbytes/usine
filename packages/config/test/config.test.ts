@@ -451,6 +451,28 @@ describe("ConfigParser", () => {
     }).pipe(Effect.provide(parserLayer)),
   );
 
+  it.effect("defaults Loop permissions to write and accepts only read or write", () =>
+    Effect.gen(function* () {
+      const parser = yield* ConfigParser;
+      const source = (field: string) =>
+        `---\ntrigger:\n  on: pr\n  if: 'true'\nagent: reviewer\n${field}---\nReview the Item.`;
+      const parse = (field: string) =>
+        parser.parseLoopFile(InstancePath.make("loops/review.md"), source(field));
+      expect((yield* parse("")).permissions).toBe("write");
+      expect((yield* parse("permissions: read\n")).permissions).toBe("read");
+      expect((yield* parse("permissions: write\n")).permissions).toBe("write");
+      for (const invalid of [
+        "permissions: admin\n",
+        "permissions: { contents: read }\n",
+        "permission: read\n",
+      ]) {
+        const failure = yield* parse(invalid).pipe(Effect.flip);
+        expect(failure.stage).toBe("schema");
+        expect(failure.message).toContain("permission");
+      }
+    }).pipe(Effect.provide(parserLayer)),
+  );
+
   it.effect("exposes pull request mergeability to pr trigger expressions", () =>
     Effect.gen(function* () {
       const parser = yield* ConfigParser;

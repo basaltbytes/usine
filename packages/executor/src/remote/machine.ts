@@ -1,9 +1,10 @@
 import type { RemoteShell } from "@usine/agents/child-host";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { AttemptId } from "@usine/core/attempt";
+import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
 import type { WorkerKind, WorkerName } from "@usine/core/worker";
-import type { Effect, Scope } from "effect";
+import type { Effect, Option, Scope } from "effect";
 import type { CredentialUnavailableError, ExecutorError, ExecutorOperation } from "../executor.ts";
 import type { HarnessProbe } from "../harness-preflight.ts";
 import type { RemoteCommands } from "./commands.ts";
@@ -36,10 +37,15 @@ export interface RemoteAccess {
 
 /** How a remote Worker gives Attempts access to one repository. */
 export interface RemoteGrant<M extends RemoteMachine> {
-  /** Gives the Attempt access to its repository on `machine` until the caller's scope closes. */
+  /**
+   * Gives the Attempt access to its repository on `machine`, at the level of
+   * its Loop `permissions` where the Worker kind can narrow it, until the
+   * caller's scope closes.
+   */
   readonly acquire: (
     attemptId: AttemptId,
     worker: WorkerName,
+    permissions: LoopPermissions,
     machine: M,
     operation: ExecutorOperation,
   ) => Effect.Effect<RemoteAccess, ExecutorError, Scope.Scope>;
@@ -71,6 +77,12 @@ export interface RemoteWorker<M extends RemoteMachine> {
   readonly grantFor: (
     repository: RepositoryName,
   ) => Effect.Effect<RemoteGrant<M>, CredentialUnavailableError>;
+  /**
+   * Why this Worker kind cannot give an Attempt repository access that
+   * cannot push, which a Loop with `permissions: read` needs; none when it
+   * can. `prepare` refuses such an Attempt before any credential is granted.
+   */
+  readonly readOnlyAccessGap: Option.Option<string>;
   /** Removes what earlier processes left on the Worker's machine that no Attempt can still use; runs before its checkouts are listed. */
   readonly reclaim: (worker: WorkerName) => Effect.Effect<void>;
   /** Grace for the parent task's cancellation, then for the Attempt to settle. */

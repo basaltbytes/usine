@@ -9,7 +9,7 @@ import { ModelId } from "@usine/core/agent/brain";
 import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
-import { LoopName, ApprovalRequirement } from "@usine/core/loop";
+import { LoopName, ApprovalRequirement, LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { StepName } from "@usine/core/step";
@@ -22,6 +22,11 @@ export class Submission extends Schema.Class<Submission>("@usine/engine/Submissi
   loop: LoopName,
   step: StepName,
   approval: ApprovalRequirement,
+  /** What the Run's Attempts may do to their repository, from the Loop when the Event matched. */
+  permissions: LoopPermissions.pipe(
+    Schema.withDecodingDefaultKey(Effect.succeed("write" as const)),
+    Schema.withConstructorDefault(Effect.succeed("write" as const)),
+  ),
   /** Item Runs default to three rounds; schedule adapters explicitly supply None. */
   cycleLimit: Schema.Option(CycleLimit).pipe(
     Schema.withDecodingDefaultTypeKey(Effect.succeed(Option.some(DEFAULT_CYCLE_LIMIT))),

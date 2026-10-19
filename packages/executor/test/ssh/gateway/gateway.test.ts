@@ -3,6 +3,7 @@ import { RemoteShell } from "@usine/agents/child-host";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { HarnessReady, HarnessUnavailableError } from "@usine/core/agent/capability";
 import type { AttemptSalvage } from "@usine/core/attempt/salvage";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import type { AttemptRequest } from "@usine/durable/attempt-runtime";
@@ -13,6 +14,7 @@ import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../../src/remote/commands.ts";
 import {
+  GIT_DIRECTORY,
   TEST_AGENT,
   TOKEN_PREFIX,
   WORKER,
@@ -449,6 +451,49 @@ describe("SSH Worker behind a Gateway", () => {
     );
   });
 
+  it.effect(
+    "attaches a read token for a read Loop and points the children's git at its pre-push hook",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const gateway = fakeGateway(machine);
+      machine.state.salvage = "dirty";
+      let given: AttemptRequest | undefined;
+      const parent: StubParent = (context) => {
+        given = context.request;
+        return fails(context);
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(
+          new CheckoutRequest({
+            ...request,
+            loop: LoopName.make("review-pr"),
+            permissions: "read",
+          }),
+        );
+        const [attached] = yield* attachmentsInForce;
+        assert(attached !== undefined);
+        assert.deepStrictEqual(credentials.permissions, ["read"]);
+        yield* prepared.launch(sink).pipe(Effect.flip);
+        assert(given !== undefined);
+        // The Gateway's own entries come first, and the token's header stays in entry 0.
+        assert.strictEqual(given.environment.GIT_CONFIG_COUNT, "4");
+        assert.strictEqual(given.environment.GIT_CONFIG_KEY_3, "core.hooksPath");
+        assert.strictEqual(given.environment.GIT_CONFIG_VALUE_3, `${GIT_DIRECTORY}/usine-hooks`);
+        assert(
+          machine.state.calls.some(({ line }) =>
+            line.includes(`'${GIT_DIRECTORY}/usine-hooks/pre-push'`),
+          ),
+        );
+        assert(!machine.state.calls.some(({ line }) => line.includes("'push'")));
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(gatewayRuntime(machine, credentials, gateway, { parent })),
+      );
+    },
+  );
+
   it.effect("detaches what an earlier process left for the Worker before recovering it", () => {
     const machine = fakeMachine();
     const credentials = mintingProvider();
@@ -465,6 +510,7 @@ describe("SSH Worker behind a Gateway", () => {
           repository: request.repository,
           worker: WORKER,
           ref: request.salvageRef,
+          permissions: "write",
           succeeded: false,
           open: false,
         },

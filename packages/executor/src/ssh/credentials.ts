@@ -1,4 +1,5 @@
 import type { AttemptId } from "@usine/core/attempt";
+import type { LoopPermissions } from "@usine/core/loop";
 import { type RepositoryName, safeSegment } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import { Cache, Effect, Redacted } from "effect";
@@ -113,11 +114,12 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
     attemptId: AttemptId,
     worker: WorkerName,
     repository: RepositoryName,
+    permissions: LoopPermissions,
     machine: SshMachine,
     operation: ExecutorOperation,
   ) {
     const host = machine.shell.destination;
-    yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, host });
+    yield* Effect.annotateCurrentSpan({ attemptId, worker, repository, permissions, host });
     const directory = `${credentialsRoot(machine)}/${safeSegment(attemptId)}`;
     yield* Effect.addFinalizer(() =>
       commands.run("cleanup", machine.shell, "rm", ["-rf", directory]).pipe(
@@ -137,8 +139,12 @@ export const sshCredentialsFor = Effect.fn("SshExecutor.credentialsFor")(functio
         Effect.ignore,
       ),
     );
-    const credential = yield* renewableCredential(provider.issue, repository, attemptId, (issued) =>
-      write(operation, machine, directory, issued),
+    const credential = yield* renewableCredential(
+      provider.issue,
+      repository,
+      attemptId,
+      permissions,
+      (issued) => write(operation, machine, directory, issued),
     );
     const environment = credentialEnvironment(directory);
     return {

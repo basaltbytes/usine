@@ -1,4 +1,5 @@
 import type { AttemptId } from "@usine/core/attempt";
+import type { LoopPermissions } from "@usine/core/loop";
 import type { RepositoryName } from "@usine/core/repository";
 import { Effect, FileSystem, Redacted } from "effect";
 import { credentialEnvironment, GH_CONFIG, ghHostsConfig } from "../credential-environment.ts";
@@ -16,9 +17,10 @@ export const localCredentialsFor = Effect.gen(function* () {
     function* (
       repository: RepositoryName,
       attemptId: AttemptId,
+      permissions: LoopPermissions,
       baseEnvironment: Record<string, string>,
     ) {
-      yield* Effect.annotateCurrentSpan({ repository, attemptId });
+      yield* Effect.annotateCurrentSpan({ repository, attemptId, permissions });
       const directory = yield* fs.makeTempDirectoryScoped({ prefix: "usine-credentials-" });
       yield* fs.chmod(directory, 0o700);
       yield* fs.writeFileString(`${directory}/config.yml`, GH_CONFIG, { mode: 0o600 });
@@ -26,6 +28,7 @@ export const localCredentialsFor = Effect.gen(function* () {
         provider.issue,
         repository,
         attemptId,
+        permissions,
         Effect.fn("LocalExecutor.writeCredential")(function* ({ value }: WorkerCredential) {
           // Rename prevents readers observing truncated credentials during renewal.
           yield* fs.writeFileString(`${directory}/token.next`, Redacted.value(value), {

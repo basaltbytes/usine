@@ -5,6 +5,7 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptTask, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
+import { LoopName, LoopPermissions } from "@usine/core/loop";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName, WorkerKind } from "@usine/core/worker";
@@ -83,7 +84,8 @@ export class WorkerCapabilityError extends Schema.TaggedError<WorkerCapabilityEr
    * harness does not run. `memory`: the machine has less than 1.5 GiB of memory per
    * concurrent Attempt, has no swap for more than one, or does not report its memory.
    * `harness-login`: a brain's harness is not logged in. `credentials`: an exe.dev
-   * GitHub integration is not ready. `gateway`: the Gateway in front of the machine
+   * GitHub integration is not ready, or the Worker kind cannot give an Attempt of a
+   * Loop with `permissions: read` access that cannot push. `gateway`: the Gateway in front of the machine
    * does not answer or is not reachable from it.
    */
   capability: WorkerCapability,
@@ -135,6 +137,16 @@ export class CheckoutRequest extends Schema.Class<CheckoutRequest>(
    * this repository only (ADR 0011).
    */
   repository: RepositoryName,
+  /** The Loop that opened the Attempt's Run. A `read` checkout's pre-push hook names it in its message. */
+  loop: LoopName,
+  /**
+   * What the Attempt may do to `repository` (ADR 0011). With `read`, its
+   * credential cannot push, and a Worker kind that cannot give it such a
+   * credential refuses it with a `credentials` capability error. Its
+   * checkout's pre-push hook tells the Agent why a push fails, and an
+   * unsuccessful end removes the checkout without salvage.
+   */
+  permissions: LoopPermissions,
   /**
    * What to fetch. Preparation resolves it to a commit, which becomes the
    * RunSpec's `baseCommit`, so a branch that moves later does not change the checkout.
@@ -234,15 +246,17 @@ export class CredentialProvider extends Context.Service<
   CredentialProvider,
   {
     /**
-     * Returns a new credential for `repository` only. The local and SSH
-     * executors call it when preparing the Attempt `attemptId`, then again before
-     * each credential expires, until the Attempt's resources are released. A
-     * failure during preparation fails `prepare`. A failed renewal is logged and
-     * tried again 30 seconds later.
+     * Returns a new credential for `repository` only, at the level of the
+     * Attempt's Loop `permissions`: a `read` credential cannot push. The local
+     * and SSH executors call it when preparing the Attempt `attemptId`, then
+     * again before each credential expires, until the Attempt's resources are
+     * released. A failure during preparation fails `prepare`. A failed renewal
+     * is logged and tried again 30 seconds later.
      */
     readonly issue: (
       repository: RepositoryName,
       attemptId: AttemptId,
+      permissions: LoopPermissions,
     ) => Effect.Effect<WorkerCredential, CredentialUnavailableError>;
   }
 >()("@usine/executor/CredentialProvider") {}

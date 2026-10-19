@@ -4,6 +4,7 @@ import { ChildSessionBudget } from "@usine/core/agent/session";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { InstanceDirectory } from "@usine/core/instance";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { WorkerName } from "@usine/core/worker";
 import { CheckoutRequest, CredentialProvider, Executor, WorkerCredential } from "@usine/executor";
@@ -93,6 +94,8 @@ it.effect(
               attemptId: AttemptId.make("renew/work/1"),
               worker: WorkerName.make("local"),
               repository: RepositoryName.make("acme/demo"),
+              loop: LoopName.make("local-worker"),
+              permissions: "write",
               revision: RepositoryRevision.make("main"),
               payload: {},
               task: AttemptTask.make("Work"),

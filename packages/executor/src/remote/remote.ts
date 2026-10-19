@@ -14,9 +14,11 @@ import {
   ExecutorError,
   type ExecutorOperation,
   ExecutorOperationError,
+  WorkerCapabilityError,
 } from "../executor.ts";
 import { verifyHarnessReadiness } from "../harness-preflight.ts";
 import { keyedLockFor } from "../keyed-lock.ts";
+import { withGitHooks } from "../pre-push-hook.ts";
 import {
   cacheDirectoryName,
   type ProvisionedWorktree,
@@ -34,6 +36,14 @@ const isExecutorError = Schema.is(ExecutorError);
 
 const executorError = (message: string, cause: unknown): ExecutorOperationError =>
   new ExecutorOperationError({ operation: "prepare", message, cause });
+
+/** Writes `$2` to the file `$1`, creating its directory, and makes it executable. */
+const WRITE_EXECUTABLE_SCRIPT = String.raw`
+set -e
+mkdir -p "$(dirname "$1")"
+printf '%s' "$2" > "$1"
+chmod 755 "$1"
+`.trim();
 
 /**
  * The Executor for a Worker whose machine the orchestrator connects to over SSH:
@@ -116,7 +126,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           },
           record,
         );
-      if (attempt.succeeded) {
+      if (attempt.succeeded || attempt.permissions === "read") {
         yield* stopChildren("cleanup", machine, worktree);
         yield* reconcile((args) => commands.run("cleanup", machine.shell, "git", args));
         return;
@@ -127,6 +137,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           const access = yield* grant.acquire(
             attempt.attemptId,
             attempt.worker,
+            attempt.permissions,
             machine,
             "cleanup",
           );
@@ -225,6 +236,16 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         commands.run("prepare", machine.shell, "mv", [layout.staging, layout.cache]),
       ),
       git: (operation, args) => accessGit(operation, access)(args),
+      writeExecutable: (target, content) =>
+        Effect.asVoid(
+          commands.run("prepare", machine.shell, "sh", [
+            "-c",
+            WRITE_EXECUTABLE_SCRIPT,
+            "sh",
+            target,
+            content,
+          ]),
+        ),
     });
 
     const prepare = Effect.fn(span("prepare"))(function* (request: CheckoutRequest) {
@@ -232,8 +253,26 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
         attemptId: request.attemptId,
         worker: request.worker,
         repository: request.repository,
+        loop: request.loop,
+        permissions: request.permissions,
         reattach: request.reattach,
       });
+      if (request.permissions === "read" && Option.isSome(worker.readOnlyAccessGap)) {
+        const message = `${label} Worker ${request.worker} cannot run the Loop ${request.loop}, which has permissions: read: ${worker.readOnlyAccessGap.value}`;
+        yield* Effect.logWarning("Refused an Attempt that needs read-only repository access", {
+          attemptId: request.attemptId,
+          worker: request.worker,
+          loop: request.loop,
+          permissions: request.permissions,
+          message,
+        });
+        return yield* new WorkerCapabilityError({
+          worker: request.worker,
+          capability: "credentials",
+          message,
+          cause: new Error(worker.readOnlyAccessGap.value),
+        });
+      }
       const grant = yield* worker.grantFor(request.repository);
       const machine = yield* worker.machineFor(request.worker);
       yield* verifyHarnessReadiness(
@@ -255,6 +294,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           worker: request.worker,
           host,
           repository: request.repository,
+          loop: request.loop,
+          permissions: request.permissions,
           worktree,
         },
       );
@@ -308,7 +349,13 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       const acquire = Effect.gen(function* () {
         // Credentials belong to the Attempt scope independently of the checkout:
         // refusing destructive cleanup must still release them exactly once.
-        const access = yield* grant.acquire(request.attemptId, request.worker, machine, "prepare");
+        const access = yield* grant.acquire(
+          request.attemptId,
+          request.worker,
+          request.permissions,
+          machine,
+          "prepare",
+        );
         const ops = workspaceOps(request, machine, access, { cache, staging });
         const checkout = Option.match(reattached, {
           onNone: () =>
@@ -377,7 +424,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               );
               return yield* session.launch(prepared, io, {
                 host: access.shell,
-                environment: { ...access.environment },
+                environment: withGitHooks(access.environment, provisioned.gitHooks),
                 harvest: harvest(prepared, access),
                 keepForReattach: provisioned.keepForReattach,
               });
