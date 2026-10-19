@@ -1,4 +1,4 @@
-import { InvalidAgent } from "@usine/config/agent";
+import { type AgentFile, InvalidAgent } from "@usine/config/agent";
 import type { LoadedInstance } from "@usine/config/instance";
 import { canonicalLabelName, GitHubLabelName } from "@usine/config/label";
 import { QuarantinedLoop } from "@usine/config/loop";
@@ -99,6 +99,17 @@ export const instanceReload = (running: LoadedInstance, loaded: LoadedInstance):
     quarantinedLoops: loaded.quarantinedLoops,
     invalidAgents: loaded.invalidAgents,
   });
+
+/** The Agents of `loaded` whose brain no Agent of the running instance has. */
+export const agentsWithNewBrains = (
+  running: LoadedInstance,
+  loaded: LoadedInstance,
+): ReadonlyArray<AgentFile> => {
+  const runningBrains = running.agents.map(({ agent }) => agent.brain);
+  return loaded.agents.filter(
+    ({ agent }) => !runningBrains.some((brain) => Equal.equals(brain, agent.brain)),
+  );
+};
 
 /** The restart-only blocks whose value in `loaded` differs from the running instance. */
 export const changedRestartBlocks = (

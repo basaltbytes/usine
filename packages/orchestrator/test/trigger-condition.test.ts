@@ -18,7 +18,7 @@ import { Source } from "@usine/expression/expression-engine";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApiError } from "@usine/github/github-app";
 import { GitHubItemNotFoundError, GitHubPolling } from "@usine/github/polling";
-import { DateTime, Deferred, Effect, Fiber, Layer, Option, Ref, Schema } from "effect";
+import { DateTime, Deferred, Effect, Fiber, Layer, Option, Schema, SubscriptionRef } from "effect";
 import { TestClock } from "effect/testing";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
@@ -188,16 +188,21 @@ describe("TriggerCondition", () => {
     "re-checks against the current instance, so a reload that removes a Loop drops its Events",
     () =>
       Effect.gen(function* () {
-        const current = yield* Ref.make(instance);
+        const current = yield* SubscriptionRef.make(instance);
         const reloadable = Layer.succeed(CurrentInstance)({
-          get: Ref.get(current),
+          get: SubscriptionRef.get(current),
+          changes: SubscriptionRef.changes(current),
           reload: Effect.die("the test swaps the instance itself"),
+          registerPreflight: () => Effect.void,
         });
         const submission = submissionFor(scheduleLoop.name, '["github","basaltbytes/usine"]');
         yield* Effect.gen(function* () {
           const condition = yield* TriggerCondition;
           assert.strictEqual(yield* condition.holds(submission), true);
-          yield* Ref.set(current, new LoadedInstance({ ...instance, loops: [issueLoop] }));
+          yield* SubscriptionRef.set(
+            current,
+            new LoadedInstance({ ...instance, loops: [issueLoop] }),
+          );
           assert.strictEqual(yield* condition.holds(submission), false);
         }).pipe(Effect.provide(layerWith(failingGitHub, reloadable)));
       }),

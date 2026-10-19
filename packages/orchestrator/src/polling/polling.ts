@@ -37,7 +37,9 @@ import {
   Result,
   Schema,
   Semaphore,
+  Stream,
 } from "effect";
+import type { CurrentInstance } from "../current-instance/current-instance.ts";
 import { LabelReconciler, type LabelPreflightFinding } from "../label-reconciler.ts";
 import { type ResolvedLoop, resolveTriggerLoops } from "../trigger-submission.ts";
 import {
@@ -130,6 +132,25 @@ const watchedRepositories = (
 const sameWatches = (left: ReadonlyArray<WatchKey>, right: ReadonlyArray<WatchKey>): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
 
+/** The current instance as polling reads it: the snapshot of each cycle, and the reloads that end a wait. */
+type PolledInstance = Pick<CurrentInstance["Service"], "get" | "changes">;
+
+/** What ends a wait between cycles before it is due. */
+type PollWake =
+  | { readonly _tag: "Due" }
+  | { readonly _tag: "Hint"; readonly hint: ItemHint }
+  | { readonly _tag: "Reloaded"; readonly instance: LoadedInstance };
+
+/** The first snapshot other than `seen`; when the stream ends without one, it never completes. */
+const reloadedFrom = (instances: PolledInstance, seen: LoadedInstance) =>
+  instances.changes.pipe(
+    Stream.filter((instance) => instance !== seen),
+    Stream.runHead,
+    Effect.flatMap(
+      Option.match({ onNone: () => Effect.never, onSome: (instance) => Effect.succeed(instance) }),
+    ),
+  );
+
 /** Keeps managed repositories' Boards current and evaluates their active Loops against changed Items. */
 export class PollingTriggers extends Context.Service<
   PollingTriggers,
@@ -162,9 +183,12 @@ export class PollingTriggers extends Context.Service<
     /**
      * Repeats cycles at the configured interval and processes self-write Hints,
      * respecting GitHub request backoff. Each cycle and each Hint reads the
-     * instance from `current`, so a reload applies from the next one.
+     * instance from `instances.get`. An accepted reload, seen on
+     * `instances.changes`, ends the wait for the configured interval: the next
+     * cycle starts at once with the reloaded instance, or at the time GitHub
+     * asked for when that is later.
      */
-    readonly run: (current: Effect.Effect<LoadedInstance>) => Effect.Effect<never>;
+    readonly run: (instances: PolledInstance) => Effect.Effect<never>;
     /** The last completed cycle, including its isolated failures; absent until the first cycle completes. */
     readonly latest: Effect.Effect<Option.Option<PollCycle>>;
   }
@@ -604,25 +628,55 @@ export class PollingTriggers extends Context.Service<
           ),
       );
 
-      const waitForNextPoll = (current: Effect.Effect<LoadedInstance>, target: number) =>
+      // An accepted reload ends the wait for `intervalAt`, never the wait for
+      // `requestedAt`, the time GitHub asked for.
+      const waitForNextPoll = (
+        instances: PolledInstance,
+        polled: LoadedInstance,
+        intervalAt: number,
+        requestedAt: number,
+      ) =>
         Effect.gen(function* () {
+          let target = Math.max(intervalAt, requestedAt);
+          let seen = polled;
           while (true) {
             const remaining = target - (yield* Clock.currentTimeMillis);
             if (remaining <= 0) return;
-            const hint = yield* Effect.raceFirst(
-              hints.take.pipe(Effect.map(Option.some)),
-              Effect.sleep(Duration.millis(remaining)).pipe(Effect.as(Option.none<ItemHint>())),
-            );
-            if (Option.isNone(hint)) return;
-            yield* refreshHint(yield* current, hint.value);
+            const wake = yield* Effect.raceAllFirst([
+              Effect.sleep(Duration.millis(remaining)).pipe(
+                Effect.map((): PollWake => ({ _tag: "Due" })),
+              ),
+              hints.take.pipe(Effect.map((hint): PollWake => ({ _tag: "Hint", hint }))),
+              reloadedFrom(instances, seen).pipe(
+                Effect.map((instance): PollWake => ({ _tag: "Reloaded", instance })),
+              ),
+            ]);
+            if (wake._tag === "Due") return;
+            if (wake._tag === "Hint") {
+              yield* refreshHint(yield* instances.get, wake.hint);
+              continue;
+            }
+            seen = wake.instance;
+            target = requestedAt;
+            const sleepMs = requestedAt - (yield* Clock.currentTimeMillis);
+            if (sleepMs > 0) {
+              yield* Effect.logInfo(
+                "Instance reloaded; the next poll waits for the time GitHub asked for",
+                { sleepMs },
+              );
+            } else {
+              yield* Effect.logInfo(
+                "Instance reloaded; polling now instead of after poll_interval",
+              );
+            }
           }
         });
 
       // `run` never returns, so wrapping it in Effect.fn would open a span that
       // never closes; `poll` opens the span for each cycle.
-      const run = (current: Effect.Effect<LoadedInstance>): Effect.Effect<never> =>
+      const run = (instances: PolledInstance): Effect.Effect<never> =>
         Effect.gen(function* () {
-          const instance = yield* current;
+          const instance = yield* instances.get;
           const startedAt = yield* Clock.currentTimeMillis;
           const result = yield* Effect.result(poll(instance));
           if (Result.isFailure(result)) {
@@ -638,12 +692,12 @@ export class PollingTriggers extends Context.Service<
           }
           const cycle = result.success;
           const intervalAt = startedAt + instance.config.settings.pollInterval * 1_000;
-          const target = Option.match(cycle.nextPollAt, {
-            onNone: () => intervalAt,
-            onSome: (value) => Math.max(intervalAt, DateTime.toEpochMillis(value)),
+          const requestedAt = Option.match(cycle.nextPollAt, {
+            onNone: () => 0,
+            onSome: DateTime.toEpochMillis,
           });
           const now = yield* Clock.currentTimeMillis;
-          const sleepMs = Math.max(0, target - now);
+          const sleepMs = Math.max(0, Math.max(intervalAt, requestedAt) - now);
           yield* Effect.logInfo("Poll cycle complete", {
             repositories: cycle.repositories,
             changedItems: cycle.changedItems,
@@ -653,7 +707,7 @@ export class PollingTriggers extends Context.Service<
             preflightFindings: cycle.preflightFindings.length,
             sleepMs,
           });
-          yield* waitForNextPoll(current, target);
+          yield* waitForNextPoll(instances, instance, intervalAt, requestedAt);
         }).pipe(Effect.forever);
 
       return { latest: Ref.get(latest), poll, run, hint: hints.offer };

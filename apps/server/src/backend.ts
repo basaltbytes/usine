@@ -68,12 +68,15 @@ export class FactoryBackend extends Context.Service<
   }
 >()("@usine/server/FactoryBackend") {}
 
-const rosterOf = (instances: CurrentInstance["Service"]) =>
+/** The parts of `CurrentInstance` the operator backend reads. */
+type BackendInstance = Pick<CurrentInstance["Service"], "get" | "reload">;
+
+const rosterOf = (instances: BackendInstance) =>
   Effect.map(instances.get, ({ agents }) => agents.map(({ name }) => name));
 
 /** The backend of a running factory; every request reads the current instance. */
 export const liveBackendLayer = (
-  instances: CurrentInstance["Service"],
+  instances: BackendInstance,
   operator: Operator["Service"],
 ): Layer.Layer<FactoryBackend> =>
   Layer.succeed(FactoryBackend)({
@@ -103,7 +106,7 @@ export const liveBackendLayer = (
 
 /** The read-only backend of setup mode; reading the overview and reloading the instance folder still work. */
 export const needsSetupBackendLayer = (
-  instances: CurrentInstance["Service"],
+  instances: BackendInstance,
   errorTag: string,
   observation: OperatorObservation["Service"],
 ): Layer.Layer<FactoryBackend> => {

@@ -73,6 +73,7 @@ import {
   Ref,
   Schema,
   Scope,
+  SubscriptionRef,
 } from "effect";
 import { TestClock } from "effect/testing";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
@@ -579,39 +580,90 @@ describe("PollingTriggers", () => {
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.effect("waits past poll_interval when GitHub recommends a longer delay", () => {
+  it.effect(
+    "waits past poll_interval when GitHub recommends a longer delay, also after a reload",
+    () => {
+      let changeRequests = 0;
+      const github: GitHubPolling["Service"] = {
+        changes: (_repository, cursor) =>
+          Effect.gen(function* () {
+            changeRequests += 1;
+            const now = yield* Clock.currentTimeMillis;
+            return new RepositoryNotModified({
+              cursor,
+              nextPollAt: Option.some(DateTime.makeUnsafe(now + 120_000)),
+            });
+          }),
+        labels: () => Effect.succeed(emptyLabelCatalog),
+        snapshot: () => Effect.die("an unchanged repository has no snapshots"),
+      };
+
+      return Effect.gen(function* () {
+        const polling = yield* PollingTriggers;
+        const current = yield* SubscriptionRef.make(instanceWith([issueLoop("start-dev")]));
+        const fiber = yield* Effect.forkChild(
+          polling.run({
+            get: SubscriptionRef.get(current),
+            changes: SubscriptionRef.changes(current),
+          }),
+        );
+        yield* Effect.yieldNow;
+        assert.strictEqual(changeRequests, 2);
+        yield* TestClock.adjust("30 seconds");
+        yield* SubscriptionRef.set(
+          current,
+          instanceWith([issueLoop("start-dev"), issueLoop("triage")]),
+        );
+        yield* TestClock.adjust("89 seconds");
+        assert.strictEqual(changeRequests, 2, "a reload does not poll before GitHub's time");
+        yield* TestClock.adjust("1 second");
+        assert.strictEqual(changeRequests, 4);
+        yield* Fiber.interrupt(fiber);
+      }).pipe(Effect.provide(pollingTestLayer(github)));
+    },
+  );
+
+  it.effect("keeps a GitHub rate-limit backoff when a reload arrives during it", () => {
     let changeRequests = 0;
     const github: GitHubPolling["Service"] = {
-      changes: (_repository, cursor) =>
-        Effect.gen(function* () {
+      changes: () =>
+        Effect.suspend(() => {
           changeRequests += 1;
-          const now = yield* Clock.currentTimeMillis;
-          return new RepositoryNotModified({
-            cursor,
-            nextPollAt: Option.some(DateTime.makeUnsafe(now + 120_000)),
-          });
+          return Effect.fail(
+            new GitHubRateLimitError({
+              operation: "poll-repository-changes",
+              retryAt: DateTime.makeUnsafe(90_000),
+              message: "Wait before retrying",
+            }),
+          );
         }),
       labels: () => Effect.succeed(emptyLabelCatalog),
-      snapshot: () => Effect.die("an unchanged repository has no snapshots"),
+      snapshot: () => Effect.die("a rate-limited repository has no snapshots"),
     };
 
     return Effect.gen(function* () {
       const polling = yield* PollingTriggers;
+      const current = yield* SubscriptionRef.make(instanceWith([]));
       const fiber = yield* Effect.forkChild(
-        polling.run(Effect.succeed(instanceWith([issueLoop("start-dev")]))),
+        polling.run({
+          get: SubscriptionRef.get(current),
+          changes: SubscriptionRef.changes(current),
+        }),
       );
-      yield* Effect.yieldNow;
+      yield* TestClock.adjust("1 millis");
       assert.strictEqual(changeRequests, 2);
-      yield* TestClock.adjust("119 seconds");
-      assert.strictEqual(changeRequests, 2);
-      yield* TestClock.adjust("1 second");
+      yield* TestClock.adjust("30 seconds");
+      yield* SubscriptionRef.set(current, instanceWith([issueLoop("start-dev")]));
+      yield* TestClock.adjust("59998 millis");
+      assert.strictEqual(changeRequests, 2, "a reload does not cut the backoff short");
+      yield* TestClock.adjust("1 millis");
       assert.strictEqual(changeRequests, 4);
       yield* Fiber.interrupt(fiber);
     }).pipe(Effect.provide(pollingTestLayer(github)));
   });
 
   it.effect(
-    "reads the current instance at each cycle, so a reload applies from the next one",
+    "starts the next cycle as soon as a reload is accepted, with the reloaded instance",
     () => {
       const polled: Array<string> = [];
       const github: GitHubPolling["Service"] = {
@@ -630,12 +682,19 @@ describe("PollingTriggers", () => {
 
       return Effect.gen(function* () {
         const polling = yield* PollingTriggers;
-        const current = yield* Ref.make(onlyWatched);
-        const fiber = yield* Effect.forkChild(polling.run(Ref.get(current)));
+        const current = yield* SubscriptionRef.make(onlyWatched);
+        const fiber = yield* Effect.forkChild(
+          polling.run({
+            get: SubscriptionRef.get(current),
+            changes: SubscriptionRef.changes(current),
+          }),
+        );
         yield* Effect.yieldNow;
         assert.deepStrictEqual(polled, [watchedRepository]);
-        yield* Ref.set(current, instanceWith([]));
-        yield* TestClock.adjust("60 seconds");
+        yield* TestClock.adjust("10 seconds");
+        assert.deepStrictEqual(polled, [watchedRepository]);
+        yield* SubscriptionRef.set(current, instanceWith([]));
+        yield* TestClock.adjust("1 millis");
         assert.deepStrictEqual(polled, [
           watchedRepository,
           watchedRepository,

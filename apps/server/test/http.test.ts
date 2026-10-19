@@ -20,6 +20,7 @@ import { RunId } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
+import { WorkerCapabilityError } from "@usine/executor";
 import {
   Claimed,
   RunNotFoundError,
@@ -65,6 +66,7 @@ import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/htt
 import {
   InstanceReload,
   type InstanceReloadError,
+  ReloadPreflightError,
   RestartRequiredError,
 } from "@usine/orchestrator/current-instance";
 import { Effect, Layer, Option, Schema } from "effect";
@@ -516,6 +518,26 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(await restart.json(), {
         error: "RestartRequiredError",
         message: "The workers block of usine.yaml changed. Restart usine up to apply it.",
+      });
+      const preflightMessage =
+        "Worker preflight failed for Agent reviewer. Worker local: Claude Code is not logged in. The running configuration is unchanged; fix the Worker or the Agent file, then reload again.";
+      reloadFailure = new ReloadPreflightError({
+        agents: [AgentName.make("reviewer")],
+        message: preflightMessage,
+        cause: new WorkerCapabilityError({
+          worker: WorkerName.make("local"),
+          capability: "harness-login",
+          message: "Claude Code is not logged in.",
+          cause: "logged out",
+        }),
+      });
+      const preflight = await rejectingApp.handler(
+        new Request("http://localhost/api/instance/reload", { method: "POST" }),
+      );
+      assert.strictEqual(preflight.status, 409);
+      assert.deepStrictEqual(await preflight.json(), {
+        error: "ReloadPreflightError",
+        message: preflightMessage,
       });
     } finally {
       await rejectingApp.dispose();
