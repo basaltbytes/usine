@@ -159,6 +159,35 @@ export class PoolRateLimitsUpdated extends Schema.TaggedClass<PoolRateLimitsUpda
   rateLimits: RateLimitsSnapshot,
 }) {}
 
+/** How many times a harness has retried its model provider during one turn of a session, counted from 1. */
+export const ProviderRetries = PositiveInt.pipe(Schema.brand("ProviderRetries"));
+export type ProviderRetries = typeof ProviderRetries.Type;
+
+/**
+ * A session's harness reported that a request to its model provider failed and
+ * that it will try again, such as Codex's `Reconnecting...` or a Claude Code
+ * API retry. The session keeps running: nothing stops or fails it on this
+ * report (ADR 0013).
+ */
+export class ProviderRetrying extends Schema.TaggedClass<ProviderRetrying>(
+  "Agent/ProviderRetrying",
+)("ProviderRetrying", {
+  session: AgentSession,
+  /** The harness's report of the failure, in its own words where it gives them. */
+  message: Schema.NonEmptyString,
+  /** Retries the harness has reported for the session's current turn, this one included. */
+  retries: ProviderRetries,
+}) {}
+
+/** The session's harness got an answer from its model provider again after `ProviderRetrying` in the same turn. */
+export class ProviderRecovered extends Schema.TaggedClass<ProviderRecovered>(
+  "Agent/ProviderRecovered",
+)("ProviderRecovered", {
+  session: AgentSession,
+  /** Retries the harness reported for the turn before it got an answer. */
+  retries: ProviderRetries,
+}) {}
+
 /** Session activity and billing observations recorded in an Attempt's transcript. */
 export const AgentSessionEvent = Schema.Union([
   SessionStarted,
@@ -170,5 +199,7 @@ export const AgentSessionEvent = Schema.Union([
   SessionIdle,
   SessionResumed,
   SessionTokensUpdated,
+  ProviderRetrying,
+  ProviderRecovered,
 ]);
 export type AgentSessionEvent = typeof AgentSessionEvent.Type;

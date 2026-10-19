@@ -69,6 +69,8 @@ interface FakeMachineState {
   /** The credential directories on the machine and the token each one contains. */
   readonly credentials: Map<string, string>;
   reachable: boolean;
+  /** The machine accepts TCP but its SSH server never answers, so a new command neither runs nor fails. */
+  stalled: boolean;
   rootWritable: boolean;
   /** The machine's physical memory and swap in GiB, as `/proc/meminfo` reports them. */
   memoryGib: number;
@@ -109,6 +111,21 @@ const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
     unref: Effect.succeed(Effect.void),
   });
 };
+
+/** An SSH client waiting for a banner that never comes: no output and no exit. */
+const stalledHandle = ChildProcessSpawner.makeHandle({
+  pid: ChildProcessSpawner.ProcessId(1),
+  stdin: Sink.drain,
+  stdout: Stream.never,
+  stderr: Stream.never,
+  all: Stream.never,
+  exitCode: Effect.never,
+  isRunning: Effect.succeed(true),
+  kill: () => Effect.void,
+  getInputFd: () => Sink.drain,
+  getOutputFd: () => Stream.empty,
+  unref: Effect.succeed(Effect.void),
+});
 
 /** `/proc/meminfo` of a Linux machine with `memoryGib` of memory and `swapGib` of swap. */
 const meminfo = (memoryGib: number, swapGib: number): string => {
@@ -165,6 +182,7 @@ export const fakeMachine = () => {
     calls: [],
     credentials: new Map(),
     reachable: true,
+    stalled: false,
     rootWritable: true,
     memoryGib: 7.7,
     swapGib: 2,
@@ -181,6 +199,7 @@ export const fakeMachine = () => {
     files: new Map(),
   };
   const respond = (command: StandardCommand, line: string, input: string) => {
+    if (state.stalled) return stalledHandle;
     if (!state.reachable)
       return oneShotHandle(
         "",

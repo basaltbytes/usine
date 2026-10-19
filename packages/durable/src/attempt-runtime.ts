@@ -124,5 +124,15 @@ export class AttemptRuntime extends Context.Service<
     ) => Effect.Effect<void, AttemptFailure>;
     /** Cancels the Attempt: aborts the task bottom-up (children, then the parent conversation) and settles `execute`. */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
+    /**
+     * Records what the executor observed of the Attempt's Worker in its
+     * transcript, after everything relayed before it. A notice for an
+     * Attempt that no `execute` call in this process has started, or that
+     * arrives before its parent started, is logged and dropped.
+     */
+    readonly notify: (
+      attemptId: AttemptId,
+      notice: AttemptChannel.WorkerNotice,
+    ) => Effect.Effect<void>;
   }
 >()("@usine/durable/AttemptRuntime") {}

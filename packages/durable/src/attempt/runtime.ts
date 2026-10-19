@@ -417,6 +417,22 @@ const makeAttemptRuntime = Effect.gen(function* () {
       ),
   );
 
+  const notify = Effect.fn("AttemptRuntime.notify")(
+    function* (attemptId: AttemptId, notice: AttemptChannel.WorkerNotice) {
+      yield* Effect.annotateCurrentSpan({ attemptId, notice: notice._tag });
+      const found = hubs.find(attemptId);
+      if (Option.isNone(found)) {
+        yield* Effect.logDebug("Dropped a Worker notice for an Attempt not relayed here", {
+          notice: notice._tag,
+          worker: notice.worker,
+        });
+        return;
+      }
+      yield* hubs.notice(found.value, notice);
+    },
+    (effect, attemptId) => effect.pipe(Effect.annotateLogs({ attemptId })),
+  );
+
   yield* Effect.logInfo("The durable Attempt runtime is ready");
   return AttemptRuntime.of({
     execute,
@@ -426,6 +442,7 @@ const makeAttemptRuntime = Effect.gen(function* () {
     request,
     intervene,
     cancel,
+    notify,
   });
 });
 

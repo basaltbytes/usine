@@ -162,6 +162,15 @@ settings:
 
 At 80% of a ceiling the parent gets one warning. At 100% the Attempt stops with `RunawayFailure`, which the engine never retries automatically. The minutes clock stops while a child is held, and the token count includes the parent and every child.
 
+## Connectivity warnings
+
+When an Attempt's Worker stops answering, or one of its children can't reach its model provider, the Run page's conversation shows a yellow line and the orchestrator logs a warning. Nothing stops the Attempt: it keeps running until it finishes, you cancel it, or a ceiling you set trips.
+
+- **Worker \<name\> stopped answering**: while an Attempt runs on an `ssh` or `exe.dev` Worker, usine runs `true` on the Worker's machine over a new SSH connection every minute, and this probe got no answer within 45 seconds. The line says when the Worker last answered and what the probe saw. **Worker \<name\> answers again** follows when a probe gets through.
+- **Cannot reach its provider**: a Codex child reported `Reconnecting...`, or a Claude Code child reported an API retry. A child's consecutive retries share one line, with the count so far and the harness's latest message. **Reached its provider again** follows when the child's turn goes on.
+
+While a warning is open, the current activity at the end of the conversation and in the Run drawer says what hasn't answered and since when. Needs you doesn't list these warnings.
+
 ## Reload the configuration
 
 Select **Reload configuration** on the **Loops** page to apply edits to Loops, Agents, and `usine.yaml` without stopping the orchestrator. `POST /api/instance/reload` and `SIGHUP` do the same. Running Attempts continue, and an open Run keeps the Agent it was opened with, also when you retry it. **Edit and retry** offers the Agents of the reloaded roster. New Runs use the new configuration. Changes to `workers` or `webhooks` still need a restart. [Run a factory](/guides/#change-the-configuration) describes what a reload applies.

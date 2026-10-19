@@ -2,6 +2,9 @@ import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import {
   ChildSession,
   PoolRateLimitsUpdated,
+  ProviderRecovered,
+  ProviderRetries,
+  ProviderRetrying,
   RateLimitsSnapshot,
   SessionStarted,
   HarnessSession,
@@ -23,8 +26,11 @@ import {
   ToolItem,
   TurnCompleted,
   RateLimitsUpdated,
+  ErrorNotification,
+  TurnActivity,
   decodeResponse,
   decodeNotification,
+  providerRetryMessage,
   toolName,
   rateLimitWindow,
 } from "./codec.ts";
@@ -53,6 +59,9 @@ const DIAGNOSTIC_METHODS: ReadonlySet<string> = new Set([
   "guardianWarning",
   "model/rerouted",
 ]);
+
+const decodeRetry = Schema.decodeUnknownOption(ErrorNotification);
+const isTurnActivity = Schema.is(TurnActivity);
 
 const makeCodexChild = Effect.gen(function* () {
   const appServer = yield* CodexAppServer;
@@ -186,6 +195,9 @@ const makeCodexChild = Effect.gen(function* () {
       const pendingMessages: string[] = [];
       let lastText: string | undefined;
       let finalText: string | undefined;
+      // Provider retries the app server reported for the current turn, and whether the last one is unanswered.
+      let retries = 0;
+      let retrying = false;
       const startTurn = Effect.fn("CodexChildBackend.startTurn")(function* (message: string) {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
         const response = yield* connection.request(
@@ -204,6 +216,43 @@ const makeCodexChild = Effect.gen(function* () {
         turnActive = true;
         lastText = undefined;
         finalText = undefined;
+        retries = 0;
+        retrying = false;
+      });
+      const reportRetry = Effect.fn("CodexChildBackend.reportRetry")(function* (
+        notification: typeof ErrorNotification.Type,
+      ) {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id, turnId });
+        if (notification.turnId !== turnId) {
+          return yield* Effect.logDebug("Skipping a provider retry of another Codex turn", {
+            sessionId: session.id,
+            turnId: notification.turnId,
+          });
+        }
+        retries += 1;
+        retrying = true;
+        const message = providerRetryMessage(notification.error);
+        yield* Effect.logWarning("Codex child cannot reach its provider and will retry", {
+          sessionId: session.id,
+          turnId,
+          retries,
+          message,
+        });
+        yield* channel.emit(
+          new ProviderRetrying({ session, message, retries: ProviderRetries.make(retries) }),
+        );
+      });
+      const reportRecovery = Effect.fn("CodexChildBackend.reportRecovery")(function* () {
+        yield* Effect.annotateCurrentSpan({ sessionId: session.id, turnId });
+        retrying = false;
+        yield* Effect.logInfo("Codex child reached its provider again", {
+          sessionId: session.id,
+          turnId,
+          retries,
+        });
+        yield* channel.emit(
+          new ProviderRecovered({ session, retries: ProviderRetries.make(retries) }),
+        );
       });
       const interruptTurn = Effect.fn("CodexChildBackend.interruptTurn")(function* () {
         yield* Effect.annotateCurrentSpan({ sessionId: session.id });
@@ -260,6 +309,13 @@ const makeCodexChild = Effect.gen(function* () {
       const consume = connection.notifications.pipe(
         Stream.runForEach(({ method, params }) =>
           Effect.gen(function* () {
+            if (method === "error") {
+              const retry = decodeRetry(params);
+              if (Option.isSome(retry) && retry.value.willRetry)
+                return yield* reportRetry(retry.value);
+            } else if (retrying && isTurnActivity(params) && params.turnId === turnId) {
+              yield* reportRecovery();
+            }
             if (method === "thread/tokenUsage/updated") {
               const usage = yield* decodeNotification(
                 CodexTokenUsage,
@@ -396,6 +452,7 @@ const makeCodexChild = Effect.gen(function* () {
                   turnId: completed.turn.id,
                 });
               }
+              if (retrying && completed.turn.status === "completed") yield* reportRecovery();
               turnActive = false;
               const wasInterrupted = interrupting;
               interrupting = false;

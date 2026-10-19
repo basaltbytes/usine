@@ -189,9 +189,14 @@ const Row = ({ row, speaker }: { readonly row: ChapterRow; readonly speaker: str
           data-transcript-id={note.key}
           className={cn(
             "text-xs leading-[1.4rem] wrap-anywhere",
-            note.undelivered ? "text-destructive" : "text-muted-foreground",
+            {
+              plain: "text-muted-foreground",
+              warning: "text-warning",
+              failed: "text-destructive",
+            }[note.tone],
           )}
         >
+          {note.tone === "warning" && <span className="sr-only">Warning: </span>}
           {note.text}
         </p>
       </ReaderLine>

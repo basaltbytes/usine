@@ -89,6 +89,28 @@ export const TurnCompleted = Schema.Struct({
     ),
   }),
 });
+/**
+ * A turn error the app server pushes; with `willRetry` it reports a failed
+ * request to the model provider that it will send again, such as
+ * `Reconnecting... 2/5`.
+ */
+export const ErrorNotification = Schema.Struct({
+  error: Schema.Struct({
+    message: Schema.String,
+    additionalDetails: Schema.optionalKey(Schema.NullOr(Schema.String)),
+  }),
+  willRetry: Schema.Boolean,
+  turnId: Schema.String,
+});
+/** Any notification addressed to one turn, such as an item or a streaming delta. */
+export const TurnActivity = Schema.Struct({ turnId: Schema.String });
+
+/** The app server's retry report as the operator reads it: its message, then its details in parentheses. */
+export const providerRetryMessage = (error: (typeof ErrorNotification.Type)["error"]): string => {
+  const message = error.message.trim() || "Codex is retrying its model provider";
+  const details = error.additionalDetails?.trim() ?? "";
+  return details === "" ? message : `${message} (${details})`;
+};
 // Upstream sends this notification as a sparse rolling update: any account
 // field may be absent, so only the load figure is required.
 const RateLimitWindow = Schema.Struct({

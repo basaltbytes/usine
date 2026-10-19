@@ -14,6 +14,9 @@ import {
   ChildSession,
   HarnessSession,
   HarnessSessionId,
+  ProviderRecovered,
+  ProviderRetries,
+  ProviderRetrying,
   SessionStarted,
   SessionTokensUpdated,
   TextOutput,
@@ -279,6 +282,30 @@ const decodeCompletionUpdate = Schema.decodeUnknownEffect(
   Schema.Union([ClaudeBackgroundTasks, ClaudeSessionState]),
 );
 
+/** Claude Code's report of a failed API request it will send again; a null status means no response arrived. */
+const ClaudeApiRetry = Schema.Struct({
+  type: Schema.Literal("system"),
+  subtype: Schema.Literal("api_retry"),
+  attempt: Schema.Number,
+  max_retries: Schema.Number,
+  retry_delay_ms: Schema.Number,
+  error_status: Schema.NullOr(Schema.Number),
+  error: Schema.String,
+});
+const decodeApiRetry = Schema.decodeUnknownOption(ClaudeApiRetry);
+const isAssistantMessage = Schema.is(Schema.Struct({ type: Schema.Literal("assistant") }));
+
+/** Claude Code gives an API retry no prose, so the operator reads its fields in one sentence. */
+const apiRetryMessage = (retry: typeof ClaudeApiRetry.Type): string => {
+  const failure =
+    retry.error_status === null ? "without a response" : `with HTTP ${retry.error_status}`;
+  const delay =
+    retry.retry_delay_ms < 1_000
+      ? `${retry.retry_delay_ms}ms`
+      : `${Math.round(retry.retry_delay_ms / 1_000)}s`;
+  return `API request failed ${failure} (${retry.error}); retry ${retry.attempt} of ${retry.max_retries} in ${delay}`;
+};
+
 const sessionEventsFrom = (
   message: Schema.Json,
   session: ChildSession,
@@ -409,13 +436,56 @@ const makeClaudeChild = Effect.gen(function* () {
       // Claude repeats its `init` message ahead of every turn; only the first
       // one is the launch record, and its session id stays constant.
       const launched = yield* Ref.make(false);
+      // API retries Claude reported for the current turn, and whether the last one is unanswered.
+      let retries = 0;
+      let retrying = false;
       input.offer(userMessage(request.prompt));
+
+      const reportRetry = Effect.fn("ClaudeChildBackend.reportRetry")(function* (
+        retry: typeof ClaudeApiRetry.Type,
+      ) {
+        yield* Effect.annotateCurrentSpan({ sessionId: request.session.id });
+        retries += 1;
+        retrying = true;
+        const message = apiRetryMessage(retry);
+        yield* Effect.logWarning("Claude child cannot reach its provider and will retry", {
+          sessionId: request.session.id,
+          retries,
+          message,
+          status: retry.error_status,
+          error: retry.error,
+        });
+        yield* channel.emit(
+          new ProviderRetrying({
+            session: request.session,
+            message,
+            retries: ProviderRetries.make(retries),
+          }),
+        );
+      });
+      const reportRecovery = Effect.fn("ClaudeChildBackend.reportRecovery")(function* () {
+        yield* Effect.annotateCurrentSpan({ sessionId: request.session.id });
+        retrying = false;
+        yield* Effect.logInfo("Claude child reached its provider again", {
+          sessionId: request.session.id,
+          retries,
+        });
+        yield* channel.emit(
+          new ProviderRecovered({
+            session: request.session,
+            retries: ProviderRetries.make(retries),
+          }),
+        );
+      });
 
       const consume = Stream.fromAsyncIterable(query, (cause) =>
         operationError("stream", request, "Claude output stream failed", cause),
       ).pipe(
         Stream.runForEach((message) =>
           Effect.gen(function* () {
+            const retry = decodeApiRetry(message);
+            if (Option.isSome(retry)) return yield* reportRetry(retry.value);
+            if (retrying && isAssistantMessage(message)) yield* reportRecovery();
             if (Schema.is(ClaudeCompletionHeader)(message)) {
               const update = yield* decodeCompletionUpdate(message).pipe(
                 Effect.mapError((cause) =>
@@ -487,6 +557,8 @@ const makeClaudeChild = Effect.gen(function* () {
             }
             if (!Schema.is(ClaudeResultMessage)(message)) return;
             completedTurn = Option.none();
+            retries = 0;
+            retrying = false;
             if (message.subtype !== "success" || message.result === undefined) {
               const detail = message.errors?.join("; ") ?? "Claude returned an unsuccessful result";
               yield* channel.fail(

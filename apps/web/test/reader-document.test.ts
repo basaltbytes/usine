@@ -4,6 +4,9 @@ import {
   AgentSessionId,
   ChildSession,
   ParentSession,
+  ProviderRecovered,
+  ProviderRetries,
+  ProviderRetrying,
   SessionFinished,
   TextOutput,
   ToolFinished,
@@ -28,8 +31,9 @@ import {
   InfraFailureView,
   TranscriptEventView,
 } from "@usine/orchestrator/operator";
-import { Option } from "effect";
+import { DateTime, Option } from "effect";
 import { assert, describe, it } from "vitest";
+import { clockLabel } from "../src/operator-copy.ts";
 import { withGitHubChanges } from "../src/run-transcript/document/github-changes.ts";
 import {
   chapterCheckpoints,
@@ -410,5 +414,88 @@ describe("GitHub changes", () => {
       "GitHub removed [] added [needs-operator]",
       "Ending",
     ]);
+  });
+});
+
+describe("connectivity", () => {
+  const retry = (sequence: number, retries: number, message: string) =>
+    record(
+      sequence,
+      new AttemptChannel.SessionEvent({
+        event: new ProviderRetrying({
+          session: child,
+          message,
+          retries: ProviderRetries.make(retries),
+        }),
+      }),
+    );
+  const lastAnsweredAt = DateTime.makeUnsafe(at(4));
+  const worker = WorkerName.make("usine-worker-1");
+  const unreachable =
+    "Reconnecting... waiting for network (Connection failed: error sending request)";
+  const events = [
+    record(1, new AttemptChannel.Started({ parentModel: ModelId.make("gpt-5") })),
+    ...delegation,
+    said(3, "Running the gate."),
+    retry(5, 1, "Reconnecting... 1/5 (request timed out)"),
+    record(
+      6,
+      new AttemptChannel.WorkerUnresponsive({
+        worker,
+        lastAnsweredAt,
+        reason: "No answer within 45 seconds",
+      }),
+    ),
+    retry(7, 2, unreachable),
+    retry(8, 3, unreachable),
+  ];
+  const notes = (rows: ReadonlyArray<ChapterRow>) =>
+    rows.flatMap((row) => (row._tag === "Note" ? [`${row.tone}: ${row.text}`] : []));
+
+  it("shows a silent Worker and a child's provider retries as warnings, each retry streak on one line", () => {
+    const chapter = document(events, [attempt(null)]).chapters[0];
+    assert(chapter !== undefined);
+    assert.deepStrictEqual(notes(chapter.rows), [
+      "warning: Cannot reach its provider, 1 retry so far. Reconnecting... 1/5 (request timed out)",
+      `warning: Worker usine-worker-1 stopped answering. It last answered at ${clockLabel(at(4))}. No answer within 45 seconds`,
+      `warning: Cannot reach its provider, 3 retries so far. ${unreachable}`,
+    ]);
+    assert.deepStrictEqual(chapter.connectivity, [
+      { _tag: "WorkerSilent", worker, lastAnsweredAt: at(4) },
+      {
+        _tag: "ProviderRetrying",
+        agent: child.agent,
+        message: unreachable,
+        retries: 3,
+        since: at(5),
+      },
+    ]);
+    assert(Option.contains(chapter.lastActivityAt, at(3)), "a report of no answer is not activity");
+  });
+
+  it("clears each warning when its Worker or provider answers again, and once the Attempt ends", () => {
+    const answered = [
+      ...events,
+      record(
+        9,
+        new AttemptChannel.SessionEvent({
+          event: new ProviderRecovered({ session: child, retries: ProviderRetries.make(3) }),
+        }),
+      ),
+      record(10, new AttemptChannel.WorkerResponsive({ worker, lastAnsweredAt })),
+    ];
+    const chapter = document(answered, [attempt(null)]).chapters[0];
+    assert(chapter !== undefined);
+    assert.deepStrictEqual(chapter.connectivity, []);
+    assert.deepStrictEqual(notes(chapter.rows).slice(-2), [
+      "plain: Reached its provider again after 3 retries",
+      "plain: Worker usine-worker-1 answers again. It did not answer for 6s",
+    ]);
+    const failure = new InfraFailureView({ message: "Worker disconnected" });
+    const ended = document(
+      [...events, record(9, new FailedTranscriptView({ failure }))],
+      [attempt(new FailedAttemptView({ failure }))],
+    ).chapters[0];
+    assert.deepStrictEqual(ended?.connectivity, []);
   });
 });

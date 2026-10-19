@@ -126,6 +126,8 @@ const transcriptPayload = (
     Cancel: (value) => value,
     InterventionApplied: (value) => value,
     InterventionRejected: (value) => value,
+    WorkerUnresponsive: (value) => value,
+    WorkerResponsive: (value) => value,
   });
 
 /** Projects one transcript row, preserving attribution and excluding private failure causes. */

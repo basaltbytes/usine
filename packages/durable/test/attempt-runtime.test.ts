@@ -7,7 +7,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure, QuestionFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import { StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { Context, Effect, Exit, Fiber, Layer, Logger, Option } from "effect";
+import { Context, DateTime, Effect, Exit, Fiber, Layer, Logger, Option } from "effect";
 import {
   AttemptReport,
   AttemptRuntime,
@@ -65,7 +65,15 @@ describe("durable AttemptRuntime", () => {
         const children = yield* StubChildren;
         const request = attemptRequest("run/step/1");
         const recording = recordingSink();
+        const lastAnsweredAt = DateTime.makeUnsafe("2026-10-15T19:42:00Z");
+        const silent = new AttemptChannel.WorkerUnresponsive({
+          worker: request.worker,
+          lastAnsweredAt,
+          reason: "Connection timed out during banner exchange",
+        });
         assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
+        // Nothing relays an Attempt that has not started here, so its notice is dropped.
+        yield* runtime.notify(request.spec.attemptId, silent);
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         const child = yield* children.next;
         assert.deepStrictEqual(child.request.environment, workerEnvironment);
@@ -73,24 +81,37 @@ describe("durable AttemptRuntime", () => {
         assert.deepStrictEqual(child.request.host, new LocalProcess());
         assert.match(child.request.prompt, /Fix the flaky test/u);
         assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+        yield* runtime.notify(request.spec.attemptId, silent);
+        yield* runtime.notify(
+          request.spec.attemptId,
+          new AttemptChannel.WorkerResponsive({ worker: request.worker, lastAnsweredAt }),
+        );
         yield* child.reply("Child fixed the test.");
         const report = yield* Fiber.join(execution);
         assert.strictEqual(report.message, "Fixed the flaky test and opened a pull request.");
         assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
         const outbound = recording.outbound();
         assertAdmitted(request.spec.attemptId, outbound);
-        assert.deepStrictEqual(trace(outbound), [
-          "Started",
-          "parent.SessionStarted",
-          "parent.ToolStarted:subagent",
-          "child.SessionStarted",
-          "child.TextOutput",
-          "child.SessionFinished",
-          "parent.ToolFinished:subagent",
-          "parent.TextOutput",
-          "parent.SessionFinished",
-          "Final",
-        ]);
+        assert.deepStrictEqual(
+          trace(outbound).filter((tag) => tag.startsWith("Worker")),
+          ["WorkerUnresponsive", "WorkerResponsive"],
+          "the notices sent while the Attempt runs, each once",
+        );
+        assert.deepStrictEqual(
+          trace(outbound).filter((tag) => !tag.startsWith("Worker")),
+          [
+            "Started",
+            "parent.SessionStarted",
+            "parent.ToolStarted:subagent",
+            "child.SessionStarted",
+            "child.TextOutput",
+            "child.SessionFinished",
+            "parent.ToolFinished:subagent",
+            "parent.TextOutput",
+            "parent.SessionFinished",
+            "Final",
+          ],
+        );
         assert.isTrue(
           outbound.some(
             ({ payload }) =>

@@ -13,13 +13,16 @@ import type {
 import { Match, Option } from "effect";
 import { conflictingSalvageMessage, failureMessage } from "../../operator-copy.ts";
 import { poolMeters, type PoolMeter } from "../cache.ts";
-import type {
-  TranscriptEntry,
-  TranscriptNotice,
-  TranscriptProjection,
-  TranscriptSession,
-  TranscriptTool,
+import {
+  type NoticeTone,
+  retriesLabel,
+  type TranscriptEntry,
+  type TranscriptNotice,
+  type TranscriptProjection,
+  type TranscriptSession,
+  type TranscriptTool,
 } from "../model.ts";
+import { type ConnectivityWarning, openConnectivity } from "./connectivity.ts";
 import { presentTool } from "../tool/presentation.ts";
 import {
   answerMarker,
@@ -58,13 +61,15 @@ export interface MessageRow extends RowPosition {
   readonly blocked: boolean;
 }
 
-/** A lifecycle line, such as a session waiting for the operator or a requested cancel. */
+/**
+ * A lifecycle line, such as a session waiting for the operator, a requested cancel, or a
+ * Worker or provider that stopped answering. A `failed` note is operator input the session refused.
+ */
 interface NoteRow extends RowPosition {
   readonly _tag: "Note";
   readonly speaker: Speaker | null;
   readonly text: string;
-  /** Operator input the session refused. */
-  readonly undelivered: boolean;
+  readonly tone: NoticeTone;
 }
 
 /** Consecutive tool calls of one session between two messages, folded into one line. */
@@ -155,6 +160,8 @@ export interface Chapter {
   readonly endedAt: Option.Option<string>;
   /** The newest loaded event the Attempt sent, account readings aside. */
   readonly lastActivityAt: Option.Option<string>;
+  /** While the Attempt runs: its Worker not answering, or its children that cannot reach their provider. */
+  readonly connectivity: ReadonlyArray<ConnectivityWarning>;
 }
 
 /** A Run's loaded transcript as the reader shows it, one chapter per Attempt. */
@@ -225,6 +232,16 @@ const envelopeEnd = (
   return null;
 };
 
+/** Whether an event shows the Attempt's sessions at work; meters and reports of no answer do not. */
+const isActivity = ({ direction, payload }: TranscriptEventView): boolean =>
+  direction === "outbound" &&
+  payload._tag !== "WorkerUnresponsive" &&
+  payload._tag !== "WorkerResponsive" &&
+  !(
+    payload._tag === "SessionEvent" &&
+    (payload.event._tag === "PoolRateLimitsUpdated" || payload.event._tag === "ProviderRetrying")
+  );
+
 const noteText = (notice: TranscriptNotice): string =>
   notice.detail === "" ? notice.label : `${notice.label}. ${notice.detail}`;
 
@@ -242,6 +259,8 @@ const chapterRows = (
   let replaced: { readonly receivedAt: string; readonly speaker: Speaker } | null = null;
   let burst: Array<TranscriptTool> = [];
   let burstSpeaker: Speaker | null = null;
+  /** The row of each session's unanswered provider retries, by session id. */
+  const retrying = new Map<string, number>();
   const flush = () => {
     const [first, ...rest] = burst;
     if (first !== undefined && burstSpeaker !== null)
@@ -305,9 +324,36 @@ const chapterRows = (
           ...at,
           speaker,
           text: origin.event === "SessionIdle" ? "Waiting for operator input" : "Resumed",
-          undelivered: false,
+          tone: "plain",
         });
       }
+      continue;
+    }
+    if (origin._tag === "Provider") {
+      const speaker = session ?? { name: origin.session.agent, sessionKey: null };
+      const event = origin.event;
+      flush();
+      if (event._tag === "ProviderRecovered") {
+        retrying.delete(origin.session.id);
+        rows.push({
+          _tag: "Note",
+          ...at,
+          speaker,
+          text: `Reached its provider again after ${retriesLabel(event.retries)}`,
+          tone: "plain",
+        });
+        continue;
+      }
+      const text = `Cannot reach its provider, ${retriesLabel(event.retries)} so far. ${event.message}`;
+      const streak = retrying.get(origin.session.id);
+      const folded = streak === undefined ? undefined : rows[streak];
+      // Consecutive retries of one session read as one line that keeps the latest report.
+      if (streak === rows.length - 1 && folded?._tag === "Note") {
+        rows[streak] = { ...folded, latestSequence: entry.latestSequence, text };
+        continue;
+      }
+      retrying.set(origin.session.id, rows.length);
+      rows.push({ _tag: "Note", ...at, speaker, text, tone: "warning" });
       continue;
     }
     if (origin._tag === "Envelope" && origin.payload._tag === "Started") {
@@ -319,7 +365,7 @@ const chapterRows = (
           ...at,
           speaker: null,
           text: conflictingSalvageMessage(salvage.value),
-          undelivered: false,
+          tone: "plain",
         });
       }
       continue;
@@ -336,10 +382,10 @@ const chapterRows = (
             },
             text: entry.detail,
             format: entry.format,
-            undelivered: entry.isError,
+            undelivered: entry.tone === "failed",
             blocked: false,
           }
-        : { _tag: "Note", ...at, speaker: null, text: noteText(entry), undelivered: entry.isError },
+        : { _tag: "Note", ...at, speaker: null, text: noteText(entry), tone: entry.tone },
     );
   }
   flush();
@@ -404,18 +450,13 @@ export const readerDocument = (
     );
     const end = envelopeEnd(envelope, attempt);
     const sent = events.filter((event) => event.attemptId === attemptId);
-    const lastActivity = [...sent]
-      .reverse()
-      .find(
-        ({ direction, payload }) =>
-          direction === "outbound" &&
-          !(payload._tag === "SessionEvent" && payload.event._tag === "PoolRateLimitsUpdated"),
-      );
+    const lastActivity = [...sent].reverse().find(isActivity);
+    const live = end === null && !projection.terminalAttempts.has(attemptId);
     return {
       key: `attempt:${attemptId}`,
       attemptId,
       attempt: Option.fromNullishOr(attempt),
-      live: end === null && !projection.terminalAttempts.has(attemptId),
+      live,
       parentModel:
         started?._tag === "Notice" &&
         started.origin._tag === "Envelope" &&
@@ -444,6 +485,7 @@ export const readerDocument = (
         Option.fromNullishOr(envelope?.receivedAt),
       ),
       lastActivityAt: Option.fromNullishOr(lastActivity?.receivedAt),
+      connectivity: live ? openConnectivity(sent) : [],
     };
   });
   return { chapters };

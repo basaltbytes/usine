@@ -4,11 +4,13 @@ import {
   AgentSessionId,
   ChildSession,
   ParentSession,
+  ProviderRetries,
+  ProviderRetrying,
   TextOutput,
   ToolStarted,
 } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
-import { SessionEvent } from "@usine/core/attempt/channel";
+import { SessionEvent, WorkerUnresponsive } from "@usine/core/attempt/channel";
 import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -31,11 +33,11 @@ import {
   TranscriptEventView,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
-import { Option, Schema } from "effect";
+import { DateTime, Option, Schema } from "effect";
 import type { ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import { dayTimeLabel } from "../src/operator-copy.ts";
+import { clockLabel, dayTimeLabel } from "../src/operator-copy.ts";
 import { RunSummary } from "../src/run-drawer.tsx";
 import { EventDocument } from "../src/run-page/documents.tsx";
 import { RunFacts, RunTitle } from "../src/run-page/header.tsx";
@@ -339,6 +341,48 @@ describe("drawer summary", () => {
     assert.include(markup, "Running the tests now.");
     assert.notInclude(markup, "First step.");
     assert.notInclude(markup, "Run conversation");
+  });
+
+  it("warns while a running Run's Worker or a child's provider does not answer", () => {
+    const child = new ChildSession({
+      id: AgentSessionId.make("child"),
+      parentId: AgentSessionId.make("parent"),
+      agent: AgentName.make("reviewer"),
+      brain,
+    });
+    const lastAnsweredAt = "2026-09-01T12:01:00.000Z";
+    const markup = summary(run({ state: "Running", attempts: [attempt(null)], canCancel: true }), [
+      new TranscriptEventView({
+        sequence: TranscriptSequence.make(1),
+        attemptId,
+        receivedAt: "2026-09-01T12:02:00.000Z",
+        direction: "outbound",
+        payload: new WorkerUnresponsive({
+          worker: WorkerName.make("usine-worker-1"),
+          lastAnsweredAt: DateTime.makeUnsafe(lastAnsweredAt),
+          reason: "No answer within 45 seconds",
+        }),
+      }),
+      new TranscriptEventView({
+        sequence: TranscriptSequence.make(2),
+        attemptId,
+        receivedAt: "2026-09-01T12:03:00.000Z",
+        direction: "outbound",
+        payload: new SessionEvent({
+          event: new ProviderRetrying({
+            session: child,
+            message: "Reconnecting... waiting for network",
+            retries: ProviderRetries.make(4),
+          }),
+        }),
+      }),
+    ]);
+    assert.include(
+      markup,
+      `Worker usine-worker-1 has not answered since ${clockLabel(lastAnsweredAt)}`,
+    );
+    assert.include(markup, "reviewer cannot reach its provider, 4 retries since");
+    assert.include(markup, "Reconnecting... waiting for network");
   });
 });
 
