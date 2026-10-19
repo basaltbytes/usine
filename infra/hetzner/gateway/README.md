@@ -5,7 +5,7 @@ These files create the gateway host of [#223](https://github.com/basaltbytes/usi
 | File | Contents |
 | --- | --- |
 | `gateway.sh` | Creates and deletes the network, the gateway VM, and its firewall with `hcloud`; installs `@usine/gateway` from npm or from packed tarballs; renders a Worker's cloud-init. |
-| `gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, sshd settings for a bastion, Node.js, and the `usine-gateway` service. |
+| `gateway-cloud-init.yaml` | The gateway VM: nftables, dnsmasq, chrony, sshd settings for a bastion, Node.js, and the `usine-gateway` service. |
 | `gateway-nftables.conf` | The gateway's firewall rules. |
 | `egress-allowlist` | The hosts Workers may reach through the forward proxy: package hosts and the harness logins' hosts. |
 | `worker-cloud-init.yaml` | What a Worker VM needs to work behind the gateway; `gateway.sh worker-user-data` sends it after the Worker file of `../cloud-init.yaml`. |
@@ -18,6 +18,8 @@ The orchestrator reaches a Worker with SSH through the gateway: `ssh -J root@<ga
 The executor reaches the admin API on the gateway's loopback port 7070 through the same SSH connection, for example with `ssh -L 7070:127.0.0.1:7070 root@<gateway>`. It attaches the Attempt's installation token for the Worker and repository there, and passes the caller token it gets back to the Attempt's children through the SSH connection to the Worker.
 
 A Worker resolves names with the gateway's dnsmasq, which answers `git.<domain>` and `llm.<domain>` with the gateway's private address and refuses every other name. It answers an AAAA query for the gateway's own names with no address rather than a refusal: musl's resolver, which the Codex binary uses, asks for A and AAAA together and fails the whole lookup when either is refused, so Codex could not resolve the forward proxy at `<domain>:3128` ([#260](https://github.com/basaltbytes/usine/issues/260)). The Worker has no default route and no public address, so it cannot open a connection to the internet even with an address in hand; its nftables rules also allow connections to the gateway only.
+
+A Worker sets its clock from the gateway. The gateway runs chrony, which syncs from Hetzner's time servers (`ntp1.hetzner.de`, `ntp2.hetzner.com`, `ntp3.hetzner.net`) and the Debian pool, and answers NTP queries from the private network only. systemd-timesyncd on the Worker asks the gateway's private address, so it looks up no name, and the Worker's nftables rules allow UDP port 123 to the gateway. chrony answers each query itself and forwards nothing, so NTP is no way out of the private network.
 
 git and gh on a Worker talk to `git.<domain>` over plain HTTP on the private network. The gateway checks the caller token, replaces it with the attached installation token, and sends the request to github.com, api.github.com, or uploads.github.com over HTTPS. gh reaches the gateway through `/run/usine-gateway/http.sock`, which systemd forwards to the gateway's port 80, because gh speaks only HTTPS to a custom `GH_HOST` and over a Unix socket it speaks plain HTTP. No certificate is needed on either side.
 
@@ -116,7 +118,7 @@ The output is a MIME multipart cloud-init of two files. The first is the Worker 
 
 Chromium is Debian's package, which a project's Playwright tests use through `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` (see [`../README.md`](../README.md)). `egress-allowlist` does not list Playwright's own browser download: on x64 Linux, Playwright 1.61 fetches Chromium from `cdn.playwright.dev`, which redirects to `storage.googleapis.com`, the endpoint of every Google Cloud Storage bucket, so listing it would let a Worker upload a checkout to any bucket it has a signed URL for.
 
-A Worker needs 8 GB of memory: the repository's lint and knip gates reserve a 6 GiB virtual buffer, which the kernel refuses on a 4 GB machine, and two Attempts' installs and checks at once thrash it ([#270](https://github.com/basaltbytes/usine/issues/270)). cloud-init sets `vm.overcommit_memory=1` and a 2 GB swap file, and installs bubblewrap for Codex's sandbox ([#269](https://github.com/basaltbytes/usine/issues/269)). The gateway must be ready first. The Worker takes about four minutes on a `cx33`; follow it with `ssh -J root@<gateway> usine@<worker> cloud-init status --wait`. Its address on the private network is in `hcloud server describe worker-one`. The Worker has no time server it can reach ([#254](https://github.com/basaltbytes/usine/issues/254)).
+A Worker needs 8 GB of memory: the repository's lint and knip gates reserve a 6 GiB virtual buffer, which the kernel refuses on a 4 GB machine, and two Attempts' installs and checks at once thrash it ([#270](https://github.com/basaltbytes/usine/issues/270)). cloud-init sets `vm.overcommit_memory=1` and a 2 GB swap file, and installs bubblewrap for Codex's sandbox ([#269](https://github.com/basaltbytes/usine/issues/269)). The gateway must be ready first. The Worker takes about four minutes on a `cx33`; follow it with `ssh -J root@<gateway> usine@<worker> cloud-init status --wait`. Its address on the private network is in `hcloud server describe worker-one`.
 
 The Worker's sshd accepts `GIT_CONFIG_VALUE_0`, `GH_ENTERPRISE_TOKEN`, `GH_TOKEN`, and `ANTHROPIC_AUTH_TOKEN` from the orchestrator (`AcceptEnv`): the executor sends each Attempt's caller token in them through the SSH connection, so it is in no command line. A Worker whose sshd drops them fails preflight with a message that names them. Existing Workers must add `GH_TOKEN` to `/etc/ssh/sshd_config.d/40-usine-gateway.conf` and reload sshd. Both gh token variables are required: gh uses `GH_TOKEN` for absolute GitHub pagination links and explicit github.com URLs.
 
@@ -176,6 +178,66 @@ workers:
 - `llm_providers` lists the providers whose credential the gateway holds, and is empty when left out. Without a provider, its harness uses the login on the Worker. With `anthropic`, Claude Code children call `llm.<domain>/anthropic` with the caller token instead, preflight checks only the `claude` binary on the Worker, and the Claude Code hosts must come off `egress-allowlist`. Codex always uses its login on the Worker.
 
 Preflight checks that the admin API answers with the token, that the Worker's sshd accepts the caller token's variables, and that the Worker reaches `git.<domain>`, without attaching anything. For each rostered harness that uses its login on the Worker, it checks the login as on a Worker without a gateway, then that the Worker gets an answer from each of the login's hosts through the forward proxy. A host the proxy refuses fails preflight with the host to add to `egress-allowlist`. While an Attempt runs, the executor stores its attachment again every two minutes, so a restarted gateway, which keeps attachments in memory, has them back within two minutes.
+
+## Add the time server to an existing gateway and Worker
+
+A gateway and Workers created before chrony was in these files need the steps below to give the Workers a time source ([#254](https://github.com/basaltbytes/usine/issues/254)). Nothing applies infra changes to a running machine yet ([#264](https://github.com/basaltbytes/usine/issues/264)), so they are by hand. They use the default `NETWORK_CIDR` and `GATEWAY_IP`, `10.42.0.0/16` and `10.42.0.2`; use yours if you changed them. Do the gateway first, since the Worker's timesyncd needs the gateway's chrony to answer.
+
+On the gateway, as root (`ssh root@<gateway>`):
+
+1. Write chrony's settings for the gateway: Hetzner's time servers, and the private network as clients.
+
+   ```sh
+   mkdir -p /etc/chrony/conf.d
+   printf 'server ntp1.hetzner.de iburst\nserver ntp2.hetzner.com iburst\nserver ntp3.hetzner.net iburst\nallow 10.42.0.0/16\n' > /etc/chrony/conf.d/usine-gateway.conf
+   ```
+
+2. Install chrony. It removes systemd-timesyncd and starts with the file above.
+
+   ```sh
+   apt-get update && apt-get install -y chrony
+   ```
+
+3. Accept NTP from the private network, then load the rules.
+
+   ```sh
+   sed -i 's/udp dport 53 accept/udp dport { 53, 123 } accept/' /etc/nftables.conf
+   nft -f /etc/nftables.conf
+   ```
+
+4. Check. Within a minute `chronyc sources` marks one source with `^*`, and `timedatectl` shows:
+
+   ```
+   System clock synchronized: yes
+   NTP service: active
+   ```
+
+A Worker rebuilt from `worker-user-data` gets the time server without these steps, but loses the harness logins. On a running Worker the `usine` user has no sudo and root cannot log in over SSH, so the steps run as root in the server's console:
+
+1. Give root a password with `hcloud server reset-password <worker>`, which prints it. Open the server's console in the Hetzner Cloud Console and log in as root.
+
+2. Point timesyncd at the gateway.
+
+   ```sh
+   mkdir -p /etc/systemd/timesyncd.conf.d
+   printf '[Time]\nNTP=\nNTP=10.42.0.2\n' > /etc/systemd/timesyncd.conf.d/usine-gateway.conf
+   ```
+
+3. Allow NTP to the gateway, then load the rules.
+
+   ```sh
+   sed -i 's/udp dport 53 accept/udp dport { 53, 123 } accept/' /etc/nftables.conf
+   nft -f /etc/nftables.conf
+   ```
+
+4. Restart timesyncd, and lock root's password again.
+
+   ```sh
+   systemctl restart systemd-timesyncd
+   passwd -l root
+   ```
+
+5. Check from the orchestrator with `ssh -J root@<gateway> usine@<worker> timedatectl`, which shows `System clock synchronized: yes` and `NTP service: active`. `timedatectl timesync-status` shows `Server: 10.42.0.2 (10.42.0.2)`.
 
 ## Delete
 

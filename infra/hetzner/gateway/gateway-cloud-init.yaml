@@ -1,13 +1,15 @@
 #cloud-config
-# The usine gateway VM: SSH bastion, DNS resolver for Workers, the gateway
-# service (credential-injecting reverse proxy, forward proxy, admin API), and
-# nftables. gateway.sh replaces the @@NAME@@ placeholders before the VM is
-# created. No secret is in this file: the VM generates its own admin token and
-# caller key, and API keys are copied in over SSH.
+# The usine gateway VM: SSH bastion, DNS resolver and time server for
+# Workers, the gateway service (credential-injecting reverse proxy, forward
+# proxy, admin API), and nftables. gateway.sh replaces the @@NAME@@
+# placeholders before the VM is created. No secret is in this file: the VM
+# generates its own admin token and caller key, and API keys are copied in
+# over SSH.
 
 package_update: true
 packages:
   - ca-certificates
+  - chrony
   - curl
   - dnsmasq
   - nftables
@@ -49,6 +51,15 @@ write_files:
       log-queries
       address=/@@DOMAIN@@/@@GATEWAY_IP@@
       local=/@@DOMAIN@@/
+
+  # chrony reads this file next to its own chrony.conf, which keeps the Debian pool as a time source.
+  - path: /etc/chrony/conf.d/usine-gateway.conf
+    permissions: "0644"
+    content: |
+      server ntp1.hetzner.de iburst
+      server ntp2.hetzner.com iburst
+      server ntp3.hetzner.net iburst
+      allow @@NETWORK_CIDR@@
 
   # Written before the package is installed, so dnsmasq never becomes the gateway's own resolver through resolvconf.
   - path: /etc/default/dnsmasq
