@@ -58,7 +58,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 
 ## Harnesses
 
-- [#227][]: pull request harvest logs a warning whenever an Attempt's final commit was never pushed.
 - [#258][]: the Codex app-server requests github.com and api.github.com on a Worker behind the Gateway.
 - [#266][]: a Codex child that can't connect to its provider reconnects silently for as long as the Attempt runs.
 - [#277][]: `StepResult` allows a `Comment` fact, but `harvestFacts` never records one ([harvest.ts:135][]).
@@ -147,7 +146,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#217]: https://github.com/basaltbytes/usine/issues/217
 [#223]: https://github.com/basaltbytes/usine/issues/223
 [#226]: https://github.com/basaltbytes/usine/issues/226
-[#227]: https://github.com/basaltbytes/usine/issues/227
 [#228]: https://github.com/basaltbytes/usine/issues/228
 [#229]: https://github.com/basaltbytes/usine/issues/229
 [#230]: https://github.com/basaltbytes/usine/issues/230
