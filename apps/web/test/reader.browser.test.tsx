@@ -15,16 +15,29 @@ import {
   ToolFinished,
   type AgentSessionEvent,
 } from "@usine/core/agent/session";
-import { AttemptId } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { SessionEvent } from "@usine/core/attempt/channel";
+import { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
+import { WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
-import { TranscriptEventView, TranscriptPageCursor } from "@usine/orchestrator/operator";
+import {
+  AgentFailureView,
+  AttemptView,
+  FailedAttemptView,
+  FailedTranscriptView,
+  RunDetailView,
+  RunView,
+  TranscriptEventView,
+  TranscriptPageCursor,
+} from "@usine/orchestrator/operator";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
-import { Conversation } from "../src/run-transcript/conversation.tsx";
+import { RunWorkspace } from "../src/run-page/workspace.tsx";
 import { ReaderBookmark, readerMemory } from "../src/run-transcript/reader/memory.ts";
 import "../src/index.css";
 
@@ -52,6 +65,38 @@ const message = (sequence: number) =>
     }),
   );
 const events = Array.from({ length: 45 }, (_, index) => message(index + 1));
+const liveAttempt = new AttemptView({
+  id: attemptId,
+  number: AttemptNumber.make(1),
+  worker: WorkerName.make("local"),
+  brain: parent.brain,
+  task: AttemptTask.make("Read the conversation"),
+  agent: parent.agent,
+  operatorIntervened: false,
+  startedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, 0)).toISOString(),
+  outcome: null,
+  endedAt: null,
+  salvage: null,
+});
+const runView = (id: RunId, attempts: ReadonlyArray<AttemptView>) =>
+  new RunView({
+    id,
+    itemKey: ItemKey.make("item"),
+    loop: LoopName.make("implement"),
+    repository: RepositoryName.make("basaltbytes/usine"),
+    agent: parent.agent,
+    state: "Running",
+    loopPaused: false,
+    openedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, 0)).toISOString(),
+    task: "Read the conversation",
+    attempts,
+    resultMessage: null,
+    pullRequestUrl: null,
+    canApprove: false,
+    canRetry: false,
+    canResolveFailure: false,
+    canCancel: true,
+  });
 let host: HTMLDivElement;
 let root: Root;
 let queryClient: QueryClient;
@@ -63,22 +108,25 @@ const mount = (
     loading: boolean;
     load: () => void;
   } = { earlier: undefined, loading: false, load: () => {} },
+  attempts: ReadonlyArray<AttemptView> = [],
 ) => {
+  const cursors = history.earlier === undefined ? [] : [history.earlier];
   flushSync(() =>
     root.render(
       <QueryClientProvider client={queryClient}>
-        <Conversation
+        <RunWorkspace
           key={id}
-          runId={id}
-          events={transcript}
-          sessionState={[]}
-          attempts={[]}
-          earlier={history.earlier}
-          loadingEarlier={history.loading}
-          earlierError={null}
-          loadEarlier={history.load}
-          state="Running"
-          active
+          detail={
+            new RunDetailView({
+              run: runView(id, attempts),
+              eventDedupKey: '["implement","basaltbytes/usine",7]',
+              eventPayload: { tick: "scheduled" },
+              transcript,
+              sessionState: [],
+              earlierTranscript: cursors,
+            })
+          }
+          history={{ cursors, loading: history.loading, error: null, load: history.load }}
         />
       </QueryClientProvider>,
     ),
@@ -100,13 +148,17 @@ const moveTo = async (sequence: number, within = 45) => {
   element.dispatchEvent(new Event("scroll", { bubbles: true }));
   await expect.poll(() => offset(sequence)).toBeCloseTo(-within, 0);
 };
+const atLatest = () => viewport().scrollHeight - viewport().clientHeight - viewport().scrollTop;
 const bookmark = () => readerMemory(() => localStorage).read(runId, Date.now());
+const burst = (calls: number) =>
+  page.getByRole("button", { name: new RegExp(`${calls} tool calls?$`, "u") });
 
-beforeEach(() => {
+beforeEach(async () => {
+  await page.viewport(1280, 800);
   localStorage.clear();
   queryClient = new QueryClient();
   host = document.createElement("div");
-  host.style.cssText = "height:600px;width:760px;display:flex;flex-direction:column";
+  host.style.cssText = "height:600px;width:1100px;display:flex;flex-direction:column";
   document.body.append(host);
   root = createRoot(host);
 });
@@ -133,18 +185,14 @@ it("reopens and cold-loads the same row offset without consuming activity receiv
     .element(page.getByRole("button", { name: "1 new update", exact: true }))
     .toBeVisible();
   await page.getByRole("button", { name: "1 new update", exact: true }).click();
-  await expect
-    .poll(() => viewport().scrollHeight - viewport().clientHeight - viewport().scrollTop)
-    .toBeLessThan(9);
+  await expect.poll(atLatest).toBeLessThan(9);
   close();
   expect(bookmark()?.position._tag).toBe("Latest");
   mount([...events, message(46), message(47)]);
-  await expect
-    .poll(() => viewport().scrollHeight - viewport().clientHeight - viewport().scrollTop)
-    .toBeLessThan(9);
+  await expect.poll(atLatest).toBeLessThan(9);
 });
 
-it("keeps filters and inspected group/tool disclosures isolated by Run across remounts", async () => {
+it("keeps inspected burst and tool disclosures isolated by Run across remounts", async () => {
   const tools = [
     record(
       1,
@@ -177,20 +225,15 @@ it("keeps filters and inspected group/tool disclosures isolated by Run across re
     ...events.slice(4),
   ];
   mount(tools);
-  await page.getByRole("button", { name: "Tools", exact: true }).click();
-  await page.getByRole("button", { name: /completed tools/i }).click();
+  await burst(2).click();
   await page.getByRole("button", { name: /first.ts.*Completed/ }).click();
   await expect.element(page.getByText("first contents", { exact: true })).toBeVisible();
   close();
   mount(tools, RunId.make("other-run"));
-  await expect
-    .element(page.getByRole("button", { name: "Everything", exact: true }))
-    .toHaveAttribute("aria-pressed", "true");
+  await expect.element(burst(2)).toHaveAttribute("aria-expanded", "false");
+  await expect.element(page.getByText("first contents", { exact: true })).not.toBeInTheDocument();
   close();
   mount(tools);
-  await expect
-    .element(page.getByRole("button", { name: "Tools", exact: true }))
-    .toHaveAttribute("aria-pressed", "true");
   await expect.element(page.getByText("first contents", { exact: true })).toBeVisible();
 });
 
@@ -216,7 +259,7 @@ it("lets scrolling cancel a delayed restoration and preserves that choice when t
   await expect.poll(() => offset(37)).toBeCloseTo(-30, 0);
 });
 
-it("keeps a pending bookmark intact when the drawer closes before history is available", async () => {
+it("keeps a pending bookmark intact when the page closes before history is available", async () => {
   mount();
   await expect.poll(() => viewport().scrollTop).toBeGreaterThan(1000);
   await moveTo(12);
@@ -235,7 +278,6 @@ it("bounds missing-row recovery and leaves unseen activity unread at its visible
   readerMemory(() => localStorage).write(
     runId,
     ReaderBookmark.make({
-      filter: "all",
       disclosures: [],
       position: {
         _tag: "Anchor",
@@ -269,9 +311,7 @@ it("bounds missing-row recovery and leaves unseen activity unread at its visible
     .element(page.getByRole("button", { name: "21 new updates", exact: true }))
     .toBeVisible();
   await page.getByRole("button", { name: "21 new updates", exact: true }).click();
-  await expect
-    .poll(() => viewport().scrollHeight - viewport().clientHeight - viewport().scrollTop)
-    .toBeLessThan(9);
+  await expect.poll(atLatest).toBeLessThan(9);
 });
 
 it("flushes the current reading place on page exit and keeps newer results unread after refresh", async () => {
@@ -312,7 +352,7 @@ it("flushes the current reading place on page exit and keeps newer results unrea
     .toBeVisible();
 });
 
-it("restores inside a child tool result after its completed group gains an earlier member", async () => {
+it("restores inside a child tool result after its burst gains an earlier member", async () => {
   const child = new ChildSession({
     id: AgentSessionId.make("child"),
     parentId: parent.id,
@@ -361,8 +401,7 @@ it("restores inside a child tool result after its completed group gains an earli
   ];
   const initial = [...events.slice(0, 15), ...tools, ...events.slice(19)];
   mount(initial);
-  await page.getByRole("button", { name: /reviewer activity/ }).click();
-  await page.getByRole("button", { name: /completed tools/i }).click();
+  await burst(2).click();
   await page.getByRole("button", { name: /child.ts.*Completed/ }).click();
   const output = () => {
     const resultId = `${JSON.stringify([attemptId, child.id, "child-a"])}:result`;
@@ -406,13 +445,12 @@ it("continues following when an inspected tool is collapsed after jumping to lat
   );
   const initial = [...events, started];
   mount(initial);
+  await burst(1).click();
   await page.getByRole("button", { name: /latest.ts.*Running/ }).click();
   await page.getByRole("button", { name: "Jump to latest", exact: true }).click();
   await page.getByRole("button", { name: /latest.ts.*Running/ }).click();
   mount([...initial, message(47)]);
-  await expect
-    .poll(() => viewport().scrollHeight - viewport().clientHeight - viewport().scrollTop)
-    .toBeLessThan(9);
+  await expect.poll(atLatest).toBeLessThan(9);
   close();
   expect(bookmark()?.position._tag).toBe("Latest");
 });
@@ -486,7 +524,7 @@ it("reveals an error instead of the pending saved place and preserves unread act
     .toBeVisible();
 });
 
-it("keeps failed commands inside their group and reopens inspected errors through collapsed child activity", async () => {
+it("keeps failed commands inside their burst and reopens inspected errors through a collapsed burst", async () => {
   const child = new ChildSession({
     id: AgentSessionId.make("child"),
     parentId: parent.id,
@@ -510,9 +548,7 @@ it("keeps failed commands inside their group and reopens inspected errors throug
     ),
   ]);
   mount([...events.slice(0, 15), ...tools, ...events.slice(21)]);
-  const activity = page.getByRole("button", { name: /reviewer activity/ });
-  await activity.click();
-  const group = page.getByRole("button", { name: /Ran 3 commands.*1 error/ });
+  const group = page.getByRole("button", { name: /Ran 3 commands, 1 failed/ });
   await expect.element(group).toHaveAttribute("aria-expanded", "false");
   const failed = page.getByRole("button", { name: /node check.js.*Error/ });
   await expect.element(failed).not.toBeInTheDocument();
@@ -524,7 +560,6 @@ it("keeps failed commands inside their group and reopens inspected errors throug
 
   await group.click();
   await expect.element(failed).not.toBeInTheDocument();
-  await activity.click();
   await page.getByRole("button", { name: "Next error", exact: true }).click();
   await expect.element(group).toHaveAttribute("aria-expanded", "true");
   await expect.element(failed).toHaveAttribute("aria-expanded", "true");
@@ -545,6 +580,7 @@ it.each(["pointer", "Space"] as const)(
     );
     const initial = [...events, started];
     mount(initial);
+    await burst(1).click();
     const tool = page.getByRole("button", { name: /paused.ts.*Running/ });
     await tool.click();
     await expect.element(tool).toHaveAttribute("aria-expanded", "true");
@@ -583,20 +619,84 @@ it("lets Space on the viewport resume following a paused reader at latest", asyn
   );
   const initial = [...events, started];
   mount(initial);
+  await burst(1).click();
   const tool = page.getByRole("button", { name: /paused.ts.*Running/ });
   await tool.click();
   await tool.click();
   await expect
     .element(page.getByText("Waiting for a result…", { exact: true }))
     .not.toBeInTheDocument();
+  // The current activity line sits below the call; reach the end without a scroll gesture.
+  viewport().scrollTop = viewport().scrollHeight;
+  await expect.poll(atLatest).toBeLessThan(9);
   viewport().focus();
   await userEvent.keyboard(" ");
   mount([...initial, message(47)]);
-  await expect
-    .poll(() => viewport().scrollHeight - viewport().clientHeight - viewport().scrollTop)
-    .toBeLessThan(9);
+  await expect.poll(atLatest).toBeLessThan(9);
   close();
   expect(bookmark()?.position._tag).toBe("Latest");
+});
+
+it("scrolls the reader to a checkpoint chosen in the outline and stops following", async () => {
+  mount(events, runId, undefined, [liveAttempt]);
+  await expect.poll(atLatest).toBeLessThan(9);
+  const outline = page.getByRole("navigation", { name: "Run outline" });
+  await expect
+    .element(outline.getByRole("button", { name: "Attempt 1, running" }))
+    .toHaveAttribute("aria-expanded", "true");
+  await outline.getByRole("button", { name: "Message 12", exact: true }).click();
+  // The reader keeps its top padding above the row it jumps to.
+  await expect.poll(() => offset(12)).toBeGreaterThanOrEqual(0);
+  await expect.poll(() => offset(12)).toBeLessThan(24);
+  const landed = offset(12);
+  mount([...events, message(46)], runId, undefined, [liveAttempt]);
+  await expect.poll(() => Math.abs(offset(12) - landed)).toBeLessThan(2);
+  await expect
+    .element(page.getByRole("button", { name: "1 new update", exact: true }))
+    .toBeVisible();
+  window.dispatchEvent(new PageTransitionEvent("pagehide"));
+  expect(bookmark()?.position).toMatchObject({ _tag: "Anchor", key: "event:12" });
+});
+
+it("shows the Task and the Event in the reader and returns to the same reading place", async () => {
+  mount(events, runId, undefined, [liveAttempt]);
+  await moveTo(20, 10);
+  const outline = page.getByRole("navigation", { name: "Run outline" });
+  await outline.getByRole("button", { name: /^Task/ }).click();
+  await expect
+    .element(page.getByRole("article", { name: "Task" }).getByText("Read the conversation"))
+    .toBeVisible();
+  await expect
+    .element(page.getByRole("region", { name: "Run conversation" }))
+    .not.toBeInTheDocument();
+  await outline.getByRole("button", { name: /^Event/ }).click();
+  await page.getByRole("button", { name: "Raw details", exact: true }).click();
+  await expect.element(page.getByText('"tick": "scheduled"', { exact: false })).toBeVisible();
+  await outline.getByRole("button", { name: "Attempt 1, running" }).click();
+  await expect.element(page.getByRole("region", { name: "Run conversation" })).toBeVisible();
+  await expect.poll(() => offset(20)).toBeCloseTo(-10, 0);
+});
+
+it("addresses the composer to the parent until a live child is chosen in the outline", async () => {
+  const child = new ChildSession({
+    id: AgentSessionId.make("child"),
+    parentId: parent.id,
+    agent: AgentName.make("reviewer"),
+    brain: parent.brain,
+  });
+  mount(
+    [...events, record(46, new TextOutput({ session: child, text: "Child is reviewing." }))],
+    runId,
+    undefined,
+    [liveAttempt],
+  );
+  await expect.element(page.getByLabelText("Message the parent")).toBeVisible();
+  await page
+    .getByRole("navigation", { name: "Run outline" })
+    .getByRole("button", { name: /^reviewer/ })
+    .click();
+  await expect.element(page.getByLabelText("Message this child")).toBeVisible();
+  await expect.element(page.getByRole("button", { name: "Release child" })).toBeVisible();
 });
 
 it.each(["claude", "codex"] as const)(
@@ -616,18 +716,93 @@ it.each(["claude", "codex"] as const)(
       record(1, new SessionStarted({ session: child, harnessSession: Option.some(saved) })),
       record(2, new SessionFinished({ session: child })),
     ]);
-    await page.getByRole("button", { name: "reviewer activity · Finished" }).click();
+    await page.getByRole("button", { name: "Resume details for reviewer" }).click();
     await expect.element(page.getByText("Harness session: native-session")).toBeVisible();
     await expect.element(page.getByText("Worker worktree: /worker/Philippe's repo")).toBeVisible();
     const command = harness === "claude" ? "claude --resume" : "codex resume --";
-    expect(host.textContent).toContain(`${command} 'native-session'`);
-    expect(host.textContent).toContain("cd -- '/worker/Philippe'\\''s repo'");
+    expect(document.body.textContent).toContain(`${command} 'native-session'`);
+    expect(document.body.textContent).toContain("cd -- '/worker/Philippe'\\''s repo'");
     await expect.element(page.getByRole("button", { name: "Copy resume command" })).toBeEnabled();
     await expect
       .element(page.getByText(/Requires its worktree and saved session files/))
       .toBeVisible();
   },
 );
+
+const failure = new AgentFailureView({ message: "The first Attempt was blocked." });
+const firstAttempt = new AttemptView({
+  ...liveAttempt,
+  id: AttemptId.make("first"),
+  outcome: new FailedAttemptView({ failure }),
+  endedAt: new Date(Date.UTC(2026, 8, 6, 11, 50, 0)).toISOString(),
+});
+const retried = new AttemptView({ ...liveAttempt, number: AttemptNumber.make(2) });
+const earlierAttempt = Array.from({ length: 20 }, (_, index) => {
+  const event = message(index + 1);
+  return new TranscriptEventView({ ...event, attemptId: firstAttempt.id });
+});
+const failedEnvelope = new TranscriptEventView({
+  sequence: TranscriptSequence.make(21),
+  attemptId: firstAttempt.id,
+  receivedAt: new Date(Date.UTC(2026, 8, 6, 12, 0, 21)).toISOString(),
+  direction: "outbound",
+  payload: new FailedTranscriptView({ failure }),
+});
+const twoAttempts = [
+  ...earlierAttempt,
+  failedEnvelope,
+  ...Array.from({ length: 25 }, (_, index) => message(index + 22)),
+];
+
+it("opens the outline on the Attempt being read and marks its checkpoint without moving the reader", async () => {
+  mount(twoAttempts, runId, undefined, [firstAttempt, retried]);
+  await expect.poll(atLatest).toBeLessThan(9);
+  const outline = page.getByRole("navigation", { name: "Run outline" });
+  const first = outline.getByRole("button", { name: "Attempt 1, failed" });
+  const second = outline.getByRole("button", { name: "Attempt 2, running" });
+  await expect.element(second).toHaveAttribute("aria-expanded", "true");
+  await expect.element(first).toHaveAttribute("aria-expanded", "false");
+  await moveTo(8, 0);
+  await expect.element(first).toHaveAttribute("aria-expanded", "true");
+  await expect.element(second).toHaveAttribute("aria-expanded", "false");
+  await expect
+    .element(outline.getByRole("button", { name: "Message 8", exact: true }))
+    .toHaveAttribute("aria-current", "location");
+  await expect.poll(() => offset(8)).toBeCloseTo(0, 0);
+  await moveTo(40, 0);
+  await expect.element(second).toHaveAttribute("aria-expanded", "true");
+  await expect
+    .element(outline.getByRole("button", { name: "Message 40", exact: true }))
+    .toHaveAttribute("aria-current", "location");
+});
+
+it("opens a finished Run on a narrow screen at its outcome's own line", async () => {
+  await page.viewport(390, 844);
+  mount([...earlierAttempt, failedEnvelope], runId, undefined, [firstAttempt]);
+  // The row, with its time line stacked above the note on a narrow screen.
+  const outcome = () =>
+    [...host.querySelectorAll<HTMLElement>("[data-message-id]")].find(
+      (element) => element.dataset.messageId === "event:21",
+    );
+  await expect
+    .poll(() => {
+      const element = outcome();
+      return element === undefined
+        ? Number.NaN
+        : element.getBoundingClientRect().top - viewport().getBoundingClientRect().top;
+    })
+    .toBeLessThan(24);
+  expect(
+    (outcome()?.getBoundingClientRect().top ?? -1) - viewport().getBoundingClientRect().top,
+  ).toBeGreaterThanOrEqual(0);
+  await expect
+    .element(
+      page
+        .getByRole("region", { name: "Run conversation" })
+        .getByText("The first Attempt was blocked."),
+    )
+    .toBeVisible();
+});
 
 it("shows that a Pi child has no saved harness session to resume", async () => {
   const child = new ChildSession({
@@ -640,7 +815,7 @@ it("shows that a Pi child has no saved harness session to resume", async () => {
     record(1, new SessionStarted({ session: child })),
     record(2, new SessionFinished({ session: child })),
   ]);
-  await page.getByRole("button", { name: "reviewer activity · Finished" }).click();
+  await page.getByRole("button", { name: "Resume details for reviewer" }).click();
   await expect.element(page.getByText("No saved harness session recorded.")).toBeVisible();
-  expect(host.textContent).not.toContain("Resume on worker");
+  expect(document.body.textContent).not.toContain("Resume on worker");
 });

@@ -1,5 +1,5 @@
+import type { Burst } from "../document/model.ts";
 import { presentTool, type ToolActivity } from "../tool/presentation.ts";
-import type { ToolGroup } from "./model.ts";
 
 // Recognize only complete, familiar invocations. Unrecognized arguments, shell
 // composition and wrappers remain generic; "ran tests" describes an invocation, never its verdict.
@@ -110,8 +110,8 @@ const activitySummary = (
 };
 
 /** Summarizes recorded actions in first-seen order, with at most two descriptions and a remaining-call count. */
-export const groupSummary = (group: ToolGroup): string => {
-  const activities = group.tools.map((tool) => presentTool(tool).activity);
+export const burstSummary = (burst: Pick<Burst, "tools">): string => {
+  const activities = burst.tools.map((tool) => presentTool(tool).activity);
   const paths = [
     ...new Set(activities.flatMap((activity) => (activity._tag === "Files" ? activity.paths : []))),
   ];

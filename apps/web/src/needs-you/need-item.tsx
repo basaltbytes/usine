@@ -5,13 +5,15 @@ import type { NeedCopy } from "../operator-copy.ts";
 
 /** One Needs you entry: its title, the Project it concerns, and one line of detail, with its actions
  * on the right. `open` makes the whole entry open what it is about, such as the Run drawer.
- * `fullDetail` lets the detail wrap, with the actions below it, for a recovery that must read in full. */
+ * `fullDetail` lets the detail wrap, with the actions below it, for a recovery that must read in full.
+ * `compact` keeps the entry to one line, its detail truncated with the full text in its tooltip. */
 export const NeedItem = ({
   copy,
   open,
   actions,
   error,
   fullDetail = false,
+  compact = false,
 }: {
   readonly copy: Pick<NeedCopy, "title" | "detail" | "repository">;
   readonly open?: (() => void) | undefined;
@@ -19,26 +21,65 @@ export const NeedItem = ({
   /** Why the last action on this entry failed. */
   readonly error?: string | null;
   readonly fullDetail?: boolean;
+  readonly compact?: boolean;
 }) => {
-  const text = (
+  const wraps = fullDetail && !compact;
+  // A compact entry keeps its title whole: below sm the detail wraps to two lines under it,
+  // from sm the entry is one line with the detail shortened beside the title.
+  const title = (
+    <span
+      className={cn(
+        "text-sm font-medium text-foreground",
+        compact ? "sm:shrink-0 sm:whitespace-nowrap" : "truncate",
+      )}
+    >
+      {copy.title}
+    </span>
+  );
+  const detail = (
+    <span
+      className={cn(
+        "text-xs text-foreground/75",
+        compact
+          ? "min-w-0 line-clamp-2 sm:block sm:flex-1 sm:text-ellipsis sm:whitespace-nowrap"
+          : "block",
+        !wraps && !compact && "truncate",
+      )}
+      title={wraps ? undefined : copy.detail}
+    >
+      {copy.detail}
+    </span>
+  );
+  const text = compact ? (
+    <span className="flex min-w-0 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
+      {title}
+      {detail}
+    </span>
+  ) : (
     <>
       <span className="flex min-w-0 items-baseline gap-2">
-        <span className="truncate text-sm font-medium text-foreground">{copy.title}</span>
+        {title}
         {copy.repository !== null && (
           <span className="shrink-0 text-xs text-foreground/70">{copy.repository}</span>
         )}
       </span>
-      <span
-        className={cn("block text-xs text-foreground/75", !fullDetail && "truncate")}
-        title={fullDetail ? undefined : copy.detail}
-      >
-        {copy.detail}
-      </span>
+      {detail}
     </>
   );
   return (
-    <li className="relative flex min-h-14 min-w-0 flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-needs-you/25 bg-needs-you/5 px-3.5 py-2.5 transition-colors has-[[data-need-open]:hover]:bg-needs-you/8">
-      <div className={cn("flex min-w-56 flex-1 flex-col gap-0.5", fullDetail && "basis-full")}>
+    <li
+      className={cn(
+        "relative flex min-w-0 flex-wrap items-center gap-x-3 rounded-lg border border-needs-you/25 bg-needs-you/5 transition-colors duration-(--duration-fast) ease-out-expo motion-safe:animate-in motion-safe:fade-in has-[[data-need-open]:hover]:bg-needs-you/8",
+        compact ? "gap-y-1 px-3 py-1" : "min-h-14 gap-y-2 px-3.5 py-2.5",
+      )}
+    >
+      <div
+        className={cn(
+          "flex flex-1 flex-col gap-0.5",
+          compact ? "min-w-0" : "min-w-56",
+          wraps && "basis-full",
+        )}
+      >
         {open === undefined ? (
           text
         ) : (

@@ -51,7 +51,7 @@ export const SessionComposer = ({
       mutation.mutate(new OperatorMessage({ message }));
   };
   return (
-    <div className="space-y-2 border-t pt-3">
+    <div className="space-y-2">
       <Label htmlFor={id}>{child ? "Message this child" : "Message the parent"}</Label>
       <Textarea
         id={id}

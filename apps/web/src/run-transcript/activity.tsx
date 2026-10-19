@@ -1,8 +1,9 @@
-import type { AttemptView, TranscriptEventView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
-import { useEffect, useMemo, useState } from "react";
+import { StateMark } from "@/components/status-badge";
+import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
-import { projectTranscript, type TranscriptSession } from "./model.ts";
+import type { Chapter } from "./document/model.ts";
+import { sessionActivityLabel, type TranscriptSession } from "./model.ts";
 import { presentTool } from "./tool/presentation.ts";
 
 /** Formats elapsed activity time without implying that a quiet session has stalled. */
@@ -15,10 +16,39 @@ export const elapsedActivity = (startedAt: string, now: number): string => {
     : `${Math.floor(minutes / 60)}h ${minutes % 60}m`;
 };
 
+/** Time elapsed since an instant, refreshed every second. */
+export const Elapsed = ({
+  since,
+  className,
+}: {
+  readonly since: string;
+  readonly className?: string;
+}) => {
+  const now = useNow(1_000);
+  return (
+    <time
+      dateTime={since}
+      aria-live="off"
+      className={cn("font-mono tabular-nums", className)}
+      title={`Since ${since}`}
+    >
+      {elapsedActivity(since, now)}
+    </time>
+  );
+};
+
+interface Activity {
+  readonly label: string;
+  readonly detail: string;
+  readonly since: Option.Option<string>;
+}
+
 /** Describes recorded work; terminal sessions never continue to advertise a running tool. */
-export const describeActivity = (session: TranscriptSession) => {
+export const describeActivity = (session: TranscriptSession): Activity => {
   if (session.status !== "Live")
     return { label: session.status, detail: "", since: Option.none<string>() };
+  if (session.paused || session.held || session.idle)
+    return { label: sessionActivityLabel(session), detail: "", since: Option.none<string>() };
   const tool = [...session.entries]
     .reverse()
     .find((entry) => entry._tag === "Tool" && entry.state._tag === "Running");
@@ -39,100 +69,65 @@ export const describeActivity = (session: TranscriptSession) => {
   };
 };
 
-/** Keeps the latest Attempt's action, elapsed time, and child counts visible above the conversation. */
-export const SessionActivity = ({
-  events,
-  attempts,
-}: {
-  readonly events: ReadonlyArray<TranscriptEventView>;
-  readonly attempts: ReadonlyArray<AttemptView>;
-}) => {
-  const projection = useMemo(() => projectTranscript(events, attempts), [events, attempts]);
-  const attempt = [...attempts].sort((left, right) => right.number - left.number)[0];
-  const sessions = projection.sessions.filter(({ attemptId }) => attemptId === attempt?.id);
-  const parent = sessions.find(({ session }) => session._tag === "ParentSession");
-  const children = sessions.filter(({ session }) => session._tag === "ChildSession");
-  const active =
-    attempt !== undefined &&
-    (parent === undefined
-      ? !projection.terminalAttempts.has(attempt.id)
-      : parent.status === "Live");
-  const [now, setNow] = useState(Date.now);
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => setNow(Date.now()), 1_000);
-    return () => clearInterval(timer);
-  }, [active]);
-  if (attempt === undefined) return null;
-  const activity =
-    parent === undefined
+/** The session that best says what a live Attempt is doing: its most recently active live child, else its parent. */
+const currentSession = (
+  sessions: ReadonlyArray<TranscriptSession>,
+): TranscriptSession | undefined => {
+  const live = sessions.filter(({ status }) => status === "Live");
+  const children = live
+    .filter(({ session }) => session._tag === "ChildSession")
+    .sort((left, right) => right.latestSequence - left.latestSequence);
+  return children[0] ?? live.find(({ session }) => session._tag === "ParentSession");
+};
+
+/** A live Attempt's current action, elapsed time, and last activity, as one quiet status line. */
+export const CurrentActivity = ({ chapter }: { readonly chapter: Chapter }) => {
+  const now = useNow(1_000);
+  const session = currentSession(chapter.sessions);
+  const activity: Activity =
+    session === undefined
       ? {
-          label: active ? "Awaiting parent activity" : "Ended",
+          label: "Waiting for the parent session to start",
           detail: "",
-          since: Option.none<string>(),
+          since: Option.none(),
         }
-      : describeActivity(parent);
-  const lastActivity = [...events]
-    .reverse()
-    .find(
-      (event) =>
-        event.attemptId === attempt.id &&
-        event.direction === "outbound" &&
-        (event.payload._tag !== "SessionEvent" ||
-          event.payload.event._tag !== "PoolRateLimitsUpdated"),
-    );
-  const childCounts = (["Live", "Finished", "Stopped"] as const).flatMap((status) => {
-    const count = children.filter((child) => child.status === status).length;
-    return count === 0 ? [] : [`${count} ${status.toLowerCase()}`];
-  });
+      : describeActivity(session);
   return (
-    <section
-      aria-label="Current activity"
-      className="shrink-0 space-y-1.5 border-b px-4 py-2 text-xs sm:px-6"
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div role="status" className="min-w-0 space-y-1.5">
-          <div className="flex items-center gap-1.5 text-muted-foreground">
-            <span
-              aria-hidden="true"
-              className={cn(
-                "size-1.5 shrink-0 rounded-full",
-                active ? "bg-run-active" : "bg-muted-foreground",
-              )}
-            />
-            <span>
-              Attempt {attempt.number} · {parent?.session.agent ?? "Parent"} · {activity.label}
-            </span>
-          </div>
-          {activity.detail !== "" && (
-            <p className="truncate font-mono" title={activity.detail}>
-              {activity.detail}
-            </p>
-          )}
-        </div>
+    <div role="status" aria-label="Current activity" className="min-w-0 space-y-0.5 text-xs">
+      <p className="flex min-w-0 items-center gap-2">
+        <StateMark state="Running" />
+        {session !== undefined && (
+          <span className="shrink-0 font-medium text-foreground">
+            {session.session._tag === "ParentSession" ? "Parent" : session.session.agent}
+          </span>
+        )}
+        <span className="min-w-0 truncate text-muted-foreground">{activity.label}</span>
         {Option.match(activity.since, {
           onNone: () => null,
           onSome: (since) => (
             <span
               aria-live="off"
-              className="shrink-0 font-mono tabular-nums text-muted-foreground"
+              className="ml-auto shrink-0 font-mono tabular-nums text-muted-foreground"
               title={`Started ${since}`}
             >
               {elapsedActivity(since, now)}
             </span>
           ),
         })}
-      </div>
-      {(childCounts.length > 0 || (active && lastActivity !== undefined)) && (
-        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-muted-foreground">
-          {childCounts.length > 0 && <span>Children: {childCounts.join(" · ")}</span>}
-          {active && lastActivity !== undefined && (
-            <span aria-live="off">
-              Last activity {elapsedActivity(lastActivity.receivedAt, now)} ago
-            </span>
-          )}
-        </div>
+      </p>
+      {activity.detail !== "" && (
+        <p className="truncate pl-3.5 font-mono text-muted-foreground" title={activity.detail}>
+          {activity.detail}
+        </p>
       )}
-    </section>
+      {Option.match(chapter.lastActivityAt, {
+        onNone: () => null,
+        onSome: (at) => (
+          <p aria-live="off" className="pl-3.5 text-muted-foreground">
+            Last activity {elapsedActivity(at, now)} ago
+          </p>
+        ),
+      })}
+    </div>
   );
 };

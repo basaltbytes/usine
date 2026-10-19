@@ -7,7 +7,13 @@ import { overviewQuery } from "../overview.ts";
 import { NeedItem } from "./need-item.tsx";
 
 /** An Item-level Ask that remains actionable without creating a Run. */
-export const CycleBudgetAsk = ({ need }: { readonly need: CycleBudgetNeed }) => {
+export const CycleBudgetAsk = ({
+  need,
+  compact,
+}: {
+  readonly need: CycleBudgetNeed;
+  readonly compact: boolean;
+}) => {
   const queries = useQueryClient();
   const reset = useMutation({
     mutationFn: () => api((client) => client.resetCycleBudget({ payload: { askId: need.ask.id } })),
@@ -16,6 +22,7 @@ export const CycleBudgetAsk = ({ need }: { readonly need: CycleBudgetNeed }) => 
   return (
     <NeedItem
       copy={needCopy(need)}
+      compact={compact}
       error={reset.isError ? reset.error.message : null}
       actions={
         <>

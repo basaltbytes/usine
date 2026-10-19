@@ -8,7 +8,7 @@ coverage/
 apps/docs/src/content/docs/reference/api/
 
 # Impeccable scratch output
-.impeccable/mocks/
-.impeccable/review/
-.impeccable/build/
-.impeccable/config.local.json
+**/.impeccable/mocks/
+**/.impeccable/review/
+**/.impeccable/build/
+**/.impeccable/config.local.json

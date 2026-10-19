@@ -1,5 +1,6 @@
 import { BrainSpec } from "@usine/core/agent/brain";
-import type { AttemptSalvage, SalvagePushed } from "@usine/core/attempt/salvage";
+import type { BillingPool } from "@usine/core/agent/session";
+import type { SalvagePushed } from "@usine/core/attempt/salvage";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { InstanceReload } from "@usine/orchestrator/current-instance";
@@ -81,6 +82,86 @@ export const timestampLabel = (instant: string): string => {
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(date.getHours())}:${two(date.getMinutes())}`;
 };
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** An instant's local day and minute, such as `15 Oct 19:30`. */
+export const dayTimeLabel = (instant: string): string => {
+  const date = new Date(instant);
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${two(date.getHours())}:${two(date.getMinutes())}`;
+};
+
+/** An instant's local day, such as `22 Oct`. */
+export const dayLabel = (date: Date): string => `${date.getDate()} ${MONTHS[date.getMonth()]}`;
+
+/** An instant's local time of day to the second, such as `19:31:03`. */
+export const clockLabel = (instant: string): string => {
+  const date = new Date(instant);
+  const two = (value: number) => String(value).padStart(2, "0");
+  return `${two(date.getHours())}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
+};
+
+/** A span of time in its largest useful units: `25s`, `22 min`, or `1 h 4 min`. */
+export const durationLabel = (milliseconds: number): string => {
+  const seconds = Math.max(0, Math.round(milliseconds / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  return minutes % 60 === 0
+    ? `${Math.floor(minutes / 60)} h`
+    : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
+};
+
+/** How a Run stands, in one phrase: `Failed after 3 Attempts`, `Waiting for approval`, `Running Attempt 2`. */
+export const runStateLine = (run: Pick<RunView, "state" | "attempts">): string => {
+  const attempts = run.attempts.length;
+  const after =
+    attempts === 0 ? "" : ` after ${attempts} ${attempts === 1 ? "Attempt" : "Attempts"}`;
+  switch (run.state) {
+    case "Pending":
+      return "Pending";
+    case "Waiting":
+      return "Waiting for approval";
+    case "Queued":
+      return "Queued for a free Worker";
+    case "Running":
+      return `Running Attempt ${run.attempts.at(-1)?.number ?? 1}`;
+    case "Succeeded":
+      return attempts > 1 ? `Succeeded${after}` : "Succeeded";
+    case "Failed":
+      return `Failed${after}`;
+    case "Canceled":
+      return `Canceled${after}`;
+  }
+};
+
+/** The typed reason of an Attempt failure, in words. */
+export const failureReason = (failure: FailureView): string =>
+  Match.valueTags(failure, {
+    InfraFailure: () => "Infrastructure failure",
+    DefectFailure: () => "Executor defect; retry explicitly",
+    AgentFailure: () => "Agent failure",
+    QuestionFailure: () => "Question for you",
+    RunawayFailure: () => "Runaway guard",
+    ChildSessionBudgetFailure: () => "Child session budget exhausted",
+  });
+
+/** A coding harness by its product name. */
+export const harnessLabel = (harness: BrainSpec["harness"]): string =>
+  ({ claude: "Claude Code", codex: "Codex", pi: "Pi" })[harness];
+
+/** A billing pool by the account it draws on. */
+export const poolLabel = (pool: BillingPool): string =>
+  ({ apiKeys: "API keys", claudePlan: "Claude plan", chatgptPlan: "ChatGPT plan" })[pool];
+
+/** An allowance window's length, such as `7-day` or `5-hour`. */
+export const windowLabel = (minutes: number): string =>
+  minutes % 1440 === 0
+    ? `${minutes / 1440}-day`
+    : minutes % 60 === 0
+      ? `${minutes / 60}-hour`
+      : `${minutes}-minute`;
+
 /** The tooltip of a Run's age, which counts from when the Run opened. */
 export const openedTitle = (openedAt: string): string => `Opened ${timestampLabel(openedAt)}`;
 
@@ -111,14 +192,6 @@ export const failureMessage = (failure: FailureView): string =>
     RunawayFailure: ({ ceiling }) => `Runaway guard tripped its ${ceiling} ceiling`,
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
       `This Attempt used its ${maxChildren}-child session budget; child ${attemptedChildren} did not start`,
-  });
-
-export const salvageMessage = (salvage: AttemptSalvage): string =>
-  Match.valueTags(salvage, {
-    Pushed: ({ ref, commit }) =>
-      `Unfinished work pushed to ${ref} at ${commit.slice(0, 7)}; a retry resumes from it`,
-    Retained: ({ path, message }) =>
-      `Salvage incomplete; unfinished work stays at ${path} and is retried at every startup while its Worker is configured. Last error: ${message}`,
   });
 
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>

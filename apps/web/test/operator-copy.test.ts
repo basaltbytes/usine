@@ -1,4 +1,4 @@
-import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
+import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
@@ -10,27 +10,11 @@ import {
   RunFailureNeed,
   UnconfiguredWorkerNeed,
 } from "@usine/orchestrator/operator";
-import { Option, Schema } from "effect";
+import { Schema } from "effect";
 import { assert, describe, it } from "vitest";
-import {
-  conflictingSalvageMessage,
-  needCopy,
-  reloadSummary,
-  salvageMessage,
-} from "../src/operator-copy.ts";
+import { conflictingSalvageMessage, needCopy, reloadSummary } from "../src/operator-copy.ts";
 
-describe("salvage copy in the run drawer", () => {
-  it("names the pushed ref and short commit", () => {
-    const message = salvageMessage(
-      new SalvagePushed({
-        ref: SalvageRef.make("usine/salvage/run/1"),
-        commit: CommitSha.make("0123456789abcdef0123456789abcdef01234567"),
-      }),
-    );
-    assert.include(message, "usine/salvage/run/1");
-    assert.include(message, "0123456");
-  });
-
+describe("salvage copy in the reader", () => {
   it("names the conflicting salvage a retry starts without", () => {
     const message = conflictingSalvageMessage(
       new SalvagePushed({
@@ -40,19 +24,6 @@ describe("salvage copy in the run drawer", () => {
     );
     assert.include(message, "usine/salvage/run/2 at 0123456");
     assert.include(message, "starts without it");
-  });
-
-  it("shows where retained work lives, that startup retries it, and why the last try failed", () => {
-    const message = salvageMessage(
-      new SalvageRetained({
-        path: "/workers/local/attempts/run_execute_1",
-        commit: Option.none(),
-        message: "git exited with code 128: remote: Repository not found.",
-      }),
-    );
-    assert.include(message, "/workers/local/attempts/run_execute_1");
-    assert.include(message, "every startup");
-    assert.include(message, "remote: Repository not found.");
   });
 });
 

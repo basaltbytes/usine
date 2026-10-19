@@ -3,8 +3,21 @@ import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useMessageScroller } from "@/components/ui/message-scroller";
 import { useTranscriptDisclosure } from "../grouping/disclosure.tsx";
-import type { TranscriptFilter } from "../model.ts";
 import type { TranscriptUpdate } from "./model.ts";
+
+/** A place in the reader to show: a row, an Attempt heading, or a tool call inside its folded burst. */
+export interface ReaderTarget {
+  /** The MessageScroller identity to bring to the top of the viewport. */
+  readonly messageId: string;
+  /** A tool call to open, together with the burst that folds it. */
+  readonly tool: string | null;
+}
+
+/** The reader target of an indexed row; a tool error opens its call. */
+export const updateTarget = (update: TranscriptUpdate): ReaderTarget => ({
+  messageId: update.key,
+  tool: update.isTool ? update.key : null,
+});
 
 /** Cycles loaded errors in conversation order while selection follows the original row identity. */
 export const ErrorControls = ({
@@ -27,7 +40,7 @@ export const ErrorControls = ({
   const count = `${errors.length} ${earlier ? "loaded " : ""}${errors.length === 1 ? "error" : "errors"}`;
   return (
     <div role="group" aria-label="Conversation errors" className="flex items-center gap-1">
-      <span role="status" className="text-xs tabular-nums text-destructive">
+      <span role="status" className="mr-auto text-xs tabular-nums text-destructive">
         {index < 0 ? count : `${index + 1} of ${count}`}
       </span>
       <Button
@@ -53,51 +66,48 @@ export const ErrorControls = ({
 };
 
 /**
- * Reveals one pending error inside the scroller and disclosure providers. The caller
- * keeps the request above the filter key and clears it only after this jump completes.
+ * Reveals one pending target inside the scroller and disclosure providers. The caller
+ * keeps the request and clears it only after this jump completes.
  */
-export const RevealError = ({
+export const RevealTarget = ({
   target,
-  filter,
   onRevealed,
 }: {
-  readonly target: TranscriptUpdate | null;
-  readonly filter: TranscriptFilter;
+  readonly target: ReaderTarget | null;
   readonly onRevealed: () => void;
 }) => {
   const { state, reveal } = useTranscriptDisclosure();
   const { scrollToMessage } = useMessageScroller();
   useEffect(() => {
-    if (target === null || filter !== "all") return;
-    const disclosures = [
-      ...(target.childKey === null ? [] : [target.childKey]),
-      ...(target.isTool ? [target.key] : []),
-    ];
-    // A tool can remain inspected after its surrounding group is collapsed.
+    if (target === null) return;
+    // A tool can remain inspected after its surrounding burst is collapsed.
     // Revealing its durable identity must reopen both disclosure levels.
-    const closed = disclosures.filter(
-      (key) =>
-        state.get(key)?.open !== true ||
-        (target.isTool && key === target.key && state.get(key)?.groupOpen !== true),
-    );
-    if (closed.length > 0) {
-      for (const key of closed) reveal({ _tag: "Item", key, open: true });
+    if (
+      target.tool !== null &&
+      (state.get(target.tool)?.open !== true || state.get(target.tool)?.groupOpen !== true)
+    ) {
+      reveal({ _tag: "Item", key: target.tool, open: true });
       return;
     }
     // Base UI mounts newly opened panels before this frame. MessageScroller Items
-    // register through their DOM refs, including rows inside those child panels.
+    // register through their DOM refs, including rows inside those panels.
+    let settleFrame: number | undefined;
     let completionFrame: number | undefined;
     const frame = requestAnimationFrame(() => {
-      if (scrollToMessage(target.key, { align: "start", behavior: "instant" })) {
+      if (!scrollToMessage(target.messageId, { align: "start", behavior: "instant" })) return;
+      // Rows the jump brings into view replace their estimated heights; jump again once measured.
+      settleFrame = requestAnimationFrame(() => {
+        scrollToMessage(target.messageId, { align: "start", behavior: "instant" });
         // The registry publishes scrollability on its next frame. Keep the request
         // pending until then so its previous "at latest" state cannot mark updates read.
         completionFrame = requestAnimationFrame(onRevealed);
-      }
+      });
     });
     return () => {
       cancelAnimationFrame(frame);
+      if (settleFrame !== undefined) cancelAnimationFrame(settleFrame);
       if (completionFrame !== undefined) cancelAnimationFrame(completionFrame);
     };
-  }, [target, filter, state, reveal, scrollToMessage, onRevealed]);
+  }, [target, state, reveal, scrollToMessage, onRevealed]);
   return null;
 };

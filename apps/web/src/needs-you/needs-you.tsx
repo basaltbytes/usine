@@ -11,6 +11,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { useOpenRun } from "../open-run.ts";
 import { needCopy, runActionLabel, runActionProgress } from "../operator-copy.ts";
 import { useRunAction } from "../run-actions.ts";
@@ -19,7 +20,13 @@ import { NeedItem } from "./need-item.tsx";
 import { UnconfiguredWorkerAsk } from "./unconfigured-worker-ask.tsx";
 
 /** A Run waiting for approval, approved or canceled from Needs you; the entry opens its drawer. */
-const ApprovalAsk = ({ need }: { readonly need: ApprovalNeed }) => {
+const ApprovalAsk = ({
+  need,
+  compact,
+}: {
+  readonly need: ApprovalNeed;
+  readonly compact: boolean;
+}) => {
   const openRun = useOpenRun();
   const action = useRunAction();
   const [confirmingCancel, setConfirmingCancel] = useState(false);
@@ -28,6 +35,7 @@ const ApprovalAsk = ({ need }: { readonly need: ApprovalNeed }) => {
     <>
       <NeedItem
         copy={needCopy(need)}
+        compact={compact}
         open={() => openRun(need.runId)}
         error={action.error?.message ?? null}
         actions={
@@ -74,31 +82,51 @@ const ApprovalAsk = ({ need }: { readonly need: ApprovalNeed }) => {
   );
 };
 
-const NeedEntry = ({ need }: { readonly need: NeedView }) => {
+const NeedEntry = ({ need, compact }: { readonly need: NeedView; readonly compact: boolean }) => {
   const openRun = useOpenRun();
   switch (need._tag) {
     case "ApprovalNeed":
-      return <ApprovalAsk need={need} />;
+      return <ApprovalAsk need={need} compact={compact} />;
     case "CycleBudgetNeed":
-      return <CycleBudgetAsk need={need} />;
+      return <CycleBudgetAsk need={need} compact={compact} />;
     case "UnconfiguredWorkerNeed":
-      return <UnconfiguredWorkerAsk need={need} />;
+      return <UnconfiguredWorkerAsk need={need} compact={compact} />;
     default: {
       const copy = needCopy(need);
       const runId = copy.runId;
-      return <NeedItem copy={copy} open={runId === null ? undefined : () => openRun(runId)} />;
+      return (
+        <NeedItem
+          copy={copy}
+          compact={compact}
+          open={runId === null ? undefined : () => openRun(runId)}
+        />
+      );
     }
   }
 };
 
 /** Everything that waits on the operator across Projects, each entry with its own actions. Renders
- * nothing when nothing does. */
-export const NeedsYou = ({ needs }: { readonly needs: ReadonlyArray<NeedView> }) =>
+ * nothing when nothing does. `compact` lists one line per entry, for screens that read below it. */
+export const NeedsYou = ({
+  needs,
+  compact = false,
+}: {
+  readonly needs: ReadonlyArray<NeedView>;
+  readonly compact?: boolean;
+}) =>
   needs.length === 0 ? null : (
-    <section aria-label="Items needing intervention" className="px-4 pt-4 md:px-5">
-      <ul className="grid max-w-7xl grid-cols-1 items-start gap-2.5 lg:grid-cols-2">
+    <section
+      aria-label="Items needing intervention"
+      className={cn("px-4 md:px-5", compact ? "pt-3" : "pt-4")}
+    >
+      <ul
+        className={cn(
+          "grid max-w-7xl grid-cols-1 items-start",
+          compact ? "gap-1.5" : "gap-2.5 lg:grid-cols-2",
+        )}
+      >
         {needs.map((need) => (
-          <NeedEntry key={need.id} need={need} />
+          <NeedEntry key={need.id} need={need} compact={compact} />
         ))}
       </ul>
     </section>

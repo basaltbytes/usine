@@ -16,18 +16,32 @@ interface ReadingPosition {
   readonly offset: number;
 }
 
-/** Finds the deepest visible transcript surface, so child and result growth preserve context. */
-export const visibleTranscriptRow = (viewport: HTMLDivElement): HTMLElement | undefined => {
-  const top = viewport.getBoundingClientRect().top + viewport.clientTop;
-  const bottom = top + viewport.clientHeight;
+/** How much of a restored row stays in view; anchors are chosen among rows showing at least this much. */
+export const VISIBLE_ROW_EDGE = 24;
+
+const deepestRow = (
+  viewport: HTMLDivElement,
+  from: number,
+  bottom: number,
+): HTMLElement | undefined => {
   let element: HTMLElement | undefined;
   for (const row of viewport.querySelectorAll<HTMLElement>("[data-transcript-id]")) {
     const bounds = row.getBoundingClientRect();
-    if (bounds.height === 0 || bounds.bottom <= top || bounds.top >= bottom) continue;
+    if (bounds.height === 0 || bounds.bottom <= from || bounds.top >= bottom) continue;
     if (element !== undefined && !element.contains(row)) break;
     element = row;
   }
   return element;
+};
+
+/**
+ * Finds the deepest visible transcript surface, so child and result growth preserve context.
+ * A row with only a sliver in view is passed over, since restoring it would scroll it further in.
+ */
+export const visibleTranscriptRow = (viewport: HTMLDivElement): HTMLElement | undefined => {
+  const top = viewport.getBoundingClientRect().top + viewport.clientTop;
+  const bottom = top + viewport.clientHeight;
+  return deepestRow(viewport, top + VISIBLE_ROW_EDGE, bottom) ?? deepestRow(viewport, top, bottom);
 };
 
 /**

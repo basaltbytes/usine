@@ -4,7 +4,7 @@ import {
   type TranscriptEventView,
   type TranscriptPageCursor,
 } from "@usine/orchestrator/operator";
-import { Option } from "effect";
+import { Array as Arr } from "effect";
 
 /** Manual earlier-page cursor writes must pass through the TanStack cache unchanged. */
 export const RUN_DETAIL_CACHE_STRUCTURAL_SHARING = false;
@@ -47,11 +47,10 @@ export const mergeEarlierTranscript = (
     ),
   });
 
-/** The latest allowance readings for one billing pool. */
+/** The latest allowance readings for one billing pool, primary window first; unreported windows are absent. */
 export interface PoolMeter {
   readonly pool: BillingPool;
-  readonly primaryUsedPercent: number | null;
-  readonly secondaryUsedPercent: number | null;
+  readonly windows: ReadonlyArray<RateLimitWindow>;
 }
 
 /** Rate-limit updates are a meter, not activity: keep the latest reading per billing pool. */
@@ -63,12 +62,9 @@ export const poolMeters = (
     if (event.payload._tag !== "SessionEvent") continue;
     const session = event.payload.event;
     if (session._tag !== "PoolRateLimitsUpdated") continue;
-    const percent = (window: Option.Option<RateLimitWindow>) =>
-      Option.match(window, { onNone: () => null, onSome: ({ usedPercent }) => usedPercent });
     latest.set(session.pool, {
       pool: session.pool,
-      primaryUsedPercent: percent(session.rateLimits.primary),
-      secondaryUsedPercent: percent(session.rateLimits.secondary),
+      windows: Arr.getSomes([session.rateLimits.primary, session.rateLimits.secondary]),
     });
   }
   return [...latest.values()];

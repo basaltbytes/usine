@@ -38,7 +38,6 @@ import { assert, describe, it } from "vitest";
 import { laneUnder, orderLanes, ProjectBoard, runsWithoutCard } from "../src/board/board.tsx";
 import { cardLabels, currentRun, itemFailure, runLineSince } from "../src/board/card.tsx";
 import { foldsByDefault } from "../src/board/column.tsx";
-import { RunLinks } from "../src/components/run-links.tsx";
 import { elapsedLabel, failureMessage, needCopy, timestampLabel } from "../src/operator-copy.ts";
 
 const brain = new BrainSpec({
@@ -113,44 +112,6 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
     conflicting: false,
   });
 };
-
-describe("Run links", () => {
-  const run = runOnItem("Succeeded", [attempt(1, null)]);
-
-  it("links the Item and produced PR to GitHub in new tabs", () => {
-    const markup = renderToStaticMarkup(
-      <RunLinks
-        run={
-          new RunView({
-            ...run,
-            pullRequestUrl: "https://github.com/basaltbytes/usine/pull/101",
-          })
-        }
-      />,
-    );
-
-    assert.ok(markup.includes("Item #33"));
-    assert.ok(markup.includes('href="https://github.com/basaltbytes/usine/issues/33"'));
-    assert.ok(markup.includes('href="https://github.com/basaltbytes/usine/pull/101"'));
-    assert.strictEqual((markup.match(/target="_blank"/gu) ?? []).length, 2);
-  });
-
-  it("omits the produced PR link when the Run has none", () => {
-    const markup = renderToStaticMarkup(<RunLinks run={run} />);
-
-    assert.ok(markup.includes('href="https://github.com/basaltbytes/usine/issues/33"'));
-    assert.ok(!markup.includes("/pull/"));
-    assert.strictEqual((markup.match(/target="_blank"/gu) ?? []).length, 1);
-  });
-
-  it("renders nothing for a schedule Run, whose Item is the repository itself", () => {
-    const scheduled = new RunView({
-      ...run,
-      itemKey: ItemKey.make('["github","basaltbytes/usine"]'),
-    });
-    assert.strictEqual(renderToStaticMarkup(<RunLinks run={scheduled} />), "");
-  });
-});
 
 describe("Board Run failure copy", () => {
   it("hides a failed Attempt after its Run recovers", () => {

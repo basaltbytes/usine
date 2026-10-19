@@ -8,7 +8,13 @@ import { overviewQuery } from "../overview.ts";
 import { NeedItem } from "./need-item.tsx";
 
 /** A Worker that `usine.yaml` no longer declares, whose Attempts' leftovers the operator can discard. */
-export const UnconfiguredWorkerAsk = ({ need }: { readonly need: UnconfiguredWorkerNeed }) => {
+export const UnconfiguredWorkerAsk = ({
+  need,
+  compact,
+}: {
+  readonly need: UnconfiguredWorkerNeed;
+  readonly compact: boolean;
+}) => {
   const queries = useQueryClient();
   const [confirming, setConfirming] = useState(false);
   const discard = useMutation({
@@ -18,6 +24,7 @@ export const UnconfiguredWorkerAsk = ({ need }: { readonly need: UnconfiguredWor
   return (
     <NeedItem
       copy={needCopy(need)}
+      compact={compact}
       fullDetail
       error={discard.isError ? discard.error.message : null}
       actions={

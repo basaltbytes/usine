@@ -9,14 +9,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { ErrorAlert } from "@/components/error-alert";
+import { cn } from "@/lib/utils";
 
 /** Edits only the task and roster choice; the server derives persona and brain settings. */
 export const EditAndRetry = ({
   run,
   close,
+  className,
 }: {
   readonly run: RunView;
   readonly close: () => void;
+  readonly className?: string;
 }) => {
   const [task, setTask] = useState(run.task);
   const [agent, setAgent] = useState<string>(run.agent);
@@ -44,7 +47,8 @@ export const EditAndRetry = ({
   });
   return (
     <form
-      className="max-h-[60vh] shrink-0 space-y-3 overflow-y-auto border-b p-4 sm:px-6"
+      aria-label="Edit and retry"
+      className={cn("space-y-3", className)}
       onSubmit={(event) => {
         event.preventDefault();
         if (
