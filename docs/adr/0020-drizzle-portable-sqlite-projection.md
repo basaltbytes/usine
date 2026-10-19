@@ -22,3 +22,7 @@ This revises [ADR 0010](./0010-single-sqlite-runtime-store.md). Usine migrations
 ## Amendment (2026-10-11, #176): no shared `SqlClient`
 
 Effect Cluster is gone (ADR 0003 amendment of the same date), so the engine's database layer provides `RunDatabase` alone and a driver no longer shares its `SqlClient` with cluster storage.
+
+## Amendment (2026-10-19, #336): Drizzle `1.0.0-rc.5-5935859` without a patch
+
+`drizzle-orm` and `drizzle-kit` are pinned to `1.0.0-rc.5-5935859`, the build behind Drizzle's `rc5` npm tag. Its Effect integration calls `Schema.TaggedError`, which `effect` 4.0.0-rc.111 exports, so usine no longer patches Drizzle. A pnpm patch applies only inside the workspace: a plain npm install of `@usine/engine` got the unpatched RC.4 files and could not load `@usine/engine/local-sqlite`. The engine still executes query builders through `.execute()`.
