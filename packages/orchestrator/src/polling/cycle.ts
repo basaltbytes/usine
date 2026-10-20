@@ -4,7 +4,7 @@ import { type RunEngineError, SubmissionResult } from "@usine/engine/engine";
 import type { ExpressionError } from "@usine/expression/expression-engine";
 import type { GitHubAppError } from "@usine/github/github-app";
 import type { GitHubItemNotFoundError } from "@usine/github/polling";
-import { DateTime, Option, Schema } from "effect";
+import { DateTime, Effect, Option, Schema } from "effect";
 import { LabelPreflightFinding } from "../label-reconciler.ts";
 import { configFileErrorLogFields } from "../trigger-submission.ts";
 
@@ -21,8 +21,23 @@ export class RepositoryPollFailure extends Schema.Class<RepositoryPollFailure>(
   message: Schema.String,
 }) {}
 
+/** When one managed repository last completed a poll in this process. */
+export class RepositoryPoll extends Schema.Class<RepositoryPoll>(
+  "@usine/orchestrator/RepositoryPoll",
+)({
+  repository: RepositoryName,
+  completedAt: Schema.DateTimeUtc,
+}) {}
+
 /** Outcomes of one poll over all managed repositories, including isolated failures and backoff. */
 export class PollCycle extends Schema.Class<PollCycle>("@usine/orchestrator/PollCycle")({
+  /**
+   * When each managed repository last completed a poll, this cycle or an
+   * earlier one of the same process; a repository yet to complete one is absent.
+   */
+  repositoryPolls: Schema.Array(RepositoryPoll).pipe(
+    Schema.withConstructorDefault(Effect.succeed([])),
+  ),
   repositories: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   changedItems: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   submissions: Schema.Array(SubmissionResult),

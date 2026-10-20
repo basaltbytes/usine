@@ -21,12 +21,16 @@ A repo declared in the registry — what loops watch and act on. The factory nee
 _Avoid_: target repo
 
 **Project**:
-A managed repo as the operator sees it — the repo plus its board, runs, and factory activity. The home surface lists the factory's projects.
+A managed repo as the operator sees it — the repo plus its board, runs, and factory activity. The sidebar lists the factory's projects.
 _Avoid_: repo (for the operator-facing surface; the registry declares managed repos, the operator works in projects)
 
 **Board**:
 A project's kanban view — its tasks grouped into lanes, with their Run histories on the cards. A task's current Item determines its lane. Dragging a card writes the label swap to that Item on GitHub, so the board doubles as a trigger surface.
 _Avoid_: kanban (the form, not the name), pipeline
+
+**Desk**:
+The operator's first page across all projects: what waits on the operator (Needs you), the attempts running now, each item a loop's trigger matches that is not moving and why, the runs that closed last, and the workers' slots.
+_Avoid_: home, dashboard, overview (the API read every page shares)
 
 **Task**:
 A piece of work as the operator sees it, joining explicitly linked issues and pull requests within one Project and the Runs on those Items. Its current Item is the one with the newest open Run, otherwise its latest open PR, latest settled PR, or originating issue.

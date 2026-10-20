@@ -47,6 +47,7 @@ import {
   type BoardMove,
   BoardView,
   ColdTranscriptRequest,
+  DeskView,
   EarlierTranscriptRequest,
   FactoryOverview,
   FailedTranscriptView,
@@ -54,6 +55,7 @@ import {
   LoopView,
   ProjectView,
   ReadyOverview,
+  RepositoryPollView,
   RunDetailView,
   RunView,
   TranscriptAttemptNotFoundError,
@@ -237,8 +239,16 @@ const task = new TaskView({
     }),
   ],
 });
+const desk = new DeskView({
+  running: [],
+  notMoving: [],
+  lastOutcomes: [],
+  workers: [],
+  polls: [new RepositoryPollView({ repository: repositoryName, polledAt: null })],
+});
 const observation: OperatorObservation["Service"] = {
   overview: () => Effect.succeed(overview),
+  desk: () => Effect.succeed(desk),
   detail: () => Effect.succeed(detail),
   task: () => Effect.succeed(task),
 };
@@ -321,6 +331,14 @@ describe("operator HTTP API", () => {
     assert.strictEqual(body._tag, "NeedsSetup");
     assert.strictEqual(body.projects[0]?.runs[0]?.id, runId);
     assert.strictEqual(body.loops[0]?.paused, true);
+
+    const deskResponse = await app.handler(new Request("http://localhost/api/desk"));
+    assert.strictEqual(deskResponse.status, 200);
+    const deskBody = Schema.decodeUnknownSync(DeskView)(await deskResponse.json());
+    assert.deepStrictEqual(
+      deskBody.polls.map(({ polledAt }) => polledAt),
+      [null],
+    );
 
     const runResponse = await app.handler(new Request(`http://localhost/api/runs/${runId}`));
     assert.strictEqual(runResponse.status, 200);
@@ -484,6 +502,7 @@ describe("operator HTTP API", () => {
       reload: Effect.suspend(() => Effect.fail(reloadFailure)),
       task: (repository, item) => Effect.fail(new BoardItemNotFoundError({ repository, item })),
       configuration: Effect.succeed(configurationView),
+      desk: Effect.succeed(desk),
     });
     const rejectingApp = HttpRouter.toWebHandler(
       apiRoutes.pipe(HttpRouter.provideRequest(rejecting)),
@@ -731,6 +750,7 @@ describe("operator HTTP API", () => {
           ? Effect.succeed(task)
           : Effect.fail(new BoardItemNotFoundError({ repository, item })),
       configuration: Effect.succeed(configurationView),
+      desk: Effect.succeed(desk),
     });
     const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
       Layer.provideMerge(NodeHttpServer.layerTest),

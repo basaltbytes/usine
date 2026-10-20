@@ -44,6 +44,12 @@ export default mergeConfig(
                   attemptId: string,
                 ) => {
                   let resolved = false;
+                  await page.route("**/api/desk", (route) =>
+                    route.fulfill({
+                      contentType: "application/json",
+                      body: '{"running":[],"notMoving":[],"lastOutcomes":[],"workers":[],"polls":[]}',
+                    }),
+                  );
                   await page.route("**/api/overview", (route) =>
                     route.fulfill({
                       contentType: "application/json",

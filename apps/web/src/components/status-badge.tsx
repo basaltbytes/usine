@@ -61,11 +61,9 @@ export const StatusBadge = ({
   </span>
 );
 
-export const NeedsYouBadge = ({ count }: { readonly count?: number }) => (
-  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-needs-you tabular-nums">
+export const NeedsYouBadge = () => (
+  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-needs-you">
     <StateMark state="needs-you" />
-    {count === undefined || count === 0
-      ? "Needs you"
-      : `${count} need${count === 1 ? "s" : ""} you`}
+    Needs you
   </span>
 );

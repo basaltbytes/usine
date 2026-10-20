@@ -12,7 +12,7 @@ const ProjectNotFound = () => (
     inPanel
   >
     <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
-      Back to projects
+      Back to the desk
     </Button>
   </BootScreen>
 );

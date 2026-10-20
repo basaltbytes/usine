@@ -82,7 +82,14 @@ const ApprovalAsk = ({
   );
 };
 
-const NeedEntry = ({ need, compact }: { readonly need: NeedView; readonly compact: boolean }) => {
+/** One Needs you entry with the actions that apply to it. */
+export const NeedEntry = ({
+  need,
+  compact,
+}: {
+  readonly need: NeedView;
+  readonly compact: boolean;
+}) => {
   const openRun = useOpenRun();
   switch (need._tag) {
     case "ApprovalNeed":

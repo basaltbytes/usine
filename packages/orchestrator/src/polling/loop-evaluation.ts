@@ -7,7 +7,7 @@ import { DedupKey } from "@usine/core/event";
 import { CommitSha, RepositoryRevision, canonicalRepositoryName } from "@usine/core/repository";
 import { RunEngine, type SubmissionResult } from "@usine/engine/engine";
 import { gitHubItemKey, type ObservedItem } from "./repository-sync.ts";
-import { ExpressionEngine } from "@usine/expression/expression-engine";
+import { ExpressionEngine, type ExpressionError } from "@usine/expression/expression-engine";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
 import type { ChangedItem } from "@usine/github/polling";
 import { DateTime, Effect, Option, Result, Schema } from "effect";
@@ -44,6 +44,23 @@ const eventKey = (
   );
 
 /**
+ * Whether `loop`'s trigger `if:` holds for one Item of `repository`, given the
+ * Item's payload slice. The poll and `LoopMatches` decide a match this way.
+ */
+export const evaluateTrigger = (
+  loop: LoopFile,
+  repository: ManagedRepo,
+  payload: Schema.JsonObject,
+): Effect.Effect<boolean, ExpressionError, ExpressionEngine> =>
+  Effect.gen(function* () {
+    const expressions = yield* ExpressionEngine;
+    return yield* expressions.evaluateBoolean(loop.trigger.if, environmentFor(loop.trigger.on), {
+      repo: repositoryContext(repository),
+      item: payload,
+    });
+  });
+
+/**
  * Evaluates an already projected Item against its repository's active Loops,
  * renders matching prompts, and submits or revokes Runs. A Loop whose `if:` or
  * prompt fails comes back as a failure while the other Loops still run; the
@@ -61,7 +78,6 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
     item: item.number,
   });
   const config = yield* ConfigParser;
-  const expressions = yield* ExpressionEngine;
   const runs = yield* RunEngine;
   const loops = resolved.filter(({ loop }) => loop.trigger.on === item.source);
   const payload = item.payload;
@@ -95,9 +111,7 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
   let revokedRuns = 0;
   for (const { agent, loop, parentModel } of loops) {
     yield* Effect.annotateCurrentSpan({ loop: loop.name, agent: agent.name });
-    const matches = yield* Effect.result(
-      expressions.evaluateBoolean(loop.trigger.if, environmentFor(loop.trigger.on), context),
-    );
+    const matches = yield* Effect.result(evaluateTrigger(loop, repository, payload));
     // A failed `if:` says nothing about whether the Item matches, so its queued
     // Runs stay as they are.
     if (Result.isFailure(matches)) {

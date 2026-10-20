@@ -18,13 +18,14 @@ import { cn } from "@/lib/utils";
 import { ConfigurationMenu } from "../configuration/layout.tsx";
 import { projectParams } from "../overview.ts";
 
-export type OperatorView = "projects" | "configuration";
+export type OperatorView = "desk" | "projects" | "configuration";
 
 export const AppSidebar = ({
   projects,
   view,
   project,
   needsYou,
+  needsYouTotal,
   live,
 }: {
   readonly projects: ReadonlyArray<ProjectView>;
@@ -32,6 +33,8 @@ export const AppSidebar = ({
   readonly project: RepositoryName | undefined;
   /** How many Needs you entries concern each Project. */
   readonly needsYou: ReadonlyMap<RepositoryName, number>;
+  /** How many Needs you entries there are in all, including those about no Project. */
+  readonly needsYouTotal: number;
   readonly live: boolean;
 }) => (
   <Sidebar variant="inset">
@@ -49,12 +52,28 @@ export const AppSidebar = ({
     </SidebarHeader>
     <SidebarContent>
       <SidebarGroup>
-        <SidebarGroupLabel
-          render={<Link to="/" />}
-          className={cn(view === "projects" && project === undefined && "text-foreground")}
-        >
-          Projects
-        </SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                isActive={view === "desk"}
+                className={cn(needsYouTotal > 0 && "pr-8")}
+                render={<Link to="/" />}
+              >
+                <span>Desk</span>
+              </SidebarMenuButton>
+              {needsYouTotal > 0 && (
+                <SidebarMenuBadge className="text-needs-you peer-data-active/menu-button:text-needs-you">
+                  {needsYouTotal}
+                  <span className="sr-only"> need you</span>
+                </SidebarMenuBadge>
+              )}
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+      <SidebarGroup className="pt-3">
+        <SidebarGroupLabel>Projects</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
             {projects.map((entry) => {

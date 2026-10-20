@@ -91,6 +91,7 @@ import {
   type RunGitHubChangesView,
 } from "./github-changes.ts";
 import { TaskReader, type TaskReadError, type TaskView } from "./task.ts";
+import { type DeskView, OperatorDesk } from "./desk.ts";
 
 export type BoardMoveError =
   | BoardItemNotFoundError
@@ -434,8 +435,10 @@ const makeOperatorObservation = Effect.gen(function* () {
   });
 
   const tasks = yield* TaskReader;
+  // The desk: Running now, Not moving, Last outcomes, Workers, and poll times.
+  const { desk } = yield* OperatorDesk;
 
-  return { detail, overview, task: tasks.read } as const;
+  return { detail, overview, task: tasks.read, desk } as const;
 });
 
 /** The read-only operator surface. It needs no trigger execution to build. */
@@ -462,10 +465,18 @@ export class OperatorObservation extends Context.Service<
       repository: RepositoryName,
       item: ItemNumber,
     ) => Effect.Effect<TaskView, TaskReadError>;
+    /**
+     * Builds the supplied instance's desk: the Attempts in flight with their
+     * last activity and open connectivity warnings, each Item a Loop's trigger
+     * matches without an Attempt running on it and why, the Runs that closed
+     * last, the Workers' slots and last preflight, and when each repository
+     * was last polled.
+     */
+    readonly desk: (instance: LoadedInstance) => Effect.Effect<DeskView, OperatorObservationError>;
   }
 >()("@usine/orchestrator/OperatorObservation") {
   static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation).pipe(
-    Layer.provide(TaskReader.layer),
+    Layer.provide(Layer.merge(TaskReader.layer, OperatorDesk.layer)),
   );
 }
 
@@ -940,6 +951,26 @@ export {
   ConfigurationView,
   OperatorConfiguration,
 } from "./configuration.ts";
+export {
+  WorkerSilentView,
+  ProviderRetryingView,
+  ConnectivityWarningView,
+  RunningAttemptView,
+  HeldForOperatorView,
+  ClosedUnchangedView,
+  RunFailedView,
+  LoopPausedView,
+  CycleBudgetUsedUpView,
+  AwaitingApprovalView,
+  QueuedForWorkerView,
+  AwaitingPollView,
+  StallReasonView,
+  StalledItemView,
+  ClosedRunView,
+  WorkerView,
+  RepositoryPollView,
+  DeskView,
+} from "./desk.ts";
 export {
   FailedTranscriptView,
   TranscriptPayload,

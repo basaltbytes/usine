@@ -284,7 +284,8 @@ const fileStem = (file: InstancePath): string => {
   return name === "" ? file : name;
 };
 
-const checkView = (check: PreflightCheck): PreflightCheckView =>
+/** One preflight check as the operator API carries it. */
+export const checkView = (check: PreflightCheck): PreflightCheckView =>
   Match.valueTags(check, {
     Passed: ({ checkedAt }) => new PassedCheckView({ checkedAt: DateTime.formatIso(checkedAt) }),
     Failed: ({ checkedAt, capability, message }) =>

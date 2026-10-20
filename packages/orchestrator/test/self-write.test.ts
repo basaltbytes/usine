@@ -52,6 +52,7 @@ import { Operator } from "../src/operator/operator.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
+import { WorkerStatus } from "../src/worker-status.ts";
 import { fixedInstance } from "./support/current-instance.ts";
 import { alwaysHoldsLayer, inertLabelReconcilerLayer } from "./support/polling.ts";
 
@@ -210,6 +211,7 @@ describe("Board self-writes", () => {
             engine,
             writer,
             MarcbachmannCelLayer,
+            WorkerStatus.idle,
             ConfigParser.layer.pipe(Layer.provide(MarcbachmannCelLayer)),
             inertLabelReconcilerLayer,
             Layer.succeed(GitHubPolling, github),

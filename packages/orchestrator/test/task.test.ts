@@ -31,6 +31,8 @@ import { OperatorObservation } from "../src/operator/operator.ts";
 import { PollingTriggers } from "../src/polling-triggers.ts";
 import { gitHubItemKey } from "../src/polling/repository-sync.ts";
 import { ScheduleTriggers } from "../src/schedule-triggers.ts";
+import { WorkerStatus } from "../src/worker-status.ts";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
@@ -350,6 +352,7 @@ const observation = (requested: Ref.Ref<ReadonlyArray<string>>) => {
     revision: () => Effect.succeed(Option.none()),
     transcript: () => Effect.die("unused"),
     attemptsByWorker: () => Effect.succeed([]),
+    sightings: () => Effect.die("A Task reads no Loop sightings"),
   });
   const controls = Layer.succeed(LoopControl)({
     isPaused: () => Effect.succeed(false),
@@ -374,7 +377,17 @@ const observation = (requested: Ref.Ref<ReadonlyArray<string>>) => {
   });
   return OperatorObservation.layer.pipe(
     Layer.provide(
-      Layer.mergeAll(noCycleBudgets, reader, controls, itemReader, labels, polling, schedules),
+      Layer.mergeAll(
+        noCycleBudgets,
+        reader,
+        controls,
+        itemReader,
+        labels,
+        polling,
+        schedules,
+        MarcbachmannCelLayer,
+        WorkerStatus.idle,
+      ),
     ),
   );
 };

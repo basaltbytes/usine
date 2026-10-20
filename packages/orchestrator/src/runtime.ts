@@ -27,8 +27,8 @@ import { WorkerStatus } from "./worker-status.ts";
 
 /**
  * A read-only operator composition for when trigger credentials are not
- * available yet: the observation and the configuration read, with no Worker
- * running Attempts.
+ * available yet: the observation, with the desk, and the configuration read,
+ * with no Worker running Attempts.
  */
 export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =>
   Layer.mergeAll(OperatorObservation.layer, OperatorConfiguration.layer).pipe(
@@ -36,6 +36,7 @@ export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =
       Layer.mergeAll(
         localObservationLayer(instanceDirectory),
         idleTriggersLayer,
+        MarcbachmannCelLayer,
         WorkerStatus.idle,
       ),
     ),

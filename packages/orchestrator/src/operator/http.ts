@@ -21,6 +21,7 @@ import { RunDetailView, EditAndRetry, SessionIntervention } from "./run.ts";
 import { RunGitHubChangesView } from "./github-changes.ts";
 import { TaskView } from "./task.ts";
 import { ConfigurationView } from "./configuration.ts";
+import { DeskView } from "./desk.ts";
 
 const errorStatuses = {
   SchemaError: 400,
@@ -252,5 +253,7 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
       }),
     )
     .add(HttpApiEndpoint.get("configuration", "/api/configuration", { success: ConfigurationView }))
+    // The desk at `/`: Running now, Not moving, Last outcomes, Workers, and poll times.
+    .add(HttpApiEndpoint.get("desk", "/api/desk", { success: DeskView }))
     .middleware(OperatorHttpPolicy),
 );

@@ -1,0 +1,579 @@
+import type { LoadedInstance } from "@usine/config/instance";
+import { AgentName } from "@usine/core/agent";
+import { ProviderRetries } from "@usine/core/agent/session";
+import { CycleBudgetAsk } from "@usine/core/cycle-budget";
+import type { ItemKey } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
+import { RepositoryName, canonicalRepositoryName } from "@usine/core/repository";
+import * as RunState from "@usine/core/run/state";
+import { WorkerName } from "@usine/core/worker";
+import { CycleBudgets } from "@usine/engine/cycle-budget";
+import { ItemProjectionReader } from "@usine/engine/item-projection";
+import { LoopControl } from "@usine/engine/loop-control";
+import type { RunStoreError } from "@usine/engine/engine";
+import { type LoopSighting, RunReader, type RunSummary } from "@usine/engine/run-reader";
+import { type TranscriptEntry, TranscriptPageQuery } from "@usine/engine/transcript";
+import { Context, DateTime, Effect, Layer, Match, Option, Order, Result, Schema } from "effect";
+import { projectedItem } from "../board/items.ts";
+import { LoopMatches } from "../loop-matches.ts";
+import { PollingTriggers } from "../polling-triggers.ts";
+import { type PreflightCheck, type WorkerPreflight, WorkerStatus } from "../worker-status.ts";
+import { AttemptView } from "./attempt.ts";
+import { BoardItemLink } from "./board.ts";
+import { checkView, PreflightCheckView, WorkerSlotsView } from "./configuration.ts";
+import { runView } from "./projection.ts";
+import { RunView } from "./run.ts";
+
+/** How many newest transcript rows of an Attempt in flight the desk reads for its activity and warnings. */
+const RECENT_TRANSCRIPT_ROWS = 200;
+/** How many closed Runs Last outcomes lists. */
+const LAST_OUTCOMES = 10;
+/** How many newest settled Runs the desk reads to find the ones that closed last. */
+const SETTLED_RUNS_READ = 100;
+/** How many newest Items of each repository the desk matches against the Loops, as many as a Board shows. */
+const DESK_ITEMS = 500;
+
+/** The Attempt's Worker has not answered the executor's probe since `lastAnsweredAt`. */
+export class WorkerSilentView extends Schema.TaggedClass<WorkerSilentView>(
+  "@usine/orchestrator/WorkerSilentView",
+)("WorkerSilent", { worker: WorkerName, lastAnsweredAt: Schema.String }) {}
+
+/**
+ * A session's harness keeps retrying its model provider: `retries` so far in
+ * the turn, the harness's latest report, and when the first unanswered retry
+ * was recorded.
+ */
+export class ProviderRetryingView extends Schema.TaggedClass<ProviderRetryingView>(
+  "@usine/orchestrator/ProviderRetryingView",
+)("ProviderRetrying", {
+  agent: AgentName,
+  message: Schema.NonEmptyString,
+  retries: ProviderRetries,
+  since: Schema.String,
+}) {}
+
+/** A connectivity problem an Attempt's transcript leaves open; a signal, never a stop (ADR 0013). */
+export const ConnectivityWarningView = Schema.Union([WorkerSilentView, ProviderRetryingView]);
+export type ConnectivityWarningView = typeof ConnectivityWarningView.Type;
+
+/** One Attempt in flight, with its Run, its Item, and what its newest transcript rows show. */
+export class RunningAttemptView extends Schema.Class<RunningAttemptView>(
+  "@usine/orchestrator/RunningAttemptView",
+)({
+  run: RunView,
+  /** The Run's Attempt in flight. */
+  attempt: AttemptView,
+  /** The Run's Item as its Board card links it; null for a schedule Run or an Item the desk did not read. */
+  item: Schema.NullOr(BoardItemLink),
+  /**
+   * When the Attempt's sessions last showed work; Worker notices, pool meters, and
+   * provider retries do not count. Null when its newest rows show none.
+   */
+  lastActivityAt: Schema.NullOr(Schema.String),
+  /** The connectivity problems still open after the Attempt's newest rows. */
+  warnings: Schema.Array(ConnectivityWarningView),
+}) {}
+
+/** An Agent's question or blocker holds the Loop on the Item until the operator answers or resolves `run`, or the Item changes (ADR 0017). */
+export class HeldForOperatorView extends Schema.TaggedClass<HeldForOperatorView>(
+  "@usine/orchestrator/HeldForOperatorView",
+)("HeldForOperator", { run: RunView }) {}
+
+/**
+ * `run` succeeded or was canceled on the Item's current state, which has not
+ * changed since, so the Loop's trigger opens no other Run for it (ADR 0007).
+ * Running `run` again opens one.
+ */
+export class ClosedUnchangedView extends Schema.TaggedClass<ClosedUnchangedView>(
+  "@usine/orchestrator/ClosedUnchangedView",
+)("ClosedUnchanged", { run: RunView }) {}
+
+/** `run` failed on the Item's current state and waits for the operator to retry it. */
+export class RunFailedView extends Schema.TaggedClass<RunFailedView>(
+  "@usine/orchestrator/RunFailedView",
+)("RunFailed", { run: RunView }) {}
+
+/** The Loop is paused, so its trigger opens no Run. */
+export class LoopPausedView extends Schema.TaggedClass<LoopPausedView>(
+  "@usine/orchestrator/LoopPausedView",
+)("LoopPaused", {}) {}
+
+/** The Item used up its cycle budget; `ask` waits for the operator to reset it. */
+export class CycleBudgetUsedUpView extends Schema.TaggedClass<CycleBudgetUsedUpView>(
+  "@usine/orchestrator/CycleBudgetUsedUpView",
+)("CycleBudgetUsedUp", { ask: CycleBudgetAsk }) {}
+
+/** `run` waits for the operator's approval. */
+export class AwaitingApprovalView extends Schema.TaggedClass<AwaitingApprovalView>(
+  "@usine/orchestrator/AwaitingApprovalView",
+)("AwaitingApproval", { run: RunView }) {}
+
+/** `run` waits for a free Worker slot. */
+export class QueuedForWorkerView extends Schema.TaggedClass<QueuedForWorkerView>(
+  "@usine/orchestrator/QueuedForWorkerView",
+)("QueuedForWorker", { run: RunView }) {}
+
+/**
+ * No Event of the Loop owns a Run for the Item's current state yet: the Loop
+ * has not seen that state, or its Event waits. The next poll acts on it.
+ */
+export class AwaitingPollView extends Schema.TaggedClass<AwaitingPollView>(
+  "@usine/orchestrator/AwaitingPollView",
+)("AwaitingPoll", {}) {}
+
+/** Why an Item a Loop's trigger matches has no Attempt running on it. */
+export const StallReasonView = Schema.Union([
+  AwaitingApprovalView,
+  HeldForOperatorView,
+  CycleBudgetUsedUpView,
+  RunFailedView,
+  ClosedUnchangedView,
+  LoopPausedView,
+  QueuedForWorkerView,
+  AwaitingPollView,
+]);
+export type StallReasonView = typeof StallReasonView.Type;
+
+/** An Item a Loop's trigger matches now with no Attempt running on it, and why. */
+export class StalledItemView extends Schema.Class<StalledItemView>(
+  "@usine/orchestrator/StalledItemView",
+)({
+  repository: RepositoryName,
+  loop: LoopName,
+  item: BoardItemLink,
+  reason: StallReasonView,
+}) {}
+
+/** A Run that closed, with its Item and when it closed. */
+export class ClosedRunView extends Schema.Class<ClosedRunView>("@usine/orchestrator/ClosedRunView")(
+  {
+    run: RunView,
+    /** The Run's Item as its Board card links it; null for a schedule Run or an Item the desk did not read. */
+    item: Schema.NullOr(BoardItemLink),
+    /** When its last Attempt ended, or when it opened for a Run canceled before any Attempt. */
+    closedAt: Schema.String,
+  },
+) {}
+
+/** One Worker on the desk's Workers line: its slots and where its last preflight stands. */
+export class WorkerView extends Schema.Class<WorkerView>("@usine/orchestrator/WorkerView")({
+  name: WorkerName,
+  /**
+   * Its slots as the scheduler holds them; while the scheduler runs no Attempt,
+   * as in setup mode, its declared `max_concurrent_attempts` with none leased.
+   */
+  slots: WorkerSlotsView,
+  /**
+   * The newest failed check among its own prerequisites and its harnesses
+   * when one of them stands failed, else the newest passed check; null before
+   * any preflight.
+   */
+  preflight: Schema.NullOr(PreflightCheckView),
+}) {}
+
+/** When the factory last finished polling a managed repository; null before the first poll ends. */
+export class RepositoryPollView extends Schema.Class<RepositoryPollView>(
+  "@usine/orchestrator/RepositoryPollView",
+)({
+  repository: RepositoryName,
+  polledAt: Schema.NullOr(Schema.String),
+}) {}
+
+/**
+ * The operator's desk: the Attempts in flight, the matched Items that are not
+ * moving and why, the Runs that closed last, the Workers' slots, and when each
+ * repository was last polled. Needs you comes from the overview.
+ */
+export class DeskView extends Schema.Class<DeskView>("@usine/orchestrator/DeskView")({
+  running: Schema.Array(RunningAttemptView),
+  notMoving: Schema.Array(StalledItemView),
+  lastOutcomes: Schema.Array(ClosedRunView),
+  workers: Schema.Array(WorkerView),
+  polls: Schema.Array(RepositoryPollView),
+}) {}
+
+/** What the desk knows about one Loop on one matched Item. */
+interface StallFacts {
+  /** The Loop's Runs on the Item, newest first. */
+  readonly runs: ReadonlyArray<RunView>;
+  readonly sighting: Option.Option<LoopSighting>;
+  readonly paused: boolean;
+  /** The Item's open cycle-budget Ask. */
+  readonly ask: Option.Option<CycleBudgetAsk>;
+}
+
+/**
+ * Why a Loop's matched Item is not moving, in the order the engine applies
+ * its rules: an open Run first, then the Loop's pause, an operator hold, the
+ * cycle budget, and the closed Run that owns the Item's current state. None
+ * while an Attempt runs on the Item.
+ */
+const stallReason = ({
+  runs,
+  sighting,
+  paused,
+  ask,
+}: StallFacts): Option.Option<StallReasonView> => {
+  const open = runs.find(({ state }) => RunState.OPEN_STATE_TAGS.some((tag) => tag === state));
+  if (open !== undefined) {
+    switch (open.state) {
+      case "Running":
+        return Option.none();
+      case "Waiting":
+        return Option.some(new AwaitingApprovalView({ run: open }));
+      default:
+        return Option.some(new QueuedForWorkerView({ run: open }));
+    }
+  }
+  if (paused) return Option.some(new LoopPausedView());
+  const runOf = (runId: RunView["id"]) => Option.fromNullishOr(runs.find(({ id }) => id === runId));
+  const holding = Option.flatMap(
+    Option.flatMap(sighting, ({ heldBy }) => heldBy),
+    runOf,
+  );
+  if (Option.isSome(holding)) return Option.some(new HeldForOperatorView({ run: holding.value }));
+  if (Option.isSome(ask)) return Option.some(new CycleBudgetUsedUpView({ ask: ask.value }));
+  const owner = Option.flatMap(
+    Option.flatMap(sighting, ({ run }) => run),
+    runOf,
+  );
+  if (Option.isSome(owner)) {
+    return Option.some(
+      owner.value.state === "Failed"
+        ? new RunFailedView({ run: owner.value })
+        : new ClosedUnchangedView({ run: owner.value }),
+    );
+  }
+  return Option.some(new AwaitingPollView());
+};
+
+/** Not moving lists what waits on the operator first and what waits on the factory last. */
+const REASON_ORDER: ReadonlyArray<StallReasonView["_tag"]> = [
+  "AwaitingApproval",
+  "HeldForOperator",
+  "CycleBudgetUsedUp",
+  "RunFailed",
+  "ClosedUnchanged",
+  "LoopPaused",
+  "QueuedForWorker",
+  "AwaitingPoll",
+];
+
+const stalledOrder = Order.combineAll([
+  Order.mapInput(Order.Number, ({ reason }: StalledItemView) => REASON_ORDER.indexOf(reason._tag)),
+  Order.mapInput(Order.String, ({ repository }: StalledItemView) => repository),
+  Order.mapInput(Order.flip(Order.Number), ({ item }: StalledItemView) => item.number),
+  Order.mapInput(Order.String, ({ loop }: StalledItemView) => loop),
+]);
+
+const isActivity = ({ direction, envelope }: TranscriptEntry): boolean => {
+  const payload = envelope.payload;
+  return (
+    direction === "outbound" &&
+    payload._tag !== "WorkerUnresponsive" &&
+    payload._tag !== "WorkerResponsive" &&
+    !(
+      payload._tag === "SessionEvent" &&
+      (payload.event._tag === "PoolRateLimitsUpdated" || payload.event._tag === "ProviderRetrying")
+    )
+  );
+};
+
+/**
+ * What one Attempt's newest transcript rows, in append order, show: when its
+ * sessions last worked, and the connectivity problems still open: the Worker
+ * until it answers again, and each session's provider retries until it reaches
+ * its provider again, goes idle, or finishes.
+ */
+const attemptActivity = (
+  entries: ReadonlyArray<TranscriptEntry>,
+): Pick<RunningAttemptView, "lastActivityAt" | "warnings"> => {
+  let worker: WorkerSilentView | null = null;
+  const providers = new Map<string, ProviderRetryingView>();
+  let lastActivity: TranscriptEntry | null = null;
+  for (const entry of entries) {
+    if (isActivity(entry)) lastActivity = entry;
+    const payload = entry.envelope.payload;
+    if (payload._tag === "WorkerUnresponsive") {
+      worker = new WorkerSilentView({
+        worker: payload.worker,
+        lastAnsweredAt: DateTime.formatIso(payload.lastAnsweredAt),
+      });
+    } else if (payload._tag === "WorkerResponsive") {
+      worker = null;
+    } else if (payload._tag === "SessionEvent") {
+      const event = payload.event;
+      if (event._tag === "ProviderRetrying") {
+        providers.set(
+          event.session.id,
+          new ProviderRetryingView({
+            agent: event.session.agent,
+            message: event.message,
+            retries: event.retries,
+            since: providers.get(event.session.id)?.since ?? DateTime.formatIso(entry.receivedAt),
+          }),
+        );
+      } else if (
+        event._tag === "ProviderRecovered" ||
+        event._tag === "SessionIdle" ||
+        event._tag === "SessionFinished"
+      ) {
+        providers.delete(event.session.id);
+      }
+    }
+  }
+  return {
+    lastActivityAt: lastActivity === null ? null : DateTime.formatIso(lastActivity.receivedAt),
+    warnings: [...(worker === null ? [] : [worker]), ...providers.values()],
+  };
+};
+
+const checkedAt = (check: PreflightCheck): number => DateTime.toEpochMillis(check.checkedAt);
+
+/** Where a Worker's last preflight stands, as `WorkerView.preflight` describes it. */
+const standingCheck = (preflight: WorkerPreflight): Option.Option<PreflightCheck> => {
+  const checks = [
+    ...Option.toArray(preflight.prerequisites),
+    ...preflight.harnesses.map(({ check }) => check),
+  ];
+  const failed = checks.filter(({ _tag }) => _tag === "Failed");
+  return Option.fromNullishOr(
+    (failed.length > 0 ? failed : checks).reduce<PreflightCheck | undefined>(
+      (newest, check) =>
+        newest === undefined || checkedAt(check) > checkedAt(newest) ? check : newest,
+      undefined,
+    ),
+  );
+};
+
+/** When a closed Run ended: its last Attempt's end, else its last Attempt's start, else when it opened. */
+const closedAt = (run: RunView): string => {
+  const last = run.attempts.at(-1);
+  return last?.endedAt ?? last?.startedAt ?? run.openedAt;
+};
+
+/** A Run the engine canceled before any Attempt, because a newer Event or the Item's change replaced it. */
+const replacedBeforeStart = ({ run, attempts }: RunSummary): boolean =>
+  attempts.length === 0 &&
+  run.state._tag === "Canceled" &&
+  run.state.reason._tag !== "OperatorCanceled";
+
+const makeDesk = Effect.gen(function* () {
+  const reader = yield* RunReader;
+  const controls = yield* LoopControl;
+  const budgets = yield* CycleBudgets;
+  const itemReader = yield* ItemProjectionReader;
+  const polling = yield* PollingTriggers;
+  const loopMatches = yield* LoopMatches;
+  const workerStatus = yield* WorkerStatus;
+
+  const recentActivity = Effect.fn("Operator.desk.recentActivity")(function* (
+    attempt: AttemptView,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId: attempt.id });
+    const entries = yield* reader.transcript(
+      new TranscriptPageQuery({
+        attemptId: attempt.id,
+        before: Option.none(),
+        limit: RECENT_TRANSCRIPT_ROWS,
+      }),
+    );
+    return attemptActivity(entries);
+  });
+
+  const desk = Effect.fn("Operator.desk")(function* (instance: LoadedInstance) {
+    const [summaries, states, asks, slots, preflights, latestPoll] = yield* Effect.all(
+      [
+        reader.list({ closedLimit: SETTLED_RUNS_READ }),
+        controls.states,
+        budgets.asks(),
+        workerStatus.slots,
+        workerStatus.preflights,
+        polling.latest,
+      ] as const,
+      { concurrency: "unbounded" },
+    );
+    const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
+    const repositories = yield* Effect.forEach(
+      instance.config.repos,
+      (repository) =>
+        Effect.gen(function* () {
+          const items = yield* itemReader.list(repository.name, { limit: DESK_ITEMS });
+          const matches = yield* loopMatches.matching(instance, repository, items);
+          return { repository, items, matches };
+        }),
+      { concurrency: 4 },
+    );
+
+    const links = new Map<ItemKey, BoardItemLink>();
+    for (const { items } of repositories) {
+      for (const stored of items) {
+        const projected = yield* Effect.result(projectedItem(stored));
+        // The Board reports an Item it cannot project in Needs you.
+        if (Result.isFailure(projected)) continue;
+        const { itemKey, kind, number, title, url } = projected.success;
+        links.set(itemKey, new BoardItemLink({ itemKey, kind, number, title, url }));
+      }
+    }
+
+    const matches = repositories.flatMap(({ matches: repositoryMatches }) => repositoryMatches);
+    const matchedKeys = [...new Set(matches.map(({ item }) => item.itemKey))];
+    const [history, sightings] = yield* Effect.all(
+      [reader.forItems(matchedKeys), reader.sightings(matchedKeys)] as const,
+      { concurrency: "unbounded" },
+    );
+    const runs = new Map(
+      [...summaries, ...history].map((summary) => [summary.run.id, runView(summary, paused)]),
+    );
+    const newestFirst = [...runs.values()].sort(
+      (left, right) =>
+        right.openedAt.localeCompare(left.openedAt) || right.id.localeCompare(left.id),
+    );
+
+    const notMoving: Array<StalledItemView> = [];
+    for (const { loop, item } of matches) {
+      const link = links.get(item.itemKey);
+      if (link === undefined) continue;
+      const reason = stallReason({
+        runs: newestFirst.filter((run) => run.loop === loop.name && run.itemKey === item.itemKey),
+        sighting: Option.fromNullishOr(
+          sightings.find(
+            (sighting) => sighting.loop === loop.name && sighting.itemKey === item.itemKey,
+          ),
+        ),
+        paused: paused.has(loop.name),
+        ask: Option.fromNullishOr(asks.find(({ itemKey }) => itemKey === item.itemKey)),
+      });
+      if (Option.isNone(reason)) continue;
+      yield* Effect.logDebug("Matched Item is not moving", {
+        repository: item.repository,
+        loop: loop.name,
+        item: item.number,
+        reason: reason.value._tag,
+        ...Match.valueTags(reason.value, {
+          AwaitingApproval: ({ run }) => ({ runId: run.id }),
+          HeldForOperator: ({ run }) => ({ runId: run.id }),
+          CycleBudgetUsedUp: ({ ask }) => ({ askId: ask.id }),
+          RunFailed: ({ run }) => ({ runId: run.id }),
+          ClosedUnchanged: ({ run }) => ({ runId: run.id, state: run.state }),
+          LoopPaused: () => ({}),
+          QueuedForWorker: ({ run }) => ({ runId: run.id }),
+          AwaitingPoll: () => ({}),
+        }),
+      });
+      notMoving.push(
+        new StalledItemView({
+          repository: item.repository,
+          loop: loop.name,
+          item: link,
+          reason: reason.value,
+        }),
+      );
+    }
+
+    const running = yield* Effect.forEach(
+      newestFirst.flatMap((run) => {
+        const attempt = run.attempts.at(-1);
+        return run.state === "Running" && attempt !== undefined && attempt.outcome === null
+          ? [{ run, attempt }]
+          : [];
+      }),
+      ({ run, attempt }) =>
+        Effect.map(
+          recentActivity(attempt),
+          (activity) =>
+            new RunningAttemptView({
+              run,
+              attempt,
+              item: links.get(run.itemKey) ?? null,
+              ...activity,
+            }),
+        ),
+      { concurrency: 4 },
+    );
+
+    const replaced = new Set(
+      [...summaries, ...history].filter(replacedBeforeStart).map((summary) => summary.run.id),
+    );
+    const lastOutcomes = newestFirst
+      .filter(
+        (run) =>
+          (run.state === "Succeeded" || run.state === "Failed" || run.state === "Canceled") &&
+          !replaced.has(run.id),
+      )
+      .map(
+        (run) =>
+          new ClosedRunView({ run, item: links.get(run.itemKey) ?? null, closedAt: closedAt(run) }),
+      )
+      .sort((left, right) => right.closedAt.localeCompare(left.closedAt))
+      .slice(0, LAST_OUTCOMES);
+
+    const slotsByWorker = new Map(slots.map((slot) => [slot.worker, slot]));
+    const preflightByWorker = new Map(preflights.map((preflight) => [preflight.worker, preflight]));
+    const declared = new Set(instance.config.workers.map(({ name }) => name));
+    const workers = [
+      ...instance.config.workers.map(({ name }) => name),
+      ...slots.map(({ worker }) => worker).filter((worker) => !declared.has(worker)),
+    ].map((name) => {
+      const slot = slotsByWorker.get(name);
+      const preflight = preflightByWorker.get(name);
+      return new WorkerView({
+        name,
+        slots: new WorkerSlotsView({
+          capacity:
+            slot?.capacity ??
+            instance.config.workers.find((worker) => worker.name === name)?.maxConcurrentAttempts ??
+            0,
+          leased: slot?.leased ?? 0,
+        }),
+        preflight: Option.getOrNull(
+          Option.map(Option.flatMap(Option.fromNullishOr(preflight), standingCheck), checkView),
+        ),
+      });
+    });
+
+    const completed = Option.match(latestPoll, {
+      onNone: () => [],
+      onSome: ({ repositoryPolls }) => repositoryPolls,
+    });
+    const polls = instance.config.repos.map(({ name }) => {
+      const poll = completed.find(
+        ({ repository }) => canonicalRepositoryName(repository) === canonicalRepositoryName(name),
+      );
+      return new RepositoryPollView({
+        repository: name,
+        polledAt: poll === undefined ? null : DateTime.formatIso(poll.completedAt),
+      });
+    });
+
+    yield* Effect.logDebug("Built the operator desk", {
+      running: running.length,
+      matches: matches.length,
+      notMoving: notMoving.length,
+      lastOutcomes: lastOutcomes.length,
+      workers: workers.length,
+    });
+    return new DeskView({
+      running,
+      notMoving: [...notMoving].sort(stalledOrder),
+      lastOutcomes,
+      workers,
+      polls,
+    });
+  });
+
+  return { desk };
+});
+
+/** Builds the operator's desk from the engine's stores, the Loop matches, and the scheduler's slots. */
+export class OperatorDesk extends Context.Service<
+  OperatorDesk,
+  {
+    /** The desk of the supplied instance; `OperatorObservation.desk` documents what it holds. */
+    readonly desk: (instance: LoadedInstance) => Effect.Effect<DeskView, RunStoreError>;
+  }
+>()("@usine/orchestrator/OperatorDesk") {
+  static readonly layer = Layer.effect(OperatorDesk, makeDesk).pipe(
+    Layer.provide(LoopMatches.layer),
+  );
+}
