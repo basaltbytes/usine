@@ -4,7 +4,7 @@ import { AttemptTask } from "@usine/core/attempt";
 import { SalvagePushed, SalvageRef } from "@usine/core/attempt/salvage";
 import { CommitSha, RepositoryName } from "@usine/core/repository";
 import { Option } from "effect";
-import { assembleChildPrompt, assemblePrompt, githubSignature } from "../src/prompt.ts";
+import { assembleChildPrompt, assemblePrompt } from "../src/prompt.ts";
 
 describe("assemblePrompt", () => {
   it("prepends the repository and payload snapshot before the persona and rendered task", () => {
@@ -113,11 +113,9 @@ describe("assemblePrompt", () => {
   });
 
   it("injects the rostered persona and GitHub signature into child work", () => {
-    const name = AgentName.make("implementation-agent");
-    assert.strictEqual(githubSignature(name), "— usine agent: implementation-agent");
     assert.strictEqual(
       assembleChildPrompt({
-        agent: name,
+        agent: AgentName.make("implementation-agent"),
         persona: AgentPersona.make("You implement focused TypeScript changes."),
         task: "Add the session interrupt adapter.",
       }),

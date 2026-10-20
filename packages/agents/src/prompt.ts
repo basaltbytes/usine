@@ -1,4 +1,4 @@
-import type { AgentPersona, AgentName } from "@usine/core/agent";
+import { githubSignature, type AgentPersona, type AgentName } from "@usine/core/agent";
 import type { AttemptTask } from "@usine/core/attempt";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
 import type { RepositoryName } from "@usine/core/repository";
@@ -25,9 +25,6 @@ export interface ChildPromptParts {
   /** Free text authored by the parent model, not the rendered loop task. */
   readonly task: string;
 }
-
-/** The attribution line every GitHub comment or review written by an Agent ends with. */
-export const githubSignature = (agent: AgentName): string => `— usine agent: ${agent}`;
 
 const completionInstructions: ReadonlyArray<string> = [
   "# Task completion",
