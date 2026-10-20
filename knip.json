@@ -1,6 +1,14 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "ignoreDependencies": ["@earendil-works/pi-codemode", "@effect/platform-node-shared"],
+  "ignoreDependencies": [
+    "@earendil-works/chord",
+    "@earendil-works/pi-agent-core",
+    "@earendil-works/pi-codemode",
+    "@earendil-works/pi-mcp",
+    "@earendil-works/pi-telemetry",
+    "@earendil-works/pi-tui",
+    "@effect/platform-node-shared"
+  ],
   "workspaces": {
     ".": {
       "entry": [],
