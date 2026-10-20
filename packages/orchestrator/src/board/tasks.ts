@@ -118,7 +118,6 @@ export const taskCards = (
         ...itemLink(current),
         title: origin.item.title,
         state: current.state,
-        updatedAt: current.updatedAt,
         labels: current.labels,
         items: ordered.map(({ item }) => itemLink(item)),
         pullRequest,

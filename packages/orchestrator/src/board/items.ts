@@ -13,8 +13,6 @@ export interface ProjectedItem {
   readonly title: string;
   readonly url: string;
   readonly state: LaneItemState;
-  /** When GitHub last updated the Item, from the stored payload. */
-  readonly updatedAt: string;
   readonly linkedPullRequests: ReadonlyArray<string>;
   readonly labels: ReadonlyArray<GitHubLabelName>;
   /** True when GitHub reports the pull request branch as conflicting with its base. */
@@ -50,7 +48,6 @@ export const projectedItem = (
         title: payload.title,
         url: payload.url,
         state: payload.state === "OPEN" && !gone ? "issue-open" : "issue-closed",
-        updatedAt: payload.updatedAt,
         linkedPullRequests: payload.closedByPullRequestsReferences.nodes.map(({ url }) => url),
         labels: yield* labelsFrom(payload.labels.nodes.map(({ name }) => name)).pipe(
           Effect.mapError((error) => projectionError(item, error.message)),
@@ -74,7 +71,6 @@ export const projectedItem = (
         title: payload.title,
         url: payload.url,
         state,
-        updatedAt: payload.updatedAt,
         linkedPullRequests: [],
         labels: yield* labelsFrom(payload.labels.nodes.map(({ name }) => name)).pipe(
           Effect.mapError((error) => projectionError(item, error.message)),

@@ -126,7 +126,6 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
       }),
     ],
     state: "issue-open",
-    updatedAt: "2026-10-20T09:00:00Z",
     labels: [],
     pullRequest: null,
     runs: [run],

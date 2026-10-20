@@ -39,8 +39,6 @@ export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestra
   {
     ...BoardItemLink.fields,
     state: LaneItemState,
-    /** When GitHub last updated the current Item, as the poll stored it: an ISO 8601 UTC time. */
-    updatedAt: Schema.String,
     labels: Schema.Array(GitHubLabelName),
     items: Schema.Array(BoardItemLink).check(Schema.isNonEmpty()),
     /**

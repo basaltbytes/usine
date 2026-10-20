@@ -397,8 +397,6 @@ describe("Board projection", () => {
         assert.deepStrictEqual(card.loops, [develop, reviewLoop]);
         assert.strictEqual(card.title, "Board lanes");
         assert.strictEqual(card.itemKey, pr.itemKey);
-        // The update time is the current pull request's, not the originating issue's.
-        assert.strictEqual(card.updatedAt, "2026-09-03T08:00:00Z");
         assert.deepStrictEqual(
           card.pullRequest,
           new BoardPullRequestView({
@@ -520,7 +518,6 @@ describe("Board projection", () => {
       title: "Board lanes",
       url: "https://github.com/basaltbytes/usine/issues/33",
       state: "issue-open",
-      updatedAt: "2026-09-01T12:00:00Z",
       items: [
         new BoardItemLink({
           itemKey,

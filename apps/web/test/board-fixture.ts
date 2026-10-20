@@ -113,7 +113,6 @@ const task = (
     readonly conflicting?: boolean;
     readonly state?: BoardTaskView["state"];
     readonly loops?: ReadonlyArray<string>;
-    readonly updatedAt?: string;
   } = {},
 ) => {
   const current = members.at(-1) ?? members[0];
@@ -124,7 +123,6 @@ const task = (
     ...current,
     title: members[0].title,
     state,
-    updatedAt: extra.updatedAt ?? minutesAgo(7 * 1440),
     labels: labels.map((label) => GitHubLabelName.make(label)),
     items: members,
     // The current Item is the Task's newest pull request whenever it has one.
@@ -182,7 +180,7 @@ const pinnedRun = run("run-pinned", pinned, "review", "Failed", 95, [
  * A Board with every card shape: lane-only and overflowing labels, a linked PR, and open, waiting,
  * failed, canceled and finished Runs; an empty Merge lane; a dependabot pull request no Loop can
  * match and one with an open Run; Done, with an issue and its merged PR, and Unmapped, with an
- * issue updated 10 minutes ago, at the end. Other Items were updated a week ago.
+ * issue, at the end.
  */
 const boardProject = () =>
   new ProjectView({
@@ -280,7 +278,7 @@ const boardProject = () =>
           name: LaneName.make("Unmapped"),
           sources: [],
           origin: "fallback",
-          items: [task([backlog], [], [], { updatedAt: minutesAgo(10) })],
+          items: [task([backlog], [])],
         }),
       ],
     }),

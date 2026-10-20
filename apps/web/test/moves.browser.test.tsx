@@ -72,7 +72,6 @@ const overview = (
                   new BoardTaskView({
                     ...link,
                     state: "issue-open",
-                    updatedAt: "2026-10-20T09:00:00Z",
                     labels: [label, ...additionalLabels.map((name) => GitHubLabelName.make(name))],
                     items: [link],
                     pullRequest: null,
