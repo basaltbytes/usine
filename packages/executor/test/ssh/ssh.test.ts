@@ -551,7 +551,7 @@ describe("SSH Worker", () => {
   );
 
   it.effect(
-    "tells an Attempt that joins while the Worker is silent at the next probe without an answer, and that the Worker answers again only after that",
+    "tells an Attempt that joins while the Worker is silent as it joins, and that the Worker answers again only after that",
     () => {
       const machine = fakeMachine();
       const credentials = mintingProvider();
@@ -586,13 +586,18 @@ describe("SSH Worker", () => {
           assert.deepStrictEqual(tags(noticesOf(request.attemptId)), ["WorkerUnresponsive"]);
 
           const late = yield* launch(second);
-          assert.lengthOf(noticesOf(second.attemptId), 0, "joining reports nothing by itself");
-          yield* silentProbe;
           const [told] = noticesOf(second.attemptId);
-          assert(told?._tag === "WorkerUnresponsive");
+          assert(told?._tag === "WorkerUnresponsive", "joining a silent watch tells the Attempt");
           assert.strictEqual(DateTime.formatIso(told.lastAnsweredAt), launchedAt);
           assert.strictEqual(told.reason, "No answer within 45 seconds");
           assert.lengthOf(noticesOf(request.attemptId), 1, "the first Attempt is not told twice");
+          yield* silentProbe;
+          for (const attemptId of [request.attemptId, second.attemptId])
+            assert.deepStrictEqual(
+              tags(noticesOf(attemptId)),
+              ["WorkerUnresponsive"],
+              "a probe that still gets no answer tells nobody twice",
+            );
 
           machine.state.stalled = false;
           yield* TestClock.adjust("1 minute");
@@ -603,13 +608,13 @@ describe("SSH Worker", () => {
             ]);
 
           yield* silentProbe;
-          const unheard = yield* launch(third);
+          const latest = yield* launch(third);
+          assert.deepStrictEqual(tags(noticesOf(third.attemptId)), ["WorkerUnresponsive"]);
           yield* TestClock.adjust("1 minute");
-          assert.lengthOf(
-            noticesOf(third.attemptId),
-            0,
-            "an Attempt never told the Worker stopped answering does not hear it answers again",
-          );
+          assert.deepStrictEqual(tags(noticesOf(third.attemptId)), [
+            "WorkerUnresponsive",
+            "WorkerResponsive",
+          ]);
           for (const attemptId of [request.attemptId, second.attemptId])
             assert.deepStrictEqual(tags(noticesOf(attemptId)), [
               "WorkerUnresponsive",
@@ -620,7 +625,7 @@ describe("SSH Worker", () => {
 
           for (const attemptId of attempts)
             yield* Deferred.succeed(signalsOf(attemptId).done, undefined);
-          for (const fiber of [first, late, unheard]) yield* Fiber.join(fiber);
+          for (const fiber of [first, late, latest]) yield* Fiber.join(fiber);
         }).pipe(
           // A failed assertion would otherwise leave cleanup waiting on a stalled machine.
           Effect.ensuring(Effect.sync(() => (machine.state.stalled = false))),

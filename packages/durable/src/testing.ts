@@ -57,6 +57,7 @@ import {
   ResultRecorded,
   StoredRequest,
 } from "./attempt-runtime.ts";
+import { keepNotice } from "./attempt/hubs.ts";
 import { layer as attemptRuntimeLayer } from "./attempt/runtime.ts";
 import { SUBAGENT_TOOL } from "./attempt/subagent.ts";
 import {
@@ -337,8 +338,10 @@ export const worksFor =
 /**
  * An in-memory `AttemptRuntime` over `storage`, for executor and engine tests
  * that need no parent model. It records Started, the parent's session events,
- * intervention receipts, Worker notices sent while `execute` runs, and a Final
- * without facts (the executor harvests those) through the Attempt's sink,
+ * intervention receipts, Worker notices (those sent before `execute` starts
+ * the Attempt right after its start events, kept as the durable runtime keeps
+ * them), and a Final without facts (the executor harvests those) through the
+ * Attempt's sink,
  * numbering them per task so a reattached `execute` continues the sequence.
  * Only a completed parent leaves the live
  * state: interrupting `execute` (a stopped process) or a failing parent leaves
@@ -352,8 +355,13 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
     Effect.sync(() => {
       const attached = new Map<
         AttemptId,
-        { readonly io: AttemptChannel.Sink; readonly canceled: Deferred.Deferred<void> }
+        {
+          readonly io: AttemptChannel.Sink;
+          readonly canceled: Deferred.Deferred<void>;
+          started: boolean;
+        }
       >();
+      const early = new Map<AttemptId, ReadonlyArray<AttemptChannel.WorkerNotice>>();
       const envelope = (task: StubTask, payload: AttemptChannel.OutboundPayload) =>
         Effect.map(
           DateTime.now,
@@ -385,7 +393,8 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           };
           storage.tasks.set(attemptId, task);
           const canceled = yield* Deferred.make<void>();
-          attached.set(attemptId, { io, canceled });
+          const active = { io, canceled, started: false };
+          attached.set(attemptId, active);
           const session = new ParentSession({
             id: AgentSessionId.make(`parent:${attemptId}`),
             agent: request.spec.agent.name,
@@ -408,6 +417,12 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           } else {
             yield* event(new TextOutput({ session, text: "Resumed after a restart" }));
           }
+          // A notice sent while the kept ones are recorded is kept too, so this ends only when none is left.
+          for (let kept = early.get(attemptId); kept !== undefined; kept = early.get(attemptId)) {
+            early.delete(attemptId);
+            for (const notice of kept) yield* emit(notice);
+          }
+          active.started = true;
           const finished = yield* parent({
             request,
             emit,
@@ -474,7 +489,10 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
           Effect.gen(function* () {
             const task = storage.tasks.get(attemptId);
             const active = attached.get(attemptId);
-            if (task === undefined || active === undefined) return;
+            if (task === undefined || active === undefined || !active.started) {
+              early.set(attemptId, keepNotice(early.get(attemptId) ?? [], notice));
+              return;
+            }
             yield* active.io.append("outbound", yield* envelope(task, notice));
           }).pipe(Effect.orDie),
         intervene: (attemptId, intervention) =>

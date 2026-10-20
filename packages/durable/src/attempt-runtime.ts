@@ -156,9 +156,11 @@ export class AttemptRuntime extends Context.Service<
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
     /**
      * Records what the executor observed of the Attempt's Worker in its
-     * transcript, after everything relayed before it. A notice for an
-     * Attempt that no `execute` call in this process has started, or that
-     * arrives before its parent started, is logged and dropped.
+     * transcript, after everything relayed before it. A notice sent before
+     * `execute` starts the Attempt, or before its parent started, is kept and
+     * recorded right after `Started`. Of those early notices only the latest
+     * is kept, with the `WorkerUnresponsive` before a `WorkerResponsive`. They
+     * are logged and dropped if the Attempt ends before its parent starts.
      */
     readonly notify: (
       attemptId: AttemptId,

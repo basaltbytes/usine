@@ -502,15 +502,16 @@ const makeAttemptRuntime = Effect.gen(function* () {
   const notify = Effect.fn("AttemptRuntime.notify")(
     function* (attemptId: AttemptId, notice: AttemptChannel.WorkerNotice) {
       yield* Effect.annotateCurrentSpan({ attemptId, notice: notice._tag });
-      const found = hubs.find(attemptId);
-      if (Option.isNone(found)) {
-        yield* Effect.logDebug("Dropped a Worker notice for an Attempt not relayed here", {
-          notice: notice._tag,
-          worker: notice.worker,
-        });
-        return;
-      }
-      yield* hubs.notice(found.value, notice);
+      const routed = yield* hubs.notice(attemptId, notice);
+      if (routed._tag === "Kept")
+        yield* Effect.logDebug(
+          "Kept a Worker notice for an Attempt not tracked here yet; it is relayed after the parent starts",
+          {
+            notice: notice._tag,
+            worker: notice.worker,
+            kept: routed.kept.map(({ _tag }) => _tag),
+          },
+        );
     },
     (effect, attemptId) => effect.pipe(Effect.annotateLogs({ attemptId })),
   );

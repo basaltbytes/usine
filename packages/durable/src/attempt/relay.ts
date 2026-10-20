@@ -25,7 +25,14 @@ import type { AttemptRequest } from "../attempt-runtime.ts";
 import type { DurableHarness, DurableHarnessError } from "../harness.ts";
 import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
 import { entryEvents, ledgerUsage } from "./events.ts";
-import type { AttemptHub, AttemptHubs, ChildDelivery, RelayItem, RelayProgress } from "./hubs.ts";
+import {
+  type AttemptHub,
+  type AttemptHubs,
+  type ChildDelivery,
+  keepNotice,
+  type RelayItem,
+  type RelayProgress,
+} from "./hubs.ts";
 import { settledOf } from "./outcome.ts";
 import { parentSession, parentSessionId } from "./parent.ts";
 
@@ -346,8 +353,9 @@ const relayChildDelivery = Effect.fn("AttemptRelay.childDelivery")(function* (
  * Relays one Attempt to `io` until its terminal envelope is sent: `Started`,
  * the parent's committed entries, the children's events, and the executor's
  * Worker notices in the order they happened, then exactly one `Final`,
- * `Failed`, or `Interrupted`. Progress is durable, so a later call continues
- * the same sequence.
+ * `Failed`, or `Interrupted`. Worker notices that arrive before the parent
+ * started follow `Started`; a parent that never starts drops them. Progress
+ * is durable, so a later call continues the same sequence.
  */
 export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
   durable: DurableHarness["Service"],
@@ -411,7 +419,7 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
   );
   if (loaded.parentConversation !== null) hubs.bindParent(hub, loaded.parentConversation);
 
-  const ensureStarted = Effect.gen(function* () {
+  const startParent = Effect.gen(function* () {
     if (Option.isSome(session) && progress().outbound.state !== "AwaitingStarted") {
       return session;
     }
@@ -439,6 +447,23 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
       yield* Effect.logInfo("Relayed the Attempt's start", { parentModel: started.brain.model });
     }
     return session;
+  });
+
+  const relayEarlyNotices = Effect.gen(function* () {
+    const early = hub.early;
+    if (early.length === 0) return;
+    hub.early = [];
+    yield* emit(durable, hub, early, cursorOf);
+    yield* Effect.logInfo("Relayed the Worker notices that arrived before the parent started", {
+      notices: early.map(({ _tag }) => _tag),
+    });
+  });
+
+  /** The parent's session once it started, after `Started` and the Worker notices that arrived before it. */
+  const ensureStarted = Effect.gen(function* () {
+    const started = yield* startParent;
+    if (Option.isSome(started)) yield* relayEarlyNotices;
+    return started;
   });
 
   const relayTokens = Effect.fn("AttemptRelay.tokens")(function* (started: ParentSession) {
@@ -522,10 +547,12 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
   ) {
     const started = yield* ensureStarted;
     if (Option.isNone(started)) {
-      return yield* Effect.logWarning(
-        "Dropped a Worker notice that arrived before the parent started",
-        { notice: notice._tag, worker: notice.worker },
-      );
+      hub.early = keepNotice(hub.early, notice);
+      return yield* Effect.logDebug("Kept a Worker notice until the parent starts", {
+        notice: notice._tag,
+        worker: notice.worker,
+        kept: hub.early.map(({ _tag }) => _tag),
+      });
     }
     yield* emitPayload(durable, hub, notice);
     yield* Effect.logDebug("Relayed a Worker notice", {
@@ -539,6 +566,12 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
   ) {
     const settled = settledOf(task);
     const started = yield* ensureStarted;
+    if (Option.isNone(started) && hub.early.length > 0) {
+      yield* Effect.logWarning("Dropped the Worker notices kept for a parent that never started", {
+        notices: hub.early.map(({ _tag }) => _tag),
+      });
+      hub.early = [];
+    }
     yield* deliveries("ended");
     if (Result.isSuccess(settled)) {
       if (Option.isSome(started)) {

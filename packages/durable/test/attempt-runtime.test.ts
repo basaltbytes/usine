@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { StorageRejected } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import { ModelId } from "@usine/core/agent/brain";
 import { TextOutput } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import {
@@ -17,6 +18,7 @@ import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import { Context, DateTime, Effect, Exit, Fiber, Layer, Logger, Option, Result } from "effect";
 import {
   AttemptReport,
+  AttemptRequest,
   AttemptRuntime,
   harvestedResult,
   ParentFailed,
@@ -95,7 +97,7 @@ describe("durable AttemptRuntime", () => {
           reason: "Connection timed out during banner exchange",
         });
         assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
-        // Nothing relays an Attempt that has not started here, so its notice is dropped.
+        // Sent before `execute` starts the Attempt, the notice waits for the parent to start.
         yield* runtime.notify(request.spec.attemptId, silent);
         const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
         const child = yield* children.next;
@@ -104,7 +106,6 @@ describe("durable AttemptRuntime", () => {
         assert.deepStrictEqual(child.request.host, new LocalProcess());
         assert.match(child.request.prompt, /Fix the flaky test/u);
         assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
-        yield* runtime.notify(request.spec.attemptId, silent);
         yield* runtime.notify(
           request.spec.attemptId,
           new AttemptChannel.WorkerResponsive({ worker: request.worker, lastAnsweredAt }),
@@ -118,8 +119,13 @@ describe("durable AttemptRuntime", () => {
         assert.deepStrictEqual(
           trace(outbound).filter((tag) => tag.startsWith("Worker")),
           ["WorkerUnresponsive", "WorkerResponsive"],
-          "the notices sent while the Attempt runs, each once",
+          "the notice sent before the Attempt started and the one sent while it runs, each once",
         );
+        assert.deepStrictEqual(trace(outbound).slice(0, 3), [
+          "Started",
+          "parent.SessionStarted",
+          "WorkerUnresponsive",
+        ]);
         assert.deepStrictEqual(
           trace(outbound).filter((tag) => !tag.startsWith("Worker")),
           [
@@ -175,6 +181,87 @@ describe("durable AttemptRuntime", () => {
         finished.recorded,
         Option.some(new ResultRecorded({ result: harvested })),
       );
+    }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "keeps the latest Worker notice sent before the Attempt starts, after the WorkerUnresponsive it answers",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const request = attemptRequest("run/step/40");
+          const recording = recordingSink();
+          const lastAnsweredAt = DateTime.makeUnsafe("2026-10-15T19:42:00Z");
+          const silent = (reason: string) =>
+            new AttemptChannel.WorkerUnresponsive({
+              worker: request.worker,
+              lastAnsweredAt,
+              reason,
+            });
+          const answering = new AttemptChannel.WorkerResponsive({
+            worker: request.worker,
+            lastAnsweredAt,
+          });
+          for (const notice of [silent("first"), answering, silent("second"), answering])
+            yield* runtime.notify(request.spec.attemptId, notice);
+          yield* runtime.execute(request, recording.sink);
+          const outbound = recording.outbound();
+          assertAdmitted(request.spec.attemptId, outbound);
+          assert.deepStrictEqual(trace(outbound), [
+            "Started",
+            "parent.SessionStarted",
+            "WorkerUnresponsive",
+            "WorkerResponsive",
+            "parent.TextOutput",
+            "parent.SessionFinished",
+            "Final",
+          ]);
+          assert.deepStrictEqual(
+            outbound.flatMap(({ payload }) =>
+              payload._tag === "WorkerUnresponsive" || payload._tag === "WorkerResponsive"
+                ? [payload]
+                : [],
+            ),
+            [silent("second"), answering],
+          );
+        }).pipe(Effect.provide(layer({ database, parent: [answer("Nothing to fix.")] })));
+      }).pipe(Effect.scoped),
+  );
+
+  it.live("drops the Worker notices kept for a parent that never starts", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const logs = capturedLogs();
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const base = attemptRequest("run/step/41");
+        const request = new AttemptRequest({
+          ...base,
+          spec: new AttemptChannel.RunSpec({
+            ...base.spec,
+            parentModel: Option.some(ModelId.make("faux/missing")),
+          }),
+        });
+        const recording = recordingSink();
+        yield* runtime.notify(
+          request.spec.attemptId,
+          new AttemptChannel.WorkerUnresponsive({
+            worker: request.worker,
+            lastAnsweredAt: DateTime.makeUnsafe("2026-10-15T19:42:00Z"),
+            reason: "Connection timed out during banner exchange",
+          }),
+        );
+        yield* runtime.execute(request, recording.sink).pipe(Effect.flip);
+        const outbound = recording.outbound();
+        assertAdmitted(request.spec.attemptId, outbound);
+        assert.deepStrictEqual(trace(outbound), ["Failed"]);
+        assert.lengthOf(
+          logs.matching(/Dropped the Worker notices kept for a parent that never started/u),
+          1,
+        );
+      }).pipe(Effect.provide(layer({ database, parent: [] })), Effect.provide(logs.layer));
     }).pipe(Effect.scoped),
   );
 
