@@ -1,4 +1,4 @@
-import type { RunView, StalledItemView } from "@usine/orchestrator/operator";
+import type { StalledItemView } from "@usine/orchestrator/operator";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   Table,
@@ -10,10 +10,8 @@ import {
 } from "@/components/ui/table";
 import { StallAction } from "../stall/action.tsx";
 import { stallSentence } from "../stall/copy.ts";
+import { stallRun } from "../task/model.ts";
 import { EmptyLine, ItemTitle, RunPageLink, RunRow } from "./section.tsx";
-
-const reasonRun = ({ reason }: StalledItemView): RunView | null =>
-  "run" in reason ? reason.run : null;
 
 const StalledRow = ({
   stalled,
@@ -27,7 +25,7 @@ const StalledRow = ({
   /** Below `md` the row is one cell: the Item, its Loop, the reason, then the action. */
   readonly narrow: boolean;
 }) => {
-  const run = reasonRun(stalled);
+  const run = stallRun(stalled);
   const title = <ItemTitle item={stalled.item} />;
   const item = run === null ? title : <RunPageLink run={run}>{title}</RunPageLink>;
   const action = <StallAction stalled={stalled} readOnly={readOnly} appearance="row" />;

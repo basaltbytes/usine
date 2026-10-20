@@ -150,6 +150,7 @@ const instance = new LoadedInstance({
 
 const snapshot = new RunSnapshot({
   resolvedFailureAttemptId: Option.none(),
+  closedAt: Option.none(),
   approval: Option.none(),
   runAgain: Option.none(),
   event: new Event({
@@ -294,6 +295,33 @@ const apiParent = sessionOf("api-parent", "pi", "openai/gpt-5.5", "developer");
 const claudeChild = sessionOf("claude-child", "claude", "claude-opus-4-7", "developer");
 const planParent = sessionOf("plan-parent", "pi", "openai-codex/gpt-5.5", "developer");
 const codexChild = sessionOf("codex-child", "codex", "gpt-5.6-sol", "reviewer");
+/** The transcript row `sequence` of `attempt`: `session` reports `tokens` so far, priced at `usd`. */
+const tokenReport = (
+  attempt: AttemptId,
+  session: ParentSession | ChildSession,
+  tokens: number,
+  usd: number | null,
+  sequence: number,
+) =>
+  new TranscriptEntry({
+    sequence: TranscriptSequence.make(sequence),
+    attemptId: attempt,
+    direction: "outbound",
+    envelope: new AttemptChannel.OutboundEnvelope({
+      version: AttemptChannel.PROTOCOL_VERSION,
+      attemptId: attempt,
+      sequence: AttemptChannel.Sequence.make(sequence),
+      sentAt: now,
+      payload: new AttemptChannel.SessionEvent({
+        event: new SessionTokensUpdated({
+          session,
+          totalTokens: TokenCount.make(tokens),
+          costUsd: usd === null ? Option.none() : Option.some(UsdAmount.make(usd)),
+        }),
+      }),
+    }),
+    receivedAt: now,
+  });
 /** The token reports the usage query returns: each session's reports, highest one included. */
 const usageReports = (
   [
@@ -303,27 +331,8 @@ const usageReports = (
     [retryAttemptId, planParent, 800, 0.3],
     [retryAttemptId, codexChild, 5_000, null],
   ] as const
-).map(
-  ([attempt, session, tokens, usd], index) =>
-    new TranscriptEntry({
-      sequence: TranscriptSequence.make(1_000 + index),
-      attemptId: attempt,
-      direction: "outbound",
-      envelope: new AttemptChannel.OutboundEnvelope({
-        version: AttemptChannel.PROTOCOL_VERSION,
-        attemptId: attempt,
-        sequence: AttemptChannel.Sequence.make(1_000 + index),
-        sentAt: now,
-        payload: new AttemptChannel.SessionEvent({
-          event: new SessionTokensUpdated({
-            session,
-            totalTokens: TokenCount.make(tokens),
-            costUsd: usd === null ? Option.none() : Option.some(UsdAmount.make(usd)),
-          }),
-        }),
-      }),
-      receivedAt: now,
-    }),
+).map(([attempt, session, tokens, usd], index) =>
+  tokenReport(attempt, session, tokens, usd, 1_000 + index),
 );
 
 interface RecordedApproval {
@@ -346,6 +355,8 @@ const testLayer = (
   },
   /** Receives the Attempt of each token-report query, in the order they ran. */
   usageQueries: Array<AttemptId> = [],
+  /** Token reports a test adds as its Attempts work on; the usage query returns them too. */
+  laterReports: ReadonlyArray<TranscriptEntry> = [],
 ) => {
   const readTranscript = (query: TranscriptQuery) =>
     Effect.succeed(
@@ -354,7 +365,7 @@ const testLayer = (
         TranscriptSessionsQuery: () => [],
         TranscriptUsageQuery: ({ attemptId: attempt }) => {
           usageQueries.push(attempt);
-          return usageReports.filter((entry) => entry.attemptId === attempt);
+          return [...usageReports, ...laterReports].filter((entry) => entry.attemptId === attempt);
         },
         TranscriptTailQuery: ({ after, limit }) =>
           transcript.filter((entry) => entry.sequence > after).slice(0, limit),
@@ -734,6 +745,7 @@ describe("Operator", () => {
           }),
         });
         const usageQueries: Array<AttemptId> = [];
+        const laterReports: Array<TranscriptEntry> = [];
         yield* Effect.gen(function* () {
           const detail = yield* (yield* Operator).detail(declared, runId);
           assert.strictEqual(detail.worker, "usine-worker-1");
@@ -796,6 +808,64 @@ describe("Operator", () => {
             [new LocalWorkerAccess(), null],
           );
           assert.deepStrictEqual(usageQueries, [attemptId, retryAttemptId, retryAttemptId]);
+
+          // The Board card adds up its Runs the same way, from the same cache.
+          const overview = yield* (yield* Operator).overview(declared);
+          const card = overview.projects[0]?.board.lanes
+            .flatMap(({ items }) => items)
+            .find(({ runs }) => runs.some(({ id }) => id === runId));
+          assert(card !== undefined);
+          assert.deepStrictEqual(
+            {
+              ...card.usage,
+              pools: card.usage.pools.map(({ pool, tokens, cost, unpriced }) => [
+                pool,
+                tokens,
+                cost?.usd ?? null,
+                unpriced,
+              ]),
+              cost: card.usage.cost === null ? null : { ...card.usage.cost },
+            },
+            {
+              durationMillis: 300_000,
+              runningSince: ["2026-08-31T12:06:00.000Z"],
+              unmeasured: 0,
+              tokens: 27_300,
+              pools: [
+                ["apiKeys", 1_500, 0.75, false],
+                ["claudePlan", 20_000, 1.25, false],
+                ["chatgptPlan", 5_800, null, false],
+              ],
+              cost: { usd: 2, estimate: true },
+            },
+          );
+          assert.deepStrictEqual(usageQueries, [
+            attemptId,
+            retryAttemptId,
+            retryAttemptId,
+            retryAttemptId,
+          ]);
+
+          // A later token report adds no projection revision. The next read keeps the cached
+          // overview and reads the Attempt at work again, so the card counts the new tokens.
+          laterReports.push(tokenReport(retryAttemptId, codexChild, 9_000, null, 2_000));
+          const later = yield* (yield* Operator).overview(declared);
+          const laterCard = later.projects[0]?.board.lanes
+            .flatMap(({ items }) => items)
+            .find(({ runs }) => runs.some(({ id }) => id === runId));
+          assert.strictEqual(laterCard?.usage.tokens, 31_300);
+          assert.deepStrictEqual(
+            laterCard?.usage.pools.map(({ pool, tokens }) => [pool, tokens]),
+            [
+              ["apiKeys", 1_500],
+              ["claudePlan", 20_000],
+              ["chatgptPlan", 9_800],
+            ],
+          );
+          assert.strictEqual(yield* Ref.get(reads), 1);
+          assert.deepStrictEqual(usageQueries.slice(4), [retryAttemptId]);
+          // Without a new report, the read returns the same overview.
+          assert.strictEqual(yield* (yield* Operator).overview(declared), later);
         }).pipe(
           Effect.provide(
             testLayer(
@@ -807,6 +877,7 @@ describe("Operator", () => {
               undefined,
               undefined,
               usageQueries,
+              laterReports,
             ),
           ),
         );

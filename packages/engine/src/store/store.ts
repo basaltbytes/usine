@@ -333,7 +333,7 @@ const makeRunStore = Effect.gen(function* () {
     if (decision._tag === "RunSucceeded") {
       yield* tx.updateStepResult(runId, attempt.stepName, decision.result);
     }
-    yield* tx.updateState(runId, decision.state);
+    yield* tx.updateState(runId, decision.state, endedAt);
   });
 
   // The Event queued while the Attempt ran is usually the Agent's own question
@@ -800,11 +800,12 @@ const makeRunStore = Effect.gen(function* () {
           decision: decision._tag,
         });
         if (decision._tag === "AlreadyClosed") return decision;
+        const canceledAt = yield* DateTime.now;
         if (Option.isSome(decision.attempt)) {
           const { id, outcome } = decision.attempt.value;
-          yield* tx.closeAttempt(id, outcome, yield* DateTime.now);
+          yield* tx.closeAttempt(id, outcome, canceledAt);
         }
-        yield* tx.updateState(runId, decision.state);
+        yield* tx.updateState(runId, decision.state, canceledAt);
         const canceled: CancelOutcome = {
           _tag: "Canceled",
           openAttempt: Option.map(decision.attempt, ({ id }) => id),

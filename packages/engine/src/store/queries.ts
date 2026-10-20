@@ -121,6 +121,7 @@ const runSelection = {
   state: runs.stateJson,
   resolvedFailureAttemptId: runs.resolvedFailureAttemptId,
   openedAt: runs.openedAt,
+  closedAt: runs.closedAt,
   repository: runs.repository,
   revision: runs.revision,
   task: runs.task,
@@ -293,6 +294,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
       step: stepFromRow(storedRun),
       attempts: storedAttempts.map(attemptFromRow),
       resolvedFailureAttemptId: Option.fromNullishOr(storedRun.resolvedFailureAttemptId),
+      closedAt: Option.fromNullishOr(storedRun.closedAt),
       approval: approvalFromRow(storedRun),
       runAgain: runAgainFromRow(storedRun),
       repository: storedRun.repository,
@@ -362,16 +364,12 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return yield* summariesWithAttempts(storedRuns);
   });
 
-  // A settled Run closed when its last Attempt ended, or started for one closed before end
-  // times were recorded; a Run canceled before any Attempt closed when it opened.
-  const closedAt = sql`coalesce((select max(coalesce(${attempts.endedAt}, ${attempts.startedAt})) from ${attempts} where ${attempts.runId} = ${runs.runId}), ${runs.openedAt})`;
-
   const closedRunSummaries = Effect.fn("RunStoreQueries.closedRunSummaries")(function* (
     limit: number,
   ) {
     const closedRuns = yield* selectRuns()
       .where(notInArray(storedStateTag, [...RunState.OPEN_STATE_TAGS]))
-      .orderBy(desc(closedAt), desc(runs.runId))
+      .orderBy(desc(runs.closedAt), desc(runs.runId))
       .limit(limit)
       .execute()
       .pipe(Effect.flatMap(decodeRunRows));
@@ -390,13 +388,16 @@ export const queriesFor = (database: RunDatabaseClient) => {
     return Option.fromNullishOr(rows[0]?.revision);
   });
 
+  // A closed state stamps when the Run closed, `at` or now; an open one, as a retry's, clears it.
   const updateState = Effect.fn("RunStoreQueries.updateState")(function* (
     runId: RunId,
     state: RunState.RunState,
+    at?: DateTime.Utc,
   ) {
+    const closedAt = RunState.isOpen(state) ? null : encodeDateTime(at ?? (yield* DateTime.now));
     const updated = yield* database
       .update(runs)
-      .set({ stateJson: encodeRunState(state) })
+      .set({ stateJson: encodeRunState(state), closedAt })
       .where(eq(runs.runId, runId))
       .returning({ runId: runs.runId })
       .execute();

@@ -3,6 +3,15 @@ import { GitHubLabelName } from "@usine/config/label";
 import { LabelLaneSource, LaneName } from "@usine/config/board";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
+import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import {
+  AgentSessionId,
+  type BillingPool,
+  ParentSession,
+  TokenCount,
+  UsdAmount,
+} from "@usine/core/agent/session";
+import { AttemptId } from "@usine/core/attempt";
 import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
@@ -23,7 +32,15 @@ import {
   ReadOnlyBoardLaneView,
   WritableBoardLaneView,
 } from "../src/operator/board.ts";
+import { SucceededAttemptView } from "../src/operator/attempt.ts";
 import { RunView } from "../src/operator/run.ts";
+import {
+  PoolUsageView,
+  RunUsageView,
+  SessionUsageView,
+  taskUsage,
+  UsageCostView,
+} from "../src/operator/usage.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = ItemKey.make("github:basaltbytes/usine:33");
@@ -121,6 +138,7 @@ const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succ
     state,
     loopPaused: false,
     openedAt: "2026-09-01T12:00:00.000Z",
+    closedAt: state === "Failed" || state === "Succeeded" ? "2026-09-01T12:30:00.000Z" : null,
     task: "Build the Board.",
     attempts: [],
     approval: null,
@@ -397,8 +415,6 @@ describe("Board projection", () => {
         assert.deepStrictEqual(card.loops, [develop, reviewLoop]);
         assert.strictEqual(card.title, "Board lanes");
         assert.strictEqual(card.itemKey, pr.itemKey);
-        // The update time is the current pull request's, not the originating issue's.
-        assert.strictEqual(card.updatedAt, "2026-09-03T08:00:00Z");
         assert.deepStrictEqual(
           card.pullRequest,
           new BoardPullRequestView({
@@ -520,7 +536,6 @@ describe("Board projection", () => {
       title: "Board lanes",
       url: "https://github.com/basaltbytes/usine/issues/33",
       state: "issue-open",
-      updatedAt: "2026-09-01T12:00:00Z",
       items: [
         new BoardItemLink({
           itemKey,
@@ -537,6 +552,7 @@ describe("Board projection", () => {
       needsYou: false,
       conflicting: false,
       loops: [],
+      usage: taskUsage([], new Map()),
     });
     const source = new WritableBoardLaneView({
       id: BoardLaneId.make("authored:Ready"),
@@ -597,4 +613,169 @@ describe("Board projection", () => {
       );
     }),
   );
+});
+
+describe("Task usage", () => {
+  const ended = (startedAt: string, endedAt: string | null) => ({
+    startedAt,
+    endedAt,
+    outcome: new SucceededAttemptView(),
+  });
+  const harnesses = { apiKeys: "pi", claudePlan: "claude", chatgptPlan: "codex" } as const;
+  /** One session of `attempt`, drawing `tokens` from `pool`, priced at `usd` or not at all. */
+  const session = (
+    attempt: string,
+    pool: BillingPool,
+    tokens: number,
+    usd: number | null,
+  ): SessionUsageView =>
+    new SessionUsageView({
+      attemptId: AttemptId.make(attempt),
+      session: new ParentSession({
+        id: AgentSessionId.make(`${attempt}-${pool}`),
+        agent: AgentName.make("developer"),
+        brain: new BrainSpec({
+          harness: harnesses[pool],
+          model: ModelId.make("model"),
+          effort: "high",
+        }),
+      }),
+      pool,
+      tokens: TokenCount.make(tokens),
+      cost:
+        usd === null
+          ? null
+          : new UsageCostView({ usd: UsdAmount.make(usd), estimate: pool === "claudePlan" }),
+    });
+  /** A Run's usage as `RunUsageReader` reads it: a pool has no price while a session has none. */
+  const runUsage = (sessions: ReadonlyArray<SessionUsageView>) =>
+    new RunUsageView({
+      tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
+      pools: [...new Set(sessions.map(({ pool }) => pool))].map((pool) => {
+        const members = sessions.filter((member) => member.pool === pool);
+        const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost]));
+        return new PoolUsageView({
+          pool,
+          tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
+          cost:
+            pool === "chatgptPlan" || costs.length < members.length
+              ? null
+              : new UsageCostView({
+                  usd: UsdAmount.make(costs.reduce((sum, { usd }) => sum + usd, 0)),
+                  estimate: pool === "claudePlan",
+                }),
+        });
+      }),
+      sessions,
+    });
+  const pools = ({ pools: lines }: ReturnType<typeof taskUsage>) =>
+    lines.map(
+      ({ pool, tokens, cost, unpriced }): readonly [string, number, number | null, boolean] => [
+        pool,
+        tokens,
+        cost?.usd ?? null,
+        unpriced,
+      ],
+    );
+  const priced = RunId.make("priced");
+  const chatgpt = RunId.make("chatgpt");
+
+  it("adds up a priced Run and a ChatGPT plan Run: time, tokens, pools, and the priced dollars", () => {
+    const usage = taskUsage(
+      [
+        {
+          id: priced,
+          attempts: [
+            ended("2026-10-20T10:00:00.000Z", "2026-10-20T10:40:00.000Z"),
+            // Closed before end times were recorded, so it is not counted.
+            ended("2026-10-20T11:00:00.000Z", null),
+          ],
+        },
+        {
+          id: chatgpt,
+          attempts: [
+            ended("2026-10-20T12:00:00.000Z", "2026-10-20T12:08:00.000Z"),
+            { startedAt: "2026-10-20T12:10:00.000Z", endedAt: null, outcome: null },
+          ],
+        },
+      ],
+      new Map([
+        [
+          priced,
+          runUsage([
+            session("priced-1", "apiKeys", 1_500, 0.75),
+            session("priced-1", "claudePlan", 20_000, 1.25),
+          ]),
+        ],
+        [
+          chatgpt,
+          runUsage([
+            session("chatgpt-1", "chatgptPlan", 800, null),
+            session("chatgpt-2", "chatgptPlan", 5_000, null),
+          ]),
+        ],
+      ]),
+    );
+    assert.strictEqual(usage.durationMillis, 48 * 60_000);
+    assert.deepStrictEqual(usage.runningSince, ["2026-10-20T12:10:00.000Z"]);
+    assert.strictEqual(usage.unmeasured, 1);
+    assert.strictEqual(usage.tokens, 27_300);
+    // The ChatGPT plan has no dollar rate, so its usage is not missing a price.
+    assert.deepStrictEqual(pools(usage), [
+      ["apiKeys", 1_500, 0.75, false],
+      ["claudePlan", 20_000, 1.25, false],
+      ["chatgptPlan", 5_800, null, false],
+    ]);
+    assert.deepStrictEqual({ ...usage.cost }, { usd: 2, estimate: true });
+  });
+
+  it("keeps the priced dollars when a Run at work has no price yet, and says the pool is unpriced", () => {
+    const running = RunId.make("running");
+    const finished = runUsage([
+      session("priced-1", "apiKeys", 1_000, 0.5),
+      session("priced-1", "claudePlan", 30_000, 2),
+    ]);
+    // The retry's Claude session has reported tokens but not its first result, so its Run's
+    // Claude plan pool has no price, not even the ended Attempt's $0.75.
+    const atWork = runUsage([
+      session("running-1", "claudePlan", 10_000, 0.75),
+      session("running-2", "claudePlan", 4_000, null),
+    ]);
+    const usage = taskUsage(
+      [
+        { id: priced, attempts: [] },
+        { id: running, attempts: [] },
+      ],
+      new Map([
+        [priced, finished],
+        [running, atWork],
+      ]),
+    );
+    assert.strictEqual(usage.tokens, 45_000);
+    assert.deepStrictEqual(pools(usage), [
+      ["apiKeys", 1_000, 0.5, false],
+      ["claudePlan", 44_000, 2.75, true],
+    ]);
+    assert.deepStrictEqual({ ...usage.cost }, { usd: 3.25, estimate: true });
+  });
+
+  it("has no cost when no session in a pool with a dollar rate has a price", () => {
+    const usage = taskUsage(
+      [{ id: chatgpt, attempts: [] }],
+      new Map([
+        [
+          chatgpt,
+          runUsage([
+            session("chatgpt-1", "apiKeys", 400, null),
+            session("chatgpt-1", "chatgptPlan", 300, null),
+          ]),
+        ],
+      ]),
+    );
+    assert.deepStrictEqual(pools(usage), [
+      ["apiKeys", 400, null, true],
+      ["chatgptPlan", 300, null, false],
+    ]);
+    assert.strictEqual(usage.cost, null);
+  });
 });

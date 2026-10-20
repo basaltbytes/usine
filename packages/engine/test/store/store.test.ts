@@ -138,7 +138,12 @@ describe("run store", () => {
             assert.deepStrictEqual(summaries[0]?.resolvedFailureAttemptId, Option.some(first.id));
             const history = yield* reader.forItems([lifecycleSubmission.itemKey]);
             assert.deepStrictEqual(history[0]?.resolvedFailureAttemptId, Option.some(first.id));
+            // The Run closed when its failed Attempt ended; the retry reopens it.
+            assert.isTrue(Option.isSome(first.endedAt));
+            assert.deepStrictEqual(after.snapshot.closedAt, first.endedAt);
+            assert.deepStrictEqual(history[0]?.closedAt, first.endedAt);
             yield* store.retry(runId);
+            assert.isTrue(Option.isNone((yield* store.snapshot(runId)).closedAt));
             const started = yield* store.beginAttempt(
               runId,
               WorkerName.make("local"),
@@ -227,6 +232,21 @@ describe("run store", () => {
           (yield* reader.list({ closedLimit: 2 })).map(({ run }) => run.id),
           [newest, middle],
         );
+
+        // A Run canceled before any Attempt closes when the cancel lands, not when it opened.
+        const waited = yield* claim("waited-for-approval");
+        yield* finish(yield* begin(yield* claim("finished-meanwhile")));
+        yield* store.cancel(waited);
+        const canceled = yield* store.snapshot(waited);
+        assert.strictEqual(canceled.attempts.length, 0);
+        assert.isTrue(
+          Option.exists(
+            canceled.closedAt,
+            (closedAt) =>
+              DateTime.toEpochMillis(closedAt) > DateTime.toEpochMillis(canceled.run.openedAt),
+          ),
+        );
+        assert.strictEqual((yield* reader.closed({ limit: 1 }))[0]?.run.id, waited);
       }).pipe(
         Effect.provide(Layer.mergeAll(RunStore.layer, RunReader.layer)),
         Effect.provide(localSqliteLayer(directory)),

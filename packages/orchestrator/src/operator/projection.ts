@@ -201,6 +201,7 @@ export const runView = (
     state: snapshot.run.state._tag,
     loopPaused: pausedLoops.has(snapshot.run.loop),
     openedAt: DateTime.formatIso(snapshot.run.openedAt),
+    closedAt: Option.match(snapshot.closedAt, { onNone: () => null, onSome: DateTime.formatIso }),
     task: snapshot.task,
     attempts: snapshot.attempts.map((attempt) => attemptView(attempt, workers)),
     approval: Option.match(snapshot.approval, {

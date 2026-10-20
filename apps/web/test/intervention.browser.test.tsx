@@ -47,6 +47,7 @@ const failedRun = new RunView({
   state: "Failed",
   loopPaused: false,
   openedAt: "2026-09-12T00:00:00Z",
+  closedAt: "2026-09-12T00:30:00Z",
   task: "Original task",
   attempts: [],
   approval: null,

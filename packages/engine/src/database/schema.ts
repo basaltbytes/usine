@@ -178,6 +178,11 @@ export const runs = snakeCase.table(
     stateJson: text({ mode: "json" }).$type<unknown>().notNull(),
     resolvedFailureAttemptId: text().$type<AttemptId>(),
     openedAt: text().notNull(),
+    /**
+     * When the Run last entered a closed state; null while it is open. A retry reopens the Run
+     * and clears it. Runs closed before this column existed carry the end of their last Attempt.
+     */
+    closedAt: text(),
     // The Run's effective context, seeded from the claiming submission.
     // Edit-and-retry amends these columns; the Event columns never change (ADR 0018).
     repository: text().$type<RepositoryName>().notNull(),

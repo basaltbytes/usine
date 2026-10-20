@@ -23,6 +23,7 @@ import { ProjectBoard } from "../src/board/board.tsx";
 import { overviewQuery } from "../src/overview.ts";
 import { WithRouter } from "./memory-router.tsx";
 import "../src/index.css";
+import { taskUsageOf } from "./board-fixture.ts";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
@@ -72,7 +73,6 @@ const overview = (
                   new BoardTaskView({
                     ...link,
                     state: "issue-open",
-                    updatedAt: "2026-10-20T09:00:00Z",
                     labels: [label, ...additionalLabels.map((name) => GitHubLabelName.make(name))],
                     items: [link],
                     pullRequest: null,
@@ -81,6 +81,7 @@ const overview = (
                     needsYou: false,
                     conflicting: false,
                     loops: [],
+                    usage: taskUsageOf([]),
                   }),
                 ];
               }),

@@ -117,6 +117,7 @@ const run = new RunView({
   state: "Waiting",
   loopPaused: true,
   openedAt: "2026-09-01T12:00:00.000Z",
+  closedAt: null,
   task: "Review issue 31.",
   attempts: [],
   approval: null,

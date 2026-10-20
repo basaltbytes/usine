@@ -1,9 +1,11 @@
 import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
+import type { RunId } from "@usine/core/run";
 import { Array as EffectArray, Option, Order, Schema } from "effect";
 import { BoardItemLink, BoardPullRequestView, BoardTaskView } from "../operator/board.ts";
 import type { RunView } from "../operator/run.ts";
+import { type RunUsageView, taskUsage } from "../operator/usage.ts";
 import type { ProjectedItem } from "./items.ts";
 
 const decodeUrl = Schema.decodeUnknownOption(Schema.URLFromString);
@@ -27,7 +29,8 @@ const itemLink = (item: ProjectedItem) =>
 
 /**
  * Joins explicit issue/PR relationships into Task cards without creating stored Task
- * identities (ADR 0024). `itemLoops` names, per Item, the Loops whose trigger matches it now.
+ * identities (ADR 0024). `itemLoops` names, per Item, the Loops whose trigger matches it now;
+ * `runUsage` holds what each Run's sessions drew, which a card adds up over its Runs.
  */
 export const taskCards = (
   repository: RepositoryName,
@@ -35,6 +38,7 @@ export const taskCards = (
   runs: ReadonlyArray<RunView>,
   cycleBlockedItems: ReadonlyArray<ItemKey>,
   itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>>,
+  runUsage: ReadonlyMap<RunId, RunUsageView>,
 ): ReadonlyArray<BoardTaskView> => {
   const runsByItem = EffectArray.groupBy(runs, ({ itemKey }) => itemKey);
   const nodes = items.map((item): TaskItem => ({
@@ -113,22 +117,23 @@ export const taskCards = (
     );
     const preferred =
       history.find(({ run }) => run.canApprove || run.canResolveFailure) ?? active ?? history[0];
+    const runs = history.map(({ run }) => run).reverse();
     cards.push(
       new BoardTaskView({
         ...itemLink(current),
         title: origin.item.title,
         state: current.state,
-        updatedAt: current.updatedAt,
         labels: current.labels,
         items: ordered.map(({ item }) => itemLink(item)),
         pullRequest,
-        runs: history.map(({ run }) => run).reverse(),
+        runs,
         run: preferred?.run ?? null,
         needsYou:
           history.some(({ run }) => run.canApprove || run.canResolveFailure) ||
           members.some(({ item }) => blocked.has(item.itemKey)),
         conflicting: current.conflicting,
         loops: [...new Set(ordered.flatMap(({ item }) => itemLoops.get(item.itemKey) ?? []))],
+        usage: taskUsage(runs, runUsage),
       }),
     );
   }

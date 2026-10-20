@@ -150,7 +150,7 @@ export class ClosedRunView extends Schema.Class<ClosedRunView>("@usine/orchestra
     run: RunView,
     /** The Run's Item as its Board card links it; null for a schedule Run or an Item the desk did not read. */
     item: Schema.NullOr(BoardItemLink),
-    /** When its last Attempt ended, or when it opened for a Run canceled before any Attempt. */
+    /** When it closed, even for a Run canceled before any Attempt; the Run's `closedAt`. */
     closedAt: Schema.String,
   },
 ) {}
@@ -346,10 +346,11 @@ const standingCheck = (preflight: WorkerPreflight): Option.Option<PreflightCheck
   );
 };
 
-/** When a closed Run ended: its last Attempt's end, else its last Attempt's start, else when it opened. */
+/** When a closed Run closed, as the store recorded it. The store dates every closed Run; the
+ * fallback, its last Attempt's end or start, else its opening, only covers the nullable field. */
 const closedAt = (run: RunView): string => {
   const last = run.attempts.at(-1);
-  return last?.endedAt ?? last?.startedAt ?? run.openedAt;
+  return run.closedAt ?? last?.endedAt ?? last?.startedAt ?? run.openedAt;
 };
 
 /** A Run the engine canceled before any Attempt, because a newer Event or the Item's change replaced it. */

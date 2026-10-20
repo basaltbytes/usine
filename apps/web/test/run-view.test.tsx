@@ -93,6 +93,7 @@ const run = (fields: Partial<ConstructorParameters<typeof RunView>[0]> = {}) =>
     state: "Succeeded",
     loopPaused: false,
     openedAt: "2026-09-01T11:59:00.000Z",
+    closedAt: "2026-09-01T12:25:00.000Z",
     task: "Fix issue 33.",
     attempts: [attempt(new SucceededAttemptView())],
     approval: null,

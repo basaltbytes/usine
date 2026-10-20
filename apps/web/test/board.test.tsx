@@ -48,6 +48,7 @@ import { foldsByDefault } from "../src/board/column.tsx";
 import { laneFlows } from "../src/board/flow.tsx";
 import { elapsedLabel, failureMessage, needCopy, timestampLabel } from "../src/operator-copy.ts";
 import { WithRouter } from "./memory-router.tsx";
+import { taskUsageOf } from "./board-fixture.ts";
 
 const brain = new BrainSpec({
   harness: "codex",
@@ -95,6 +96,7 @@ const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Attemp
     state,
     loopPaused: false,
     openedAt: "2026-09-01T12:00:00.000Z",
+    closedAt: attempts.at(-1)?.endedAt ?? "2026-09-01T12:00:00.000Z",
     task: "Review issue 33.",
     attempts,
     approval: null,
@@ -126,7 +128,6 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
       }),
     ],
     state: "issue-open",
-    updatedAt: "2026-10-20T09:00:00Z",
     labels: [],
     pullRequest: null,
     runs: [run],
@@ -134,6 +135,7 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
     needsYou: state === "Failed",
     conflicting: false,
     loops: [LoopName.make("review")],
+    usage: taskUsageOf([run]),
   });
 };
 

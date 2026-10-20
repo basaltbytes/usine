@@ -198,6 +198,7 @@ const summary = (
     step: new Step({ runId, name: StepName.make("run"), result }),
     attempts: attempts(runId),
     resolvedFailureAttemptId: Option.none(),
+    closedAt: Option.none(),
     approval: Option.none(),
     runAgain,
     repository,

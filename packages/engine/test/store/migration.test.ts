@@ -455,3 +455,57 @@ describe("Run approval source migration", () => {
       }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
 });
+
+describe("Run close time migration", () => {
+  it.live("dates a Run closed before the upgrade by its last Attempt's end or start", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({ prefix: "usine-run-closed-at-upgrade-" }),
+      );
+      const historical = yield* fs.makeTempDirectoryScoped({
+        prefix: "usine-run-closed-at-migrations-",
+      });
+      const source = fileURLToPath(new URL("../../drizzle", import.meta.url));
+      for (const name of yield* fs.readDirectory(source)) {
+        if (name >= "20261020191320_run_closed_at") continue;
+        yield* fs.copy(`${source}/${name}`, `${historical}/${name}`);
+      }
+      yield* fs.makeDirectory(`${directory}/.usine`);
+      const previousDatabase = Layer.effect(
+        RunDatabase,
+        Effect.gen(function* () {
+          const database = yield* SQLiteDrizzle.makeWithDefaults();
+          yield* migrate(database, {
+            migrationsFolder: historical,
+            migrationsTable: "usine_migrations",
+          });
+          return database;
+        }),
+      ).pipe(
+        Layer.provideMerge(SqliteClient.layer({ filename: `${directory}/.usine/runtime.sqlite` })),
+      );
+      const runId = RunId.make("closed-before-upgrade");
+      const brain = JSON.stringify(Schema.encodeSync(BrainSpec)(testAgent.brain));
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          yield* seedPendingRun(runId);
+          const sql = yield* SqlClient.SqlClient;
+          // The first Attempt recorded its end; the second ended before end times were recorded.
+          yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, task, agent, started_at, outcome_json, ended_at)
+            VALUES ('closed-before-upgrade-1', ${runId}, ${lifecycleSubmission.step}, 'local', 1, ${brain}, ${lifecycleSubmission.task}, ${testAgent.name}, '2026-10-19T00:00:00.000Z', '{"_tag":"Canceled"}', '2026-10-19T00:10:00.000Z')`;
+          yield* sql`INSERT INTO usine_attempts (attempt_id, run_id, step_name, worker_name, attempt_number, brain_json, task, agent, started_at, outcome_json)
+            VALUES ('closed-before-upgrade-2', ${runId}, ${lifecycleSubmission.step}, 'local', 2, ${brain}, ${lifecycleSubmission.task}, ${testAgent.name}, '2026-10-19T01:00:00.000Z', '{"_tag":"Canceled"}')`;
+          yield* sql`UPDATE usine_runs SET state_json = '{"_tag":"Canceled","reason":{"_tag":"OperatorCanceled"}}' WHERE run_id = ${runId}`;
+        }).pipe(Effect.provide(previousDatabase)),
+      );
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore;
+        assert.deepStrictEqual(
+          (yield* store.snapshot(runId)).closedAt,
+          Option.some(DateTime.makeUnsafe("2026-10-19T01:00:00.000Z")),
+        );
+      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+});

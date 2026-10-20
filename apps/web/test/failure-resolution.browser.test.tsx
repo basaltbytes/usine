@@ -59,6 +59,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
     state: "Failed",
     loopPaused: false,
     openedAt: "2026-09-17T00:00:00Z",
+    closedAt: "2026-09-17T00:20:00Z",
     task: "Complete the issue",
     attempts: [
       new AttemptView({
