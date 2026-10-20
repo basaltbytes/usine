@@ -8,8 +8,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { timestampLabel } from "../operator-copy.ts";
-import { agoLabel, pullRequestLabel } from "./copy.ts";
+import { agoLabel, timestampLabel } from "../operator-copy.ts";
+import { pullRequestLabel } from "./copy.ts";
 import { EmptyLine, ItemTitle, RunPageLink, RunRow } from "./section.tsx";
 
 const OutcomeRow = ({ closed, now }: { readonly closed: ClosedRunView; readonly now: number }) => {

@@ -374,15 +374,23 @@ describe("Board projection", () => {
           itemKey: pr.itemKey,
           openedAt: "2026-09-02T12:00:00.000Z",
         });
+        const develop = LoopName.make("start-dev");
+        const reviewLoop = LoopName.make("review-pr");
         const board = yield* projectBoard(
           managed,
           [],
           [itemWithLabels([]), pr],
           [reviewRun, development],
           [itemKey],
+          new Map([
+            [pr.itemKey, [reviewLoop]],
+            [itemKey, [develop, reviewLoop]],
+          ]),
         );
         const card = board.lanes[0]?.items[0];
         assert(card !== undefined);
+        // Each Loop watching one of the Task's Items is named once, the issue's first.
+        assert.deepStrictEqual(card.loops, [develop, reviewLoop]);
         assert.strictEqual(card.title, "Board lanes");
         assert.strictEqual(card.itemKey, pr.itemKey);
         assert.deepStrictEqual(
@@ -511,6 +519,7 @@ describe("Board projection", () => {
       run: null,
       needsYou: false,
       conflicting: false,
+      loops: [],
     });
     const source = new WritableBoardLaneView({
       id: BoardLaneId.make("authored:Ready"),

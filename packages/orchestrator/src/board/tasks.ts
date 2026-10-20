@@ -1,4 +1,5 @@
 import type { ItemKey } from "@usine/core/item";
+import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import { Array as EffectArray, Option, Order, Schema } from "effect";
 import { BoardItemLink, BoardTaskView } from "../operator/board.ts";
@@ -24,12 +25,16 @@ const itemLink = (item: ProjectedItem) =>
     url: item.url,
   });
 
-/** Joins explicit issue/PR relationships into Task cards without creating stored Task identities (ADR 0024). */
+/**
+ * Joins explicit issue/PR relationships into Task cards without creating stored Task
+ * identities (ADR 0024). `itemLoops` names, per Item, the Loops whose trigger matches it now.
+ */
 export const taskCards = (
   repository: RepositoryName,
   items: ReadonlyArray<ProjectedItem>,
   runs: ReadonlyArray<RunView>,
   cycleBlockedItems: ReadonlyArray<ItemKey>,
+  itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>>,
 ): ReadonlyArray<BoardTaskView> => {
   const runsByItem = EffectArray.groupBy(runs, ({ itemKey }) => itemKey);
   const nodes = items.map((item): TaskItem => ({
@@ -114,6 +119,7 @@ export const taskCards = (
           history.some(({ run }) => run.canApprove || run.canResolveFailure) ||
           members.some(({ item }) => blocked.has(item.itemKey)),
         conflicting: current.conflicting,
+        loops: [...new Set(ordered.flatMap(({ item }) => itemLoops.get(item.itemKey) ?? []))],
       }),
     );
   }

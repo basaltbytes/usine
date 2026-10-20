@@ -8,8 +8,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { dayTimeLabel, timestampLabel } from "../operator-copy.ts";
-import { agoLabel, nothingRunning, warningLine } from "./copy.ts";
+import { agoLabel, dayTimeLabel, timestampLabel } from "../operator-copy.ts";
+import { nothingRunning, warningLine } from "./copy.ts";
 import { EmptyLine, ItemTitle, RunPageLink, RunRow } from "./section.tsx";
 
 /** A start time as the clock time when it is today, else its day and time. */

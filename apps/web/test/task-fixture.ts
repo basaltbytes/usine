@@ -285,6 +285,7 @@ const card = (task: TaskView) => {
     run: task.runs[0] ?? null,
     needsYou: task.needsYou,
     conflicting: current.conflicting,
+    loops: [],
   });
 };
 

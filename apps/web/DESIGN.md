@@ -167,7 +167,7 @@ components:
 
 The operator UI is a dense, quiet work tool held to the craft of Linear, the Vercel dashboard, and Raycast. It reads as a standard kanban: a dark sidebar, one inset work panel, lanes of cards. It improves on the stock shadcn look by being cleaner, with fewer pills, fewer boxes on boxes, one type scale, and one action colour.
 
-The factory idea appears only where it carries information. Thin arrows between authored lanes name the Loops at work on the left lane's Tasks, and an empty lane shows a dashed outline. The rest of the screen has no factory imagery, no logo, and no ornament.
+The factory idea appears only where it carries information. Thin arrows between authored lanes name the Loops that watch the left lane's Tasks, and an empty lane collapses to a dashed column. The rest of the screen has no factory imagery, no logo, and no ornament.
 
 The world is dark only. The `.dark` block in `src/index.css` is what ships; `:root` holds a Catppuccin Latte fallback that no screen is designed against.
 
@@ -234,7 +234,7 @@ GitHub label colours are kept as they come from the repository and rendered by t
 
 A 232px mantle sidebar on the left; to its right the base work panel, inset 8px from the window on top, right, and bottom, with a 10px radius and a hairline border (below the `md` breakpoint the panel fills the screen and the sidebar becomes a sheet). The panel opens with a 48px header holding the breadcrumb only, then the Needs you row, then the screen. On the desk, Needs you is the screen's first block instead.
 
-On the Board, Needs you items sit in a two-column grid from `lg` (one column below) with 10px gaps. The Project title and its counts follow, then the lanes: 272px wide, 12px apart, scrolling sideways together. Each lane heading is sticky on the base ground while its cards scroll. Folded lanes become 40px rails showing the name vertically and the count. Page gutters are 16px, 20px from `md`.
+On the Board, Needs you items sit in a two-column grid from `lg` (one column below) with 10px gaps. The Project title and its counts follow, then the lanes: 272px wide, 12px apart, scrolling sideways together. Each lane heading is sticky on the base ground while its cards scroll. A lane without a Task collapses to a 40px column with a dashed outline: its count, its name set vertically, and its label chips set vertically under it; under a drag it widens to 128px over 150ms and takes the targeted lane's tint. Done and Unmapped sit behind outline toggles at the right of the Project title, each with its count in subtext0, and come back as lanes at the end of the row; a pressed toggle fills surface0. Page gutters are 16px, 20px from `md`.
 
 The desk at `/` fills the panel: the page heading with its counts (`2 running, 7 not moving`), then Needs you, Running now, Not moving, and Last outcomes, 36px apart, each a 16px semibold title with its count in 13px subtext0 beside it and a flat table under it, then the Workers line. An empty block is one 13px subtext0 sentence under its title.
 
@@ -286,7 +286,7 @@ Content is visible without motion. Under `prefers-reduced-motion: reduce` all th
 
 ## Shapes
 
-Corners step with nesting: the work panel 10px, cards, lane rails, menus, and Needs you items 8px, buttons, inputs, and menu items 6px, extra-small buttons 4px. Chips are full pills. Borders are 1px hairlines, drawn as rings on cards so they do not change the box. The only dashed line is the outline of an empty lane.
+Corners step with nesting: the work panel 10px, cards, collapsed lanes, menus, and Needs you items 8px, buttons, inputs, and menu items 6px, extra-small buttons 4px. Chips are full pills. Borders are 1px hairlines, drawn as rings on cards so they do not change the box. The only dashed line is the outline of an empty lane.
 
 ## Components
 
@@ -311,7 +311,7 @@ Compact and quiet; most actions are 28px tall.
 - **Shadow Strategy:** none at rest; Raised while dragged.
 - **Border:** 7% white ring; 15% on hover; peach at 45% when the card needs the operator (65% on hover).
 - **Internal Padding:** 10px top and bottom, 12px sides; rows 6px apart.
-- **Content order:** Item numbers and kinds in mono; title, two lines, 13px medium; labels; Run line (state dot, Loop, state, mono elapsed time, Agent at the right). A failure shows as red text on red at 8% with Retry.
+- **Content order:** Item numbers and kinds in mono; title, two lines, 13px medium; labels; Run line (state dot, Loop, state, mono elapsed time, Agent at the right). A failure shows as red text on red at 8% with Retry, or with Mark answered or Mark resolved for a question or blocker. A Task on the desk's Not moving list carries the desk's sentence in 12px subtext0, at most three lines, after the Loop in text colour when no Run line names it, then its one action as an extra-small outline button.
 - **Menu:** a 20px ghost icon button in the top right corner, shown on hover or focus on pointer devices and always on touch.
 
 ### Inputs / Fields
@@ -348,7 +348,7 @@ Peach-tinted row: 8px radius, peach border at 25%, peach fill at 5% (8% on hover
 **Compact:** on the Run page, where the reader below needs the height, Needs you lists one entry per row in a single column, 6px apart, with 12px by 4px padding and no repository. The title stays whole. From `sm` the entry is one line with its detail shortened beside the title, 12px apart, the full detail in its tooltip; below `sm` the detail wraps to two lines under the title.
 
 ### Flow arrow
-A 22 by 8 one-pixel arrow at the end of an authored lane's heading, crossing the gap to the next authored lane. When Loops have open Runs on the lane's Tasks, their names sit before it in 12px, blue if any Run is queued or running, peach if all are waiting; otherwise the arrow alone in overlay0.
+A 22 by 8 one-pixel arrow at the end of an authored lane's heading, crossing the gap to the next authored lane. The Loops whose trigger matches one of the lane's Tasks sit before it in 12px, with `paused` after a paused one: blue if one of them has a queued or running Run on the lane's Tasks, peach if their open Runs all wait, otherwise subtext0 with the arrow in overlay0. Without such a Loop, the arrow stands alone in overlay0. A collapsed lane has no arrow.
 
 ### Desk rows
 The desk's tables follow the flat table. A row about a Run opens its Run page; a row that names no Run opens nothing. A cell holds the Item as its number in 12px mono subtext0 and its title in 13px medium, truncated; rows that hold more than one line align to the top. A connectivity warning sits under the Item in 12px yellow with a filled warning icon, the harness's message under it. Not moving gives the reason as one 13px sentence and the one action that applies as a ghost button in subtext0. The Workers line closes the desk under a hairline: `Workers` in 12px medium text colour, then each Worker's name in mono, its slots in use, and its last preflight as a state dot and words, red when it failed.

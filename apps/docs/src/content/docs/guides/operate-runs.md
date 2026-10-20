@@ -38,6 +38,17 @@ A change to the Item, such as a new label or comment, is a new state, and the Lo
 
 The sidebar lists the Projects. Opening one shows its Board, where each lane names the labels and Item states that route Items to it, and each card is a task: an issue and the pull requests linked to it. While a task has an open Run, or a `Failed` Run you have not resolved, its card shows that Run's Loop, state, time, and Agent, so you can see when the Run is `Waiting` for your approval or `Queued` for a free Worker. The time counts from when the Run opened, from when its current Attempt started while it is `Running`, and from the failure once it is `Failed`; hover it for the full timestamp. The card's menu button lists only what applies: it opens the task's Items on GitHub and its Run, lists the task's other Runs under **Run history**, approves, retries, or cancels the Run when its state allows, and moves the card to another lane under **Move to**. The Board lists Runs without an Item, such as schedule Runs, below the lanes under **Runs without a card**.
 
+A card whose task is on the desk's **Not moving** list says why in one line, with the same sentence as the desk, and shows the one action that moves it again, such as **Run again** for a Run that was canceled on an Item that has not changed since. A `Failed` Run keeps its failure note with **Retry**; for an Agent's question or blocker, the note offers **Mark answered** or **Mark resolved** instead.
+
+The arrow between two authored label lanes names the Loops whose `if:` matches a task in the left lane now, whether or not they have a Run there, with `paused` after a paused Loop. It is blue while one of those Loops has a `Queued` or `Running` Run on the lane's tasks, and orange while their open Runs all wait for your approval. An arrow without a name means no Loop picks up work from that lane.
+
+A lane without a task collapses to a narrow column with its name, its count, and its labels. Dragging a card over it widens it, and you can drop the card there as in any lane.
+
+The header keeps three filters, all off when you open the Board:
+
+- **Show all Items** brings back the tasks that no Loop can act on, such as dependabot pull requests when your Loops select by labels those pull requests never carry. While it is off, the Board shows a task only when a Loop's `if:` matches one of its Items now, its current Item carries a label of an authored lane, one of its Runs is open, it needs you, or you are moving it. The heading counts the tasks it hides.
+- **Done** and **Unmapped**, each with its count, show the lane of closed Items and the lane of Items no lane routes, after the other lanes. They show every task they hold, so **Unmapped** is where you find an issue to drag into a lane.
+
 Clicking a card opens its task page at `/projects/<owner>/<name>/tasks/<number>`, whether or not the task has a Run. The number is the task's originating issue, or its first pull request when it has no issue; the number of any of its Items opens the same page. The page shows:
 
 - a header with the issue's number, which links to GitHub, its title, the state of the Item that places the task in its lane, the lane, that Item's labels, and **Move to**, which moves the card as on the Board;

@@ -8,6 +8,7 @@ import {
 } from "@usine/config/board";
 import type { ManagedRepo } from "@usine/config/factory";
 import { ItemKey } from "@usine/core/item";
+import type { LoopName } from "@usine/core/loop";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { ItemLabelMutation } from "@usine/github/item-writer";
 import { Effect, Result } from "effect";
@@ -88,6 +89,12 @@ const laneFor = (
     ? stateLaneFor(item, lanes)
     : (labelLaneFor(item, lanes) ?? stateLaneFor(item, lanes));
 
+/**
+ * Groups the repository's stored Items into Task cards and the cards into lanes.
+ * `cycleBlockedItems` mark their Tasks as needing the operator; `itemLoops` names, per
+ * Item, the Loops whose trigger matches it now, and a Task carries those of its Items.
+ * Callers that read only lanes and membership leave both empty.
+ */
 export const projectBoard = Effect.fn("Board.project")(
   (
     repository: ManagedRepo,
@@ -95,6 +102,7 @@ export const projectBoard = Effect.fn("Board.project")(
     storedItems: ReadonlyArray<ItemProjection>,
     runs: ReadonlyArray<RunView>,
     cycleBlockedItems: ReadonlyArray<ItemKey> = [],
+    itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>> = new Map(),
   ): Effect.Effect<BoardView> =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ repository: repository.name });
@@ -117,12 +125,13 @@ export const projectBoard = Effect.fn("Board.project")(
         });
       }
       const lanes = effectiveLanes(repository, repositoryLabels);
-      const cards = taskCards(repository.name, items, runs, cycleBlockedItems);
+      const cards = taskCards(repository.name, items, runs, cycleBlockedItems, itemLoops);
       yield* Effect.logDebug("Projected Task cards from linked Items", {
         repository: repository.name,
         items: items.length,
         tasks: cards.length,
         runs: runs.length,
+        watchedTasks: cards.filter(({ loops }) => loops.length > 0).length,
       });
       const grouped = new Map<BoardLaneId, Array<BoardTaskView>>();
       for (const definition of lanes) grouped.set(laneId(definition), []);

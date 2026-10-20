@@ -1,4 +1,5 @@
 import { ItemKey, ItemNumber } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { GitHubLabelName } from "@usine/config/label";
 import { LaneItemState, LaneName, LaneSource } from "@usine/config/board";
@@ -37,6 +38,12 @@ export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestra
     needsYou: Schema.Boolean,
     /** The current Item is an open pull request whose branch conflicts with its base. */
     conflicting: Schema.Boolean,
+    /**
+     * The Loops whose trigger matches one of the Task's Items now, as the poll evaluates
+     * it, paused Loops included: in the order of the Task's Items, then of the instance's
+     * Loops. Empty when no Loop's trigger matches the Task as it is.
+     */
+    loops: Schema.Array(LoopName),
   },
 ) {}
 

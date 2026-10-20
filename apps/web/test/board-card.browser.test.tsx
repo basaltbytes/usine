@@ -10,7 +10,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { ProjectBoard } from "../src/board/board.tsx";
 import { timestampLabel } from "../src/operator-copy.ts";
 import { overviewQuery } from "../src/overview.ts";
-import { boardOverview } from "./board-fixture.ts";
+import { boardOverview, boardStalled } from "./board-fixture.ts";
 import { memoryRouter } from "./memory-router.tsx";
 import "../src/index.css";
 
@@ -31,12 +31,21 @@ const Board = () => {
   const { data } = useSuspenseQuery(overviewQuery());
   const project = data.projects[0];
   if (project === undefined) return null;
-  return <ProjectBoard project={project} disabled={false} openRun={(id) => opened.push(id)} />;
+  return (
+    <ProjectBoard
+      project={project}
+      loops={data.loops}
+      stalled={boardStalled()}
+      disabled={false}
+      openRun={(id) => opened.push(id)}
+    />
+  );
 };
 
 const lane = (name: string) => page.getByLabelText(`${name} lane`);
-/** Done holds only closed Items, so it opens folded into a rail. */
-const openDone = () => lane("Done").getByRole("button", { name: "Done 1" }).click();
+const filters = () => page.getByRole("group", { name: "Board filters" });
+/** Done holds only closed Items, so it waits behind its header toggle. */
+const openDone = () => filters().getByRole("button", { name: "Done 1" }).click();
 const actions = (number: number) =>
   page.getByRole("button", { name: `Actions for issue #${number}`, exact: true });
 const cardOf = (title: RegExp) => {
@@ -114,24 +123,77 @@ it("heads each lane with the labels in their GitHub colors and the Item states t
   expect(closed.classList).toContain("text-muted-foreground");
 });
 
-it("puts the lanes that accept moves first and folds the lane of closed Items into a rail", async () => {
-  const names = [...document.querySelectorAll("section[aria-label$=' lane']")].map((section) =>
+const laneNames = () =>
+  [...document.querySelectorAll("section[aria-label$=' lane']")].map((section) =>
     section.getAttribute("aria-label"),
   );
-  expect(names).toEqual([
+
+it("puts the lanes that accept moves first and keeps Done and Unmapped behind header toggles with their counts", async () => {
+  expect(laneNames()).toEqual([
     "Backlog lane",
     "Ready lane",
     "In progress lane",
     "Review lane",
-    "Done lane",
+    "Merge lane",
+    "Pull requests lane",
   ]);
-  const rail = lane("Done").getByRole("button", { name: "Done 1" });
-  await expect.element(rail).toHaveAttribute("aria-expanded", "false");
-  expect(lane("Done").element().getBoundingClientRect().width).toBeLessThanOrEqual(40);
+  const done = filters().getByRole("button", { name: "Done 1" });
+  const unmapped = filters().getByRole("button", { name: "Unmapped 1" });
+  await expect.element(done).toHaveAttribute("aria-pressed", "false");
+  await expect.element(unmapped).toHaveAttribute("aria-pressed", "false");
   await openDone();
+  await expect.element(done).toHaveAttribute("aria-pressed", "true");
   await expect.element(lane("Done").getByText(/^Show the salvage branch/u)).toBeVisible();
-  await lane("Done").getByRole("button", { name: "Fold Done", exact: true }).click();
-  await expect.element(lane("Done").getByRole("button", { name: "Done 1" })).toBeVisible();
+  // Unmapped exists to show what no lane routes, so it shows its Tasks no Loop can match.
+  await unmapped.click();
+  await expect.element(lane("Unmapped").getByText(/^Investigate the reader/u)).toBeVisible();
+  expect(laneNames().slice(-2)).toEqual(["Done lane", "Unmapped lane"]);
+  await done.click();
+  await expect.element(lane("Done")).not.toBeInTheDocument();
+});
+
+it("hides the Items no Loop can match until Show all Items, and keeps one with an open Run", async () => {
+  const pullRequests = lane("Pull requests");
+  await expect.element(pullRequests.getByText(/^Pin the Node version/u)).toBeVisible();
+  await expect.element(pullRequests.getByText(/^Bump vite/u)).not.toBeInTheDocument();
+  await expect.element(page.getByText("6 lanes, 7 items, 1 hidden")).toBeVisible();
+  const showAll = filters().getByRole("button", { name: "Show all Items" });
+  await showAll.click();
+  await expect.element(showAll).toHaveAttribute("aria-pressed", "true");
+  await expect.element(pullRequests.getByText(/^Bump vite/u)).toBeVisible();
+  await expect.element(page.getByText("6 lanes, 8 items", { exact: true })).toBeVisible();
+});
+
+it("collapses an empty lane to a narrow column with its name, count, and label, and widens it under a drag", async () => {
+  const merge = lane("Merge");
+  expect(merge.element().getBoundingClientRect().width).toBeLessThanOrEqual(40);
+  await expect.element(merge.getByRole("heading", { name: "Merge 0" })).toBeVisible();
+  await expect.element(merge.getByText("ready-to-merge", { exact: true })).toBeVisible();
+  const card = cardOf(/^Pin GitHub Actions/u);
+  card.focus();
+  await userEvent.keyboard(" ");
+  await userEvent.keyboard("{ArrowRight}");
+  await expect.poll(() => merge.element().getBoundingClientRect().width).toBeGreaterThan(100);
+  await userEvent.keyboard("{Escape}");
+  await expect.poll(() => merge.element().getBoundingClientRect().width).toBeLessThanOrEqual(40);
+});
+
+it("names why a card is not moving, as the desk does, with the one action that moves it again", async () => {
+  const canceled = page.elementLocator(cardOf(/^Cache the label catalog/u));
+  const note = canceled.element().querySelector("[data-slot=stall-note]");
+  expect(note?.textContent).toMatch(
+    /^implement Its Run was canceled \d+h ago and the Item has not changed since, so no Run opens\.Run again$/u,
+  );
+  await expect.element(canceled.getByRole("button", { name: "Run again" })).toBeVisible();
+  // The Run line already names the Loop of a waiting Run.
+  const waiting = page.elementLocator(cardOf(/^Retry salvage/u));
+  expect(waiting.element().querySelector("[data-slot=stall-note] p")?.textContent).toBe(
+    "Its Run waits for your approval.",
+  );
+  await expect.element(waiting.getByRole("button", { name: "Approve" })).toBeVisible();
+  // A failed Run keeps its failure note and Retry, without a second note.
+  const failed = cardOf(/^Pin GitHub Actions/u);
+  expect(failed.querySelector("[data-slot=stall-note]")).toBeNull();
 });
 
 it("shows a card's menu button on hover or focus and while its menu is open", async () => {
@@ -223,23 +285,29 @@ it("offers Retry beside the failure only on the card whose Run failed", async ()
   expect(page.getByRole("button", { name: "Retry", exact: true }).elements()).toHaveLength(1);
 });
 
-it("draws the flow between adjacent authored label lanes, named after the Loops at work", async () => {
+it("draws the flow between adjacent authored label lanes, named after the Loops that watch the left one", async () => {
   const flow = (name: string) => lane(name).element().querySelector("[data-slot=flow-arrow]");
   expect(flow("Backlog")?.textContent).toBe("Flows to Ready");
   expect(flow("Ready")?.textContent).toBe("Flows to In progressimplement");
   expect(flow("Ready")?.classList).toContain("text-run-waiting");
-  expect(flow("In progress")?.textContent).toBe("Flows to Reviewimplement");
-  expect(flow("In progress")?.classList).toContain("text-run-active");
-  // Done is read-only, so Review has no next bay to flow into.
-  expect(flow("Review")).toBeNull();
-  expect(flow("Done")).toBeNull();
+  // implement runs on the Task, but its trigger no longer matches it, so it watches no Item there.
+  expect(flow("In progress")?.textContent).toBe("Flows to Review");
+  expect(flow("Review")?.textContent).toBe("Flows to Mergereview paused");
+  expect(flow("Review")?.classList).toContain("text-muted-foreground");
+  expect(flow("Review")?.getAttribute("title")).toBe(
+    "Watching this lane: review (paused). Flows to Merge.",
+  );
+  // Merge is empty and Pull requests read-only, so neither has a next bay to flow into.
+  expect(flow("Merge")).toBeNull();
+  expect(flow("Pull requests")).toBeNull();
 });
 
 it("leaves canceled and succeeded Runs off the card", async () => {
   await openDone();
   for (const card of [cardOf(/^Cache the label catalog/u), cardOf(/^Show the salvage branch/u)]) {
     expect(card.querySelector("time")).toBeNull();
-    expect(card.textContent).not.toMatch(/Canceled|Succeeded|implement/u);
+    expect(card.querySelector("[data-slot=state-mark]")).toBeNull();
+    expect(card.textContent).not.toMatch(/Canceled|Succeeded/u);
   }
 });
 
@@ -289,7 +357,7 @@ it("lists the current Run's applicable actions and moves the card through Move t
   const destinations = page.getByRole("menu").last().getByRole("menuitem");
   await expect
     .poll(() => destinations.elements().map((item) => item.textContent))
-    .toEqual(["Backlog", "In progress", "Review"]);
+    .toEqual(["Backlog", "In progress", "Review", "Merge"]);
   await page.getByRole("menuitem", { name: "In progress", exact: true }).click();
   await expect.element(page.getByRole("menu")).not.toBeInTheDocument();
   await expect.element(lane("In progress").getByText(/^Retry salvage/u)).toBeVisible();
@@ -327,7 +395,7 @@ it("tints only the column a keyboard drag is over", async () => {
   await userEvent.keyboard(" ");
   await userEvent.keyboard("{ArrowRight}");
   const tinted = () =>
-    ["Backlog", "Ready", "In progress", "Review", "Done"].filter((name) =>
+    ["Backlog", "Ready", "In progress", "Review", "Merge", "Pull requests"].filter((name) =>
       lane(name).element().classList.contains("bg-muted/40"),
     );
   await expect.poll(tinted).toEqual(["In progress"]);

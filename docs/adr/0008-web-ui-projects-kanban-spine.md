@@ -18,3 +18,13 @@ The UI's spine is the work, not the machinery. Home lists the factory's Projects
 - Proposed lanes are read-only. Only an authored lane map identifies which labels the Board may exchange; repository labels such as `bug` or `documentation` cannot safely be inferred as workflow state. Cards expose moves only when another authored label-backed lane is available, and the server rejects proposed-lane destinations. Authored moves preserve labels outside their map. To enable moves, configure `repos[].lanes` in `usine.yaml` and restart the orchestrator. This settles the write behavior raised in [#76](https://github.com/basaltbytes/usine/issues/76).
 - **Project** enters the glossary as the operator-facing term (a managed repo plus its board and factory activity); *managed repo* remains the registry-level mechanism.
 - The validated prototype (structure only — its visual language was explicitly rejected; the UI's look is a separate prototype ticket) lives on the `prototype/v1-web-ui` branch.
+
+## 2026-10-20: the Board hides what no Loop acts on
+
+The audit of 2026-10-20 found the Board built around everything GitHub holds. Five of nine lanes were empty columns the operator scrolled past, Done and Unmapped held 232 cards, dependabot pull requests filled the Pull requests lane, and nothing said why seven Items in Ready had no Run. The Board now shows the lanes and Tasks the factory acts on, and puts the others behind header toggles.
+
+- A lane without a Task collapses to a narrow column with its name, count, and labels, and widens under a drag to take the drop.
+- The fallback lane and every lane that holds only closed Items leave the lane row for toggles in the header, off by default, with their counts. Toggled on, they come back as lanes at the end of the row, so a card in Unmapped can still be dragged into an authored lane.
+- A Task no Loop can match is hidden until **Show all Items**: no Loop's trigger matches one of its Items now, its current Item carries no label an authored lane uses, it has no open Run, and nothing about it waits in Needs you. The orchestrator evaluates the triggers with `LoopMatches`, the evaluation the poll runs, so the Board and the poll cannot disagree about a match.
+- The arrow between two authored lanes names the Loops whose trigger matches a Task of the left lane, with or without an open Run ([#345](https://github.com/basaltbytes/usine/issues/345)), since an arrow that names only Loops at work is blank whenever nothing runs.
+- A card on the desk's Not moving list carries the desk's reason and action. The Board reads the desk view for it instead of computing reasons a second time.
