@@ -22,12 +22,12 @@ import {
   Order,
   Ref,
   Schema,
+  Semaphore,
   TxPriorityQueue,
   TxRef,
 } from "effect";
 import {
   agentsWithNewBrains,
-  changedWorkerSettings,
   type RestartChange,
   type WorkersChange,
   workersChange,
@@ -161,16 +161,36 @@ const brainLabel = ({ harness, model, effort }: BrainSpec) => `${harness}/${mode
 const EXE_DEV_BOT_LOGIN = BotLogin.make("exe-dev-github-integration[bot]");
 const decodeBotLogin = Schema.decodeUnknownOption(BotLogin);
 
+/**
+ * How an executor that reaches only the Workers it was given, as the SSH
+ * executor does, gains and drops Workers after it starts.
+ */
+export interface ExecutorWorkers {
+  /**
+   * Gives the executor `worker`, which a reload adds, before its preflight.
+   * A failure refuses the reload with `ReloadPreflightError`.
+   */
+  readonly add: (worker: ConfigWorker) => Effect.Effect<void, ExecutorError>;
+  /**
+   * Takes `worker` away once no Attempt runs on it: a Worker a reload
+   * removed, after its last Attempt ended, or a Worker the reload added that
+   * its preflight refused.
+   */
+  readonly remove: (worker: WorkerName) => Effect.Effect<void>;
+}
+
 /** How the executor a `stepExecutorLayer` drives takes Workers after startup. */
 export interface StepExecutorOptions {
   /**
-   * The executor runs only the Workers of `config`, as the SSH executor does,
-   * which sets up each Worker's machine and Gateway forward when its layer
-   * builds. A reload can then resize or remove those Workers and add one back
-   * with the settings it started with, but refuses any other new Worker.
+   * The executor's own Worker set, which the scheduler changes with each
+   * reload. Without it, the executor runs any Worker of its kind by name, as
+   * the local executor does.
    */
-  readonly startupWorkersOnly?: boolean;
+  readonly workers?: ExecutorWorkers;
 }
+
+/** An executor that runs any Worker of its kind by name, so it has no Worker set to change. */
+const anyWorker: ExecutorWorkers = { add: () => Effect.void, remove: () => Effect.void };
 
 /**
  * Schedules Attempts FIFO over the Workers and adapts the Executor to the
@@ -179,9 +199,11 @@ export interface StepExecutorOptions {
  * and registers with the current instance, so a reload can resize, add, and
  * remove Workers. A reload preflights each Worker it adds or gives more slots
  * with every rostered brain, and each other Worker with the brains it adds,
- * before anything changes. A Worker with more running Attempts than slots
- * takes no new Attempt, and each extra slot retires when its Attempt ends; a
- * removed Worker leaves the scheduler when its last Attempt ends. Each Attempt
+ * before anything changes. With `options.workers`, a Worker the reload adds
+ * joins the executor before its preflight and leaves it again when the reload
+ * is refused. A Worker with more running Attempts than slots takes no new
+ * Attempt, and each extra slot retires when its Attempt ends; a removed Worker
+ * leaves the scheduler, and the executor, when its last Attempt ends. Each Attempt
  * reads its `settings` (child budget, ceilings, parent effort) from the
  * current instance, and gets the bot login it writes to GitHub as: exe.dev's
  * integration bot on exe.dev Workers, the App's bot from `GitHubApp` on the
@@ -207,6 +229,10 @@ export const stepExecutorLayer = (
       const pending = yield* TxPriorityQueue.empty(reservationOrder);
       const nextOrder = yield* Ref.make(0);
       const preflights = yield* Ref.make(new Map<WorkerName, WorkerPreflight>());
+      const executorWorkers = options.workers ?? anyWorker;
+      // Taken by every change to the executor's Workers, so a removal never undoes an addition.
+      const membership = yield* Semaphore.make(1);
+      const adding = yield* Ref.make<ReadonlySet<WorkerName>>(new Set());
 
       const recordPreflightExit = Effect.fn("WorkerScheduler.recordPreflight")(function* (
         worker: WorkerName,
@@ -225,32 +251,52 @@ export const stepExecutorLayer = (
         );
       });
 
-      const preflightWorker = (worker: ConfigWorker, roster: ReadonlyArray<BrainSpec>) =>
-        executor.preflight(worker.name, roster, worker.maxConcurrentAttempts).pipe(
+      /** Runs `before`, then the Worker's preflight, and records the outcome of both as its preflight. */
+      const preflightWorker = (
+        worker: ConfigWorker,
+        roster: ReadonlyArray<BrainSpec>,
+        before: Effect.Effect<void, ExecutorError> = Effect.void,
+      ) =>
+        before.pipe(
+          Effect.andThen(executor.preflight(worker.name, roster, worker.maxConcurrentAttempts)),
           Effect.mapError(namingWorker(worker.name)),
           Effect.onExit((exit) => recordPreflightExit(worker.name, roster, exit)),
         );
 
-      const unservedChange = (worker: ConfigWorker): Option.Option<RestartChange> => {
-        if (worker.kind !== executor.kind) {
-          return Option.some({
-            block: "workers",
-            field: `workers.${worker.name}.kind`,
-            reason: `Worker ${worker.name} is ${worker.kind}, and the running Workers are ${executor.kind}`,
-          });
+      /** Takes `worker` away from the executor unless the scheduler has it or a reload is adding it; callers hold `membership`. */
+      const removeUnused = Effect.fn("WorkerScheduler.removeFromExecutor")(function* (
+        worker: WorkerName,
+      ) {
+        yield* Effect.annotateCurrentSpan({ worker });
+        const scheduled = (yield* TxRef.get(pool)).has(worker);
+        const added = (yield* Ref.get(adding)).has(worker);
+        if (scheduled || added) {
+          yield* Effect.logDebug(
+            "The Worker stays with the executor, because the scheduler has it or a reload is adding it",
+            { worker, scheduled, added },
+          );
+          return;
         }
-        const started = config.workers.some(
-          (startup) =>
-            startup.name === worker.name && changedWorkerSettings(startup, worker).length === 0,
+        yield* executorWorkers.remove(worker);
+      });
+
+      /** Ends a reload's addition of `added`, and takes away each one the scheduler does not have. */
+      const settleAdded = (added: ReadonlySet<WorkerName>, removed: ReadonlyArray<WorkerName>) =>
+        membership.withPermit(
+          Ref.update(
+            adding,
+            (current) => new Set([...current].filter((name) => !added.has(name))),
+          ).pipe(Effect.andThen(Effect.forEach(removed, removeUnused, { discard: true }))),
         );
-        return options.startupWorkersOnly === true && !started
-          ? Option.some({
+
+      const unservedChange = (worker: ConfigWorker): Option.Option<RestartChange> =>
+        worker.kind === executor.kind
+          ? Option.none()
+          : Option.some({
               block: "workers",
-              field: `workers.${worker.name}`,
-              reason: `Worker ${worker.name} is new, and the ${executor.kind} executor runs only the Workers usine up started with`,
-            })
-          : Option.none();
-      };
+              field: `workers.${worker.name}.kind`,
+              reason: `Worker ${worker.name} is ${worker.kind}, and the running Workers are ${executor.kind}`,
+            });
 
       const applyWorkers = Effect.fn("WorkerScheduler.applyWorkers")(function* (
         change: WorkersChange,
@@ -285,6 +331,10 @@ export const stepExecutorLayer = (
                 "Worker removed by a reload; it takes no new Attempt, and its running Attempts finish",
                 { worker: name, running: running(name) },
               ),
+        );
+        yield* settleAdded(
+          new Set(change.added.map(({ name }) => name)),
+          change.removed.map(({ name }) => name),
         );
       });
 
@@ -322,19 +372,31 @@ export const stepExecutorLayer = (
           yield* Effect.logDebug(
             "The reload adds no Worker, slot, or brain, so it runs no Worker preflight",
           );
-        } else {
-          yield* Effect.logInfo("Preflighting the Workers, slots, and brains the reload adds", {
-            agents: agentNames,
-            brains: newBrains.map(brainLabel),
-            workers: [...wholeRoster],
-          });
-          yield* Effect.forEach(checks, ({ worker, brains }) => preflightWorker(worker, brains), {
-            concurrency: "unbounded",
-            discard: true,
-          }).pipe(
-            Effect.mapError((cause) => reloadPreflightFailed(agentNames, [...wholeRoster], cause)),
-          );
+          return applyWorkers(change, loaded.config.workers);
         }
+        const added = new Set(change.added.map(({ name }) => name));
+        yield* membership.withPermit(
+          Ref.update(adding, (current) => new Set([...current, ...added])),
+        );
+        yield* Effect.logInfo("Preflighting the Workers, slots, and brains the reload adds", {
+          agents: agentNames,
+          brains: newBrains.map(brainLabel),
+          workers: [...wholeRoster],
+        });
+        // An added Worker joins the executor first, so its preflight reaches its machine.
+        yield* Effect.forEach(
+          checks,
+          ({ worker, brains }) =>
+            added.has(worker.name)
+              ? preflightWorker(worker, brains, executorWorkers.add(worker))
+              : preflightWorker(worker, brains),
+          { concurrency: "unbounded", discard: true },
+        ).pipe(
+          Effect.mapError((cause) => reloadPreflightFailed(agentNames, [...wholeRoster], cause)),
+          Effect.onExit((exit) =>
+            Exit.isFailure(exit) ? settleAdded(added, [...added]) : Effect.void,
+          ),
+        );
         return applyWorkers(change, loaded.config.workers);
       });
 
@@ -364,7 +426,7 @@ export const stepExecutorLayer = (
                 Effect.logInfo(
                   "The last Attempt on a removed Worker ended; the Worker leaves the scheduler",
                   { worker },
-                ),
+                ).pipe(Effect.andThen(membership.withPermit(removeUnused(worker)))),
             }),
           ),
         );

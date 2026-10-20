@@ -188,45 +188,47 @@ export class CurrentInstance extends Context.Service<
           return Effect.void;
         });
 
-        const reload = Effect.gen(function* () {
-          const running = yield* SubscriptionRef.get(current);
-          const loaded = yield* folder.load(directory);
-          const workers = yield* Ref.get(registered);
-          const restart = restartChanges(running, loaded, Option.isSome(workers));
-          if (EffectArray.isReadonlyArrayNonEmpty(restart)) {
-            return yield* restartRequired(restart);
-          }
-          const applyWorkers = Option.isSome(workers)
-            ? yield* workers.value(running, loaded)
-            : yield* beforeWorkersStart(running, loaded);
-          const changes = instanceReload(running, loaded);
-          yield* SubscriptionRef.set(current, loaded).pipe(
-            Effect.andThen(applyWorkers),
-            Effect.uninterruptible,
-          );
-          yield* Effect.logInfo("Instance folder reloaded; new Runs use the new configuration", {
-            loopsAdded: changes.loops.added,
-            loopsRemoved: changes.loops.removed,
-            loopsChanged: changes.loops.changed,
-            agentsAdded: changes.agents.added,
-            agentsRemoved: changes.agents.removed,
-            agentsChanged: changes.agents.changed,
-            labelsAdded: changes.labels.added,
-            labelsRemoved: changes.labels.removed,
-            labelsChanged: changes.labels.changed,
-            reposAdded: changes.repos.added,
-            reposRemoved: changes.repos.removed,
-            reposChanged: changes.repos.changed,
-            workersAdded: changes.workers.added,
-            workersRemoved: changes.workers.removed,
-            workersChanged: changes.workers.changed,
-            settingsChanged: changes.settingsChanged,
-            operatorChanged: changes.operatorChanged,
-            quarantinedLoops: changes.quarantinedLoops.map(({ file }) => file),
-            invalidAgents: changes.invalidAgents.map(({ file }) => file),
-          });
-          return changes;
-        }).pipe(
+        // Once the Workers have prepared the reload, it runs to the end, so what they added is applied.
+        const reload = Effect.uninterruptibleMask((restore) =>
+          Effect.gen(function* () {
+            const running = yield* SubscriptionRef.get(current);
+            const loaded = yield* restore(folder.load(directory));
+            const workers = yield* Ref.get(registered);
+            const restart = restartChanges(running, loaded, Option.isSome(workers));
+            if (EffectArray.isReadonlyArrayNonEmpty(restart)) {
+              return yield* restartRequired(restart);
+            }
+            const applyWorkers = yield* restore(
+              Option.isSome(workers)
+                ? workers.value(running, loaded)
+                : beforeWorkersStart(running, loaded),
+            );
+            const changes = instanceReload(running, loaded);
+            yield* SubscriptionRef.set(current, loaded).pipe(Effect.andThen(applyWorkers));
+            yield* Effect.logInfo("Instance folder reloaded; new Runs use the new configuration", {
+              loopsAdded: changes.loops.added,
+              loopsRemoved: changes.loops.removed,
+              loopsChanged: changes.loops.changed,
+              agentsAdded: changes.agents.added,
+              agentsRemoved: changes.agents.removed,
+              agentsChanged: changes.agents.changed,
+              labelsAdded: changes.labels.added,
+              labelsRemoved: changes.labels.removed,
+              labelsChanged: changes.labels.changed,
+              reposAdded: changes.repos.added,
+              reposRemoved: changes.repos.removed,
+              reposChanged: changes.repos.changed,
+              workersAdded: changes.workers.added,
+              workersRemoved: changes.workers.removed,
+              workersChanged: changes.workers.changed,
+              settingsChanged: changes.settingsChanged,
+              operatorChanged: changes.operatorChanged,
+              quarantinedLoops: changes.quarantinedLoops.map(({ file }) => file),
+              invalidAgents: changes.invalidAgents.map(({ file }) => file),
+            });
+            return changes;
+          }),
+        ).pipe(
           Effect.tapError((error) =>
             Effect.logWarning(
               "Instance folder reload rejected; the running configuration is unchanged",

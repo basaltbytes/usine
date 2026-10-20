@@ -3,6 +3,7 @@ import {
   GatewayDomain,
   type GatewayLlmProvider,
   SshDestination,
+  type WorkerName,
 } from "@usine/core/worker";
 import {
   AdminToken,
@@ -38,17 +39,22 @@ const GATEWAY = SshDestination.make("usine-gateway");
  * The test Worker's address behind the Gateway at `gw.test`, presenting
  * `adminToken`. The Gateway holds the Anthropic credential unless
  * `llmProviders` says otherwise, since the test agent's brain is Claude Code.
+ * `name` and `gateway` give another Worker, or the same Gateway reached
+ * through another SSH destination.
  */
 export const gatewayAddress = (
   options: {
     readonly llmProviders?: ReadonlyArray<GatewayLlmProvider>;
     readonly adminToken?: string;
+    readonly name?: WorkerName;
+    readonly gateway?: SshDestination;
   } = {},
 ): SshWorkerAddress => ({
   ...ADDRESS,
+  name: options.name ?? ADDRESS.name,
   gateway: Option.some({
     domain: DOMAIN,
-    destination: GATEWAY,
+    destination: options.gateway ?? GATEWAY,
     adminPort: GatewayAdminPort.make(7070),
     adminToken: Redacted.make(options.adminToken ?? ADMIN_TOKEN),
     llmProviders: options.llmProviders ?? ["anthropic"],

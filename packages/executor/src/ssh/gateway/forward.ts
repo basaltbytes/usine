@@ -41,9 +41,9 @@ export class GatewayForwardClosed extends Schema.TaggedError<GatewayForwardClose
 
 /**
  * The executor's own SSH forward from a local port to one Gateway's admin
- * API (ADR 0027, amendment of 2026-10-19). It opens when the executor's
- * layer is built, reopens after a pause whenever its SSH client exits, and
- * closes with the layer.
+ * API (ADR 0027, amendment of 2026-10-19). It opens with the first Worker
+ * behind the Gateway, reopens after a pause whenever its SSH client exits,
+ * and closes with the last Worker behind the Gateway or with the executor.
  */
 export interface GatewayForward {
   /** The Gateway's SSH destination, which names it in logs and messages. */
@@ -345,7 +345,7 @@ export const gatewayForwardFor = Effect.fn("SshExecutor.gatewayForwardFor")(func
   });
   yield* supervise.pipe(
     Effect.onInterrupt(() =>
-      Effect.logInfo("Closed the forward to the Gateway's admin API with the executor", fields),
+      Effect.logInfo("Closed the forward to the Gateway's admin API", fields),
     ),
     Effect.forkScoped,
   );
