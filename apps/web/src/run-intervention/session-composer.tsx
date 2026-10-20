@@ -99,7 +99,7 @@ export const SessionComposer = ({
       </div>
       <p className="text-xs text-muted-foreground">
         {child
-          ? "After a message, the child stays open. Release it to return the result to the parent"
+          ? "Session stays open after a message. Release to return the result to the parent"
           : "After answering a message, the parent is held. Release it to continue the task"}
       </p>
       {mutation.isError && <ErrorAlert message={mutation.error.message} />}

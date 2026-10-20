@@ -1,6 +1,6 @@
 import { CaretRightIcon, TerminalWindowIcon } from "@phosphor-icons/react";
 import type { AttemptId } from "@usine/core/attempt";
-import type { RunView } from "@usine/orchestrator/operator";
+import type { AttemptView, RunView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { StateMark } from "@/components/status-badge";
@@ -82,7 +82,13 @@ const sessionStatus = (
 const sessionName = (session: TranscriptSession) =>
   session.session._tag === "ParentSession" ? "Parent" : session.session.agent;
 
-const ResumeDetails = ({ session }: { readonly session: TranscriptSession }) => (
+const ResumeDetails = ({
+  session,
+  attempt,
+}: {
+  readonly session: TranscriptSession;
+  readonly attempt: AttemptView;
+}) => (
   <Popover>
     <PopoverTrigger
       render={
@@ -102,7 +108,7 @@ const ResumeDetails = ({ session }: { readonly session: TranscriptSession }) => 
       align="start"
       className="w-[28rem] max-w-[calc(100vw-2rem)] p-3 shadow-raised"
     >
-      <SessionHandoff session={session} />
+      <SessionHandoff session={session} attempt={attempt} />
     </PopoverContent>
   </Popover>
 );
@@ -302,7 +308,9 @@ const ChapterTree = ({
                 </span>
               )}
             </button>
-            {session.session._tag === "ChildSession" && <ResumeDetails session={session} />}
+            {session.session._tag === "ChildSession" && Option.isSome(chapter.attempt) && (
+              <ResumeDetails session={session} attempt={chapter.attempt.value} />
+            )}
           </div>
         </div>
       );
