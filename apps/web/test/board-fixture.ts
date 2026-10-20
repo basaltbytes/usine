@@ -2,6 +2,7 @@ import { LabelLaneSource, LaneName, StateLaneSource } from "@usine/config/board"
 import { GitHubLabelName } from "@usine/config/label";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
+import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -22,6 +23,7 @@ import {
   FailedAttemptView,
   LabelView,
   LoopView,
+  PoolUsageView,
   ProjectView,
   ReadOnlyBoardLaneView,
   ReadyOverview,
@@ -29,6 +31,8 @@ import {
   RunView,
   StalledItemView,
   SucceededAttemptView,
+  TaskUsageView,
+  UsageCostView,
   WritableBoardLaneView,
   LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
@@ -75,6 +79,10 @@ const attempt = (
     salvage: null,
   });
 
+const isClosed = (state: RunView["state"]) =>
+  state === "Succeeded" || state === "Failed" || state === "Canceled";
+
+/** A Run opened `minutes` ago; a closed one closed when its last Attempt ended, else when it opened. */
 const run = (
   id: string,
   item: BoardItemLink,
@@ -92,6 +100,7 @@ const run = (
     state,
     loopPaused: loop === "review",
     openedAt: minutesAgo(minutes),
+    closedAt: isClosed(state) ? (attempts.at(-1)?.endedAt ?? minutesAgo(minutes)) : null,
     task: `Work on #${item.number}.`,
     attempts,
     approval: null,
@@ -105,6 +114,53 @@ const run = (
     canRunAgain: state === "Succeeded" || state === "Canceled",
   });
 
+/** What one billing pool drew: its tokens, and its dollars when it has a price. */
+const pool = (
+  name: PoolUsageView["pool"],
+  tokens: number,
+  usd: number | null = null,
+): PoolUsageView =>
+  new PoolUsageView({
+    pool: name,
+    tokens: TokenCount.make(tokens),
+    cost:
+      usd === null
+        ? null
+        : new UsageCostView({ usd: UsdAmount.make(usd), estimate: name === "claudePlan" }),
+  });
+
+/** A Task's usage as the server adds it up: its Runs' Attempt time and the pools they drew from. */
+export const taskUsageOf = (
+  runs: ReadonlyArray<RunView>,
+  pools: ReadonlyArray<PoolUsageView> = [],
+): TaskUsageView => {
+  const attempts = runs.flatMap((candidate) => candidate.attempts);
+  const priced = pools.flatMap(({ cost }) => (cost === null ? [] : [cost]));
+  return new TaskUsageView({
+    durationMillis: attempts.reduce(
+      (sum, { startedAt, endedAt, outcome }) =>
+        outcome === null || endedAt === null
+          ? sum
+          : sum + Date.parse(endedAt) - Date.parse(startedAt),
+      0,
+    ),
+    runningSince: attempts.flatMap(({ startedAt, outcome }) =>
+      outcome === null ? [startedAt] : [],
+    ),
+    unmeasured: attempts.filter(({ endedAt, outcome }) => outcome !== null && endedAt === null)
+      .length,
+    tokens: TokenCount.make(pools.reduce((sum, { tokens }) => sum + tokens, 0)),
+    pools,
+    cost:
+      priced.length === 0
+        ? null
+        : new UsageCostView({
+            usd: UsdAmount.make(priced.reduce((sum, { usd }) => sum + usd, 0)),
+            estimate: priced.some(({ estimate }) => estimate),
+          }),
+  });
+};
+
 const task = (
   members: readonly [BoardItemLink, ...ReadonlyArray<BoardItemLink>],
   labels: ReadonlyArray<string>,
@@ -113,6 +169,8 @@ const task = (
     readonly conflicting?: boolean;
     readonly state?: BoardTaskView["state"];
     readonly loops?: ReadonlyArray<string>;
+    /** The pools the Task's Runs drew from, summed over them. */
+    readonly pools?: ReadonlyArray<PoolUsageView>;
   } = {},
 ) => {
   const current = members.at(-1) ?? members[0];
@@ -135,6 +193,7 @@ const task = (
     needsYou: runs.some((run) => run.canApprove || run.canResolveFailure),
     conflicting: extra.conflicting ?? false,
     loops: (extra.loops ?? []).map((loop) => LoopName.make(loop)),
+    usage: taskUsageOf(runs, extra.pools),
   });
 };
 
@@ -236,10 +295,22 @@ const boardProject = () =>
                 attempt(2, minutesAgo(6), "running"),
               ]),
             ],
+            // The plan Run is priced; the implement Run is on the ChatGPT plan, with no dollar rate.
+            {
+              pools: [
+                pool("apiKeys", 1_500, 0.75),
+                pool("claudePlan", 20_000, 1.25),
+                pool("chatgptPlan", 5_800),
+              ],
+            },
           ),
         ]),
         writable("Review", "review", [
-          task([pinned], ["review"], [pinnedRun], { conflicting: true, loops: ["review"] }),
+          task([pinned], ["review"], [pinnedRun], {
+            conflicting: true,
+            loops: ["review"],
+            pools: [pool("apiKeys", 12_000, 0.4)],
+          }),
         ]),
         writable("Merge", "ready-to-merge", []),
         new ReadOnlyBoardLaneView({
@@ -269,7 +340,7 @@ const boardProject = () =>
                   attempt(1, minutesAgo(2 * 1440), null, minutesAgo(2 * 1440 - 30)),
                 ]),
               ],
-              { state: "pr-merged" },
+              { state: "pr-merged", pools: [pool("claudePlan", 48_000, 3.1)] },
             ),
           ],
         }),

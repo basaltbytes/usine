@@ -125,6 +125,10 @@ export const deskFixture = (now: number) => {
       state,
       loopPaused: loop === "review-fix",
       openedAt: ago(opened),
+      closedAt:
+        state === "Succeeded" || state === "Failed" || state === "Canceled"
+          ? (attempts.at(-1)?.endedAt ?? ago(opened))
+          : null,
       task: "Implement the issue.",
       attempts,
       approval: null,

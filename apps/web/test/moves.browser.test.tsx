@@ -23,6 +23,7 @@ import { ProjectBoard } from "../src/board/board.tsx";
 import { overviewQuery } from "../src/overview.ts";
 import { WithRouter } from "./memory-router.tsx";
 import "../src/index.css";
+import { taskUsageOf } from "./board-fixture.ts";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
@@ -80,6 +81,7 @@ const overview = (
                     needsYou: false,
                     conflicting: false,
                     loops: [],
+                    usage: taskUsageOf([]),
                   }),
                 ];
               }),

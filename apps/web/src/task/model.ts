@@ -9,6 +9,7 @@ import type {
   RunView,
   StalledItemView,
   TaskItemView,
+  TaskUsageView,
 } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 
@@ -56,11 +57,12 @@ export const itemStateLine = (
   return `${itemStateLabel(item.state)} ${kind}${origin ? "" : ` #${item.number}`}`;
 };
 
-/** When a Run was last at work: its last Attempt's end, that Attempt's start while it runs or
- * when no end was recorded, or when the Run opened before any Attempt started. */
-export const runActivityAt = (run: Pick<RunView, "attempts" | "openedAt">): string => {
+/** When a Run was last at work: when it closed, even before any Attempt began; while it is open,
+ * its last Attempt's end, that Attempt's start while it runs or when no end was recorded, or when
+ * the Run opened before any Attempt started. */
+export const runActivityAt = (run: Pick<RunView, "attempts" | "openedAt" | "closedAt">): string => {
   const last = run.attempts.at(-1);
-  return last?.endedAt ?? last?.startedAt ?? run.openedAt;
+  return run.closedAt ?? last?.endedAt ?? last?.startedAt ?? run.openedAt;
 };
 
 /** The stall of a Task: the first entry of the desk's stalled list that is about one of the
@@ -101,7 +103,8 @@ type TaskStatus =
   | { readonly _tag: "Queued"; readonly run: RunView }
   /**
    * A Loop's trigger matches one of the Task's Items with no Attempt running on it, for `stall`'s
-   * reason; `run` is the Run that reason names, else the Run that is open, else the last Run.
+   * reason; `run` is the Run that reason names, the pending or queued one when one is open, else
+   * the last Run.
    */
   | { readonly _tag: "Stalled"; readonly stall: StalledItemView; readonly run: RunView }
   /** Nothing is open or stalled, and a failed Run or a hold on one of the Items waits on the
@@ -134,24 +137,29 @@ const newestIn = (
 
 /**
  * A Task's status, the first that applies: a Run at work, a Run waiting for approval, a pending or
- * queued Run with the desk's reason, Done for a merged or closed current Item, the desk's stall,
- * Needs attention, and last the outcome of `last`.
+ * queued Run with the desk's reason for that Run, Done for a merged or closed current Item, the
+ * desk's stall, Needs attention, and last the outcome of `last`. `stalled` is the desk's list.
  */
 const taskStatus = (
   task: BoardTaskView,
   last: RunView,
-  stall: StalledItemView | null,
+  stalled: ReadonlyArray<StalledItemView>,
 ): TaskStatus => {
   const running = newestIn(task.runs, "Running");
   if (running !== undefined) return { _tag: "Running", run: running };
   const waiting = newestIn(task.runs, "Waiting");
   if (waiting !== undefined) return { _tag: "AwaitingApproval", run: waiting };
   const queued = newestIn(task.runs, "Pending", "Queued");
-  if (queued !== undefined)
-    return stall === null
+  if (queued !== undefined) {
+    // The desk lists a stall per Loop and Item, and one about an older closed Run on another of
+    // the Task's Items can come first; only the reason that names the queued Run explains it.
+    const own = stalled.find((stall) => stallRun(stall)?.id === queued.id);
+    return own === undefined
       ? { _tag: "Queued", run: queued }
-      : { _tag: "Stalled", stall, run: stallRun(stall) ?? queued };
+      : { _tag: "Stalled", stall: own, run: queued };
+  }
   if (isSettledItemState(task.state)) return { _tag: "Done" };
+  const stall = taskStall(stalled, task);
   if (stall !== null) return { _tag: "Stalled", stall, run: stallRun(stall) ?? last };
   if (task.needsYou) return { _tag: "NeedsAttention" };
   return { _tag: "Ended", run: last };
@@ -160,7 +168,8 @@ const taskStatus = (
 /**
  * A row's place in the list: its group, then the time that orders it within the group, newest
  * first. In flight comes first, running, then waiting for approval, then pending, queued, and
- * stalled, each by when its Run opened; every other Task follows, by when its last Run ended.
+ * stalled, each by when its Run opened; every other Task follows, by when its last Run closed,
+ * which for a Run canceled before any Attempt is the cancel, not its opening.
  */
 const rowPlace = ({ status, last }: TaskRow): readonly [group: number, at: number] => {
   switch (status._tag) {
@@ -191,9 +200,7 @@ export const taskRows = (
     .flatMap(({ items }) => items)
     .flatMap((task) => {
       const last = task.runs.at(-1);
-      return last === undefined
-        ? []
-        : [{ task, last, status: taskStatus(task, last, taskStall(stalled, task)) }];
+      return last === undefined ? [] : [{ task, last, status: taskStatus(task, last, stalled) }];
     })
     .map((row) => ({ row, place: rowPlace(row) }))
     .sort(
@@ -216,6 +223,48 @@ export const taskCounts = (rows: ReadonlyArray<TaskRow>): string | undefined => 
   return shown.length === 0
     ? undefined
     : shown.map(([count, what]) => `${count} ${what}`).join(", ");
+};
+
+/**
+ * A Task's Attempt time at `now`: its ended Attempts' time, and each Attempt at work counted from
+ * its start up to `now`.
+ */
+export const taskDuration = (
+  usage: Pick<TaskUsageView, "durationMillis" | "runningSince">,
+  now: number,
+): number =>
+  usage.runningSince.reduce(
+    (total, since) => total + Math.max(0, now - Date.parse(since)),
+    usage.durationMillis,
+  );
+
+/** What the listed Tasks took, added up, as the line under the Tasks list's heading says. */
+export interface TaskTotals {
+  readonly runs: number;
+  readonly durationMillis: number;
+  /** Ended Attempts with no recorded end, which `durationMillis` leaves out. */
+  readonly unmeasured: number;
+  readonly tokens: number;
+  /** The priced Tasks' dollars, an estimate when any is; null when no Task has a price. */
+  readonly cost: { readonly usd: number; readonly estimate: boolean } | null;
+}
+
+/** The runs, Attempt time at `now`, tokens, and dollars of every row, added up. */
+export const taskTotals = (rows: ReadonlyArray<TaskRow>, now: number): TaskTotals => {
+  const costs = rows.flatMap(({ task }) => (task.usage.cost === null ? [] : [task.usage.cost]));
+  return {
+    runs: rows.reduce((sum, { task }) => sum + task.runs.length, 0),
+    durationMillis: rows.reduce((sum, { task }) => sum + taskDuration(task.usage, now), 0),
+    unmeasured: rows.reduce((sum, { task }) => sum + task.usage.unmeasured, 0),
+    tokens: rows.reduce((sum, { task }) => sum + task.usage.tokens, 0),
+    cost:
+      costs.length === 0
+        ? null
+        : {
+            usd: costs.reduce((sum, { usd }) => sum + usd, 0),
+            estimate: costs.some(({ estimate }) => estimate),
+          },
+  };
 };
 
 /** A Loop that ran on a Task, with the state of its last Run there. */

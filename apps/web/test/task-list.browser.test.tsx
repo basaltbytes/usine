@@ -43,7 +43,8 @@ afterEach(() => {
   host.remove();
 });
 
-const mount = async (path: string, width = 1280) => {
+// Wide enough, beside the sidebar, for every column.
+const mount = async (path: string, width = 1440) => {
   await page.viewport(width, 900);
   router = createRouter({
     routeTree,
@@ -89,10 +90,23 @@ const sidebarLink = (name: string) => {
   return page.elementLocator(sidebar).getByRole("link", { name, exact: true });
 };
 
-it("lists only the tasks with runs, in flight first, with their status, runs, last run, and pull request", async () => {
+it("lists only the tasks with runs, in flight first, with their status, runs, last run, pull request, time, tokens, and cost", async () => {
   await mount(list);
   await expect.element(page.getByText("5 in flight, 1 done", { exact: true })).toBeVisible();
-  expect(columns()).toEqual(["Task", "Status", "Runs", "Last run", "Pull request"]);
+  // Every listed task added up: 41, 15, 10, and 30 min of attempts, and the priced tasks' dollars.
+  await expect
+    .element(page.getByText("7 runs, 1 h 36 min, 87.3K tokens, $5.50 estimate", { exact: true }))
+    .toBeVisible();
+  expect(columns()).toEqual([
+    "Task",
+    "Status",
+    "Runs",
+    "Last run",
+    "Pull request",
+    "Time",
+    "Tokens",
+    "Cost",
+  ]);
   // Running, then waiting for approval, then queued and stalled by when the run opened, then
   // the merged task; the four tasks no loop ever ran on are absent. A task reads as its
   // originating issue.
@@ -118,12 +132,35 @@ it("lists only the tasks with runs, in flight first, with their status, runs, la
   // Each loop once, in the order it first ran, with its last run's state, then the run count.
   await expect.element(redesign).toHaveTextContent("plan Succeeded · implement Running2");
   await expect.element(redesign).toHaveTextContent(/implementRunning6m ago/u);
-  await expect.element(redesign).toHaveTextContent(/#31open$/u);
   await expect
     .element(redesign.getByRole("link", { name: "#31", exact: true }))
     .toHaveAttribute("href", "https://github.com/board-test/repo/pull/31");
-  await expect.element(rowOf(/Show the salvage branch/u)).toHaveTextContent(/#6merged$/u);
+  // The pull request, then a priced run and one on the ChatGPT plan: their time, their tokens,
+  // and the priced dollars.
+  await expect.element(redesign).toHaveTextContent(/#31open41 min27\.3K\$2\.00 estimate$/u);
+  await expect
+    .element(rowOf(/Show the salvage branch/u))
+    .toHaveTextContent(/#6merged30 min48K\$3\.10 estimate$/u);
+  // No attempt began on the waiting task, and the canceled one reported no tokens.
+  await expect.element(rowOf(/Retry salvage pushes/u)).toHaveTextContent(/3m ago$/u);
+  await expect.element(rowOf(/Cache the label catalog/u)).toHaveTextContent(/ago10 min$/u);
   expect(rowOf(/Document the cycle budget reset/u).elements()).toHaveLength(0);
+});
+
+it("opens the tokens per pool, summed over the task's runs, from the tokens or the cost", async () => {
+  await mount(list);
+  const redesign = rowOf(/Redesign the Board columns/u);
+  await redesign.getByRole("button", { name: "Tokens: 27.3K. Show them per pool" }).hover();
+  const pools = page.getByRole("region", { name: "Tokens per pool" });
+  await expect.element(pools).toBeVisible();
+  await expect.element(pools).toHaveTextContent("API keys1,500$0.75");
+  await expect.element(pools).toHaveTextContent("Claude plan20,000$1.25 estimate");
+  await expect.element(pools).toHaveTextContent("ChatGPT plan5,800No dollar rate");
+  await page.getByRole("heading", { name: "Tasks", level: 1 }).hover();
+  await expect.element(pools).not.toBeInTheDocument();
+
+  await redesign.getByRole("button", { name: "Cost: $2.00 estimate. Show it per pool" }).hover();
+  await expect.element(pools).toHaveTextContent("Claude plan20,000$1.25 estimate");
 });
 
 it("says Needs attention for a failure no stall explains, then the last run's outcome once it is resolved", async () => {
@@ -200,12 +237,19 @@ it("shows Board and Tasks under the project in the sidebar, the open page's row 
   await expect.element(sidebarLink("Tasks")).not.toHaveAttribute("data-active");
 });
 
-it("drops Runs and Pull request on a phone without scrolling sideways", async () => {
+it("drops Runs and Pull request beside the sidebar on a mid-size window", async () => {
+  await mount(list, 1280);
+  await expect.poll(columns).toEqual(["Task", "Status", "Last run", "Time", "Tokens", "Cost"]);
+  const title = rowOf(/Redesign the Board/u).getByRole("link", { name: /Redesign the Board/u });
+  expect(title.element().getBoundingClientRect().width).toBeGreaterThan(240);
+});
+
+it("keeps only Time of the totals on a phone, without scrolling sideways", async () => {
   await mount(list, 390);
-  await expect.poll(columns).toEqual(["Task", "Status", "Last run"]);
-  // A long status wraps instead of squeezing the title out.
+  await expect.poll(columns).toEqual(["Task", "Status", "Last run", "Time"]);
+  // A long status wraps instead of squeezing the title out, beside the time.
   const title = rowOf(/Pin GitHub Actions/u).getByRole("link", { name: /Pin GitHub Actions/u });
-  expect(title.element().getBoundingClientRect().width).toBeGreaterThan(120);
+  expect(title.element().getBoundingClientRect().width).toBeGreaterThan(100);
   const container = table().element().parentElement;
   expect(container?.scrollWidth).toBeLessThanOrEqual(container?.clientWidth ?? 0);
 });

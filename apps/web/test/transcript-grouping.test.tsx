@@ -645,6 +645,7 @@ it("renders a held child from session state when its activity is outside the loa
     state: "Running",
     loopPaused: false,
     openedAt: "2026-09-12",
+    closedAt: null,
     task: "Task",
     attempts: [running],
     approval: null,

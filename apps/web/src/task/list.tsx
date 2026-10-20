@@ -6,11 +6,13 @@ import type {
   ProjectView,
   RunView,
   StalledItemView,
+  TaskUsageView,
 } from "@usine/orchestrator/operator";
 import { Match } from "effect";
-import { Fragment } from "react";
+import { Fragment, type ReactNode } from "react";
 import { Page, PageHeading } from "@/components/page";
 import { StateMark, StatusBadge } from "@/components/status-badge";
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
 import {
   Table,
   TableBody,
@@ -22,18 +24,28 @@ import {
 import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
 import { EmptyLine, ItemTitle } from "../desk/section.tsx";
-import { agoLabel, timestampLabel } from "../operator-copy.ts";
+import {
+  agoLabel,
+  durationLabel,
+  timestampLabel,
+  tokensLabel,
+  usdLabel,
+} from "../operator-copy.ts";
 import { projectParams } from "../overview.ts";
+import { PoolBreakdown } from "../run-page/usage.tsx";
 import { stallNamesLoop, stallSentence } from "../stall/copy.ts";
 import {
   itemStateLabel,
   runActivityAt,
   type TaskRow,
+  type TaskTotals,
   taskCounts,
+  taskDuration,
   taskLoops,
   taskNumber,
   taskOrigin,
   taskRows,
+  taskTotals,
 } from "./model.ts";
 import { linkedRow, rowLink } from "./section.tsx";
 
@@ -41,13 +53,19 @@ const pullRequestLink =
   "relative z-10 rounded-sm font-mono text-xs text-primary underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
 // The columns follow the table's own width, since the sidebar beside a mid-size window leaves
-// less room than a phone held sideways. Runs and Pull request need 56rem, so they drop on phones
-// and beside the sidebar on mid-size windows. Status and Last run keep a minimum width that grows
-// with the table, from 28rem, and wrap past it; from 36rem Last run stays on one line. On a
-// phone both wrap, so the table never scrolls sideways.
-const WIDE_COLUMN = "hidden @4xl:table-cell";
+// less room than a phone held sideways. Time always shows. Tokens and Cost need 56rem and Runs and
+// Pull request 64rem, so the title keeps room: on phones all four drop, and beside the sidebar on
+// a mid-size window Runs and Pull request do. Status and Last run keep a minimum width that grows
+// with the table, from 28rem, and wrap past it; from 36rem Last run stays on one line. On a phone
+// both wrap, so the table never scrolls sideways.
+const WIDE_COLUMN = "hidden @5xl:table-cell";
+const USAGE_COLUMN = "hidden @4xl:table-cell";
 const STATUS_COLUMN = "whitespace-normal @md:min-w-40 @xl:min-w-52";
 const LAST_RUN_COLUMN = "whitespace-normal @md:min-w-28 @xl:whitespace-nowrap";
+const TOTAL_COLUMN = "py-3 text-right align-top font-mono text-xs/5 whitespace-nowrap tabular-nums";
+
+const usageTrigger =
+  "relative z-10 rounded-sm underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
 /** The tone of a stall's state mark: the state of the Run its reason names, or what holds it. */
 const stallTone = ({ reason }: StalledItemView): string =>
@@ -134,6 +152,59 @@ const LastRun = ({ run, now }: { readonly run: RunView; readonly now: number }) 
   );
 };
 
+/** A Task's Attempt time, counting on while an Attempt runs; nothing before any Attempt began. */
+const TaskTime = ({ task, now }: { readonly task: BoardTaskView; readonly now: number }) => {
+  const { usage } = task;
+  if (task.runs.every(({ attempts }) => attempts.length === 0)) return null;
+  return (
+    <span
+      title={
+        usage.unmeasured === 0
+          ? "Total attempt time"
+          : `${usage.unmeasured} ${usage.unmeasured === 1 ? "attempt" : "attempts"} not counted, ended before end times were recorded`
+      }
+    >
+      {usage.unmeasured > 0 && "at least "}
+      {durationLabel(taskDuration(usage, now))}
+    </span>
+  );
+};
+
+/** Dollars, then `estimate` in muted text when the Claude plan's figure is among them. */
+const CostLabel = ({ cost }: { readonly cost: NonNullable<TaskTotals["cost"]> }) => (
+  <>
+    {usdLabel(cost.usd)}
+    {cost.estimate && <span className="font-sans text-muted-foreground"> estimate</span>}
+  </>
+);
+
+/** `children` opening, on hover or focus, the Task's tokens per billing pool. */
+const PoolHover = ({
+  usage,
+  label,
+  children,
+}: {
+  readonly usage: TaskUsageView;
+  readonly label: string;
+  readonly children: ReactNode;
+}) => (
+  <HoverCard>
+    <HoverCardTrigger
+      delay={200}
+      aria-label={label}
+      render={<button type="button" className={usageTrigger} />}
+    >
+      {children}
+    </HoverCardTrigger>
+    <HoverCardContent
+      align="end"
+      className="w-[26rem] max-w-[calc(100vw-2rem)] p-3 font-sans text-xs shadow-raised"
+    >
+      <PoolBreakdown pools={usage.pools} />
+    </HoverCardContent>
+  </HoverCard>
+);
+
 /** The pull request's number as a link, then whether it is open or merged. */
 const PullRequest = ({ pullRequest }: { readonly pullRequest: BoardPullRequestView }) => (
   <span className="inline-flex items-baseline gap-1.5">
@@ -178,8 +249,43 @@ const TaskListRow = ({
     <TableCell className={cn("py-3 text-right align-top", WIDE_COLUMN)}>
       {row.task.pullRequest !== null && <PullRequest pullRequest={row.task.pullRequest} />}
     </TableCell>
+    <TableCell className={TOTAL_COLUMN}>
+      <TaskTime task={row.task} now={now} />
+    </TableCell>
+    <TableCell className={cn(TOTAL_COLUMN, USAGE_COLUMN)}>
+      {row.task.usage.pools.length > 0 && (
+        <PoolHover
+          usage={row.task.usage}
+          label={`Tokens: ${tokensLabel(row.task.usage.tokens)}. Show them per pool`}
+        >
+          {tokensLabel(row.task.usage.tokens)}
+        </PoolHover>
+      )}
+    </TableCell>
+    <TableCell className={cn(TOTAL_COLUMN, USAGE_COLUMN)}>
+      {row.task.usage.cost !== null && (
+        <PoolHover
+          usage={row.task.usage}
+          label={`Cost: ${usdLabel(row.task.usage.cost.usd)}${row.task.usage.cost.estimate ? " estimate" : ""}. Show it per pool`}
+        >
+          <CostLabel cost={row.task.usage.cost} />
+        </PoolHover>
+      )}
+    </TableCell>
   </TableRow>
 );
+
+/** The totals of every listed Task, such as `9 runs, 6 h 12 min, 4.8M tokens, $14.20 estimate`;
+ * the cost is left out when no Task has a price. */
+const totalsLine = (totals: TaskTotals): string =>
+  [
+    `${totals.runs} ${totals.runs === 1 ? "run" : "runs"}`,
+    `${totals.unmeasured > 0 ? "at least " : ""}${durationLabel(totals.durationMillis)}`,
+    `${tokensLabel(totals.tokens)} tokens`,
+    ...(totals.cost === null
+      ? []
+      : [`${usdLabel(totals.cost.usd)}${totals.cost.estimate ? " estimate" : ""}`]),
+  ].join(", ");
 
 /**
  * The Tasks of a Project that usine ran at least once, as rows: those in flight first, then the
@@ -201,29 +307,37 @@ export const TaskList = ({
       {rows.length === 0 ? (
         <EmptyLine>No runs yet</EmptyLine>
       ) : (
-        <div className="@container -mx-2">
-          <Table aria-label={`${project.repository} tasks`}>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead>Task</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className={WIDE_COLUMN}>Runs</TableHead>
-                <TableHead>Last run</TableHead>
-                <TableHead className={cn("text-right", WIDE_COLUMN)}>Pull request</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((row) => (
-                <TaskListRow
-                  key={row.task.itemKey}
-                  row={row}
-                  repository={project.repository}
-                  now={now}
-                />
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+        <>
+          <p className="-mt-2 text-sm text-muted-foreground tabular-nums">
+            {totalsLine(taskTotals(rows, now))}
+          </p>
+          <div className="@container -mx-2">
+            <Table aria-label={`${project.repository} tasks`}>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Task</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className={WIDE_COLUMN}>Runs</TableHead>
+                  <TableHead>Last run</TableHead>
+                  <TableHead className={cn("text-right", WIDE_COLUMN)}>Pull request</TableHead>
+                  <TableHead className="text-right">Time</TableHead>
+                  <TableHead className={cn("text-right", USAGE_COLUMN)}>Tokens</TableHead>
+                  <TableHead className={cn("text-right", USAGE_COLUMN)}>Cost</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {rows.map((row) => (
+                  <TaskListRow
+                    key={row.task.itemKey}
+                    row={row}
+                    repository={project.repository}
+                    now={now}
+                  />
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
     </Page>
   );

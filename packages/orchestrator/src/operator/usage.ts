@@ -7,9 +7,11 @@ import {
 } from "@usine/core/agent/session";
 import { type Attempt, AttemptId } from "@usine/core/attempt";
 import type { RunStoreError } from "@usine/engine/engine";
+import type { RunId } from "@usine/core/run";
 import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { type TranscriptEntry, TranscriptUsageQuery } from "@usine/engine/transcript";
 import { Context, Effect, Layer, Option, Schema } from "effect";
+import type { AttemptView } from "./attempt.ts";
 
 /**
  * Dollars a harness priced usage at. `estimate` marks the Claude plan's figure,
@@ -51,6 +53,32 @@ export class RunUsageView extends Schema.Class<RunUsageView>("@usine/orchestrato
   /** Sessions in the order their Attempt began and their first report arrived. */
   sessions: Schema.Array(SessionUsageView),
 }) {}
+
+/**
+ * What usine's work on a Task took, over every Run on its Items: the Attempts' wall time, and the
+ * tokens and dollars their sessions drew per billing pool.
+ */
+export class TaskUsageView extends Schema.Class<TaskUsageView>("@usine/orchestrator/TaskUsageView")(
+  {
+    /** The ended Attempts' wall time added up, each from its start to its recorded end. */
+    durationMillis: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    /** When each Attempt at work began; a reader adds the time since then to `durationMillis`. */
+    runningSince: Schema.Array(Schema.String),
+    /** Ended Attempts with no recorded end, which `durationMillis` leaves out. */
+    unmeasured: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
+    tokens: TokenCount,
+    /**
+     * Each pool summed over the Runs, in the order API keys, Claude plan, ChatGPT plan; a pool no
+     * Run used is absent. A pool's cost is null when any Run left it unpriced.
+     */
+    pools: Schema.Array(PoolUsageView),
+    /**
+     * The priced pools' dollars added up, an estimate when the Claude plan's figure is among them;
+     * null when no pool has a price.
+     */
+    cost: Schema.NullOr(UsageCostView),
+  },
+) {}
 
 const POOLS: ReadonlyArray<BillingPool> = ["apiKeys", "claudePlan", "chatgptPlan"];
 
@@ -114,6 +142,67 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsageView => {
   });
 };
 
+/**
+ * Adds up a Task's `runs`: their Attempts' time, and the tokens and dollars in `usage`, what
+ * each Run's sessions drew. A Run absent from `usage` adds time but no tokens.
+ */
+export const taskUsage = (
+  runs: ReadonlyArray<{
+    readonly id: RunId;
+    readonly attempts: ReadonlyArray<Pick<AttemptView, "startedAt" | "endedAt" | "outcome">>;
+  }>,
+  usage: ReadonlyMap<RunId, RunUsageView>,
+): TaskUsageView => {
+  let durationMillis = 0;
+  let unmeasured = 0;
+  const runningSince: Array<string> = [];
+  for (const { attempts } of runs) {
+    for (const { startedAt, endedAt, outcome } of attempts) {
+      if (outcome === null) runningSince.push(startedAt);
+      else if (endedAt === null) unmeasured += 1;
+      else durationMillis += Math.max(0, Date.parse(endedAt) - Date.parse(startedAt));
+    }
+  }
+  const read = runs.flatMap(({ id }) => {
+    const run = usage.get(id);
+    return run === undefined ? [] : [run];
+  });
+  const pools = POOLS.flatMap((pool) => {
+    const members = read.flatMap(({ pools: runPools }) =>
+      runPools.filter((member) => member.pool === pool),
+    );
+    if (members.length === 0) return [];
+    const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost.usd]));
+    return [
+      new PoolUsageView({
+        pool,
+        tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
+        cost: priced(
+          pool,
+          costs.length === members.length
+            ? Option.some(UsdAmount.make(costs.reduce((sum, usd) => sum + usd, 0)))
+            : Option.none(),
+        ),
+      }),
+    ];
+  });
+  const costs = pools.flatMap(({ cost }) => (cost === null ? [] : [cost]));
+  return new TaskUsageView({
+    durationMillis: Math.round(durationMillis),
+    runningSince,
+    unmeasured,
+    tokens: TokenCount.make(read.reduce((sum, { tokens }) => sum + tokens, 0)),
+    pools,
+    cost:
+      costs.length === 0
+        ? null
+        : new UsageCostView({
+            usd: UsdAmount.make(costs.reduce((sum, { usd }) => sum + usd, 0)),
+            estimate: costs.some(({ estimate }) => estimate),
+          }),
+  });
+};
+
 const makeRunUsageReader = Effect.gen(function* () {
   const runs = yield* RunReader;
   const ended = yield* Effect.sync(() => new Map<AttemptId, ReadonlyArray<TranscriptEntry>>());
@@ -126,7 +215,7 @@ const makeRunUsageReader = Effect.gen(function* () {
     return { reports, read: true };
   });
 
-  const read = Effect.fn("RunUsageReader.read")(function* (snapshot: RunSnapshot) {
+  const read = Effect.fn("RunUsageReader.read")(function* (snapshot: RunUsageSource) {
     yield* Effect.annotateCurrentSpan({ runId: snapshot.run.id });
     const attempts = yield* Effect.forEach(snapshot.attempts, attemptReports, { concurrency: 4 });
     const usage = runUsage(attempts.flatMap(({ reports }) => reports));
@@ -143,6 +232,9 @@ const makeRunUsageReader = Effect.gen(function* () {
   return { read };
 });
 
+/** The parts of a Run snapshot or summary that its usage reads: the Run and its Attempts. */
+type RunUsageSource = Pick<RunSnapshot, "run" | "attempts">;
+
 /**
  * Reads a Run's usage: every Attempt's highest token report per session, summed for the Run.
  * An Attempt with an outcome gets no more reports, so its reports are read once and kept for
@@ -150,7 +242,7 @@ const makeRunUsageReader = Effect.gen(function* () {
  */
 export class RunUsageReader extends Context.Service<
   RunUsageReader,
-  { readonly read: (snapshot: RunSnapshot) => Effect.Effect<RunUsageView, RunStoreError> }
+  { readonly read: (run: RunUsageSource) => Effect.Effect<RunUsageView, RunStoreError> }
 >()("@usine/orchestrator/RunUsageReader") {
   static readonly layer = Layer.effect(RunUsageReader, makeRunUsageReader);
 }

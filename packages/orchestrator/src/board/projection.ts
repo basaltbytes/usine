@@ -10,6 +10,7 @@ import {
 import type { ManagedRepo } from "@usine/config/factory";
 import { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
+import type { RunId } from "@usine/core/run";
 import type { ItemProjection } from "@usine/engine/item-projection";
 import { ItemLabelMutation } from "@usine/github/item-writer";
 import { Effect, Result } from "effect";
@@ -22,6 +23,7 @@ import {
   WritableBoardLaneView,
 } from "../operator/board.ts";
 import { type RunView } from "../operator/run.ts";
+import type { RunUsageView } from "../operator/usage.ts";
 import { projectedItem, type ProjectedItem } from "./items.ts";
 import { taskCards } from "./tasks.ts";
 
@@ -89,7 +91,8 @@ const laneFor = (
  * Groups the repository's stored Items into Task cards and the cards into lanes.
  * `cycleBlockedItems` mark their Tasks as needing the operator; `itemLoops` names, per
  * Item, the Loops whose trigger matches it now, and a Task carries those of its Items.
- * Callers that read only lanes and membership leave both empty.
+ * `runUsage` holds what each Run's sessions drew; a Task adds up its Runs', and a Run absent
+ * from it adds no tokens. Callers that read only lanes and membership leave all three empty.
  */
 export const projectBoard = Effect.fn("Board.project")(
   (
@@ -99,6 +102,7 @@ export const projectBoard = Effect.fn("Board.project")(
     runs: ReadonlyArray<RunView>,
     cycleBlockedItems: ReadonlyArray<ItemKey> = [],
     itemLoops: ReadonlyMap<ItemKey, ReadonlyArray<LoopName>> = new Map(),
+    runUsage: ReadonlyMap<RunId, RunUsageView> = new Map(),
   ): Effect.Effect<BoardView> =>
     Effect.gen(function* () {
       yield* Effect.annotateCurrentSpan({ repository: repository.name });
@@ -121,7 +125,7 @@ export const projectBoard = Effect.fn("Board.project")(
         });
       }
       const lanes = effectiveLanes(repository, repositoryLabels);
-      const cards = taskCards(repository.name, items, runs, cycleBlockedItems, itemLoops);
+      const cards = taskCards(repository.name, items, runs, cycleBlockedItems, itemLoops, runUsage);
       yield* Effect.logDebug("Projected Task cards from linked Items", {
         repository: repository.name,
         items: items.length,

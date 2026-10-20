@@ -22,6 +22,12 @@ export class RunSnapshot extends Schema.Class<RunSnapshot>("@usine/engine/RunSna
   attempts: Schema.Array(Attempt),
   /** The failed Attempt whose attention the operator resolved; outcomes and history stay intact. */
   resolvedFailureAttemptId: Schema.Option(AttemptId),
+  /**
+   * When the Run last closed: it succeeded, failed, or was canceled, even before any Attempt
+   * began. None while it is open. A Run closed before close times were recorded carries the end
+   * of its last Attempt, else that Attempt's start, else when it opened.
+   */
+  closedAt: Schema.Option(Schema.DateTimeUtc),
   /** The approval the Run consumed; none until one arrives, and always none for a Loop with `approval: none`. */
   approval: Schema.Option(RunApproval),
   /** The closed Run the operator ran again to open this one, and who asked; none for a Run its trigger opened. */
@@ -49,6 +55,12 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
   attempts: Schema.Array(Attempt),
   /** The failed Attempt whose attention the operator resolved; outcomes and history stay intact. */
   resolvedFailureAttemptId: Schema.Option(AttemptId),
+  /**
+   * When the Run last closed: it succeeded, failed, or was canceled, even before any Attempt
+   * began. None while it is open. A Run closed before close times were recorded carries the end
+   * of its last Attempt, else that Attempt's start, else when it opened.
+   */
+  closedAt: Schema.Option(Schema.DateTimeUtc),
   /** The approval the Run consumed; none until one arrives, and always none for a Loop with `approval: none`. */
   approval: Schema.Option(RunApproval),
   /** The closed Run the operator ran again to open this one, and who asked; none for a Run its trigger opened. */

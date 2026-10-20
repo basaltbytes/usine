@@ -150,6 +150,7 @@ const instance = new LoadedInstance({
 
 const snapshot = new RunSnapshot({
   resolvedFailureAttemptId: Option.none(),
+  closedAt: Option.none(),
   approval: Option.none(),
   runAgain: Option.none(),
   event: new Event({
@@ -795,6 +796,38 @@ describe("Operator", () => {
             [new LocalWorkerAccess(), null],
           );
           assert.deepStrictEqual(usageQueries, [attemptId, retryAttemptId, retryAttemptId]);
+
+          // The Board card adds up its Runs the same way, from the same cache.
+          const overview = yield* (yield* Operator).overview(declared);
+          const card = overview.projects[0]?.board.lanes
+            .flatMap(({ items }) => items)
+            .find(({ runs }) => runs.some(({ id }) => id === runId));
+          assert(card !== undefined);
+          assert.deepStrictEqual(
+            {
+              ...card.usage,
+              pools: card.usage.pools.map(({ pool, tokens }) => [pool, tokens]),
+              cost: card.usage.cost === null ? null : { ...card.usage.cost },
+            },
+            {
+              durationMillis: 300_000,
+              runningSince: ["2026-08-31T12:06:00.000Z"],
+              unmeasured: 0,
+              tokens: 27_300,
+              pools: [
+                ["apiKeys", 1_500],
+                ["claudePlan", 20_000],
+                ["chatgptPlan", 5_800],
+              ],
+              cost: { usd: 2, estimate: true },
+            },
+          );
+          assert.deepStrictEqual(usageQueries, [
+            attemptId,
+            retryAttemptId,
+            retryAttemptId,
+            retryAttemptId,
+          ]);
         }).pipe(
           Effect.provide(
             testLayer(

@@ -36,6 +36,7 @@ import {
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Option, Schema } from "effect";
+import { taskUsageOf } from "./board-fixture.ts";
 
 export const taskRepository = RepositoryName.make("basaltbytes/usine");
 
@@ -109,6 +110,10 @@ const run = (
     state,
     loopPaused: false,
     openedAt,
+    closedAt:
+      state === "Succeeded" || state === "Failed" || state === "Canceled"
+        ? (attempts.at(-1)?.endedAt ?? openedAt)
+        : null,
     task: "Do the work.",
     attempts,
     approval: extra.approval ?? null,
@@ -291,6 +296,7 @@ const card = (task: TaskView) => {
     needsYou: task.needsYou,
     conflicting: current.conflicting,
     loops: [],
+    usage: taskUsageOf(task.runs),
   });
 };
 

@@ -5,6 +5,7 @@ import { GitHubLabelName } from "@usine/config/label";
 import { LaneItemState, LaneName, LaneSource } from "@usine/config/board";
 import { Schema } from "effect";
 import { RunView } from "./run.ts";
+import { TaskUsageView } from "./usage.ts";
 
 /** Identifies a lane within a Project's Board for operator moves. */
 export const BoardLaneId = Schema.NonEmptyString.pipe(Schema.brand("BoardLaneId"));
@@ -58,6 +59,8 @@ export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestra
      * Loops. Empty when no Loop's trigger matches the Task as it is.
      */
     loops: Schema.Array(LoopName),
+    /** What `runs` took: their Attempts' time, tokens, and dollars, added up. */
+    usage: TaskUsageView,
   },
 ) {}
 

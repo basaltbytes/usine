@@ -201,6 +201,22 @@ const makeOperatorObservation = Effect.gen(function* () {
           const projectRuns = [...merged.values()].sort(
             (a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id),
           );
+          // The Runs on the Board's Items, whose usage the Task cards add up. The reader keeps
+          // ended Attempts' reports, so only Attempts at work are read again.
+          const runUsage = new Map(
+            yield* Effect.forEach(
+              history,
+              (summary) =>
+                usageReader
+                  .read(summary)
+                  .pipe(Effect.map((usage) => [summary.run.id, usage] as const)),
+              { concurrency: 4 },
+            ),
+          );
+          yield* Effect.logDebug("Read the usage of the Board's Runs", {
+            repository: name,
+            runs: runUsage.size,
+          });
           const catalog = Option.match(labelProjection, {
             onNone: () => [],
             onSome: ({ labels }) => labels,
@@ -212,6 +228,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             projectRuns,
             cycleAsks.map(({ itemKey }) => itemKey),
             itemLoops,
+            runUsage,
           );
           const status: ProjectStatus =
             cycleAsks.some((ask) => ask.repository === name) ||
@@ -925,7 +942,13 @@ export {
   SessionIntervention,
   RosterAgentNotFoundError,
 } from "./run.ts";
-export { UsageCostView, SessionUsageView, PoolUsageView, RunUsageView } from "./usage.ts";
+export {
+  UsageCostView,
+  SessionUsageView,
+  PoolUsageView,
+  RunUsageView,
+  TaskUsageView,
+} from "./usage.ts";
 export {
   InfraFailureView,
   DefectFailureView,

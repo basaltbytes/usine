@@ -63,6 +63,11 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   state: RunStateTag,
   loopPaused: Schema.Boolean,
   openedAt: Schema.String,
+  /**
+   * When the Run last closed: it succeeded, failed, or was canceled, even before any Attempt
+   * began. Null while it is open; a retry reopens a failed Run and clears it.
+   */
+  closedAt: Schema.NullOr(Schema.String),
   task: Schema.String,
   attempts: Schema.Array(AttemptView),
   /** The approval the Run consumed; null until one arrives, and always null for a Loop with `approval: none`. */

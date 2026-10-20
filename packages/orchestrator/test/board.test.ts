@@ -3,6 +3,7 @@ import { GitHubLabelName } from "@usine/config/label";
 import { LabelLaneSource, LaneName } from "@usine/config/board";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
+import { TokenCount, UsdAmount } from "@usine/core/agent/session";
 import { ItemKey, ItemNumber as CoreItemNumber, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
@@ -23,7 +24,9 @@ import {
   ReadOnlyBoardLaneView,
   WritableBoardLaneView,
 } from "../src/operator/board.ts";
+import { SucceededAttemptView } from "../src/operator/attempt.ts";
 import { RunView } from "../src/operator/run.ts";
+import { PoolUsageView, RunUsageView, taskUsage, UsageCostView } from "../src/operator/usage.ts";
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = ItemKey.make("github:basaltbytes/usine:33");
@@ -121,6 +124,7 @@ const runForBoard = (id: string, state: "Waiting" | "Running" | "Failed" | "Succ
     state,
     loopPaused: false,
     openedAt: "2026-09-01T12:00:00.000Z",
+    closedAt: state === "Failed" || state === "Succeeded" ? "2026-09-01T12:30:00.000Z" : null,
     task: "Build the Board.",
     attempts: [],
     approval: null,
@@ -534,6 +538,7 @@ describe("Board projection", () => {
       needsYou: false,
       conflicting: false,
       loops: [],
+      usage: taskUsage([], new Map()),
     });
     const source = new WritableBoardLaneView({
       id: BoardLaneId.make("authored:Ready"),
@@ -594,4 +599,103 @@ describe("Board projection", () => {
       );
     }),
   );
+});
+
+describe("Task usage", () => {
+  const ended = (startedAt: string, endedAt: string | null) => ({
+    startedAt,
+    endedAt,
+    outcome: new SucceededAttemptView(),
+  });
+  const pool = (
+    name: PoolUsageView["pool"],
+    tokens: number,
+    cost: { readonly usd: number; readonly estimate: boolean } | null,
+  ) =>
+    new PoolUsageView({
+      pool: name,
+      tokens: TokenCount.make(tokens),
+      cost:
+        cost === null
+          ? null
+          : new UsageCostView({ usd: UsdAmount.make(cost.usd), estimate: cost.estimate }),
+    });
+  const runUsage = (pools: ReadonlyArray<PoolUsageView>) =>
+    new RunUsageView({
+      tokens: TokenCount.make(pools.reduce((sum, { tokens }) => sum + tokens, 0)),
+      pools,
+      sessions: [],
+    });
+  const priced = RunId.make("priced");
+  const chatgpt = RunId.make("chatgpt");
+
+  it("adds up a priced Run and a ChatGPT plan Run: time, tokens, pools, and the priced dollars", () => {
+    const usage = taskUsage(
+      [
+        {
+          id: priced,
+          attempts: [
+            ended("2026-10-20T10:00:00.000Z", "2026-10-20T10:40:00.000Z"),
+            // Closed before end times were recorded, so it is not counted.
+            ended("2026-10-20T11:00:00.000Z", null),
+          ],
+        },
+        {
+          id: chatgpt,
+          attempts: [
+            ended("2026-10-20T12:00:00.000Z", "2026-10-20T12:08:00.000Z"),
+            { startedAt: "2026-10-20T12:10:00.000Z", endedAt: null, outcome: null },
+          ],
+        },
+      ],
+      new Map([
+        [
+          priced,
+          runUsage([
+            pool("apiKeys", 1_500, { usd: 0.75, estimate: false }),
+            pool("claudePlan", 20_000, { usd: 1.25, estimate: true }),
+          ]),
+        ],
+        [chatgpt, runUsage([pool("chatgptPlan", 5_800, null)])],
+      ]),
+    );
+    assert.strictEqual(usage.durationMillis, 48 * 60_000);
+    assert.deepStrictEqual(usage.runningSince, ["2026-10-20T12:10:00.000Z"]);
+    assert.strictEqual(usage.unmeasured, 1);
+    assert.strictEqual(usage.tokens, 27_300);
+    assert.deepStrictEqual(
+      usage.pools.map(({ pool: name, tokens, cost }) => [name, tokens, cost?.usd ?? null]),
+      [
+        ["apiKeys", 1_500, 0.75],
+        ["claudePlan", 20_000, 1.25],
+        ["chatgptPlan", 5_800, null],
+      ],
+    );
+    assert.deepStrictEqual({ ...usage.cost }, { usd: 2, estimate: true });
+  });
+
+  it("sums a pool over Runs and leaves it unpriced when one Run's share has no price", () => {
+    const usage = taskUsage(
+      [
+        { id: priced, attempts: [] },
+        { id: chatgpt, attempts: [] },
+      ],
+      new Map([
+        [priced, runUsage([pool("apiKeys", 1_000, { usd: 0.5, estimate: false })])],
+        [chatgpt, runUsage([pool("apiKeys", 400, null), pool("chatgptPlan", 300, null)])],
+      ]),
+    );
+    assert.deepStrictEqual(
+      usage.pools.map(({ pool: name, tokens, cost }): readonly [string, number, unknown] => [
+        name,
+        tokens,
+        cost,
+      ]),
+      [
+        ["apiKeys", 1_400, null],
+        ["chatgptPlan", 300, null],
+      ],
+    );
+    assert.strictEqual(usage.cost, null);
+  });
 });
