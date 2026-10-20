@@ -27,7 +27,7 @@ import {
 } from "@usine/engine/engine";
 import { ItemProjectionReader } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
-import { type ProjectionRevision, RunReader } from "@usine/engine/run-reader";
+import { type ProjectionRevision, RunReader, type RunSummary } from "@usine/engine/run-reader";
 import { RepositoryLabelProjectionReader } from "@usine/engine/repository-label-projection";
 import { GitHubItemWriter } from "@usine/github/item-writer";
 import type { GitHubAppError } from "@usine/github/github-app";
@@ -71,7 +71,11 @@ import {
   type BoardMove,
   type BoardProjectNotFoundError,
   BoardProjectNotFoundError as BoardProjectNotFound,
+  BoardTaskView,
+  BoardView,
   LabelView,
+  ReadOnlyBoardLaneView,
+  WritableBoardLaneView,
 } from "./board.ts";
 import {
   ColdTranscriptRequest,
@@ -93,7 +97,7 @@ import {
   runView,
   workerAccesses,
 } from "./projection.ts";
-import { RunUsageReader } from "./usage.ts";
+import { RunUsageReader, type RunUsageView, taskUsage } from "./usage.ts";
 import {
   RunGitHubChanges,
   type RunGitHubChangesError,
@@ -125,10 +129,50 @@ const OVERVIEW_CLOSED_RUNS = 100;
 /** How many newest Items a Board shows; older ones drop off. */
 const OVERVIEW_BOARD_ITEMS = 500;
 
+/**
+ * What the overview's Task cards add up: each Board Run's usage when the overview was projected,
+ * and the Runs whose Attempt was at work then. A token report adds a transcript row and no
+ * projection revision, so a cached overview reads the usage of those Runs again on every read.
+ */
+interface BoardUsage {
+  readonly runs: ReadonlyMap<RunId, RunUsageView>;
+  readonly working: ReadonlyArray<RunSummary>;
+}
+
 interface CachedOverview {
   readonly token: string;
   readonly overview: ReadyOverview;
+  readonly usage: BoardUsage;
 }
+
+/** `overview` with the cards that hold one of the `changed` Runs adding up their Runs' `usage` again. */
+const withRunUsage = (
+  overview: ReadyOverview,
+  changed: ReadonlySet<RunId>,
+  usage: ReadonlyMap<RunId, RunUsageView>,
+): ReadyOverview =>
+  new ReadyOverview({
+    ...overview,
+    projects: overview.projects.map(
+      (project) =>
+        new ProjectView({
+          ...project,
+          board: new BoardView({
+            ...project.board,
+            lanes: project.board.lanes.map((lane) => {
+              const items = lane.items.map((task) =>
+                task.runs.some(({ id }) => changed.has(id))
+                  ? new BoardTaskView({ ...task, usage: taskUsage(task.runs, usage) })
+                  : task,
+              );
+              return lane._tag === "WritableBoardLane"
+                ? new WritableBoardLaneView({ ...lane, items })
+                : new ReadOnlyBoardLaneView({ ...lane, items });
+            }),
+          }),
+        }),
+    ),
+  });
 
 const makeOperatorObservation = Effect.gen(function* () {
   const budgets = yield* CycleBudgets;
@@ -167,7 +211,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       projectRuns.push(view);
       runsByRepository.set(view.repository, projectRuns);
     }
-    const projects = yield* Effect.forEach(
+    const projected = yield* Effect.forEach(
       instance.config.repos,
       (repository) =>
         Effect.gen(function* () {
@@ -230,6 +274,9 @@ const makeOperatorObservation = Effect.gen(function* () {
             itemLoops,
             runUsage,
           );
+          const working = history.filter(({ attempts }) =>
+            attempts.some(({ outcome }) => Option.isNone(outcome)),
+          );
           const status: ProjectStatus =
             cycleAsks.some((ask) => ask.repository === name) ||
             board.failures.length > 0 ||
@@ -239,7 +286,7 @@ const makeOperatorObservation = Effect.gen(function* () {
               : projectRuns.some((run) => run.canCancel)
                 ? "active"
                 : "clear";
-          return new ProjectView({
+          const project = new ProjectView({
             repository: name,
             status,
             runs: projectRuns,
@@ -254,9 +301,15 @@ const makeOperatorObservation = Effect.gen(function* () {
             ),
             preflightFindings: projectFindings,
           });
+          return { project, runUsage, working } as const;
         }),
       { concurrency: 4 },
     );
+    const projects = projected.map(({ project }) => project);
+    const usage: BoardUsage = {
+      runs: new Map(projected.flatMap(({ runUsage }) => [...runUsage])),
+      working: projected.flatMap(({ working }) => working),
+    };
     const loops = instance.loops.map(
       (loop) =>
         new LoopView({
@@ -367,13 +420,47 @@ const makeOperatorObservation = Effect.gen(function* () {
         new UnconfiguredWorkerNeed({ id: `unconfigured-worker:${worker}`, worker, attempts }),
       );
     }
-    const projected = new ReadyOverview({ projects, loops, needsYou });
+    const overview = new ReadyOverview({ projects, loops, needsYou });
     yield* Effect.logDebug("Refreshed operator overview", {
       revision,
       runs: views.length,
       needsYou: needsYou.length,
+      runsAtWork: usage.working.length,
     });
-    return projected;
+    return { overview, usage } as const;
+  });
+
+  // Each session keeps its highest report, so a Run's usage changes only with more tokens or
+  // another session; the rest of a cached overview stays as projected.
+  const refreshWorkingUsage = Effect.fn("Operator.refreshWorkingUsage")(function* (
+    cached: CachedOverview,
+  ) {
+    if (cached.usage.working.length === 0) return cached;
+    const read = yield* Effect.forEach(
+      cached.usage.working,
+      (summary) =>
+        usageReader.read(summary).pipe(Effect.map((usage) => [summary.run.id, usage] as const)),
+      { concurrency: 4 },
+    );
+    const changed = new Set(
+      read.flatMap(([runId, usage]) => {
+        const before = cached.usage.runs.get(runId);
+        return before?.tokens === usage.tokens && before.sessions.length === usage.sessions.length
+          ? []
+          : [runId];
+      }),
+    );
+    if (changed.size === 0) return cached;
+    const runs = new Map([...cached.usage.runs, ...read]);
+    yield* Effect.logDebug("Refreshed the usage of Runs at work on the cached overview", {
+      runsAtWork: read.length,
+      changed: changed.size,
+    });
+    return {
+      ...cached,
+      overview: withRunUsage(cached.overview, changed, runs),
+      usage: { ...cached.usage, runs },
+    };
   });
 
   const overview = Effect.fn("Operator.overview")((instance: LoadedInstance) =>
@@ -422,7 +509,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           yield* Effect.logWarning(
             "Projection revision singleton is missing; the overview cache is bypassed",
           );
-          const projected = yield* projectOverview(
+          const { overview: projected } = yield* projectOverview(
             instance,
             pollFailures,
             preflightFindings,
@@ -435,7 +522,8 @@ const makeOperatorObservation = Effect.gen(function* () {
           yield* Effect.logDebug("Reusing unchanged operator overview", {
             revision,
           });
-          return [cached.value.overview, cached] as const;
+          const current = yield* refreshWorkingUsage(cached.value);
+          return [current.overview, Option.some(current)] as const;
         }
         const projected = yield* projectOverview(
           instance,
@@ -444,7 +532,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           scheduleFailures,
           revision,
         );
-        return [projected, Option.some({ token: token.value, overview: projected })] as const;
+        return [projected.overview, Option.some({ token: token.value, ...projected })] as const;
       }),
     ),
   );
@@ -497,7 +585,11 @@ const makeOperatorObservation = Effect.gen(function* () {
 export class OperatorObservation extends Context.Service<
   OperatorObservation,
   {
-    /** Builds the supplied instance's Projects, Boards, Runs, and items needing operator attention. */
+    /**
+     * Builds the supplied instance's Projects, Boards, Runs, and items needing operator attention.
+     * The overview is kept until the projection revision or the instance changes; each read still
+     * reads the token reports of the Attempts at work, so a Task card's usage stays current.
+     */
     readonly overview: (
       instance: LoadedInstance,
     ) => Effect.Effect<ReadyOverview, OperatorObservationError>;
