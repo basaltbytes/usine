@@ -37,6 +37,7 @@ describe("exe.dev preparation", () => {
         const failure = yield* prepared
           .launch({
             append: () => Effect.void,
+            comments: () => Effect.void,
             salvage: (value) =>
               Effect.sync(() => {
                 assert(
@@ -120,6 +121,7 @@ describe("exe.dev preparation", () => {
       const exit = yield* Effect.exit(
         prepared.launch({
           append: () => Effect.void,
+          comments: () => Effect.void,
           salvage: () => Effect.fail(recordFailure),
         }),
       );
@@ -176,6 +178,7 @@ describe("exe.dev preparation", () => {
         yield* prepared
           .launch({
             append: () => Effect.void,
+            comments: () => Effect.void,
             salvage: (value) =>
               Effect.sync(() => {
                 recorded.push(value);
@@ -200,7 +203,11 @@ describe("exe.dev preparation", () => {
       const prepared = yield* executor.prepare(request);
       yield* TestClock.adjust("3 hours");
       assert(ssh.state.commands.filter(({ args }) => args.includes("attach")).length > 3);
-      yield* prepared.launch({ append: () => Effect.void, salvage: () => Effect.void });
+      yield* prepared.launch({
+        append: () => Effect.void,
+        salvage: () => Effect.void,
+        comments: () => Effect.void,
+      });
       const released = ssh.state.commands.length;
       yield* TestClock.adjust("2 hours");
       assert.strictEqual(ssh.state.commands.length, released);
@@ -274,7 +281,11 @@ describe("exe.dev preparation", () => {
       const executor = yield* Executor;
       const prepared = yield* executor.prepare(request);
       yield* prepared
-        .launch({ append: () => Effect.void, salvage: () => Effect.void })
+        .launch({
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+          comments: () => Effect.void,
+        })
         .pipe(Effect.forkChild);
       yield* Deferred.await(started);
       const before = ssh.state.commands.length;
@@ -315,6 +326,7 @@ describe("exe.dev preparation", () => {
         const result = yield* prepared.launch({
           append: () => Effect.void,
           salvage: () => Effect.void,
+          comments: () => Effect.void,
         });
         assert.strictEqual(result.message, `Completed: ${request.task}`);
         yield* Scope.close(owner, Exit.void);
@@ -474,6 +486,7 @@ describe("exe.dev preparation", () => {
       const result = yield* prepared.launch({
         append: () => Effect.void,
         salvage: () => Effect.void,
+        comments: () => Effect.void,
       });
       assert.strictEqual(result.message, `Completed: ${request.task}`);
       assert(JSON.stringify(errors).includes("worktree-directory"));
@@ -514,6 +527,7 @@ describe("exe.dev preparation", () => {
         const result = yield* prepared.launch({
           append: () => Effect.void,
           salvage: () => Effect.void,
+          comments: () => Effect.void,
         });
         assert.strictEqual(result.message, `Completed: ${request.task}`);
         const issued = ssh.state.commands.slice(beforeLaunch);
@@ -592,7 +606,11 @@ describe("exe.dev preparation", () => {
       yield* executor.cancel(ATTEMPT_ID);
       yield* executor.cancel(ATTEMPT_ID);
       const error = yield* prepared
-        .launch({ append: () => Effect.void, salvage: () => Effect.void })
+        .launch({
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+          comments: () => Effect.void,
+        })
         .pipe(Effect.flip);
       assert.strictEqual(error._tag, "InfraFailure");
       assert.strictEqual(
@@ -611,7 +629,11 @@ describe("exe.dev preparation", () => {
       ssh.state.hangPreparation = "checkout";
       const attempt = Effect.gen(function* () {
         const prepared = yield* executor.prepare(request);
-        return yield* prepared.launch({ append: () => Effect.void, salvage: () => Effect.void });
+        return yield* prepared.launch({
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+          comments: () => Effect.void,
+        });
       }).pipe(Effect.scoped);
       // The grant detaches last, so its count at the owner's exit shows whether
       // the owner returned while the canceling fiber was still cleaning up.

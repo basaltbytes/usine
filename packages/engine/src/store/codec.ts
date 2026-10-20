@@ -17,7 +17,7 @@ import { ApprovalChannel, ApprovalSource, RunApproval } from "@usine/core/run/ap
 import { StepName, Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
-import { StepResult } from "@usine/core/step/result";
+import { Comment, StepResult } from "@usine/core/step/result";
 import { Effect, Option, Schema } from "effect";
 import { EnginePersistenceError, RunStoreError } from "../engine/error.ts";
 import { IgnoreReason, Submission } from "../engine/submission.ts";
@@ -84,6 +84,7 @@ export const AttemptRow = Schema.Struct({
   salvage: Schema.NullOr(AttemptSalvage),
   start: Schema.NullOr(AttemptStart),
   reattachedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
+  comments: Schema.NullOr(Schema.Array(Comment)),
 });
 export type AttemptRow = typeof AttemptRow.Type;
 
@@ -121,6 +122,7 @@ export const encodeDateTime = Schema.encodeSync(Schema.DateTimeUtcFromString);
 export const encodeRunState = Schema.encodeSync(RunState.RunState);
 export const encodeOutcome = Schema.encodeSync(AttemptOutcome);
 export const encodeSalvage = Schema.encodeSync(AttemptSalvage);
+export const encodeComments = Schema.encodeSync(Schema.Array(Comment));
 export const encodeAttemptStart = Schema.encodeSync(AttemptStart);
 export const decodeNextStarts = Schema.decodeUnknownEffect(
   Schema.Array(Schema.Struct({ nextStart: Schema.NullOr(OperatorRetryStart) })),
@@ -218,6 +220,7 @@ export const attemptFromRow = (row: AttemptRow): Attempt =>
     salvage: Option.fromNullishOr(row.salvage),
     start: Option.fromNullishOr(row.start),
     reattachedAt: Option.fromNullishOr(row.reattachedAt),
+    comments: row.comments ?? [],
   });
 
 export const runSummaryFromRow = (

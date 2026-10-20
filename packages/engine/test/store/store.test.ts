@@ -24,7 +24,7 @@ import { OperatorLogin } from "@usine/core/operator";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
-import { StepResult } from "@usine/core/step/result";
+import { Comment, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 
 import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
@@ -1103,6 +1103,37 @@ describe("cursor store", () => {
           );
         }),
       ),
+  );
+
+  it.live("records the comments an Attempt posted before it failed, on that Attempt", () =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const runId = RunId.make("commented");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        const review = new Comment({
+          url: new URL("https://github.com/basaltbytes/usine/pull/71#pullrequestreview-9"),
+          kind: "review",
+          at: Option.some(DateTime.makeUnsafe("2026-10-20T10:00:00.000Z")),
+        });
+        yield* store.recordComments(started.execution.attempt.id, [review]);
+        yield* store.finishAttempt(
+          started.execution.attempt,
+          Result.fail(new AgentFailure({ message: "Checks failed" })),
+        );
+        yield* store.retry(runId);
+        const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(retried._tag === "AttemptStarted");
+
+        const attempts = (yield* store.snapshot(runId)).attempts;
+        assert.deepStrictEqual(attempts[0]?.comments, [review]);
+        // An Attempt with nothing recorded, like every Attempt before comments were, reads none.
+        assert.deepStrictEqual(attempts[1]?.comments, []);
+        assert(Option.isNone((yield* store.snapshot(runId)).step.result));
+      }),
+    ),
   );
 });
 

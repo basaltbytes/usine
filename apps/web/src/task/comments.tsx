@@ -37,7 +37,7 @@ export const TaskComments = ({ task }: { readonly task: TaskView }) => {
       {task.comments.length === 0 ? (
         <SectionEmpty title="No comments or reviews">
           The comments and reviews an Agent posts on this Task's Items show here once its Attempt
-          succeeds.
+          ends.
         </SectionEmpty>
       ) : (
         <div className="-mx-2">

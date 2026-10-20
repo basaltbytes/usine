@@ -397,7 +397,11 @@ describe("local worker", () => {
             resume: Option.none(),
           });
           const running = yield* scheduler
-            .execute(execution, { append: () => Effect.void, salvage: () => Effect.void })
+            .execute(execution, {
+              append: () => Effect.void,
+              salvage: () => Effect.void,
+              comments: () => Effect.void,
+            })
             .pipe(Effect.forkChild);
           yield* Deferred.await(cleanupStarted);
           // Agent work is complete; only resource release crosses the one-minute budget.
@@ -604,7 +608,11 @@ describe("local worker", () => {
           assert.strictEqual(issued.length, 2);
           for (const token of issued) assert.throws(() => Redacted.value(token));
           const reused = yield* prepared
-            .launch({ append: () => Effect.void, salvage: () => Effect.void })
+            .launch({
+              append: () => Effect.void,
+              salvage: () => Effect.void,
+              comments: () => Effect.void,
+            })
             .pipe(Effect.flip);
           assert.strictEqual(reused._tag, "InfraFailure");
         }).pipe(Effect.provide(runtime));
@@ -875,7 +883,11 @@ describe("local worker", () => {
                   permissions: selected.permissions,
                   resume: Option.none(),
                 }),
-                { append: () => Effect.void, salvage: () => Effect.void },
+                {
+                  append: () => Effect.void,
+                  salvage: () => Effect.void,
+                  comments: () => Effect.void,
+                },
               )
               .pipe(Effect.flip);
           }).pipe(

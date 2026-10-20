@@ -50,7 +50,7 @@ const setup = (
             ),
           ),
       },
-      { append: () => Effect.void, salvage: () => Effect.void },
+      { append: () => Effect.void, salvage: () => Effect.void, comments: () => Effect.void },
     );
     const attempt = Effect.raceFirst(
       Effect.forever(

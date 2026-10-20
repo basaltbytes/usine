@@ -362,19 +362,21 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
 /**
  * GitHub discovery is read-only enrichment of a finished Attempt: a failure or
  * a ten-second stall records nothing it looked for and keeps the other facts.
+ * `retaining` says what the Attempt keeps, for the warning.
  */
 const enrichment = <A, E extends { readonly _tag: string; readonly message: string }>(
   spec: HarvestSpec,
   subject: "Pull request" | "Comment",
   discovery: Effect.Effect<ReadonlyArray<A>, E>,
+  retaining = "retaining the completed agent result",
 ) =>
   discovery.pipe(
     Effect.timeout("10 seconds"),
     Effect.catch((error) =>
       Effect.logWarning(
         error._tag === "TimeoutError"
-          ? `${subject} discovery timed out; retaining the completed agent result`
-          : `${subject} discovery failed; retaining the completed agent result`,
+          ? `${subject} discovery timed out; ${retaining}`
+          : `${subject} discovery failed; ${retaining}`,
         {
           attemptId: spec.attemptId,
           repository: spec.repository,
@@ -406,4 +408,23 @@ export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
   const comments = yield* enrichment(spec, "Comment", harvestComments(spec, run));
   const facts: ReadonlyArray<StepResultFact> = [...commits, ...pullRequests, ...comments];
   return facts;
+});
+
+/**
+ * The comments and reviews an Attempt that ended without success posted on its
+ * Run's Item, found as `harvestFacts` finds them. Its commits and pull requests
+ * are not collected, since the Attempt delivered no result. A GitHub failure or
+ * a ten-second stall records none and never fails.
+ */
+export const harvestPostedComments = Effect.fn("StepResult.harvestPostedComments")(function* <
+  E extends { readonly _tag: string; readonly message: string },
+>(spec: HarvestSpec, run: HarvestCommand<E>) {
+  yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
+  const comments: ReadonlyArray<Comment> = yield* enrichment(
+    spec,
+    "Comment",
+    harvestComments(spec, run),
+    "the Attempt that ended without success records no comment",
+  );
+  return comments;
 });

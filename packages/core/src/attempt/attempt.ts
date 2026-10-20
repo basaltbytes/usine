@@ -2,6 +2,7 @@ import { Effect, Option, Schema } from "effect";
 import { Agent, AgentName } from "../agent/agent.ts";
 import { BrainSpec, ModelId } from "../agent/brain.ts";
 import { RunId } from "../run/run.ts";
+import { Comment } from "../step/result.ts";
 import { StepName } from "../step/step.ts";
 import { WorkerName } from "../worker.ts";
 import { AttemptFailure, isAutoRetryableFailure } from "./failure.ts";
@@ -44,7 +45,9 @@ export class AttemptContext extends Schema.Class<AttemptContext>("AttemptContext
  * unsuccessful end; the next attempt of the same Run resumes from a pushed salvage.
  * `start` is why the attempt began, none for attempts begun before it was
  * recorded, and `reattachedAt` is when an orchestrator restart last reattached
- * it, none if none did.
+ * it, none if none did. `comments` are the comments and reviews the attempt
+ * posted on its Run's Item before it ended without success; a succeeded
+ * attempt's are facts of its Step result instead.
  */
 export class Attempt extends Schema.Class<Attempt>("Attempt")({
   id: AttemptId,
@@ -67,6 +70,7 @@ export class Attempt extends Schema.Class<Attempt>("Attempt")({
   reattachedAt: Schema.Option(Schema.DateTimeUtc).pipe(
     Schema.withConstructorDefault(Effect.succeed(Option.none())),
   ),
+  comments: Schema.Array(Comment).pipe(Schema.withConstructorDefault(Effect.succeed([]))),
 }) {}
 
 /**

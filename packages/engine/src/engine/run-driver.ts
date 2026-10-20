@@ -349,6 +349,8 @@ export class RunDriver extends Context.Service<
               store.appendTranscript(direction, envelope).pipe(asAttemptFailure),
             salvage: (salvage) =>
               store.recordSalvage(started.execution.attempt.id, salvage).pipe(asAttemptFailure),
+            comments: (comments) =>
+              store.recordComments(started.execution.attempt.id, comments).pipe(asAttemptFailure),
           })
           .pipe(
             Effect.catchDefect((defect) =>

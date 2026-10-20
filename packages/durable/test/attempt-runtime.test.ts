@@ -288,6 +288,7 @@ describe("durable AttemptRuntime", () => {
               return yield* new InfraFailure({ message: "The orchestrator stopped", cause: null });
             }),
           salvage: () => Effect.void,
+          comments: () => Effect.void,
         };
         const stopped = yield* runtime.execute(request, sink).pipe(Effect.flip);
         assert.strictEqual(stopped._tag, "InfraFailure");
@@ -796,6 +797,7 @@ describe("durable AttemptRuntime", () => {
               ? Effect.fail(new RunawayFailure({ ceiling: "tokens" }))
               : Effect.void,
           salvage: () => Effect.void,
+          comments: () => Effect.void,
         };
         const failure = yield* runtime.execute(request, sink).pipe(Effect.flip);
         assert.strictEqual(failure._tag, "RunawayFailure");

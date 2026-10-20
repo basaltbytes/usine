@@ -3,7 +3,7 @@ import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
-import { harvestFacts } from "@usine/core/step/harvest";
+import { harvestFacts, harvestPostedComments } from "@usine/core/step/harvest";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Deferred, Effect, Exit, Option, Schema, Scope } from "effect";
 import { durableSessionFor } from "../durable-session.ts";
@@ -148,8 +148,9 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
     });
 
-    const harvest = (workspace: AttemptWorkspace, access: RemoteAccess) =>
-      harvestFacts(workspace.spec, (command, args) =>
+    const harvestCommand =
+      (workspace: AttemptWorkspace, access: RemoteAccess) =>
+      (command: "git" | "gh", args: ReadonlyArray<string>) =>
         access.refresh
           .pipe(
             Effect.andThen(
@@ -162,8 +163,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           )
           .pipe(
             Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
-          ),
-      ).pipe(
+          );
+
+    const harvest = (workspace: AttemptWorkspace, access: RemoteAccess) =>
+      harvestFacts(workspace.spec, harvestCommand(workspace, access)).pipe(
         Effect.mapError(
           (error) =>
             new InfraFailure({
@@ -425,6 +428,10 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                 host: access.shell,
                 environment: withGitHooks(access.environment, provisioned.gitHooks),
                 harvest: harvest(prepared, access),
+                harvestComments: harvestPostedComments(
+                  prepared.spec,
+                  harvestCommand(prepared, access),
+                ),
                 keepForReattach: provisioned.keepForReattach,
               });
             }),

@@ -260,13 +260,25 @@ const runs = [
         Option.some(new AttemptFailed({ failure: new AgentFailure({ message: "Checks failed" }) })),
         Option.some("2026-10-03T09:30:00.000Z"),
       ),
-      attempt(
-        runId,
-        2,
-        "2026-10-03T10:00:00.000Z",
-        Option.some(new AttemptFailed({ failure: new AgentFailure({ message: "Checks failed" }) })),
-        Option.some("2026-10-03T10:30:00.000Z"),
-      ),
+      new Attempt({
+        ...attempt(
+          runId,
+          2,
+          "2026-10-03T10:00:00.000Z",
+          Option.some(
+            new AttemptFailed({ failure: new AgentFailure({ message: "Checks failed" }) }),
+          ),
+          Option.some("2026-10-03T10:30:00.000Z"),
+        ),
+        // A failed Attempt keeps the comments it posted on the Attempt itself.
+        comments: [
+          new Comment({
+            url: new URL(`https://github.com/${repository}/issues/40#issuecomment-2`),
+            kind: "issue-comment",
+            at: Option.some(at("2026-10-03T10:10:00.000Z")),
+          }),
+        ],
+      }),
     ],
   ),
   summary(
@@ -439,7 +451,8 @@ describe("Task view", () => {
       );
       assert.strictEqual(task.runs[0]?.runAgain?.from, "run-fix");
       assert.isTrue(task.needsYou);
-      // A comment carries GitHub's time when the harvest recorded one, and its Attempt's end always.
+      // A comment carries GitHub's time when the harvest recorded one, and its Attempt's end always;
+      // a Run's comments are newest first by the time it has.
       assert.deepStrictEqual(
         task.comments.map(({ runId, kind, postedAt, attemptEndedAt }) => [
           runId,
@@ -448,8 +461,9 @@ describe("Task view", () => {
           attemptEndedAt,
         ]),
         [
-          ["run-review", "review", "2026-10-04T09:05:00.000Z", "2026-10-04T09:12:00.000Z"],
           ["run-review", "review-comment", null, "2026-10-04T09:12:00.000Z"],
+          ["run-review", "review", "2026-10-04T09:05:00.000Z", "2026-10-04T09:12:00.000Z"],
+          ["run-dev", "issue-comment", "2026-10-03T10:10:00.000Z", "2026-10-03T10:30:00.000Z"],
           ["run-plan", "issue-comment", null, "2026-10-02T09:20:00.000Z"],
         ],
       );

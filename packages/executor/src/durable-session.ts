@@ -3,7 +3,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
-import type { StepResult, StepResultFact } from "@usine/core/step/result";
+import type { Comment, StepResult, StepResultFact } from "@usine/core/step/result";
 import {
   type AttemptReport,
   AttemptRequest,
@@ -50,6 +50,8 @@ export interface DurableCheckout {
   readonly environment: Record<string, string>;
   /** Collects the commits and pull requests the checkout holds and the comments the Attempt posted on its Item. */
   readonly harvest: Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
+  /** Collects only the comments the Attempt posted on its Item, for an Attempt that ended without success; none when GitHub fails. */
+  readonly harvestComments: Effect.Effect<ReadonlyArray<Comment>>;
   /** Preserves the checkout when a restart needs to reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;
 }
@@ -120,6 +122,37 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
         attemptId,
         reason,
       });
+  });
+
+  /**
+   * Records the comments and reviews an Attempt that ended without success
+   * posted on its Run's Item, once its parent task has stopped. A failure to
+   * record them is logged and never changes how the Attempt ended.
+   */
+  const recordPostedComments = Effect.fn("DurableSession.recordPostedComments")(function* (
+    attemptId: AttemptId,
+    checkout: DurableCheckout,
+    io: AttemptChannel.Sink,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    const comments = yield* checkout.harvestComments;
+    if (comments.length === 0) {
+      yield* Effect.logDebug("The Attempt posted no comment on its Item before it ended", {
+        attemptId,
+      });
+      return;
+    }
+    yield* io.comments(comments).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("Could not record the comments the Attempt posted before it ended", {
+          attemptId,
+          comments: comments.length,
+          errorTag: error._tag,
+          message: error.message,
+        }),
+      ),
+      Effect.ignore,
+    );
   });
 
   const launch = Effect.fn("DurableSession.launch")(function* (
@@ -220,6 +253,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
                     reason._tag === "Cancel" ? "the Attempt was canceled" : "a ceiling tripped",
                 }),
               );
+              yield* recordPostedComments(attemptId, checkout, io);
             }
           }
         }),

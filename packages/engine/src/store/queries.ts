@@ -15,7 +15,7 @@ import type { RunAgain } from "@usine/core/run/again";
 import type { ApprovalSource } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
 import * as RunState from "@usine/core/run/state";
-import { StepResult } from "@usine/core/step/result";
+import { type Comment, StepResult } from "@usine/core/step/result";
 import {
   and,
   asc,
@@ -66,6 +66,7 @@ import {
   encodeBrainSpec,
   encodeDateTime,
   encodeOutcome,
+  encodeComments,
   encodeSalvage,
   encodePayload,
   encodeRunState,
@@ -151,6 +152,7 @@ const attemptSelection = {
   salvage: attempts.salvageJson,
   start: attempts.startJson,
   reattachedAt: attempts.reattachedAt,
+  comments: attempts.commentsJson,
 } as const;
 
 // The state partitions are owned by @usine/core; these predicates only borrow their tags.
@@ -465,6 +467,18 @@ export const queriesFor = (database: RunDatabaseClient) => {
     yield* database
       .update(attempts)
       .set({ salvageJson: encodeSalvage(salvage) })
+      .where(eq(attempts.attemptId, attemptId))
+      .execute();
+  });
+
+  const recordComments = Effect.fn("RunStoreQueries.recordComments")(function* (
+    attemptId: AttemptId,
+    comments: ReadonlyArray<Comment>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, comments: comments.length });
+    yield* database
+      .update(attempts)
+      .set({ commentsJson: encodeComments(comments) })
       .where(eq(attempts.attemptId, attemptId))
       .execute();
   });
@@ -918,6 +932,7 @@ export const queriesFor = (database: RunDatabaseClient) => {
     nextStart,
     setNextStart,
     recordSalvage,
+    recordComments,
     amend,
     markIntervened,
     approvalExists,
