@@ -2,6 +2,7 @@ import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { ArrowsInLineHorizontalIcon } from "@phosphor-icons/react";
 import type { LaneItemState } from "@usine/config/board";
+import type { RepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView } from "@usine/orchestrator/operator";
 import { useState } from "react";
@@ -82,6 +83,7 @@ export const BoardColumn = ({
   moves,
   openRun,
   onMove,
+  repository,
 }: {
   readonly lane: BoardLaneView;
   readonly lanes: ReadonlyArray<BoardLaneView>;
@@ -92,6 +94,7 @@ export const BoardColumn = ({
   readonly moves: ReadonlyArray<BoardMoveProgress>;
   readonly openRun: (runId: RunId) => void;
   readonly onMove: (item: BoardTaskView, lane: BoardLaneView) => void;
+  readonly repository: RepositoryName;
 }) => {
   const foldable = foldsByDefault(lane);
   const [folded, setFolded] = useState(foldable);
@@ -164,6 +167,7 @@ export const BoardColumn = ({
                 phase={phase}
                 moves={{ targets, disabled: moveDisabled, onMove }}
                 openRun={openRun}
+                repository={repository}
               />
             );
           })}

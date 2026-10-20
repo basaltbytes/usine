@@ -39,6 +39,7 @@ import { laneUnder, orderLanes, ProjectBoard, runsWithoutCard } from "../src/boa
 import { cardLabels, currentRun, itemFailure, runLineSince } from "../src/board/card.tsx";
 import { foldsByDefault } from "../src/board/column.tsx";
 import { elapsedLabel, failureMessage, needCopy, timestampLabel } from "../src/operator-copy.ts";
+import { WithRouter } from "./memory-router.tsx";
 
 const brain = new BrainSpec({
   harness: "codex",
@@ -296,7 +297,9 @@ describe("Board drag targets", () => {
       });
       return renderToStaticMarkup(
         <QueryClientProvider client={new QueryClient()}>
-          <ProjectBoard project={project} disabled={false} openRun={() => {}} />
+          <WithRouter>
+            <ProjectBoard project={project} disabled={false} openRun={() => {}} />
+          </WithRouter>
         </QueryClientProvider>,
       );
     };
@@ -329,6 +332,81 @@ describe("Board drag targets", () => {
     assert.strictEqual(laneUnder(carded.itemKey, lanes)?.id, "review");
     assert.strictEqual(laneUnder(BoardLaneId.make("ready"), lanes)?.id, "ready");
     assert.strictEqual(laneUnder(BoardLaneId.make("elsewhere"), lanes), undefined);
+  });
+});
+
+describe("Board card link", () => {
+  it("opens the Task page under its originating Item, with or without a current Run", () => {
+    const withRun = itemWithRun("Failed", [attempt(1, "Checks failed")]);
+    const prKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(40)]);
+    const pullRequest = new BoardItemLink({
+      itemKey: prKey,
+      kind: "pr",
+      number: ItemNumber.make(40),
+      title: "Fix the Board lanes",
+      url: "https://github.com/basaltbytes/usine/pull/40",
+    });
+    // A Task whose pull request is its current Item still opens under the issue's number.
+    const linked = new BoardTaskView({
+      ...withRun,
+      ...pullRequest,
+      title: withRun.title,
+      items: [...withRun.items, pullRequest],
+      runs: [],
+      run: null,
+    });
+    const quietKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(12)]);
+    const quiet = new BoardTaskView({
+      ...withRun,
+      itemKey: quietKey,
+      number: ItemNumber.make(12),
+      items: [
+        new BoardItemLink({
+          itemKey: quietKey,
+          kind: "issue",
+          number: ItemNumber.make(12),
+          title: "Document the cycle budget reset",
+          url: "https://github.com/basaltbytes/usine/issues/12",
+        }),
+      ],
+      runs: [],
+      run: null,
+      needsYou: false,
+    });
+    const project = new ProjectView({
+      repository,
+      status: "clear",
+      runs: [],
+      labels: [],
+      preflightFindings: [],
+      board: new BoardView({
+        failures: [],
+        lanes: [
+          new ReadOnlyBoardLaneView({
+            id: BoardLaneId.make("authored:Backlog"),
+            name: LaneName.make("Backlog"),
+            sources: [],
+            origin: "authored",
+            items: [withRun, linked, quiet],
+          }),
+        ],
+      }),
+    });
+    const markup = renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WithRouter>
+          <ProjectBoard project={project} disabled={false} openRun={() => {}} />
+        </WithRouter>
+      </QueryClientProvider>,
+    );
+    const titleLinks = [...markup.matchAll(/<h3[^>]*><a[^>]*href="([^"]+)"/gu)].map(
+      ([, href]) => href,
+    );
+    assert.deepStrictEqual(titleLinks, [
+      "/projects/basaltbytes/usine/tasks/33",
+      "/projects/basaltbytes/usine/tasks/33",
+      "/projects/basaltbytes/usine/tasks/12",
+    ]);
   });
 });
 

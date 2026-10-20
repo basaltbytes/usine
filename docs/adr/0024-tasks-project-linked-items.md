@@ -9,3 +9,7 @@ The earliest issue number supplies the Task title. The Item with the newest open
 The Task is a read projection without a stored identity or new execution lifecycle. Run ownership, deduplication, approval, retry, and per-Item cycle budgets stay with their existing records. Connected components avoid duplicate cards when several issues share a PR. The engine supplies all saved Run summaries for visible Items independently of the overview's recent-history limit, and each Run's existing drawer exposes its Attempts and transcript.
 
 The UI reports Run and Attempt counts. It does not derive task cost from account rate-limit snapshots or duration from timestamps that do not record completion.
+
+## 2026-10-20: the Task has a page
+
+A Run that succeeded or was canceled left the card, so the only way back to it was a card that still showed a Run. The Task now has a page at `/projects/<owner>/<name>/tasks/<number>`, and a click on a card opens it. The Task still has no stored identity, so the page is addressed by its originating Item, the earliest issue or, without one, the earliest pull request; any member's number finds the same Task, and the address then names the originating Item. The page reads the Task through the Board projection, so it joins the same Items, places the Task in the same lane, and covers the same 500 newest Items. The comments and reviews it lists come from the Runs' `Comment` facts, which record no time, so each is dated by the end of the succeeded Attempt that recorded it.

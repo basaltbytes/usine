@@ -15,6 +15,7 @@ import { Route as ConfigurationLoopsRouteImport } from './routes/configuration/l
 import { Route as ProjectsOwnerNameRouteImport } from './routes/projects/$owner/$name'
 import { Route as ProjectsOwnerNameIndexRouteImport } from './routes/projects/$owner/$name/index'
 import { Route as ProjectsOwnerNameRunsRunRouteImport } from './routes/projects/$owner/$name/runs/$run'
+import { Route as ProjectsOwnerNameTasksNumberRouteImport } from './routes/projects/$owner/$name/tasks/$number'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -47,6 +48,12 @@ const ProjectsOwnerNameRunsRunRoute =
     path: '/runs/$run',
     getParentRoute: () => ProjectsOwnerNameRoute,
   } as any)
+const ProjectsOwnerNameTasksNumberRoute =
+  ProjectsOwnerNameTasksNumberRouteImport.update({
+    id: '/tasks/$number',
+    path: '/tasks/$number',
+    getParentRoute: () => ProjectsOwnerNameRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -55,6 +62,7 @@ export interface FileRoutesByFullPath {
   '/projects/$owner/$name': typeof ProjectsOwnerNameRouteWithChildren
   '/projects/$owner/$name/': typeof ProjectsOwnerNameIndexRoute
   '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
+  '/projects/$owner/$name/tasks/$number': typeof ProjectsOwnerNameTasksNumberRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -62,6 +70,7 @@ export interface FileRoutesByTo {
   '/configuration': typeof ConfigurationIndexRoute
   '/projects/$owner/$name': typeof ProjectsOwnerNameIndexRoute
   '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
+  '/projects/$owner/$name/tasks/$number': typeof ProjectsOwnerNameTasksNumberRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -71,6 +80,7 @@ export interface FileRoutesById {
   '/projects/$owner/$name': typeof ProjectsOwnerNameRouteWithChildren
   '/projects/$owner/$name/': typeof ProjectsOwnerNameIndexRoute
   '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
+  '/projects/$owner/$name/tasks/$number': typeof ProjectsOwnerNameTasksNumberRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -81,6 +91,7 @@ export interface FileRouteTypes {
     | '/projects/$owner/$name'
     | '/projects/$owner/$name/'
     | '/projects/$owner/$name/runs/$run'
+    | '/projects/$owner/$name/tasks/$number'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -88,6 +99,7 @@ export interface FileRouteTypes {
     | '/configuration'
     | '/projects/$owner/$name'
     | '/projects/$owner/$name/runs/$run'
+    | '/projects/$owner/$name/tasks/$number'
   id:
     | '__root__'
     | '/'
@@ -96,6 +108,7 @@ export interface FileRouteTypes {
     | '/projects/$owner/$name'
     | '/projects/$owner/$name/'
     | '/projects/$owner/$name/runs/$run'
+    | '/projects/$owner/$name/tasks/$number'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -149,17 +162,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsOwnerNameRunsRunRouteImport
       parentRoute: typeof ProjectsOwnerNameRoute
     }
+    '/projects/$owner/$name/tasks/$number': {
+      id: '/projects/$owner/$name/tasks/$number'
+      path: '/tasks/$number'
+      fullPath: '/projects/$owner/$name/tasks/$number'
+      preLoaderRoute: typeof ProjectsOwnerNameTasksNumberRouteImport
+      parentRoute: typeof ProjectsOwnerNameRoute
+    }
   }
 }
 
 interface ProjectsOwnerNameRouteChildren {
   ProjectsOwnerNameIndexRoute: typeof ProjectsOwnerNameIndexRoute
   ProjectsOwnerNameRunsRunRoute: typeof ProjectsOwnerNameRunsRunRoute
+  ProjectsOwnerNameTasksNumberRoute: typeof ProjectsOwnerNameTasksNumberRoute
 }
 
 const ProjectsOwnerNameRouteChildren: ProjectsOwnerNameRouteChildren = {
   ProjectsOwnerNameIndexRoute: ProjectsOwnerNameIndexRoute,
   ProjectsOwnerNameRunsRunRoute: ProjectsOwnerNameRunsRunRoute,
+  ProjectsOwnerNameTasksNumberRoute: ProjectsOwnerNameTasksNumberRoute,
 }
 
 const ProjectsOwnerNameRouteWithChildren =

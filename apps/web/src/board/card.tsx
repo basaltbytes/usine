@@ -1,5 +1,7 @@
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { Link } from "@tanstack/react-router";
+import type { RepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import { OPEN_STATE_TAGS } from "@usine/core/run/state";
 import type {
@@ -24,6 +26,7 @@ import {
   runActionProgress,
   runLineTimeTitle,
 } from "../operator-copy.ts";
+import { projectParams } from "../overview.ts";
 import { type RunActions, useRunAction } from "../run-actions.ts";
 import { type CardMoves, CardMenu } from "./card-menu.tsx";
 import type { BoardMoveProgress } from "./moves.ts";
@@ -152,39 +155,32 @@ const progressMessage = (
   return phase === undefined ? null : moveProgressMessage(phase);
 };
 
-// The title's hit area stretches over the whole card, so a click anywhere on it opens the Run or Item.
+// The title's hit area stretches over the whole card, so a click anywhere on it opens the Task page.
 const titleClass =
   "block w-full cursor-pointer text-left outline-none after:absolute after:inset-0 after:rounded-lg";
 
+/** The Task's title, linking to its page under the number of its originating Item. */
 const CardTitle = ({
   item,
-  openRun,
+  repository,
 }: {
   readonly item: BoardTaskView;
-  readonly openRun: (runId: RunId) => void;
-}) => {
-  const run = item.run;
-  const text = <span className="line-clamp-2">{item.title}</span>;
-  return (
-    <h3 className="text-sm/snug font-medium text-card-foreground" title={item.title}>
-      {run === null ? (
-        <a
-          href={item.url}
-          target="_blank"
-          rel="noreferrer"
-          draggable={false}
-          className={titleClass}
-        >
-          {text}
-        </a>
-      ) : (
-        <button type="button" className={titleClass} onClick={() => openRun(run.id)}>
-          {text}
-        </button>
-      )}
-    </h3>
-  );
-};
+  readonly repository: RepositoryName;
+}) => (
+  <h3 className="text-sm/snug font-medium text-card-foreground" title={item.title}>
+    <Link
+      to="/projects/$owner/$name/tasks/$number"
+      params={{
+        ...projectParams(repository),
+        number: String(item.items[0]?.number ?? item.number),
+      }}
+      draggable={false}
+      className={titleClass}
+    >
+      <span className="line-clamp-2">{item.title}</span>
+    </Link>
+  </h3>
+);
 
 /** The failure that still needs the operator, with Retry when its Run can be retried. */
 const FailureNote = ({
@@ -215,14 +211,14 @@ const CardFace = ({
   item,
   lane,
   catalog,
-  openRun,
+  repository,
   action,
   progress,
 }: {
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
-  readonly openRun: (runId: RunId) => void;
+  readonly repository: RepositoryName;
   /** The card's Run actions, or null on the copy that follows a drag. */
   readonly action: RunActions | null;
   readonly progress: string | null;
@@ -250,7 +246,7 @@ const CardFace = ({
           ),
         )}
       </p>
-      <CardTitle item={item} openRun={openRun} />
+      <CardTitle item={item} repository={repository} />
       <CardLabels labels={cardLabels(item, lane)} catalog={catalog} />
       {run !== null && <RunLine run={run} />}
       {progress !== null && (
@@ -283,10 +279,12 @@ export const BoardCard = ({
   phase,
   moves,
   openRun,
+  repository,
 }: {
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
+  readonly repository: RepositoryName;
   readonly draggable: boolean;
   readonly phase: BoardMoveProgress["phase"] | undefined;
   readonly moves: CardMoves;
@@ -323,7 +321,7 @@ export const BoardCard = ({
           item={item}
           lane={lane}
           catalog={catalog}
-          openRun={openRun}
+          repository={repository}
           action={action}
           progress={progressMessage(action, phase)}
         />
@@ -345,17 +343,19 @@ export const DraggedCard = ({
   item,
   lane,
   catalog,
+  repository,
 }: {
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
+  readonly repository: RepositoryName;
 }) => (
   <Card size="sm" className={cn(cardClass(item.needsYou), "cursor-grabbing shadow-raised")}>
     <CardFace
       item={item}
       lane={lane}
       catalog={catalog}
-      openRun={() => {}}
+      repository={repository}
       action={null}
       progress={null}
     />

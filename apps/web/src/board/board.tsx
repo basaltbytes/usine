@@ -250,6 +250,7 @@ export const ProjectBoard = ({
                   moves={moves}
                   openRun={openRun}
                   onMove={moveItem}
+                  repository={project.repository}
                 />
               ))}
             </div>
@@ -258,7 +259,12 @@ export const ProjectBoard = ({
         </div>
         <DragOverlay>
           {active !== null && (
-            <DraggedCard item={active.item} lane={active.lane} catalog={catalog} />
+            <DraggedCard
+              item={active.item}
+              lane={active.lane}
+              catalog={catalog}
+              repository={project.repository}
+            />
           )}
         </DragOverlay>
       </DndContext>

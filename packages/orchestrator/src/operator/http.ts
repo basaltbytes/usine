@@ -19,6 +19,7 @@ import {
 import { FactoryOverview } from "./overview.ts";
 import { RunDetailView, EditAndRetry, SessionIntervention } from "./run.ts";
 import { RunGitHubChangesView } from "./github-changes.ts";
+import { TaskView } from "./task.ts";
 
 const errorStatuses = {
   SchemaError: 400,
@@ -236,6 +237,16 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         success: acknowledged,
       }),
       HttpApiEndpoint.post("reload", "/api/instance/reload", { success: InstanceReload }),
+    )
+    .add(
+      HttpApiEndpoint.get("task", "/api/projects/:owner/:repository/tasks/:item", {
+        params: {
+          owner: repositoryPart,
+          repository: repositoryPart,
+          item: Schema.FiniteFromString.pipe(Schema.decodeTo(ItemNumber)),
+        },
+        success: TaskView,
+      }),
     )
     .middleware(OperatorHttpPolicy),
 );

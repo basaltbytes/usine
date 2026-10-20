@@ -6,10 +6,12 @@ import { flushSync } from "react-dom";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
+import { RouterProvider } from "@tanstack/react-router";
 import { ProjectBoard } from "../src/board/board.tsx";
 import { timestampLabel } from "../src/operator-copy.ts";
 import { overviewQuery } from "../src/overview.ts";
 import { boardOverview } from "./board-fixture.ts";
+import { memoryRouter } from "./memory-router.tsx";
 import "../src/index.css";
 
 declare module "vitest/browser" {
@@ -23,6 +25,7 @@ let root: Root;
 let queryClient: QueryClient;
 let opened: Array<RunId>;
 let overview: ReadyOverview;
+let router: ReturnType<typeof memoryRouter>;
 
 const Board = () => {
   const { data } = useSuspenseQuery(overviewQuery());
@@ -79,10 +82,12 @@ beforeEach(async () => {
   host = document.createElement("div");
   document.body.append(host);
   root = createRoot(host);
+  router = memoryRouter(Board);
+  await router.load();
   flushSync(() =>
     root.render(
       <QueryClientProvider client={queryClient}>
-        <Board />
+        <RouterProvider router={router} />
       </QueryClientProvider>,
     ),
   );
@@ -238,11 +243,21 @@ it("leaves canceled and succeeded Runs off the card", async () => {
   }
 });
 
-it("opens the Run drawer from anywhere on the card body", async () => {
+it("opens the Task page from anywhere on the card body, with or without a Run", async () => {
   await userEvent.click(page.elementLocator(cardOf(/^Retry salvage/u)), {
     position: { x: 24, y: 70 },
   });
-  expect(opened).toEqual(["run-salvage"]);
+  await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test/repo/tasks/7");
+  expect(opened).toEqual([]);
+  await userEvent.click(page.elementLocator(cardOf(/^Document the cycle budget/u)), {
+    position: { x: 24, y: 40 },
+  });
+  await expect
+    .poll(() => router.state.location.pathname)
+    .toBe("/projects/board-test/repo/tasks/12");
+  // A Task joining an issue and its pull request opens under the issue.
+  await userEvent.click(page.elementLocator(cardOf(/^Redesign the Board columns/u)));
+  await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test/repo/tasks/9");
 });
 
 it("lists only the actions that apply to a card without a Run", async () => {
