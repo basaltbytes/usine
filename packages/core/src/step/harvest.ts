@@ -376,9 +376,9 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
   // All Attempts that write as one bot login share it, such as two Loops' Runs
   // on one pull request, so the login alone does not tell their comments apart.
   // The Attempt prompt asks the Agent to end each comment and review with its
-  // signature, and only those that do are the Attempt's. Two concurrent
-  // Attempts of one Agent on one Item still sign alike (#429). A body often
-  // ends with a newline, so trailing whitespace is ignored.
+  // signature, and only those that do are the Attempt's (ADR 0006, #394).
+  // Two concurrent Attempts of one Agent on one Item still sign alike (#429).
+  // A body often ends with a newline, so trailing whitespace is ignored.
   const signature = githubSignature(spec.agent.name);
   const posted = candidates.flatMap(({ body, fact }) =>
     body !== undefined && body.trimEnd().endsWith(signature) ? [fact] : [],
