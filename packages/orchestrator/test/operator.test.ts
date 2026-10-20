@@ -38,9 +38,13 @@ import {
   AgentSessionId,
   ChildSession,
   ParentSession,
+  SessionTokensUpdated,
   TextOutput,
+  TokenCount,
   ToolStarted,
+  UsdAmount,
 } from "@usine/core/agent/session";
+import { StartedByEvent, StartedByInfraRetry } from "@usine/core/attempt/start";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { BlockedFailure, DefectFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptFailed } from "@usine/core/attempt/outcome";
@@ -85,7 +89,7 @@ import { ReadyOverview } from "../src/operator/overview.ts";
 import { ApprovalView, EditAndRetry, SessionIntervention } from "../src/operator/run.ts";
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
-import { failureView } from "../src/operator/projection.ts";
+import { failureView, runDuration } from "../src/operator/projection.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
@@ -269,6 +273,59 @@ const transcript = [
   }),
 ];
 
+const retryAttemptId = AttemptId.make("running-retry");
+const sessionOf = (
+  id: string,
+  harness: BrainSpec["harness"],
+  model: string,
+  agent: string,
+): ParentSession | ChildSession => {
+  const sessionBrain = new BrainSpec({ harness, model: ModelId.make(model), effort: "high" });
+  return harness === "pi"
+    ? new ParentSession({ id: AgentSessionId.make(id), agent: agentFile.name, brain: sessionBrain })
+    : new ChildSession({
+        id: AgentSessionId.make(id),
+        parentId: AgentSessionId.make(`parent-of-${id}`),
+        agent: AgentName.make(agent),
+        brain: sessionBrain,
+      });
+};
+const apiParent = sessionOf("api-parent", "pi", "openai/gpt-5.5", "developer");
+const claudeChild = sessionOf("claude-child", "claude", "claude-opus-4-7", "developer");
+const planParent = sessionOf("plan-parent", "pi", "openai-codex/gpt-5.5", "developer");
+const codexChild = sessionOf("codex-child", "codex", "gpt-5.6-sol", "reviewer");
+/** The token reports the usage query returns: each session's reports, highest one included. */
+const usageReports = (
+  [
+    [attemptId, apiParent, 1_000, 0.5],
+    [attemptId, apiParent, 1_500, 0.75],
+    [attemptId, claudeChild, 20_000, 1.25],
+    [retryAttemptId, planParent, 800, 0.3],
+    [retryAttemptId, codexChild, 5_000, null],
+  ] as const
+).map(
+  ([attempt, session, tokens, usd], index) =>
+    new TranscriptEntry({
+      sequence: TranscriptSequence.make(1_000 + index),
+      attemptId: attempt,
+      direction: "outbound",
+      envelope: new AttemptChannel.OutboundEnvelope({
+        version: AttemptChannel.PROTOCOL_VERSION,
+        attemptId: attempt,
+        sequence: AttemptChannel.Sequence.make(1_000 + index),
+        sentAt: now,
+        payload: new AttemptChannel.SessionEvent({
+          event: new SessionTokensUpdated({
+            session,
+            totalTokens: TokenCount.make(tokens),
+            costUsd: usd === null ? Option.none() : Option.some(UsdAmount.make(usd)),
+          }),
+        }),
+      }),
+      receivedAt: now,
+    }),
+);
+
 interface RecordedApproval {
   readonly runId: RunId;
   readonly event: Event;
@@ -293,6 +350,8 @@ const testLayer = (
       Match.valueTags(query, {
         TranscriptAllQuery: () => transcript,
         TranscriptSessionsQuery: () => [],
+        TranscriptUsageQuery: ({ attemptId: attempt }) =>
+          usageReports.filter((entry) => entry.attemptId === attempt),
         TranscriptTailQuery: ({ after, limit }) =>
           transcript.filter((entry) => entry.sequence > after).slice(0, limit),
         TranscriptPageQuery: ({ before, limit }) => {
@@ -586,6 +645,118 @@ describe("Operator", () => {
     }),
   );
 
+  it("adds up Attempt time, ending an Attempt with no recorded end at its newest transcript row", () => {
+    const original = snapshot.attempts[0];
+    assert(original !== undefined);
+    const closed = (id: string, startMinute: number, endMinute: number | null) =>
+      new Attempt({
+        ...original,
+        id: AttemptId.make(id),
+        startedAt: DateTime.add(now, { minutes: startMinute }),
+        outcome: Option.some(
+          new AttemptFailed({ failure: new InfraFailure({ message: "Lost", cause: "gone" }) }),
+        ),
+        endedAt:
+          endMinute === null
+            ? Option.none()
+            : Option.some(DateTime.add(now, { minutes: endMinute })),
+      });
+    const running = new Attempt({
+      ...original,
+      id: AttemptId.make("open"),
+      startedAt: DateTime.add(now, { minutes: 30 }),
+    });
+    const duration = runDuration(
+      [closed("recorded", 0, 5), closed("legacy", 10, null), closed("silent", 20, null), running],
+      new Map([[AttemptId.make("legacy"), DateTime.add(now, { minutes: 17 })]]),
+    );
+    assert.deepStrictEqual(
+      { ...duration },
+      { endedMillis: 12 * 60_000, runningSince: "2026-08-31T12:30:00.000Z", unmeasured: 1 },
+    );
+  });
+
+  it.effect(
+    "details the Run's Worker, Attempt time, why each Attempt began, and its tokens per session and pool",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const original = snapshot.attempts[0];
+        assert(original !== undefined);
+        const failed = new Attempt({
+          ...original,
+          outcome: Option.some(
+            new AttemptFailed({
+              failure: new InfraFailure({ message: "Worker unavailable", cause: "disconnected" }),
+            }),
+          ),
+          endedAt: Option.some(DateTime.add(now, { minutes: 5 })),
+          start: Option.some(new StartedByEvent()),
+        });
+        const running = new Attempt({
+          ...original,
+          id: retryAttemptId,
+          number: AttemptNumber.make(2),
+          worker: WorkerName.make("usine-worker-1"),
+          startedAt: DateTime.add(now, { minutes: 6 }),
+          start: Option.some(new StartedByInfraRetry()),
+          reattachedAt: Option.some(DateTime.add(now, { minutes: 9 })),
+        });
+        const current = new RunSnapshot({
+          ...snapshot,
+          run: new Run({ ...snapshot.run, state: new RunState.Running() }),
+          attempts: [failed, running],
+        });
+        yield* Effect.gen(function* () {
+          const detail = yield* (yield* Operator).detail(runId);
+          assert.strictEqual(detail.worker, "usine-worker-1");
+          assert.deepStrictEqual(
+            { ...detail.duration },
+            { endedMillis: 300_000, runningSince: "2026-08-31T12:06:00.000Z", unmeasured: 0 },
+          );
+          assert.deepStrictEqual(
+            detail.run.attempts.map(({ start, reattachedAt }) => [start?._tag, reattachedAt]),
+            [
+              ["Event", null],
+              ["InfraRetry", "2026-08-31T12:09:00.000Z"],
+            ],
+          );
+          assert.strictEqual(detail.usage.tokens, 27_300);
+          assert.deepStrictEqual(
+            detail.usage.pools.map(
+              ({ pool, tokens, cost }): readonly [string, number, object | null] => [
+                pool,
+                tokens,
+                cost === null ? null : { ...cost },
+              ],
+            ),
+            [
+              ["apiKeys", 1_500, { usd: 0.75, estimate: false }],
+              ["claudePlan", 20_000, { usd: 1.25, estimate: true }],
+              ["chatgptPlan", 5_800, null],
+            ],
+          );
+          assert.deepStrictEqual(
+            detail.usage.sessions.map(({ attemptId: attempt, session, tokens, cost }) => [
+              attempt,
+              session.id,
+              tokens,
+              cost?.usd ?? null,
+            ]),
+            [
+              [attemptId, "api-parent", 1_500, 0.75],
+              [attemptId, "claude-child", 20_000, 1.25],
+              [retryAttemptId, "plan-parent", 800, null],
+              [retryAttemptId, "codex-child", 5_000, null],
+            ],
+          );
+        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
+      }),
+  );
+
   it.effect(
     "derives retry context from the selected roster agent and attributes input to the configured operator",
     () =>
@@ -595,6 +766,7 @@ describe("Operator", () => {
         const reads = yield* Ref.make(0);
         const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
         const edits: Array<AttemptContext> = [];
+        const retriedBy: Array<Option.Option<OperatorLogin>> = [];
         const inputs: Array<AttemptChannel.Intervention> = [];
         const replacement = new AgentFile({
           ...agentFile,
@@ -642,6 +814,12 @@ describe("Operator", () => {
           );
           assert.strictEqual(refused._tag, "RosterAgentNotFoundError");
           assert.strictEqual(edits.length, 1);
+          yield* operator.retry(configured, runId);
+          assert.deepStrictEqual(retriedBy, [
+            Option.some(OperatorLogin.make("Philippe")),
+            Option.some(OperatorLogin.make("Philippe")),
+          ]);
+          assert.strictEqual(edits.length, 1);
           const input = Schema.decodeUnknownSync(SessionIntervention)({
             attemptId,
             action: { _tag: "Steer", message: "Continue" },
@@ -658,9 +836,11 @@ describe("Operator", () => {
         }).pipe(
           Effect.provide(
             testLayer(approved, moved, reads, revision, snapshot, noCycleBudgets, {
-              retry: (_runId, edit) =>
+              retry: (_runId, request) =>
                 Effect.sync(() => {
-                  if (edit !== undefined && Option.isSome(edit)) edits.push(edit.value);
+                  if (request === undefined) return;
+                  retriedBy.push(request.requestedBy);
+                  if (Option.isSome(request.amendment)) edits.push(request.amendment.value);
                 }),
               intervene: (_runId, _attemptId, input) =>
                 Effect.sync(() => {

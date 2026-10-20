@@ -33,7 +33,7 @@ import {
   TranscriptPageCursor,
   TranscriptEventView,
 } from "./transcript.ts";
-import { ApprovalView, RunView } from "./run.ts";
+import { ApprovalView, RunDurationView, RunView } from "./run.ts";
 
 /** How many newest rows one cold drawer open loads per Attempt. */
 const COLD_TRANSCRIPT_LIMIT = 500;
@@ -75,8 +75,73 @@ const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
     }),
     endedAt: Option.match(attempt.endedAt, { onNone: () => null, onSome: DateTime.formatIso }),
     salvage: Option.getOrNull(attempt.salvage),
+    start: Option.getOrNull(attempt.start),
+    reattachedAt: Option.match(attempt.reattachedAt, {
+      onNone: () => null,
+      onSome: DateTime.formatIso,
+    }),
   });
 };
+
+/**
+ * Adds up how long a Run's Attempts worked; the open one counts on from its
+ * start in the reader. An Attempt closed before end times were recorded ends
+ * at its newest transcript row, as the reader shows it, from `lastRows`.
+ */
+export const runDuration = (
+  attempts: RunSnapshot["attempts"],
+  lastRows: ReadonlyMap<RunSnapshot["attempts"][number]["id"], DateTime.Utc>,
+): RunDurationView => {
+  let endedMillis = 0;
+  let unmeasured = 0;
+  let runningSince: string | null = null;
+  for (const attempt of attempts) {
+    if (Option.isNone(attempt.outcome)) {
+      runningSince = DateTime.formatIso(attempt.startedAt);
+      continue;
+    }
+    Option.match(
+      Option.orElse(attempt.endedAt, () => Option.fromNullishOr(lastRows.get(attempt.id))),
+      {
+        onNone: () => {
+          unmeasured += 1;
+        },
+        onSome: (endedAt) => {
+          endedMillis += Math.max(
+            0,
+            DateTime.toEpochMillis(endedAt) - DateTime.toEpochMillis(attempt.startedAt),
+          );
+        },
+      },
+    );
+  }
+  return new RunDurationView({ endedMillis, runningSince, unmeasured });
+};
+
+/** The newest transcript row's time of each closed Attempt that has no recorded end. */
+export const readUnrecordedEnds = Effect.fn("Operator.readUnrecordedEnds")(function* (
+  runs: RunReader["Service"],
+  snapshot: RunSnapshot,
+) {
+  const unrecorded = snapshot.attempts.filter(
+    (attempt) => Option.isSome(attempt.outcome) && Option.isNone(attempt.endedAt),
+  );
+  const newest = yield* Effect.forEach(
+    unrecorded,
+    (attempt) =>
+      runs
+        .transcript(
+          new TranscriptPageQuery({ attemptId: attempt.id, before: Option.none(), limit: 1 }),
+        )
+        .pipe(Effect.map((rows) => [attempt.id, rows.at(-1)?.receivedAt] as const)),
+    { concurrency: 4 },
+  );
+  return new Map(
+    newest.flatMap(([attemptId, receivedAt]) =>
+      receivedAt === undefined ? [] : [[attemptId, receivedAt] as const],
+    ),
+  );
+});
 
 export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<LoopName>): RunView => {
   const actions = RunState.operatorActions(snapshot.run.state);

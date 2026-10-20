@@ -10,7 +10,7 @@ import {
   ToolStarted,
 } from "@usine/core/agent/session";
 import { Cause, Deferred, Effect, Option, Queue, Ref, Schema } from "effect";
-import { piMessageTokens } from "./usage.ts";
+import { addUsage, piMessageUsage, type SessionUsage } from "./usage.ts";
 import { type AgentSessionError, reportedOutcome, SessionResult } from "../runtime.ts";
 import type { PiMessage, PiSession, PiSessionEvent } from "./sdk.ts";
 
@@ -211,18 +211,13 @@ export const subscribePiSession = (
     const context = yield* Effect.context<never>();
     const log = Effect.runForkWith(context);
     let lastText: string | undefined;
-    let totalTokens = 0;
+    let total: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Option.none() };
     const unsubscribe = piSession.subscribe((event) => {
       if (event.type === "message_end") {
-        const usage = piMessageTokens(event.message);
+        const usage = piMessageUsage(event.message);
         if (Option.isSome(usage)) {
-          totalTokens += usage.value;
-          if (
-            !Queue.offerUnsafe(
-              channel.events,
-              new SessionTokensUpdated({ session, totalTokens: TokenCount.make(totalTokens) }),
-            )
-          ) {
+          total = addUsage(total, usage.value);
+          if (!Queue.offerUnsafe(channel.events, new SessionTokensUpdated({ session, ...total }))) {
             log(
               Effect.logWarning("Dropped Pi usage after the terminal transition", {
                 sessionId: session.id,

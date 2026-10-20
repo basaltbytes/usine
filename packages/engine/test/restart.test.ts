@@ -144,6 +144,10 @@ describe("engine restart", () => {
         );
         assert.strictEqual(repaired.attempts.length, 2);
         assert.strictEqual(repaired.attempts[1]?.number, 2);
+        assert.deepStrictEqual(
+          repaired.attempts.map(({ start }) => Option.map(start, ({ _tag }) => _tag)),
+          [Option.some("Event"), Option.some("AfterRestart")],
+        );
         const interrupted = repaired.attempts[0]?.outcome;
         assert(interrupted !== undefined);
         assert(Option.isSome(interrupted));
@@ -211,6 +215,11 @@ describe("engine restart", () => {
         );
         const [started] = finished.attempts;
         assert(started !== undefined && finished.attempts.length === 1);
+        assert.deepStrictEqual(
+          Option.map(started.start, ({ _tag }) => _tag),
+          Option.some("Event"),
+        );
+        assert(Option.isSome(started.reattachedAt));
         assert.deepStrictEqual(yield* Ref.get(executions), [
           [started.id, false],
           [started.id, true],

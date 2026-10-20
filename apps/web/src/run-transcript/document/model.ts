@@ -53,6 +53,8 @@ export interface Speaker {
 export interface MessageRow extends RowPosition {
   readonly _tag: "Message";
   readonly speaker: Speaker;
+  /** Whether an Agent session said it or the operator sent it. */
+  readonly from: "agent" | "operator";
   /** The prose without a reserved opening marker. */
   readonly text: string;
   readonly format: "markdown" | "plain";
@@ -62,7 +64,15 @@ export interface MessageRow extends RowPosition {
   readonly queued: QueuedFor | null;
   /** The message opens with the reserved blocker marker. */
   readonly blocked: boolean;
+  /** The message opens with the reserved question marker. */
+  readonly question: boolean;
 }
+
+/** The connectivity report a note shows: the Worker silent or answering again, or a session retrying its provider. */
+type ConnectivityNote =
+  | { readonly _tag: "WorkerSilent" }
+  | { readonly _tag: "WorkerAnswers" }
+  | { readonly _tag: "ProviderRetrying"; readonly sessionId: string };
 
 /**
  * A lifecycle line, such as a session waiting for the operator, a requested cancel, or a
@@ -73,6 +83,7 @@ interface NoteRow extends RowPosition {
   readonly speaker: Speaker | null;
   readonly text: string;
   readonly tone: NoticeTone;
+  readonly connectivity: ConnectivityNote | null;
 }
 
 /** Consecutive tool calls of one session between two messages, folded into one line. */
@@ -172,16 +183,40 @@ export interface ReaderDocument {
   readonly chapters: ReadonlyArray<Chapter>;
 }
 
-/** A row the outline lists by its own first sentence; failures and blockers are marked. */
+/**
+ * What a checkpoint is: a session's turn, which the outline folds with that
+ * session's neighbouring turns, or a row the reader marks and the outline lists
+ * on its own (a blocker, a question, operator input, a Worker or provider
+ * notice, the Attempt's outcome).
+ */
+type CheckpointKind = "turn" | "blocker" | "question" | "operator" | "notice" | "ending";
+
+/** A row the outline lists by its own first sentence; failures, blockers, and warnings are marked. */
 export interface Checkpoint {
   readonly key: string;
   readonly sessionKey: string | null;
+  readonly kind: CheckpointKind;
+  /** Who said it: "Parent", a child's Agent, or the operator; null for an outcome or a Worker notice. */
+  readonly speaker: string | null;
   /** The message's first sentence. */
   readonly text: string;
   /** The sentence shortened to one outline row at a clause or word boundary. */
   readonly label: string;
-  readonly tone: "plain" | "failed";
+  readonly tone: "plain" | "warning" | "failed";
 }
+
+/** Consecutive turns of one session, which the outline lists as one entry until it is opened. */
+export interface TurnsEntry {
+  readonly _tag: "Turns";
+  /** Named after its first turn, so the entry keeps its identity while turns join it. */
+  readonly key: string;
+  readonly speaker: string;
+  readonly sessionKey: string | null;
+  readonly turns: readonly [Checkpoint, ...Checkpoint[]];
+}
+
+/** One entry of an Attempt's outline: folded turns, or a checkpoint listed on its own. */
+export type OutlineEntry = TurnsEntry | { readonly _tag: "Mark"; readonly checkpoint: Checkpoint };
 
 /** Where the operator is reading: the Attempt at the reading line and the last checkpoint at or above it. */
 export interface ReadingPlace {
@@ -250,6 +285,13 @@ const isActivity = ({ direction, payload }: TranscriptEventView): boolean =>
 const noteText = (notice: TranscriptNotice): string =>
   notice.detail === "" ? notice.label : `${notice.label}. ${notice.detail}`;
 
+const workerNotice = (origin: TranscriptNotice["origin"]): ConnectivityNote | null => {
+  if (origin._tag !== "Envelope") return null;
+  if (origin.payload._tag === "WorkerUnresponsive") return { _tag: "WorkerSilent" };
+  if (origin.payload._tag === "WorkerResponsive") return { _tag: "WorkerAnswers" };
+  return null;
+};
+
 const chapterRows = (
   entries: ReadonlyArray<{ readonly entry: TranscriptEntry; readonly session: Speaker | null }>,
   end: AttemptEnd | null,
@@ -311,15 +353,18 @@ const chapterRows = (
         if (!child && childTexts.has(text)) continue;
         if (child) childTexts.add(text);
         flush();
+        const marker = answerMarker(entry.detail);
         rows.push({
           _tag: "Message",
           ...at,
           speaker,
+          from: "agent",
           text: withoutMarker(entry.detail),
           format: entry.format,
           undelivered: false,
           queued: null,
-          blocked: answerMarker(entry.detail) === "blocked",
+          blocked: marker === "blocked",
+          question: marker === "question",
         });
         continue;
       }
@@ -331,6 +376,7 @@ const chapterRows = (
           speaker,
           text: origin.event === "SessionIdle" ? "Waiting for operator input" : "Resumed",
           tone: "plain",
+          connectivity: null,
         });
       }
       continue;
@@ -347,6 +393,7 @@ const chapterRows = (
           speaker,
           text: `Reached its provider again after ${retriesLabel(event.retries)}`,
           tone: "plain",
+          connectivity: null,
         });
         continue;
       }
@@ -359,7 +406,14 @@ const chapterRows = (
         continue;
       }
       retrying.set(origin.session.id, rows.length);
-      rows.push({ _tag: "Note", ...at, speaker, text, tone: "warning" });
+      rows.push({
+        _tag: "Note",
+        ...at,
+        speaker,
+        text,
+        tone: "warning",
+        connectivity: { _tag: "ProviderRetrying", sessionId: origin.session.id },
+      });
       continue;
     }
     if (origin._tag === "Envelope" && origin.payload._tag === "Started") {
@@ -372,6 +426,7 @@ const chapterRows = (
           speaker: null,
           text: conflictingSalvageMessage(salvage.value),
           tone: "plain",
+          connectivity: null,
         });
       }
       continue;
@@ -386,13 +441,22 @@ const chapterRows = (
               name: origin._tag === "Operator" ? origin.operator : entry.label,
               sessionKey: session?.sessionKey ?? null,
             },
+            from: "operator",
             text: entry.detail,
             format: entry.format,
             undelivered: entry.tone === "failed",
             queued: entry.queued,
             blocked: false,
+            question: false,
           }
-        : { _tag: "Note", ...at, speaker: null, text: noteText(entry), tone: entry.tone },
+        : {
+            _tag: "Note",
+            ...at,
+            speaker: null,
+            text: noteText(entry),
+            tone: entry.tone,
+            connectivity: workerNotice(origin),
+          },
     );
   }
   flush();
@@ -498,35 +562,95 @@ export const readerDocument = (
   return { chapters };
 };
 
-/** The rows the outline lists for a chapter: each message, then the Attempt's outcome. */
+/**
+ * The rows the outline lists for a chapter, in order: each message, operator
+ * input, Worker notice and provider warning, then the Attempt's outcome.
+ */
 export const chapterCheckpoints = (chapter: Chapter): ReadonlyArray<Checkpoint> =>
   chapter.rows.flatMap((row): ReadonlyArray<Checkpoint> => {
     const named = (
-      sessionKey: string | null,
+      fields: Pick<Checkpoint, "sessionKey" | "kind" | "speaker" | "tone">,
       text: string,
-      tone: Checkpoint["tone"],
     ): ReadonlyArray<Checkpoint> => [
-      { key: row.key, sessionKey, text, label: checkpointLabel(text), tone },
+      { key: row.key, ...fields, text, label: checkpointLabel(text) },
     ];
-    if (row._tag === "Message" && !row.undelivered)
+    if (row._tag === "Message") {
+      const { sessionKey, name } = row.speaker;
+      if (row.from === "operator")
+        return named(
+          {
+            sessionKey,
+            kind: "operator",
+            speaker: name,
+            tone: row.undelivered ? "failed" : "plain",
+          },
+          checkpointText(row.text),
+        );
       return named(
-        row.speaker.sessionKey,
+        {
+          sessionKey,
+          kind: row.blocked ? "blocker" : row.question ? "question" : "turn",
+          speaker: name,
+          tone: row.blocked ? "failed" : "plain",
+        },
         checkpointText(row.text),
-        row.blocked ? "failed" : "plain",
       );
+    }
+    if (row._tag === "Note") {
+      if (row.connectivity === null && row.tone !== "failed") return [];
+      return named(
+        {
+          sessionKey: row.speaker?.sessionKey ?? null,
+          kind: row.connectivity === null ? "operator" : "notice",
+          speaker: row.speaker?.name ?? null,
+          tone: row.tone,
+        },
+        checkpointText(row.text),
+      );
+    }
     if (row._tag !== "Ending") return [];
-    const sessionKey = row.speaker?.sessionKey ?? null;
+    const ending = (text: string, tone: Checkpoint["tone"]) =>
+      named(
+        { sessionKey: row.speaker?.sessionKey ?? null, kind: "ending", speaker: null, tone },
+        text,
+      );
     return Match.valueTags(row.end, {
       Succeeded: ({ message }) =>
-        named(
-          sessionKey,
+        ending(
           Option.match(message, { onNone: () => "Succeeded", onSome: checkpointText }),
           "plain",
         ),
-      Failed: ({ failure }) => named(sessionKey, checkpointText(failureMessage(failure)), "failed"),
-      Canceled: () => named(sessionKey, "Canceled", "plain"),
+      Failed: ({ failure }) => ending(checkpointText(failureMessage(failure)), "failed"),
+      Canceled: () => ending("Canceled", "plain"),
     });
   });
+
+/**
+ * The outline's entries for a chapter: each run of consecutive turns of one
+ * session folds into one entry, and every other checkpoint stays its own entry,
+ * so blockers, questions, operator input, notices, and the outcome are never
+ * hidden in a fold.
+ */
+export const outlineEntries = (chapter: Chapter): ReadonlyArray<OutlineEntry> => {
+  const entries: Array<OutlineEntry> = [];
+  for (const checkpoint of chapterCheckpoints(chapter)) {
+    const last = entries.at(-1);
+    if (checkpoint.kind !== "turn") {
+      entries.push({ _tag: "Mark", checkpoint });
+    } else if (last?._tag === "Turns" && last.sessionKey === checkpoint.sessionKey) {
+      entries[entries.length - 1] = { ...last, turns: [...last.turns, checkpoint] };
+    } else {
+      entries.push({
+        _tag: "Turns",
+        key: `turns:${checkpoint.key}`,
+        speaker: checkpoint.speaker ?? "Parent",
+        sessionKey: checkpoint.sessionKey,
+        turns: [checkpoint],
+      });
+    }
+  }
+  return entries;
+};
 
 /** The reader's rows in document order, each with its Attempt and whether the outline lists it. */
 export type ReadingOrder = ReadonlyArray<{

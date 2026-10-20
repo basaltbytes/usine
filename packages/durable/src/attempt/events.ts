@@ -11,6 +11,7 @@ import {
   TokenCount,
   ToolFinished,
   ToolStarted,
+  UsdAmount,
 } from "@usine/core/agent/session";
 import { Option, Schema } from "effect";
 
@@ -104,27 +105,44 @@ export const entryEvents = (
 };
 
 const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const Dollars = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0));
 const UsageLedger = Schema.Struct({
   models: Schema.Record(
     Schema.String,
-    Schema.Struct({ input: Count, output: Count, cacheWrite: Count }),
+    Schema.Struct({
+      input: Count,
+      output: Count,
+      cacheWrite: Count,
+      cost: Schema.optionalKey(Schema.Struct({ total: Dollars })),
+    }),
   ),
 });
 const decodeUsage = Schema.decodeUnknownOption(UsageLedger);
 
+/** A conversation's `TokenCount` and the dollars Pi priced it at, none when no model was priced. */
+interface LedgerUsage {
+  readonly totalTokens: TokenCount;
+  readonly costUsd: Option.Option<UsdAmount>;
+}
+
 /**
  * A conversation's consumption from its `pi.usage` ledger: output plus uncached
  * input, where a cache write is new context and a cache read is not, summed
- * over every model it called.
+ * over every model it called, with the dollar totals Pi recorded for them.
  */
-export const usageTokens = (usage: Readonly<UsageState> | undefined): TokenCount =>
-  TokenCount.make(
-    Option.match(decodeUsage(usage), {
-      onNone: () => 0,
-      onSome: ({ models }) =>
-        Object.values(models).reduce(
-          (total, model) => total + model.output + model.input + model.cacheWrite,
-          0,
-        ),
-    }),
-  );
+export const ledgerUsage = (usage: Readonly<UsageState> | undefined): LedgerUsage => {
+  const models = Option.match(decodeUsage(usage), {
+    onNone: () => [],
+    onSome: ({ models }) => Object.values(models),
+  });
+  const priced = models.flatMap(({ cost }) => (cost === undefined ? [] : [cost.total]));
+  return {
+    totalTokens: TokenCount.make(
+      models.reduce((total, model) => total + model.output + model.input + model.cacheWrite, 0),
+    ),
+    costUsd:
+      priced.length === 0
+        ? Option.none()
+        : Option.some(UsdAmount.make(priced.reduce((total, value) => total + value, 0))),
+  };
+};

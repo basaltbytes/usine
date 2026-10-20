@@ -6,6 +6,7 @@ import { Attempt, AttemptId, AttemptContext, AttemptNumber } from "@usine/core/a
 
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { AttemptSalvage, salvageRefFor } from "@usine/core/attempt/salvage";
+import type { OperatorRetryStart } from "@usine/core/attempt/start";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName, LoopPermissions } from "@usine/core/loop";
@@ -53,6 +54,7 @@ import {
   attemptFromRow,
   decodeAttemptRows,
   decodeDiscards,
+  decodeNextStarts,
   decodeEventRoutes,
   decodeProjectionRevision,
   decodeReopenedEvents,
@@ -60,6 +62,7 @@ import {
   decodeRunIds,
   decodeRunRows,
   encodeAgent,
+  encodeAttemptStart,
   encodeBrainSpec,
   encodeDateTime,
   encodeOutcome,
@@ -146,6 +149,8 @@ const attemptSelection = {
   outcome: attempts.outcomeJson,
   endedAt: attempts.endedAt,
   salvage: attempts.salvageJson,
+  start: attempts.startJson,
+  reattachedAt: attempts.reattachedAt,
 } as const;
 
 // The state partitions are owned by @usine/core; these predicates only borrow their tags.
@@ -412,7 +417,43 @@ export const queriesFor = (database: RunDatabaseClient) => {
         outcomeJson: null,
         endedAt: null,
         salvageJson: null,
+        startJson: Option.match(attempt.start, { onNone: () => null, onSome: encodeAttemptStart }),
       })
+      .execute();
+  });
+
+  const recordReattach = Effect.fn("RunStoreQueries.recordReattach")(function* (
+    attemptId: AttemptId,
+    reattachedAt: DateTime.Utc,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId });
+    yield* database
+      .update(attempts)
+      .set({ reattachedAt: encodeDateTime(reattachedAt) })
+      .where(eq(attempts.attemptId, attemptId))
+      .execute();
+  });
+
+  /** The operator retry that begins the Run's next Attempt, if one waits. */
+  const nextStart = Effect.fn("RunStoreQueries.nextStart")(function* (runId: RunId) {
+    const rows = yield* database
+      .select({ nextStart: runs.nextStartJson })
+      .from(runs)
+      .where(eq(runs.runId, runId))
+      .execute();
+    return Option.fromNullishOr((yield* decodeNextStarts(rows))[0]?.nextStart);
+  });
+
+  const setNextStart = Effect.fn("RunStoreQueries.setNextStart")(function* (
+    runId: RunId,
+    start: Option.Option<OperatorRetryStart>,
+  ) {
+    yield* database
+      .update(runs)
+      .set({
+        nextStartJson: Option.match(start, { onNone: () => null, onSome: encodeAttemptStart }),
+      })
+      .where(eq(runs.runId, runId))
       .execute();
   });
 
@@ -873,6 +914,9 @@ export const queriesFor = (database: RunDatabaseClient) => {
     loopItems: loopItemQueries(database),
     ...transcriptQueries(database),
     addAttempt,
+    recordReattach,
+    nextStart,
+    setNextStart,
     recordSalvage,
     amend,
     markIntervened,

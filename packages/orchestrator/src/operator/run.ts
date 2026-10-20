@@ -1,4 +1,5 @@
 import { AgentName } from "@usine/core/agent";
+import { TokenCount } from "@usine/core/agent/session";
 import { AttemptId, AttemptTask } from "@usine/core/attempt";
 import { OperatorAction, SessionTarget } from "@usine/core/attempt/channel";
 import { ItemKey } from "@usine/core/item";
@@ -8,9 +9,11 @@ import { RunId } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
 import * as RunState from "@usine/core/run/state";
+import { WorkerName } from "@usine/core/worker";
 import { Effect, Schema } from "effect";
 import { AttemptView } from "./attempt.ts";
 import { TranscriptEventView, TranscriptPageCursor } from "./transcript.ts";
+import { RunUsageView } from "./usage.ts";
 
 /** The persisted Run lifecycle state as exposed in operator views. */
 export const RunStateTag = Schema.Literals(RunState.STATE_TAGS);
@@ -77,7 +80,22 @@ export class RunView extends Schema.Class<RunView>("@usine/orchestrator/RunView"
   canRunAgain: Schema.Boolean,
 }) {}
 
-/** A Run summary with its triggering Event payload and a bounded portion of its transcript. */
+const Milliseconds = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+const Count = Schema.Int.check(Schema.isGreaterThanOrEqualTo(0));
+
+/** How long a Run's Attempts have worked, added up Attempt by Attempt. */
+export class RunDurationView extends Schema.Class<RunDurationView>(
+  "@usine/orchestrator/RunDurationView",
+)({
+  /** The ended Attempts' time, each from its start to its recorded end. */
+  endedMillis: Milliseconds,
+  /** When the Attempt that still runs started, so the total keeps counting; null when none runs. */
+  runningSince: Schema.NullOr(Schema.String),
+  /** Ended Attempts closed before end times were recorded; their time is not in the total. */
+  unmeasured: Count,
+}) {}
+
+/** A Run summary with its triggering Event payload, a bounded portion of its transcript, and what its Attempts used. */
 export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestrator/RunDetailView")(
   {
     run: RunView,
@@ -87,5 +105,17 @@ export class RunDetailView extends Schema.Class<RunDetailView>("@usine/orchestra
     /** Current session controls remain available when their last activity predates the transcript page. */
     sessionState: Schema.Array(TranscriptEventView),
     earlierTranscript: Schema.Array(TranscriptPageCursor),
+    /** The Worker the newest Attempt runs or ran on; null before the first Attempt. */
+    worker: Schema.NullOr(WorkerName).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
+    duration: RunDurationView.pipe(
+      Schema.withConstructorDefault(
+        Effect.succeed(new RunDurationView({ endedMillis: 0, runningSince: null, unmeasured: 0 })),
+      ),
+    ),
+    usage: RunUsageView.pipe(
+      Schema.withConstructorDefault(
+        Effect.succeed(new RunUsageView({ tokens: TokenCount.make(0), pools: [], sessions: [] })),
+      ),
+    ),
   },
 ) {}

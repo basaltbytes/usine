@@ -1,10 +1,12 @@
-import type { RunView } from "@usine/orchestrator/operator";
+import type { RunDetailView, RunDurationView, RunView } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import type { ReactNode } from "react";
 import { StateMark } from "@/components/status-badge";
+import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
-import { runStateLine } from "../operator-copy.ts";
+import { durationLabel, runStateLine } from "../operator-copy.ts";
 import { pullRequestNumber, type RunItem } from "./item.ts";
+import { UsageFact } from "./usage.tsx";
 
 const external = { target: "_blank", rel: "noreferrer" } as const;
 
@@ -114,3 +116,61 @@ export const RunFacts = ({
     </p>
   );
 };
+
+const LiveDuration = ({ endedMillis, since }: { endedMillis: number; since: string }) => {
+  const now = useNow(1_000);
+  return <>{durationLabel(endedMillis + Math.max(0, now - Date.parse(since)))}</>;
+};
+
+/** The Run's Attempt time: the ended Attempts' time, counting on while one runs. */
+const RunDuration = ({ duration }: { readonly duration: RunDurationView }) => (
+  <span
+    title={
+      duration.unmeasured === 0
+        ? "Time the Run's Attempts worked"
+        : `${duration.unmeasured} ${duration.unmeasured === 1 ? "Attempt" : "Attempts"} ended before end times were recorded and ${duration.unmeasured === 1 ? "is" : "are"} not counted`
+    }
+  >
+    Duration{" "}
+    <span className="font-mono text-xs text-foreground tabular-nums">
+      {duration.unmeasured > 0 && "at least "}
+      {duration.runningSince === null ? (
+        durationLabel(duration.endedMillis)
+      ) : (
+        <LiveDuration endedMillis={duration.endedMillis} since={duration.runningSince} />
+      )}
+    </span>
+  </span>
+);
+
+/**
+ * Where and how long the Run's Attempts worked, on the line under the Run's
+ * facts: the Worker the newest Attempt runs or ran on and the Attempts' total
+ * time, and on the Run page the tokens they used. Nothing before an Attempt starts.
+ */
+export const WorkFacts = ({
+  detail,
+  showUsage,
+  className,
+}: {
+  readonly detail: Pick<RunDetailView, "run" | "worker" | "duration" | "usage">;
+  /** The Run page shows the tokens; the drawer keeps to the Worker and the time. */
+  readonly showUsage: boolean;
+  readonly className?: string;
+}) =>
+  detail.worker === null ? null : (
+    <p
+      className={cn(
+        "flex flex-wrap items-baseline gap-x-5 gap-y-1 text-sm text-muted-foreground",
+        className,
+      )}
+    >
+      <span>
+        Worker <span className="text-foreground">{detail.worker}</span>
+      </span>
+      <RunDuration duration={detail.duration} />
+      {showUsage && detail.usage.sessions.length > 0 && (
+        <UsageFact usage={detail.usage} attempts={detail.run.attempts} />
+      )}
+    </p>
+  );

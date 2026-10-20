@@ -504,26 +504,28 @@ it("reveals an error instead of the pending saved place and preserves unread act
         isError: true,
       }),
     ),
+    // The Agent goes on after the failed read, which makes it a recovered tool failure.
+    message(48),
   ];
   mount([...events.slice(30), ...error], runId, {
     earlier: new TranscriptPageCursor({ attemptId, before: TranscriptSequence.make(31) }),
     loading: true,
     load: () => {},
   });
-  await page.getByRole("button", { name: "Next error", exact: true }).click();
+  await page.getByRole("button", { name: "Next recovered tool failure", exact: true }).click();
   const errorButton = page.getByRole("button", { name: /error.ts.*Error/ });
   await expect.element(errorButton).toHaveAttribute("aria-expanded", "true");
   const errorOffset = () =>
     errorButton.element().getBoundingClientRect().top - viewport().getBoundingClientRect().top;
   await expect.poll(errorOffset).toBeLessThan(24);
   await expect
-    .element(page.getByRole("button", { name: "1 new update", exact: true }))
+    .element(page.getByRole("button", { name: "2 new updates", exact: true }))
     .toBeVisible();
   const previousOffset = errorOffset();
   mount([...events, ...error]);
   await expect.poll(errorOffset).toBeCloseTo(previousOffset, 0);
   await expect
-    .element(page.getByRole("button", { name: "1 new update", exact: true }))
+    .element(page.getByRole("button", { name: "2 new updates", exact: true }))
     .toBeVisible();
 });
 
@@ -556,14 +558,17 @@ it("keeps failed commands inside their burst and reopens inspected errors throug
   const failed = page.getByRole("button", { name: /node check.js.*Error/ });
   await expect.element(failed).not.toBeInTheDocument();
 
-  await page.getByRole("button", { name: "Next error", exact: true }).click();
+  // The Agent went on after the failed command, so it is counted as recovered, not as an error.
+  await expect.element(page.getByRole("button", { name: "Next error" })).not.toBeInTheDocument();
+  const next = page.getByRole("button", { name: "Next recovered tool failure", exact: true });
+  await next.click();
   await expect.element(group).toHaveAttribute("aria-expanded", "true");
   await expect.element(failed).toHaveAttribute("aria-expanded", "true");
   await expect.element(page.getByText("Validation failed", { exact: true })).toBeVisible();
 
   await group.click();
   await expect.element(failed).not.toBeInTheDocument();
-  await page.getByRole("button", { name: "Next error", exact: true }).click();
+  await next.click();
   await expect.element(group).toHaveAttribute("aria-expanded", "true");
   await expect.element(failed).toHaveAttribute("aria-expanded", "true");
   await expect.element(page.getByText("Validation failed", { exact: true })).toBeVisible();
@@ -647,6 +652,7 @@ it("scrolls the reader to a checkpoint chosen in the outline and stops following
   await expect
     .element(outline.getByRole("button", { name: "Attempt 1, running" }))
     .toHaveAttribute("aria-expanded", "true");
+  await outline.getByRole("button", { name: "Parent, 45 messages" }).click();
   await outline.getByRole("button", { name: "Message 12", exact: true }).click();
   // The reader keeps its top padding above the row it jumps to.
   await expect.poll(() => offset(12)).toBeGreaterThanOrEqual(0);
@@ -696,7 +702,7 @@ it("addresses the composer to the parent until a live child is chosen in the out
   await expect.element(page.getByLabelText("Message the parent")).toBeVisible();
   await page
     .getByRole("navigation", { name: "Run outline" })
-    .getByRole("button", { name: /^reviewer/ })
+    .getByRole("button", { name: /^reviewer(?!,)/ })
     .click();
   await expect.element(page.getByLabelText("Message this child")).toBeVisible();
   await expect.element(page.getByRole("button", { name: "Release child" })).toBeVisible();
@@ -768,14 +774,19 @@ it("opens the outline on the Attempt being read and marks its checkpoint without
   await moveTo(8, 0);
   await expect.element(first).toHaveAttribute("aria-expanded", "true");
   await expect.element(second).toHaveAttribute("aria-expanded", "false");
+  // A closed fold carries the mark of the turn being read; opened, the turn itself does.
+  const firstTurns = outline.getByRole("button", { name: "Parent, 20 messages" });
+  await expect.element(firstTurns).toHaveAttribute("aria-current", "location");
+  await firstTurns.click();
   await expect
     .element(outline.getByRole("button", { name: "Message 8", exact: true }))
     .toHaveAttribute("aria-current", "location");
+  await expect.element(firstTurns).not.toHaveAttribute("aria-current");
   await expect.poll(() => offset(8)).toBeCloseTo(0, 0);
   await moveTo(40, 0);
   await expect.element(second).toHaveAttribute("aria-expanded", "true");
   await expect
-    .element(outline.getByRole("button", { name: "Message 40", exact: true }))
+    .element(outline.getByRole("button", { name: "Parent, 25 messages" }))
     .toHaveAttribute("aria-current", "location");
 });
 

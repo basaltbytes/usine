@@ -11,6 +11,7 @@ interface WorkerSilent {
 /** A session's harness keeps retrying its model provider; `since` is the first retry without an answer after it. */
 interface ProviderRetrying {
   readonly _tag: "ProviderRetrying";
+  readonly sessionId: string;
   readonly agent: string;
   readonly message: string;
   readonly retries: number;
@@ -44,6 +45,7 @@ export const openConnectivity = (
       if (event._tag === "ProviderRetrying") {
         providers.set(event.session.id, {
           _tag: "ProviderRetrying",
+          sessionId: event.session.id,
           agent: event.session.agent,
           message: event.message,
           retries: event.retries,

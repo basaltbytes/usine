@@ -4,8 +4,9 @@ import { AttemptNumber, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
 import { RunawayCeiling } from "@usine/core/attempt/failure";
 import { AttemptSalvage } from "@usine/core/attempt/salvage";
+import { AttemptStart } from "@usine/core/attempt/start";
 import { WorkerName } from "@usine/core/worker";
-import { Schema } from "effect";
+import { Effect, Schema } from "effect";
 
 /** An infra failure as the operator sees it; the defect cause stays behind this boundary. */
 export class InfraFailureView extends Schema.TaggedClass<InfraFailureView>(
@@ -80,7 +81,10 @@ export const AttemptOutcomeView = Schema.Union([
 ]);
 export type AttemptOutcomeView = typeof AttemptOutcomeView.Type;
 
-/** One Attempt's identity, Worker, effective brain, start and end times, optional terminal outcome, and salvaged work. */
+/**
+ * One Attempt's identity, Worker, effective brain, why and when it started,
+ * its end time, optional terminal outcome, and salvaged work.
+ */
 export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/AttemptView")({
   id: AttemptId,
   number: AttemptNumber,
@@ -94,4 +98,10 @@ export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/
   /** When the outcome was recorded; null while the Attempt runs and for Attempts closed before end times were recorded. */
   endedAt: Schema.NullOr(Schema.String),
   salvage: Schema.NullOr(AttemptSalvage),
+  /** Why the Attempt began; null for a later Attempt begun before usine recorded it. */
+  start: Schema.NullOr(AttemptStart).pipe(Schema.withConstructorDefault(Effect.succeed(null))),
+  /** When an orchestrator restart last reattached the Attempt; null if none did. */
+  reattachedAt: Schema.NullOr(Schema.String).pipe(
+    Schema.withConstructorDefault(Effect.succeed(null)),
+  ),
 }) {}

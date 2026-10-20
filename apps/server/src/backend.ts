@@ -101,7 +101,7 @@ export const liveBackendLayer = (
     approve: (runId) =>
       Effect.flatMap(instances.get, (instance) => operator.approve(instance, runId)),
     resetCycleBudget: operator.resetCycleBudget,
-    retry: operator.retry,
+    retry: (runId) => Effect.flatMap(instances.get, (instance) => operator.retry(instance, runId)),
     resolveFailure: operator.resolveFailure,
     agents: rosterOf(instances),
     editAndRetry: (runId, edit) =>

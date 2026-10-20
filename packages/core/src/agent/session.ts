@@ -121,14 +121,52 @@ export class SessionResumed extends Schema.TaggedClass<SessionResumed>("Agent/Se
   { session: AgentSession },
 ) {}
 
-/** Cumulative `TokenCount` consumed by this session so far, including its later operator turns. */
+/**
+ * US dollars a harness priced usage at with its own rate table: Pi from its
+ * model catalog, Claude Code from the Agent SDK's bundled prices. It is the
+ * harness's figure, not a bill (ADR 0013).
+ */
+export const UsdAmount = Schema.Finite.check(Schema.isGreaterThanOrEqualTo(0)).pipe(
+  Schema.brand("UsdAmount"),
+);
+export type UsdAmount = typeof UsdAmount.Type;
+
+/**
+ * Cumulative `TokenCount` consumed by this session so far, including its later
+ * operator turns. `costUsd` is the cumulative price the harness put on that
+ * usage; none for a harness that prices nothing, such as Codex, and for
+ * transcripts recorded before prices were.
+ */
 export class SessionTokensUpdated extends Schema.TaggedClass<SessionTokensUpdated>(
   "Agent/SessionTokensUpdated",
-)("SessionTokensUpdated", { session: AgentSession, totalTokens: TokenCount }) {}
+)("SessionTokensUpdated", {
+  session: AgentSession,
+  totalTokens: TokenCount,
+  costUsd: Schema.OptionFromOptionalKey(UsdAmount).pipe(
+    Schema.withConstructorDefault(Effect.succeed(Option.none<UsdAmount>())),
+  ),
+}) {}
 
 /** The billing source whose meter produced a usage or rate-limit observation. */
 export const BillingPool = Schema.Literals(["apiKeys", "claudePlan", "chatgptPlan"] as const);
 export type BillingPool = typeof BillingPool.Type;
+
+/**
+ * The billing pool a started session draws from, read from its brain: Claude
+ * Code spends the Claude plan, Codex the ChatGPT plan, and Pi the ChatGPT plan
+ * through its `openai-codex` provider or API keys otherwise. A Pi session whose
+ * credential cannot spend that pool never starts (ADR 0021).
+ */
+export const brainPool = (brain: BrainSpec): BillingPool => {
+  switch (brain.harness) {
+    case "claude":
+      return "claudePlan";
+    case "codex":
+      return "chatgptPlan";
+    case "pi":
+      return brain.model.startsWith("openai-codex/") ? "chatgptPlan" : "apiKeys";
+  }
+};
 
 /** A billing pool's observed usage for one allowance window. */
 export class RateLimitWindow extends Schema.Class<RateLimitWindow>("Agent/RateLimitWindow")({

@@ -24,7 +24,7 @@ import { DateTime, Deferred, Effect, Option, Queue, Result, Schema } from "effec
 import type { AttemptRequest } from "../attempt-runtime.ts";
 import type { DurableHarness, DurableHarnessError } from "../harness.ts";
 import { type AttemptRecord, AttemptRecordDoc, HoldDoc } from "./documents.ts";
-import { entryEvents, usageTokens } from "./events.ts";
+import { entryEvents, ledgerUsage } from "./events.ts";
 import type { AttemptHub, AttemptHubs, ChildDelivery, RelayItem, RelayProgress } from "./hubs.ts";
 import { settledOf } from "./outcome.ts";
 import { parentSession, parentSessionId } from "./parent.ts";
@@ -447,17 +447,17 @@ export const relayAttempt = Effect.fn("AttemptRelay.relay")(function* (
     const usage = yield* durable.use("read the parent's usage", (harness, context) =>
       harness.snapshot(UsageDoc, parent, context),
     );
-    const total = usageTokens(usage);
-    if (total <= progress().tokens) return;
+    const total = ledgerUsage(usage);
+    if (total.totalTokens <= progress().tokens) return;
     yield* emit(
       durable,
       hub,
       [
         new AttemptChannel.SessionEvent({
-          event: new SessionTokensUpdated({ session: started, totalTokens: total }),
+          event: new SessionTokensUpdated({ session: started, ...total }),
         }),
       ],
-      (current) => ({ ...cursorOf(current), tokens: total }),
+      (current) => ({ ...cursorOf(current), tokens: total.totalTokens }),
     );
   });
 

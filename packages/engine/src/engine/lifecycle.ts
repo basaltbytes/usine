@@ -2,6 +2,13 @@ import { Attempt, AttemptId, AttemptNumber, shouldAutoRetry } from "@usine/core/
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { AttemptCanceled, AttemptFailed, AttemptSucceeded } from "@usine/core/attempt/outcome";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
+import {
+  type AttemptStart,
+  type OperatorRetryStart,
+  StartedAfterRestart,
+  StartedByEvent,
+  StartedByInfraRetry,
+} from "@usine/core/attempt/start";
 import { EventId } from "@usine/core/event";
 import { Run, RunId } from "@usine/core/run";
 import * as RunState from "@usine/core/run/state";
@@ -98,6 +105,7 @@ type StartDecision =
       readonly _tag: "StartAttempt";
       readonly state: RunState.Running;
       readonly number: AttemptNumber;
+      readonly start: AttemptStart;
       readonly interrupted: Option.Option<RetryAttempt>;
       readonly resume: Option.Option<SalvagePushed>;
     }
@@ -128,12 +136,15 @@ const newestPushedSalvage = (attempts: ReadonlyArray<Attempt>): Option.Option<Sa
  * Otherwise it counts against the same retry cap as ordinary infrastructure
  * failure, with `interruption` as the runtime's explanation. The caller creates
  * a new Attempt's identity and timestamp only when admitted. `resume` names the
- * pushed salvage the Attempt's checkout starts from, if any.
+ * pushed salvage the Attempt's checkout starts from, if any. `requested` is the
+ * operator retry that reopened the Run, if one did; otherwise a later Attempt
+ * follows an infrastructure failure or a restart, and the first one the Event.
  */
 export const beginAttempt = (
   current: RunProgress,
   interruption: InfraFailure,
   live: Option.Option<AttemptId>,
+  requested: Option.Option<OperatorRetryStart>,
 ): StartDecision => {
   const state = current.run.state;
   if (!RunState.isStartable(state) && state._tag !== "Running") {
@@ -154,10 +165,16 @@ export const beginAttempt = (
     if (recovery._tag === "RunFailed") return recovery;
     interrupted = Option.some(recovery);
   }
+  const start: AttemptStart = Option.isSome(interrupted)
+    ? new StartedAfterRestart()
+    : Option.getOrElse(requested, (): AttemptStart =>
+        current.attempts.length === 0 ? new StartedByEvent() : new StartedByInfraRetry(),
+      );
   return {
     _tag: "StartAttempt",
     state: state._tag === "Running" ? state : RunState.start(state),
     number: AttemptNumber.make((current.attempts.at(-1)?.number ?? 0) + 1),
+    start,
     interrupted,
     resume: newestPushedSalvage(current.attempts),
   };

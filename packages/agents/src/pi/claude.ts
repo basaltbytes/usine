@@ -545,13 +545,10 @@ const makeClaudeChild = Effect.gen(function* () {
                 cwd: harnessSession.cwd,
               });
             }
-            const totalTokens = tokens(message);
-            if (Option.isSome(totalTokens))
+            const usage = tokens(message);
+            if (Option.isSome(usage))
               yield* channel.emit(
-                new SessionTokensUpdated({
-                  session: request.session,
-                  totalTokens: totalTokens.value,
-                }),
+                new SessionTokensUpdated({ session: request.session, ...usage.value }),
               );
             for (const event of sessionEventsFrom(message, request.session, tools)) {
               yield* channel.emit(event);

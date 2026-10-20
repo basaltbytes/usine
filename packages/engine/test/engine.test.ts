@@ -5,6 +5,12 @@ import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AttemptContext, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
+import {
+  StartedByEditAndRetry,
+  StartedByEvent,
+  StartedByInfraRetry,
+  StartedByRetry,
+} from "@usine/core/attempt/start";
 import { Event, EventId } from "@usine/core/event";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
@@ -15,7 +21,12 @@ import { WorkerName } from "@usine/core/worker";
 import { Deferred, Effect, Fiber, Layer, Logger, Option, Ref } from "effect";
 import { RunDatabase, type RunDatabaseClient } from "../src/database/database.ts";
 import { localSqliteLayer } from "../src/database/local-sqlite.ts";
-import { layerWithDatabase, ReconcileInterval, RunEngine } from "../src/engine/engine.ts";
+import {
+  layerWithDatabase,
+  ReconcileInterval,
+  RetryRequest,
+  RunEngine,
+} from "../src/engine/engine.ts";
 import { LoopControl } from "../src/loop-control/loop-control.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
@@ -94,13 +105,31 @@ describe("durable run engine", () => {
             assert.strictEqual(accepted._tag, "Claimed");
             if (accepted._tag !== "Claimed") return;
             yield* waitFor(engine, accepted.runId, ({ run }) => run.state._tag === "Failed");
-            yield* engine.retry(accepted.runId, Option.some(amended));
+            yield* engine.retry(
+              accepted.runId,
+              new RetryRequest({
+                requestedBy: Option.some(OperatorLogin.make("PhilDL")),
+                amendment: Option.some(amended),
+              }),
+            );
             const finished = yield* waitFor(
               engine,
               accepted.runId,
               ({ run }) => run.state._tag === "Succeeded",
             );
             assert.strictEqual(executed.length, 3);
+            assert.deepStrictEqual(
+              finished.attempts.map(({ start }) => start),
+              [
+                Option.some(new StartedByEvent()),
+                Option.some(
+                  new StartedByEditAndRetry({
+                    operator: Option.some(OperatorLogin.make("PhilDL")),
+                  }),
+                ),
+                Option.some(new StartedByInfraRetry()),
+              ],
+            );
             assert.deepStrictEqual(
               executed.slice(1),
               [amended, amended].map(({ task, agent, parentModel }) => ({
@@ -441,6 +470,14 @@ describe("durable run engine", () => {
             ({ run }) => run.state._tag === "Succeeded",
           );
           assert.strictEqual(finished.attempts.length, 4);
+          assert.deepStrictEqual(
+            finished.attempts.map(({ start }) => Option.map(start, ({ _tag }) => _tag)),
+            ["Event", "InfraRetry", "InfraRetry", "OperatorRetry"].map(Option.some),
+          );
+          assert.deepStrictEqual(
+            finished.attempts[3]?.start,
+            Option.some(new StartedByRetry({ operator: Option.none() })),
+          );
         }).pipe(Effect.provide(runtime));
       }),
     ),

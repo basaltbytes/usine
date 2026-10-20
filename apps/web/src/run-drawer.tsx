@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/sheet";
 import { clockLabel, queuedMessageLabel, timestampLabel } from "./operator-copy.ts";
 import { overviewQuery, projectParams } from "./overview.ts";
-import { RunFacts, RunTitle } from "./run-page/header.tsx";
+import { RunFacts, RunTitle, WorkFacts } from "./run-page/header.tsx";
 import { runItem } from "./run-page/item.ts";
 import { RunActions } from "./run-intervention/actions.tsx";
 import { EditAndRetry, type EditIntent, editApplies } from "./run-intervention/edit-and-retry.tsx";
@@ -162,7 +162,10 @@ export const RunDrawer = ({
               <SheetDescription className="sr-only">
                 Run {run.id} of {run.loop} on {run.repository}
               </SheetDescription>
-              <RunFacts run={run} item={item} shared={open} className="gap-x-4" />
+              <div className="space-y-1">
+                <RunFacts run={run} item={item} shared={open} className="gap-x-4" />
+                <WorkFacts detail={detail.data} showUsage={false} className="gap-x-4" />
+              </div>
               <RunActions run={run} onEdit={setEditing} openRun={openRun} />
             </>
           )}

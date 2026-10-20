@@ -7,7 +7,7 @@ import { overviewQuery, projectParams } from "../overview.ts";
 import { RunActions } from "../run-intervention/actions.tsx";
 import { EditAndRetry, type EditIntent, editApplies } from "../run-intervention/edit-and-retry.tsx";
 import { useEarlierTranscript, useRunDetail } from "../run-transcript/query.ts";
-import { RunFacts, RunTitle } from "./header.tsx";
+import { RunFacts, RunTitle, WorkFacts } from "./header.tsx";
 import { runItem } from "./item.ts";
 import { RunWorkspace } from "./workspace.tsx";
 
@@ -42,6 +42,7 @@ export const RunPage = ({ runId }: { readonly runId: RunId }) => {
             heading={(title) => <h1 className="text-xl font-semibold wrap-anywhere">{title}</h1>}
           />
           <RunFacts run={run} item={item} shared />
+          <WorkFacts detail={detail.data} showUsage />
         </div>
         <RunActions run={run} onEdit={setEditing} openRun={openRun} className="lg:shrink-0" />
       </header>

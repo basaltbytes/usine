@@ -21,10 +21,7 @@ import {
   updateTarget,
   type ReaderTarget,
 } from "../run-transcript/navigation/errors.tsx";
-import {
-  indexTranscriptUpdates,
-  type TranscriptUpdate,
-} from "../run-transcript/navigation/model.ts";
+import { errorTally, type NavigableRow } from "../run-transcript/navigation/model.ts";
 import { ReaderLine, type TranscriptHistory } from "../run-transcript/transcript.tsx";
 import { EventDocument, TaskDocument } from "./documents.tsx";
 import { useRunGitHubChanges } from "./github-changes.ts";
@@ -95,10 +92,7 @@ export const RunWorkspace = ({
       githubChanges.data,
     ],
   );
-  const errors = useMemo(
-    () => indexTranscriptUpdates(document).filter((update) => update.isError),
-    [document],
-  );
+  const tally = useMemo(() => errorTally(document), [document]);
   const through = detail.transcript.reduce<RunDetailView["transcript"][number]["sequence"] | null>(
     (latest, event) => (latest === null || event.sequence > latest ? event.sequence : latest),
     null,
@@ -165,7 +159,7 @@ export const RunWorkspace = ({
     follow({ attemptId: chapter.attemptId, checkpointKey: null });
     show({ messageId: first?.key ?? chapter.key, tool: null });
   };
-  const selectError = (error: TranscriptUpdate) => {
+  const selectError = (error: NavigableRow) => {
     setSelectedError(error.key);
     const chapter = chapterOf(document, error.key);
     if (chapter !== undefined) {
@@ -227,13 +221,22 @@ export const RunWorkspace = ({
           show({ messageId: checkpoint.key, tool: null });
         }}
         errors={
-          errors.length === 0 ? null : (
-            <ErrorControls
-              errors={errors}
-              selectedKey={selectedError}
-              earlier={history.cursors.length > 0}
-              onSelect={selectError}
-            />
+          tally.errors.length === 0 && tally.recovered.length === 0 ? null : (
+            <div className="space-y-0.5">
+              <ErrorControls
+                errors={tally.errors}
+                selectedKey={selectedError}
+                earlier={history.cursors.length > 0}
+                onSelect={selectError}
+              />
+              <ErrorControls
+                errors={tally.recovered}
+                kind="recovered"
+                selectedKey={selectedError}
+                earlier={history.cursors.length > 0}
+                onSelect={selectError}
+              />
+            </div>
           )
         }
         className={cn(

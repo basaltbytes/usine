@@ -185,6 +185,8 @@ export const runs = snakeCase.table(
     task: text().$type<AttemptTask>().notNull(),
     agentJson: text({ mode: "json" }).$type<unknown>().notNull(),
     parentModel: text().$type<ModelId>(),
+    /** The operator retry that begins the Run's next Attempt; cleared once that Attempt begins. */
+    nextStartJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
     check("usine_runs_state_json_valid", sql`json_valid(${table.stateJson})`),
@@ -231,6 +233,10 @@ export const attempts = snakeCase.table(
     salvageJson: text({ mode: "json" }).$type<unknown>(),
     /** When the operator discarded what the Attempt left on a Worker that is no longer configured; startup reconciliation skips it from then on. */
     leftoversDiscardedAt: text(),
+    /** Why the Attempt began; null for later Attempts begun before this column existed. */
+    startJson: text({ mode: "json" }).$type<unknown>(),
+    /** When an orchestrator restart last reattached the Attempt; null if none did. */
+    reattachedAt: text(),
   },
   (table) => [
     check("usine_attempts_number", sql`${table.attemptNumber} >= 1`),

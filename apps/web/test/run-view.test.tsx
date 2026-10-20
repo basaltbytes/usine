@@ -7,11 +7,20 @@ import {
   ProviderRetries,
   ProviderRetrying,
   TextOutput,
+  TokenCount,
   ToolStarted,
+  UsdAmount,
 } from "@usine/core/agent/session";
 import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import { SessionEvent, WorkerUnresponsive } from "@usine/core/attempt/channel";
 import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
+import {
+  StartedAfterRestart,
+  StartedByEditAndRetry,
+  StartedByEvent,
+  StartedByInfraRetry,
+  StartedByRetry,
+} from "@usine/core/attempt/start";
 import { ItemKey, ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { OperatorLogin } from "@usine/core/operator";
@@ -27,11 +36,16 @@ import {
   AttemptView,
   CanceledAttemptView,
   FailedAttemptView,
+  PoolUsageView,
   QuestionFailureView,
   RunDetailView,
+  RunDurationView,
+  RunUsageView,
   RunView,
+  SessionUsageView,
   SucceededAttemptView,
   TranscriptEventView,
+  UsageCostView,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { DateTime, Option, Schema } from "effect";
@@ -41,7 +55,8 @@ import { assert, describe, it } from "vitest";
 import { clockLabel, dayTimeLabel } from "../src/operator-copy.ts";
 import { RunSummary } from "../src/run-drawer.tsx";
 import { EventDocument } from "../src/run-page/documents.tsx";
-import { RunFacts, RunTitle } from "../src/run-page/header.tsx";
+import { RunFacts, RunTitle, WorkFacts } from "../src/run-page/header.tsx";
+import { UsageBreakdown } from "../src/run-page/usage.tsx";
 import { eventPreview, runItem } from "../src/run-page/item.ts";
 import { Outline } from "../src/run-page/outline.tsx";
 import { readerDocument } from "../src/run-transcript/document/model.ts";
@@ -195,6 +210,178 @@ describe("Run header", () => {
     const markup = header(scheduled);
     assert.notInclude(markup, "/issues/");
     assert.include(markup, "start-dev on basaltbytes/usine");
+  });
+});
+
+describe("Run work facts", () => {
+  const second = AttemptId.make("attempt-2");
+  const twoAttempts = run({
+    attempts: [
+      attempt(new SucceededAttemptView()),
+      new AttemptView({ ...attempt(null), id: second, number: AttemptNumber.make(2) }),
+    ],
+  });
+  const childSession = (id: string, agent: string, harness: BrainSpec["harness"], model: string) =>
+    new ChildSession({
+      id: AgentSessionId.make(id),
+      parentId: AgentSessionId.make("parent"),
+      agent: AgentName.make(agent),
+      brain: new BrainSpec({ harness, model: ModelId.make(model), effort: "high" }),
+    });
+  const parentSession = new ParentSession({
+    id: AgentSessionId.make("parent"),
+    agent: AgentName.make("developer"),
+    brain: new BrainSpec({ harness: "pi", model: ModelId.make("openai/gpt-5.5"), effort: "high" }),
+  });
+  const cost = (usd: number, estimate: boolean) =>
+    new UsageCostView({ usd: UsdAmount.make(usd), estimate });
+  const usage = new RunUsageView({
+    tokens: TokenCount.make(27_300),
+    pools: [
+      new PoolUsageView({
+        pool: "apiKeys",
+        tokens: TokenCount.make(1_500),
+        cost: cost(0.75, false),
+      }),
+      new PoolUsageView({
+        pool: "claudePlan",
+        tokens: TokenCount.make(20_000),
+        cost: cost(1.25, true),
+      }),
+      new PoolUsageView({ pool: "chatgptPlan", tokens: TokenCount.make(5_800), cost: null }),
+    ],
+    sessions: [
+      new SessionUsageView({
+        attemptId,
+        session: parentSession,
+        pool: "apiKeys",
+        tokens: TokenCount.make(1_500),
+        cost: cost(0.75, false),
+      }),
+      new SessionUsageView({
+        attemptId,
+        session: childSession("claude", "developer", "claude", "claude-opus-4-7"),
+        pool: "claudePlan",
+        tokens: TokenCount.make(20_000),
+        cost: cost(1.25, true),
+      }),
+      new SessionUsageView({
+        attemptId: second,
+        session: childSession("codex", "reviewer", "codex", "gpt-5.6-sol"),
+        pool: "chatgptPlan",
+        tokens: TokenCount.make(5_800),
+        cost: null,
+      }),
+    ],
+  });
+  const worked = (duration: Partial<ConstructorParameters<typeof RunDurationView>[0]> = {}) =>
+    new RunDetailView({
+      ...detail(twoAttempts),
+      worker: WorkerName.make("usine-worker-1"),
+      duration: new RunDurationView({
+        endedMillis: 25 * 60_000,
+        runningSince: null,
+        unmeasured: 0,
+        ...duration,
+      }),
+      usage,
+    });
+  const facts = (view: RunDetailView, showUsage: boolean) =>
+    renderToStaticMarkup(<WorkFacts detail={view} showUsage={showUsage} />).replaceAll(
+      /<[^>]+>/gu,
+      " ",
+    );
+
+  it("names the newest Attempt's Worker, the Attempts' total time, and on the Run page their tokens", () => {
+    const page = facts(worked(), true);
+    assert.match(page, /Worker\s+usine-worker-1/u);
+    assert.match(page, /Duration\s+25 min/u);
+    assert.match(page, /Tokens\s+27\.3K/u);
+    const drawer = facts(worked(), false);
+    assert.match(drawer, /Worker\s+usine-worker-1/u);
+    assert.notInclude(drawer, "Tokens");
+  });
+
+  it("counts a running Attempt into the total and says when earlier Attempts have no recorded end", () => {
+    const running = facts(
+      worked({ runningSince: new Date(Date.now() - 10 * 60_000).toISOString() }),
+      false,
+    );
+    assert.match(running, /Duration\s+35 min/u);
+    assert.match(facts(worked({ unmeasured: 1 }), false), /Duration\s+at least 25 min/u);
+  });
+
+  it("says nothing about work before the first Attempt", () => {
+    assert.equal(facts(detail(run({ state: "Waiting", attempts: [] })), true), "");
+  });
+
+  it("prices only pools with a dollar rate, marks the Claude plan's figure as an estimate, and lists each session under its Attempt", () => {
+    const markup = renderToStaticMarkup(
+      <UsageBreakdown usage={usage} attempts={twoAttempts.attempts} />,
+    );
+    const text = markup.replaceAll(/<[^>]+>/gu, " ").replaceAll(/\s+/gu, " ");
+    assert.include(text, "API keys 1,500 $0.75 Claude plan");
+    assert.include(text, "Claude plan 20,000 $1.25 estimate");
+    assert.include(text, "ChatGPT plan 5,800 No dollar rate");
+    assert.include(
+      text,
+      "Attempt 1 Parent openai/gpt-5.5 1,500 $0.75 developer claude-opus-4-7 20,000 $1.25 estimate",
+    );
+    assert.include(text, "Attempt 2 reviewer gpt-5.6-sol 5,800 Tokens are");
+  });
+});
+
+describe("Attempt start", () => {
+  const started = (
+    number: number,
+    start: AttemptView["start"],
+    reattachedAt: string | null = null,
+  ) =>
+    new AttemptView({
+      ...attempt(new FailedAttemptView({ failure: new AgentFailureView({ message: "No" }) })),
+      id: AttemptId.make(`attempt-${number}`),
+      number: AttemptNumber.make(number),
+      start,
+      reattachedAt,
+    });
+  const philippe = Option.some(OperatorLogin.make("Philippe"));
+  const attempts = [
+    started(1, new StartedByEvent(), "2026-09-01T12:10:00.000Z"),
+    started(2, new StartedByInfraRetry()),
+    started(3, new StartedAfterRestart()),
+    started(4, new StartedByRetry({ operator: philippe })),
+    started(5, new StartedByEditAndRetry({ operator: Option.none() })),
+    started(6, null),
+  ];
+  const view = run({ state: "Failed", attempts });
+
+  it("says beside each Attempt's time why it began, and when a restart reattached it", () => {
+    const markup = renderToStaticMarkup(
+      <Outline
+        run={view}
+        eventPreview="Issue #33"
+        document={readerDocument(projectTranscript([], attempts), attempts, [])}
+        selection={{ _tag: "Event" }}
+        reading={null}
+        composerSession={null}
+        onSelect={() => {}}
+        onCheckpoint={() => {}}
+        errors={null}
+      />,
+    );
+    const reasons = [
+      ...markup.matchAll(
+        /<span class="block truncate text-xs text-muted-foreground"[^>]*>([^<]+)</gu,
+      ),
+    ].map(([, reason]) => reason);
+    assert.deepEqual(reasons, [
+      "From the Event",
+      "Reattached after a restart",
+      "Retried after an infrastructure failure",
+      "Started again after a restart",
+      "Retried by Philippe",
+      "Edited and retried",
+    ]);
   });
 });
 
