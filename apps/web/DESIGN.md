@@ -187,7 +187,7 @@ The palette is Catppuccin Mocha used as stated: neutral grounds from crust to te
 
 ### Secondary
 - **Blue** (`{colors.blue}`): a Run that is Pending, Queued, or Running; a flow arrow whose Loops are at work.
-- **Peach** (`{colors.peach}`): a Run waiting for approval and everything marked Needs you (sidebar counts, Needs you items, card ring at 45%).
+- **Peach** (`{colors.peach}`): a Run waiting for approval and everything marked Needs attention (sidebar counts, Needs attention items, card ring at 45%).
 - **Red** (`{colors.red}`): failed Runs, error text, destructive actions. Fills use it at 8 to 25% alpha, never solid.
 - **Green** (`{colors.green}`): succeeded Runs, a clear Project, an active Loop, and the live connection dot.
 
@@ -208,7 +208,7 @@ GitHub label colours are kept as they come from the repository and rendered by t
 ### Named Rules
 **The One Action Colour Rule.** Mauve marks what the operator can act on or has focused. State never borrows mauve, and actions never borrow a state colour except destructive red.
 
-**The State Tone Rule.** Blue running, peach waiting and Needs you, red failed, green succeeded, overlay0 canceled. A state is shown as a 6px dot in its tone next to the state's word, so colour is never the only signal. Projects and Loops borrow the scale: a Project is active in blue or clear in green; a Loop is active in the live green or paused in overlay0.
+**The State Tone Rule.** Blue running, peach waiting and Needs attention, red failed, green succeeded, overlay0 canceled. A state is shown as a 6px dot in its tone next to the state's word, so colour is never the only signal. Projects and Loops borrow the scale: a Project is active in blue or clear in green; a Loop is active in the live green or paused in overlay0.
 
 ## Typography
 
@@ -232,21 +232,21 @@ GitHub label colours are kept as they come from the repository and rendered by t
 
 ## Layout
 
-A 232px mantle sidebar on the left; to its right the base work panel, inset 8px from the window on top, right, and bottom, with a 10px radius and a hairline border (below the `md` breakpoint the panel fills the screen and the sidebar becomes a sheet). The panel opens with a 48px header holding the breadcrumb only, then the Needs you row, then the screen. On the desk, Needs you is the screen's first block instead.
+A 232px mantle sidebar on the left; to its right the base work panel, inset 8px from the window on top, right, and bottom, with a 10px radius and a hairline border (below the `md` breakpoint the panel fills the screen and the sidebar becomes a sheet). The panel opens with a 48px header holding the breadcrumb only, then the Needs attention row, then the screen. On Overview, Needs attention is the screen's first block instead.
 
-On the Board, Needs you items sit in a two-column grid from `lg` (one column below) with 10px gaps. The Project title and its counts follow, then the lanes: 272px wide, 12px apart, scrolling sideways together. Each lane heading is sticky on the base ground while its cards scroll. Folded lanes become 40px rails showing the name vertically and the count. Page gutters are 16px, 20px from `md`.
+On the Board, Needs attention items sit in a two-column grid from `lg` (one column below) with 10px gaps. The Project title and its counts follow, then the lanes: 272px wide, 12px apart, scrolling sideways together. Each lane heading is sticky on the base ground while its cards scroll. Folded lanes become 40px rails showing the name vertically and the count. Page gutters are 16px, 20px from `md`.
 
-The desk at `/` fills the panel: the page heading with its counts (`2 running, 7 not moving`), then Needs you, Running now, Not moving, and Last outcomes, 36px apart, each a 16px semibold title with its count in 13px subtext0 beside it and a flat table under it, then the Workers line. An empty block is one 13px subtext0 sentence under its title.
+The Overview page at `/` fills the panel: the page heading with its counts (`2 running, 7 stalled`), then Needs attention, Running, Stalled, and Recent runs, 36px apart, each a 16px semibold title with its count in 13px subtext0 beside it and a flat table under it, then the Workers line. An empty block is one 13px subtext0 fragment under its title, such as `Nothing running`.
 
-List screens sit flat on the panel, with no card around them: the page heading, then a table. The page shell has two widths: prose stops content at 768px, full fills the panel (the desk and every Configuration page). A table's text lines up with the heading, so its hairlines and row fills reach 8px past the heading on each side. Below `sm`, a table drops or folds its least important columns instead of scrolling sideways.
+List screens sit flat on the panel, with no card around them: the page heading, then a table. The page shell has two widths: prose stops content at 768px, full fills the panel (Overview and every Configuration page). A table's text lines up with the heading, so its hairlines and row fills reach 8px past the heading on each side. Below `sm`, a table drops or folds its least important columns instead of scrolling sideways.
 
 A Configuration detail page puts the file's long parts (trigger, selector, prompt, persona, lanes, preflight) in a main column and its short facts in a 21rem rail on the right, behind a hairline, from `lg`; below `lg` the rail comes first. The heading row carries the entry's name, its state mark, and its file path in 12px mono under the name, with the actions at the right; on phones the actions wrap under the path.
 
-The Task page (`repository › Task #<number>`) is a document at most 1024px wide, flat on the panel with 16px gutters (20px from `md`), 20px above and 40px below. Its header comes first: the originating Item's number in 12px mono mauve, linking to GitHub, on the baseline of the 20px title, then a facts line in 13px with 20px between facts (the current Item's state in medium text colour, `Lane` and its name, the label chips, Needs you), and Move to as an outline button at the right of the title from `sm`. Three sections follow 32px apart, each a 16px semibold title with its count in 13px subtext0 on the same baseline, 8px above a flat table: Runs, Pull requests, and Comments and reviews. Runs shows all its columns from `xl` and folds Agent, Attempts, duration, opened, and pull request into one 12px line under the Loop below it; below `sm` the state column folds into that line too, its dot before the Loop. A run row's cells align to the top so a failure, approval, or Run again line sits under the Loop without moving the other cells. An empty section is a hairline with a 13px medium title and one sentence on how it fills.
+The Task page (`repository › Task #<number>`) is a document at most 1024px wide, flat on the panel with 16px gutters (20px from `md`), 20px above and 40px below. Its header comes first: the originating Item's number in 12px mono mauve, linking to GitHub, on the baseline of the 20px title, then a facts line in 13px with 20px between facts (the current Item's state in medium text colour, `Lane` and its name, the label chips, Needs attention), and Move to as an outline button at the right of the title from `sm`. Three sections follow 32px apart, each a 16px semibold title with its count in 13px subtext0 on the same baseline, 8px above a flat table: Runs, Pull requests, and Comments and reviews. Runs shows all its columns from `xl` and folds Agent, Attempts, duration, opened, and pull request into one 12px line under the Loop below it; below `sm` the state column folds into that line too, its dot before the Loop. A run row's cells align to the top so a failure, approval, or Run again line sits under the Loop without moving the other cells. An empty section is a hairline with a 13px medium title and one sentence on how it fills.
 
 List screens (Loops) sit flat on the panel, with no card around them: the page heading, then a table at most 768px wide. Its text lines up with the heading, so its hairlines and row fills reach 8px past the heading on each side. Below `sm`, a table drops or folds its least important columns instead of scrolling sideways.
 
-The Run page fills the panel below the breadcrumb (`repository › Run <short id>`) and any Needs you row. Its header comes first, 16px from the panel edges (20px from `md`), with the Run's actions at the right of the title from `lg` and below the facts line under it. Below the header, the outline and the reader sit side by side from `lg`:
+The Run page fills the panel below the breadcrumb (`repository › Run <short id>`) and any Needs attention row. Its header comes first, 16px from the panel edges (20px from `md`), with the Run's actions at the right of the title from `lg` and below the facts line under it. Below the header, the outline and the reader sit side by side from `lg`:
 
 - **Outline:** a 288px column with a hairline on its right and its own scroll, 12px side padding. It follows the reader: the Attempt being read is the open one, the checkpoint at the reading line is marked, and the outline scrolls itself to keep that mark in view with 8px to spare. Choosing a checkpoint scrolls the reader to it. Below `lg` the outline folds into a 36px Outline button that names the part being read; it opens as a hairline box at most 60% of the screen tall and closes once something is chosen.
 - **Reader:** a column at most 616px wide, centred in the space beside the outline, with 20px above and 32px below. Each row is a 72px time-and-speaker gutter, a 24px gap, and content at most 504px wide, which holds about 72 characters of 14px prose. Below `sm` the gutter becomes one line of time and speaker above the content. The reader opens on the latest Attempt; below `lg`, a finished Run opens at its outcome.
@@ -281,12 +281,12 @@ Content is visible without motion. Under `prefers-reduced-motion: reduce` all th
 - **Sheet:** slides in and its overlay fades in over 200ms; both leave in 150ms.
 - **Panels:** fold lines, delegations, and an outline Attempt opening to its sessions grow from 0 to Base UI's `--collapsible-panel-height` while fading in (the `collapsible-motion` utility); closing runs at 150ms.
 - **Reading mark:** one 1px mark per checkpoint rail slides to the checkpoint at the reading line over 200ms.
-- **Needs you:** a new entry fades in over 150ms.
+- **Needs attention:** a new entry fades in over 150ms.
 - **Controls:** button colour, border, and ring changes run 100ms.
 
 ## Shapes
 
-Corners step with nesting: the work panel 10px, cards, lane rails, menus, and Needs you items 8px, buttons, inputs, and menu items 6px, extra-small buttons 4px. Chips are full pills. Borders are 1px hairlines, drawn as rings on cards so they do not change the box. The only dashed line is the outline of an empty lane.
+Corners step with nesting: the work panel 10px, cards, lane rails, menus, and Needs attention items 8px, buttons, inputs, and menu items 6px, extra-small buttons 4px. Chips are full pills. Borders are 1px hairlines, drawn as rings on cards so they do not change the box. The only dashed line is the outline of an empty lane.
 
 ## Components
 
@@ -311,7 +311,7 @@ Compact and quiet; most actions are 28px tall.
 - **Shadow Strategy:** none at rest; Raised while dragged.
 - **Border:** 7% white ring; 15% on hover; peach at 45% when the card needs the operator (65% on hover).
 - **Internal Padding:** 10px top and bottom, 12px sides; rows 6px apart.
-- **Content order:** Item numbers and kinds in mono; title, two lines, 13px medium; labels; Run line (state dot, Loop, state, mono elapsed time, Agent at the right). A failure shows as red text on red at 8% with Retry, or with Mark answered or Mark resolved for a question or blocker. A Task on the desk's Not moving list carries the desk's sentence in 12px subtext0, at most three lines, after the Loop in text colour when no Run line names it, then its one action as an extra-small outline button.
+- **Content order:** Item numbers and kinds in mono; title, two lines, 13px medium; labels; Run line (state dot, Loop, state, mono elapsed time, Agent at the right). A failure shows as red text on red at 8% with Retry, or with Mark answered or Mark resolved for a question or blocker. A stalled Task shows its stall reason, the same fragment as on Overview, in 12px subtext0, at most three lines, after the Loop in text colour when no Run line shows the Loop, then the one action as an extra-small outline button.
 - **Menu:** a 20px ghost icon button in the top right corner, shown on hover or focus on pointer devices and always on touch.
 
 ### Inputs / Fields
@@ -320,12 +320,12 @@ Compact and quiet; most actions are 28px tall.
 - **Error / Disabled:** red stroke with a red ring at 25%; disabled at 50% opacity.
 
 ### Navigation
-- **Sidebar:** 232px mantle column. The wordmark `usine` in 14px semibold, then group names in 12px subtext0, then 32px rows in 13px subtext1. Hover fills surface0 at 60%; the active row is surface0 with text colour and medium weight. Needs you counts sit at the row's right in peach. The footer shows the live dot and word.
+- **Sidebar:** 232px mantle column. The wordmark `usine` in 14px semibold, then group names in 12px subtext0, then 32px rows in 13px subtext1. Hover fills surface0 at 60%; the active row is surface0 with text colour and medium weight. Needs attention counts sit at the row's right in peach. The footer shows the live dot and word.
 - **Header:** 48px, hairline bottom border, sidebar toggle and breadcrumb only.
 - **Menus:** surface0 popup, 8px radius, 4px padding, Raised shadow; 28px items in 13px, focus fills surface1; destructive items in red with a red 15% focus fill. Menus list only actions that apply.
 
 ### Page heading
-The screen title in 20px semibold, its counts beside it in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), then any mark such as Needs you, with the screen's actions at the right of the row. Shared by the desk, the Board, and the Configuration pages.
+The screen title in 20px semibold, its counts beside it in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), then any mark such as Needs attention, with the screen's actions at the right of the row. Shared by Overview, the Board, and the Configuration pages.
 
 ### Flat table
 The registry table on the panel ground: a 36px heading row of 12px subtext0 labels, then 44px rows split by hairlines, 8px cell padding, numbers right-aligned in tabular figures. A row that opens something fills surface0 at 60% on hover and while its link has focus, and the link takes a 2px mauve outline; rows that open nothing have no hover fill. Row actions are ghost buttons in subtext0 that show only what applies, such as Pause or Resume.
@@ -342,16 +342,16 @@ A `{{ }}` expression in a rendered prompt is outlined, not filled: mono on no fi
 ### Slot cells
 One 10px cell per Worker slot, 4px apart: filled in the running blue while an Attempt holds it, an empty ring otherwise, with the count beside them.
 
-### Needs you item
+### Needs attention item
 Peach-tinted row: 8px radius, peach border at 25%, peach fill at 5% (8% on hover), 14px by 10px padding. Title 13px medium, context in 12px, and its actions (primary and ghost buttons) at the right. The whole row opens the related Run.
 
-**Compact:** on the Run page, where the reader below needs the height, Needs you lists one entry per row in a single column, 6px apart, with 12px by 4px padding and no repository. The title stays whole. From `sm` the entry is one line with its detail shortened beside the title, 12px apart, the full detail in its tooltip; below `sm` the detail wraps to two lines under the title.
+**Compact:** on the Run page, where the reader below needs the height, Needs attention lists one entry per row in a single column, 6px apart, with 12px by 4px padding and no repository. The title stays whole. From `sm` the entry is one line with its detail shortened beside the title, 12px apart, the full detail in its tooltip; below `sm` the detail wraps to two lines under the title.
 
 ### Flow arrow
 A 22 by 8 one-pixel arrow at the end of an authored lane's heading, crossing the gap to the next authored lane. The Loops whose trigger matches one of the lane's Tasks sit before it in 12px, with `paused` after a paused one: blue if one of them has a queued or running Run on the lane's Tasks, peach if their open Runs all wait, otherwise subtext0 with the arrow in overlay0. Without such a Loop, the arrow stands alone in overlay0.
 
-### Desk rows
-The desk's tables follow the flat table. A row about a Run opens its Run page; a row that names no Run opens nothing. A cell holds the Item as its number in 12px mono subtext0 and its title in 13px medium, truncated; rows that hold more than one line align to the top. A connectivity warning sits under the Item in 12px yellow with a filled warning icon, the harness's message under it. Not moving gives the reason as one 13px sentence and the one action that applies as a ghost button in subtext0. The Workers line closes the desk under a hairline: `Workers` in 12px medium text colour, then each Worker's name in mono, its slots in use, and its last preflight as a state dot and words, red when it failed.
+### Overview rows
+The Overview tables follow the flat table. A row about a Run opens its Run page; a row that names no Run opens nothing. A cell holds the Item as its number in 12px mono subtext0 and its title in 13px medium, truncated; rows that hold more than one line align to the top. A connectivity warning sits under the Item in 12px yellow with a filled warning icon, the harness's message under it. Stalled gives the reason as one 13px fragment and the one action that applies as a ghost button in subtext0. The Workers line closes the page under a hairline: `Workers` in 12px medium text colour, then each Worker's name in mono, its slots in use, and its last preflight as a state dot and words, red when it failed.
 
 ### Run header
 Shared by the Run page and the drawer. The Item number in 12px mono mauve, linking to GitHub, on the title's baseline 10px before it; the title in 20px semibold on the page and 16px in the drawer. Under it, the facts line in 13px subtext0 with 20px between facts: the state mark and the state line (`Failed after 3 Attempts`) in medium text colour, the pull request link or `No pull request`, `Loop` and `Agent` with their values in text colour. Once an Attempt has started, a second line in the same style says where and how long the Run worked: `Worker` and its name, `Duration` and the Attempts' total in 12px mono (`at least` when an Attempt's end was never recorded), counting while one runs; on the page only, `Tokens` and the total in 12px mono mauve, which opens the usage breakdown. The actions that apply follow, as buttons.
@@ -385,6 +385,16 @@ A short summary of one Run over any screen. A right sheet, full width on phones 
 
 ### Named Rules
 **The Said Once Rule.** A Run's reader shows each fact once: Worker and models in the Attempt's meta line, never per message; a final message that the outcome repeats only as the outcome; a parent's copy of a child's message not at all; a GitHub comment or review the outcome links, or a label change the outcome states in the line's words, only as the outcome.
+
+## Voice
+
+Every string on screen, from a title to a tooltip, says what is true in common app words.
+
+1. **Glossary words are ordinary nouns.** Run, item, loop, worker, agent, attempt, event, task, board, project, and lane are lowercase inside a sentence. A loop, worker, agent, or repository name keeps its own spelling. A page title or navigation label that is one plural noun stays capitalized: Loops, Agents, Workers, Repositories, Settings.
+2. **Software is not a person.** A run, loop, item, worker, or agent does not wait, ask, want, hold, carry, belong, see, act, or own anything, and is never "its", "their", or "theirs". Write the state: `Waiting for approval`, not `Its Run waits for your approval`.
+3. **The fact comes first.** Cut the clause that explains a consequence, such as `so no run opens` or `the loop waits for a retry`. When the operator has something to do, that is a button, not a sentence.
+4. **Common app words, no factory roleplay, no invented terms.** Overview, Running, Stalled, Needs attention, Recent runs, Last checked. Never Desk, Not moving, Needs you, Running now, Last outcomes, or the factory.
+5. **Short.** A status or stall reason is a fragment with no final period: `Canceled 2d ago, unchanged since`, `Failed 3h ago: Agent failure`, `Queued, no free worker`, `usine-worker-1 silent since 19:31:03`.
 
 ## Do's and Don'ts
 

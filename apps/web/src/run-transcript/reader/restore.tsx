@@ -107,8 +107,8 @@ export const RestoreReader = ({
       if (location._tag === "Empty" || location.fallback)
         setNotice(
           history.earlier !== undefined
-            ? "Your saved place is outside the loaded history. Showing nearby activity; use Load earlier to continue back."
-            : "Your saved row is no longer available. Showing the nearest remaining activity.",
+            ? "Saved place not in the loaded history, showing nearby activity"
+            : "Saved row no longer available, showing the nearest activity",
         );
       // Rows the jump brought into view replace their estimated heights on the next frame;
       // place the surface again, then let the registry publish the restored scrollability

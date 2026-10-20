@@ -65,7 +65,7 @@ Lists are GraphQL connections with `totalCount` and `nodes`, so CEL's list macro
 
 The orchestrator type-checks `if:` and every `{{ }}` expression of the body when it loads the Loop. If an expression reads a field that the payload doesn't have, or `if:` isn't a boolean, the Loop doesn't load.
 
-Some fields are null when GitHub has no value for them: `milestone`, `issueType`, `stateReason`, `closedAt`, and `author` on an issue; `mergedAt`, `reviewDecision`, `statusCheckRollup`, and `author` on a pull request; and the `author` of a comment or review written by a deleted account. A comparison such as `item.reviewDecision == "APPROVED"` is false on a null field, and `item.milestone != null` tests for a value. Reading below a null object, as in `item.milestone.title`, makes the evaluation fail, so test the object first: `item.milestone != null && item.milestone.title == "v1"`. An `if:` that fails affects only that Loop on that Item: **Needs you** shows the failure until the Loop evaluates, and the poll goes on with the other Loops and Items.
+Some fields are null when GitHub has no value for them: `milestone`, `issueType`, `stateReason`, `closedAt`, and `author` on an issue; `mergedAt`, `reviewDecision`, `statusCheckRollup`, and `author` on a pull request; and the `author` of a comment or review written by a deleted account. A comparison such as `item.reviewDecision == "APPROVED"` is false on a null field, and `item.milestone != null` tests for a value. Reading below a null object, as in `item.milestone.title`, makes the evaluation fail, so test the object first: `item.milestone != null && item.milestone.title == "v1"`. An `if:` that fails affects only that Loop on that Item: **Needs attention** shows the failure until the Loop evaluates, and the poll goes on with the other Loops and Items.
 
 ## Narrow the repositories
 
@@ -99,13 +99,13 @@ The task is one part of what the Agent's first session receives. The full prompt
 
 The task doesn't need to repeat the payload or these rules; it only needs what is specific to the Loop. A pull request Run starts detached at the head commit, so a task that pushes must tell the Agent to check out `{{ item.headRefName }}` first. usine removes the worktree when the Attempt ends, and when the Attempt succeeds, commits that weren't pushed are lost.
 
-If a `{{ }}` expression fails, for example because it reads below a null field, **Needs you** reports the failure for that Loop and Item only, until the template renders. The repository's other Loops still run and the poll continues. After you fix the Loop and reload the configuration, the first poll evaluates the Item again.
+If a `{{ }}` expression fails, for example because it reads below a null field, **Needs attention** reports the failure for that Loop and Item only, until the template renders. The repository's other Loops still run and the poll continues. After you fix the Loop and reload the configuration, the first poll evaluates the Item again.
 
 ## Pass an Item to the next Loop
 
 usine adds or removes a label on an Item only when you move a card on the Board. Loops pass work to each other through labels that the Agent changes with `gh`, as the task instructs. In this pattern, each Loop's `if:` requires one label, and its task removes that label first and adds the next Loop's label when the work is done.
 
-The task must remove the trigger label first. While the Agent works, new comments, labels, and commits change the Item's content. If the trigger label is still there, `if:` stays true for the new content, a new Event waits behind the running one, and the Loop runs again on the same Item after the current Run ends. The cycle budget stops these repeats after `max_cycles` Runs and asks you what to do in **Needs you** ([Bounded review and fix Loops](/guides/review-fix-loops/)).
+The task must remove the trigger label first. While the Agent works, new comments, labels, and commits change the Item's content. If the trigger label is still there, `if:` stays true for the new content, a new Event waits behind the running one, and the Loop runs again on the same Item after the current Run ends. The cycle budget stops these repeats after `max_cycles` Runs and asks you what to do in **Needs attention** ([Bounded review and fix Loops](/guides/review-fix-loops/)).
 
 <Steps>
 
@@ -227,7 +227,7 @@ The HTTP API has the same switch: `POST /api/loops/<name>/pause` and `POST /api/
 
 ## When a Loop does not load
 
-usine leaves out a Loop file that has an error and loads the other Loops. It logs the reason and lists the file in **Needs you** as **Loop quarantined**, at startup and at each reload. usine leaves out a Loop when:
+usine leaves out a Loop file that has an error and loads the other Loops. It logs the reason and lists the file in **Needs attention** as **Loop quarantined**, at startup and at each reload. usine leaves out a Loop when:
 
 - the file doesn't start with a `---` line or has no closing `---`;
 - the file name isn't kebab-case;

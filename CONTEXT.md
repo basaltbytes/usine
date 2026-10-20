@@ -28,9 +28,9 @@ _Avoid_: repo (for the operator-facing surface; the registry declares managed re
 A project's kanban view — its tasks grouped into lanes, with their Run histories on the cards. A task's current Item determines its lane. Dragging a card writes the label swap to that Item on GitHub, so the board doubles as a trigger surface.
 _Avoid_: kanban (the form, not the name), pipeline
 
-**Desk**:
-The operator's first page across all projects: what waits on the operator (Needs you), the attempts running now, each item a loop's trigger matches that is not moving and why, the runs that closed last, and the workers' slots.
-_Avoid_: home, dashboard, overview (the API read every page shares)
+**Overview**:
+The operator's first page across all projects, at `/`: what needs the operator's attention (Needs attention), the attempts running, each item a loop's trigger matches that is stalled and why, the recent runs, and the workers' slots. The code and the API call it the desk (`/api/desk`).
+_Avoid_: desk (on screen), home, dashboard. The overview read (`/api/overview`) that every page shares is not this page.
 
 **Task**:
 A piece of work as the operator sees it, joining explicitly linked issues and pull requests within one Project and the Runs on those Items. Its current Item is the one with the newest open Run, otherwise its latest open PR, latest settled PR, or originating issue.

@@ -46,7 +46,7 @@ export const ReloadOutcome = ({ reload }: { readonly reload: ConfigurationReload
             <li key={line}>{line}</li>
           ))}
         </ul>
-        <p className="mt-1">New Runs use it; open Runs keep the Agent they were opened with.</p>
+        <p className="mt-1">Applies to new runs; open runs are unchanged</p>
       </AlertDescription>
     </Alert>
   );

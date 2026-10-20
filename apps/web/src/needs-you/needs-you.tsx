@@ -61,7 +61,7 @@ const ApprovalAsk = ({
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel {need.loop}?</AlertDialogTitle>
             <AlertDialogDescription>
-              The Run on {need.repository} stops before it starts.
+              The run on {need.repository} never starts.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -122,10 +122,7 @@ export const NeedsYou = ({
   readonly compact?: boolean;
 }) =>
   needs.length === 0 ? null : (
-    <section
-      aria-label="Items needing intervention"
-      className={cn("px-4 md:px-5", compact ? "pt-3" : "pt-4")}
-    >
+    <section aria-label="Needs attention" className={cn("px-4 md:px-5", compact ? "pt-3" : "pt-4")}>
       <ul
         className={cn(
           "grid max-w-7xl grid-cols-1 items-start",

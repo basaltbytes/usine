@@ -64,6 +64,6 @@ export const StatusBadge = ({
 export const NeedsYouBadge = () => (
   <span className="inline-flex items-center gap-1.5 text-xs font-medium text-needs-you">
     <StateMark state="needs-you" />
-    Needs you
+    Needs attention
   </span>
 );

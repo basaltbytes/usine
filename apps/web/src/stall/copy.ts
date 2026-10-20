@@ -13,25 +13,21 @@ const isQuestion = (run: RunView): boolean => {
   return outcome?._tag === "Failed" && outcome.failure._tag === "QuestionFailure";
 };
 
-/** Why a matched Item is not moving, as one plain sentence. The desk and the Board both say it. */
+/** Why a matched Item is stalled, as one short fragment. The overview page and the Board both show it. */
 export const stallSentence = ({ loop, reason }: StalledItemView, now: number): string =>
   Match.valueTags(reason, {
-    AwaitingApproval: () => "Its Run waits for your approval.",
+    AwaitingApproval: () => "Waiting for approval",
     HeldForOperator: ({ run }) =>
-      isQuestion(run)
-        ? "The Agent asked you a question. The Loop waits for your answer."
-        : "The Agent reported a blocker. The Loop waits until you resolve it or the Item changes.",
-    CycleBudgetUsedUp: ({ ask }) =>
-      `The Item used its cycle budget of ${ask.limit} rounds. No Run opens until you reset it.`,
+      isQuestion(run) ? "Question from the agent" : "Blocked by the agent",
+    CycleBudgetUsedUp: ({ ask }) => `Cycle budget used, ${ask.limit} rounds`,
     RunFailed: ({ run }) => {
       const outcome = run.attempts.at(-1)?.outcome;
       const why = outcome?._tag === "Failed" ? `: ${failureReason(outcome.failure)}` : "";
-      return `Its Run failed ${agoLabel(runClosedAt(run), now)}${why}. The Loop waits for a retry.`;
+      return `Failed ${agoLabel(runClosedAt(run), now)}${why}`;
     },
     ClosedUnchanged: ({ run }) =>
-      `Its Run ${run.state === "Succeeded" ? "succeeded" : "was canceled"} ${agoLabel(runClosedAt(run), now)} and the Item has not changed since, so no Run opens.`,
-    LoopPaused: () => `${loop} is paused, so it opens no Run.`,
-    QueuedForWorker: () => "Its Run waits for a free Worker slot.",
-    AwaitingPoll: () =>
-      "The Loop has not acted on the Item's current state yet. The next poll does.",
+      `${run.state === "Succeeded" ? "Succeeded" : "Canceled"} ${agoLabel(runClosedAt(run), now)}, unchanged since`,
+    LoopPaused: () => `${loop} paused`,
+    QueuedForWorker: () => "Waiting for a free worker slot",
+    AwaitingPoll: () => "Waiting for the next poll",
   });

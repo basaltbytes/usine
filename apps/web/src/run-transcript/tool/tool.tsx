@@ -60,8 +60,8 @@ export const ToolDetails = ({
               {state._tag === "Running"
                 ? "Waiting for a result…"
                 : state._tag === "Stopped"
-                  ? "The session ended before this tool returned a result."
-                  : "No output was recorded."}
+                  ? "Session ended before a result"
+                  : "No output recorded"}
             </p>
           </ToolOutput>
         )}

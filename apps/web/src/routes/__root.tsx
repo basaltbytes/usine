@@ -69,7 +69,7 @@ const Crumbs = ({
   if (project === undefined)
     return (
       <BreadcrumbItem>
-        <BreadcrumbPage>Desk</BreadcrumbPage>
+        <BreadcrumbPage>Overview</BreadcrumbPage>
       </BreadcrumbItem>
     );
   return (
@@ -163,7 +163,7 @@ const Shell = () => {
               </AlertDescription>
             </Alert>
           )}
-          {/* The desk lists Needs you as its first block. */}
+          {/* The Overview page lists Needs attention as its first block. */}
           {!atDesk && <NeedsYou needs={data.needsYou} compact={params.run !== undefined} />}
           <Outlet />
         </div>

@@ -42,7 +42,7 @@ declare module "vitest/browser" {
   }
 }
 
-it("resolves a failure from Needs you while retaining unrelated attention, failed history, and retry, and shows why a retry is refused", async () => {
+it("resolves a failure from Needs attention while retaining unrelated attention, failed history, and retry, and shows why a retry is refused", async () => {
   const repository = RepositoryName.make("resolution/project");
   const runId = RunId.make("resolution-run");
   const attemptId = AttemptId.make("resolution-attempt");
@@ -173,26 +173,26 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
       .element(drawer.getByText("Work was completed separately", { exact: false }))
       .toBeVisible();
     // The labelled button in the body and the expand icon beside Close lead to the same page.
-    const toPage = drawer.getByRole("link", { name: "Open Run page" });
+    const toPage = drawer.getByRole("link", { name: "Open run page" });
     await expect.poll(() => toPage.elements().length).toBe(2);
     expect(new Set(toPage.elements().map((link) => link.getAttribute("href")))).toEqual(
       new Set(["/projects/resolution/project/runs/resolution-run"]),
     );
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    const needs = page.getByRole("region", { name: "Needs you" });
+    const needs = page.getByRole("region", { name: "Needs attention" });
     await expect
       .element(needs.getByRole("button", { name: /AgentFailure/ }))
       .not.toBeInTheDocument();
     await expect
       .element(
         needs.getByRole("button", {
-          name: /implement waits for approval.*#7 Write the release notes/,
+          name: /implement: approval needed.*#7 Write the release notes/,
         }),
       )
       .toBeVisible();
     await expect.element(needs.getByRole("button", { name: "Approve", exact: true })).toBeVisible();
     await expect
-      .element(needs.getByRole("button", { name: "Cancel Run", exact: true }))
+      .element(needs.getByRole("button", { name: "Cancel run", exact: true }))
       .toBeVisible();
     expect(queryClient.getQueryData<ReadyOverview>(["overview"])?.projects[0]?.status).toBe(
       "clear",

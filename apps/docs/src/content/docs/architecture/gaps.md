@@ -21,7 +21,7 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 
 - [#40][]: the Configuration section reads every Loop, Agent, Worker, repository, and setting, but the UI has no configuration form or raw editor, and the surgical YAML writer has no production caller ([writer.ts][]).
 - [#387][]: a reload resizes, adds, and removes Workers, but refuses a new SSH Worker, because the SSH executor sets up its Workers and Gateway forwards when `usine up` starts ([ssh.ts][]); a removed SSH Worker's forward stays open until `usine up` stops.
-- [#388][]: Needs you offers Discard leftovers for a Worker a reload removed while its Attempts still run, and the action does nothing until they end.
+- [#388][]: Needs attention offers Discard leftovers for a Worker a reload removed while its Attempts still run, and the action does nothing until they end.
 
 ## Triggers and polling
 

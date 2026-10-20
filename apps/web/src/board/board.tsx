@@ -140,7 +140,7 @@ const UncardedRuns = ({
     <CardHeader>
       <CardTitle>Runs without a card</CardTitle>
       <CardDescription>
-        {runs.length} run{runs.length === 1 ? "" : "s"} whose Item has no card on this board
+        {runs.length} run{runs.length === 1 ? "" : "s"} with no card on this board
       </CardDescription>
     </CardHeader>
     <CardContent>
@@ -254,15 +254,15 @@ export const ProjectBoard = ({
       </PageHeading>
       {project.board.lanes.some(({ origin }) => origin === "proposed") && (
         <p className="mx-4 max-w-3xl text-muted-foreground md:mx-5">
-          Proposed lanes are read-only. To enable moves, configure this project’s lanes in{" "}
-          <code>repos[].lanes</code> in <code>usine.yaml</code> with the labels the Board may
-          exchange, then reload the configuration from Configuration &gt; Loops.
+          Proposed lanes are read-only. To enable moves, add lanes with labels for this project
+          under <code>repos[].lanes</code> in <code>usine.yaml</code>, then reload the configuration
+          from Configuration &gt; Loops.
         </p>
       )}
       {project.board.failures.length > 0 && (
         <ErrorAlert
           className="mx-4 max-w-3xl md:mx-5"
-          title={`${project.board.failures.length} Item projection${project.board.failures.length === 1 ? " was" : "s were"} quarantined`}
+          title={`${project.board.failures.length} item projection${project.board.failures.length === 1 ? "" : "s"} quarantined`}
           message={project.board.failures.map((failure) => failure.message).join("\n")}
         />
       )}

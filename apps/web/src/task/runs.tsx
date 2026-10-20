@@ -82,7 +82,7 @@ const Duration = ({ run }: { readonly run: RunView }) => {
   return Option.match(attemptsDuration(run, now), {
     onNone: () => null,
     onSome: (milliseconds) => (
-      <span className="font-mono text-xs tabular-nums" title="How long its Attempts ran">
+      <span className="font-mono text-xs tabular-nums" title="Total attempt time">
         {durationLabel(milliseconds)}
       </span>
     ),
@@ -104,7 +104,7 @@ const FoldedFacts = ({ run }: { readonly run: RunView }) => (
   <p className="flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-xs text-muted-foreground xl:hidden">
     <span className="font-medium text-foreground sm:hidden">{run.state}</span>
     <span>{run.agent}</span>
-    <span>{plural(run.attempts.length, "Attempt")}</span>
+    <span>{plural(run.attempts.length, "attempt")}</span>
     <Duration run={run} />
     <Opened run={run} />
     {run.pullRequestUrl !== null && <PullRequestLink url={run.pullRequestUrl} />}
@@ -160,7 +160,7 @@ const RowActions = ({
   if (again.isPending)
     return (
       <span role="status" className="text-xs text-muted-foreground">
-        Opening a Run…
+        Opening a run…
       </span>
     );
   const act = (request: RunActionRequest) =>
@@ -223,7 +223,7 @@ const RowActions = ({
                 className="text-muted-foreground hover:text-foreground aria-expanded:text-foreground"
               />
             }
-            aria-label={`Actions for the ${run.loop} Run opened ${dayTimeLabel(run.openedAt)}`}
+            aria-label={`Actions for the ${run.loop} run opened ${dayTimeLabel(run.openedAt)}`}
           >
             <DotsThreeIcon weight="bold" className="size-4" aria-hidden="true" />
           </DropdownMenuTrigger>
@@ -248,7 +248,7 @@ const RowActions = ({
             <AlertDialogHeader>
               <AlertDialogTitle>Cancel {run.loop}?</AlertDialogTitle>
               <AlertDialogDescription>
-                The Run stops, including any Attempt in progress.
+                The run stops, including any attempt in progress.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -372,9 +372,8 @@ export const TaskRuns = ({
     <section aria-labelledby="task-runs" className="flex flex-col gap-2">
       <SectionHeading id="task-runs" title="Runs" count={task.runs.length} />
       {task.runs.length === 0 ? (
-        <SectionEmpty title="No Runs yet">
-          A Run opens when a Loop's trigger matches one of this Task's Items. Move the Task to a
-          lane a Loop watches to hand it to the factory.
+        <SectionEmpty title="No runs yet">
+          A run opens when a loop's trigger matches one of the task's items
         </SectionEmpty>
       ) : (
         <div className="-mx-2">

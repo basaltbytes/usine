@@ -158,17 +158,15 @@ it("shows an empty lane at full width with its name, count, and labels", async (
   await expect.element(merge.getByText("No tasks", { exact: true })).toBeVisible();
 });
 
-it("names why a card is not moving, as the desk does, with the one action that moves it again", async () => {
+it("names why a card is stalled, as the overview page does, with the one action that moves it again", async () => {
   const canceled = page.elementLocator(cardOf(/^Cache the label catalog/u));
   const note = canceled.element().querySelector("[data-slot=stall-note]");
-  expect(note?.textContent).toMatch(
-    /^implement Its Run was canceled \d+h ago and the Item has not changed since, so no Run opens\.Run again$/u,
-  );
+  expect(note?.textContent).toMatch(/^implement Canceled \d+h ago, unchanged sinceRun again$/u);
   await expect.element(canceled.getByRole("button", { name: "Run again" })).toBeVisible();
   // The Run line already names the Loop of a waiting Run.
   const waiting = page.elementLocator(cardOf(/^Retry salvage/u));
   expect(waiting.element().querySelector("[data-slot=stall-note] p")?.textContent).toBe(
-    "Its Run waits for your approval.",
+    "Waiting for approval",
   );
   await expect.element(waiting.getByRole("button", { name: "Approve" })).toBeVisible();
   // A failed Run keeps its failure note and Retry, without a second note.
@@ -275,7 +273,7 @@ it("draws the flow between adjacent authored label lanes, named after the Loops 
   expect(flow("Review")?.textContent).toBe("Flows to Mergereview paused");
   expect(flow("Review")?.classList).toContain("text-muted-foreground");
   expect(flow("Review")?.getAttribute("title")).toBe(
-    "Watching this lane: review (paused). Flows to Merge.",
+    "Loops matching this lane: review (paused). Flows to Merge",
   );
   // Pull requests is read-only, so neither Merge nor it has a next lane to flow into.
   expect(flow("Merge")).toBeNull();
@@ -287,7 +285,9 @@ it("leaves canceled and succeeded Runs off the card", async () => {
   for (const card of [cardOf(/^Cache the label catalog/u), cardOf(/^Show the salvage branch/u)]) {
     expect(card.querySelector("time")).toBeNull();
     expect(card.querySelector("[data-slot=state-mark]")).toBeNull();
-    expect(card.textContent).not.toMatch(/Canceled|Succeeded/u);
+    // A stall note may say how the Run ended; the card has no Run line for it.
+    const stall = card.querySelector("[data-slot=stall-note]")?.textContent ?? "";
+    expect(card.textContent?.replace(stall, "")).not.toMatch(/Canceled|Succeeded/u);
   }
 });
 
@@ -325,7 +325,7 @@ it("lists the current Run's applicable actions and moves the card through Move t
   await actions(7).click();
   expect(opened).toEqual([]);
   expect(await menuContents()).toEqual({
-    items: ["Open #7 on GitHub", "Open Run", "Approve", "Cancel Run", "Move to"],
+    items: ["Open #7 on GitHub", "Open run", "Approve", "Cancel run", "Move to"],
     separators: 3,
   });
   await expect
@@ -347,11 +347,11 @@ it("lists the current Run's applicable actions and moves the card through Move t
   await expect.element(lane("Ready").getByText(/^Retry salvage/u)).not.toBeInTheDocument();
 });
 
-it("offers Retry for a failed Run and Cancel Run alone for a running one", async () => {
+it("offers Retry for a failed Run and Cancel run alone for a running one", async () => {
   await page.getByRole("button", { name: "Actions for pull request #28", exact: true }).click();
   expect((await menuContents()).items).toEqual([
     "Open #28 on GitHub",
-    "Open Run",
+    "Open run",
     "Retry",
     "Move to",
   ]);
@@ -362,9 +362,9 @@ it("offers Retry for a failed Run and Cancel Run alone for a running one", async
   expect((await menuContents()).items).toEqual([
     "Open #9 on GitHub",
     "Open #31 on GitHub",
-    "Open Run",
+    "Open run",
     "Run history",
-    "Cancel Run",
+    "Cancel run",
     "Move to",
   ]);
 });

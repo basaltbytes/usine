@@ -32,7 +32,7 @@ export const CycleBudgetAsk = ({
               nativeButton={false}
               render={<a href={need.itemUrl} target="_blank" rel="noreferrer" />}
             >
-              Open Item
+              Open item
             </Button>
           )}
           <Button variant="outline" disabled={reset.isPending} onClick={() => reset.mutate()}>

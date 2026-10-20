@@ -303,7 +303,7 @@ describe("checkpoints", () => {
         "developer: Running the baseline.",
         "[blocker failed] developer: The gate is blocked by memory.",
         "[operator plain] Operator: Use the deploy key.",
-        "[notice warning] -: Worker usine-worker-1 stopped answering.",
+        `[notice warning] -: usine-worker-1 silent since ${clockLabel(at(7))}.`,
         "developer: Retrying with more memory. | The gate passes now.",
         "[ending failed] -: The gate fails.",
       ],
@@ -609,9 +609,9 @@ describe("connectivity", () => {
     const chapter = document(events, [attempt(null)]).chapters[0];
     assert(chapter !== undefined);
     assert.deepStrictEqual(notes(chapter.rows), [
-      "warning: Cannot reach its provider, 1 retry so far. Reconnecting... 1/5 (request timed out)",
-      `warning: Worker usine-worker-1 stopped answering. It last answered at ${clockLabel(at(4))}. No answer within 45 seconds`,
-      `warning: Cannot reach its provider, 3 retries so far. ${unreachable}`,
+      "warning: Provider unreachable, 1 retry so far. Reconnecting... 1/5 (request timed out)",
+      `warning: usine-worker-1 silent since ${clockLabel(at(4))}. No answer within 45 seconds`,
+      `warning: Provider unreachable, 3 retries so far. ${unreachable}`,
     ]);
     assert.deepStrictEqual(chapter.connectivity, [
       { _tag: "WorkerSilent", worker, lastAnsweredAt: at(4) },
@@ -642,8 +642,8 @@ describe("connectivity", () => {
     assert(chapter !== undefined);
     assert.deepStrictEqual(chapter.connectivity, []);
     assert.deepStrictEqual(notes(chapter.rows).slice(-2), [
-      "plain: Reached its provider again after 3 retries",
-      "plain: Worker usine-worker-1 answers again. It did not answer for 6s",
+      "plain: Provider reachable again after 3 retries",
+      "plain: usine-worker-1 answering again. Silent for 6s",
     ]);
     const failure = new InfraFailureView({ message: "Worker disconnected" });
     const ended = document(

@@ -25,7 +25,7 @@ export const SessionHandoff = ({
     saved: session.harnessSession,
   });
   if (Option.isNone(handoff))
-    return <p className="text-xs text-muted-foreground">No saved harness session recorded.</p>;
+    return <p className="text-xs text-muted-foreground">No saved harness session</p>;
   const { resume, saved } = handoff.value;
   const command = `cd -- ${shellArgument(saved.cwd)} && ${resume} ${shellArgument(saved.id)}`;
   return (
@@ -43,8 +43,8 @@ export const SessionHandoff = ({
         </CodeBlockHeader>
       </CodeBlock>
       <p className="text-muted-foreground">
-        Run on the same worker with the same harness account. Requires its worktree and saved
-        session files; Attempt cleanup removes the worktree.
+        Run on the same worker with the same harness account. Needs the worktree and the saved
+        session files; attempt cleanup removes the worktree.
       </p>
     </div>
   );

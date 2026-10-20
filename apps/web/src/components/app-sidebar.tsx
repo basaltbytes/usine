@@ -60,12 +60,12 @@ export const AppSidebar = ({
                 className={cn(needsYouTotal > 0 && "pr-8")}
                 render={<Link to="/" />}
               >
-                <span>Desk</span>
+                <span>Overview</span>
               </SidebarMenuButton>
               {needsYouTotal > 0 && (
                 <SidebarMenuBadge className="text-needs-you peer-data-active/menu-button:text-needs-you">
                   {needsYouTotal}
-                  <span className="sr-only"> need you</span>
+                  <span className="sr-only"> need attention</span>
                 </SidebarMenuBadge>
               )}
             </SidebarMenuItem>
@@ -92,7 +92,7 @@ export const AppSidebar = ({
                   {count > 0 && (
                     <SidebarMenuBadge className="text-needs-you peer-data-active/menu-button:text-needs-you">
                       {count}
-                      <span className="sr-only"> need you</span>
+                      <span className="sr-only"> need attention</span>
                     </SidebarMenuBadge>
                   )}
                 </SidebarMenuItem>

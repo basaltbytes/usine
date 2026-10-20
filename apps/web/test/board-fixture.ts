@@ -293,7 +293,7 @@ const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView[
     reason,
   });
 
-/** The desk's Not moving list for the Board's Items, in the desk's order. */
+/** The desk's stalled Items for the Board's Items, in the desk's order. */
 export const boardStalled = () => [
   stalled("implement", salvage, new AwaitingApprovalView({ run: salvageRun })),
   stalled("review", pinned, new RunFailedView({ run: pinnedRun })),

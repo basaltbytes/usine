@@ -12,8 +12,7 @@ export const TaskPullRequests = ({ task }: { readonly task: TaskView }) => {
       <SectionHeading id="task-pull-requests" title="Pull requests" count={pullRequests.length} />
       {pullRequests.length === 0 ? (
         <SectionEmpty title="No pull requests">
-          A pull request joins this Task when the issue names it as a closing pull request, or when
-          a Run on the issue opens it.
+          Pull requests that close the issue, or that a run on the issue opened, appear here
         </SectionEmpty>
       ) : (
         <div className="-mx-2">

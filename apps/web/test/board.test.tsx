@@ -171,12 +171,12 @@ describe("Board Run failure copy", () => {
     );
   });
 
-  it("explains an exhausted child-session budget in the drawer and Needs you", () => {
+  it("explains an exhausted child-session budget in the drawer and Needs attention", () => {
     const failure = new ChildSessionBudgetFailureView({
       maxChildren: ChildSessionBudget.make(4),
       attemptedChildren: ChildSessionCount.make(5),
     });
-    const message = "This Attempt used its 4-child session budget; child 5 did not start";
+    const message = "Child session budget of 4 used; child 5 did not start";
     const repository = RepositoryName.make("basaltbytes/usine");
     const runId = RunId.make("run-33");
     assert.strictEqual(failureMessage(failure), message);
@@ -414,16 +414,13 @@ describe("Board card stall note", () => {
     assert.include(markup, "Which lanes stay on the Board?");
     assert.include(markup, "Mark answered");
     assert.notInclude(markup, ">Retry<");
-    assert.match(
-      markup,
-      /start-dev <\/span>Its Run was canceled \d+d ago and the Item has not changed since, so no Run opens\./u,
-    );
+    assert.match(markup, /start-dev <\/span>Canceled \d+d ago, unchanged since</u);
     assert.include(markup, ">Run again<");
   });
 
   it("names the reason but offers no action while the factory needs setup", () => {
     const markup = render(true);
-    assert.include(markup, "so no Run opens.");
+    assert.include(markup, "unchanged since");
     assert.notInclude(markup, ">Run again<");
     assert.notInclude(markup, "Mark answered");
   });

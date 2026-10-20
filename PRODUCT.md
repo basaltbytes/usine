@@ -20,7 +20,7 @@ Docs readers are operators setting up a factory, writing Loops and Agents, and a
 
 usine runs coding agents on the GitHub issues and pull requests of the repositories the operator registers. A Loop decides which Items open a Run, whether the operator approves it first, and which Agent does the work; the Agent works in a checkout on a Worker and usually ends with a pull request. The engine has no built-in Loop.
 
-Success means the operator hands issue-to-PR work to agents and spends attention only where a Run needs them: every approval, failure, question, and exhausted budget reaches Needs you or a GitHub Ask, and the reason a Run did or did not act can be read from its Event, Attempts, and transcript.
+Success means the operator hands issue-to-PR work to agents and spends attention only where a Run needs them: every approval, failure, question, and exhausted budget reaches Needs attention or a GitHub Ask, and the reason a Run did or did not act can be read from its Event, Attempts, and transcript.
 
 ## Positioning
 
@@ -33,13 +33,13 @@ Success means the operator hands issue-to-PR work to agents and spends attention
 - **Instance repo:** `usine.yaml` (registry, Workers, lanes, settings), `loops/`, `agents/`, and a gitignored `.usine/` holding runtime state and secrets.
 - **Process:** `usine up` is a foreground CLI in the instance folder. It prints the local UI address; keeping it alive (tmux, launchd, systemd) is the operator's business.
 - **GitHub:** a GitHub App per instance supplies the factory's identity. Polling is the source of truth and webhooks are hints. Label swaps on Items are the usual handoff between Loops.
-- **Web UI:** a desk at `/` with Needs you, the Attempts running now, the matched Items that are not moving and why, the last outcomes, and the Workers' slots; a Board per Project whose label-backed lanes accept drag-and-drop moves that write labels to GitHub, a short Run drawer with the outcome and the actions that apply, a Run page with an outline of the Task, Event, and Attempts beside a reader of the conversation, and a Configuration section that shows Loops, Agents, Workers, repositories with their lanes, and settings as parsed, with Loop pauses and configuration reloads.
+- **Web UI:** an Overview page at `/` with Needs attention, the Attempts running, the matched Items that are stalled and why, the recent runs, and the Workers' slots; a Board per Project whose label-backed lanes accept drag-and-drop moves that write labels to GitHub, a short Run drawer with the outcome and the actions that apply, a Run page with an outline of the Task, Event, and Attempts beside a reader of the conversation, and a Configuration section that shows Loops, Agents, Workers, repositories with their lanes, and settings as parsed, with Loop pauses and configuration reloads.
 - **Away:** Asks are @mention comments on the Run's Item, answered by a 👍/👎 reaction or a reply. Managed repos can be public, so Asks never carry error detail, transcript excerpts, or cost figures.
 - **Docs:** Astro Starlight site deployed to docs.usine.dev on every push to `main`; guides, architecture pages dated to the commit they describe, and a generated API reference.
 
 ## Capabilities and Constraints
 
-- Terminology follows `CONTEXT.md`: Project, Board, Lane, Task, Item, Loop, Agent, Run, Attempt, Event, Worker, Needs you. UI copy and docs use these terms and avoid the listed alternatives.
+- Terminology follows `CONTEXT.md`: Project, Board, Lane, Task, Item, Loop, Agent, Run, Attempt, Event, Worker, Needs attention. UI copy and docs use these terms and avoid the listed alternatives.
 - Interventions: Approve, Retry, Edit and retry, Cancel Run, Pause session, message a parent or child, Hold and Release child, Mark resolved, Mark answered, Reset cycle budget, Pause a Loop.
 - The Run drawer links the pull request a Run produced; there is no reconstructed diff view.
 - Proposed and state-only lanes are read-only. Moves need lanes authored in `repos[].lanes`; usine never deletes a label.
@@ -64,7 +64,7 @@ Success means the operator hands issue-to-PR work to agents and spends attention
 ## Product Principles
 
 1. The work is the spine. Screens are organised around Projects, Tasks, and Runs in the operator's vocabulary; Loops, Agents, and Workers are configuration.
-2. Attention goes only where a Run needs it. Needs you and Asks surface every blocked Run; nothing requires checking each Project to find one.
+2. Attention goes only where a Run needs it. Needs attention and Asks surface every blocked Run; nothing requires checking each Project to find one.
 3. Every outcome is explainable. A skipped, failed, or waiting Run shows why, with the typed reason and the data that led to it.
 4. The operator's files are the truth. The UI round-trips through the instance repo and never invents its own configuration.
 5. Never destroy work. Guards salvage unfinished Attempts, and destructive actions ask for confirmation.

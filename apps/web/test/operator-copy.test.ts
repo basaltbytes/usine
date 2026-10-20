@@ -24,11 +24,12 @@ describe("salvage copy in the reader", () => {
       }),
     );
     assert.include(message, "usine/salvage/run/2 at 0123456");
-    assert.include(message, "starts without it");
+    assert.include(message, "Not applied");
+    assert.include(message, "conflicts with the current revision");
   });
 });
 
-describe("operator question copy in Needs you", () => {
+describe("operator question copy in Needs attention", () => {
   it("names the asking Loop and shows the Agent's question", () => {
     const copy = needCopy(
       new RunFailureNeed({
@@ -39,13 +40,13 @@ describe("operator question copy in Needs you", () => {
         failure: new QuestionFailureView({ question: "HTTP CONNECT or SOCKS for egress?" }),
       }),
     );
-    assert.strictEqual(copy.title, "act-on-findings asks a question");
+    assert.strictEqual(copy.title, "Question from act-on-findings");
     assert.strictEqual(copy.detail, "HTTP CONNECT or SOCKS for egress?");
     assert.strictEqual(copy.runId, "asked");
   });
 });
 
-describe("blocker copy in Needs you", () => {
+describe("blocker copy in Needs attention", () => {
   it("names the blocked Loop and shows the Agent's blocker", () => {
     const copy = needCopy(
       new RunFailureNeed({
@@ -58,13 +59,13 @@ describe("blocker copy in Needs you", () => {
         }),
       }),
     );
-    assert.strictEqual(copy.title, "start-dev is blocked");
+    assert.strictEqual(copy.title, "start-dev: blocked");
     assert.strictEqual(copy.detail, "The baseline gate fails on main before any change.");
     assert.strictEqual(copy.runId, "blocked");
   });
 });
 
-describe("config file copy in Needs you", () => {
+describe("config file copy in Needs attention", () => {
   const need = (kind: "loop" | "agent", file: string, message: string) =>
     Schema.decodeUnknownSync(ConfigFileNeed)({
       _tag: "ConfigFileNeed",
@@ -130,7 +131,7 @@ describe("reload summary on the Loops page", () => {
       "Workers removed: spare",
       "Workers changed: local",
       "Settings changed",
-      "1 file was left out; Needs you lists it",
+      "1 file left out, listed in Needs attention",
     ]);
   });
 
@@ -139,7 +140,7 @@ describe("reload summary on the Loops page", () => {
   });
 });
 
-describe("unconfigured Worker copy in Needs you", () => {
+describe("unconfigured Worker copy in Needs attention", () => {
   const need = (attempts: number) =>
     new UnconfiguredWorkerNeed({
       id: "unconfigured-worker:local",
@@ -150,10 +151,10 @@ describe("unconfigured Worker copy in Needs you", () => {
   it("names the Worker, counts its Attempts, and gives both ways out", () => {
     const copy = needCopy(need(114));
     assert.strictEqual(copy.title, "Worker not configured");
-    assert.include(copy.detail, "Worker local");
-    assert.include(copy.detail, "114 recorded Attempts");
-    assert.include(copy.detail, "Declare the Worker again");
+    assert.include(copy.detail, "local is not in usine.yaml");
+    assert.include(copy.detail, "114 recorded attempts");
+    assert.include(copy.detail, "Declare the worker again");
     assert.include(copy.detail, "discard the leftovers");
-    assert.include(needCopy(need(1)).detail, "1 recorded Attempt.");
+    assert.include(needCopy(need(1)).detail, "1 recorded attempt on it");
   });
 });

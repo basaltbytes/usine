@@ -44,7 +44,7 @@ const remarkInterpolations = () => markInterpolations;
 const Interpolation = ({ children }: { readonly children?: ReactNode }) => (
   <mark
     className="bg-transparent p-0 text-inherit"
-    title="Filled in from the Item when a Run opens"
+    title="Filled in from the item when a run opens"
   >
     <code className="bg-transparent [font-variant-ligatures:none] ring-1 ring-input ring-inset [box-decoration-break:clone]">
       <span className="text-muted-foreground">{"{{\u00a0"}</span>

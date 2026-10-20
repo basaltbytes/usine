@@ -165,7 +165,7 @@ What the Loop's Attempts may do to their repository ([`LoopPermissions`](https:/
 
 usine records the permission level with each Event, so a Run keeps the level its Loop had when the Event matched. A change to the file applies to Events that match after the next reload.
 
-An exe.dev Worker uses exe.dev's GitHub integration, which grants the access of exe.dev's own GitHub App and cannot narrow it to `read`. An exe.dev Worker therefore refuses the Attempts of a `read` Loop before it attaches the integration: the Attempt fails with a message that names the Worker and the Loop, usine does not retry it, and the failed Run shows in **Needs you**. Run `read` Loops on a local or SSH Worker.
+An exe.dev Worker uses exe.dev's GitHub integration, which grants the access of exe.dev's own GitHub App and cannot narrow it to `read`. An exe.dev Worker therefore refuses the Attempts of a `read` Loop before it attaches the integration: the Attempt fails with a message that names the Worker and the Loop, usine does not retry it, and the failed Run shows in **Needs attention**. Run `read` Loops on a local or SSH Worker.
 
 Two gaps remain. On the local Worker, the Agent runs as your Unix user, so it can read GitHub credentials in your home directory, such as gh's own login, and push with them ([#384](https://github.com/basaltbytes/usine/issues/384)). On an SSH Worker, an Attempt can read the token or caller token of another Attempt running on the same machine at the same time ([#231](https://github.com/basaltbytes/usine/issues/231), [#243](https://github.com/basaltbytes/usine/issues/243)), so a `read` Attempt that runs beside a `write` one can reach access that pushes.
 
@@ -197,7 +197,7 @@ Labels on this issue: {{ item.labels.nodes.map(label, label.name).join(", ") }}
 
 usine type-checks every interpolation when the file loads, but a value can still fail at render time, for example a field that is `null` on this Item (see [null fields](/reference/configuration/expressions/#fields-that-can-be-null)).
 
-- For `issue` and `pr` Loops, usine submits no Event for that Loop and Item and continues with the other Loops and Items; the poll cursor still advances. **Needs you** shows the failure with the Loop, the Item, and the interpolation for as long as it lasts, and usine logs `Loop evaluation failed on an Item` once per Loop, Item, and content hash. usine evaluates the Item again when it changes, and on the first poll after a restart or a reload, so a fixed template renders without waiting for a change.
+- For `issue` and `pr` Loops, usine submits no Event for that Loop and Item and continues with the other Loops and Items; the poll cursor still advances. **Needs attention** shows the failure with the Loop, the Item, and the interpolation for as long as it lasts, and usine logs `Loop evaluation failed on an Item` once per Loop, Item, and content hash. usine evaluates the Item again when it changes, and on the first poll after a restart or a reload, so a fixed template renders without waiting for a change.
 - For `schedule` Loops, the Tick fails for that repository, and usine evaluates it again at the next wake.
 
 ### What the Agent receives
@@ -226,7 +226,7 @@ usine validates each Loop file separately. A file that fails any check is quaran
 | `expression` | `if` type-checks as a boolean; each interpolation is closed and type-checks as a scalar. | `No such key: nmae` |
 | `reference` | The Agent is in the roster; selected repositories and tags exist in `usine.yaml`. | `Unknown selector tags: mobile` |
 
-At startup and at each reload, usine logs each quarantined Loop as a warning, `Loop quarantined; it opens no Runs until its file is fixed`, with its file, stage, and message, and lists it in **Needs you** as **Loop quarantined**. Fix the file and reload the configuration ([CLI](/reference/configuration/cli/#reload)).
+At startup and at each reload, usine logs each quarantined Loop as a warning, `Loop quarantined; it opens no Runs until its file is fixed`, with its file, stage, and message, and lists it in **Needs attention** as **Loop quarantined**. Fix the file and reload the configuration ([CLI](/reference/configuration/cli/#reload)).
 
 Two checks only log a warning. If `if` compares `item.labels` against a label name that isn't declared under `labels` in `usine.yaml`, usine logs `Loop trigger references an undeclared GitHub label` and still loads the Loop. The other check covers labels in Board Lanes; see [`repos[].lanes`](/reference/configuration/usine-yaml/#reposlanes).
 

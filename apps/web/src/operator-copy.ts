@@ -33,14 +33,13 @@ export const runActionLabel = {
   approve: "Approve",
   retry: "Retry",
   runAgain: "Run again",
-  cancel: "Cancel Run",
+  cancel: "Cancel run",
   confirmCancel: "Confirm cancel",
   keepRunning: "Keep running",
 } as const;
 
 /** Why running a Run again opened no Run, and what the operator does next. */
-export const runAgainBlocked =
-  "No Run opened: this Item used up its cycle budget. Reset it in Needs you.";
+export const runAgainBlocked = "No run opened: cycle budget used up. Reset it in Needs attention";
 
 export const itemKindLabel = (kind: BoardItemLink["kind"]): string =>
   kind === "pr" ? "Pull request" : "Issue";
@@ -111,10 +110,10 @@ export const durationLabel = (milliseconds: number): string => {
     : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 };
 
-/** Why an Attempt began, in a phrase: `From the Event`, `Retried by PhilDL`, `Retried after an infrastructure failure`. */
+/** Why an Attempt began, in a phrase: `From the event`, `Retried by PhilDL`, `Retried after an infrastructure failure`. */
 export const attemptStartLabel = (start: AttemptStart): string =>
   Match.valueTags(start, {
-    Event: () => "From the Event",
+    Event: () => "From the event",
     OperatorRetry: ({ operator }) =>
       Option.match(operator, { onNone: () => "Retried", onSome: (login) => `Retried by ${login}` }),
     EditAndRetry: ({ operator }) =>
@@ -134,20 +133,20 @@ export const tokensLabel = (tokens: number): string =>
 export const usdLabel = (usd: number): string =>
   usd > 0 && usd < 0.005 ? "under $0.01" : `$${usd.toFixed(2)}`;
 
-/** How a Run stands, in one phrase: `Failed after 3 Attempts`, `Waiting for approval`, `Running Attempt 2`. */
+/** How a Run stands, in one phrase: `Failed after 3 attempts`, `Waiting for approval`, `Running, attempt 2`. */
 export const runStateLine = (run: Pick<RunView, "state" | "attempts">): string => {
   const attempts = run.attempts.length;
   const after =
-    attempts === 0 ? "" : ` after ${attempts} ${attempts === 1 ? "Attempt" : "Attempts"}`;
+    attempts === 0 ? "" : ` after ${attempts} ${attempts === 1 ? "attempt" : "attempts"}`;
   switch (run.state) {
     case "Pending":
       return "Pending";
     case "Waiting":
       return "Waiting for approval";
     case "Queued":
-      return "Queued for a free Worker";
+      return "Queued, no free worker";
     case "Running":
-      return `Running Attempt ${run.attempts.at(-1)?.number ?? 1}`;
+      return `Running, attempt ${run.attempts.at(-1)?.number ?? 1}`;
     case "Succeeded":
       return attempts > 1 ? `Succeeded${after}` : "Succeeded";
     case "Failed":
@@ -164,7 +163,7 @@ export const failureReason = (failure: FailureView): string =>
     DefectFailure: () => "Executor defect; retry explicitly",
     AgentFailure: () => "Agent failure",
     BlockedFailure: () => "Agent blocked",
-    QuestionFailure: () => "Question for you",
+    QuestionFailure: () => "Question from the agent",
     RunawayFailure: () => "Runaway guard",
     ChildSessionBudgetFailure: () => "Child session budget exhausted",
   });
@@ -219,40 +218,40 @@ export const failureMessage = (failure: FailureView): string =>
     AgentFailure: ({ message }) => message,
     BlockedFailure: ({ message }) => message,
     QuestionFailure: ({ question }) => question,
-    RunawayFailure: ({ ceiling }) => `Runaway guard tripped its ${ceiling} ceiling`,
+    RunawayFailure: ({ ceiling }) => `Runaway guard: ${ceiling} ceiling reached`,
     ChildSessionBudgetFailure: ({ attemptedChildren, maxChildren }) =>
-      `This Attempt used its ${maxChildren}-child session budget; child ${attemptedChildren} did not start`,
+      `Child session budget of ${maxChildren} used; child ${attemptedChildren} did not start`,
   });
 
 /** Under an operator message the session it went to has not read yet. */
 export const queuedMessageLabel = (session: QueuedFor): string =>
   session === "parent"
-    ? "Queued until the parent's current delegation returns"
-    : "Queued until the child finishes its current step";
+    ? "Queued until the current delegation returns"
+    : "Queued until the child's current step ends";
 
 export const conflictingSalvageMessage = ({ ref, commit }: SalvagePushed): string =>
-  `The previous Attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision; this Attempt starts without it, and the branch keeps it`;
+  `Not applied: the previous attempt's work on ${ref} at ${commit.slice(0, 7)} conflicts with the current revision. It is still on ${ref}`;
 
 export const needCopy = (need: NeedView): NeedCopy =>
   Match.valueTags(need, {
     CycleBudgetNeed: ({ ask, itemLabel }) => ({
       title: "Cycle budget exhausted",
-      detail: `${itemLabel}: ${ask.completedCycles} completed rounds. ${ask.counts.map(({ loop, admitted }) => `${loop}: ${admitted} Runs`).join("; ")}. Reset to allow up to ${ask.limit} more rounds of ${ask.loop}.`,
+      detail: `${itemLabel}: ${ask.completedCycles} completed rounds. ${ask.counts.map(({ loop, admitted }) => `${loop}: ${admitted} ${admitted === 1 ? "run" : "runs"}`).join("; ")}`,
       repository: ask.repository,
       runId: null,
     }),
     ApprovalNeed: ({ loop, repository, runId, item }) => ({
-      title: `${loop} waits for approval`,
-      detail: item === null ? "Open the Run to read its task." : `#${item.number} ${item.title}`,
+      title: `${loop}: approval needed`,
+      detail: item === null ? "Open the run for the task text" : `#${item.number} ${item.title}`,
       repository,
       runId,
     }),
     RunFailureNeed: ({ failure, loop, repository, runId }) => ({
       title:
         failure._tag === "QuestionFailure"
-          ? `${loop} asks a question`
+          ? `Question from ${loop}`
           : failure._tag === "BlockedFailure"
-            ? `${loop} is blocked`
+            ? `${loop}: blocked`
             : failure._tag,
       detail: failureMessage(failure),
       repository,
@@ -284,13 +283,13 @@ export const needCopy = (need: NeedView): NeedCopy =>
     }),
     ConfigFileNeed: ({ kind, error }) => ({
       title: kind === "loop" ? "Loop quarantined" : "Agent file not loaded",
-      detail: `${error.file}: ${error.message.replace(/\.$/u, "")}. Fix the file, then reload the configuration from Configuration > Loops.`,
+      detail: `${error.file}: ${error.message.replace(/\.$/u, "")}. Fix the file, then reload the configuration from Configuration > Loops`,
       repository: null,
       runId: null,
     }),
     UnconfiguredWorkerNeed: ({ worker, attempts }) => ({
       title: "Worker not configured",
-      detail: `usine.yaml no longer declares Worker ${worker}, so startup doesn't reconcile its ${attempts} recorded ${attempts === 1 ? "Attempt" : "Attempts"}. Declare the Worker again and restart usine up, or discard the leftovers.`,
+      detail: `${worker} is not in usine.yaml. Startup does not reconcile the ${attempts} recorded ${attempts === 1 ? "attempt" : "attempts"} on it. Declare the worker again and restart usine up, or discard the leftovers`,
       repository: null,
       runId: null,
     }),
@@ -329,8 +328,8 @@ export const reloadSummary = (reload: InstanceReload): ReadonlyArray<string> => 
   if (leftOut > 0) {
     lines.push(
       leftOut === 1
-        ? "1 file was left out; Needs you lists it"
-        : `${leftOut} files were left out; Needs you lists them`,
+        ? "1 file left out, listed in Needs attention"
+        : `${leftOut} files left out, listed in Needs attention`,
     );
   }
   return lines;

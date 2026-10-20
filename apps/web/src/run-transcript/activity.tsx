@@ -89,7 +89,7 @@ export const CurrentActivity = ({ chapter }: { readonly chapter: Chapter }) => {
   const activity: Activity =
     session === undefined
       ? {
-          label: "Waiting for the parent session to start",
+          label: "Parent session starting",
           detail: "",
           since: Option.none(),
         }
@@ -153,12 +153,12 @@ const ConnectivityLine = ({
 }) => {
   const line = Match.valueTags(warning, {
     WorkerSilent: ({ worker, lastAnsweredAt }) => ({
-      text: `Worker ${worker} has not answered since ${clockLabel(lastAnsweredAt)}`,
+      text: `${worker} silent since ${clockLabel(lastAnsweredAt)}`,
       since: lastAnsweredAt,
       detail: null,
     }),
     ProviderRetrying: ({ agent, retries, since, message }) => ({
-      text: `${agent} cannot reach its provider, ${retriesLabel(retries)} since ${clockLabel(since)}`,
+      text: `${agent}: provider unreachable, ${retriesLabel(retries)} since ${clockLabel(since)}`,
       since,
       detail: message,
     }),

@@ -95,7 +95,7 @@ const RepositoryRow = ({ repository }: { readonly repository: RepositoryConfigur
         {standing.text}
       </TableCell>
       <TableCell className="hidden w-full whitespace-normal text-muted-foreground sm:table-cell">
-        {repository.loops.length === 0 ? "No Loop" : repository.loops.join(", ")}
+        {repository.loops.length === 0 ? "No loop" : repository.loops.join(", ")}
       </TableCell>
     </OpeningRow>
   );
@@ -173,7 +173,7 @@ const LanesTable = ({ repository }: { readonly repository: RepositoryConfigurati
         <TableRow className="hover:bg-transparent">
           <TableHead className="text-right">#</TableHead>
           <TableHead>Lane</TableHead>
-          <TableHead className="w-full">Routes Items with</TableHead>
+          <TableHead className="w-full">Routes items with</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -207,7 +207,7 @@ const RepositoryFacts = ({ repository }: { readonly repository: RepositoryConfig
         params={projectParams(repository.name)}
         className="text-primary hover:underline"
       >
-        Open the Board
+        Open the board
       </Link>
     </Fact>
     <Fact label="Tags">
@@ -215,7 +215,7 @@ const RepositoryFacts = ({ repository }: { readonly repository: RepositoryConfig
     </Fact>
     <Fact label="Loops">
       {repository.loops.length === 0 ? (
-        <Unset>No Loop selects it</Unset>
+        <Unset>No loop selects it</Unset>
       ) : (
         <ul className="flex flex-col gap-0.5">
           {repository.loops.map((loop) => (
@@ -268,23 +268,20 @@ export const RepositoryDetail = ({
         <DetailSection
           title="Lanes"
           aside={
-            repository.lanes.length === 0
-              ? undefined
-              : "In Board order, as repos[].lanes lists them"
+            repository.lanes.length === 0 ? undefined : "In board order, as listed in repos[].lanes"
           }
         >
           {[...repository.declaredLabels, ...laneLabels(repository)].some(
             ({ onGitHub }) => onGitHub === null,
           ) && (
             <p className="text-muted-foreground">
-              Polling has not read this repository's labels yet; whether each one is on GitHub shows
-              after the first poll.
+              Labels not polled yet; whether each one is on GitHub shows after the first poll.
             </p>
           )}
           {repository.lanes.length === 0 ? (
             <p className="max-w-[72ch] text-muted-foreground">
-              <code>usine.yaml</code> declares no lanes for this repository, so its Board proposes
-              lanes from the repository's labels and accepts no moves. Add lanes under{" "}
+              <code>usine.yaml</code> declares no lanes for this repository. The board shows lanes
+              proposed from the repository labels and takes no moves. Add lanes under{" "}
               <code>repos[].lanes</code> to move cards.
             </p>
           ) : (

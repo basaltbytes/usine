@@ -245,7 +245,7 @@ A reload ([CLI](/reference/configuration/cli/#reload)) applies these `workers` c
 | A Worker's `max_concurrent_attempts` goes up | Runs Preflight on the Worker with the new count and every rostered harness, then its new slots take waiting Runs at once. |
 | A Worker's `max_concurrent_attempts` goes down | The Worker starts no new Attempt until it runs fewer Attempts than the new count. Running Attempts finish, and each extra slot retires when its Attempt ends. |
 | A new Worker | Runs Preflight on it with every rostered harness; it takes Attempts once that passes. A new `ssh` Worker needs a restart, except one `usine up` started with and a reload removed, added back with the same keys. |
-| A removed Worker | It starts no new Attempt, and its running Attempts finish. Its leftovers can be discarded from Needs you once the last one ends. An `ssh` Worker's Gateway forward stays open until `usine up` stops. |
+| A removed Worker | It starts no new Attempt, and its running Attempts finish. Its leftovers can be discarded from Needs attention once the last one ends. An `ssh` Worker's Gateway forward stays open until `usine up` stops. |
 
 A failed Preflight refuses the whole reload with `ReloadPreflightError`. These changes need a restart, and the reload refuses them with `RestartRequiredError`, which names the field, such as `workers.worker-2.destination`:
 

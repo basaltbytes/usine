@@ -22,7 +22,7 @@ const BoardRoute = () => {
         tone="error"
       >
         <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
-          Back to the desk
+          Back to Overview
         </Button>
       </BootScreen>
     );

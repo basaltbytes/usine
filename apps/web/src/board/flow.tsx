@@ -75,7 +75,7 @@ export const FlowArrow = ({ flow }: { readonly flow: LaneFlow }) => {
       )}
       title={
         named
-          ? `Watching this lane: ${loopsTitle(flow.loops)}. Flows to ${flow.next.name}.`
+          ? `Loops matching this lane: ${loopsTitle(flow.loops)}. Flows to ${flow.next.name}`
           : undefined
       }
     >

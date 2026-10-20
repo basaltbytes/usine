@@ -78,7 +78,7 @@ Loops can rely on the signature. The `act-on-findings` example in [Loop files](/
 
 ## The roster
 
-Every valid Agent file is added to the roster. usine leaves out a file that fails validation and quarantines every Loop that references it, with the message `Unknown agent: <name>`. At startup and at each reload, usine logs each invalid Agent file as a warning with its file, stage, and message, and lists it in **Needs you** as **Agent file not loaded**.
+Every valid Agent file is added to the roster. usine leaves out a file that fails validation and quarantines every Loop that references it, with the message `Unknown agent: <name>`. At startup and at each reload, usine logs each invalid Agent file as a warning with its file, stage, and message, and lists it in **Needs attention** as **Agent file not loaded**.
 
 | Stage | Checks |
 | --- | --- |

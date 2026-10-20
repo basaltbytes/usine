@@ -262,7 +262,7 @@ describe("run transcript", () => {
     );
     const text = markup.replace(/<[^>]+>/gu, "");
     assert.include(text, "Removed agent-in-progress, added ready-for-review");
-    assert.include(text, "You moved it from Review to Findings on the Board");
+    assert.include(text, "You moved it from Review to Findings on the board");
     assert.include(text, "Commented on #247");
     assert.include(markup, "border-color:#fbca0466");
     assert.include(markup, "border-color:#0e8a1666");

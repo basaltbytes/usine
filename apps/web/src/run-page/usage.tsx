@@ -82,7 +82,7 @@ export const UsageBreakdown = ({
       })}
     </section>
     <p className="text-muted-foreground">
-      Tokens are output and uncached input. Dollars are each harness's own price.
+      Tokens are output and uncached input. Dollars are the price each harness reports.
     </p>
   </>
 );

@@ -1,36 +1,36 @@
 ---
 title: Operate Runs
-description: Follow Runs in the web UI, approve, retry, cancel, edit, and run them again, steer a live Attempt, answer Needs you, stop the orchestrator cleanly, and back up the runtime store.
+description: Follow Runs in the web UI, approve, retry, cancel, edit, and run them again, steer a live Attempt, answer Needs attention, stop the orchestrator cleanly, and back up the runtime store.
 sidebar:
   order: 3
 ---
 
 A Run is the work that a Loop does for one Event, and each try of its Step is an Attempt. This page explains how to manage Runs in the web UI at `http://127.0.0.1:7331`, and the CLI commands that back up and export their history. Every UI action is also available as an HTTP endpoint of the operator API.
 
-## The desk
+## Overview
 
-The page at `/`, which `usine up` opens, is the desk. It shows, in this order:
+The page at `/`, which `usine up` opens, is **Overview**. It shows, in this order:
 
-- **Needs you**: everything that waits for you, described [below](#needs-you). When nothing does, it says so, and the right of its heading says when usine last finished polling each repository.
-- **Running now**: one row per Attempt in flight across the Projects, with the Item, Loop, Agent, Worker, start time, and last activity. A Worker that stopped answering or a child that cannot reach its provider shows as a yellow line under the Item ([Connectivity warnings](#connectivity-warnings)). When nothing runs, it says how many Worker slots are free.
-- **Not moving**: each Item a Loop's trigger matches now that has no Attempt running on it, with the reason and the one action that moves it again. See [Why an Item is not moving](#why-an-item-is-not-moving).
-- **Last outcomes**: the 10 Runs that closed last, newest first, with their outcome and pull request.
+- **Needs attention**: everything that waits for you, described [below](#needs-attention). When nothing does, it says so, and the right of its heading says when usine last finished polling each repository.
+- **Running**: one row per Attempt in flight across the Projects, with the Item, Loop, Agent, Worker, start time, and last activity. A Worker that stopped answering or a child that cannot reach its provider shows as a yellow line under the Item ([Connectivity warnings](#connectivity-warnings)). When nothing runs, it says how many Worker slots are free.
+- **Stalled**: each Item a Loop's trigger matches now that has no Attempt running on it, with the reason and the one action that moves it again. See [Why an Item is stalled](#why-an-item-is-stalled).
+- **Recent runs**: the 10 Runs that closed last, newest first, with their outcome and pull request.
 - **Workers**: one line with each Worker's slots in use and its last preflight, at startup or at a reload.
 
 A row about a Run opens its Run page.
 
-### Why an Item is not moving
+### Why an Item is stalled
 
 | Reason                                                                     | Action                                          |
 | -------------------------------------------------------------------------- | ----------------------------------------------- |
-| Its Run waits for your approval.                                           | **Approve**                                     |
-| The Agent asked you a question, or reported a blocker, and the Loop holds the Item. | **Mark answered** or **Mark resolved**          |
-| The Item used its cycle budget.                                            | **Reset cycle budget**                          |
-| Its Run failed and waits for a retry.                                      | **Retry**                                       |
-| Its Run succeeded or was canceled and the Item has not changed since, so no Run opens: a Loop opens one Run per state of an Item. | **Run again**                                   |
-| The Loop is paused.                                                        | **Resume**                                      |
-| Its Run waits for a free Worker slot.                                      | None; it starts when a slot frees.              |
-| The Loop has not acted on the Item's current state yet.                    | None; the next poll does.                       |
+| **Waiting for approval**                                                   | **Approve**                                     |
+| **Question from the agent** or **Blocked by the agent**                    | **Mark answered** or **Mark resolved**          |
+| **Cycle budget used, \<n\> rounds**                                        | **Reset cycle budget**                          |
+| **Failed \<time\> ago**, with the failure's reason                         | **Retry**                                       |
+| **Canceled \<time\> ago, unchanged since** or **Succeeded \<time\> ago, unchanged since**. A Loop opens one Run per state of an Item. | **Run again**                                   |
+| **\<loop\> paused**                                                        | **Resume**                                      |
+| **Waiting for a free worker slot**                                         | None; it starts when a slot frees.              |
+| **Waiting for the next poll**                                              | None; the next poll acts on the Item's current state. |
 
 A change to the Item, such as a new label or comment, is a new state, and the Loop acts on it at the next poll.
 
@@ -38,7 +38,7 @@ A change to the Item, such as a new label or comment, is a new state, and the Lo
 
 The sidebar lists the Projects. Opening one shows its Board, where each lane names the labels and Item states that route Items to it, and each card is a task: an issue and the pull requests linked to it. While a task has an open Run, or a `Failed` Run you have not resolved, its card shows that Run's Loop, state, time, and Agent, so you can see when the Run is `Waiting` for your approval or `Queued` for a free Worker. The time counts from when the Run opened, from when its current Attempt started while it is `Running`, and from the failure once it is `Failed`; hover it for the full timestamp. The card's menu button lists only what applies: it opens the task's Items on GitHub and its Run, lists the task's other Runs under **Run history**, approves, retries, or cancels the Run when its state allows, and moves the card to another lane under **Move to**. The Board lists Runs without an Item, such as schedule Runs, below the lanes under **Runs without a card**.
 
-A card whose task is on the desk's **Not moving** list says why in one line, with the same sentence as the desk, and shows the one action that moves it again, such as **Run again** for a Run that was canceled on an Item that has not changed since. A `Failed` Run keeps its failure note with **Retry**; for an Agent's question or blocker, the note offers **Mark answered** or **Mark resolved** instead.
+A stalled task's card says why in one line, with the same reason as **Stalled** on Overview, and shows the one action that moves it again, such as **Run again** for a Run that was canceled on an Item that has not changed since. A `Failed` Run keeps its failure note with **Retry**; for an Agent's question or blocker, the note offers **Mark answered** or **Mark resolved** instead.
 
 The arrow between two authored label lanes names the Loops whose `if:` matches a task in the left lane now, whether or not they have a Run there, with `paused` after a paused Loop. It is blue while one of those Loops has a `Queued` or `Running` Run on the lane's tasks, and orange while their open Runs all wait for your approval. An arrow without a name means no Loop picks up work from that lane.
 
@@ -53,13 +53,13 @@ Clicking a card opens its task page at `/projects/<owner>/<name>/tasks/<number>`
 
 Like the Board, the page covers the Project's 500 newest Items.
 
-Choosing **Open Run** in a card's menu, or selecting a Run in **Needs you**, opens the Run drawer. The URL gets `?run=<run id>`, so you can share or reload it. The drawer has:
+Choosing **Open run** in a card's menu, or selecting a Run in **Needs attention**, opens the Run drawer. The URL gets `?run=<run id>`, so you can share or reload it. The drawer has:
 
 - a header with the Item and its title, the Run's state, its pull request or **No pull request**, its Loop and Agent, and a **Loop paused** note when that applies;
 - once an Attempt has started, a line with the Worker the newest Attempt runs or ran on and the **Duration** of all the Run's Attempts, which counts on while one runs;
 - the actions the Run's state allows;
 - one summary: what an open Run waits for, what a running Attempt is doing and its latest message, or how the Run ended;
-- **Open Run page**, which opens the whole Run.
+- **Open run page**, which opens the whole Run.
 
 The drawer refreshes every second while the Run can be canceled, and the rest of the UI every 2 seconds while some Run can be canceled, or every 15 seconds otherwise.
 
@@ -71,7 +71,7 @@ Beside the outline of the Task, the Event, and the Attempts sits the conversatio
 
 | Line                                         | The Attempt began because                                                      |
 | -------------------------------------------- | ------------------------------------------------------------------------------ |
-| **From the Event**                           | the Run's Event opened it; every Run's first Attempt starts this way.          |
+| **From the event**                           | the Run's Event opened it; every Run's first Attempt starts this way.          |
 | **Retried by \<login\>**                     | you selected **Retry**; the login is the `operator` in `usine.yaml`.           |
 | **Edited and retried by \<login\>**          | you used **Edit and retry**.                                                   |
 | **Retried after an infrastructure failure**  | the engine retried on its own after the previous Attempt's `InfraFailure`.     |
@@ -89,7 +89,7 @@ Under the outline, a red count such as **2 errors** steps through what the Run e
 | ----------- | --------------------------------------------------------------------------------------------- |
 | `Pending`   | Opened. No Attempt has started, and the Run waits for a Worker slot unless its Loop requires approval. |
 | `Waiting`   | Waits for your approval.                                                                      |
-| `Queued`    | Approved, and waits for a Worker slot. The drawer says **Waiting for a free worker**.          |
+| `Queued`    | Approved, and waits for a Worker slot. The drawer says **Approved, waiting for a free worker**. |
 | `Running`   | An Attempt is running, or the next one is about to start.                                     |
 | `Succeeded` | The Step's result is stored: the commits and pull requests the Attempt produced.              |
 | `Failed`    | The last Attempt failed, and the engine doesn't retry it automatically.                       |
@@ -110,10 +110,10 @@ stateDiagram-v2
   Running --> Failed: the Attempt fails
   Failed --> Running: Retry, or Edit and retry
   Failed --> Failed: Mark resolved
-  Pending --> Canceled: Cancel Run, superseded, or revoked
-  Waiting --> Canceled: Cancel Run, superseded, or revoked
-  Queued --> Canceled: Cancel Run, superseded, or revoked
-  Running --> Canceled: Cancel Run
+  Pending --> Canceled: Cancel run, superseded, or revoked
+  Waiting --> Canceled: Cancel run, superseded, or revoked
+  Queued --> Canceled: Cancel run, superseded, or revoked
+  Running --> Canceled: Cancel run
   Succeeded --> [*]
   Failed --> [*]
   Canceled --> [*]
@@ -123,13 +123,13 @@ Workers take Runs in the order their Events arrived, and each Worker runs up to 
 
 ## Approve
 
-A Loop with `approval: required` keeps each new Run in `Waiting`. The Run appears in **Needs you** as **Approval required**, and its card shows that a Run is waiting for approval. Open the Run, read its **Task** and **Event**, and select **Approve**. The Run becomes `Queued` and starts when a Worker slot is free. On the Run page, the **Event** then shows who approved the Run, when, and from where, such as **Approved by octocat · 15 Oct 19:30 · from the UI**, where the name is the `operator` login in `usine.yaml`. A Run approved before usine recorded approvers shows **Approved** without a name.
+A Loop with `approval: required` keeps each new Run in `Waiting`. The Run appears in **Needs attention** as **\<loop\>: approval needed**, and its card shows that a Run is waiting for approval. Open the Run, read its **Task** and **Event**, and select **Approve**. The Run becomes `Queued` and starts when a Worker slot is free. On the Run page, the **Event** then shows who approved the Run, when, and from where, such as **Approved by octocat · 15 Oct 19:30 · from the UI**, where the name is the `operator` login in `usine.yaml`. A Run approved before usine recorded approvers shows **Approved** without a name.
 
 If the Item changes before you approve and still matches the Loop, a new waiting Run replaces this one, and usine cancels this one as superseded. If the Item no longer matches, usine cancels the waiting Run as revoked.
 
 ## Retry and Mark resolved
 
-The engine retries an Attempt automatically only after an `InfraFailure`, such as an unreachable Worker or a failed checkout, and only up to three Attempts per Run. Every other failure leaves the Run `Failed` and lists it in **Needs you** under the failure's name:
+The engine retries an Attempt automatically only after an `InfraFailure`, such as an unreachable Worker or a failed checkout, and only up to three Attempts per Run. Every other failure leaves the Run `Failed` and lists it in **Needs attention** under the failure's name:
 
 | Failure                     | Cause                                                                                                      |
 | --------------------------- | ---------------------------------------------------------------------------------------------------------- |
@@ -147,11 +147,11 @@ The next Attempt fetches the Run's revision again: for an issue Run, the default
 
 A later Event on the same Item can open a new Run of the Loop while the failed one waits for you. usine refuses to retry the failed Run while that other Run is open, so that one Loop never runs twice on one Item; the drawer names the open Run. Retry after it closes, or cancel it first. **Edit and retry** follows the same rule.
 
-**Mark resolved** removes a failure you have handled from **Needs you** and from the project's status. The Run stays `Failed`, and you can still retry it. If a later Attempt fails, the Run appears in **Needs you** again.
+**Mark resolved** removes a failure you have handled from **Needs attention** and from the project's status. The Run stays `Failed`, and you can still retry it. If a later Attempt fails, the Run appears in **Needs attention** again.
 
 ## Answer a question
 
-An Agent that can't continue without your decision posts its question on the Item and ends its Attempt with `[usine:question]`. The Run fails with `QuestionFailure`, and **Needs you** lists it as **\<loop\> asks a question**, with the question. usine doesn't retry it.
+An Agent that can't continue without your decision posts its question on the Item and ends its Attempt with `[usine:question]`. The Run fails with `QuestionFailure`, and **Needs attention** lists it as **Question from \<loop\>**, with the question. usine doesn't retry it.
 
 While the question waits, the Loop holds the Item. The Agent's own comment changed the Item, but the Loop opens no Run for that state, so a new Run doesn't ask the same question again and use up the cycle budget. The state the Loop holds is the first one polling sees after the question. The Loop acts on the Item again when one of these happens:
 
@@ -164,7 +164,7 @@ An answer on GitHub only counts when it changes the Item after polling has seen 
 
 ## Clear a blocker
 
-An Agent that hits a blocker it can't resolve, such as a failing baseline check or a missing permission, records the blocker on the Item and ends its Attempt with `[usine:blocked]`. The Run fails with `BlockedFailure`, and **Needs you** lists it as **\<loop\> is blocked**, with the blocker. usine doesn't retry it.
+An Agent that hits a blocker it can't resolve, such as a failing baseline check or a missing permission, records the blocker on the Item and ends its Attempt with `[usine:blocked]`. The Run fails with `BlockedFailure`, and **Needs attention** lists it as **\<loop\>: blocked**, with the blocker. usine doesn't retry it.
 
 The Loop holds the Item as it does for a question: the Agent's blocker comment opens no Run, so a new Run doesn't meet the same blocker and post it again. Once you have removed the blocker, the Loop acts on the Item again when the Item changes again, when it stops matching and comes back, when you **Retry** or **Edit and retry** the Run, or when you select **Mark resolved**, which checks the trigger against the Item's newest state and opens a Run for it.
 
@@ -174,7 +174,7 @@ The Loop holds the Item as it does for a question: the Agent's blocker comment o
 
 ## Cancel
 
-Select **Cancel Run**, then **Confirm cancel**, to close any open Run as `Canceled`. usine stops a running Attempt and pushes its unfinished work to a salvage branch, as on a failure. The cancel holds while the Item stays as it is: polling sees the same content again and starts nothing.
+Select **Cancel run**, then **Confirm cancel**, to close any open Run as `Canceled`. usine stops a running Attempt and pushes its unfinished work to a salvage branch, as on a failure. The cancel holds while the Item stays as it is: polling sees the same content again and starts nothing.
 
 To run the Loop on the Item again, make it leave the Loop and come back: remove the Loop's label, wait until usine sees the Item without it (one poll, or right away for a Board move), then add the label again. The same content then opens a new Run with a new id. A Run that usine superseded or revoked behaves the same way when the Item returns to its content. A `Failed` Run is different: it keeps its Event, and you retry it instead.
 
@@ -184,7 +184,7 @@ If you remove and add the label within one poll interval, polling sees only the 
 
 A `Succeeded` or `Canceled` Run has **Run again** and **Edit and run again** in its drawer, on its Run page, and in its row's menu on the task page. **Run again** opens a new Run of the same Loop on the same Item content, with the Run's task and Agent, and shows the new Run. **Edit and run again** opens the task and Agent editor first; **Save and run again** starts the new Run with your changes. The Run you ran again stays as it ended, and both Runs are in the Item's Run history.
 
-The new Run follows the Loop file as it is now: it waits for your approval when the Loop requires approval, and it counts against the Item's cycle budget. When the budget is used up, no Run opens, the drawer says so, and the Item's cycle budget appears in **Needs you**. usine refuses to run a Run again while another Run of the Loop is open on the Item. The Event section of the new Run's page shows who ran it again, when, and from which Run.
+The new Run follows the Loop file as it is now: it waits for your approval when the Loop requires approval, and it counts against the Item's cycle budget. When the budget is used up, no Run opens, the drawer says so, and the Item's cycle budget appears in **Needs attention**. usine refuses to run a Run again while another Run of the Loop is open on the Item. The Event section of the new Run's page shows who ran it again, when, and from which Run.
 
 After a Run again, polling the unchanged Item still starts nothing. A Run again works on a paused Loop too.
 
@@ -200,23 +200,23 @@ While a Run is `Running`, the drawer has a message box under the parent's conver
 
 To take over a live session, send it messages: you work in the session as a user would. A held child returns to the parent only after you release it, and a held parent ends the Attempt only after you release it. You can hold several sessions at once. While a session is held, the `max_attempt_minutes` clock stops; tokens still count toward `max_attempt_tokens`.
 
-A message to a parent that is waiting on a child shows **Queued until the parent's current delegation returns** under it, in the conversation and in the drawer, until the parent reads it. If you pause the parent first, the message shows **Not delivered**; send it again to resume the parent with it.
+A message to a parent that is waiting on a child shows **Queued until the current delegation returns** under it, in the conversation and in the drawer, until the parent reads it. If you pause the parent first, the message shows **Not delivered**; send it again to resume the parent with it.
 
-A message to a child that is working shows **Queued until the child finishes its current step** until the child reads it, and the child is not shown as resumed, since it never stopped. A Pi child reads it before its next model request, a Codex child before its next model request in the same turn, and a Claude Code child when a tool call returns or as its next turn. If the child stops before it reads the message, the message shows **Not delivered**.
+A message to a child that is working shows **Queued until the child's current step ends** until the child reads it, and the child is not shown as resumed, since it never stopped. A Pi child reads it before its next model request, a Codex child before its next model request in the same turn, and a Claude Code child when a tool call returns or as its next turn. If the child stops before it reads the message, the message shows **Not delivered**.
 
 The API has one more action, `Steer`, which adds guidance to the parent or a child without a Hold. The runaway guard sends one `Steer` from the operator `engine` when an Attempt reaches 80% of a ceiling. All four actions use `POST /api/runs/<run id>/intervene`. usine refuses an action when the Run isn't `Running`, when the Attempt is no longer the Run's latest, or when the session isn't live in this process (for example, before a restarted orchestrator reattaches the Attempt). The drawer shows the error. When the session itself refuses an action, such as a message to a child that has already returned, the refusal appears in the conversation. When the parent's last turn answered you and the Attempt has no commit, pull request, or comment to show, the Attempt fails with the parent's answer instead of succeeding, so you decide what happens next.
 
 For a Claude Code or Codex child, the expanded child section also shows its saved session id, its worktree on the Worker, and a **Resume on worker** command, `claude --resume <id>` or `codex resume -- <id>` from that worktree. Run it on the same Worker, under the same login, to continue the conversation yourself. This works only while the worktree exists; Attempt cleanup removes it.
 
-## Needs you
+## Needs attention
 
-**Needs you**, first on the desk and at the top of every other page, lists the items that are waiting for you. Selecting an entry about a Run opens its drawer.
+**Needs attention**, first on Overview and at the top of every other page, lists what is waiting for you. Selecting an entry about a Run opens its drawer.
 
 | Entry                                  | Meaning                                                                                                              |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| **Approval required**                  | A Run is in `Waiting`. Approve or cancel it.                                                                         |
+| **\<loop\>: approval needed**          | A Run is in `Waiting`. Approve or cancel it.                                                                         |
 | A failure name, such as `AgentFailure` | A Run is `Failed`. Read the Attempt, then **Retry**, **Edit and retry**, or **Mark resolved**.                       |
-| **\<loop\> asks a question**           | An Agent asked you a question and its Loop holds the Item. [Answer it](#answer-a-question).                          |
+| **Question from \<loop\>**             | An Agent asked you a question and its Loop holds the Item. [Answer it](#answer-a-question).                          |
 | **Cycle budget exhausted**             | An Item reached a Loop's `max_cycles`. Inspect it, then **Reset cycle budget**.                                      |
 | An error name from polling             | A repository's poll failed, for example on a GitHub error, a missing App permission, or an `if:` that fails to evaluate. |
 | **Label preflight failed**             | usine couldn't create a label that `usine.yaml` declares.                                                            |
@@ -228,7 +228,7 @@ For a Claude Code or Codex child, the expanded child section also shows its save
 
 ## Cycle budgets
 
-Each Loop can open `max_cycles` Runs on one Item between your resets, 3 by default. When a Loop is about to open one more, usine opens an Ask instead: **Cycle budget exhausted** in **Needs you**, with the Item, the number of completed rounds, and the Runs of each Loop that took part. From then on, no Loop opens a Run on that Item, and the Runs already open continue. Restarts and label changes don't clear the Ask.
+Each Loop can open `max_cycles` Runs on one Item between your resets, 3 by default. When a Loop is about to open one more, usine opens an Ask instead: **Cycle budget exhausted** in **Needs attention**, with the Item, the number of completed rounds, and the Runs of each Loop that took part. From then on, no Loop opens a Run on that Item, and the Runs already open continue. Restarts and label changes don't clear the Ask.
 
 Look at the Item, then select **Reset cycle budget**. usine gives the Item a new allowance and polls its repository again from the start, so each active Loop that matches the Item's current state can open a Run. A paused Loop stays paused. usine doesn't post anything about the Ask on GitHub ([#36](https://github.com/basaltbytes/usine/issues/36)). [Bounded review and fix Loops](/guides/review-fix-loops/) explains how to write Loops around the budget.
 
@@ -248,10 +248,10 @@ At 80% of a ceiling the parent gets one warning. At 100% the Attempt stops with 
 
 When an Attempt's Worker stops answering, or one of its children can't reach its model provider, the Run page's conversation shows a yellow line and the orchestrator logs a warning. Nothing stops the Attempt: it keeps running until it finishes, you cancel it, or a ceiling you set trips.
 
-- **Worker \<name\> stopped answering**: while Attempts run on an `ssh` or `exe.dev` Worker, usine runs `true` on the Worker's machine over a new SSH connection every minute, one probe for all of them, and this probe got no answer within 45 seconds. The line appears in the conversation of every Attempt on that Worker. The line says when the Worker last answered and what the probe saw. **Worker \<name\> answers again** follows when a probe gets through.
-- **Cannot reach its provider**: a Codex child reported `Reconnecting...`, or a Claude Code child reported an API retry. A child's consecutive retries share one line, with the count so far and the harness's latest message. **Reached its provider again** follows when the child's turn goes on.
+- **\<worker\> silent since \<time\>**: while Attempts run on an `ssh` or `exe.dev` Worker, usine runs `true` on the Worker's machine over a new SSH connection every minute, one probe for all of them, and this probe got no answer within 45 seconds. The line appears in the conversation of every Attempt on that Worker. The line says when the Worker last answered and what the probe saw. **\<worker\> answering again** follows when a probe gets through.
+- **Provider unreachable**: a Codex child reported `Reconnecting...`, or a Claude Code child reported an API retry. A child's consecutive retries share one line, with the count so far and the harness's latest message. **Provider reachable again** follows when the child's turn goes on.
 
-While a warning is open, the current activity at the end of the conversation and in the Run drawer says what hasn't answered and since when. Needs you doesn't list these warnings.
+While a warning is open, the current activity at the end of the conversation and in the Run drawer says what hasn't answered and since when. Needs attention doesn't list these warnings.
 
 ## Reload the configuration
 
@@ -261,7 +261,7 @@ Select **Reload configuration** on any **Configuration** page to apply edits to 
 
 When the orchestrator stops, a running Attempt's Pi parent task stays in `.usine/durable.sqlite`. The next `usine up` reattaches the same Attempt with the same worktree, and this doesn't count as a retry. If the parent task or the worktree no longer exists, the Attempt fails with an `InfraFailure`, and the Run retries with a new Attempt, starting from the newest salvage branch if there is one.
 
-At each start, usine also checks every Worker that `usine.yaml` declares for checkouts that earlier Attempts left: it salvages the unfinished work of a failed or canceled Attempt and removes the checkout of a succeeded one. It skips the Attempts recorded on a Worker that `usine.yaml` no longer declares, for example after you replace the `local` Worker with an SSH Worker. The log has one warning per start with their count and the Workers, and **Needs you** shows **Worker not configured** for each such Worker. Their checkouts stay where they are. Declare the Worker again and restart `usine up` to reconcile them, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them. Discarding changes nothing on the Worker, so remove its checkouts yourself if you no longer need them. A Worker you declare again later only reconciles the Attempts recorded after the discard.
+At each start, usine also checks every Worker that `usine.yaml` declares for checkouts that earlier Attempts left: it salvages the unfinished work of a failed or canceled Attempt and removes the checkout of a succeeded one. It skips the Attempts recorded on a Worker that `usine.yaml` no longer declares, for example after you replace the `local` Worker with an SSH Worker. The log has one warning per start with their count and the Workers, and **Needs attention** shows **Worker not configured** for each such Worker. Their checkouts stay where they are. Declare the Worker again and restart `usine up` to reconcile them, or select **Discard leftovers**, then **Confirm discard**, to stop tracking them. Discarding changes nothing on the Worker, so remove its checkouts yourself if you no longer need them. A Worker you declare again later only reconciles the Attempts recorded after the discard.
 
 ## Stop the orchestrator
 

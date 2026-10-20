@@ -118,12 +118,12 @@ const RefusalSubjects = ({ refusal }: { readonly refusal: ReloadRefusal }) => {
           <li>
             {cause._tag === "WorkerCapabilityError" && (
               <>
-                Failed check: {capabilityLabel[cause.capability]} on Worker{" "}
+                Failed check: {capabilityLabel[cause.capability]} on worker{" "}
                 {workerLink(cause.worker)}
               </>
             )}
             {cause._tag === "ExecutorOperationError" && (
-              <>Failed Worker operation: {cause.operation}</>
+              <>Failed worker operation: {cause.operation}</>
             )}
             {cause._tag === "CredentialUnavailableError" && (
               <>
@@ -139,12 +139,12 @@ const RefusalSubjects = ({ refusal }: { readonly refusal: ReloadRefusal }) => {
           </li>
           {agents.length > 0 && (
             <li>
-              Checked {agents.length === 1 ? "Agent" : "Agents"}: {listed(agents, agentLink)}
+              Checked {agents.length === 1 ? "agent" : "agents"}: {listed(agents, agentLink)}
             </li>
           )}
           {workers.length > 0 && (
             <li>
-              Checked {workers.length === 1 ? "Worker" : "Workers"}: {listed(workers, workerLink)}
+              Checked {workers.length === 1 ? "worker" : "workers"}: {listed(workers, workerLink)}
             </li>
           )}
         </ul>
@@ -220,7 +220,7 @@ export const SectionReloadResult = () => {
             ))}
           </ul>
         )}
-        <p>New Runs use it; open Runs keep the Agent they were opened with.</p>
+        <p>Applies to new runs; open runs are unchanged</p>
       </AlertDescription>
       {dismiss}
     </Alert>

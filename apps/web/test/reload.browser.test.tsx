@@ -143,7 +143,7 @@ it("reloads the configuration from any Configuration page and shows what changed
     const refusal = page.getByRole("alert").filter({ hasText: "Configuration not reloaded" });
     await page.getByRole("button", { name: "Reload configuration" }).click();
     await expect
-      .element(refusal.getByText("Failed check: harness login on Worker", { exact: false }))
+      .element(refusal.getByText("Failed check: harness login on worker", { exact: false }))
       .toBeVisible();
     await expect.element(refusal.getByRole("link", { name: "reviewer" })).toBeVisible();
     await expect.element(refusal.getByRole("link", { name: "eu-1" })).toBeVisible();

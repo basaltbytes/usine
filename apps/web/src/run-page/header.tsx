@@ -127,8 +127,8 @@ const RunDuration = ({ duration }: { readonly duration: RunDurationView }) => (
   <span
     title={
       duration.unmeasured === 0
-        ? "Time the Run's Attempts worked"
-        : `${duration.unmeasured} ${duration.unmeasured === 1 ? "Attempt" : "Attempts"} ended before end times were recorded and ${duration.unmeasured === 1 ? "is" : "are"} not counted`
+        ? "Total attempt time"
+        : `${duration.unmeasured} ${duration.unmeasured === 1 ? "attempt" : "attempts"} not counted, ended before end times were recorded`
     }
   >
     Duration{" "}
