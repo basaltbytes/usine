@@ -7,9 +7,36 @@ sidebar:
 
 A Run is the work that a Loop does for one Event, and each try of its Step is an Attempt. This page explains how to manage Runs in the web UI at `http://127.0.0.1:7331`, and the CLI commands that back up and export their history. Every UI action is also available as an HTTP endpoint of the operator API.
 
+## The desk
+
+The page at `/`, which `usine up` opens, is the desk. It shows, in this order:
+
+- **Needs you**: everything that waits for you, described [below](#needs-you). When nothing does, it says so, and the right of its heading says when usine last finished polling each repository.
+- **Running now**: one row per Attempt in flight across the Projects, with the Item, Loop, Agent, Worker, start time, and last activity. A Worker that stopped answering or a child that cannot reach its provider shows as a yellow line under the Item ([Connectivity warnings](#connectivity-warnings)). When nothing runs, it says how many Worker slots are free.
+- **Not moving**: each Item a Loop's trigger matches now that has no Attempt running on it, with the reason and the one action that moves it again. See [Why an Item is not moving](#why-an-item-is-not-moving).
+- **Last outcomes**: the 10 Runs that closed last, newest first, with their outcome and pull request.
+- **Workers**: one line with each Worker's slots in use and its last preflight, at startup or at a reload.
+
+A row about a Run opens its Run page.
+
+### Why an Item is not moving
+
+| Reason                                                                     | Action                                          |
+| -------------------------------------------------------------------------- | ----------------------------------------------- |
+| Its Run waits for your approval.                                           | **Approve**                                     |
+| The Agent asked you a question, or reported a blocker, and the Loop holds the Item. | **Mark answered** or **Mark resolved**          |
+| The Item used its cycle budget.                                            | **Reset cycle budget**                          |
+| Its Run failed and waits for a retry.                                      | **Retry**                                       |
+| Its Run succeeded or was canceled and the Item has not changed since, so no Run opens: a Loop opens one Run per state of an Item. | **Run again**                                   |
+| The Loop is paused.                                                        | **Resume**                                      |
+| Its Run waits for a free Worker slot.                                      | None; it starts when a slot frees.              |
+| The Loop has not acted on the Item's current state yet.                    | None; the next poll does.                       |
+
+A change to the Item, such as a new label or comment, is a new state, and the Loop acts on it at the next poll.
+
 ## Follow a Run
 
-**Projects** lists the registered repositories with a status, their open Runs by running, queued, and waiting, and their Item and lane counts. The status counts the Needs you entries about the Project, or reads **Active** while a Run can still be canceled, or **Clear**. Opening a project shows its Board, where each lane names the labels and Item states that route Items to it, and each card is a task: an issue and the pull requests linked to it. While a task has an open Run, or a `Failed` Run you have not resolved, its card shows that Run's Loop, state, time, and Agent, so you can see when the Run is `Waiting` for your approval or `Queued` for a free Worker. The time counts from when the Run opened, from when its current Attempt started while it is `Running`, and from the failure once it is `Failed`; hover it for the full timestamp. The card's menu button lists only what applies: it opens the task's Items on GitHub and its Run, lists the task's other Runs under **Run history**, approves, retries, or cancels the Run when its state allows, and moves the card to another lane under **Move to**. The Board lists Runs without an Item, such as schedule Runs, below the lanes under **Runs without a card**.
+The sidebar lists the Projects. Opening one shows its Board, where each lane names the labels and Item states that route Items to it, and each card is a task: an issue and the pull requests linked to it. While a task has an open Run, or a `Failed` Run you have not resolved, its card shows that Run's Loop, state, time, and Agent, so you can see when the Run is `Waiting` for your approval or `Queued` for a free Worker. The time counts from when the Run opened, from when its current Attempt started while it is `Running`, and from the failure once it is `Failed`; hover it for the full timestamp. The card's menu button lists only what applies: it opens the task's Items on GitHub and its Run, lists the task's other Runs under **Run history**, approves, retries, or cancels the Run when its state allows, and moves the card to another lane under **Move to**. The Board lists Runs without an Item, such as schedule Runs, below the lanes under **Runs without a card**.
 
 Clicking a card opens its task page at `/projects/<owner>/<name>/tasks/<number>`, whether or not the task has a Run. The number is the task's originating issue, or its first pull request when it has no issue; the number of any of its Items opens the same page. The page shows:
 
@@ -158,7 +185,7 @@ For a Claude Code or Codex child, the expanded child section also shows its save
 
 ## Needs you
 
-**Needs you**, at the top of every page, lists the items that are waiting for you. Selecting an entry about a Run opens its drawer.
+**Needs you**, first on the desk and at the top of every other page, lists the items that are waiting for you. Selecting an entry about a Run opens its drawer.
 
 | Entry                                  | Meaning                                                                                                              |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |

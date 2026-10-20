@@ -14,11 +14,12 @@ const useRefreshRun = () => {
   return (runId: RunId) =>
     Promise.all([
       queryClient.invalidateQueries({ queryKey: ["overview"] }),
+      queryClient.invalidateQueries({ queryKey: ["desk"] }),
       queryClient.invalidateQueries({ queryKey: ["run", runId] }),
     ]);
 };
 
-/** Sends Run actions from any screen; success refreshes the overview and that Run's detail. */
+/** Sends Run actions from any screen; success refreshes the overview, the desk, and that Run's detail. */
 export const useRunAction = () => {
   const refresh = useRefreshRun();
   return useMutation({

@@ -45,6 +45,7 @@ import {
   type InterruptedRepositoryCycle,
   latestPollAt,
   PollCycle,
+  RepositoryPoll,
   type RepositoryPollError,
   RepositoryPollFailure,
   repositoryFailureLogFields,
@@ -187,6 +188,8 @@ export class PollingTriggers extends Context.Service<
       const github = yield* GitHubPolling;
       const loops = yield* LoopControl;
       const latest = yield* Ref.make(Option.none<PollCycle>());
+      // Kept across cycles, so a repository whose poll fails keeps its last completion.
+      const completedPolls = yield* Ref.make<ReadonlyMap<string, RepositoryPoll>>(new Map());
       const hints = yield* ItemHints;
       const ownership = yield* Semaphore.make(1);
       // A failing Item is fetched again only on its repository's first
@@ -492,10 +495,17 @@ export class PollingTriggers extends Context.Service<
           const failures: Array<RepositoryPollFailure> = [];
           const backoffs: Array<Option.Option<DateTime.Utc>> = [];
           const preflightFindings: Array<LabelPreflightFinding> = [];
+          const completedAt = yield* DateTime.now;
           for (const { repository, result } of settled) {
             if (Result.isSuccess(result)) {
               cycles.push(result.success);
               preflightFindings.push(...result.success.preflightFindings);
+              yield* Ref.update(completedPolls, (current) =>
+                new Map(current).set(
+                  canonicalRepositoryName(repository.repository.name),
+                  new RepositoryPoll({ repository: repository.repository.name, completedAt }),
+                ),
+              );
               continue;
             }
             const interrupted = result.failure._tag === "InterruptedRepositoryCycle";
@@ -529,7 +539,13 @@ export class PollingTriggers extends Context.Service<
               }),
             );
           }
+          const polls = yield* Ref.get(completedPolls);
           const cycle = new PollCycle({
+            repositoryPolls: watched.flatMap(({ repository }) =>
+              Option.toArray(
+                Option.fromNullishOr(polls.get(canonicalRepositoryName(repository.name))),
+              ),
+            ),
             repositories: watched.length,
             changedItems: cycles.reduce((sum, cycle) => sum + cycle.changedItems, 0),
             submissions: cycles.flatMap(({ submissions }) => submissions),

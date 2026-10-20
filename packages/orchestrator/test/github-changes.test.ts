@@ -225,6 +225,7 @@ const testLayer = (current: Ref.Ref<RunSnapshot>, requests: Ref.Ref<ReadonlyArra
     revision: () => Effect.die("unused"),
     transcript: (query) => Effect.succeed(query.attemptId === first.id ? [lastRow] : []),
     attemptsByWorker: () => Effect.die("unused"),
+    sightings: () => Effect.die("unused"),
   });
   const history = Layer.succeed(GitHubItemHistory)({
     appChanges: (_repository, _item, since) =>

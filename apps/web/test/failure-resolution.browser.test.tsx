@@ -179,7 +179,7 @@ it("resolves a failure from Needs you while retaining unrelated attention, faile
       new Set(["/projects/resolution/project/runs/resolution-run"]),
     );
     await page.getByRole("button", { name: "Close", exact: true }).click();
-    const needs = page.getByRole("region", { name: "Items needing intervention" });
+    const needs = page.getByRole("region", { name: "Needs you" });
     await expect
       .element(needs.getByRole("button", { name: /AgentFailure/ }))
       .not.toBeInTheDocument();

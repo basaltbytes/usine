@@ -2,11 +2,12 @@ import { EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
-import { and, eq, isNotNull } from "drizzle-orm";
-import { Effect, Option, Schema } from "effect";
+import { and, desc, eq, inArray, isNotNull } from "drizzle-orm";
+import { Array as EffectArray, Effect, Option, Schema } from "effect";
 import type { RunDatabaseClient } from "../database/database.ts";
-import { loopItems } from "../database/schema.ts";
+import { loopItems, runs, triggerEvents } from "../database/schema.ts";
 import type { OperatorHold, PreviousSighting } from "../engine/lifecycle.ts";
+import { LoopSighting } from "../run-reader/model.ts";
 
 const LoopItemRow = Schema.Struct({
   observedEventId: Schema.NullOr(EventId),
@@ -14,6 +15,22 @@ const LoopItemRow = Schema.Struct({
   heldEventId: Schema.NullOr(EventId),
 });
 const decodeLoopItems = Schema.decodeUnknownEffect(Schema.Array(LoopItemRow));
+const decodeSightingRows = Schema.decodeUnknownEffect(
+  Schema.Array(
+    Schema.Struct({
+      loop: LoopName,
+      itemKey: ItemKey,
+      observedEventId: Schema.NullOr(EventId),
+      heldByRunId: Schema.NullOr(RunId),
+    }),
+  ),
+);
+const decodeReopeningRows = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ eventId: EventId, reopensEventId: EventId })),
+);
+const decodeOwnerRows = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ eventId: EventId, runId: RunId })),
+);
 
 /** Transaction-local reads and writes of what each Loop last saw of an Item, and of operator holds. */
 export const loopItemQueries = (database: RunDatabaseClient) => {
@@ -139,5 +156,79 @@ export const loopItemQueries = (database: RunDatabaseClient) => {
     return released.length > 0;
   });
 
-  return { sighted, unmatched, hold, startHold, holdAt, release, releaseRun } as const;
+  /**
+   * What each Loop last saw of the supplied Items. The Event of a sighting is
+   * the newest one the engine opened again or the operator ran again for the
+   * Event the trigger submitted, as later sightings of that state join it.
+   */
+  const sightings = Effect.fn("LoopItems.sightings")(function* (itemKeys: ReadonlyArray<ItemKey>) {
+    const keys = [...new Set(itemKeys)];
+    if (keys.length === 0) return [];
+    // Chunks keep each read below the adapter's bind-parameter limit.
+    const rows = (yield* Effect.forEach(EffectArray.chunksOf(keys, 100), (chunk) =>
+      database
+        .select({
+          loop: loopItems.loopName,
+          itemKey: loopItems.itemKey,
+          observedEventId: loopItems.observedEventId,
+          heldByRunId: loopItems.heldByRunId,
+        })
+        .from(loopItems)
+        .where(inArray(loopItems.itemKey, chunk))
+        .execute()
+        .pipe(Effect.flatMap(decodeSightingRows)),
+    )).flat();
+    const observed = [
+      ...new Set(
+        rows.flatMap(({ observedEventId }) => (observedEventId === null ? [] : [observedEventId])),
+      ),
+    ];
+    const reopenings = (yield* Effect.forEach(EffectArray.chunksOf(observed, 100), (chunk) =>
+      database
+        .select({ eventId: triggerEvents.eventId, reopensEventId: triggerEvents.reopensEventId })
+        .from(triggerEvents)
+        .where(inArray(triggerEvents.reopensEventId, chunk))
+        .orderBy(desc(triggerEvents.reopening))
+        .execute()
+        .pipe(Effect.flatMap(decodeReopeningRows)),
+    )).flat();
+    const newest = new Map<EventId, EventId>();
+    for (const { eventId, reopensEventId } of reopenings) {
+      if (!newest.has(reopensEventId)) newest.set(reopensEventId, eventId);
+    }
+    const current = (eventId: EventId) => newest.get(eventId) ?? eventId;
+    const owners = new Map(
+      (yield* Effect.forEach(EffectArray.chunksOf(observed.map(current), 100), (chunk) =>
+        database
+          .select({ eventId: runs.eventId, runId: runs.runId })
+          .from(runs)
+          .where(inArray(runs.eventId, chunk))
+          .execute()
+          .pipe(Effect.flatMap(decodeOwnerRows)),
+      ))
+        .flat()
+        .map(({ eventId, runId }) => [eventId, runId] as const),
+    );
+    return rows.map(({ loop, itemKey, observedEventId, heldByRunId }) => {
+      const event = Option.map(Option.fromNullishOr(observedEventId), current);
+      return new LoopSighting({
+        loop,
+        itemKey,
+        event,
+        run: Option.flatMap(event, (eventId) => Option.fromNullishOr(owners.get(eventId))),
+        heldBy: Option.fromNullishOr(heldByRunId),
+      });
+    });
+  });
+
+  return {
+    sighted,
+    unmatched,
+    hold,
+    startHold,
+    holdAt,
+    release,
+    releaseRun,
+    sightings,
+  } as const;
 };

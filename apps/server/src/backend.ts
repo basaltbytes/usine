@@ -13,6 +13,7 @@ import type { WorkerName } from "@usine/core/worker";
 import {
   type BoardMove,
   type ConfigurationView,
+  type DeskView,
   type FactoryOverview,
   NeedsSetupOverview,
   type RunDetailView,
@@ -76,6 +77,8 @@ export class FactoryBackend extends Context.Service<
       item: ItemNumber,
     ) => Effect.Effect<TaskView, BackendError>;
     readonly configuration: Effect.Effect<ConfigurationView, BackendError>;
+    /** The desk of the current instance: Running now, Not moving, Last outcomes, Workers, poll times. */
+    readonly desk: Effect.Effect<DeskView, BackendError>;
   }
 >()("@usine/server/FactoryBackend") {}
 
@@ -118,6 +121,7 @@ export const liveBackendLayer = (
     task: (repository, item) =>
       Effect.flatMap(instances.get, (instance) => operator.task(instance, repository, item)),
     configuration: Effect.flatMap(instances.get, configuration.view),
+    desk: Effect.flatMap(instances.get, operator.desk),
   });
 
 /**
@@ -162,5 +166,6 @@ export const needsSetupBackendLayer = (
     task: (repository, item) =>
       Effect.flatMap(instances.get, (instance) => observation.task(instance, repository, item)),
     configuration: Effect.flatMap(instances.get, configuration.view),
+    desk: Effect.flatMap(instances.get, observation.desk),
   });
 };

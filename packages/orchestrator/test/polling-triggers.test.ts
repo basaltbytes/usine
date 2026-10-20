@@ -77,7 +77,7 @@ import {
 } from "effect";
 import { TestClock } from "effect/testing";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
-import { PollingTriggers } from "../src/polling-triggers.ts";
+import { type PollCycle, PollingTriggers } from "../src/polling-triggers.ts";
 import { triggerConditionLayer } from "../src/trigger-condition.ts";
 import {
   alwaysHoldsLayer,
@@ -1127,9 +1127,10 @@ describe("PollingTriggers", () => {
       number: 7,
       updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
     });
+    let failing = true;
     const github: GitHubPolling["Service"] = {
       changes: (repository, cursor) =>
-        repository === "basaltbytes/failing"
+        repository === "basaltbytes/failing" && failing
           ? Effect.fail(
               new GitHubApiError({
                 operation: "poll-repository-changes",
@@ -1209,6 +1210,25 @@ describe("PollingTriggers", () => {
       assert.strictEqual(cycle.failures[0]?.repository, "basaltbytes/failing");
       assert.strictEqual(cycle.failures[0]?.errorTag, "GitHubApiError");
       assert.strictEqual(cycle.submissions.length, 1);
+      const completions = (polled: PollCycle) =>
+        polled.repositoryPolls.map(({ repository, completedAt }) => [
+          repository,
+          DateTime.formatIso(completedAt),
+        ]);
+      assert.deepStrictEqual(completions(cycle), [
+        ["basaltbytes/healthy", "1970-01-01T00:00:00.000Z"],
+      ]);
+
+      // A repository whose poll fails keeps the time its last poll completed.
+      failing = false;
+      yield* TestClock.adjust("1 minute");
+      yield* polling.poll(instance);
+      failing = true;
+      yield* TestClock.adjust("1 minute");
+      assert.deepStrictEqual(completions(yield* polling.poll(instance)), [
+        ["basaltbytes/failing", "1970-01-01T00:01:00.000Z"],
+        ["basaltbytes/healthy", "1970-01-01T00:02:00.000Z"],
+      ]);
     }).pipe(Effect.provide(layer));
   });
 

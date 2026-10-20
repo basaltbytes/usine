@@ -1,11 +1,11 @@
 import { Agent } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
-import { Event } from "@usine/core/event";
+import { Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
-import { LoopPermissions } from "@usine/core/loop";
+import { LoopName, LoopPermissions } from "@usine/core/loop";
 import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
-import { Run } from "@usine/core/run";
+import { Run, RunId } from "@usine/core/run";
 import { RunAgain } from "@usine/core/run/again";
 import { RunApproval } from "@usine/core/run/approval";
 import { Step } from "@usine/core/step";
@@ -66,6 +66,27 @@ export class RunSummary extends Schema.Class<RunSummary>("@usine/engine/RunSumma
 export class WorkerAttempts extends Schema.Class<WorkerAttempts>("@usine/engine/WorkerAttempts")({
   worker: WorkerName,
   attempts: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
+}) {}
+
+/**
+ * What one Loop last saw of an Item and what became of it: the Event the
+ * Loop's trigger last submitted for the Item's state, the Run that Event
+ * opened, and the Run whose Attempt stopped for the operator and holds the
+ * Loop on the Item (ADR 0007, ADR 0017).
+ */
+export class LoopSighting extends Schema.Class<LoopSighting>("@usine/engine/LoopSighting")({
+  loop: LoopName,
+  itemKey: ItemKey,
+  /**
+   * The Event of the Item's state the Loop last saw match, or the newest Event the
+   * engine opened again or the operator ran again for it; none after a sighting
+   * that did not match.
+   */
+  event: Schema.Option(EventId),
+  /** The Run `event` owns; none while it waits behind a running Attempt or a hold, or after the engine ignored it. */
+  run: Schema.Option(RunId),
+  /** The Run whose Attempt asked a question or reported a blocker and holds the Loop on the Item; none without a hold. */
+  heldBy: Schema.Option(RunId),
 }) {}
 
 /** Monotonic version of the operator projection. */

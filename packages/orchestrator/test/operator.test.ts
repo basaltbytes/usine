@@ -86,6 +86,8 @@ import { ApprovalView, EditAndRetry, SessionIntervention } from "../src/operator
 import { PollCycle, PollingTriggers, RepositoryPollFailure } from "../src/polling-triggers.ts";
 import { ScheduleCycle, ScheduleTriggers } from "../src/schedule-triggers.ts";
 import { failureView } from "../src/operator/projection.ts";
+import { WorkerStatus } from "../src/worker-status.ts";
+import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { noCycleBudgets } from "./support/polling.ts";
 
 const now = DateTime.makeUnsafe("2026-08-31T12:00:00.000Z");
@@ -331,6 +333,7 @@ const testLayer = (
     transcript: readTranscript,
     attemptsByWorker: () =>
       Effect.succeed([new WorkerAttempts({ worker: WorkerName.make("local"), attempts: 3 })]),
+    sightings: () => Effect.succeed([]),
   });
   const controls = Layer.succeed(LoopControl)({
     isPaused: () => Effect.succeed(true),
@@ -472,6 +475,8 @@ const testLayer = (
     repositoryLabelReader,
     polling,
     schedules,
+    MarcbachmannCelLayer,
+    WorkerStatus.idle,
   );
   return Operator.layer.pipe(Layer.provide(dependencies));
 };

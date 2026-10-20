@@ -3,6 +3,7 @@ import { RunId } from "@usine/core/run";
 import { ItemKey } from "@usine/core/item";
 import { RunDatabase } from "../database/database.ts";
 import {
+  type LoopSighting,
   ProjectionRevision,
   RunEvidence,
   RunSnapshot,
@@ -60,8 +61,20 @@ const makeRunReader = Effect.gen(function* () {
   const attemptsByWorker = Effect.fn("RunReader.attemptsByWorker")(() =>
     queries.attemptCountsByWorker().pipe(persistence("count Attempts by Worker")),
   );
+  const sightings = Effect.fn("RunReader.sightings")((itemKeys: ReadonlyArray<ItemKey>) =>
+    queries.loopItems.sightings(itemKeys).pipe(persistence("read Loop sightings")),
+  );
 
-  return { inspect, evidence, list, forItems, revision, transcript, attemptsByWorker } as const;
+  return {
+    inspect,
+    evidence,
+    list,
+    forItems,
+    revision,
+    transcript,
+    attemptsByWorker,
+    sightings,
+  } as const;
 });
 
 /** Reads saved Run state and transcripts without starting or recovering execution. */
@@ -88,12 +101,21 @@ export class RunReader extends Context.Service<
     ) => Effect.Effect<ReadonlyArray<TranscriptEntry>, RunStoreError>;
     /** The Attempts startup reconciliation visits, counted per Worker and ordered by Worker name; Workers without any are left out. */
     readonly attemptsByWorker: () => Effect.Effect<ReadonlyArray<WorkerAttempts>, RunStoreError>;
+    /**
+     * What each Loop last saw of the supplied Items, one entry per Loop that
+     * has seen an Item: the Event of the state it last saw match, the Run that
+     * Event owns, and the Run whose question or blocker holds it on the Item.
+     */
+    readonly sightings: (
+      itemKeys: ReadonlyArray<ItemKey>,
+    ) => Effect.Effect<ReadonlyArray<LoopSighting>, RunStoreError>;
   }
 >()("@usine/engine/RunReader") {
   static readonly layer = Layer.effect(RunReader, makeRunReader);
 }
 
 export {
+  LoopSighting,
   RunEvidence,
   RunSnapshot,
   RunSummary,

@@ -219,7 +219,8 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
         return yield* fromBackend((backend) => backend.task(repository, params.item));
       }),
     )
-    .handle("configuration", () => fromBackend((backend) => backend.configuration)),
+    .handle("configuration", () => fromBackend((backend) => backend.configuration))
+    .handle("desk", () => fromBackend((backend) => backend.desk)),
 );
 
 export const apiRoutes = HttpApiBuilder.layer(OperatorApi).pipe(

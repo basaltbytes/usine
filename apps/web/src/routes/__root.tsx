@@ -69,15 +69,11 @@ const Crumbs = ({
   if (project === undefined)
     return (
       <BreadcrumbItem>
-        <BreadcrumbPage>Projects</BreadcrumbPage>
+        <BreadcrumbPage>Desk</BreadcrumbPage>
       </BreadcrumbItem>
     );
   return (
     <>
-      <BreadcrumbItem>
-        <BreadcrumbLink render={<Link to="/" />}>Projects</BreadcrumbLink>
-      </BreadcrumbItem>
-      <BreadcrumbSeparator />
       <BreadcrumbItem>
         {runId === undefined && task === undefined ? (
           <BreadcrumbPage>{project}</BreadcrumbPage>
@@ -121,8 +117,13 @@ const Shell = () => {
   const params = useParams({ strict: false });
   const matchRoute = useMatchRoute();
   const project = params.repository;
+  const atDesk = matchRoute({ to: "/" }) !== false;
   const view =
-    matchRoute({ to: "/configuration", fuzzy: true }) === false ? "projects" : "configuration";
+    matchRoute({ to: "/configuration", fuzzy: true }) !== false
+      ? "configuration"
+      : atDesk
+        ? "desk"
+        : "projects";
   const closeRun = () => void navigate({ to: ".", search: ({ run: _run, ...rest }) => rest });
   // Remember the last opened Run so the Sheet stays mounted for its exit transition.
   const [shownRun, setShownRun] = useState(run);
@@ -135,6 +136,7 @@ const Shell = () => {
         view={view}
         project={project}
         needsYou={needsYouByProject(data.needsYou)}
+        needsYouTotal={data.needsYou.length}
         live={live}
       />
       <SidebarInset className="h-svh overflow-hidden">
@@ -161,7 +163,8 @@ const Shell = () => {
               </AlertDescription>
             </Alert>
           )}
-          <NeedsYou needs={data.needsYou} compact={params.run !== undefined} />
+          {/* The desk lists Needs you as its first block. */}
+          {!atDesk && <NeedsYou needs={data.needsYou} compact={params.run !== undefined} />}
           <Outlet />
         </div>
         {shownRun !== undefined && (

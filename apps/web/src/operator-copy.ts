@@ -58,21 +58,6 @@ export const triggerLabel = (trigger: LoopView["trigger"]): string => {
   }
 };
 
-/** A Project's open Runs by what they are doing, such as `2 running, 1 waiting`, or `None`. Pending
- * Runs count as queued. */
-export const openRunsLabel = (runs: ReadonlyArray<Pick<RunView, "state">>): string => {
-  const count = (states: ReadonlyArray<RunView["state"]>) =>
-    runs.filter(({ state }) => states.includes(state)).length;
-  const open = (
-    [
-      [count(["Running"]), "running"],
-      [count(["Pending", "Queued"]), "queued"],
-      [count(["Waiting"]), "waiting"],
-    ] as const
-  ).flatMap(([total, word]) => (total === 0 ? [] : [`${total} ${word}`]));
-  return open.length === 0 ? "None" : open.join(", ");
-};
-
 /** How long ago `since` happened, in the largest whole unit: `now`, `12m`, `3h`, or `2d`. */
 export const elapsedLabel = (since: string, now: number = Date.now()): string => {
   const elapsed = Math.max(0, now - Date.parse(since));
