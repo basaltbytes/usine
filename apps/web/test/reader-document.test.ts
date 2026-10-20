@@ -37,11 +37,13 @@ import { clockLabel } from "../src/operator-copy.ts";
 import { withGitHubChanges } from "../src/run-transcript/document/github-changes.ts";
 import {
   chapterCheckpoints,
+  outlineEntries,
   readerDocument,
   readingOrder,
   readingPlace,
   type ChapterRow,
 } from "../src/run-transcript/document/model.ts";
+import { errorTally } from "../src/run-transcript/navigation/model.ts";
 import { checkpointLabel, checkpointText } from "../src/run-transcript/document/text.ts";
 import { projectTranscript } from "../src/run-transcript/model.ts";
 
@@ -261,6 +263,53 @@ describe("checkpoints", () => {
     assert.equal(chapterCheckpoints(chapter)[2]?.key, "event:5");
   });
 
+  it("folds each run of one session's turns into one outline entry and keeps marked rows on their own", () => {
+    const failure = new AgentFailureView({ message: "The gate fails. No edits made." });
+    const steer = new TranscriptEventView({
+      sequence: TranscriptSequence.make(7),
+      attemptId,
+      receivedAt: at(7),
+      direction: "inbound",
+      payload: new AttemptChannel.Steer({ message: "Use the deploy key. It is in the vault." }),
+    });
+    const events = [
+      said(3, "Reading the issue.", parent),
+      said(4, "Delegating the change.", parent),
+      said(5, "Running the baseline."),
+      said(6, "[usine:blocked]\nThe gate is blocked by memory."),
+      steer,
+      record(
+        8,
+        new AttemptChannel.WorkerUnresponsive({
+          worker: WorkerName.make("usine-worker-1"),
+          lastAnsweredAt: DateTime.makeUnsafe(at(7)),
+          reason: "No answer within 45 seconds",
+        }),
+      ),
+      said(9, "Retrying with more memory."),
+      said(10, "The gate passes now."),
+      record(11, new FailedTranscriptView({ failure })),
+    ];
+    const chapter = document(events, [attempt(new FailedAttemptView({ failure }))]).chapters[0];
+    assert.isDefined(chapter);
+    assert.deepEqual(
+      outlineEntries(chapter).map((entry) =>
+        entry._tag === "Turns"
+          ? `${entry.speaker}: ${entry.turns.map(({ text }) => text).join(" | ")}`
+          : `[${entry.checkpoint.kind} ${entry.checkpoint.tone}] ${entry.checkpoint.speaker ?? "-"}: ${entry.checkpoint.text}`,
+      ),
+      [
+        "Parent: Reading the issue. | Delegating the change.",
+        "developer: Running the baseline.",
+        "[blocker failed] developer: The gate is blocked by memory.",
+        "[operator plain] Operator: Use the deploy key.",
+        "[notice warning] -: Worker usine-worker-1 stopped answering.",
+        "developer: Retrying with more memory. | The gate passes now.",
+        "[ending failed] -: The gate fails.",
+      ],
+    );
+  });
+
   it("labels a long sentence at a clause or a whole word, never mid-word", () => {
     assert.equal(checkpointLabel("Blocker posted on #247."), "Blocker posted on #247.");
     assert.equal(
@@ -287,6 +336,106 @@ describe("checkpoints", () => {
       checkpointLabel("Antidisestablishmentarianismwithoutanyspaces ends here."),
       "Antidisestablishmentarianismwithoutanyspaces…",
     );
+  });
+});
+
+describe("error count", () => {
+  const call = (sequence: number, callId: string, isError: boolean) => [
+    record(
+      sequence,
+      new AttemptChannel.SessionEvent({
+        event: new ToolStarted({
+          session: child,
+          callId,
+          tool: "bash",
+          input: { command: "pnpm lint" },
+        }),
+      }),
+    ),
+    record(
+      sequence + 1,
+      new AttemptChannel.SessionEvent({
+        event: new ToolFinished({ session: child, callId, tool: "bash", output: "", isError }),
+      }),
+    ),
+  ];
+  const tally = (
+    events: ReadonlyArray<TranscriptEventView>,
+    attempts: ReadonlyArray<AttemptView>,
+  ) => {
+    const counted = errorTally(document(events, attempts));
+    return {
+      errors: counted.errors.map(({ key }) => key),
+      recovered: counted.recovered.map(({ key }) => key),
+    };
+  };
+
+  it("counts failed Attempts and blockers as errors and tool failures the Agent went on from as recovered", () => {
+    const failure = new InfraFailureView({ message: "Worker disconnected" });
+    const second = AttemptId.make("attempt-2");
+    const retried = (event: TranscriptEventView) =>
+      new TranscriptEventView({ ...event, attemptId: second });
+    const events = [
+      ...call(3, "lint", true),
+      said(5, "Lint failed; fixing the import."),
+      ...call(6, "lint-again", false),
+      ...call(8, "push", true),
+      record(10, new FailedTranscriptView({ failure })),
+      retried(said(11, "[usine:blocked]\nThe registry rejects the token.")),
+      ...call(12, "build", true).map(retried),
+      retried(said(14, "Built after a clean install.")),
+    ];
+    const counted = tally(events, [
+      attempt(new FailedAttemptView({ failure })),
+      new AttemptView({ ...attempt(null), id: second, number: AttemptNumber.make(2) }),
+    ]);
+    // The failed push is the last thing the first Attempt did, so its failure counts it.
+    const toolKey = (attempt: AttemptId, callId: string) =>
+      JSON.stringify([attempt, child.id, callId]);
+    assert.deepEqual(counted, {
+      errors: ["event:10", "event:11"],
+      recovered: [toolKey(attemptId, "lint"), toolKey(second, "build")],
+    });
+  });
+
+  it("counts a refused operator message and a connectivity warning only while it is open", () => {
+    const refused = record(
+      4,
+      new AttemptChannel.InterventionRejected({
+        inputSequence: AttemptChannel.Sequence.make(1),
+        intervention: new AttemptChannel.Intervention({
+          operator: "Philippe",
+          target: new AttemptChannel.ChildTarget({ sessionId: child.id }),
+          action: new AttemptChannel.OperatorMessage({ message: "Stop and push." }),
+        }),
+        message: "The child already finished.",
+      }),
+    );
+    const silent = record(
+      5,
+      new AttemptChannel.WorkerUnresponsive({
+        worker: WorkerName.make("usine-worker-1"),
+        lastAnsweredAt: DateTime.makeUnsafe(at(4)),
+        reason: "No answer within 45 seconds",
+      }),
+    );
+    const live = tally([said(2, "Working."), refused, silent], [attempt(null)]);
+    assert.deepEqual(live, { errors: ["event:4", "event:5"], recovered: [] });
+    const answered = tally(
+      [
+        said(2, "Working."),
+        silent,
+        record(
+          6,
+          new AttemptChannel.WorkerResponsive({
+            worker: WorkerName.make("usine-worker-1"),
+            lastAnsweredAt: DateTime.makeUnsafe(at(4)),
+          }),
+        ),
+      ],
+      [attempt(null)],
+    );
+    assert.deepEqual(answered, { errors: [], recovered: [] });
   });
 });
 
@@ -468,6 +617,7 @@ describe("connectivity", () => {
       { _tag: "WorkerSilent", worker, lastAnsweredAt: at(4) },
       {
         _tag: "ProviderRetrying",
+        sessionId: child.id,
         agent: child.agent,
         message: unreachable,
         retries: 3,

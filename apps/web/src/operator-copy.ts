@@ -1,6 +1,7 @@
 import { BrainSpec } from "@usine/core/agent/brain";
 import type { BillingPool } from "@usine/core/agent/session";
 import type { SalvagePushed } from "@usine/core/attempt/salvage";
+import type { AttemptStart } from "@usine/core/attempt/start";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import type { ApprovalChannel } from "@usine/core/run/approval";
@@ -12,7 +13,7 @@ import type {
   NeedView,
   RunView,
 } from "@usine/orchestrator/operator";
-import { Match } from "effect";
+import { Match, Option } from "effect";
 import type { BoardMoveProgress } from "./board/moves.ts";
 import type { RunActionRequest } from "./run-actions.ts";
 import type { QueuedFor } from "./run-transcript/model.ts";
@@ -103,6 +104,29 @@ export const durationLabel = (milliseconds: number): string => {
     ? `${Math.floor(minutes / 60)} h`
     : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 };
+
+/** Why an Attempt began, in a phrase: `From the Event`, `Retried by PhilDL`, `Retried after an infrastructure failure`. */
+export const attemptStartLabel = (start: AttemptStart): string =>
+  Match.valueTags(start, {
+    Event: () => "From the Event",
+    OperatorRetry: ({ operator }) =>
+      Option.match(operator, { onNone: () => "Retried", onSome: (login) => `Retried by ${login}` }),
+    EditAndRetry: ({ operator }) =>
+      Option.match(operator, {
+        onNone: () => "Edited and retried",
+        onSome: (login) => `Edited and retried by ${login}`,
+      }),
+    InfraRetry: () => "Retried after an infrastructure failure",
+    AfterRestart: () => "Started again after a restart",
+  });
+
+/** A token count in its largest useful unit: `950`, `27.3K`, `1.2M`. */
+export const tokensLabel = (tokens: number): string =>
+  new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 }).format(tokens);
+
+/** Dollars to the cent, such as `$1.25`, or `under $0.01` for less than a cent. */
+export const usdLabel = (usd: number): string =>
+  usd > 0 && usd < 0.005 ? "under $0.01" : `$${usd.toFixed(2)}`;
 
 /** How a Run stands, in one phrase: `Failed after 3 Attempts`, `Waiting for approval`, `Running Attempt 2`. */
 export const runStateLine = (run: Pick<RunView, "state" | "attempts">): string => {

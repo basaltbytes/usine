@@ -1,7 +1,8 @@
-import { Attempt, AttemptId, AttemptContext } from "@usine/core/attempt";
+import { Attempt, AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
+import { StartedByEditAndRetry, StartedByRetry } from "@usine/core/attempt/start";
 import { Event, EventId } from "@usine/core/event";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -37,6 +38,7 @@ import {
   type RunAgainResult,
   runAgainSubmission,
 } from "../engine/run-again.ts";
+import { plainRetry, type RetryRequest } from "../engine/retry.ts";
 import { StepExecution } from "../step-executor.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import { persistence, submissionFromRow } from "./codec.ts";
@@ -412,7 +414,8 @@ const makeRunStore = Effect.gen(function* () {
           message: "The orchestrator stopped during the attempt",
           cause: new Error("attempt interrupted by orchestrator restart"),
         });
-        const decision = decideBeginAttempt(current, interruption, live);
+        const requested = yield* tx.nextStart(runId);
+        const decision = decideBeginAttempt(current, interruption, live, requested);
         if (decision._tag === "RunClosed") {
           yield* Effect.logInfo("Attempt start skipped", { runId, state: decision.state._tag });
           return new RunClosed();
@@ -422,7 +425,12 @@ const makeRunStore = Effect.gen(function* () {
           return new AttemptRecoveryFailed();
         }
         if (decision._tag === "ReattachAttempt") {
-          const attempt = decision.attempt;
+          const reattachedAt = yield* DateTime.now;
+          const attempt = new Attempt({
+            ...decision.attempt,
+            reattachedAt: Option.some(reattachedAt),
+          });
+          yield* tx.recordReattach(attempt.id, reattachedAt);
           yield* Effect.annotateCurrentSpan({ attemptId: attempt.id });
           yield* Effect.logInfo("Attempt reattached after an orchestrator restart", {
             runId,
@@ -474,13 +482,17 @@ const makeRunStore = Effect.gen(function* () {
           outcome: Option.none(),
           endedAt: Option.none(),
           salvage: Option.none(),
+          start: Option.some(decision.start),
+          reattachedAt: Option.none(),
         });
         yield* tx.addAttempt(attempt);
+        if (Option.isSome(requested)) yield* tx.setNextStart(runId, Option.none());
         yield* Effect.logInfo("Attempt started", {
           runId,
           attemptId,
           number: decision.number,
           worker,
+          start: decision.start._tag,
           resumesFrom: Option.map(decision.resume, ({ ref }) => ref),
         });
         return new AttemptStarted({
@@ -603,8 +615,9 @@ const makeRunStore = Effect.gen(function* () {
 
   const retry = Effect.fn("RunStore.retry")(function* (
     runId: RunId,
-    amendment: Option.Option<AttemptContext> = Option.none(),
+    request: RetryRequest = plainRetry,
   ) {
+    const { amendment, requestedBy } = request;
     yield* Effect.annotateCurrentSpan({ runId });
     return yield* database.transaction((transaction) =>
       Effect.gen(function* () {
@@ -644,6 +657,14 @@ const makeRunStore = Effect.gen(function* () {
           if (yield* tx.loopItems.releaseRun(runId)) {
             yield* Effect.logInfo("Operator retry ends the hold on the Item", { runId });
           }
+          yield* tx.setNextStart(
+            runId,
+            Option.some(
+              Option.isSome(amendment)
+                ? new StartedByEditAndRetry({ operator: requestedBy })
+                : new StartedByRetry({ operator: requestedBy }),
+            ),
+          );
           yield* tx.updateState(runId, decision.state);
           return true;
         }
@@ -989,14 +1010,12 @@ export class RunStore extends Context.Service<
       attemptId: AttemptId,
     ) => Effect.Effect<boolean, RunStoreError>;
     /**
-     * Reopens a failed Run for its next Attempt. True when this call reopened it;
-     * a request while the Run runs between Attempts changes nothing. Fails with
-     * `RunRetryBlockedError` while another Run of the same Loop and Item is open.
+     * Reopens a failed Run for its next Attempt, which records the request as
+     * why it began. True when this call reopened it; a request while the Run
+     * runs between Attempts changes nothing. Fails with `RunRetryBlockedError`
+     * while another Run of the same Loop and Item is open.
      */
-    readonly retry: (
-      runId: RunId,
-      amendment?: Option.Option<AttemptContext>,
-    ) => Effect.Effect<boolean, RunStoreError>;
+    readonly retry: (runId: RunId, request?: RetryRequest) => Effect.Effect<boolean, RunStoreError>;
     /**
      * Opens a new Run for the Item state of a succeeded or canceled Run (#152),
      * as an operator-originated Event that continues the trigger Event's

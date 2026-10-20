@@ -51,6 +51,10 @@
       "types": "./dist/attempt/salvage.d.ts",
       "default": "./dist/attempt/salvage.js"
     },
+    "./attempt/start": {
+      "types": "./dist/attempt/start.d.ts",
+      "default": "./dist/attempt/start.js"
+    },
     "./event": {
       "types": "./dist/event.d.ts",
       "default": "./dist/event.js"

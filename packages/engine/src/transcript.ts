@@ -73,6 +73,15 @@ export class TranscriptSessionsQuery extends Schema.TaggedClass<TranscriptSessio
   "@usine/engine/TranscriptSessionsQuery",
 )("TranscriptSessionsQuery", { attemptId: AttemptId }) {}
 
+/**
+ * Each session's highest `SessionTokensUpdated` report, the one with the most
+ * tokens, whatever page the reader shows. Reports are cumulative, so this
+ * row holds the session's whole usage so far.
+ */
+export class TranscriptUsageQuery extends Schema.TaggedClass<TranscriptUsageQuery>(
+  "@usine/engine/TranscriptUsageQuery",
+)("TranscriptUsageQuery", { attemptId: AttemptId }) {}
+
 /** The next bounded set of rows after a cursor, in append order, for following an Attempt's activity. */
 export class TranscriptTailQuery extends Schema.TaggedClass<TranscriptTailQuery>(
   "@usine/engine/TranscriptTailQuery",
@@ -95,10 +104,11 @@ export class TranscriptPageQuery extends Schema.TaggedClass<TranscriptPageQuery>
   limit: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
 }) {}
 
-/** Selects a complete Attempt transcript, newer activity, or an earlier page. */
+/** Selects a complete Attempt transcript, its sessions or usage, newer activity, or an earlier page. */
 export const TranscriptQuery = Schema.Union([
   TranscriptAllQuery,
   TranscriptSessionsQuery,
+  TranscriptUsageQuery,
   TranscriptTailQuery,
   TranscriptPageQuery,
 ]);

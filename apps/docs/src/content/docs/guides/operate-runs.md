@@ -49,14 +49,33 @@ Like the Board, the page covers the Project's 500 newest Items.
 
 Choosing **Open Run** in a card's menu, or selecting a Run in **Needs you**, opens the Run drawer. The URL gets `?run=<run id>`, so you can share or reload it. The drawer has:
 
-- a header with the Loop, the Run's state, a **Loop paused** badge when that applies, the repository, and links to the Item and to the pull request the Run produced;
-- a row of the actions the Run's state allows;
-- **Conversation**: the parent's messages and one collapsible section per child, with **Everything**, **Messages**, and **Tools** filters, **Load earlier** for older activity, and a message box while the Attempt runs;
-- **Task**: the task the Run currently uses;
-- **Event**: the Event's identity and the Item payload it was recorded with;
-- **Attempts**: the Run id, the rate windows the providers reported for each billing pool, and for each Attempt its Agent, Worker, harness, model, effort, the task it actually ran, its failure, and where its unfinished work was saved.
+- a header with the Item and its title, the Run's state, its pull request or **No pull request**, its Loop and Agent, and a **Loop paused** note when that applies;
+- once an Attempt has started, a line with the Worker the newest Attempt runs or ran on and the **Duration** of all the Run's Attempts, which counts on while one runs;
+- the actions the Run's state allows;
+- one summary: what an open Run waits for, what a running Attempt is doing and its latest message, or how the Run ended;
+- **Open Run page**, which opens the whole Run.
 
 The drawer refreshes every second while the Run can be canceled, and the rest of the UI every 2 seconds while some Run can be canceled, or every 15 seconds otherwise.
+
+### Read the Run page
+
+The Run page has the same header as the drawer, and its second line adds **Tokens**: what the Run's sessions used so far, output plus uncached input, as each harness reports it. Select the number to see it per billing pool and per session under each Attempt. A pool with a dollar rate also shows the price its harness put on that usage: API keys at Pi's catalog price, and the Claude plan at the Agent SDK's price, marked **estimate** because the plan bills no dollars per token. The ChatGPT plan has no dollar rate, so it shows **No dollar rate** and never a price. A pool shows no price when one of its sessions was recorded before usine kept prices.
+
+Beside the outline of the Task, the Event, and the Attempts sits the conversation. Each Attempt in the outline shows why it began, its start time, and how long it took:
+
+| Line                                         | The Attempt began because                                                      |
+| -------------------------------------------- | ------------------------------------------------------------------------------ |
+| **From the Event**                           | the Run's Event opened it; every Run's first Attempt starts this way.          |
+| **Retried by \<login\>**                     | you selected **Retry**; the login is the `operator` in `usine.yaml`.           |
+| **Edited and retried by \<login\>**          | you used **Edit and retry**.                                                   |
+| **Retried after an infrastructure failure**  | the engine retried on its own after the previous Attempt's `InfraFailure`.     |
+| **Started again after a restart**            | a restart interrupted the previous Attempt and its parent task did not survive. |
+
+An Attempt that a restart reattached also says **Reattached after a restart**. Attempts begun before usine recorded the reason, other than a Run's first, show no line.
+
+The Attempt being read opens to its sessions, then its checkpoints in order. Consecutive messages of one session fold into one entry, such as **developer, 14 messages**; select it to list each message by its first sentence. Blockers, questions, your messages, Worker and provider warnings, and the Attempt's outcome stay entries of their own, so they are never hidden in a fold.
+
+Under the outline, a red count such as **2 errors** steps through what the Run ended with or what you must read: each failed Attempt's outcome, the last of which is the Run's failure, every blocker and question, a message a session refused, and a connectivity warning that is still open. Tool calls that failed while the Agent went on are counted apart in grey, such as **12 recovered**, and step through the same way. A count with **loaded** or **+** covers only the history loaded so far.
 
 ## Run states
 
@@ -217,7 +236,7 @@ settings:
   max_attempt_tokens: 5000000
 ```
 
-At 80% of a ceiling the parent gets one warning. At 100% the Attempt stops with `RunawayFailure`, which the engine never retries automatically. The minutes clock stops while a child is held, and the token count includes the parent and every child.
+At 80% of a ceiling the parent gets one warning. At 100% the Attempt stops with `RunawayFailure`, which the engine never retries automatically. The minutes clock stops while a child is held, and the token count includes the parent and every child. The **Tokens** figure on the Run page counts the same way, added up over all the Run's Attempts.
 
 ## Connectivity warnings
 

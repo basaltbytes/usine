@@ -72,6 +72,31 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
               sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') = 'SessionStarted'`,
             ),
         ),
+      TranscriptUsageQuery: ({ attemptId }) => {
+        // SQLite takes a bare column from the row that holds the group's max().
+        const highest = database
+          .select({
+            sequence: attemptTranscripts.sequence,
+            tokens:
+              sql<number>`max(json_extract(${attemptTranscripts.envelope}, '$.payload.event.totalTokens'))`.as(
+                "tokens",
+              ),
+          })
+          .from(attemptTranscripts)
+          .where(
+            and(
+              eq(attemptTranscripts.attemptId, attemptId),
+              sql`json_extract(${attemptTranscripts.envelope}, '$.payload._tag') = 'SessionEvent'`,
+              sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event._tag') = 'SessionTokensUpdated'`,
+            ),
+          )
+          .groupBy(sql`json_extract(${attemptTranscripts.envelope}, '$.payload.event.session.id')`)
+          .as("highest");
+        return inArray(
+          attemptTranscripts.sequence,
+          database.select({ sequence: highest.sequence }).from(highest),
+        );
+      },
       TranscriptAllQuery: ({ attemptId }) => eq(attemptTranscripts.attemptId, attemptId),
       TranscriptTailQuery: ({ attemptId, after }) =>
         and(eq(attemptTranscripts.attemptId, attemptId), gt(attemptTranscripts.sequence, after)),
@@ -99,6 +124,7 @@ export const transcriptQueries = (database: RunDatabaseClient) => {
     // re-sorts ascending, so callers always receive append order.
     const rows = yield* Match.valueTags(query, {
       TranscriptSessionsQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
+      TranscriptUsageQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
       TranscriptAllQuery: () => selection.orderBy(asc(attemptTranscripts.sequence)).execute(),
       TranscriptTailQuery: ({ limit }) =>
         selection.orderBy(asc(attemptTranscripts.sequence)).limit(limit).execute(),

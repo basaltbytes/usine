@@ -2,7 +2,15 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 
 import { ModelId } from "@usine/core/agent/brain";
-import { AgentSessionId, ParentSession, TextOutput } from "@usine/core/agent/session";
+import {
+  AgentSessionId,
+  ChildSession,
+  ParentSession,
+  SessionTokensUpdated,
+  TextOutput,
+  TokenCount,
+  UsdAmount,
+} from "@usine/core/agent/session";
 import { AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 
@@ -27,12 +35,13 @@ import {
   TranscriptPageQuery,
   TranscriptSequence,
   TranscriptTailQuery,
+  TranscriptUsageQuery,
 } from "../../src/transcript.ts";
 import { InstanceDirectory } from "@usine/core/instance";
 
 import { RunStore } from "../../src/store/store.ts";
 
-import { testAgent } from "./support.ts";
+import { lifecycleSubmission, testAgent } from "./support.ts";
 describe("Attempt transcripts", () => {
   it.live("writes the effective parent model back onto the Attempt", () =>
     Effect.gen(function* () {
@@ -146,6 +155,80 @@ describe("Attempt transcripts", () => {
             }),
           )).map(({ sequence }) => sequence),
           [1, 2],
+        );
+      }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("reads each session's highest token report, wherever it sits in the transcript", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-store-usage-" }),
+      );
+      const runId = RunId.make("usage-run");
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore;
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        const attemptId = started.execution.attempt.id;
+        const parent = new ParentSession({
+          id: AgentSessionId.make("usage-parent"),
+          agent: testAgent.name,
+          brain: testAgent.brain,
+        });
+        const child = new ChildSession({
+          id: AgentSessionId.make("usage-child"),
+          parentId: parent.id,
+          agent: testAgent.name,
+          brain: testAgent.brain,
+        });
+        const events = [
+          new SessionTokensUpdated({ session: parent, totalTokens: TokenCount.make(100) }),
+          new SessionTokensUpdated({
+            session: child,
+            totalTokens: TokenCount.make(40),
+            costUsd: Option.some(UsdAmount.make(0.4)),
+          }),
+          new TextOutput({ session: parent, text: "Delegated the fix." }),
+          new SessionTokensUpdated({ session: parent, totalTokens: TokenCount.make(250) }),
+          new SessionTokensUpdated({
+            session: child,
+            totalTokens: TokenCount.make(90),
+            costUsd: Option.some(UsdAmount.make(1.25)),
+          }),
+          // A lower report after a higher one never lowers the session's usage.
+          new SessionTokensUpdated({ session: parent, totalTokens: TokenCount.make(200) }),
+        ];
+        for (const [index, event] of events.entries()) {
+          yield* store.appendTranscript(
+            "outbound",
+            new AttemptChannel.OutboundEnvelope({
+              version: AttemptChannel.PROTOCOL_VERSION,
+              attemptId,
+              sequence: AttemptChannel.Sequence.make(index + 1),
+              sentAt: DateTime.makeUnsafe("2026-10-20T00:00:00Z"),
+              payload: new AttemptChannel.SessionEvent({ event }),
+            }),
+          );
+        }
+        const usage = yield* store.transcript(new TranscriptUsageQuery({ attemptId }));
+        assert.deepStrictEqual(
+          usage.map(({ envelope }): readonly [string, number, number | null] | null =>
+            envelope.payload._tag === "SessionEvent" &&
+            envelope.payload.event._tag === "SessionTokensUpdated"
+              ? [
+                  envelope.payload.event.session.id,
+                  envelope.payload.event.totalTokens,
+                  Option.getOrNull(envelope.payload.event.costUsd),
+                ]
+              : null,
+          ),
+          [
+            ["usage-parent", 250, null],
+            ["usage-child", 90, 1.25],
+          ],
         );
       }).pipe(Effect.provide(RunStore.layer), Effect.provide(localSqliteLayer(directory)));
     }).pipe(Effect.provide(NodeServices.layer)),

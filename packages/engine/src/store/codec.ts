@@ -5,6 +5,7 @@ import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/atte
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { AttemptSalvage } from "@usine/core/attempt/salvage";
+import { AttemptStart, OperatorRetryStart } from "@usine/core/attempt/start";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { ApprovalRequirement, LoopName, LoopPermissions } from "@usine/core/loop";
 import { ItemKey } from "@usine/core/item";
@@ -81,6 +82,8 @@ export const AttemptRow = Schema.Struct({
   outcome: Schema.NullOr(AttemptOutcome),
   endedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   salvage: Schema.NullOr(AttemptSalvage),
+  start: Schema.NullOr(AttemptStart),
+  reattachedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
 });
 export type AttemptRow = typeof AttemptRow.Type;
 
@@ -118,6 +121,10 @@ export const encodeDateTime = Schema.encodeSync(Schema.DateTimeUtcFromString);
 export const encodeRunState = Schema.encodeSync(RunState.RunState);
 export const encodeOutcome = Schema.encodeSync(AttemptOutcome);
 export const encodeSalvage = Schema.encodeSync(AttemptSalvage);
+export const encodeAttemptStart = Schema.encodeSync(AttemptStart);
+export const decodeNextStarts = Schema.decodeUnknownEffect(
+  Schema.Array(Schema.Struct({ nextStart: Schema.NullOr(OperatorRetryStart) })),
+);
 export const encodeStepResult = Schema.encodeSync(StepResult);
 export const encodeEnvelope = Schema.encodeSync(AttemptChannel.Envelope);
 export const encodeAgent = Schema.encodeSync(Agent);
@@ -209,6 +216,8 @@ export const attemptFromRow = (row: AttemptRow): Attempt =>
     outcome: Option.fromNullishOr(row.outcome),
     endedAt: Option.fromNullishOr(row.endedAt),
     salvage: Option.fromNullishOr(row.salvage),
+    start: Option.fromNullishOr(row.start),
+    reattachedAt: Option.fromNullishOr(row.reattachedAt),
   });
 
 export const runSummaryFromRow = (

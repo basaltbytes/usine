@@ -14,6 +14,7 @@ Import each domain concept from its owning subpath. Identities, records, and ope
 | `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptOutcome` |
 | `@usine/core/attempt/failure` | `InfraFailure`, `DefectFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |
 | `@usine/core/attempt/salvage` | `SalvageRef`, `salvageRefFor`, `SalvagePushed`, `SalvageRetained`, `AttemptSalvage`, `AttemptRecovery` |
+| `@usine/core/attempt/start` | Why an Attempt began: `StartedByEvent`, `StartedByRetry`, `StartedByEditAndRetry` (with the operator login), `StartedByInfraRetry`, `StartedAfterRestart`, `AttemptStart`, and `OperatorRetryStart` |
 | `@usine/core/attempt/channel` | The attempt channel: `RunSpec`, the versioned envelopes, the `Sink` that stores them, and the `admit` reducer. Import it as a namespace (`AttemptChannel.Started`) |
 | `@usine/core/agent`, `@usine/core/agent/brain`, `@usine/core/agent/session` | `Agent`, `AgentName`, `AgentPersona`, parent-model resolution; `BrainSpec`, `ModelId`, `Harness`, `Effort`; `AgentSessionId`, session descriptors, `AgentSessionEvent`, `ChildSessionBudget`, `ChildSessionCount` |
 | `@usine/core/agent/capability` | `HarnessCapability`, `HarnessReady`, `HarnessUnavailableError`, and the credential-free `HarnessReadiness` preflight response |
@@ -35,6 +36,10 @@ Everything is 0.x: APIs change without notice while the engine grows. `effect` i
 Import `CycleLimit`, `CycleGeneration`, `CycleCount`, `LoopCycleCount`, and `CycleBudgetAsk` from `@usine/core/cycle-budget`. An Item-level Ask records the exhausted Loop, its limit, and participating Loops’ admitted and completed Runs; it can exist before another Run is opened.
 
 `DefectFailure` records a programmer defect captured at a boundary that needs a serializable Attempt outcome. It retains the original cause and never qualifies for automatic retry.
+
+An `Attempt` records why it began (`start`, none for a later Attempt begun before usine recorded it) and when a restart last reattached it (`reattachedAt`).
+
+`SessionTokensUpdated` carries a session's cumulative `TokenCount` and, as `costUsd`, the `UsdAmount` its harness priced that usage at: Pi from its model catalog, Claude Code from the Agent SDK's prices. Codex prices nothing, and transcripts recorded before prices were decode to `Option.none()`. `brainPool(brain)` names the billing pool a started session draws from (ADR 0021).
 
 `SessionStarted.harnessSession` optionally records a `HarnessSession`: the harness-native `HarnessSessionId` and worker working directory (`cwd`). Missing metadata in older transcripts decodes to `Option.none()`; usine's session identity remains separate.
 

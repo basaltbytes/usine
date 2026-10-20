@@ -2,8 +2,9 @@ import { ArrowDownIcon, ArrowUpIcon } from "@phosphor-icons/react";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { useMessageScroller } from "@/components/ui/message-scroller";
+import { cn } from "@/lib/utils";
 import { useTranscriptDisclosure } from "../grouping/disclosure.tsx";
-import type { TranscriptUpdate } from "./model.ts";
+import type { NavigableRow } from "./model.ts";
 
 /** A place in the reader to show: a row, an Attempt heading, or a tool call inside its folded burst. */
 export interface ReaderTarget {
@@ -14,40 +15,71 @@ export interface ReaderTarget {
 }
 
 /** The reader target of an indexed row; a tool error opens its call. */
-export const updateTarget = (update: TranscriptUpdate): ReaderTarget => ({
+export const updateTarget = (update: NavigableRow): ReaderTarget => ({
   messageId: update.key,
   tool: update.isTool ? update.key : null,
 });
 
-/** Cycles loaded errors in conversation order while selection follows the original row identity. */
+const wording = {
+  errors: {
+    count: (total: number, earlier: boolean) =>
+      `${total} ${earlier ? "loaded " : ""}${total === 1 ? "error" : "errors"}`,
+    name: "error",
+    group: "Conversation errors",
+    title: undefined,
+  },
+  recovered: {
+    count: (total: number, earlier: boolean) => `${total}${earlier ? "+" : ""} recovered`,
+    name: "recovered tool failure",
+    group: "Recovered tool failures",
+    title: "Tool calls that failed while the Agent went on",
+  },
+} as const;
+
+/**
+ * Cycles loaded rows of one kind in conversation order while selection follows the
+ * original row identity: the errors in red, or the tool failures the Agent recovered
+ * from, quieter, under them (see `errorTally` for which is which).
+ */
 export const ErrorControls = ({
   errors,
+  kind = "errors",
   selectedKey,
   earlier,
   onSelect,
 }: {
-  readonly errors: ReadonlyArray<TranscriptUpdate>;
+  readonly errors: ReadonlyArray<NavigableRow>;
+  readonly kind?: keyof typeof wording;
   readonly selectedKey: string | null;
   readonly earlier: boolean;
-  readonly onSelect: (target: TranscriptUpdate) => void;
+  readonly onSelect: (target: NavigableRow) => void;
 }) => {
   const first = errors[0];
   const last = errors.at(-1);
   if (first === undefined || last === undefined) return null;
+  const words = wording[kind];
   const index = errors.findIndex((error) => error.key === selectedKey);
   const previous = errors[index - 1] ?? last;
   const next = errors[index + 1] ?? first;
-  const count = `${errors.length} ${earlier ? "loaded " : ""}${errors.length === 1 ? "error" : "errors"}`;
+  const count = words.count(errors.length, earlier);
   return (
-    <div role="group" aria-label="Conversation errors" className="flex items-center gap-1">
-      <span role="status" className="mr-auto text-xs tabular-nums text-destructive">
+    <div role="group" aria-label={words.group} className="flex items-center gap-1">
+      <span
+        role="status"
+        title={words.title}
+        className={cn(
+          "mr-auto text-xs tabular-nums",
+          kind === "errors" ? "text-destructive" : "text-muted-foreground",
+        )}
+      >
         {index < 0 ? count : `${index + 1} of ${count}`}
       </span>
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label="Previous error"
-        title="Previous error"
+        aria-label={`Previous ${words.name}`}
+        title={`Previous ${words.name}`}
+        className={kind === "recovered" ? "text-muted-foreground" : undefined}
         onClick={() => onSelect(previous)}
       >
         <ArrowUpIcon aria-hidden="true" />
@@ -55,8 +87,9 @@ export const ErrorControls = ({
       <Button
         variant="ghost"
         size="icon-sm"
-        aria-label="Next error"
-        title="Next error"
+        aria-label={`Next ${words.name}`}
+        title={`Next ${words.name}`}
+        className={kind === "recovered" ? "text-muted-foreground" : undefined}
         onClick={() => onSelect(next)}
       >
         <ArrowDownIcon aria-hidden="true" />

@@ -1,5 +1,5 @@
 import { Event } from "@usine/core/event";
-import { AttemptContext, AttemptId } from "@usine/core/attempt";
+import { AttemptId } from "@usine/core/attempt";
 import { Intervention } from "@usine/core/attempt/channel";
 import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
@@ -16,6 +16,7 @@ import {
 import type { RunSnapshot } from "../run-reader/model.ts";
 import { runIdFor, type Submission, type SubmissionResult } from "./submission.ts";
 import type { RunAgainRequest, RunAgainResult } from "./run-again.ts";
+import { plainRetry, type RetryRequest } from "./retry.ts";
 import type { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import { RunStore } from "../store/store.ts";
 import { RunReader } from "../run-reader/run-reader.ts";
@@ -92,9 +93,9 @@ const makeRunEngine = Effect.gen(function* () {
 
   const retry = Effect.fn("RunEngine.retry")(function* (
     runId: RunId,
-    amendment: Option.Option<AttemptContext> = Option.none(),
+    request: RetryRequest = plainRetry,
   ) {
-    if (yield* store.retry(runId, amendment)) {
+    if (yield* store.retry(runId, request)) {
       yield* driver.resume(runId);
       return;
     }
@@ -354,11 +355,12 @@ export class RunEngine extends Context.Service<
       runId: RunId,
       attemptId: AttemptId,
     ) => Effect.Effect<void, RunEngineError>;
-    /** Requests another Attempt for a failed Run using its existing Event and effective task and Agent. */
-    readonly retry: (
-      runId: RunId,
-      amendment?: Option.Option<AttemptContext>,
-    ) => Effect.Effect<void, RunEngineError>;
+    /**
+     * Requests another Attempt for a failed Run using its existing Event, with
+     * the effective task and Agent the request amends, if it does. The Attempt
+     * records the request, and who made it, as why it began.
+     */
+    readonly retry: (runId: RunId, request?: RetryRequest) => Effect.Effect<void, RunEngineError>;
     /**
      * Opens a new Run for the Item state of a succeeded or canceled Run, with
      * the request's task and Agent, as an Event of the operator's that a later
@@ -442,6 +444,7 @@ export {
   SubmissionResult,
 } from "./submission.ts";
 export { RunAgainRequest, RunAgainResult } from "./run-again.ts";
+export { RetryRequest } from "./retry.ts";
 export { RunEngineShutdown } from "./shutdown.ts";
 export {
   RunNotFoundError,

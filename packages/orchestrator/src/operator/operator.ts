@@ -16,6 +16,7 @@ import type { WorkerName } from "@usine/core/worker";
 import type { ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
 import {
+  RetryRequest,
   RunAgainRequest,
   type RunAgainResult,
   RunEngine,
@@ -84,7 +85,8 @@ import {
   SessionIntervention,
   RosterAgentNotFoundError,
 } from "./run.ts";
-import { readTranscript, runView } from "./projection.ts";
+import { readTranscript, readUnrecordedEnds, runDuration, runView } from "./projection.ts";
+import { readRunUsage } from "./usage.ts";
 import {
   RunGitHubChanges,
   type RunGitHubChangesError,
@@ -413,7 +415,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const [transcript, sessionState] = yield* Effect.all(
+    const [transcript, sessionState, usage, unrecordedEnds] = yield* Effect.all(
       [
         readTranscript(reader, snapshot, request),
         Effect.forEach(
@@ -421,6 +423,8 @@ const makeOperatorObservation = Effect.gen(function* () {
           (attempt) => reader.transcript(new TranscriptSessionsQuery({ attemptId: attempt.id })),
           { concurrency: "unbounded" },
         ),
+        readRunUsage(reader, snapshot),
+        readUnrecordedEnds(reader, snapshot),
       ],
       { concurrency: "unbounded" },
     );
@@ -431,6 +435,9 @@ const makeOperatorObservation = Effect.gen(function* () {
       transcript: transcript.events,
       sessionState: sessionState.flat().map(transcriptEvent),
       earlierTranscript: transcript.earlier,
+      worker: snapshot.attempts.at(-1)?.worker ?? null,
+      duration: runDuration(snapshot.attempts, unrecordedEnds),
+      usage,
     });
   });
 
@@ -521,9 +528,12 @@ const makeOperator = Effect.gen(function* () {
     yield* Effect.logInfo("Operator approved Run", { runId });
   });
 
-  const retry = Effect.fn("Operator.retry")(function* (runId: RunId) {
+  const retry = Effect.fn("Operator.retry")(function* (instance: LoadedInstance, runId: RunId) {
     yield* Effect.annotateCurrentSpan({ runId });
-    yield* runs.retry(runId);
+    yield* runs.retry(
+      runId,
+      new RetryRequest({ requestedBy: instance.config.operator, amendment: Option.none() }),
+    );
     yield* Effect.logInfo("Operator retried Run", { runId });
   });
 
@@ -542,13 +552,16 @@ const makeOperator = Effect.gen(function* () {
     const agent = file.agent;
     yield* runs.retry(
       runId,
-      Option.some(
-        new AttemptContext({
-          task: edit.task,
-          agent,
-          parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
-        }),
-      ),
+      new RetryRequest({
+        requestedBy: instance.config.operator,
+        amendment: Option.some(
+          new AttemptContext({
+            task: edit.task,
+            agent,
+            parentModel: resolveParentModel(agent, instance.config.settings.parentModel),
+          }),
+        ),
+      }),
     );
     yield* Effect.logInfo("Operator amended and retried Run", { runId, agent: agent.name });
   });
@@ -787,8 +800,8 @@ export class Operator extends Context.Service<
       runId: RunId,
       attemptId: AttemptId,
     ) => Effect.Effect<void, OperatorError>;
-    /** Requests a new Attempt for a failed Run using its effective task and Agent. */
-    readonly retry: (runId: RunId) => Effect.Effect<void, OperatorError>;
+    /** Requests a new Attempt for a failed Run using its effective task and Agent, as the instance's operator. */
+    readonly retry: (instance: LoadedInstance, runId: RunId) => Effect.Effect<void, OperatorError>;
     /** Atomically amends a failed Run before requesting its next Attempt. */
     readonly editAndRetry: (
       instance: LoadedInstance,
@@ -870,12 +883,14 @@ export {
   ApprovalView,
   RunStateTag,
   RunView,
+  RunDurationView,
   RunDetailView,
   EditAndRetry,
   LoopNotFoundError,
   SessionIntervention,
   RosterAgentNotFoundError,
 } from "./run.ts";
+export { UsageCostView, SessionUsageView, PoolUsageView, RunUsageView } from "./usage.ts";
 export {
   InfraFailureView,
   DefectFailureView,
