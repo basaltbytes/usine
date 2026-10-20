@@ -1,11 +1,21 @@
 import type { RunId } from "@usine/core/run";
 import type { TranscriptSequence } from "@usine/engine/transcript";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   MessageScroller,
   MessageScrollerContent,
   MessageScrollerProvider,
   MessageScrollerViewport,
+  useMessageScroller,
   useMessageScrollerVisibility,
 } from "@/components/ui/message-scroller";
 import {
@@ -64,6 +74,84 @@ const TrackReading = ({
     if (active && attemptId !== undefined) onReading({ attemptId, checkpointKey });
   }, [active, attemptId, checkpointKey, onReading]);
   return null;
+};
+
+const SCROLL_KEYS = ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "];
+const KEYS_TOWARD_START = ["ArrowUp", "Home", "PageUp"];
+
+/**
+ * The scrolling conversation. The scroller stops following on every wheel turn, swipe, and scroll
+ * key before these handlers run, and follows again only after a scroll that ends at the latest row.
+ * One toward the end that finds the reader already there scrolls nothing, so the viewport resumes
+ * following itself.
+ */
+const ConversationViewport = ({
+  viewportRef,
+  following,
+  onNavigate,
+  onInteract,
+  children,
+}: {
+  readonly viewportRef: RefObject<HTMLDivElement | null>;
+  /** The reader follows incoming activity whenever it is at the latest row. */
+  readonly following: boolean;
+  /** The operator scrolls the conversation itself. */
+  readonly onNavigate: () => void;
+  /** The operator presses or activates something inside the conversation. */
+  readonly onInteract: () => void;
+  readonly children: ReactNode;
+}) => {
+  const { scrollToEnd } = useMessageScroller();
+  const touchY = useRef(0);
+  const navigate = (viewport: HTMLDivElement, toward: "start" | "end") => {
+    onNavigate();
+    if (
+      following &&
+      toward === "end" &&
+      viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 8
+    )
+      scrollToEnd({ behavior: "instant" });
+  };
+  return (
+    <MessageScrollerViewport
+      ref={viewportRef}
+      aria-label="Run conversation"
+      preserveScrollOnPrepend={false}
+      onWheel={(event) => navigate(event.currentTarget, event.deltaY < 0 ? "start" : "end")}
+      onTouchStart={(event) => {
+        touchY.current = event.touches[0]?.clientY ?? touchY.current;
+      }}
+      onTouchMove={(event) => {
+        const y = event.touches[0]?.clientY ?? touchY.current;
+        navigate(event.currentTarget, y > touchY.current ? "start" : "end");
+        touchY.current = y;
+      }}
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget) onNavigate();
+        else onInteract();
+      }}
+      onKeyDown={(event) => {
+        // Let focused buttons activate on Space without changing the reader's follow intention.
+        const activatesButton =
+          event.key === " " &&
+          event.target instanceof Element &&
+          event.target.closest('button, [role="button"]') !== null;
+        if (event.key === "Enter" || activatesButton) {
+          onInteract();
+          return;
+        }
+        if (!event.defaultPrevented && SCROLL_KEYS.includes(event.key))
+          navigate(
+            event.currentTarget,
+            KEYS_TOWARD_START.includes(event.key) || (event.key === " " && event.shiftKey)
+              ? "start"
+              : "end",
+          );
+      }}
+    >
+      {children}
+    </MessageScrollerViewport>
+  );
 };
 
 const Reader = ({
@@ -140,13 +228,14 @@ const Reader = ({
   const reachedLatest = useCallback(() => setPendingLatest(false), []);
   const revealed = useCallback(() => setPendingTarget(null), []);
   const latest = history.cursors.at(-1);
+  const following = active && pendingRestore === null && allowLatest;
   return (
     <TranscriptDisclosureProvider
       initialState={new Map(saved?.disclosures.map(({ key, ...choice }) => [key, choice]))}
       onInspect={inspect}
     >
       <MessageScrollerProvider
-        autoScroll={active && pendingRestore === null && allowLatest}
+        autoScroll={following}
         defaultScrollPosition={defaultPosition}
         scrollEdgeThreshold={8}
       >
@@ -156,39 +245,16 @@ const Reader = ({
             viewportRef={viewportRef}
             revision={revision}
           >
-            <MessageScrollerViewport
-              ref={viewportRef}
-              aria-label="Run conversation"
-              preserveScrollOnPrepend={false}
-              onWheel={navigate}
-              onTouchMove={navigate}
-              onPointerDown={(event) => {
-                if (event.target === event.currentTarget) navigate();
-                else setPendingRestore(null);
-              }}
-              onKeyDown={(event) => {
-                // Let focused buttons activate on Space without changing the reader's follow intention.
-                const activatesButton =
-                  event.key === " " &&
-                  event.target instanceof Element &&
-                  event.target.closest('button, [role="button"]') !== null;
-                if (event.key === "Enter" || activatesButton) {
-                  setPendingRestore(null);
-                  return;
-                }
-                if (
-                  !event.defaultPrevented &&
-                  ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown", " "].includes(
-                    event.key,
-                  )
-                )
-                  navigate();
-              }}
+            <ConversationViewport
+              viewportRef={viewportRef}
+              following={following}
+              onNavigate={navigate}
+              onInteract={() => setPendingRestore(null)}
             >
               <MessageScrollerContent className="mx-auto w-full max-w-[38.5rem] gap-0 px-4 pt-5 pb-8 sm:px-2 [&>*]:-mx-2 [&>*]:px-2">
                 <Transcript document={document} runTask={runTask} history={history} />
               </MessageScrollerContent>
-            </MessageScrollerViewport>
+            </ConversationViewport>
           </PreserveReadingPosition>
           <RestoreReader
             target={pendingRestore}

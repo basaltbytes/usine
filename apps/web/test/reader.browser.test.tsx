@@ -169,8 +169,10 @@ const burst = (calls: number) =>
   page.getByRole("button", { name: new RegExp(`${calls} tool calls?$`, "u") });
 // The reader scrolls itself to the latest row after mounting, and an opened burst panel grows over
 // a CSS transition; positions read before either ends do not hold.
+const ownScrollEnded = () =>
+  expect.poll(() => viewport().hasAttribute("data-autoscrolling")).toBe(false);
 const openBurst = async (calls: number) => {
-  await expect.poll(() => viewport().hasAttribute("data-autoscrolling")).toBe(false);
+  await ownScrollEnded();
   await burst(calls).click();
   await expect
     .poll(() => {
@@ -682,6 +684,33 @@ it("lets Space on the viewport resume following a paused reader at latest", asyn
   close();
   expect(bookmark()?.position._tag).toBe("Latest");
 });
+
+const swipeUp = () => {
+  const element = viewport();
+  const touches = (clientY: number) => [
+    new Touch({ identifier: 1, target: element, clientX: 300, clientY }),
+  ];
+  element.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: touches(400) }));
+  element.dispatchEvent(new TouchEvent("touchmove", { bubbles: true, touches: touches(300) }));
+  element.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
+};
+
+it.each(["End", "Space", "ArrowDown", "PageDown", "wheel", "swipe"] as const)(
+  "keeps following when %s at the latest row scrolls nothing",
+  async (input) => {
+    mount();
+    await expect.poll(atLatest).toBeLessThan(9);
+    await ownScrollEnded();
+    if (input === "wheel") await userEvent.wheel(viewport(), { delta: { y: 100 } });
+    else if (input === "swipe") swipeUp();
+    else {
+      viewport().focus();
+      await userEvent.keyboard(input === "Space" ? " " : `{${input}}`);
+    }
+    mount([...events, message(46)]);
+    await expect.poll(atLatest).toBeLessThan(9);
+  },
+);
 
 it("scrolls the reader to a checkpoint chosen in the outline and stops following", async () => {
   mount(events, runId, undefined, [liveAttempt]);
