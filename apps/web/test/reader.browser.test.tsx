@@ -32,6 +32,7 @@ import {
   RunView,
   TranscriptEventView,
   TranscriptPageCursor,
+  LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
@@ -69,6 +70,7 @@ const liveAttempt = new AttemptView({
   id: attemptId,
   number: AttemptNumber.make(1),
   worker: WorkerName.make("local"),
+  workerAccess: new LocalWorkerAccess(),
   brain: parent.brain,
   task: AttemptTask.make("Read the conversation"),
   agent: parent.agent,

@@ -86,7 +86,13 @@ import {
   SessionIntervention,
   RosterAgentNotFoundError,
 } from "./run.ts";
-import { readTranscript, readUnrecordedEnds, runDuration, runView } from "./projection.ts";
+import {
+  readTranscript,
+  readUnrecordedEnds,
+  runDuration,
+  runView,
+  workerAccesses,
+} from "./projection.ts";
 import { RunUsageReader } from "./usage.ts";
 import {
   RunGitHubChanges,
@@ -153,7 +159,8 @@ const makeOperatorObservation = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
-    const views = snapshots.map((snapshot) => runView(snapshot, paused));
+    const access = workerAccesses(instance.config.workers);
+    const views = snapshots.map((snapshot) => runView(snapshot, paused, access));
     const runsByRepository = new Map<string, Array<(typeof views)[number]>>();
     for (const view of views) {
       const projectRuns = runsByRepository.get(view.repository) ?? [];
@@ -188,7 +195,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
           for (const saved of history) {
-            const view = runView(saved, paused);
+            const view = runView(saved, paused, access);
             merged.set(view.id, view);
           }
           const projectRuns = [...merged.values()].sort(
@@ -377,6 +384,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           JSON.stringify([
             value,
             instance.config.repos.map(({ name, tags, lanes }) => [name, tags, lanes]),
+            [...workerAccesses(instance.config.workers)],
             instance.loops.map(({ name, agent, trigger, selector }) => [
               name,
               agent,
@@ -425,6 +433,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   );
 
   const detail = Effect.fn("Operator.detail")(function* (
+    instance: LoadedInstance,
     runId: RunId,
     request: TranscriptRequest = new ColdTranscriptRequest(),
   ) {
@@ -448,7 +457,7 @@ const makeOperatorObservation = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     return new RunDetailView({
-      run: runView(snapshot, paused),
+      run: runView(snapshot, paused, workerAccesses(instance.config.workers)),
       eventDedupKey: snapshot.event.dedupKey,
       eventPayload: snapshot.event.payload,
       transcript: transcript.events,
@@ -475,8 +484,13 @@ export class OperatorObservation extends Context.Service<
     readonly overview: (
       instance: LoadedInstance,
     ) => Effect.Effect<ReadyOverview, OperatorObservationError>;
-    /** Reads one Run and a bounded transcript page; `request` selects the latest, newer, or earlier activity. */
+    /**
+     * Reads one Run and a bounded transcript page; `request` selects the latest,
+     * newer, or earlier activity. Each Attempt says how its Worker is reached
+     * as the supplied instance's `usine.yaml` declares it.
+     */
     readonly detail: (
+      instance: LoadedInstance,
       runId: RunId,
       request?: TranscriptRequest,
     ) => Effect.Effect<RunDetailView, OperatorObservationError>;
@@ -925,6 +939,9 @@ export {
   FailedAttemptView,
   CanceledAttemptView,
   AttemptOutcomeView,
+  LocalWorkerAccess,
+  SshWorkerAccess,
+  WorkerAccess,
   AttemptView,
 } from "./attempt.ts";
 export {

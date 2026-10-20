@@ -32,6 +32,7 @@ import {
   TaskLaneView,
   TaskView,
   WritableBoardLaneView,
+  LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Option, Schema } from "effect";
@@ -77,6 +78,7 @@ const attempt = (
     id: AttemptId.make(`${runId}/${number}`),
     number: AttemptNumber.make(number),
     worker: WorkerName.make("local"),
+    workerAccess: new LocalWorkerAccess(),
     brain,
     task: AttemptTask.make("Do the work."),
     agent: AgentName.make("developer"),

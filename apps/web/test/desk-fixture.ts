@@ -50,6 +50,7 @@ import {
   WorkerSilentView,
   WorkerSlotsView,
   WorkerView,
+  LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Schema } from "effect";
@@ -96,6 +97,7 @@ export const deskFixture = (now: number) => {
       id: AttemptId.make(`${id}-1`),
       number: AttemptNumber.make(1),
       worker: WorkerName.make(worker),
+      workerAccess: new LocalWorkerAccess(),
       brain,
       task: AttemptTask.make("Implement the issue."),
       agent: AgentName.make("developer"),

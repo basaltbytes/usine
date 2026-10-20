@@ -43,6 +43,7 @@ import {
   TailTranscriptRequest,
   TranscriptEventView,
   TranscriptPageCursor,
+  LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { QueryClient } from "@tanstack/react-query";
 import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
@@ -80,6 +81,7 @@ const liveAttempt = new AttemptView({
   id: attemptId,
   number: AttemptNumber.make(1),
   worker: WorkerName.make("local"),
+  workerAccess: new LocalWorkerAccess(),
   brain,
   startedAt: "2026-09-01T12:00:00.000Z",
   outcome: null,

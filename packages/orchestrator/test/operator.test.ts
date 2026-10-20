@@ -24,7 +24,7 @@ import { RepositoryName, RepositoryRevision } from "@usine/core/repository";
 import { RunId, Run } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName, Step } from "@usine/core/step";
-import { WorkerName } from "@usine/core/worker";
+import { SshDestination, WorkerName } from "@usine/core/worker";
 import { AgentFile, InvalidAgent } from "@usine/config/agent";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { GitHubLabelName } from "@usine/config/label";
@@ -32,7 +32,7 @@ import { IssueTrigger, PullRequestTrigger } from "@usine/config/trigger";
 import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate, QuarantinedLoop } from "@usine/config/loop";
 import { LoopName } from "@usine/core/loop";
-import { UsineConfig } from "@usine/config/factory";
+import { LocalWorker, UsineConfig } from "@usine/config/factory";
 import { OperatorLogin } from "@usine/core/operator";
 import {
   AgentSessionId,
@@ -83,7 +83,7 @@ import {
   EarlierTranscriptRequest,
   TailTranscriptRequest,
 } from "../src/operator/transcript.ts";
-import { FailureView } from "../src/operator/attempt.ts";
+import { FailureView, LocalWorkerAccess, SshWorkerAccess } from "../src/operator/attempt.ts";
 import { Operator } from "../src/operator/operator.ts";
 import { ReadyOverview } from "../src/operator/overview.ts";
 import { ApprovalView, EditAndRetry, SessionIntervention } from "../src/operator/run.ts";
@@ -596,7 +596,7 @@ describe("Operator", () => {
             .find((item) => item.itemKey === itemKey);
           assert.strictEqual(card?.needsYou, needsAttention);
           assert.strictEqual(overview.projects[0]?.status, "needs-you");
-          const detail = yield* operator.detail(runId);
+          const detail = yield* operator.detail(instance, runId);
           assert.strictEqual(detail.run.canResolveFailure, needsAttention);
           assert.strictEqual(detail.run.canRetry, true);
           assert.strictEqual(detail.run.state, "Failed");
@@ -682,7 +682,7 @@ describe("Operator", () => {
   });
 
   it.effect(
-    "details the Run's Worker, Attempt time, why each Attempt began, and its tokens per session and pool",
+    "details the Run's Worker, how each Attempt's Worker is reached, Attempt time, why each Attempt began, and its tokens per session and pool",
     () =>
       Effect.gen(function* () {
         const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
@@ -715,10 +715,37 @@ describe("Operator", () => {
           run: new Run({ ...snapshot.run, state: new RunState.Running() }),
           attempts: [failed, running],
         });
+        // `instance` declares only `local`; this one also declares `usine-worker-1` over SSH.
+        const declared = new LoadedInstance({
+          ...instance,
+          config: Schema.decodeUnknownSync(UsineConfig)({
+            version: 1,
+            repos: [{ name: repository }],
+            workers: [
+              { name: "local", kind: "local" },
+              {
+                name: "usine-worker-1",
+                kind: "ssh",
+                destination: "usine-worker-1",
+                root: "/home/usine/.usine",
+              },
+            ],
+          }),
+        });
         const usageQueries: Array<AttemptId> = [];
         yield* Effect.gen(function* () {
-          const detail = yield* (yield* Operator).detail(runId);
+          const detail = yield* (yield* Operator).detail(declared, runId);
           assert.strictEqual(detail.worker, "usine-worker-1");
+          assert.deepStrictEqual(
+            detail.run.attempts.map(({ workerAccess }) => workerAccess),
+            [
+              new LocalWorkerAccess(),
+              new SshWorkerAccess({
+                destination: SshDestination.make("usine-worker-1"),
+                port: null,
+              }),
+            ],
+          );
           assert.deepStrictEqual(
             { ...detail.duration },
             { endedMillis: 300_000, runningSince: "2026-08-31T12:06:00.000Z", unmeasured: 0 },
@@ -761,8 +788,12 @@ describe("Operator", () => {
           );
 
           // The ended Attempt's reports are read once; the running one's on every poll.
-          const again = yield* (yield* Operator).detail(runId);
+          const again = yield* (yield* Operator).detail(instance, runId);
           assert.strictEqual(again.usage.tokens, 27_300);
+          assert.deepStrictEqual(
+            again.run.attempts.map(({ workerAccess }) => workerAccess),
+            [new LocalWorkerAccess(), null],
+          );
           assert.deepStrictEqual(usageQueries, [attemptId, retryAttemptId, retryAttemptId]);
         }).pipe(
           Effect.provide(
@@ -1114,7 +1145,7 @@ describe("Operator", () => {
             source: askAnswer,
           });
           assert.deepStrictEqual(run.approval, shown);
-          assert.deepStrictEqual((yield* operator.detail(runId)).run.approval, shown);
+          assert.deepStrictEqual((yield* operator.detail(instance, runId)).run.approval, shown);
           // The fixture's malformed Item, poll failure, and preflight finding still need the
           // operator; the Run does not.
           assert.deepStrictEqual(
@@ -1180,7 +1211,7 @@ describe("Operator", () => {
           overview.projects[0]?.board.lanes[0]?.items[0]?.items[0],
         );
 
-        const detail = yield* operator.detail(runId, new ColdTranscriptRequest());
+        const detail = yield* operator.detail(instance, runId, new ColdTranscriptRequest());
         assert.strictEqual(detail.eventDedupKey, snapshot.event.dedupKey);
         assert.deepStrictEqual(detail.eventPayload, { number: 31 });
         assert.strictEqual(detail.run.attempts[0]?.number, 1);
@@ -1191,6 +1222,7 @@ describe("Operator", () => {
         assert.strictEqual(detail.earlierTranscript[0]?.before, 3);
 
         const tail = yield* operator.detail(
+          instance,
           runId,
           new TailTranscriptRequest({ after: TranscriptSequence.make(1) }),
         );
@@ -1199,6 +1231,7 @@ describe("Operator", () => {
         assert.strictEqual(tail.transcript.at(-1)?.sequence, 501);
         assert.deepStrictEqual(tail.earlierTranscript, []);
         const remainingTail = yield* operator.detail(
+          instance,
           runId,
           new TailTranscriptRequest({ after: TranscriptSequence.make(501) }),
         );
@@ -1208,6 +1241,7 @@ describe("Operator", () => {
         );
 
         const earlier = yield* operator.detail(
+          instance,
           runId,
           new EarlierTranscriptRequest({
             attemptId,
@@ -1225,6 +1259,7 @@ describe("Operator", () => {
         assert.deepStrictEqual(earlier.earlierTranscript, []);
         const wrongAttempt = yield* operator
           .detail(
+            instance,
             runId,
             new EarlierTranscriptRequest({
               attemptId: AttemptId.make("another-attempt"),
@@ -1411,32 +1446,39 @@ describe("Operator", () => {
       const moved = yield* Ref.make<ItemLabelMutation | null>(null);
       const reads = yield* Ref.make(0);
       const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
-      const unconfiguredNeeds = (current: LoadedInstance) =>
-        Effect.flatMap(Operator, (operator) => operator.overview(current)).pipe(
-          Effect.provide(testLayer(approved, moved, reads, revision)),
-          Effect.map(({ needsYou }) =>
+      yield* Effect.gen(function* () {
+        const operator = yield* Operator;
+        const unconfiguredNeeds = (current: LoadedInstance) =>
+          Effect.map(operator.overview(current), ({ needsYou }) =>
             needsYou.filter((need) => need._tag === "UnconfiguredWorkerNeed"),
-          ),
+          );
+        // The reader reports three Attempts on `local`, the Worker `instance` declares.
+        assert.deepStrictEqual(yield* unconfiguredNeeds(instance), []);
+        // A reload that changes only the Worker leaves the runtime store as it
+        // was; the overview must not answer from its cache.
+        const switched = new LoadedInstance({
+          ...instance,
+          config: new UsineConfig({
+            ...instance.config,
+            workers: [
+              new LocalWorker({
+                name: WorkerName.make("laptop"),
+                kind: "local",
+                maxConcurrentAttempts: 1,
+              }),
+            ],
+          }),
+        });
+        const needs = yield* unconfiguredNeeds(switched);
+        assert.deepStrictEqual(
+          needs.map(({ id, worker, attempts }) => [id, worker, attempts]),
+          [["unconfigured-worker:local", "local", 3]],
         );
-      // The reader reports three Attempts on `local`, the Worker `instance` declares.
-      assert.deepStrictEqual(yield* unconfiguredNeeds(instance), []);
-      const switched = new LoadedInstance({
-        ...instance,
-        config: Schema.decodeUnknownSync(UsineConfig)({
-          version: 1,
-          repos: [{ name: repository }],
-          workers: [{ name: "laptop", kind: "local" }],
-        }),
-      });
-      const needs = yield* unconfiguredNeeds(switched);
-      assert.deepStrictEqual(
-        needs.map(({ id, worker, attempts }) => [id, worker, attempts]),
-        [["unconfigured-worker:local", "local", 3]],
-      );
-      const encoded = Schema.encodeUnknownSync(ReadyOverview)(
-        new ReadyOverview({ projects: [], loops: [], needsYou: needs }),
-      );
-      assert.deepStrictEqual(Schema.decodeUnknownSync(ReadyOverview)(encoded).needsYou, needs);
+        const encoded = Schema.encodeUnknownSync(ReadyOverview)(
+          new ReadyOverview({ projects: [], loops: [], needsYou: needs }),
+        );
+        assert.deepStrictEqual(Schema.decodeUnknownSync(ReadyOverview)(encoded).needsYou, needs);
+      }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
     }),
   );
 
