@@ -17,7 +17,7 @@ import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { StepResult } from "@usine/core/step/result";
 import { GitHubLabelName } from "@usine/config/label";
-import { WorkerName } from "@usine/core/worker";
+import { SshDestination, WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   AgentFailureView,
@@ -30,6 +30,7 @@ import {
   FailedTranscriptView,
   InfraFailureView,
   TranscriptEventView,
+  SshWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { DateTime, Option } from "effect";
 import { assert, describe, it } from "vitest";
@@ -89,6 +90,10 @@ const attempt = (outcome: AttemptView["outcome"]) =>
     id: attemptId,
     number: AttemptNumber.make(1),
     worker: WorkerName.make("usine-worker-1"),
+    workerAccess: new SshWorkerAccess({
+      destination: SshDestination.make("usine-worker-1"),
+      port: null,
+    }),
     brain,
     task: AttemptTask.make("Complete issue #247."),
     agent: AgentName.make("developer"),

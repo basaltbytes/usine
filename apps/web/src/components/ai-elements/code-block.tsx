@@ -84,10 +84,12 @@ const CodeBlockContent = ({
   code,
   language,
   showLineNumbers,
+  wrap,
 }: {
   code: string;
   language: CodeLanguage;
   showLineNumbers: boolean;
+  wrap: boolean;
 }) => {
   const [result, setResult] = useState<
     | ({ readonly code: string; readonly language: CodeLanguage } & (
@@ -123,7 +125,12 @@ const CodeBlockContent = ({
   return (
     <>
       <div className="max-h-96 overflow-auto">
-        <pre className="m-0 p-3 font-mono text-xs/relaxed">
+        <pre
+          className={cn(
+            "m-0 p-3 font-mono text-xs/relaxed",
+            wrap && "whitespace-pre-wrap wrap-anywhere",
+          )}
+        >
           <code>
             {lines.map((line, lineIndex) => (
               <span key={lineIndex}>
@@ -155,15 +162,25 @@ const CodeBlockContent = ({
   );
 };
 
-/** A copyable source panel; highlighting loads only when the panel mounts. */
+/**
+ * A copyable source panel; highlighting loads only when the panel mounts. With
+ * `wrap`, long lines wrap anywhere instead of scrolling sideways, so a one-line
+ * command shows whole.
+ */
 export const CodeBlock = ({
   code,
   language,
   showLineNumbers = false,
+  wrap = false,
   children,
   className,
   ...props
-}: ComponentProps<"div"> & { code: string; language: CodeLanguage; showLineNumbers?: boolean }) => (
+}: ComponentProps<"div"> & {
+  code: string;
+  language: CodeLanguage;
+  showLineNumbers?: boolean;
+  wrap?: boolean;
+}) => (
   <CodeBlockContext.Provider value={code}>
     <div
       className={cn(
@@ -173,7 +190,12 @@ export const CodeBlock = ({
       {...props}
     >
       {children}
-      <CodeBlockContent code={code} language={language} showLineNumbers={showLineNumbers} />
+      <CodeBlockContent
+        code={code}
+        language={language}
+        showLineNumbers={showLineNumbers}
+        wrap={wrap}
+      />
     </div>
   </CodeBlockContext.Provider>
 );

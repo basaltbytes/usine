@@ -17,7 +17,7 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { AttemptId } from "@usine/core/attempt";
+import { AttemptId, AttemptNumber, AttemptTask } from "@usine/core/attempt";
 import {
   Sequence,
   SessionEvent,
@@ -30,7 +30,13 @@ import {
   ParentTarget,
 } from "@usine/core/attempt/channel";
 import { TranscriptSequence } from "@usine/engine/transcript";
-import { RunView, TranscriptEventView } from "@usine/orchestrator/operator";
+import { WorkerName } from "@usine/core/worker";
+import {
+  AttemptView,
+  LocalWorkerAccess,
+  RunView,
+  TranscriptEventView,
+} from "@usine/orchestrator/operator";
 import type { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, it } from "vitest";
@@ -616,6 +622,20 @@ it("renders a held child from session state when its activity is outside the loa
     }),
   });
   const page = [record(20, new TextOutput({ session: parent, text: "Waiting on the child." }))];
+  const running = new AttemptView({
+    id: attempt,
+    number: AttemptNumber.make(1),
+    worker: WorkerName.make("local"),
+    workerAccess: new LocalWorkerAccess(),
+    brain,
+    task: AttemptTask.make("Task"),
+    agent: parent.agent,
+    operatorIntervened: false,
+    startedAt: "2026-09-12",
+    outcome: null,
+    endedAt: null,
+    salvage: null,
+  });
   const run = new RunView({
     id: RunId.make("run-31"),
     itemKey: ItemKey.make("item"),
@@ -626,7 +646,7 @@ it("renders a held child from session state when its activity is outside the loa
     loopPaused: false,
     openedAt: "2026-09-12",
     task: "Task",
-    attempts: [],
+    attempts: [running],
     approval: null,
     runAgain: null,
     resultMessage: null,
@@ -642,7 +662,7 @@ it("renders a held child from session state when its activity is outside the loa
       <Outline
         run={run}
         eventPreview="Event"
-        document={readerDocument(projectTranscript(page, [], sessionState), [], page)}
+        document={readerDocument(projectTranscript(page, [running], sessionState), [running], page)}
         selection={{ _tag: "Attempt", attemptId: attempt, sessionKey: null }}
         reading={null}
         composerSession={null}

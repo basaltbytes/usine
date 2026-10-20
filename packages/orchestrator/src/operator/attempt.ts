@@ -5,7 +5,7 @@ import { AgentName } from "@usine/core/agent";
 import { RunawayCeiling } from "@usine/core/attempt/failure";
 import { AttemptSalvage } from "@usine/core/attempt/salvage";
 import { AttemptStart } from "@usine/core/attempt/start";
-import { WorkerName } from "@usine/core/worker";
+import { SshDestination, SshPort, WorkerName } from "@usine/core/worker";
 import { Effect, Schema } from "effect";
 
 /** An infra failure as the operator sees it; the defect cause stays behind this boundary. */
@@ -81,14 +81,33 @@ export const AttemptOutcomeView = Schema.Union([
 ]);
 export type AttemptOutcomeView = typeof AttemptOutcomeView.Type;
 
+/** A Worker on the orchestrator's own machine: its paths are paths on that machine. */
+export class LocalWorkerAccess extends Schema.TaggedClass<LocalWorkerAccess>(
+  "@usine/orchestrator/LocalWorkerAccess",
+)("Local", {}) {}
+
 /**
- * One Attempt's identity, Worker, effective brain, why and when it started,
- * its end time, optional terminal outcome, and salvaged work.
+ * A Worker on another machine, reached with `ssh` at `destination`, on `port`
+ * when `usine.yaml` sets one and on the client's default port when null.
+ */
+export class SshWorkerAccess extends Schema.TaggedClass<SshWorkerAccess>(
+  "@usine/orchestrator/SshWorkerAccess",
+)("Ssh", { destination: SshDestination, port: Schema.NullOr(SshPort) }) {}
+
+/** How the operator reaches a Worker's machine, read from the Worker's entry in `usine.yaml`. */
+export const WorkerAccess = Schema.Union([LocalWorkerAccess, SshWorkerAccess]);
+export type WorkerAccess = typeof WorkerAccess.Type;
+
+/**
+ * One Attempt's identity, Worker and how to reach it, effective brain, why and
+ * when it started, its end time, optional terminal outcome, and salvaged work.
  */
 export class AttemptView extends Schema.Class<AttemptView>("@usine/orchestrator/AttemptView")({
   id: AttemptId,
   number: AttemptNumber,
   worker: WorkerName,
+  /** How the operator reaches `worker`; null when `usine.yaml` no longer declares it. */
+  workerAccess: Schema.NullOr(WorkerAccess),
   brain: BrainSpec,
   task: AttemptTask,
   agent: AgentName,

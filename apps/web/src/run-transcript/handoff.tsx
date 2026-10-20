@@ -1,4 +1,5 @@
 import type { Harness } from "@usine/core/agent/brain";
+import type { AttemptView, WorkerAccess } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { CodeBlock, CodeBlockHeader, CodeBlockTitle } from "@/components/ai-elements/code-block";
 import { CopyButton } from "@/components/ai-elements/copy-button";
@@ -14,11 +15,25 @@ const RESUME_COMMANDS = {
   pi: Option.none(),
 } satisfies Record<Harness, Option.Option<string>>;
 
-/** Opens a saved child conversation on the worker that created it. */
+/**
+ * Where the operator runs `command`, a command line for the worker's machine:
+ * as is for a local worker or one `usine.yaml` no longer declares, and over
+ * `ssh -t` for an ssh worker. The remote shell parses `ssh`'s last argument
+ * again, so the whole command is quoted once more.
+ */
+const fromOperatorTerminal = (access: WorkerAccess | null, command: string): string => {
+  if (access === null || access._tag === "Local") return command;
+  const port = access.port === null ? [] : ["-p", String(access.port)];
+  return ["ssh", "-t", ...port, access.destination, shellArgument(command)].join(" ");
+};
+
+/** Reopens a saved child conversation from the operator's terminal, on the worker that ran it. */
 export const SessionHandoff = ({
   session,
+  attempt,
 }: {
   readonly session: Pick<TranscriptSession, "session" | "harnessSession">;
+  readonly attempt: Pick<AttemptView, "worker" | "workerAccess">;
 }) => {
   const handoff = Option.all({
     resume: RESUME_COMMANDS[session.session.brain.harness],
@@ -27,25 +42,37 @@ export const SessionHandoff = ({
   if (Option.isNone(handoff))
     return <p className="text-xs text-muted-foreground">No saved harness session</p>;
   const { resume, saved } = handoff.value;
-  const command = `cd -- ${shellArgument(saved.cwd)} && ${resume} ${shellArgument(saved.id)}`;
+  const { worker, workerAccess } = attempt;
+  const command = fromOperatorTerminal(
+    workerAccess,
+    `cd -- ${shellArgument(saved.cwd)} && ${resume} ${shellArgument(saved.id)}`,
+  );
   return (
-    <div className="space-y-2 text-xs">
-      <p className="wrap-anywhere text-muted-foreground">
-        Harness session: <span className="font-mono">{saved.id}</span>
+    <div className="space-y-2 text-xs text-muted-foreground">
+      <p className="wrap-anywhere">
+        Session <span className="font-mono">{saved.id}</span>
       </p>
-      <p className="wrap-anywhere text-muted-foreground">
-        Worker worktree: <span className="font-mono">{saved.cwd}</span>
+      <p className="wrap-anywhere">
+        Worktree <span className="font-mono">{saved.cwd}</span>
+        {workerAccess?._tag === "Ssh" && (
+          <>
+            {" on "}
+            <span className="font-mono">{worker}</span>
+          </>
+        )}
       </p>
-      <CodeBlock code={command} language="bash">
+      {workerAccess === null && (
+        <p className="wrap-anywhere">
+          Worker <span className="font-mono">{worker}</span> is no longer declared in usine.yaml
+        </p>
+      )}
+      <CodeBlock code={command} language="bash" wrap>
         <CodeBlockHeader>
-          <CodeBlockTitle>Resume on worker</CodeBlockTitle>
-          <CopyButton value={command} label="Copy resume command" />
+          <CodeBlockTitle>Resume this session</CodeBlockTitle>
+          <CopyButton value={command} label="Copy command" />
         </CodeBlockHeader>
       </CodeBlock>
-      <p className="text-muted-foreground">
-        Run on the same worker with the same harness account. Needs the worktree and the saved
-        session files; attempt cleanup removes the worktree.
-      </p>
+      <p>Same harness login as the attempt. The worktree is removed at attempt cleanup</p>
     </div>
   );
 };
