@@ -255,15 +255,18 @@ describe("exe.dev preparation", () => {
             succeeded: false,
             open: false,
           },
-          (salvage) =>
-            Effect.sync(() => {
-              assert.strictEqual(salvage._tag, "Pushed");
-              assert(
-                !ssh.state.commands.some((command) =>
-                  remoteLine(command).includes("'worktree' 'remove'"),
-                ),
-              );
-            }),
+          {
+            salvage: (salvage) =>
+              Effect.sync(() => {
+                assert.strictEqual(salvage._tag, "Pushed");
+                assert(
+                  !ssh.state.commands.some((command) =>
+                    remoteLine(command).includes("'worktree' 'remove'"),
+                  ),
+                );
+              }),
+            comments: () => Effect.die("A closed Attempt records no comment at recovery"),
+          },
         );
         const lines = ssh.state.commands.map(remoteLine);
         const stop = lines.findIndex((line) => line.startsWith("exec 'sh' '-c'"));
@@ -299,7 +302,7 @@ describe("exe.dev preparation", () => {
           succeeded: false,
           open: true,
         },
-        () => Effect.void,
+        { salvage: () => Effect.void, comments: () => Effect.void },
       );
       assert.strictEqual(ssh.state.commands.length, before);
     }).pipe(
@@ -343,7 +346,10 @@ describe("exe.dev preparation", () => {
             succeeded: true,
             open: false,
           },
-          (salvage) => Effect.sync(() => void recorded.push(salvage)),
+          {
+            salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+            comments: () => Effect.void,
+          },
         );
         const remote = ssh.state.commands.slice(reconciled).map(remoteLine);
         assert.strictEqual(recorded.length, 0);
@@ -374,7 +380,10 @@ describe("exe.dev preparation", () => {
             succeeded,
             open: false,
           },
-          (salvage) => Effect.sync(() => void recorded.push(salvage)),
+          {
+            salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+            comments: () => Effect.void,
+          },
         );
       }
       const remote = ssh.state.commands.map(remoteLine);
@@ -408,7 +417,7 @@ describe("exe.dev preparation", () => {
               succeeded: index !== 2,
               open: false,
             },
-            () => Effect.void,
+            { salvage: () => Effect.void, comments: () => Effect.void },
           )
           .pipe(Effect.exit);
         assert(Exit.isFailure(exit));

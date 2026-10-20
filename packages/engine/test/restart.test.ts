@@ -2,6 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import type { AttemptId } from "@usine/core/attempt";
 import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { InstanceDirectory } from "@usine/core/instance";
+import { Comment } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import {
   Context,
@@ -33,6 +34,8 @@ import {
   waitFor,
   withInstance,
 } from "./support.ts";
+
+const POSTED_COMMENT = "https://github.com/acme/demo/issues/57#issuecomment-1";
 
 /** Runs one Attempt to success on Worker `local`, then closes that runtime. */
 const deliverOneAttempt = (directory: InstanceDirectory, number: number) =>
@@ -247,7 +250,22 @@ describe("engine restart", () => {
               Ref.get(stored).pipe(
                 Effect.map((results) => Option.fromUndefinedOr(results.get(attemptId))),
               ),
-            recover: () => Effect.void,
+            // Reconciliation records the comment the Attempt whose parent failed posted on its Item.
+            recover: (attempt, record) =>
+              Ref.get(stored).pipe(
+                Effect.flatMap((results) => {
+                  const result = results.get(attempt.attemptId);
+                  return attempt.open && result !== undefined && Result.isFailure(result)
+                    ? record.comments([
+                        new Comment({
+                          url: new URL(POSTED_COMMENT),
+                          kind: "issue-comment",
+                          at: Option.none(),
+                        }),
+                      ])
+                    : Effect.void;
+                }),
+              ),
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
             reserve: () =>
@@ -308,6 +326,11 @@ describe("engine restart", () => {
             outcome !== undefined && Option.isSome(outcome) && outcome.value._tag === "Failed",
           );
           assert.strictEqual(outcome.value.failure._tag, "AgentFailure");
+          assert.deepStrictEqual(
+            failure.attempts[0]?.comments.map(({ url }) => url.href),
+            [POSTED_COMMENT],
+          );
+          assert.deepStrictEqual(success.attempts[0]?.comments, []);
           assert.strictEqual(yield* Ref.get(executions), 2);
           yield* Scope.close(secondScope, Exit.void);
         }),

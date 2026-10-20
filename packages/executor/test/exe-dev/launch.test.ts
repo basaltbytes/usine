@@ -4,10 +4,11 @@ import { githubSignature } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
+import type { AttemptRecovery } from "@usine/core/attempt/salvage";
 import { BotLogin } from "@usine/core/worker";
-import { type AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
+import { type AttemptRequest, AttemptRuntime, ParentFailed } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Deferred, Effect, Fiber, Layer, Option, Result } from "effect";
+import { Deferred, Effect, Fiber, Layer, Logger, Option, Result } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
@@ -45,18 +46,81 @@ const working =
     Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
 
 /** Runs the Attempt in one orchestrator process until that process stops mid-Attempt. */
-const stopMidAttempt = (ssh: ReturnType<typeof fakeSsh>, storage: StubStorage) =>
+const stopMidAttempt = (
+  ssh: ReturnType<typeof fakeSsh>,
+  storage: StubStorage,
+  checkout: CheckoutRequest = request,
+) =>
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>();
     yield* Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-      const prepared = yield* executor.prepare(request);
+      const prepared = yield* executor.prepare(checkout);
       const launch = yield* prepared.launch(recording().sink).pipe(Effect.forkChild);
       yield* Deferred.await(started);
       yield* Fiber.interrupt(launch);
     }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started), storage)));
   });
+
+const COMMENT = "https://github.com/acme/demo/issues/42#issuecomment-7";
+
+/** The Attempt on issue 42, writing as the bot login the fake `gh` lists comments for. */
+const onItem = new CheckoutRequest({
+  ...request,
+  payload: { number: 42, url: "https://github.com/acme/demo/issues/42" },
+  botLogin: Option.some(BotLogin.make("usine-test[bot]")),
+});
+
+/** Has the fake `gh` list `COMMENT` on issue 42, signed by the Attempt's Agent. */
+const postSignedComment = (ssh: ReturnType<typeof fakeSsh>) => {
+  ssh.state.issueComments = JSON.stringify([
+    [
+      {
+        html_url: COMMENT,
+        body: `Fixed.\n\n${githubSignature(TEST_AGENT.name)}`,
+        user: { login: "usine-test[bot]" },
+        created_at: "2026-10-20T10:00:00Z",
+        updated_at: "2026-10-20T10:00:00Z",
+      },
+    ],
+  ]);
+};
+
+/** The Attempt as startup reconciliation finds it after a restart, still open. */
+const openAttempt: AttemptRecovery = {
+  attemptId: ATTEMPT_ID,
+  repository: request.repository,
+  worker: WORKER,
+  ref: request.salvageRef,
+  permissions: "write",
+  succeeded: false,
+  open: true,
+};
+
+/**
+ * The stub runtime as a restarted process finds it when the Attempt's parent
+ * task failed and relayed its terminal envelope, and the previous process
+ * stopped before recording the failure: durable storage holds `ParentFailed`.
+ */
+const parentFailed = (stub: Layer.Layer<AttemptRuntime>) =>
+  Layer.effect(
+    AttemptRuntime,
+    Effect.map(AttemptRuntime, (runtime) =>
+      AttemptRuntime.of({
+        ...runtime,
+        isLive: () => Effect.succeed(false),
+        finished: () =>
+          Effect.succeed(
+            Option.some(
+              new ParentFailed({
+                failure: new InfraFailure({ message: "The parent stopped", cause: "crash" }),
+              }),
+            ),
+          ),
+      }),
+    ),
+  ).pipe(Layer.provide(stub));
 
 describe("exe.dev launch", () => {
   it.effect("keeps a completed checkout when its harvested result could not be stored", () => {
@@ -229,7 +293,6 @@ describe("exe.dev launch", () => {
   it.effect(
     "records the comments an Attempt posted on its Item when it fails, not when it succeeds",
     () => {
-      const comment = "https://github.com/acme/demo/issues/42#issuecomment-7";
       const recorded: Array<ReadonlyArray<string>> = [];
       const sink: AttemptChannel.Sink = {
         append: () => Effect.void,
@@ -239,24 +302,9 @@ describe("exe.dev launch", () => {
             () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
           ),
       };
-      const onItem = new CheckoutRequest({
-        ...request,
-        payload: { number: 42, url: "https://github.com/acme/demo/issues/42" },
-        botLogin: Option.some(BotLogin.make("usine-test[bot]")),
-      });
       const attempt = (parent: StubParent) => {
         const ssh = fakeSsh();
-        ssh.state.issueComments = JSON.stringify([
-          [
-            {
-              html_url: comment,
-              body: `Fixed.\n\n${githubSignature(TEST_AGENT.name)}`,
-              user: { login: "usine-test[bot]" },
-              created_at: "2026-10-20T10:00:00Z",
-              updated_at: "2026-10-20T10:00:00Z",
-            },
-          ],
-        ]);
+        postSignedComment(ssh);
         return Effect.gen(function* () {
           const executor = yield* Executor;
           const prepared = yield* executor.prepare(onItem);
@@ -266,7 +314,7 @@ describe("exe.dev launch", () => {
       return Effect.gen(function* () {
         const failed = yield* attempt(fails);
         assert(Result.isFailure(failed) && failed.failure._tag === "InfraFailure");
-        assert.deepStrictEqual(recorded, [["issue-comment " + comment]]);
+        assert.deepStrictEqual(recorded, [["issue-comment " + COMMENT]]);
 
         // A succeeded Attempt's comments are facts of its result, so nothing is recorded apart.
         const succeeded = yield* attempt(completes);
@@ -275,7 +323,7 @@ describe("exe.dev launch", () => {
           succeeded.success.facts.flatMap((fact) =>
             fact._tag === "Comment" ? [fact.url.href] : [],
           ),
-          [comment],
+          [COMMENT],
         );
         assert.strictEqual(recorded.length, 1);
       });
@@ -519,6 +567,84 @@ describe("exe.dev launch", () => {
       }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
     });
   });
+
+  it.effect(
+    "records the comments of an Attempt whose parent failed before a restart, then salvages its checkout",
+    () => {
+      const ssh = fakeSsh();
+      ssh.state.salvage = "dirty";
+      postSignedComment(ssh);
+      const storage = new StubStorage();
+      return Effect.gen(function* () {
+        yield* stopMidAttempt(ssh, storage, onItem);
+        const restart = ssh.state.commands.length;
+        const recorded: Array<string> = [];
+        const salvaged: Array<string> = [];
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.recover(openAttempt, {
+            salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
+            comments: (comments) =>
+              Effect.sync(
+                () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
+              ),
+          });
+          // The Run closes the Attempt from the stored failure without launching it again.
+          const outcome = yield* executor.outcome(ATTEMPT_ID);
+          assert(Option.isSome(outcome) && Result.isFailure(outcome.value));
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(runtime(ssh.layer, completes, storage, parentFailed)),
+        );
+        assert.deepStrictEqual(recorded, [`issue-comment ${COMMENT}`]);
+        assert.deepStrictEqual(salvaged, ["Pushed"]);
+        const lines = ssh.state.commands.slice(restart).map(remoteLine);
+        const harvested = lines.findIndex(
+          (line) =>
+            line.startsWith(`cd '${WORKTREE}'`) &&
+            line.includes("&& exec 'gh' 'api' 'repos/acme/demo/issues/42/comments?"),
+        );
+        const removed = lines.findIndex((line) => line.includes("'worktree' 'remove'"));
+        assert(harvested >= 0, "the comments are harvested in the Attempt's checkout");
+        assert(removed > harvested, "the comments are harvested before the checkout is removed");
+      });
+    },
+  );
+
+  it.effect(
+    "records no comment for an Attempt whose parent failed before a restart when its checkout is gone",
+    () => {
+      const ssh = fakeSsh();
+      postSignedComment(ssh);
+      const storage = new StubStorage();
+      const warnings: Array<unknown> = [];
+      const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+        if (logLevel === "Warn") warnings.push(message);
+      });
+      return Effect.gen(function* () {
+        yield* stopMidAttempt(ssh, storage, onItem);
+        ssh.state.worktreeGone = true;
+        const restart = ssh.state.commands.length;
+        const recorded: Array<unknown> = [];
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          yield* executor.recover(openAttempt, {
+            salvage: () => Effect.die("A checkout that is gone has no salvage"),
+            comments: (comments) => Effect.sync(() => void recorded.push(...comments)),
+          });
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(runtime(ssh.layer, completes, storage, parentFailed)),
+          Effect.provide(Logger.layer([logger])),
+        );
+        assert.deepStrictEqual(recorded, []);
+        const issued = ssh.state.commands.slice(restart);
+        assert(!issued.some(({ args }) => args.includes("attach")), "no credential is granted");
+        assert(!issued.map(remoteLine).some((line) => line.includes("'gh'")));
+        assert(JSON.stringify(warnings).includes("its checkout is gone"));
+      });
+    },
+  );
 
   it.effect("checks the roster on the VM and refuses login loss before preparation", () => {
     const ssh = fakeSsh();

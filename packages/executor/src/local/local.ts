@@ -1,7 +1,7 @@
 import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
-import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
+import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -22,7 +22,7 @@ import {
 import { type ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { platform, totalmem } from "node:os";
 import { allowlistedEnvironment, collectCommand, requireSuccess } from "../child-command.ts";
-import { durableSessionFor } from "../durable-session.ts";
+import { durableSessionFor, type PostedCommentsHarvest } from "../durable-session.ts";
 import {
   type AttemptWorkspace,
   CheckoutRequest,
@@ -222,16 +222,63 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
 
     const workerLeftovers = yield* workerLeftoversFor(workersRoot);
 
+    const harvestCommand =
+      (
+        operation: ExecutorOperation,
+        worktree: string,
+        credential: Effect.Success<ReturnType<typeof credentials>>,
+        environment: Record<string, string>,
+      ) =>
+      (command: "git" | "gh", args: ReadonlyArray<string>) =>
+        Effect.gen(function* () {
+          yield* credential.refresh();
+          const result = yield* collectCommand(spawner, operation, command, args, {
+            cwd: worktree,
+            env: environment,
+            extendEnv: false,
+          });
+          const stdout = yield* requireSuccess(operation, "local", command, args, {
+            ...result,
+            stdout: credential.scrub(result.stdout),
+            stderr: credential.scrub(result.stderr),
+          });
+          return stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n");
+        });
+
     const recover = Effect.fn("LocalExecutor.recover")(function* <E>(
       attempt: AttemptRecovery,
-      record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
+      record: RecoverySink<E>,
     ) {
       yield* Effect.annotateCurrentSpan({ ...attempt, host: "local" });
       if (yield* session.awaitsReattach(attempt)) return;
       const root = path.join(workersRoot, attempt.worker);
       const worktree = path.join(root, "attempts", safeSegment(attempt.attemptId));
-      if (!(yield* workerLeftovers(attempt.worker)).has(worktree)) return;
-      if (!(yield* fileSystem.exists(worktree))) return;
+      const present =
+        (yield* workerLeftovers(attempt.worker)).has(worktree) &&
+        (yield* fileSystem.exists(worktree));
+      yield* session.recoverPostedComments(
+        attempt,
+        present
+          ? Option.some<PostedCommentsHarvest>((spec) =>
+              Effect.scoped(
+                Effect.gen(function* () {
+                  const credential = yield* credentials(
+                    attempt.repository,
+                    attempt.attemptId,
+                    attempt.permissions,
+                    baseEnvironment,
+                  );
+                  return yield* harvestPostedComments(
+                    spec,
+                    harvestCommand("cleanup", worktree, credential, credential.environment),
+                  );
+                }),
+              ),
+            )
+          : Option.none(),
+        record.comments,
+      );
+      if (!present) return;
       const cache = path.join(root, "repos", cacheDirectoryName(attempt.repository));
       if (attempt.succeeded || attempt.permissions === "read") {
         return yield* recoverWorktree(
@@ -242,7 +289,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             cache,
             git: (args) => executeCommand("cleanup", "git", args),
           },
-          record,
+          record.salvage,
         );
       }
       yield* Effect.scoped(
@@ -256,7 +303,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           const git = credentialedGit(credential);
           yield* recoverWorktree(
             { attempt, host: "local", worktree, cache, git: (args) => git("cleanup", args) },
-            record,
+            record.salvage,
           );
         }),
       );
@@ -312,34 +359,15 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       TURBO_CACHE_DIR: path.join(workersRoot, workspace.worker, "turbo"),
     });
 
-    const harvestCommand =
-      (
-        workspace: AttemptWorkspace,
-        credential: Effect.Success<ReturnType<typeof credentials>>,
-        environment: Record<string, string>,
-      ) =>
-      (command: "git" | "gh", args: ReadonlyArray<string>) =>
-        Effect.gen(function* () {
-          yield* credential.refresh();
-          const result = yield* collectCommand(spawner, "launch", command, args, {
-            cwd: workspace.worktree,
-            env: environment,
-            extendEnv: false,
-          });
-          const stdout = yield* requireSuccess("launch", "local", command, args, {
-            ...result,
-            stdout: credential.scrub(result.stdout),
-            stderr: credential.scrub(result.stderr),
-          });
-          return stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n");
-        });
-
     const harvest = (
       workspace: AttemptWorkspace,
       credential: Effect.Success<ReturnType<typeof credentials>>,
       environment: Record<string, string>,
     ) =>
-      harvestFacts(workspace.spec, harvestCommand(workspace, credential, environment)).pipe(
+      harvestFacts(
+        workspace.spec,
+        harvestCommand("launch", workspace.worktree, credential, environment),
+      ).pipe(
         Effect.mapError(
           (error) =>
             new InfraFailure({
@@ -458,7 +486,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             harvest: harvest(prepared.workspace, credential, environment),
             harvestComments: harvestPostedComments(
               prepared.workspace.spec,
-              harvestCommand(prepared.workspace, credential, environment),
+              harvestCommand("launch", prepared.workspace.worktree, credential, environment),
             ),
             keepForReattach: prepared.keepForReattach,
           }),

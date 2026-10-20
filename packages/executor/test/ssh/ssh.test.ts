@@ -309,7 +309,10 @@ describe("SSH Worker", () => {
           succeeded: false,
           open: false,
         },
-        (salvage) => Effect.sync(() => void recorded.push(salvage)),
+        {
+          salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+          comments: () => Effect.void,
+        },
       );
       const lines = machine.state.calls.map(({ line }) => line);
       assert(lines.some((line) => line.includes("'worktree' 'remove'")));
@@ -341,7 +344,10 @@ describe("SSH Worker", () => {
             succeeded: false,
             open: false,
           },
-          (salvage) => Effect.sync(() => void recorded.push(salvage)),
+          {
+            salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
+            comments: () => Effect.void,
+          },
         );
         assert.strictEqual(recorded[0]?._tag, "Pushed");
         const lines = machine.state.calls.map(({ line }) => line);
