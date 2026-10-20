@@ -80,10 +80,33 @@ const SCROLL_KEYS = ["ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"
 const KEYS_TOWARD_START = ["ArrowUp", "Home", "PageUp"];
 
 /**
+ * Whether scrolling `delta` pixels (negative toward the start) from `target` moves an area nested
+ * between it and the viewport, such as a long tool output, instead of the viewport.
+ */
+const scrollsNestedArea = (target: EventTarget, viewport: Element, delta: number) => {
+  if (delta === 0) return false;
+  for (
+    let element = target instanceof Element ? target : null;
+    element !== null && element !== viewport;
+    element = element.parentElement
+  ) {
+    const room =
+      delta < 0
+        ? element.scrollTop
+        : element.scrollHeight - element.clientHeight - element.scrollTop;
+    if (room < 1) continue;
+    const { overflowY } = getComputedStyle(element);
+    if (overflowY === "auto" || overflowY === "scroll") return true;
+  }
+  return false;
+};
+
+/**
  * The scrolling conversation. The scroller stops following on every wheel turn, swipe, and scroll
  * key before these handlers run, and follows again only after a scroll that ends at the latest row.
  * One toward the end that finds the reader already there scrolls nothing, so the viewport resumes
- * following itself.
+ * following itself. A wheel turn or swipe that a nested area takes leaves the conversation in place
+ * and the reader following as it was.
  */
 const ConversationViewport = ({
   viewportRef,
@@ -97,33 +120,38 @@ const ConversationViewport = ({
   readonly following: boolean;
   /** The operator scrolls the conversation itself. */
   readonly onNavigate: () => void;
-  /** The operator presses or activates something inside the conversation. */
+  /** The operator presses or activates something inside the conversation, or scrolls an area in it. */
   readonly onInteract: () => void;
   readonly children: ReactNode;
 }) => {
   const { scrollToEnd } = useMessageScroller();
   const touchY = useRef(0);
+  const keepFollowing = (viewport: HTMLDivElement) => {
+    if (following && viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 8)
+      scrollToEnd({ behavior: "instant" });
+  };
   const navigate = (viewport: HTMLDivElement, toward: "start" | "end") => {
     onNavigate();
-    if (
-      following &&
-      toward === "end" &&
-      viewport.scrollHeight - viewport.clientHeight - viewport.scrollTop <= 8
-    )
-      scrollToEnd({ behavior: "instant" });
+    if (toward === "end") keepFollowing(viewport);
+  };
+  const scroll = (target: EventTarget, viewport: HTMLDivElement, delta: number) => {
+    if (scrollsNestedArea(target, viewport, delta)) {
+      onInteract();
+      keepFollowing(viewport);
+    } else navigate(viewport, delta < 0 ? "start" : "end");
   };
   return (
     <MessageScrollerViewport
       ref={viewportRef}
       aria-label="Run conversation"
       preserveScrollOnPrepend={false}
-      onWheel={(event) => navigate(event.currentTarget, event.deltaY < 0 ? "start" : "end")}
+      onWheel={(event) => scroll(event.target, event.currentTarget, event.deltaY)}
       onTouchStart={(event) => {
         touchY.current = event.touches[0]?.clientY ?? touchY.current;
       }}
       onTouchMove={(event) => {
         const y = event.touches[0]?.clientY ?? touchY.current;
-        navigate(event.currentTarget, y > touchY.current ? "start" : "end");
+        scroll(event.target, event.currentTarget, touchY.current - y);
         touchY.current = y;
       }}
       onPointerDown={(event) => {
