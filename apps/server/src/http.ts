@@ -7,6 +7,7 @@ import {
   OperatorApi,
   OperatorHttpError,
   OperatorHttpPolicy,
+  reloadRefusal,
 } from "@usine/orchestrator/operator/http";
 import { Effect, Layer, Schema, type Types } from "effect";
 import { Headers, HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
@@ -210,7 +211,21 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     .handle("unpause", ({ params }) =>
       fromBackend((backend) => backend.unpause(params.loop)).pipe(acknowledge),
     )
-    .handle("reload", () => fromBackend((backend) => backend.reload))
+    .handle("reload", () =>
+      Effect.flatMap(FactoryBackend, (backend) => backend.reload).pipe(
+        Effect.mapError((error) => {
+          const failure = operatorFailure(error);
+          switch (error._tag) {
+            case "FactoryConfigError":
+            case "RestartRequiredError":
+            case "ReloadPreflightError":
+              return reloadRefusal(error, failure.message);
+            default:
+              return failure;
+          }
+        }),
+      ),
+    )
     .handle(
       "task",
       Effect.fn("Http.task")(function* ({ params }) {

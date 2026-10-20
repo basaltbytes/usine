@@ -1,7 +1,14 @@
 import { CheckCircleIcon, WarningCircleIcon, XIcon } from "@phosphor-icons/react";
 import { Link } from "@tanstack/react-router";
-import { OperatorHttpError } from "@usine/orchestrator/operator/http";
-import { createContext, type ReactNode, use } from "react";
+import { splitRepositoryName } from "@usine/core/repository";
+import {
+  FactoryConfigRefusal,
+  OperatorHttpError,
+  ReloadPreflightRefusal,
+  type ReloadRefusal,
+  RestartRequiredRefusal,
+} from "@usine/orchestrator/operator/http";
+import { createContext, Fragment, type ReactNode, use } from "react";
 import {
   type ConfigurationReload,
   ReloadConfigurationButton,
@@ -10,7 +17,7 @@ import {
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { clockLabel, reloadChanges } from "../operator-copy.ts";
-import { reloadRefusalLead } from "./copy.ts";
+import { capabilityLabel, reloadRefusalLead } from "./copy.ts";
 
 const ReloadContext = createContext<ConfigurationReload | null>(null);
 
@@ -42,8 +49,113 @@ const fileLink = (file: string) => {
   );
 };
 
-/** What the section's last reload changed and which files it left out, or why it was refused and
- * that the running configuration stayed; nothing before the first reload or once dismissed. */
+const workerLink = (worker: string) => (
+  <Link to="/configuration/workers/$worker" params={{ worker }}>
+    <code>{worker}</code>
+  </Link>
+);
+
+const agentLink = (agent: string) => (
+  <Link to="/configuration/agents/$agent" params={{ agent }}>
+    <code>{agent}</code>
+  </Link>
+);
+
+/** A `usine.yaml` path such as `workers.build-1.destination`, linked to the page that shows it. */
+const fieldLink = (field: string) => {
+  const worker = /^workers\.([a-z0-9-]+)\.[a-z_]+$/u.exec(field)?.[1];
+  if (worker !== undefined)
+    return (
+      <Link to="/configuration/workers/$worker" params={{ worker }}>
+        <code>{field}</code>
+      </Link>
+    );
+  if (field === "workers")
+    return (
+      <Link to="/configuration/workers">
+        <code>{field}</code>
+      </Link>
+    );
+  if (field === "webhooks")
+    return (
+      <Link to="/configuration/settings">
+        <code>{field}</code>
+      </Link>
+    );
+  return <code>{field}</code>;
+};
+
+const listed = (names: ReadonlyArray<string>, link: (name: string) => ReactNode) =>
+  names.map((name, index) => (
+    <Fragment key={name}>
+      {index > 0 && ", "}
+      {link(name)}
+    </Fragment>
+  ));
+
+const reloadRefusalOf = (error: Error): ReloadRefusal | null =>
+  error instanceof RestartRequiredRefusal ||
+  error instanceof ReloadPreflightRefusal ||
+  error instanceof FactoryConfigRefusal
+    ? error
+    : null;
+
+/** The fields, Agents, Workers, or repository a refused reload names, each linked to its page. */
+const RefusalSubjects = ({ refusal }: { readonly refusal: ReloadRefusal }) => {
+  switch (refusal.error) {
+    case "FactoryConfigError":
+      return null;
+    case "RestartRequiredError":
+      return (
+        <ul>
+          <li>Changed in usine.yaml: {listed(refusal.fields, fieldLink)}</li>
+        </ul>
+      );
+    case "ReloadPreflightError": {
+      const { cause, agents, workers } = refusal;
+      return (
+        <ul>
+          <li>
+            {cause._tag === "WorkerCapabilityError" && (
+              <>
+                Failed check: {capabilityLabel[cause.capability]} on Worker{" "}
+                {workerLink(cause.worker)}
+              </>
+            )}
+            {cause._tag === "ExecutorOperationError" && (
+              <>Failed Worker operation: {cause.operation}</>
+            )}
+            {cause._tag === "CredentialUnavailableError" && (
+              <>
+                No credential for{" "}
+                <Link
+                  to="/configuration/repositories/$owner/$name"
+                  params={splitRepositoryName(cause.repository)}
+                >
+                  <code>{cause.repository}</code>
+                </Link>
+              </>
+            )}
+          </li>
+          {agents.length > 0 && (
+            <li>
+              Checked {agents.length === 1 ? "Agent" : "Agents"}: {listed(agents, agentLink)}
+            </li>
+          )}
+          {workers.length > 0 && (
+            <li>
+              Checked {workers.length === 1 ? "Worker" : "Workers"}: {listed(workers, workerLink)}
+            </li>
+          )}
+        </ul>
+      );
+    }
+  }
+};
+
+/** What the section's last reload changed and which files it left out, or why it was refused, what
+ * the refusal names, and that the running configuration stayed; nothing before the first reload or
+ * once dismissed. */
 export const SectionReloadResult = () => {
   const reload = useSectionReload();
   const at =
@@ -61,8 +173,10 @@ export const SectionReloadResult = () => {
     </AlertAction>
   );
   if (reload.isError) {
+    const refusal = reloadRefusalOf(reload.error);
     const lead = reloadRefusalLead(
-      reload.error instanceof OperatorHttpError ? reload.error.error : undefined,
+      refusal?.error ??
+        (reload.error instanceof OperatorHttpError ? reload.error.error : undefined),
     );
     return (
       <Alert variant="destructive" className="wrap-anywhere">
@@ -74,6 +188,7 @@ export const SectionReloadResult = () => {
         <AlertDescription className="flex flex-col gap-1">
           {lead !== null && <p className="font-medium text-destructive">{lead}</p>}
           <p>{reload.error.message}</p>
+          {refusal !== null && <RefusalSubjects refusal={refusal} />}
         </AlertDescription>
         {dismiss}
       </Alert>

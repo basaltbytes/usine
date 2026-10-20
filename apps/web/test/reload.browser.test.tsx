@@ -19,7 +19,7 @@ declare module "vitest/browser" {
       before: string,
       after: string,
       report: string,
-      rejection: string,
+      rejections: ReadonlyArray<{ readonly status: number; readonly body: string }>,
       configurationBefore: string,
       configurationAfter: string,
     ) => Promise<void>;
@@ -57,11 +57,44 @@ it("reloads the configuration from any Configuration page and shows what changed
     JSON.stringify(Schema.encodeSync(FactoryOverview)(before)),
     JSON.stringify(Schema.encodeSync(FactoryOverview)(after)),
     JSON.stringify(Schema.encodeSync(InstanceReload)(report)),
-    JSON.stringify({
-      error: "FactoryConfigError",
-      message:
-        "usine.yaml is invalid (yaml): Unexpected token. The running configuration is unchanged.",
-    }),
+    [
+      {
+        status: 422,
+        body: JSON.stringify({
+          error: "FactoryConfigError",
+          message:
+            "usine.yaml is invalid (yaml): Unexpected token. The running configuration is unchanged.",
+          file: "usine.yaml",
+          stage: "yaml",
+        }),
+      },
+      {
+        status: 409,
+        body: JSON.stringify({
+          error: "ReloadPreflightError",
+          message:
+            "Worker preflight failed for Agent reviewer and Worker eu-1, which the reload adds or gives more slots. Worker local: Claude Code is not logged in. The running configuration is unchanged; fix the Worker, usine.yaml, or the Agent file, then reload again.",
+          agents: ["reviewer"],
+          workers: ["eu-1"],
+          cause: {
+            _tag: "WorkerCapabilityError",
+            worker: "local",
+            capability: "harness-login",
+            message: "Claude Code is not logged in.",
+          },
+        }),
+      },
+      {
+        status: 409,
+        body: JSON.stringify({
+          error: "RestartRequiredError",
+          message:
+            "usine.yaml changed in a way that applies only when usine up restarts: Worker eu-1 changed its destination; the webhooks block changed. The running configuration is unchanged; restart usine up to apply the change.",
+          blocks: ["workers", "webhooks"],
+          fields: ["workers.eu-1.destination", "webhooks"],
+        }),
+      },
+    ],
     JSON.stringify(configurationJson),
     JSON.stringify(configurationAfter),
   );
@@ -105,6 +138,26 @@ it("reloads the configuration from any Configuration page and shows what changed
 
     await page.getByRole("button", { name: "Dismiss the reload result" }).click();
     await expect.element(page.getByText("Configuration not reloaded")).not.toBeInTheDocument();
+
+    // A refused preflight links the Worker whose check failed and what the reload adds.
+    const refusal = page.getByRole("alert").filter({ hasText: "Configuration not reloaded" });
+    await page.getByRole("button", { name: "Reload configuration" }).click();
+    await expect
+      .element(refusal.getByText("Failed check: harness login on Worker", { exact: false }))
+      .toBeVisible();
+    await expect.element(refusal.getByRole("link", { name: "reviewer" })).toBeVisible();
+    await expect.element(refusal.getByRole("link", { name: "eu-1" })).toBeVisible();
+    await refusal.getByRole("link", { name: "local" }).click();
+    await expect.element(page.getByRole("heading", { name: "local" })).toBeVisible();
+
+    // A change only a restart applies links each changed field of usine.yaml.
+    await page.getByRole("button", { name: "Reload configuration" }).click();
+    await expect
+      .element(refusal.getByText("Changed in usine.yaml:", { exact: false }))
+      .toBeVisible();
+    await expect.element(refusal.getByRole("link", { name: "webhooks" })).toBeVisible();
+    await refusal.getByRole("link", { name: "workers.eu-1.destination" }).click();
+    await expect.element(page.getByRole("heading", { name: "eu-1" })).toBeVisible();
   } finally {
     flushSync(() => root.unmount());
     queryClient.clear();

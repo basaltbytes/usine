@@ -74,7 +74,11 @@ import {
   SettingsView,
   WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
-import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
+import {
+  OperatorApi,
+  OperatorHttpError,
+  ReloadPreflightRefusal,
+} from "@usine/orchestrator/operator/http";
 import {
   InstanceReload,
   type InstanceReloadError,
@@ -633,6 +637,8 @@ describe("operator HTTP API", () => {
         error: "FactoryConfigError",
         message:
           "usine.yaml is invalid (yaml): Unexpected flow-map-end token. The running configuration is unchanged.",
+        file: "usine.yaml",
+        stage: "yaml",
       });
       const restartMessage =
         "usine.yaml changed in a way that applies only when usine up restarts: Worker local changed its kind from local to ssh. The running configuration is unchanged; restart usine up to apply the change.";
@@ -648,6 +654,8 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(await restart.json(), {
         error: "RestartRequiredError",
         message: restartMessage,
+        blocks: ["workers"],
+        fields: ["workers.local.kind"],
       });
       const preflightMessage =
         "Worker preflight failed for Agent reviewer. Worker local: Claude Code is not logged in. The running configuration is unchanged; fix the Worker, usine.yaml, or the Agent file, then reload again.";
@@ -666,9 +674,38 @@ describe("operator HTTP API", () => {
         new Request("http://localhost/api/instance/reload", { method: "POST" }),
       );
       assert.strictEqual(preflight.status, 409);
+      // What the check observed ("logged out") stays on the server.
       assert.deepStrictEqual(await preflight.json(), {
         error: "ReloadPreflightError",
         message: preflightMessage,
+        agents: ["reviewer"],
+        workers: [],
+        cause: {
+          _tag: "WorkerCapabilityError",
+          worker: "local",
+          capability: "harness-login",
+          message: "Claude Code is not logged in.",
+        },
+      });
+
+      const preflightRefusal = await Effect.runPromise(
+        Effect.gen(function* () {
+          const { operator: client } = yield* HttpApiClient.make(OperatorApi);
+          return yield* Effect.flip(client.reload());
+        }).pipe(
+          Effect.provide(
+            HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(rejecting))).pipe(
+              Layer.provideMerge(NodeHttpServer.layerTest),
+            ),
+          ),
+        ),
+      );
+      assert.instanceOf(preflightRefusal, ReloadPreflightRefusal);
+      assert.deepStrictEqual(preflightRefusal.cause, {
+        _tag: "WorkerCapabilityError",
+        worker: WorkerName.make("local"),
+        capability: "harness-login",
+        message: "Claude Code is not logged in.",
       });
     } finally {
       await rejectingApp.dispose();
