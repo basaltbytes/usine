@@ -22,6 +22,9 @@ export default mergeConfig(
         },
         {
           extends: true,
+          // A cache an earlier tree built passes the optimizer's hash check without a dependency these
+          // tests import, and the bundle it then starts mid-run reloads the page under the test files.
+          optimizeDeps: { force: true },
           test: {
             name: "browser",
             include: ["test/**/*.browser.test.tsx"],
