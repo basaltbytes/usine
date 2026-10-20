@@ -57,15 +57,29 @@ export class ExecutorOperationError extends Schema.TaggedError<ExecutorOperation
   cause: Schema.Defect(),
 }) {}
 
+/**
+ * Why a Worker could not obtain access to a repository. `refused`: the answer
+ * does not change on a retry, such as a GitHub App installation that does not
+ * cover the repository, lacks a permission, or is suspended, or an exe.dev
+ * Worker with no GitHub integration for the repository. `unreachable`: the
+ * access could not be obtained now, such as a GitHub outage or rate limit, or
+ * a Gateway or exe.dev command that did not answer.
+ */
+export const CredentialUnavailableReason = Schema.Literals(["refused", "unreachable"]);
+export type CredentialUnavailableReason = typeof CredentialUnavailableReason.Type;
+
 /** A Worker could not obtain access to the repository assigned to an Attempt. */
 export class CredentialUnavailableError extends Schema.TaggedError<CredentialUnavailableError>(
   "@usine/executor/CredentialUnavailableError",
 )("CredentialUnavailableError", {
   /** The repository the Attempt needed access to. */
   repository: RepositoryName,
+  /** Whether trying again can succeed: never for `refused`, possibly later for `unreachable`. */
+  reason: CredentialUnavailableReason,
   /**
    * A summary for operators, such as a GitHub App installation that does not
-   * cover the repository, or an exe.dev Worker with no GitHub integration for it.
+   * cover the repository, with the reason GitHub gave when it refused, or an
+   * exe.dev Worker with no GitHub integration for it.
    */
   message: Schema.NonEmptyString,
   /** The underlying failure, for example the GitHub API error returned while minting the token. */
@@ -259,8 +273,9 @@ export class CredentialProvider extends Context.Service<
      * Attempt's Loop `permissions`: a `read` credential cannot push. The local
      * and SSH executors call it when preparing the Attempt `attemptId`, then
      * again before each credential expires, until the Attempt's resources are
-     * released. A failure during preparation fails `prepare`. A failed renewal
-     * is logged and tried again 30 seconds later.
+     * released. A failure during preparation fails `prepare`; its `reason`
+     * says whether a retry can succeed. A failed renewal is logged and tried
+     * again 30 seconds later.
      */
     readonly issue: (
       repository: RepositoryName,

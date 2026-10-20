@@ -6,13 +6,15 @@ import { RepositoryName } from "@usine/core/repository";
 import { CredentialProvider } from "@usine/executor";
 import {
   CoveredProject,
+  GitHubApiError,
   GitHubApp,
+  type GitHubAppError,
   InstallationId,
   InstallationToken,
   RepositoryId,
   SingleRepository,
 } from "@usine/github/github-app";
-import { DateTime, Effect, Layer, Redacted, Schema } from "effect";
+import { DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { gitHubCredentialLayer } from "../src/credentials.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
 
@@ -62,4 +64,91 @@ describe("GitHub credential provider", () => {
       ),
     );
   });
+});
+
+describe("GitHub credential provider failures", () => {
+  const project = new CoveredProject({
+    installationId: InstallationId.make(77),
+    repository,
+    repositoryId: RepositoryId.make(99),
+  });
+  const provider = (projects: ReadonlyArray<CoveredProject>, mint: GitHubAppError) =>
+    gitHubCredentialLayer.pipe(
+      Layer.provide(
+        Layer.succeed(GitHubApp)({
+          installation: () => Effect.die("unused"),
+          installationToken: () => Effect.die("unused"),
+          projectAccess: () => Effect.succeed(projects),
+          workerToken: () => Effect.fail(mint),
+        }),
+      ),
+      Layer.provide(fixedConfigLayer(config)),
+    );
+  const issue = CredentialProvider.use((credentials) =>
+    credentials.issue(repository, AttemptId.make("implement/1"), "write"),
+  ).pipe(Effect.flip);
+
+  it.effect("reports a mint GitHub refuses as refused, with GitHub's reason", () =>
+    Effect.gen(function* () {
+      const failure = yield* issue;
+      assert.strictEqual(failure.reason, "refused");
+      assert.strictEqual(
+        failure.message,
+        "Could not mint a worker token for acme/demo: GitHub rejected the request with status 422: The permissions requested are not granted to this installation.",
+      );
+    }).pipe(
+      Effect.provide(
+        provider(
+          [project],
+          new GitHubApiError({
+            operation: "mint-worker-token",
+            status: Option.some(422),
+            message:
+              "GitHub rejected the request with status 422: The permissions requested are not granted to this installation.",
+          }),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("reports a repository the installation does not cover as refused", () =>
+    Effect.gen(function* () {
+      const failure = yield* issue;
+      assert.strictEqual(failure.reason, "refused");
+      assert.strictEqual(failure.message, "GitHub App installation does not cover acme/demo");
+    }).pipe(
+      Effect.provide(
+        provider(
+          [],
+          new GitHubApiError({
+            operation: "mint-worker-token",
+            status: Option.none(),
+            message: "unused",
+          }),
+        ),
+      ),
+    ),
+  );
+
+  it.effect("reports a mint GitHub could not answer as unreachable", () =>
+    Effect.gen(function* () {
+      const failure = yield* issue;
+      assert.strictEqual(failure.reason, "unreachable");
+      assert.strictEqual(
+        failure.message,
+        "Could not mint a worker token for acme/demo: The request to GitHub could not be sent",
+      );
+    }).pipe(
+      Effect.provide(
+        provider(
+          [project],
+          new GitHubApiError({
+            operation: "mint-worker-token",
+            status: Option.none(),
+            message: "The request to GitHub could not be sent",
+          }),
+        ),
+      ),
+    ),
+  );
 });

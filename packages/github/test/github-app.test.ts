@@ -3,7 +3,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { RepositoryName } from "@usine/core/repository";
 import { Clock, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
-import { GitHubApp } from "../src/github-app.ts";
+import { GitHubApp, isRefusal } from "../src/github-app.ts";
 import { AppCredentials, AppId, GitHubCredentials, PrivateKey } from "../src/credentials.ts";
 import { CoveredProject, REQUIRED_REPOSITORY_PERMISSIONS } from "../src/access.ts";
 import { InstallationId, RepositoryId } from "../src/installation.ts";
@@ -343,6 +343,65 @@ describe("GitHubApp", () => {
     }).pipe(Effect.provide(appLayer(client)));
   });
 
+  it.live("keeps GitHub's reason for a refused mint and tells a refusal from an outage", () => {
+    const answers: Array<Response> = [
+      new Response(
+        JSON.stringify({
+          message: "The permissions requested are not granted to this installation.",
+        }),
+        { status: 422, headers: { "content-type": "application/json" } },
+      ),
+      new Response("upstream timeout", { status: 503 }),
+      new Response(JSON.stringify({ message: "API rate limit exceeded" }), {
+        status: 429,
+        headers: { "content-type": "application/json", "retry-after": "60" },
+      }),
+    ];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        const answer = answers.shift();
+        if (answer === undefined) return assert.fail("unexpected request");
+        return HttpClientResponse.fromWeb(request, answer);
+      }),
+    );
+    const project = new CoveredProject({
+      installationId: InstallationId.make(77),
+      repository: RepositoryName.make("basaltbytes/usine"),
+      repositoryId: RepositoryId.make(99),
+    });
+
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const refused = yield* app.workerToken(project, "write").pipe(Effect.flip);
+      assert.strictEqual(
+        refused.message,
+        "GitHub rejected the request with status 422: The permissions requested are not granted to this installation.",
+      );
+      assert.isTrue(isRefusal(refused));
+      const outage = yield* app.workerToken(project, "write").pipe(Effect.flip);
+      assert.strictEqual(outage.message, "GitHub rejected the request with status 503");
+      assert.isFalse(isRefusal(outage));
+      const limited = yield* app.workerToken(project, "write").pipe(Effect.flip);
+      assert.strictEqual(limited._tag, "GitHubRateLimitError");
+      assert.isFalse(isRefusal(limited));
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
+  it.live("counts a suspended installation as a refusal", () => {
+    const client = HttpClient.make((request) =>
+      Effect.succeed(
+        jsonResponse(request, [{ ...installation, suspended_at: "2026-10-01T00:00:00Z" }]),
+      ),
+    );
+
+    return Effect.gen(function* () {
+      const app = yield* GitHubApp;
+      const failure = yield* app.installation().pipe(Effect.flip);
+      assert.strictEqual(failure._tag, "InstallationDiscoveryError");
+      assert.isTrue(isRefusal(failure));
+    }).pipe(Effect.provide(appLayer(client)));
+  });
+
   it.live("reports installation permission drift before minting a token", () => {
     const client = HttpClient.make((request) =>
       Effect.succeed(
@@ -362,6 +421,7 @@ describe("GitHubApp", () => {
       if (failure._tag === "AppPermissionError") {
         assert.deepStrictEqual(failure.missing, ["contents:write"]);
       }
+      assert.isTrue(isRefusal(failure));
     }).pipe(Effect.provide(appLayer(client)));
   });
 });

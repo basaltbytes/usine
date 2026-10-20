@@ -62,6 +62,7 @@ const makeExeDevExecutor = (options: ExeDevExecutorOptions) =>
       if (integration === undefined)
         return yield* new CredentialUnavailableError({
           repository,
+          reason: "refused",
           message: `No exe.dev GitHub integration is configured for ${repository}`,
           cause: new Error("repository integration missing"),
         });

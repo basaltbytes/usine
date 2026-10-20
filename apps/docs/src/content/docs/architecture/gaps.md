@@ -73,7 +73,6 @@ See [Workers and the Gateway](/architecture/workers-and-gateway/) for how each W
 - [#231][]: Attempts on one SSH Worker without a Gateway can read each other's GitHub token.
 - [#229][]: the harness versions pinned in `infra/hetzner/cloud-init.yaml` must be updated by hand to match the versions usine supports.
 - [#270][]: two Attempts at once thrash a 4 GB Worker until sshd stops responding.
-- [#278][]: local and direct SSH preflight don't check the GitHub credential; only the exe.dev preflight raises the `credentials` capability ([exe-dev/preflight.ts:123][]).
 
 ## Gateway
 
@@ -115,7 +114,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [worker-engine.ts:13]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/worker-engine.ts#L13
 [scheduler.ts:76]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/scheduler.ts#L76
 [ssh.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/ssh.ts
-[exe-dev/preflight.ts:123]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/exe-dev/preflight.ts#L123
 [#35]: https://github.com/basaltbytes/usine/issues/35
 [#36]: https://github.com/basaltbytes/usine/issues/36
 [#37]: https://github.com/basaltbytes/usine/issues/37
@@ -162,7 +160,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#266]: https://github.com/basaltbytes/usine/issues/266
 [#270]: https://github.com/basaltbytes/usine/issues/270
 [#277]: https://github.com/basaltbytes/usine/issues/277
-[#278]: https://github.com/basaltbytes/usine/issues/278
 [#279]: https://github.com/basaltbytes/usine/issues/279
 [#387]: https://github.com/basaltbytes/usine/issues/387
 [#388]: https://github.com/basaltbytes/usine/issues/388

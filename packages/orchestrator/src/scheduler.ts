@@ -121,16 +121,17 @@ const releasedFrom = (pool: SlotPool, worker: WorkerName): [SlotRelease, SlotPoo
     : [{ _tag: "Freed" }, next];
 };
 
-const asAttemptFailure = (error: ExecutorError | ExecutorOperationError) =>
-  error._tag === "WorkerCapabilityError"
-    ? new AgentFailure({ message: error.message })
-    : new InfraFailure({
-        message:
-          error._tag === "ExecutorOperationError"
-            ? `Executor ${error.operation} failed: ${error.message}`
-            : error.message,
-        cause: error,
-      });
+// Only an error a later try can avoid becomes the InfraFailure the engine retries.
+const asAttemptFailure = (error: ExecutorError): AgentFailure | InfraFailure =>
+  Match.valueTags(error, {
+    WorkerCapabilityError: ({ message }) => new AgentFailure({ message }),
+    CredentialUnavailableError: ({ reason, message }) =>
+      reason === "refused"
+        ? new AgentFailure({ message })
+        : new InfraFailure({ message, cause: error }),
+    ExecutorOperationError: ({ operation, message }) =>
+      new InfraFailure({ message: `Executor ${operation} failed: ${message}`, cause: error }),
+  });
 
 // The operation error has no Worker field; reports must name the Worker.
 const namingWorker =
@@ -500,7 +501,25 @@ export const stepExecutorLayer = (
                 botLogin,
               }),
             )
-            .pipe(Effect.mapError(asAttemptFailure));
+            .pipe(
+              Effect.tapError((error) =>
+                error._tag === "CredentialUnavailableError"
+                  ? Effect.logWarning(
+                      error.reason === "refused"
+                        ? "The Attempt's repository access was refused; the Attempt fails without an automatic retry"
+                        : "The Attempt's repository access could not be obtained now; the Attempt fails with an infrastructure failure, which is retried",
+                      {
+                        attemptId: execution.attempt.id,
+                        worker: execution.attempt.worker,
+                        repository: error.repository,
+                        reason: error.reason,
+                        message: error.message,
+                      },
+                    )
+                  : Effect.void,
+              ),
+              Effect.mapError(asAttemptFailure),
+            );
           return yield* prepared.launch(io);
         },
         Effect.scoped,

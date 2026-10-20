@@ -1,4 +1,4 @@
-import { DateTime, Option, Redacted } from "effect";
+import { DateTime, Effect, Option, Redacted, Schema } from "effect";
 import { HttpClientRequest, type HttpClientResponse } from "effect/unstable/http";
 import type { HttpClientError } from "effect/unstable/http/HttpClientError";
 import {
@@ -28,6 +28,38 @@ export const transportError = (operation: GitHubOperation, error: HttpClientErro
         ? "The request to GitHub could not be sent"
         : `GitHub rejected the request with status ${error.response.status}`,
   });
+
+const ErrorBody = Schema.Struct({ message: Schema.NonEmptyString });
+const decodeErrorBody = Schema.decodeUnknownOption(ErrorBody);
+
+/**
+ * `failure` with the reason GitHub's error response gives in its `message`
+ * field appended, such as `The permissions requested are not granted to this
+ * installation.`; `failure` unchanged when the body has no such field.
+ */
+export const withGitHubReason = (
+  failure: GitHubApiError,
+  response: HttpClientResponse.HttpClientResponse,
+): Effect.Effect<GitHubApiError> =>
+  response.json.pipe(
+    Effect.map((body) =>
+      Option.match(decodeErrorBody(body), {
+        onNone: () => failure,
+        onSome: ({ message }) =>
+          new GitHubApiError({
+            operation: failure.operation,
+            status: failure.status,
+            message: `${failure.message}: ${message}`,
+          }),
+      }),
+    ),
+    Effect.catch((error) =>
+      Effect.logDebug("GitHub's error response has no JSON body to read a reason from", {
+        operation: failure.operation,
+        message: error.message,
+      }).pipe(Effect.as(failure)),
+    ),
+  );
 
 export const invalidResponse = (operation: GitHubOperation, detail: string) =>
   new InvalidGitHubResponseError({

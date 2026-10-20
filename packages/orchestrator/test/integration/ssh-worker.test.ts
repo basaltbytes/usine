@@ -372,6 +372,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
             Effect.fail(
               new CredentialUnavailableError({
                 repository,
+                reason: "refused",
                 message: "Preflight issues no credential",
                 cause: new Error("unused"),
               }),
@@ -719,6 +720,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
             Effect.fail(
               new CredentialUnavailableError({
                 repository,
+                reason: "refused",
                 message: "Preflight issues no credential",
                 cause: new Error("unused"),
               }),
