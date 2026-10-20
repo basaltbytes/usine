@@ -189,7 +189,7 @@ The UI is at `http://127.0.0.1:7331`, or the port you chose. The server listens 
 ssh -N -L 7331:127.0.0.1:7331 orchestrator.example.com
 ```
 
-The sidebar lists **Projects**, with one Board per registered repository, and **Configuration**, where you pause and unpause Loops and reload the configuration on the **Loops** page. **Needs you** at the top of every page lists the items that are waiting for you. [Operate Runs](/guides/operate-runs/) describes each screen.
+The sidebar lists **Projects**, with one Board per registered repository, and **Configuration**, whose **Loops**, **Agents**, **Workers**, **Repositories**, and **Settings** pages show your files as usine parsed them, where you pause and unpause Loops and reload the configuration. **Needs you** at the top of every page lists the items that are waiting for you. [Operate Runs](/guides/operate-runs/) describes each screen.
 
 ## Runtime state
 
@@ -209,7 +209,7 @@ The runtime store also records every Event the factory has seen. usine uses this
 
 `usine up` reads the instance folder at startup and doesn't watch the files for changes. After you edit a Loop, an Agent, or the `labels`, `repos`, `settings`, `operator`, or `workers` keys of `usine.yaml`, reload the configuration in one of three ways:
 
-- Select **Reload configuration** on the **Loops** page under **Configuration**. The page lists what changed.
+- Select **Reload configuration** on any page under **Configuration**. The page lists what changed, or why the reload was refused.
 - Send `POST /api/instance/reload` to the server, for example with `curl -s -X POST http://127.0.0.1:7331/api/instance/reload`. The response lists what changed.
 - Send `SIGHUP` to the process: `kill -HUP $(cat .usine/instance.pid)` from the instance folder.
 

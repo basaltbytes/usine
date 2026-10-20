@@ -12,12 +12,14 @@ import type {
 import type { WorkerName } from "@usine/core/worker";
 import {
   type BoardMove,
+  type ConfigurationView,
   type FactoryOverview,
   NeedsSetupOverview,
   type RunDetailView,
   type RunGitHubChangesView,
   type TranscriptRequest,
   type Operator,
+  type OperatorConfiguration,
   type OperatorError,
   type OperatorObservation,
   type EditAndRetry,
@@ -73,6 +75,7 @@ export class FactoryBackend extends Context.Service<
       repository: RepositoryName,
       item: ItemNumber,
     ) => Effect.Effect<TaskView, BackendError>;
+    readonly configuration: Effect.Effect<ConfigurationView, BackendError>;
   }
 >()("@usine/server/FactoryBackend") {}
 
@@ -86,6 +89,7 @@ const rosterOf = (instances: BackendInstance) =>
 export const liveBackendLayer = (
   instances: BackendInstance,
   operator: Operator["Service"],
+  configuration: OperatorConfiguration["Service"],
 ): Layer.Layer<FactoryBackend> =>
   Layer.succeed(FactoryBackend)({
     overview: Effect.flatMap(instances.get, operator.overview),
@@ -113,13 +117,18 @@ export const liveBackendLayer = (
 
     task: (repository, item) =>
       Effect.flatMap(instances.get, (instance) => operator.task(instance, repository, item)),
+    configuration: Effect.flatMap(instances.get, configuration.view),
   });
 
-/** The read-only backend of setup mode; reading the overview and reloading the instance folder still work. */
+/**
+ * The read-only backend of setup mode; reading the overview and the
+ * configuration and reloading the instance folder still work.
+ */
 export const needsSetupBackendLayer = (
   instances: BackendInstance,
   errorTag: string,
   observation: OperatorObservation["Service"],
+  configuration: OperatorConfiguration["Service"],
 ): Layer.Layer<FactoryBackend> => {
   const unavailable = new BackendUnavailableError({
     message: "GitHub App setup is required before operator actions are available.",
@@ -152,5 +161,6 @@ export const needsSetupBackendLayer = (
 
     task: (repository, item) =>
       Effect.flatMap(instances.get, (instance) => observation.task(instance, repository, item)),
+    configuration: Effect.flatMap(instances.get, configuration.view),
   });
 };

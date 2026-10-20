@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { Button } from "@/components/ui/button";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
+import { ConfigurationCrumbs } from "../configuration/layout.tsx";
 import { NeedsYou } from "../needs-you/needs-you.tsx";
 import { needsYouByProject, overviewQuery, projectParams } from "../overview.ts";
 import { Suspense, lazy, useState } from "react";
@@ -64,19 +65,7 @@ const Crumbs = ({
   readonly task: string | undefined;
 }) => {
   const matchRoute = useMatchRoute();
-  const configuration = matchRoute({ to: "/configuration/loops" }) !== false;
-  if (configuration)
-    return (
-      <>
-        <BreadcrumbItem>
-          <BreadcrumbLink render={<Link to="/configuration/loops" />}>Configuration</BreadcrumbLink>
-        </BreadcrumbItem>
-        <BreadcrumbSeparator />
-        <BreadcrumbItem>
-          <BreadcrumbPage>Loops</BreadcrumbPage>
-        </BreadcrumbItem>
-      </>
-    );
+  if (matchRoute({ to: "/configuration", fuzzy: true }) !== false) return <ConfigurationCrumbs />;
   if (project === undefined)
     return (
       <BreadcrumbItem>
@@ -132,7 +121,8 @@ const Shell = () => {
   const params = useParams({ strict: false });
   const matchRoute = useMatchRoute();
   const project = params.repository;
-  const view = matchRoute({ to: "/configuration/loops" }) === false ? "projects" : "configuration";
+  const view =
+    matchRoute({ to: "/configuration", fuzzy: true }) === false ? "projects" : "configuration";
   const closeRun = () => void navigate({ to: ".", search: ({ run: _run, ...rest }) => rest });
   // Remember the last opened Run so the Sheet stays mounted for its exit transition.
   const [shownRun, setShownRun] = useState(run);

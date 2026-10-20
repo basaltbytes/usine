@@ -80,6 +80,8 @@ export default mergeConfig(
                   after: string,
                   report: string,
                   rejection: string,
+                  configurationBefore: string,
+                  configurationAfter: string,
                 ) => {
                   let reloads = 0;
                   await page.unroute("**/api/overview");
@@ -87,6 +89,12 @@ export default mergeConfig(
                     route.fulfill({
                       contentType: "application/json",
                       body: reloads === 0 ? before : after,
+                    }),
+                  );
+                  await page.route("**/api/configuration", (route) =>
+                    route.fulfill({
+                      contentType: "application/json",
+                      body: reloads === 0 ? configurationBefore : configurationAfter,
                     }),
                   );
                   await page.route("**/api/instance/reload", (route) => {

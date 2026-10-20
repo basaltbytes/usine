@@ -67,6 +67,10 @@ import {
   TaskItemView,
   TaskLaneView,
   TaskView,
+  ConfigurationView,
+  type OperatorConfiguration,
+  SettingsView,
+  WorkerConfigurationView,
 } from "@usine/orchestrator/operator";
 import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
 import {
@@ -238,6 +242,43 @@ const observation: OperatorObservation["Service"] = {
   detail: () => Effect.succeed(detail),
   task: () => Effect.succeed(task),
 };
+const configurationView = new ConfigurationView({
+  loops: [],
+  quarantinedLoops: [],
+  agents: [],
+  invalidAgents: [],
+  workers: [
+    new WorkerConfigurationView({
+      name: WorkerName.make("local"),
+      kind: "local",
+      maxConcurrentAttempts: 1,
+      destination: null,
+      port: null,
+      identityFile: null,
+      root: null,
+      gateway: null,
+      slots: null,
+      prerequisites: null,
+      harnesses: [],
+    }),
+  ],
+  removedWorkers: [],
+  repositories: [],
+  settings: new SettingsView({
+    pollInterval: 60,
+    maxChildren: 4,
+    maxAttemptMinutes: null,
+    maxAttemptTokens: null,
+    parentModel: null,
+    parentEffort: null,
+    operator: null,
+    webhooks: "off",
+    webhooksPublicUrl: null,
+  }),
+});
+const configuration: OperatorConfiguration["Service"] = {
+  view: () => Effect.succeed(configurationView),
+};
 const noChanges = { added: [], removed: [], changed: [] };
 const reloaded = new InstanceReload({
   loops: { added: [LoopName.make("triage")], removed: [], changed: [loopName] },
@@ -264,6 +305,7 @@ const backend = needsSetupBackendLayer(
   { get: Effect.succeed(instance), reload: Effect.succeed(reloaded) },
   "SecretsFileError",
   observation,
+  configuration,
 );
 const app = HttpRouter.toWebHandler(apiRoutes.pipe(HttpRouter.provideRequest(backend)), {
   disableLogger: true,
@@ -309,6 +351,15 @@ describe("operator HTTP API", () => {
       error: "BackendUnavailableError",
       message: "GitHub App setup is required before operator actions are available.",
     });
+
+    const configurationResponse = await app.handler(
+      new Request("http://localhost/api/configuration"),
+    );
+    assert.strictEqual(configurationResponse.status, 200);
+    assert.deepStrictEqual(
+      Schema.decodeUnknownSync(ConfigurationView)(await configurationResponse.json()),
+      configurationView,
+    );
 
     // Setup mode can still pick up edits to the instance folder.
     const reload = await app.handler(
@@ -432,6 +483,7 @@ describe("operator HTTP API", () => {
       unpause: () => Effect.void,
       reload: Effect.suspend(() => Effect.fail(reloadFailure)),
       task: (repository, item) => Effect.fail(new BoardItemNotFoundError({ repository, item })),
+      configuration: Effect.succeed(configurationView),
     });
     const rejectingApp = HttpRouter.toWebHandler(
       apiRoutes.pipe(HttpRouter.provideRequest(rejecting)),
@@ -678,6 +730,7 @@ describe("operator HTTP API", () => {
         repository === repositoryName && item === 31
           ? Effect.succeed(task)
           : Effect.fail(new BoardItemNotFoundError({ repository, item })),
+      configuration: Effect.succeed(configurationView),
     });
     const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
       Layer.provideMerge(NodeHttpServer.layerTest),
@@ -688,6 +741,7 @@ describe("operator HTTP API", () => {
         assert.deepStrictEqual(yield* client.overview(), overview);
         assert.deepStrictEqual(yield* client.agents(), [agentName]);
         assert.deepStrictEqual(yield* client.reload(), reloaded);
+        assert.deepStrictEqual(yield* client.configuration(), configurationView);
         const edit = new EditAndRetry({
           task: AttemptTask.make("Fix the reviewed behavior"),
           agent: agentName,

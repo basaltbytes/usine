@@ -27,9 +27,19 @@ export const PageHeading = ({
   </header>
 );
 
-/** A list screen in the work panel, bounded in width so a row stays readable. */
-export const Page = ({ children }: { readonly children: ReactNode }) => (
+/** How wide a screen's content runs: `prose` stops at 768px so lines stay readable, `full` fills
+ * the work panel for tables and side-by-side layouts. */
+export type PageWidth = "prose" | "full";
+
+/** A screen in the work panel, as wide as `width` allows. */
+export const Page = ({
+  children,
+  width = "prose",
+}: {
+  readonly children: ReactNode;
+  readonly width?: PageWidth;
+}) => (
   <main className="px-4 pt-5 pb-6 md:px-5">
-    <div className="flex max-w-3xl flex-col gap-4">{children}</div>
+    <div className={cn("flex flex-col gap-4", width === "prose" && "max-w-3xl")}>{children}</div>
   </main>
 );

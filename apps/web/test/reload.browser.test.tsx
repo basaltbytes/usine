@@ -11,6 +11,7 @@ import { expect, it } from "vitest";
 import { commands, page } from "vitest/browser";
 import { routeTree } from "../src/route-tree.gen.ts";
 import "../src/index.css";
+import { configurationJson } from "./configuration-fixture.ts";
 
 declare module "vitest/browser" {
   interface BrowserCommands {
@@ -19,16 +20,27 @@ declare module "vitest/browser" {
       after: string,
       report: string,
       rejection: string,
+      configurationBefore: string,
+      configurationAfter: string,
     ) => Promise<void>;
   }
 }
 
-it("reloads the configuration from the Loops page and shows what changed or why it was refused", async () => {
+it("reloads the configuration from any Configuration page and shows what changed or why it was refused", async () => {
   const agent = AgentName.make("developer");
   const loop = (name: string) =>
     new LoopView({ name: LoopName.make(name), trigger: "issue", agent, paused: false });
   const before = new ReadyOverview({ projects: [], loops: [loop("start-dev")], needsYou: [] });
   const after = new ReadyOverview({ ...before, loops: [loop("start-dev"), loop("triage")] });
+  const configurationAfter = {
+    ...configurationJson,
+    loops: [
+      ...configurationJson.loops,
+      ...configurationJson.loops
+        .slice(0, 1)
+        .map((loop) => ({ ...loop, name: "triage", file: "loops/triage.md" })),
+    ],
+  };
   const noChanges = { added: [], removed: [], changed: [] };
   const report = new InstanceReload({
     loops: { added: [LoopName.make("triage")], removed: [], changed: [] },
@@ -50,7 +62,10 @@ it("reloads the configuration from the Loops page and shows what changed or why 
       message:
         "usine.yaml is invalid (yaml): Unexpected token. The running configuration is unchanged.",
     }),
+    JSON.stringify(configurationJson),
+    JSON.stringify(configurationAfter),
   );
+  await page.viewport(1280, 800);
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const router = createRouter({
     routeTree,
@@ -72,13 +87,24 @@ it("reloads the configuration from the Loops page and shows what changed or why 
     await reload.click();
     await expect.element(page.getByText("Configuration reloaded")).toBeVisible();
     await expect.element(page.getByText("Loops added: triage")).toBeVisible();
-    await expect.element(page.getByRole("cell", { name: "triage", exact: true })).toBeVisible();
+    await expect.element(page.getByRole("link", { name: "triage", exact: true })).toBeVisible();
 
-    await reload.click();
+    // The result stays on screen while the operator moves to another page of the section.
+    await page.getByRole("link", { name: "Workers", exact: true }).click();
+    await expect.element(page.getByRole("heading", { name: "Workers" })).toBeVisible();
+    await expect.element(page.getByText("Loops added: triage")).toBeVisible();
+
+    await page.getByRole("button", { name: "Reload configuration" }).click();
     await expect.element(page.getByText("Configuration not reloaded")).toBeVisible();
+    await expect
+      .element(page.getByText("usine.yaml, or the loops or agents folder, could not be loaded."))
+      .toBeVisible();
     await expect
       .element(page.getByText("The running configuration is unchanged", { exact: false }))
       .toBeVisible();
+
+    await page.getByRole("button", { name: "Dismiss the reload result" }).click();
+    await expect.element(page.getByText("Configuration not reloaded")).not.toBeInTheDocument();
   } finally {
     flushSync(() => root.unmount());
     queryClient.clear();

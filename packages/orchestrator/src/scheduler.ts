@@ -11,9 +11,11 @@ import { StepExecutor, type WorkerLease } from "@usine/engine/step-executor";
 import { GitHubApp, type Installation } from "@usine/github/github-app";
 import {
   Array as EffectArray,
+  Context,
   DateTime,
   Deferred,
   Effect,
+  Exit,
   Layer,
   Match,
   Option,
@@ -36,6 +38,7 @@ import {
   restartRequired,
   type WorkerReload,
 } from "./current-instance/current-instance.ts";
+import { recordPreflight, unchecked, type WorkerPreflight, WorkerStatus } from "./worker-status.ts";
 
 export class UnsupportedWorkerError extends Schema.TaggedError<UnsupportedWorkerError>(
   "@usine/orchestrator/UnsupportedWorkerError",
@@ -181,19 +184,19 @@ export interface StepExecutorOptions {
  * reads its `settings` (child budget, ceilings, parent effort) from the
  * current instance, and gets the bot login it writes to GitHub as: exe.dev's
  * integration bot on exe.dev Workers, the App's bot from `GitHubApp` on the
- * others, or none when the App's installation cannot be read.
+ * others, or none when the App's installation cannot be read. `WorkerStatus`
+ * reads the slots and the last preflight of each Worker.
  */
 export const stepExecutorLayer = (
   config: UsineConfig,
   brains: ReadonlyArray<BrainSpec>,
   options: StepExecutorOptions = {},
 ): Layer.Layer<
-  StepExecutor,
+  StepExecutor | WorkerStatus,
   ExecutorError | UnsupportedWorkerError,
   CurrentInstance | Executor | GitHubApp
 > =>
-  Layer.effect(
-    StepExecutor,
+  Layer.effectContext(
     Effect.gen(function* () {
       const executor = yield* Executor;
       const instances = yield* CurrentInstance;
@@ -202,11 +205,30 @@ export const stepExecutorLayer = (
       const pool = yield* TxRef.make(slotPoolOf(workers, new Map()));
       const pending = yield* TxPriorityQueue.empty(reservationOrder);
       const nextOrder = yield* Ref.make(0);
+      const preflights = yield* Ref.make(new Map<WorkerName, WorkerPreflight>());
+
+      const recordPreflightExit = Effect.fn("WorkerScheduler.recordPreflight")(function* (
+        worker: WorkerName,
+        roster: ReadonlyArray<BrainSpec>,
+        exit: Exit.Exit<void, ExecutorError>,
+      ) {
+        const failure = Exit.findErrorOption(exit);
+        // An interrupted or defective preflight says nothing about the Worker.
+        if (Exit.isFailure(exit) && Option.isNone(failure)) return;
+        const checkedAt = yield* DateTime.now;
+        yield* Ref.update(preflights, (current) =>
+          new Map(current).set(
+            worker,
+            recordPreflight(current.get(worker) ?? unchecked(worker), roster, checkedAt, failure),
+          ),
+        );
+      });
 
       const preflightWorker = (worker: ConfigWorker, roster: ReadonlyArray<BrainSpec>) =>
-        executor
-          .preflight(worker.name, roster, worker.maxConcurrentAttempts)
-          .pipe(Effect.mapError(namingWorker(worker.name)));
+        executor.preflight(worker.name, roster, worker.maxConcurrentAttempts).pipe(
+          Effect.mapError(namingWorker(worker.name)),
+          Effect.onExit((exit) => recordPreflightExit(worker.name, roster, exit)),
+        );
 
       const unservedChange = (worker: ConfigWorker): Option.Option<RestartChange> => {
         if (worker.kind !== executor.kind) {
@@ -487,7 +509,16 @@ export const stepExecutorLayer = (
       const interrupt: StepExecutor["Service"]["interrupt"] = (attemptId) =>
         executor.cancel(attemptId).pipe(Effect.mapError(asAttemptFailure));
 
-      return StepExecutor.of({
+      const status = WorkerStatus.of({
+        slots: TxRef.get(pool).pipe(
+          Effect.map((current) =>
+            [...current].map(([worker, { capacity, leased }]) => ({ worker, capacity, leased })),
+          ),
+        ),
+        preflights: Ref.get(preflights).pipe(Effect.map((current) => [...current.values()])),
+      });
+
+      const stepExecutor = StepExecutor.of({
         workers: TxRef.get(pool).pipe(Effect.map((current) => [...current.keys()])),
         execute,
         interrupt,
@@ -504,5 +535,6 @@ export const stepExecutorLayer = (
               ),
             ),
       });
+      return Context.make(StepExecutor, stepExecutor).pipe(Context.add(WorkerStatus, status));
     }),
   );

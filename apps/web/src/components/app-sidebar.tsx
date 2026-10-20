@@ -15,6 +15,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
+import { ConfigurationMenu } from "../configuration/layout.tsx";
 import { projectParams } from "../overview.ts";
 
 export type OperatorView = "projects" | "configuration";
@@ -84,16 +85,7 @@ export const AppSidebar = ({
       <SidebarGroup className="pt-3">
         <SidebarGroupLabel>Configuration</SidebarGroupLabel>
         <SidebarGroupContent>
-          <SidebarMenu>
-            <SidebarMenuItem>
-              <SidebarMenuButton
-                isActive={view === "configuration"}
-                render={<Link to="/configuration/loops" />}
-              >
-                <span>Loops</span>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-          </SidebarMenu>
+          <ConfigurationMenu inSection={view === "configuration"} />
         </SidebarGroupContent>
       </SidebarGroup>
     </SidebarContent>

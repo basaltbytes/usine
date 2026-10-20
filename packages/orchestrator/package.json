@@ -67,6 +67,10 @@
       "types": "./dist/ssh.d.ts",
       "default": "./dist/ssh.js"
     },
+    "./worker-status": {
+      "types": "./dist/worker-status.d.ts",
+      "default": "./dist/worker-status.js"
+    },
     "./operator": {
       "types": "./dist/operator/operator.d.ts",
       "default": "./dist/operator/operator.js"

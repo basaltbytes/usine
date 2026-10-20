@@ -2,6 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { UsineConfig } from "@usine/config/factory";
 import type { Agent } from "@usine/core/agent";
+import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import { AttemptTask } from "@usine/core/attempt";
 import { DedupKey, Event, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
@@ -27,6 +28,7 @@ import {
 } from "effect";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
 import { stepExecutorLayer } from "../src/scheduler.ts";
+import { WorkerStatus } from "../src/worker-status.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
 import { testAppLayer } from "./support/github-app.ts";
 import { reloadableInstanceLayer, writeInstanceFiles } from "./support/instance-folder.ts";
@@ -475,5 +477,75 @@ describe("Worker scheduler on reload", () => {
         assert.deepStrictEqual(yield* scheduler.workers, [WorkerName.make("build-1")]);
       }).pipe(Effect.scoped),
     ),
+  );
+});
+
+describe("Worker status", () => {
+  it.live(
+    "reports slots in use and the last preflight per harness, including a refused reload's",
+    () =>
+      withWorkers(localWorkers([["local", 2]]), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const { config, agents } = yield* instances.get;
+          const executor = Layer.succeed(Executor)({
+            kind: "local",
+            recover: unused,
+            isLive: unused,
+            outcome: unused,
+            prepare: unused,
+            cancel: unused,
+            intervene: unused,
+            preflight: (worker, brains) =>
+              brains.some(({ harness }) => harness === "claude")
+                ? Effect.fail(
+                    new WorkerCapabilityError({
+                      worker,
+                      capability: "harness-login",
+                      message: "Claude Code is not logged in",
+                      cause: new HarnessUnavailableError({
+                        harness: "claude",
+                        capability: "login",
+                        message: "Claude Code is not logged in",
+                      }),
+                    }),
+                  )
+                : Effect.void,
+          });
+          const context = yield* Layer.build(
+            stepExecutorLayer(
+              config,
+              agents.map(({ agent }) => agent.brain),
+            ).pipe(Layer.provide(executor), Layer.provide(testAppLayer)),
+          );
+          const scheduler = Context.get(context, StepExecutor);
+          const status = Context.get(context, WorkerStatus);
+          const checks = Effect.map(status.preflights, (preflights) =>
+            preflights.flatMap(({ worker, prerequisites, harnesses }) => [
+              `${worker} ${Option.match(prerequisites, { onNone: () => "unchecked", onSome: ({ _tag }) => _tag })}`,
+              ...harnesses.map(({ harness, check }) => `${worker} ${harness} ${check._tag}`),
+            ]),
+          );
+          assert.deepStrictEqual(yield* checks, ["local Passed", "local codex Passed"]);
+          assert.deepStrictEqual(yield* status.slots, [{ worker: local, capacity: 2, leased: 0 }]);
+
+          yield* scheduler.reserve(submission(yield* developer, 1));
+          assert.deepStrictEqual(yield* status.slots, [{ worker: local, capacity: 2, leased: 1 }]);
+
+          yield* writeInstanceFiles(root, [
+            [
+              "agents/reviewer.md",
+              "---\nharness: claude\nmodel: claude-opus-4-1\neffort: high\n---\nReview the pull request.\n",
+            ],
+          ]);
+          const refused = yield* Effect.flip(instances.reload);
+          assert(refused._tag === "ReloadPreflightError", refused._tag);
+          assert.deepStrictEqual(yield* checks, [
+            "local Passed",
+            "local claude Failed",
+            "local codex Passed",
+          ]);
+        }).pipe(Effect.scoped),
+      ),
   );
 });

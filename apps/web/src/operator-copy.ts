@@ -281,8 +281,8 @@ export const needCopy = (need: NeedView): NeedCopy =>
     }),
   });
 
-/** One line per kind of change an accepted reload made, then the files it left out. */
-export const reloadSummary = (reload: InstanceReload): ReadonlyArray<string> => {
+/** One line per kind of change an accepted reload made, or `Nothing changed`. */
+export const reloadChanges = (reload: InstanceReload): ReadonlyArray<string> => {
   const named = [
     ["Loops", reload.loops],
     ["Agents", reload.agents],
@@ -304,6 +304,12 @@ export const reloadSummary = (reload: InstanceReload): ReadonlyArray<string> => 
   if (reload.settingsChanged) lines.push("Settings changed");
   if (reload.operatorChanged) lines.push("Operator login changed");
   if (lines.length === 0) lines.push("Nothing changed");
+  return lines;
+};
+
+/** One line per kind of change an accepted reload made, then the files it left out. */
+export const reloadSummary = (reload: InstanceReload): ReadonlyArray<string> => {
+  const lines = [...reloadChanges(reload)];
   const leftOut = reload.quarantinedLoops.length + reload.invalidAgents.length;
   if (leftOut > 0) {
     lines.push(

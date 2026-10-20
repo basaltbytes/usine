@@ -236,7 +236,9 @@ A 232px mantle sidebar on the left; to its right the base work panel, inset 8px 
 
 On the Board, Needs you items sit in a two-column grid from `lg` (one column below) with 10px gaps. The Project title and its counts follow, then the lanes: 272px wide, 12px apart, scrolling sideways together. Each lane heading is sticky on the base ground while its cards scroll. Folded lanes become 40px rails showing the name vertically and the count. Page gutters are 16px, 20px from `md`.
 
-List screens (Projects, Loops) sit flat on the panel, with no card around them: the page heading, then a table at most 768px wide. Its text lines up with the heading, so its hairlines and row fills reach 8px past the heading on each side. Below `sm`, a table drops or folds its least important columns instead of scrolling sideways.
+List screens sit flat on the panel, with no card around them: the page heading, then a table. The page shell has two widths: prose stops content at 768px (Projects), full fills the panel (every Configuration page). A table's text lines up with the heading, so its hairlines and row fills reach 8px past the heading on each side. Below `sm`, a table drops or folds its least important columns instead of scrolling sideways.
+
+A Configuration detail page puts the file's long parts (trigger, selector, prompt, persona, lanes, preflight) in a main column and its short facts in a 21rem rail on the right, behind a hairline, from `lg`; below `lg` the rail comes first. The heading row carries the entry's name, its state mark, and its file path in 12px mono under the name, with the actions at the right; on phones the actions wrap under the path.
 
 The Task page (`Projects › repository › Task #<number>`) is a document at most 1024px wide, flat on the panel with 16px gutters (20px from `md`), 20px above and 40px below. Its header comes first: the originating Item's number in 12px mono mauve, linking to GitHub, on the baseline of the 20px title, then a facts line in 13px with 20px between facts (the current Item's state in medium text colour, `Lane` and its name, the label chips, Needs you), and Move to as an outline button at the right of the title from `sm`. Three sections follow 32px apart, each a 16px semibold title with its count in 13px subtext0 on the same baseline, 8px above a flat table: Runs, Pull requests, and Comments and reviews. Runs shows all its columns from `xl` and folds Agent, Attempts, duration, opened, and pull request into one 12px line under the Loop below it; below `sm` the state column folds into that line too, its dot before the Loop. A run row's cells align to the top so a failure, approval, or Run again line sits under the Loop without moving the other cells. An empty section is a hairline with a 13px medium title and one sentence on how it fills.
 
@@ -319,10 +321,22 @@ Compact and quiet; most actions are 28px tall.
 - **Menus:** surface0 popup, 8px radius, 4px padding, Raised shadow; 28px items in 13px, focus fills surface1; destructive items in red with a red 15% focus fill. Menus list only actions that apply.
 
 ### Page heading
-The screen title in 20px semibold, its counts beside it in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), then any mark such as Needs you, with the screen's actions at the right of the row. Shared by the Board, Projects, and Loops.
+The screen title in 20px semibold, its counts beside it in 13px subtext0 on the same baseline (`9 lanes, 233 items`, `5 loops, 1 paused`), then any mark such as Needs you, with the screen's actions at the right of the row. Shared by the Board, Projects, and the Configuration pages.
 
 ### Flat table
 The registry table on the panel ground: a 36px heading row of 12px subtext0 labels, then 44px rows split by hairlines, 8px cell padding, numbers right-aligned in tabular figures. A row that opens something fills surface0 at 60% on hover and while its link has focus, and the link takes a 2px mauve outline; rows that open nothing have no hover fill. Row actions are ghost buttons in subtext0 that show only what applies, such as Pause or Resume.
+
+### Frontmatter block
+Keys and values copied from a file, such as a Loop's `on:` and `if:`: a mantle box with a hairline ring and 8px radius, 12px mono, keys in subtext0, values in text colour and wrapping anywhere. Ligatures are off, so `==` reads as written.
+
+### Facts rail
+A definition list of short facts beside a detail page: 13px labels in subtext0 in a 6.5rem column, values in text colour; a value's source or unit follows in subtext0. Links to other entries are mauve.
+
+### Prompt expression
+A `{{ }}` expression in a rendered prompt is outlined, not filled: mono on no fill with a 10% white ring, its braces in subtext0. Inline code keeps the surface0 fill, so a literal and a value filled in per Item read apart.
+
+### Slot cells
+One 10px cell per Worker slot, 4px apart: filled in the running blue while an Attempt holds it, an empty ring otherwise, with the count beside them.
 
 ### Needs you item
 Peach-tinted row: 8px radius, peach border at 25%, peach fill at 5% (8% on hover), 14px by 10px padding. Title 13px medium, context in 12px, and its actions (primary and ghost buttons) at the right. The whole row opens the related Run.
