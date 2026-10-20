@@ -115,18 +115,19 @@ const finalAnswer = Effect.fn("AttemptTask.finalAnswer")(function* (
 });
 
 /**
- * Whether the answer replies to operator input: the newest user input before
- * it is not the Attempt's prompt, and no tool result lies between them.
+ * Whether the answer replies to an operator message or a steer: the newest
+ * user input before it is not the turn's own input, the Attempt's prompt or
+ * the release guidance, and no tool result lies between them.
  */
 const repliesToOperator = (
   entries: ReadonlyArray<EntryRecord>,
   answer: EntryId,
-  prompt: Option.Option<EntryId>,
+  ownInput: Option.Option<EntryId>,
 ): boolean => {
   for (const entry of [...entries].reverse()) {
     if (entry.id >= answer) continue;
     if (entry.kind === ToolResultEntry.kind) return false;
-    if (entry.kind === UserEntry.kind) return !Option.contains(prompt, entry.id);
+    if (entry.kind === UserEntry.kind) return !Option.contains(ownInput, entry.id);
   }
   return false;
 };
@@ -374,7 +375,7 @@ export const attemptTask = (
       const answeredOperator = repliesToOperator(
         view.entries,
         settled.answer,
-        turn === 1 ? Option.some(settled.entry) : Option.none(),
+        turn === 1 || message === RELEASE_GUIDANCE ? Option.some(settled.entry) : Option.none(),
       );
       const record = yield* call("read the Attempt record", () =>
         runtime.snapshot(AttemptRecordDoc, spec.attemptId, context),

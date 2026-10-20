@@ -32,6 +32,6 @@ The decision above said the parent has no hold semantics because it returns to n
 
 pi-durable places a steer after the running tool call returns, and the parent's only tool is a delegation that can run for a long time. It cannot deliver a user turn into a call in progress without aborting the child, so a message to a delegating parent is queued. Its receipt says so, and a second receipt with the same input sequence reports when the parent reads it, or that it never will, as when the operator pauses the parent and the abort withdraws the message.
 
-The parent's report also records whether its last turn replied to operator input without delegating after it. The executor fails such an Attempt with an `AgentFailure` when the checkout holds no commit, pull request, or comment, so a parent that ends on its answer to the operator, after a steer or a release, never makes the Run `Succeeded` with nothing delivered.
+The parent's report also records whether its last turn replied to operator input without delegating after it. The executor fails such an Attempt with an `AgentFailure` when the checkout holds no commit, pull request, or comment, so a parent that ends on its answer to the operator, after a steer or a release, never makes the Run `Succeeded` with nothing delivered. 2026-10-20 (#393): only an operator message or a steer counts as operator input, so a released parent's answer to the release guidance is judged on its harvest and final answer like any other.
 
 The runaway guard's wall-clock pause covers the parent's Hold as it covers a child's.
