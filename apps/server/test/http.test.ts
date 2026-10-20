@@ -6,6 +6,7 @@ import { NodeHttpPlatform, NodeHttpServer } from "@effect/platform-node";
 import { FactoryConfigError, ConfigFileError, InstancePath } from "@usine/config/file";
 import { LoadedInstance } from "@usine/config/instance";
 import { GitHubLabelName } from "@usine/config/label";
+import { LaneName } from "@usine/config/board";
 import { QuarantinedLoop } from "@usine/config/loop";
 import { UsineConfig } from "@usine/config/factory";
 import { AgentName } from "@usine/core/agent";
@@ -61,6 +62,11 @@ import {
   TailTranscriptRequest,
   type TranscriptRequest,
   OperatorObservation,
+  BoardItemNotFoundError,
+  TaskCommentView,
+  TaskItemView,
+  TaskLaneView,
+  TaskView,
 } from "@usine/orchestrator/operator";
 import { OperatorApi, OperatorHttpError } from "@usine/orchestrator/operator/http";
 import {
@@ -195,9 +201,42 @@ const githubChanges = new RunGitHubChangesView({
     }),
   ],
 });
+const task = new TaskView({
+  repository: repositoryName,
+  number: ItemNumber.make(31),
+  title: "Review issue 31",
+  current: run.itemKey,
+  lane: new TaskLaneView({
+    id: BoardLaneId.make("authored:Review"),
+    name: LaneName.make("Review"),
+  }),
+  needsYou: true,
+  items: [
+    new TaskItemView({
+      itemKey: run.itemKey,
+      kind: "issue",
+      number: ItemNumber.make(31),
+      title: "Review issue 31",
+      url: "https://github.com/basaltbytes/usine/issues/31",
+      state: "issue-open",
+      labels: [GitHubLabelName.make("review")],
+      conflicting: false,
+    }),
+  ],
+  runs: [run],
+  comments: [
+    new TaskCommentView({
+      runId,
+      kind: "issue-comment",
+      url: "https://github.com/basaltbytes/usine/issues/31#issuecomment-1",
+      at: "2026-09-01T12:30:00.000Z",
+    }),
+  ],
+});
 const observation: OperatorObservation["Service"] = {
   overview: () => Effect.succeed(overview),
   detail: () => Effect.succeed(detail),
+  task: () => Effect.succeed(task),
 };
 const noChanges = { added: [], removed: [], changed: [] };
 const reloaded = new InstanceReload({
@@ -244,6 +283,12 @@ describe("operator HTTP API", () => {
     const runResponse = await app.handler(new Request(`http://localhost/api/runs/${runId}`));
     assert.strictEqual(runResponse.status, 200);
     assert.strictEqual((await runResponse.json()).eventDedupKey, "issue:31");
+
+    const taskResponse = await app.handler(
+      new Request("http://localhost/api/projects/basaltbytes/usine/tasks/31"),
+    );
+    assert.strictEqual(taskResponse.status, 200);
+    assert.deepStrictEqual(Schema.decodeUnknownSync(TaskView)(await taskResponse.json()), task);
 
     for (const search of [
       "after=2&after=0",
@@ -386,6 +431,7 @@ describe("operator HTTP API", () => {
       pause: () => Effect.void,
       unpause: () => Effect.void,
       reload: Effect.suspend(() => Effect.fail(reloadFailure)),
+      task: (repository, item) => Effect.fail(new BoardItemNotFoundError({ repository, item })),
     });
     const rejectingApp = HttpRouter.toWebHandler(
       apiRoutes.pipe(HttpRouter.provideRequest(rejecting)),
@@ -397,6 +443,15 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(await missing.json(), {
         error: "RunNotFoundError",
         message: "Run run-2 was not found.",
+      });
+
+      const offBoard = await rejectingApp.handler(
+        new Request("http://localhost/api/projects/basaltbytes/usine/tasks/9999"),
+      );
+      assert.strictEqual(offBoard.status, 404);
+      assert.deepStrictEqual(await offBoard.json(), {
+        error: "BoardItemNotFoundError",
+        message: "Item basaltbytes/usine#9999 was not found on the Board.",
       });
 
       const gone = await rejectingApp.handler(
@@ -619,6 +674,10 @@ describe("operator HTTP API", () => {
       unpause: (loop) => record(`unpause:${loop}`),
       moveBoardItem: (move) => record(`move:${move.repository}#${move.item}:${move.toLane}`),
       reload: Effect.succeed(reloaded),
+      task: (repository, item) =>
+        repository === repositoryName && item === 31
+          ? Effect.succeed(task)
+          : Effect.fail(new BoardItemNotFoundError({ repository, item })),
     });
     const server = HttpRouter.serve(apiRoutes.pipe(HttpRouter.provideRequest(live))).pipe(
       Layer.provideMerge(NodeHttpServer.layerTest),
@@ -660,6 +719,12 @@ describe("operator HTTP API", () => {
         }
         assert.deepStrictEqual(observed, requests);
         assert.deepStrictEqual(yield* client.githubChanges({ params: { runId } }), githubChanges);
+        assert.deepStrictEqual(
+          yield* client.task({
+            params: { owner: "basaltbytes", repository: "usine", item: ItemNumber.make(31) },
+          }),
+          task,
+        );
         assert.deepStrictEqual(
           yield* client.resetCycleBudget({
             payload: { askId: CycleBudgetAskId.make("current-ask") },

@@ -56,9 +56,12 @@ const Unreachable = ({ error }: { readonly error: Error }) => {
 const Crumbs = ({
   project,
   runId,
+  task,
 }: {
   readonly project: RepositoryName | undefined;
   readonly runId: RunId | undefined;
+  /** The Item number of the Task page being shown. */
+  readonly task: string | undefined;
 }) => {
   const matchRoute = useMatchRoute();
   const configuration = matchRoute({ to: "/configuration/loops" }) !== false;
@@ -87,7 +90,7 @@ const Crumbs = ({
       </BreadcrumbItem>
       <BreadcrumbSeparator />
       <BreadcrumbItem>
-        {runId === undefined ? (
+        {runId === undefined && task === undefined ? (
           <BreadcrumbPage>{project}</BreadcrumbPage>
         ) : (
           <BreadcrumbLink
@@ -103,6 +106,16 @@ const Crumbs = ({
           <BreadcrumbItem>
             <BreadcrumbPage>
               Run <span className="font-mono text-xs">{runId.slice(0, 8)}</span>
+            </BreadcrumbPage>
+          </BreadcrumbItem>
+        </>
+      )}
+      {task !== undefined && (
+        <>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            <BreadcrumbPage>
+              Task <span className="font-mono text-xs">#{task}</span>
             </BreadcrumbPage>
           </BreadcrumbItem>
         </>
@@ -139,7 +152,7 @@ const Shell = () => {
           <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
           <Breadcrumb>
             <BreadcrumbList>
-              <Crumbs project={project} runId={params.run} />
+              <Crumbs project={project} runId={params.run} task={params.number} />
             </BreadcrumbList>
           </Breadcrumb>
         </header>

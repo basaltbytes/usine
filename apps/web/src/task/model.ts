@@ -1,0 +1,78 @@
+import type { LaneItemState } from "@usine/config/board";
+import type { CommentKind } from "@usine/core/step/result";
+import type { FailureView, RunView, TaskItemView } from "@usine/orchestrator/operator";
+import { Option } from "effect";
+
+/**
+ * How long a Run's Attempts ran, added up: each ended Attempt from its start to its end, and a
+ * live Attempt up to `now`. None when no Attempt started, or when an ended Attempt has no
+ * recorded end, since the sum would then undercount.
+ */
+export const attemptsDuration = (
+  run: Pick<RunView, "attempts">,
+  now: number,
+): Option.Option<number> => {
+  if (run.attempts.length === 0) return Option.none();
+  let total = 0;
+  for (const attempt of run.attempts) {
+    const end =
+      attempt.outcome === null
+        ? now
+        : attempt.endedAt === null
+          ? Number.NaN
+          : Date.parse(attempt.endedAt);
+    if (Number.isNaN(end)) return Option.none();
+    total += Math.max(0, end - Date.parse(attempt.startedAt));
+  }
+  return Option.some(total);
+};
+
+/** The typed failure that closed a Failed Run's latest Attempt; none for any other Run. */
+export const runFailure = (
+  run: Pick<RunView, "state" | "attempts">,
+): Option.Option<FailureView> => {
+  const outcome = run.attempts.at(-1)?.outcome;
+  return run.state === "Failed" && outcome?._tag === "Failed"
+    ? Option.some(outcome.failure)
+    : Option.none();
+};
+
+/** An Item's state and kind in words, such as `Open issue` or `Merged pull request #41`; the
+ * number is named when the Item is not the Task's originating one. */
+export const itemStateLine = (
+  item: Pick<TaskItemView, "kind" | "number" | "state">,
+  origin: boolean,
+): string => {
+  const kind = item.kind === "pr" ? "pull request" : "issue";
+  return `${itemStateLabel(item.state)} ${kind}${origin ? "" : ` #${item.number}`}`;
+};
+
+/** An Item's state as GitHub names it: Open, Closed, or Merged. */
+export const itemStateLabel = (state: LaneItemState): string => {
+  switch (state) {
+    case "issue-open":
+    case "pr-open":
+      return "Open";
+    case "issue-closed":
+    case "pr-closed":
+      return "Closed";
+    case "pr-merged":
+      return "Merged";
+  }
+};
+
+/** What an Agent posted, as GitHub names it. */
+export const commentKindLabel = (kind: CommentKind): string => {
+  switch (kind) {
+    case "issue-comment":
+      return "Comment";
+    case "review":
+      return "Review";
+    case "review-comment":
+      return "Review comment";
+  }
+};
+
+/** An Item's number and kind, as Board cards show them: `#41 PR` or `#40 Issue`. */
+export const itemReference = (item: Pick<TaskItemView, "kind" | "number">): string =>
+  `#${item.number} ${item.kind === "pr" ? "PR" : "Issue"}`;

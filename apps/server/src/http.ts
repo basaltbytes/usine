@@ -142,6 +142,17 @@ const fromBackend = <A>(
   use: (backend: FactoryBackend["Service"]) => Effect.Effect<A, BackendError>,
 ) => Effect.flatMap(FactoryBackend, use).pipe(Effect.mapError(operatorFailure));
 
+const projectRepository = (params: { readonly owner: string; readonly repository: string }) =>
+  Schema.decodeUnknownEffect(RepositoryName)(`${params.owner}/${params.repository}`).pipe(
+    Effect.mapError(
+      (error) =>
+        new OperatorHttpError({
+          error: "SchemaError",
+          message: `Invalid request: ${error.message}`,
+        }),
+    ),
+  );
+
 const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
   routes
     .handle("overview", () => fromBackend((backend) => backend.overview))
@@ -184,17 +195,7 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     .handle(
       "moveBoardItem",
       Effect.fn("Http.boardMove")(function* ({ params, payload }) {
-        const repository = yield* Schema.decodeUnknownEffect(RepositoryName)(
-          `${params.owner}/${params.repository}`,
-        ).pipe(
-          Effect.mapError(
-            (error) =>
-              new OperatorHttpError({
-                error: "SchemaError",
-                message: `Invalid request: ${error.message}`,
-              }),
-          ),
-        );
+        const repository = yield* projectRepository(params);
         yield* Effect.annotateCurrentSpan({ repository, item: params.item, lane: payload.toLane });
         return yield* fromBackend((backend) =>
           backend.moveBoardItem(
@@ -209,7 +210,15 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
     .handle("unpause", ({ params }) =>
       fromBackend((backend) => backend.unpause(params.loop)).pipe(acknowledge),
     )
-    .handle("reload", () => fromBackend((backend) => backend.reload)),
+    .handle("reload", () => fromBackend((backend) => backend.reload))
+    .handle(
+      "task",
+      Effect.fn("Http.task")(function* ({ params }) {
+        const repository = yield* projectRepository(params);
+        yield* Effect.annotateCurrentSpan({ repository, item: params.item });
+        return yield* fromBackend((backend) => backend.task(repository, params.item));
+      }),
+    ),
 );
 
 export const apiRoutes = HttpApiBuilder.layer(OperatorApi).pipe(

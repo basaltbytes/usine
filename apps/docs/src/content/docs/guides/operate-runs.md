@@ -11,7 +11,16 @@ A Run is the work that a Loop does for one Event, and each try of its Step is an
 
 **Projects** lists the registered repositories with a status, their open Runs by running, queued, and waiting, and their Item and lane counts. The status counts the Needs you entries about the Project, or reads **Active** while a Run can still be canceled, or **Clear**. Opening a project shows its Board, where each lane names the labels and Item states that route Items to it, and each card is a task: an issue and the pull requests linked to it. While a task has an open Run, or a `Failed` Run you have not resolved, its card shows that Run's Loop, state, time, and Agent, so you can see when the Run is `Waiting` for your approval or `Queued` for a free Worker. The time counts from when the Run opened, from when its current Attempt started while it is `Running`, and from the failure once it is `Failed`; hover it for the full timestamp. The card's menu button lists only what applies: it opens the task's Items on GitHub and its Run, lists the task's other Runs under **Run history**, approves, retries, or cancels the Run when its state allows, and moves the card to another lane under **Move to**. The Board lists Runs without an Item, such as schedule Runs, below the lanes under **Runs without a card**.
 
-Clicking a card that has a Run, choosing a Run in the card's menu, or selecting a Run in **Needs you** opens the Run drawer. The URL gets `?run=<run id>`, so you can share or reload it. The drawer has:
+Clicking a card opens its task page at `/projects/<owner>/<name>/tasks/<number>`, whether or not the task has a Run. The number is the task's originating issue, or its first pull request when it has no issue; the number of any of its Items opens the same page. The page shows:
+
+- a header with the issue's number, which links to GitHub, its title, the state of the Item that places the task in its lane, the lane, that Item's labels, and **Move to**, which moves the card as on the Board;
+- **Runs**: every Run on the task's Items, newest first, `Succeeded` and `Canceled` ones included, with its state, Loop, the Item it works on, Agent, Attempts, how long its Attempts ran, when it opened, the pull request it produced, the typed reason of a failure, and who approved it or ran it again. Clicking a row opens the Run page. A Run that needs you shows **Approve** or **Retry** in its row, and the row's menu lists the other actions its state allows;
+- **Pull requests**: the task's pull requests, each with its state and whether it conflicts with its base;
+- **Comments and reviews**: what the Runs' Agents posted on the task's Items, with the Run that posted it and when that Run's Attempt ended. A comment appears once its Attempt succeeds.
+
+Like the Board, the page covers the Project's 500 newest Items.
+
+Choosing **Open Run** in a card's menu, or selecting a Run in **Needs you**, opens the Run drawer. The URL gets `?run=<run id>`, so you can share or reload it. The drawer has:
 
 - a header with the Loop, the Run's state, a **Loop paused** badge when that applies, the repository, and links to the Item and to the pull request the Run produced;
 - a row of the actions the Run's state allows;
@@ -121,7 +130,7 @@ If you remove and add the label within one poll interval, polling sees only the 
 
 ## Run again
 
-A `Succeeded` or `Canceled` Run has **Run again** and **Edit and run again** in its drawer and on its Run page. **Run again** opens a new Run of the same Loop on the same Item content, with the Run's task and Agent, and shows the new Run. **Edit and run again** opens the task and Agent editor first; **Save and run again** starts the new Run with your changes. The Run you ran again stays as it ended, and both Runs are in the Item's Run history.
+A `Succeeded` or `Canceled` Run has **Run again** and **Edit and run again** in its drawer, on its Run page, and in its row's menu on the task page. **Run again** opens a new Run of the same Loop on the same Item content, with the Run's task and Agent, and shows the new Run. **Edit and run again** opens the task and Agent editor first; **Save and run again** starts the new Run with your changes. The Run you ran again stays as it ended, and both Runs are in the Item's Run history.
 
 The new Run follows the Loop file as it is now: it waits for your approval when the Loop requires approval, and it counts against the Item's cycle budget. When the budget is used up, no Run opens, the drawer says so, and the Item's cycle budget appears in **Needs you**. usine refuses to run a Run again while another Run of the Loop is open on the Item. The Event section of the new Run's page shows who ran it again, when, and from which Run.
 

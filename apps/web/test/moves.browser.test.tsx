@@ -21,6 +21,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { commands, page, userEvent } from "vitest/browser";
 import { ProjectBoard } from "../src/board/board.tsx";
 import { overviewQuery } from "../src/overview.ts";
+import { WithRouter } from "./memory-router.tsx";
 import "../src/index.css";
 
 declare module "vitest/browser" {
@@ -131,7 +132,9 @@ beforeEach(async () => {
   flushSync(() =>
     root.render(
       <QueryClientProvider client={queryClient}>
-        <Board />
+        <WithRouter>
+          <Board />
+        </WithRouter>
       </QueryClientProvider>,
     ),
   );
@@ -207,7 +210,9 @@ it("finishes an in-flight move in its original project after navigating to anoth
   flushSync(() =>
     root.render(
       <QueryClientProvider client={queryClient}>
-        <Board selected={other} />
+        <WithRouter>
+          <Board selected={other} />
+        </WithRouter>
       </QueryClientProvider>,
     ),
   );
@@ -218,7 +223,9 @@ it("finishes an in-flight move in its original project after navigating to anoth
   flushSync(() =>
     root.render(
       <QueryClientProvider client={queryClient}>
-        <Board />
+        <WithRouter>
+          <Board />
+        </WithRouter>
       </QueryClientProvider>,
     ),
   );
@@ -269,7 +276,9 @@ it("keeps a saved destination when the project is reopened before GitHub is obse
   flushSync(() =>
     root.render(
       <QueryClientProvider client={queryClient}>
-        <Board />
+        <WithRouter>
+          <Board />
+        </WithRouter>
       </QueryClientProvider>,
     ),
   );

@@ -22,7 +22,10 @@ import {
   type OperatorObservation,
   type EditAndRetry,
   type SessionIntervention,
+  type TaskView,
 } from "@usine/orchestrator/operator";
+import type { ItemNumber } from "@usine/core/item";
+import type { RepositoryName } from "@usine/core/repository";
 import { Context, Effect, Layer, Schema } from "effect";
 
 export class BackendUnavailableError extends Schema.TaggedError<BackendUnavailableError>(
@@ -65,6 +68,11 @@ export class FactoryBackend extends Context.Service<
     readonly pause: (loop: LoopName) => Effect.Effect<void, BackendError>;
     readonly unpause: (loop: LoopName) => Effect.Effect<void, BackendError>;
     readonly reload: Effect.Effect<InstanceReload, BackendError>;
+
+    readonly task: (
+      repository: RepositoryName,
+      item: ItemNumber,
+    ) => Effect.Effect<TaskView, BackendError>;
   }
 >()("@usine/server/FactoryBackend") {}
 
@@ -102,6 +110,9 @@ export const liveBackendLayer = (
     pause: (loop) => operator.pause(loop).pipe(Effect.asVoid),
     unpause: (loop) => operator.unpause(loop).pipe(Effect.asVoid),
     reload: instances.reload,
+
+    task: (repository, item) =>
+      Effect.flatMap(instances.get, (instance) => operator.task(instance, repository, item)),
   });
 
 /** The read-only backend of setup mode; reading the overview and reloading the instance folder still work. */
@@ -138,5 +149,8 @@ export const needsSetupBackendLayer = (
     pause: fail,
     unpause: fail,
     reload: instances.reload,
+
+    task: (repository, item) =>
+      Effect.flatMap(instances.get, (instance) => observation.task(instance, repository, item)),
   });
 };

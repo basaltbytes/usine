@@ -13,6 +13,8 @@ import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import type { WorkerName } from "@usine/core/worker";
+import type { ItemNumber } from "@usine/core/item";
+import type { RepositoryName } from "@usine/core/repository";
 import {
   RunAgainRequest,
   type RunAgainResult,
@@ -88,6 +90,7 @@ import {
   type RunGitHubChangesError,
   type RunGitHubChangesView,
 } from "./github-changes.ts";
+import { TaskReader, type TaskReadError, type TaskView } from "./task.ts";
 
 export type BoardMoveError =
   | BoardItemNotFoundError
@@ -430,7 +433,9 @@ const makeOperatorObservation = Effect.gen(function* () {
     });
   });
 
-  return { detail, overview } as const;
+  const tasks = yield* TaskReader;
+
+  return { detail, overview, task: tasks.read } as const;
 });
 
 /** The read-only operator surface. It needs no trigger execution to build. */
@@ -446,9 +451,22 @@ export class OperatorObservation extends Context.Service<
       runId: RunId,
       request?: TranscriptRequest,
     ) => Effect.Effect<RunDetailView, OperatorObservationError>;
+
+    /**
+     * Reads the Task holding Item `item` of `repository`: its Items, every saved Run on
+     * them, and their harvested comments. Any member's number finds the Task; the view
+     * names its originating Item. Fails when the Item is not among the Board's newest Items.
+     */
+    readonly task: (
+      instance: LoadedInstance,
+      repository: RepositoryName,
+      item: ItemNumber,
+    ) => Effect.Effect<TaskView, TaskReadError>;
   }
 >()("@usine/orchestrator/OperatorObservation") {
-  static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation);
+  static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation).pipe(
+    Layer.provide(TaskReader.layer),
+  );
 }
 
 const makeOperator = Effect.gen(function* () {
@@ -879,6 +897,13 @@ export {
   BoardLaneNotFoundError,
   BoardLaneReadOnlyError,
 } from "./board.ts";
+export {
+  TaskItemView,
+  TaskLaneView,
+  TaskCommentView,
+  TaskView,
+  type TaskReadError,
+} from "./task.ts";
 export {
   ApprovalNeed,
   CycleBudgetNeed,
