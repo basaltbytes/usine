@@ -387,6 +387,7 @@ const testLayer = (
         Effect.andThen(Effect.yieldNow),
         Effect.as([runSnapshot]),
       ),
+    closed: () => Effect.succeed([]),
     forItems: () => Effect.succeed([runSnapshot]),
     revision: () => Ref.get(projectionRevision),
     transcript: readTranscript,

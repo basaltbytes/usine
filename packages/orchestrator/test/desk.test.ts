@@ -351,6 +351,12 @@ const deskLayer = (polls: ReadonlyArray<RepositoryPoll>) => {
     inspect: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
     list: () => Effect.succeed(runs),
+    closed: ({ limit }) =>
+      Effect.succeed(
+        runs
+          .filter(({ run }) => !RunState.OPEN_STATE_TAGS.some((tag) => tag === run.state._tag))
+          .slice(0, limit),
+      ),
     forItems: (keys) => Effect.succeed(runs.filter(({ itemKey }) => keys.includes(itemKey))),
     revision: () => Effect.die("unused"),
     transcript: (query) =>

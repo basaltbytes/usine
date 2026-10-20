@@ -360,6 +360,7 @@ const observation = (requested: Ref.Ref<ReadonlyArray<string>>) => {
     inspect: () => Effect.die("unused"),
     evidence: () => Effect.die("unused"),
     list: () => Effect.die("A Task reads every Run of its Items, not the overview's window"),
+    closed: () => Effect.die("unused"),
     forItems: (keys) =>
       Ref.set(requested, keys).pipe(
         Effect.as(runs.filter(({ itemKey }) => keys.includes(itemKey))),
