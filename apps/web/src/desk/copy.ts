@@ -2,52 +2,10 @@ import type {
   ConnectivityWarningView,
   DeskView,
   RepositoryPollView,
-  RunView,
-  StalledItemView,
   WorkerView,
 } from "@usine/orchestrator/operator";
 import { Match } from "effect";
-import { clockLabel, elapsedLabel, failureReason } from "../operator-copy.ts";
-
-/** How long ago `instant` was, as a phrase: `just now` or `12m ago`. */
-export const agoLabel = (instant: string, now: number): string => {
-  const elapsed = elapsedLabel(instant, now);
-  return elapsed === "now" ? "just now" : `${elapsed} ago`;
-};
-
-/** When a closed Run ended: its last Attempt's end, else that Attempt's start, else its opening. */
-const runClosedAt = (run: RunView): string => {
-  const last = run.attempts.at(-1);
-  return last?.endedAt ?? last?.startedAt ?? run.openedAt;
-};
-
-const isQuestion = (run: RunView): boolean => {
-  const outcome = run.attempts.at(-1)?.outcome;
-  return outcome?._tag === "Failed" && outcome.failure._tag === "QuestionFailure";
-};
-
-/** Why a matched Item is not moving, as one plain sentence. */
-export const stallSentence = ({ loop, reason }: StalledItemView, now: number): string =>
-  Match.valueTags(reason, {
-    AwaitingApproval: () => "Its Run waits for your approval.",
-    HeldForOperator: ({ run }) =>
-      isQuestion(run)
-        ? "The Agent asked you a question. The Loop waits for your answer."
-        : "The Agent reported a blocker. The Loop waits until you resolve it or the Item changes.",
-    CycleBudgetUsedUp: ({ ask }) =>
-      `The Item used its cycle budget of ${ask.limit} rounds. No Run opens until you reset it.`,
-    RunFailed: ({ run }) => {
-      const outcome = run.attempts.at(-1)?.outcome;
-      const why = outcome?._tag === "Failed" ? `: ${failureReason(outcome.failure)}` : "";
-      return `Its Run failed ${agoLabel(runClosedAt(run), now)}${why}. The Loop waits for a retry.`;
-    },
-    ClosedUnchanged: ({ run }) =>
-      `Its Run ${run.state === "Succeeded" ? "succeeded" : "was canceled"} ${agoLabel(runClosedAt(run), now)} and the Item has not changed since, so no Run opens.`,
-    LoopPaused: () => `${loop} is paused, so it opens no Run.`,
-    QueuedForWorker: () => "Its Run waits for a free Worker slot.",
-    AwaitingPoll: () =>
-      "The Loop has not acted on the Item's current state yet. The next poll does.",
-  });
+import { agoLabel, clockLabel } from "../operator-copy.ts";
 
 /** An open connectivity problem of an Attempt in flight, as one line. */
 export const warningLine = (warning: ConnectivityWarningView): string =>

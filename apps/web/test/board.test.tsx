@@ -23,6 +23,11 @@ import {
   BoardLaneId,
   BoardView,
   ChildSessionBudgetFailureView,
+  ClosedUnchangedView,
+  HeldForOperatorView,
+  LoopView,
+  QuestionFailureView,
+  StalledItemView,
   FailedAttemptView,
   ProjectView,
   ReadOnlyBoardLaneView,
@@ -35,9 +40,16 @@ import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import { laneUnder, orderLanes, ProjectBoard, runsWithoutCard } from "../src/board/board.tsx";
+import {
+  laneUnder,
+  orderLanes,
+  ProjectBoard,
+  runsWithoutCard,
+  shownLanes,
+} from "../src/board/board.tsx";
 import { cardLabels, currentRun, itemFailure, runLineSince } from "../src/board/card.tsx";
-import { foldsByDefault } from "../src/board/column.tsx";
+import { isFilterLane } from "../src/board/filters.tsx";
+import { laneFlows } from "../src/board/flow.tsx";
 import { elapsedLabel, failureMessage, needCopy, timestampLabel } from "../src/operator-copy.ts";
 import { WithRouter } from "./memory-router.tsx";
 
@@ -67,6 +79,14 @@ const attempt = (number: number, message: string | null) =>
 
 const repository = RepositoryName.make("basaltbytes/usine");
 const itemKey = Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(33)]);
+const issueLink = (number: number, title: string) =>
+  new BoardItemLink({
+    itemKey: Schema.encodeSync(GitHubItemKey)(["github", repository, ItemNumber.make(number)]),
+    kind: "issue",
+    number: ItemNumber.make(number),
+    title,
+    url: `https://github.com/basaltbytes/usine/issues/${number}`,
+  });
 
 const runOnItem = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<AttemptView>) =>
   new RunView({
@@ -114,6 +134,7 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
     run,
     needsYou: state === "Failed",
     conflicting: false,
+    loops: [LoopName.make("review")],
   });
 };
 
@@ -260,12 +281,240 @@ describe("Board lane order", () => {
     );
   });
 
-  it("folds the fallback lane and lanes of closed Items until the operator opens them", () => {
-    assert.isTrue(foldsByDefault(readOnly("unmapped", "fallback")));
-    assert.isTrue(foldsByDefault(readOnly("done", "authored", ["issue-closed", "pr-merged"])));
-    assert.isFalse(foldsByDefault(readOnly("pull-requests", "authored", ["pr-open", "pr-merged"])));
-    assert.isFalse(foldsByDefault(readOnly("backlog", "authored")));
-    assert.isFalse(foldsByDefault(writable("ready")));
+  it("moves the fallback lane and lanes of closed Items out of the lane row into header filters", () => {
+    assert.isTrue(isFilterLane(readOnly("unmapped", "fallback")));
+    assert.isTrue(isFilterLane(readOnly("done", "authored", ["issue-closed", "pr-merged"])));
+    assert.isFalse(isFilterLane(readOnly("pull-requests", "authored", ["pr-open", "pr-merged"])));
+    assert.isFalse(isFilterLane(readOnly("backlog", "authored")));
+    assert.isFalse(isFilterLane(writable("ready")));
+  });
+});
+
+describe("Board filters", () => {
+  const base = itemWithRun("Succeeded", [attempt(1, null)]);
+  const taskAt = (number: number, fields: Partial<BoardTaskView>) => {
+    const member = issueLink(number, `Task ${number}`);
+    return new BoardTaskView({
+      ...base,
+      ...member,
+      items: [member],
+      labels: [],
+      runs: [],
+      run: null,
+      needsYou: false,
+      loops: [],
+      ...fields,
+    });
+  };
+  const queued = new RunView({ ...runOnItem("Succeeded", []), state: "Queued", canCancel: true });
+  const watched = taskAt(1, { loops: [LoopName.make("start-dev")] });
+  const labelled = taskAt(2, { labels: [GitHubLabelName.make("Ready-For-Agent")] });
+  const dependabot = taskAt(3, { labels: [GitHubLabelName.make("dependencies")] });
+  const running = taskAt(4, { runs: [queued], run: queued });
+  const blocked = taskAt(5, { needsYou: true });
+  const moving = taskAt(6, {});
+  const unrouted = taskAt(7, {});
+  const lanes = [
+    new WritableBoardLaneView({
+      id: BoardLaneId.make("authored:Ready"),
+      name: LaneName.make("Ready"),
+      sources: [new LabelLaneSource({ label: GitHubLabelName.make("ready-for-agent") })],
+      labels: [GitHubLabelName.make("ready-for-agent")],
+      origin: "authored",
+      items: [watched, labelled, moving],
+    }),
+    new ReadOnlyBoardLaneView({
+      id: BoardLaneId.make("authored:Pull requests"),
+      name: LaneName.make("Pull requests"),
+      sources: [new StateLaneSource({ state: "pr-open" })],
+      origin: "authored",
+      items: [dependabot, running, blocked],
+    }),
+    new ReadOnlyBoardLaneView({
+      id: BoardLaneId.make("fallback:unmapped"),
+      name: LaneName.make("Unmapped"),
+      sources: [],
+      origin: "fallback",
+      items: [unrouted],
+    }),
+  ];
+  const numbers = (shown: ReturnType<typeof shownLanes>) =>
+    shown.lanes.map(({ name, items }) => [name, items.map(({ number }) => number)]);
+
+  it("hides the Items no Loop can match, never one with an open Run, a Needs you entry, or a move in flight", () => {
+    const filtered = shownLanes(
+      lanes,
+      [{ itemKey: moving.itemKey, toLane: BoardLaneId.make("authored:Ready"), phase: "saving" }],
+      { shown: new Set(), showAll: false },
+    );
+    assert.deepStrictEqual(numbers(filtered), [
+      ["Ready", [1, 2, 6]],
+      ["Pull requests", [4, 5]],
+    ]);
+    assert.strictEqual(filtered.hidden, 1);
+    assert.deepStrictEqual(
+      filtered.filterLanes.map(({ name }) => name),
+      ["Unmapped"],
+    );
+    const all = shownLanes(lanes, [], { shown: new Set(), showAll: true });
+    assert.deepStrictEqual(numbers(all), [
+      ["Ready", [1, 2, 6]],
+      ["Pull requests", [3, 4, 5]],
+    ]);
+    assert.strictEqual(all.hidden, 0);
+  });
+
+  it("shows a toggled filter lane after the row with every Task it holds", () => {
+    const shown = shownLanes(lanes, [], {
+      shown: new Set([BoardLaneId.make("fallback:unmapped")]),
+      showAll: false,
+    });
+    assert.deepStrictEqual(numbers(shown).at(-1), ["Unmapped", [7]]);
+  });
+});
+
+describe("Board flow arrows", () => {
+  const card = itemWithRun("Succeeded", [attempt(1, null)]);
+  const waiting = new RunView({
+    ...runOnItem("Succeeded", []),
+    state: "Waiting",
+    loop: LoopName.make("start-dev"),
+  });
+  const lane = (name: string, items: ReadonlyArray<BoardTaskView>) =>
+    new WritableBoardLaneView({
+      id: BoardLaneId.make(name),
+      name: LaneName.make(name),
+      sources: [new LabelLaneSource({ label: GitHubLabelName.make(name) })],
+      labels: [GitHubLabelName.make(name)],
+      origin: "authored",
+      items,
+    });
+  const loop = (name: string, paused: boolean) =>
+    new LoopView({
+      name: LoopName.make(name),
+      trigger: "issue",
+      agent: AgentName.make("developer"),
+      paused,
+    });
+
+  it("names the Loops whose trigger matches a Task of the left lane, in the instance's order, with or without an open Run", () => {
+    const flows = laneFlows(
+      [
+        lane("ready", [
+          new BoardTaskView({
+            ...card,
+            loops: [LoopName.make("start-dev"), LoopName.make("triage")],
+          }),
+        ]),
+        lane("review", [new BoardTaskView({ ...card, loops: [], runs: [waiting], run: waiting })]),
+        lane("merge", []),
+      ],
+      [loop("triage", true), loop("start-dev", false), loop("review", false)],
+    );
+    const ready = flows.get(BoardLaneId.make("ready"));
+    assert.deepStrictEqual(ready?.loops, [
+      { name: LoopName.make("triage"), paused: true },
+      { name: LoopName.make("start-dev"), paused: false },
+    ]);
+    assert.strictEqual(ready?.tone, "idle");
+    assert.strictEqual(ready?.next.name, "review");
+    // A Loop at work on a Task its trigger no longer matches does not watch the lane.
+    assert.deepStrictEqual(flows.get(BoardLaneId.make("review"))?.loops, []);
+    assert.isFalse(flows.has(BoardLaneId.make("merge")));
+  });
+});
+
+describe("Board card stall note", () => {
+  const question = new AttemptView({
+    ...attempt(1, "unused"),
+    outcome: new FailedAttemptView({
+      failure: new QuestionFailureView({ question: "Which lanes stay on the Board?" }),
+    }),
+  });
+  const heldRun = runOnItem("Failed", [question]);
+  const held = itemWithRun("Failed", [question]);
+  const canceledLink = issueLink(18, "Cache the label catalog");
+  const canceledRun = new RunView({
+    ...runOnItem("Succeeded", [attempt(1, null)]),
+    id: RunId.make("run-18"),
+    itemKey: canceledLink.itemKey,
+    loop: LoopName.make("start-dev"),
+    state: "Canceled",
+    canRunAgain: true,
+  });
+  const canceled = new BoardTaskView({
+    ...held,
+    ...canceledLink,
+    items: [canceledLink],
+    runs: [canceledRun],
+    run: canceledRun,
+    needsYou: false,
+  });
+  const render = (disabled: boolean) =>
+    renderToStaticMarkup(
+      <QueryClientProvider client={new QueryClient()}>
+        <WithRouter>
+          <ProjectBoard
+            project={
+              new ProjectView({
+                repository,
+                status: "needs-you",
+                runs: [],
+                labels: [],
+                preflightFindings: [],
+                board: new BoardView({
+                  failures: [],
+                  lanes: [
+                    new ReadOnlyBoardLaneView({
+                      id: BoardLaneId.make("authored:Backlog"),
+                      name: LaneName.make("Backlog"),
+                      sources: [],
+                      origin: "authored",
+                      items: [held, canceled],
+                    }),
+                  ],
+                }),
+              })
+            }
+            loops={[]}
+            stalled={[
+              new StalledItemView({
+                repository,
+                loop: LoopName.make("review"),
+                item: issueLink(33, "Board lanes"),
+                reason: new HeldForOperatorView({ run: heldRun }),
+              }),
+              new StalledItemView({
+                repository,
+                loop: LoopName.make("start-dev"),
+                item: canceledLink,
+                reason: new ClosedUnchangedView({ run: canceledRun }),
+              }),
+            ]}
+            disabled={disabled}
+            openRun={() => {}}
+          />
+        </WithRouter>
+      </QueryClientProvider>,
+    );
+
+  it("answers a held Run's question from its failure note, and runs a canceled one again from the reason", () => {
+    const markup = render(false);
+    assert.include(markup, "Which lanes stay on the Board?");
+    assert.include(markup, "Mark answered");
+    assert.notInclude(markup, ">Retry<");
+    assert.match(
+      markup,
+      /start-dev <\/span>Its Run was canceled \d+d ago and the Item has not changed since, so no Run opens\./u,
+    );
+    assert.include(markup, ">Run again<");
+  });
+
+  it("names the reason but offers no action while the factory needs setup", () => {
+    const markup = render(true);
+    assert.include(markup, "so no Run opens.");
+    assert.notInclude(markup, ">Run again<");
+    assert.notInclude(markup, "Mark answered");
   });
 });
 
@@ -298,7 +547,13 @@ describe("Board drag targets", () => {
       return renderToStaticMarkup(
         <QueryClientProvider client={new QueryClient()}>
           <WithRouter>
-            <ProjectBoard project={project} disabled={false} openRun={() => {}} />
+            <ProjectBoard
+              project={project}
+              loops={[]}
+              stalled={[]}
+              disabled={false}
+              openRun={() => {}}
+            />
           </WithRouter>
         </QueryClientProvider>,
       );
@@ -395,7 +650,13 @@ describe("Board card link", () => {
     const markup = renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
         <WithRouter>
-          <ProjectBoard project={project} disabled={false} openRun={() => {}} />
+          <ProjectBoard
+            project={project}
+            loops={[]}
+            stalled={[]}
+            disabled={false}
+            openRun={() => {}}
+          />
         </WithRouter>
       </QueryClientProvider>,
     );

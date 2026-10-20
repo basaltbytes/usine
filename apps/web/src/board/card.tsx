@@ -9,7 +9,9 @@ import type {
   BoardTaskView,
   LabelView,
   RunView,
+  StalledItemView,
 } from "@usine/orchestrator/operator";
+import type { ReactNode } from "react";
 import { LabelBadge } from "@/components/label-badge";
 import { StateMark } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -28,6 +30,8 @@ import {
 } from "../operator-copy.ts";
 import { projectParams } from "../overview.ts";
 import { type RunActions, useRunAction } from "../run-actions.ts";
+import { StallAction } from "../stall/action.tsx";
+import { stallSentence } from "../stall/copy.ts";
 import { type CardMoves, CardMenu } from "./card-menu.tsx";
 import type { BoardMoveProgress } from "./moves.ts";
 
@@ -182,36 +186,75 @@ const CardTitle = ({
   </h3>
 );
 
-/** The failure that still needs the operator, with Retry when its Run can be retried. */
+/** The failure that still needs the operator, with the action that answers it. */
 const FailureNote = ({
   failure,
-  action,
+  children,
 }: {
   readonly failure: RunFailure;
-  readonly action: RunActions | null;
+  readonly children: ReactNode;
 }) => (
   <div className="flex flex-col items-start gap-1.5 rounded-md bg-destructive/8 px-2 py-1.5 text-xs text-destructive">
     <p className="line-clamp-2 wrap-anywhere" title={failure.message}>
       {failure.message}
     </p>
-    {action !== null && failure.run.canRetry && !action.isPending && (
-      <Button
-        variant="outline"
-        size="xs"
-        className="relative z-10"
-        onClick={() => action.mutate({ runId: failure.run.id, request: { action: "retry" } })}
-      >
-        {runActionLabel.retry}
-      </Button>
-    )}
+    {children}
   </div>
 );
+
+const RetryButton = ({
+  failure,
+  action,
+}: {
+  readonly failure: RunFailure;
+  readonly action: RunActions | null;
+}) =>
+  action !== null && failure.run.canRetry && !action.isPending ? (
+    <Button
+      variant="outline"
+      size="xs"
+      className="relative z-10"
+      onClick={() => action.mutate({ runId: failure.run.id, request: { action: "retry" } })}
+    >
+      {runActionLabel.retry}
+    </Button>
+  ) : null;
+
+/** Why the Task is not moving, in the desk's words, with the one action that moves it again.
+ * `named` puts the Loop first when no Run line on the card names it already. */
+const StallNote = ({
+  stalled,
+  named,
+  children,
+}: {
+  readonly stalled: StalledItemView;
+  readonly named: boolean;
+  readonly children: ReactNode;
+}) => {
+  const now = useNow(30_000);
+  const sentence = stallSentence(stalled, now);
+  return (
+    <div data-slot="stall-note" className="flex flex-col items-start gap-1.5 text-xs">
+      <p className="line-clamp-3 text-muted-foreground" title={`${stalled.loop}: ${sentence}`}>
+        {named && <span className="font-medium text-foreground">{stalled.loop} </span>}
+        {sentence}
+      </p>
+      {children}
+    </div>
+  );
+};
+
+/** The Run a stall reason names, if it names one. */
+const stallRun = ({ reason }: StalledItemView): RunView | null =>
+  "run" in reason ? reason.run : null;
 
 const CardFace = ({
   item,
   lane,
   catalog,
   repository,
+  stall,
+  readOnly,
   action,
   progress,
 }: {
@@ -219,6 +262,8 @@ const CardFace = ({
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
   readonly repository: RepositoryName;
+  readonly stall: StalledItemView | null;
+  readonly readOnly: boolean;
   /** The card's Run actions, or null on the copy that follows a drag. */
   readonly action: RunActions | null;
   readonly progress: string | null;
@@ -226,8 +271,19 @@ const CardFace = ({
   const failure = failedRun(item);
   const run = currentRun(item);
   const actionError = action?.error?.message ?? null;
+  // The failure note already shows a failed or held Run, and a held one takes the stall's action.
+  const onFailure =
+    stall !== null &&
+    failure !== null &&
+    (stall.reason._tag === "RunFailed" || stall.reason._tag === "HeldForOperator") &&
+    stall.reason.run.id === failure.run.id;
+  const stallAction =
+    stall === null || action === null ? null : (
+      <StallAction stalled={stall} readOnly={readOnly} appearance="card" />
+    );
   // Waiting and Failed Runs already show why the card needs the operator; a blocked Item does not.
-  const unexplained = item.needsYou && !(run?.canApprove || run?.canResolveFailure);
+  const unexplained =
+    item.needsYou && !(run?.canApprove || run?.canResolveFailure) && stall === null;
   return (
     <div className="flex min-w-0 flex-col gap-1.5 px-3">
       <p className="flex flex-wrap gap-x-3 pr-6 font-mono text-xs text-muted-foreground">
@@ -254,7 +310,20 @@ const CardFace = ({
           {progress}
         </p>
       )}
-      {failure !== null && <FailureNote failure={failure} action={action} />}
+      {failure !== null && (
+        <FailureNote failure={failure}>
+          {onFailure && stall?.reason._tag === "HeldForOperator" ? (
+            stallAction
+          ) : (
+            <RetryButton failure={failure} action={action} />
+          )}
+        </FailureNote>
+      )}
+      {stall !== null && !onFailure && (
+        <StallNote stalled={stall} named={run === null || stallRun(stall)?.id !== run.id}>
+          {stallAction}
+        </StallNote>
+      )}
       {actionError !== null && (
         <p className="text-xs text-destructive wrap-anywhere">{actionError}</p>
       )}
@@ -278,6 +347,8 @@ export const BoardCard = ({
   draggable,
   phase,
   moves,
+  stall,
+  readOnly,
   openRun,
   repository,
 }: {
@@ -288,6 +359,10 @@ export const BoardCard = ({
   readonly draggable: boolean;
   readonly phase: BoardMoveProgress["phase"] | undefined;
   readonly moves: CardMoves;
+  /** Why the Task is not moving, as the desk lists it; null when the desk does not list it. */
+  readonly stall: StalledItemView | null;
+  /** Hides the stall's action while the factory needs setup. */
+  readonly readOnly: boolean;
   readonly openRun: (runId: RunId) => void;
 }) => {
   const action = useRunAction();
@@ -299,7 +374,10 @@ export const BoardCard = ({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: item.itemKey, disabled: !draggable });
+  } = useSortable({
+    id: item.itemKey,
+    disabled: { draggable: !draggable, droppable: lane._tag !== "WritableBoardLane" },
+  });
   // The menu sits beside the drag activator, not inside it, so pressing it never starts a drag.
   return (
     <div
@@ -322,6 +400,8 @@ export const BoardCard = ({
           lane={lane}
           catalog={catalog}
           repository={repository}
+          stall={stall}
+          readOnly={readOnly}
           action={action}
           progress={progressMessage(action, phase)}
         />
@@ -344,11 +424,13 @@ export const DraggedCard = ({
   lane,
   catalog,
   repository,
+  stall,
 }: {
   readonly item: BoardTaskView;
   readonly lane: BoardLaneView;
   readonly catalog: LabelCatalog;
   readonly repository: RepositoryName;
+  readonly stall: StalledItemView | null;
 }) => (
   <Card size="sm" className={cn(cardClass(item.needsYou), "cursor-grabbing shadow-raised")}>
     <CardFace
@@ -356,6 +438,8 @@ export const DraggedCard = ({
       lane={lane}
       catalog={catalog}
       repository={repository}
+      stall={stall}
+      readOnly
       action={null}
       progress={null}
     />

@@ -1,9 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createMemoryHistory, createRouter, RouterProvider } from "@tanstack/react-router";
 import { LaneName } from "@usine/config/board";
+import { ItemKey, ItemNumber } from "@usine/core/item";
+import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import {
+  BoardItemLink,
   BoardLaneId,
+  BoardTaskView,
   BoardView,
   ProjectView,
   ReadOnlyBoardLaneView,
@@ -25,16 +29,35 @@ const project = new ProjectView({
   preflightFindings: [],
   board: new BoardView({
     failures: [],
-    lanes: ["Backlog", "Ready", "Developing", "Review", "Finishing", "Done"].map(
-      (name) =>
-        new ReadOnlyBoardLaneView({
-          id: BoardLaneId.make(name),
-          name: LaneName.make(name),
-          origin: "authored",
-          sources: [],
-          items: [],
-        }),
-    ),
+    // Each lane holds a Task a Loop watches, so none collapses and the row is wider than the panel.
+    lanes: ["Backlog", "Ready", "Developing", "Review", "Finishing", "Done"].map((name, index) => {
+      const item = new BoardItemLink({
+        itemKey: ItemKey.make(`${repository}:${index + 1}`),
+        kind: "issue",
+        number: ItemNumber.make(index + 1),
+        title: `Task in ${name}`,
+        url: `https://github.com/${repository}/issues/${index + 1}`,
+      });
+      return new ReadOnlyBoardLaneView({
+        id: BoardLaneId.make(name),
+        name: LaneName.make(name),
+        origin: "authored",
+        sources: [],
+        items: [
+          new BoardTaskView({
+            ...item,
+            state: "issue-open",
+            labels: [],
+            items: [item],
+            runs: [],
+            run: null,
+            needsYou: false,
+            conflicting: false,
+            loops: [LoopName.make("start-dev")],
+          }),
+        ],
+      });
+    }),
   }),
 });
 let host: HTMLDivElement;

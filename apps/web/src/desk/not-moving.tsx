@@ -1,13 +1,4 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AttemptTask } from "@usine/core/attempt";
-import type { LoopName } from "@usine/core/loop";
-import {
-  type CycleBudgetUsedUpView,
-  EditAndRetry,
-  type RunView,
-  type StalledItemView,
-} from "@usine/orchestrator/operator";
-import { Button } from "@/components/ui/button";
+import type { RunView, StalledItemView } from "@usine/orchestrator/operator";
 import { useIsMobile } from "@/hooks/use-mobile";
 import {
   Table,
@@ -17,171 +8,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { api } from "../api.ts";
-import { runActionLabel, runActionProgress, runAgainBlocked } from "../operator-copy.ts";
-import { type RunActionRequest, useRunAction, useRunAgain } from "../run-actions.ts";
-import { stallSentence } from "./copy.ts";
+import { StallAction } from "../stall/action.tsx";
+import { stallSentence } from "../stall/copy.ts";
 import { EmptyLine, ItemTitle, RunPageLink, RunRow } from "./section.tsx";
-
-const ROW_ACTION = "text-muted-foreground";
-
-/** Refreshes what the desk and every screen show after an action on a row. */
-const useRefreshDesk = () => {
-  const queryClient = useQueryClient();
-  return () =>
-    Promise.all([
-      queryClient.invalidateQueries({ queryKey: ["overview"] }),
-      queryClient.invalidateQueries({ queryKey: ["desk"] }),
-    ]);
-};
-
-/** Approve, Retry, or Mark resolved or answered, on the Run that keeps the Item from moving. */
-const RunAction = ({
-  run,
-  request,
-  label,
-}: {
-  readonly run: RunView;
-  readonly request: RunActionRequest;
-  readonly label: string;
-}) => {
-  const action = useRunAction();
-  return (
-    <ActionButton
-      label={action.isPending ? runActionProgress[request.action] : label}
-      disabled={action.isPending}
-      error={action.error?.message ?? null}
-      onClick={() => action.mutate({ runId: run.id, request })}
-    />
-  );
-};
-
-const RunAgainAction = ({ run }: { readonly run: RunView }) => {
-  const again = useRunAgain(run.id);
-  const blocked = again.data?._tag === "CycleBlocked";
-  return (
-    <ActionButton
-      label={again.isPending ? "Opening…" : runActionLabel.runAgain}
-      disabled={again.isPending}
-      error={blocked ? runAgainBlocked : (again.error?.message ?? null)}
-      onClick={() =>
-        again.mutate(new EditAndRetry({ task: AttemptTask.make(run.task), agent: run.agent }))
-      }
-    />
-  );
-};
-
-const ResetBudgetAction = ({ reason }: { readonly reason: CycleBudgetUsedUpView }) => {
-  const refresh = useRefreshDesk();
-  const reset = useMutation({
-    mutationFn: () =>
-      api((client) => client.resetCycleBudget({ payload: { askId: reason.ask.id } })),
-    onSuccess: refresh,
-  });
-  return (
-    <ActionButton
-      label={reset.isPending ? "Resetting…" : "Reset cycle budget"}
-      disabled={reset.isPending}
-      error={reset.error?.message ?? null}
-      onClick={() => reset.mutate()}
-    />
-  );
-};
-
-const ResumeAction = ({ loop }: { readonly loop: LoopName }) => {
-  const refresh = useRefreshDesk();
-  const resume = useMutation({
-    mutationFn: () => api((client) => client.unpause({ params: { loop } })),
-    onSuccess: refresh,
-  });
-  return (
-    <ActionButton
-      label={resume.isPending ? "Resuming…" : "Resume"}
-      disabled={resume.isPending}
-      error={resume.error?.message ?? null}
-      onClick={() => resume.mutate()}
-    />
-  );
-};
-
-const ActionButton = ({
-  label,
-  disabled,
-  error,
-  onClick,
-}: {
-  readonly label: string;
-  readonly disabled: boolean;
-  readonly error: string | null;
-  readonly onClick: () => void;
-}) => (
-  <span className="inline-flex flex-col items-end gap-1">
-    <Button
-      variant="ghost"
-      className={ROW_ACTION}
-      disabled={disabled}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick();
-      }}
-    >
-      {label}
-    </Button>
-    {error !== null && (
-      <span role="alert" className="max-w-56 text-right text-xs whitespace-normal text-destructive">
-        {error}
-      </span>
-    )}
-  </span>
-);
-
-/** The one action that moves the Item again, when the operator has one; none otherwise. */
-const StallAction = ({
-  stalled,
-  readOnly,
-}: {
-  readonly stalled: StalledItemView;
-  readonly readOnly: boolean;
-}) => {
-  if (readOnly) return null;
-  const reason = stalled.reason;
-  switch (reason._tag) {
-    case "AwaitingApproval":
-      return reason.run.canApprove ? (
-        <RunAction
-          run={reason.run}
-          request={{ action: "approve" }}
-          label={runActionLabel.approve}
-        />
-      ) : null;
-    case "HeldForOperator": {
-      const attempt = reason.run.attempts.at(-1);
-      if (!reason.run.canResolveFailure || attempt === undefined) return null;
-      const question =
-        attempt.outcome?._tag === "Failed" && attempt.outcome.failure._tag === "QuestionFailure";
-      return (
-        <RunAction
-          run={reason.run}
-          request={{ action: "resolveFailure", attemptId: attempt.id }}
-          label={question ? "Mark answered" : "Mark resolved"}
-        />
-      );
-    }
-    case "CycleBudgetUsedUp":
-      return <ResetBudgetAction reason={reason} />;
-    case "RunFailed":
-      return reason.run.canRetry ? (
-        <RunAction run={reason.run} request={{ action: "retry" }} label={runActionLabel.retry} />
-      ) : null;
-    case "ClosedUnchanged":
-      return reason.run.canRunAgain ? <RunAgainAction run={reason.run} /> : null;
-    case "LoopPaused":
-      return <ResumeAction loop={stalled.loop} />;
-    case "QueuedForWorker":
-    case "AwaitingPoll":
-      return null;
-  }
-};
 
 const reasonRun = ({ reason }: StalledItemView): RunView | null =>
   "run" in reason ? reason.run : null;
@@ -201,7 +30,7 @@ const StalledRow = ({
   const run = reasonRun(stalled);
   const title = <ItemTitle item={stalled.item} />;
   const item = run === null ? title : <RunPageLink run={run}>{title}</RunPageLink>;
-  const action = <StallAction stalled={stalled} readOnly={readOnly} />;
+  const action = <StallAction stalled={stalled} readOnly={readOnly} appearance="row" />;
   if (narrow)
     return (
       <RunRow run={run}>

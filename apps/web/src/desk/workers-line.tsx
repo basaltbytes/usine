@@ -1,7 +1,6 @@
 import type { WorkerView } from "@usine/orchestrator/operator";
 import { StateMark } from "@/components/status-badge";
-import { timestampLabel } from "../operator-copy.ts";
-import { agoLabel } from "./copy.ts";
+import { agoLabel, timestampLabel } from "../operator-copy.ts";
 
 const Preflight = ({ worker, now }: { readonly worker: WorkerView; readonly now: number }) => {
   const preflight = worker.preflight;

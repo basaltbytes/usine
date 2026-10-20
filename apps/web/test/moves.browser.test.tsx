@@ -78,6 +78,7 @@ const overview = (
                     run: null,
                     needsYou: false,
                     conflicting: false,
+                    loops: [],
                   }),
                 ];
               }),
@@ -95,7 +96,9 @@ const Board = ({ selected = repository }: { readonly selected?: RepositoryName }
   const { data } = useSuspenseQuery(overviewQuery());
   const project = data.projects.find(({ repository }) => repository === selected);
   if (!project) return null;
-  return <ProjectBoard project={project} disabled={false} openRun={() => {}} />;
+  return (
+    <ProjectBoard project={project} loops={[]} stalled={[]} disabled={false} openRun={() => {}} />
+  );
 };
 const respond = (data = overview(), status: 200 | 503 = 200) =>
   commands.boardResponses(JSON.stringify(Schema.encodeSync(FactoryOverview)(data)), status);
@@ -264,6 +267,8 @@ it("shows move progress even when the destination has no labels or Run details t
   await respond(singleDestination);
   await queryClient.refetchQueries({ queryKey: ["overview"] });
   await expect.element(lane("In progress")).not.toBeInTheDocument();
+  // A fallback lane waits behind its header toggle.
+  await page.getByRole("button", { name: "Backlog 2" }).click();
   await move(1, "Ready");
   await expectMovable(2, true);
   await expect.element(lane("Ready").getByRole("status")).toHaveTextContent("Saved on GitHub");
@@ -285,6 +290,21 @@ it("keeps a saved destination when the project is reopened before GitHub is obse
   await expect.element(taskIn("Ready")).toBeVisible();
   await queryClient.refetchQueries({ queryKey: ["overview"] });
   await expect.element(taskIn("Ready")).toBeVisible();
+});
+
+it("takes a drop on a collapsed empty lane, which widens under the drag", async () => {
+  const ready = lane("Ready");
+  expect(ready.element().getBoundingClientRect().width).toBeLessThanOrEqual(40);
+  const card = taskIn("Backlog").element().closest("[data-slot=card]");
+  if (!(card instanceof HTMLElement)) throw new Error("No card for Task 1");
+  card.focus();
+  await userEvent.keyboard(" ");
+  await userEvent.keyboard("{ArrowRight}");
+  await expect.poll(() => ready.element().getBoundingClientRect().width).toBeGreaterThan(100);
+  await userEvent.keyboard(" ");
+  await expect.element(taskIn("Ready")).toBeVisible();
+  await expect.element(lane("Ready").getByRole("status")).toHaveTextContent("Saved on GitHub");
+  await expect.element(taskIn("Backlog")).not.toBeInTheDocument();
 });
 
 it("restores the original lane and explains a failed GitHub write", async () => {

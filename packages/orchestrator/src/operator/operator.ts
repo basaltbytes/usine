@@ -13,7 +13,7 @@ import { LoopName } from "@usine/core/loop";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource } from "@usine/core/run/approval";
 import type { WorkerName } from "@usine/core/worker";
-import type { ItemNumber } from "@usine/core/item";
+import type { ItemKey, ItemNumber } from "@usine/core/item";
 import type { RepositoryName } from "@usine/core/repository";
 import {
   RetryRequest,
@@ -45,6 +45,7 @@ import {
 } from "effect";
 import { labelMutationForBoardMove, projectBoard } from "../board/projection.ts";
 import type { LabelPreflightFinding } from "../label-reconciler.ts";
+import { LoopMatches } from "../loop-matches.ts";
 import { GitHubItemKey, PollingTriggers, type RepositoryPollFailure } from "../polling-triggers.ts";
 import { ScheduleTriggers, type ScheduleFailure } from "../schedule-triggers.ts";
 import { cycleLimitOf } from "../trigger-submission.ts";
@@ -131,6 +132,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const polling = yield* PollingTriggers;
   const schedules = yield* ScheduleTriggers;
+  const loopMatches = yield* LoopMatches;
   const cache = yield* SynchronizedRef.make(Option.none<CachedOverview>());
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
@@ -172,7 +174,17 @@ const makeOperatorObservation = Effect.gen(function* () {
             ] as const,
             { concurrency: "unbounded" },
           );
-          const history = yield* reader.forItems(boardItems.map(({ itemKey }) => itemKey));
+          const [history, matches] = yield* Effect.all(
+            [
+              reader.forItems(boardItems.map(({ itemKey }) => itemKey)),
+              loopMatches.matching(instance, repository, boardItems),
+            ] as const,
+            { concurrency: "unbounded" },
+          );
+          const itemLoops = new Map<ItemKey, Array<LoopName>>();
+          for (const { loop, item } of matches) {
+            itemLoops.set(item.itemKey, [...(itemLoops.get(item.itemKey) ?? []), loop.name]);
+          }
           const merged = new Map((runsByRepository.get(name) ?? []).map((run) => [run.id, run]));
           for (const saved of history) {
             const view = runView(saved, paused);
@@ -191,6 +203,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             boardItems,
             projectRuns,
             cycleAsks.map(({ itemKey }) => itemKey),
+            itemLoops,
           );
           const status: ProjectStatus =
             cycleAsks.some((ask) => ask.repository === name) ||
@@ -362,8 +375,13 @@ const makeOperatorObservation = Effect.gen(function* () {
         const token = Option.map(revision, (value) =>
           JSON.stringify([
             value,
-            instance.config.repos.map(({ name, lanes }) => [name, lanes]),
-            instance.loops.map(({ name, agent, trigger }) => [name, agent, trigger.on]),
+            instance.config.repos.map(({ name, tags, lanes }) => [name, tags, lanes]),
+            instance.loops.map(({ name, agent, trigger, selector }) => [
+              name,
+              agent,
+              trigger,
+              selector,
+            ]),
             [...instance.invalidAgents, ...instance.quarantinedLoops].map(({ file, error }) => [
               file,
               error.stage,
@@ -483,7 +501,7 @@ export class OperatorObservation extends Context.Service<
   }
 >()("@usine/orchestrator/OperatorObservation") {
   static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation).pipe(
-    Layer.provide(Layer.merge(TaskReader.layer, OperatorDesk.layer)),
+    Layer.provide(Layer.mergeAll(TaskReader.layer, OperatorDesk.layer, LoopMatches.layer)),
   );
 }
 

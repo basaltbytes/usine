@@ -20,8 +20,10 @@ import type {
   BoardLaneId,
   BoardLaneView,
   BoardTaskView,
+  LoopView,
   ProjectView,
   RunView,
+  StalledItemView,
 } from "@usine/orchestrator/operator";
 import { useState } from "react";
 import { ErrorAlert } from "@/components/error-alert";
@@ -39,6 +41,7 @@ import {
 } from "@/components/ui/table";
 import { DraggedCard, type LabelCatalog } from "./card.tsx";
 import { BoardColumn } from "./column.tsx";
+import { authoredLaneLabels, BoardFilters, canMatch, isFilterLane } from "./filters.tsx";
 import { laneFlows } from "./flow.tsx";
 import { type BoardMoveProgress, useBoardMoves } from "./moves.ts";
 
@@ -156,28 +159,108 @@ interface DragSource {
   readonly lane: BoardLaneView;
 }
 
+/** The lanes the Board shows and how many Tasks the unmatched filter hides from them. */
+interface ShownLanes {
+  readonly lanes: ReadonlyArray<BoardLaneView>;
+  readonly filterLanes: ReadonlyArray<BoardLaneView>;
+  readonly hidden: number;
+}
+
+/** The header filters: the filter lanes toggled on, and whether Show all Items is on. */
+interface BoardFilterState {
+  readonly shown: ReadonlySet<BoardLaneId>;
+  readonly showAll: boolean;
+}
+
+/**
+ * The lane row: every lane but the filter lanes, then the filter lanes in `shown`. Unless
+ * `showAll`, the row's lanes keep only the Tasks `canMatch` keeps and the Tasks being moved;
+ * a filter lane, once shown, keeps all of its Tasks, since it exists to show what no lane routes.
+ */
+export const shownLanes = (
+  ordered: ReadonlyArray<BoardLaneView>,
+  moves: ReadonlyArray<BoardMoveProgress>,
+  { shown, showAll }: BoardFilterState,
+): ShownLanes => {
+  const laneLabels = authoredLaneLabels(ordered);
+  const moving = new Set(moves.map(({ itemKey }) => itemKey));
+  const keep = (task: BoardTaskView) =>
+    showAll || moving.has(task.itemKey) || canMatch(task, laneLabels);
+  let hidden = 0;
+  const row = ordered.flatMap((lane) => {
+    if (isFilterLane(lane)) return [];
+    const items = lane.items.filter(keep);
+    hidden += lane.items.length - items.length;
+    return [items.length === lane.items.length ? lane : { ...lane, items }];
+  });
+  const filterLanes = ordered.filter(isFilterLane);
+  return {
+    lanes: [...row, ...filterLanes.filter(({ id }) => shown.has(id))],
+    filterLanes,
+    hidden,
+  };
+};
+
+const countsLabel = (lanes: ReadonlyArray<BoardLaneView>, hidden: number): string => {
+  const items = lanes.reduce((total, lane) => total + lane.items.length, 0);
+  return [
+    `${lanes.length} lane${lanes.length === 1 ? "" : "s"}`,
+    `${items} item${items === 1 ? "" : "s"}`,
+    ...(hidden > 0 ? [`${hidden} hidden`] : []),
+  ].join(", ");
+};
+
+/**
+ * A Project's Board: its lanes of Task cards, with Done and Unmapped and the Items no Loop can
+ * match behind header filters. `loops` are the instance's Loops with their pause state, for the
+ * flow arrows; `stalled` is the desk's Not moving list, whose reason a card shows when one of its
+ * Items is on it. `disabled` holds moves and actions while the factory needs setup.
+ */
 export const ProjectBoard = ({
   project,
+  loops,
+  stalled,
   disabled,
   openRun,
 }: {
   readonly project: ProjectView;
+  readonly loops: ReadonlyArray<LoopView>;
+  readonly stalled: ReadonlyArray<StalledItemView>;
   readonly disabled: boolean;
   readonly openRun: (runId: RunId) => void;
 }) => {
   const [active, setActive] = useState<DragSource | null>(null);
   const [over, setOver] = useState<BoardLaneId | null>(null);
+  const [shown, setShown] = useState<ReadonlySet<BoardLaneId>>(new Set());
+  const [showAll, setShowAll] = useState(false);
   const { moves, moveItem, isPending, error } = useBoardMoves(project);
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
   const uncarded = runsWithoutCard(project);
-  const lanes = moves.reduce(applyMove, orderLanes(project.board.lanes));
-  const flows = laneFlows(lanes);
-  const itemCount = lanes.reduce((total, lane) => total + lane.items.length, 0);
+  const {
+    lanes,
+    filterLanes: filters,
+    hidden,
+  } = shownLanes(moves.reduce(applyMove, orderLanes(project.board.lanes)), moves, {
+    shown,
+    showAll,
+  });
+  const flows = laneFlows(lanes, loops);
+  const stallOf = (task: BoardTaskView): StalledItemView | null => {
+    const keys = new Set(task.items.map(({ itemKey }) => itemKey));
+    return stalled.find(({ item }) => keys.has(item.itemKey)) ?? null;
+  };
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
   const pending = disabled || isPending;
+  const showLane = (lane: BoardLaneId, visible: boolean) =>
+    setShown((current) => {
+      const next = new Set(current);
+      if (visible) next.add(lane);
+      else next.delete(lane);
+      return next;
+    });
   const endDrag = () => {
     setActive(null);
     setOver(null);
@@ -199,8 +282,18 @@ export const ProjectBoard = ({
     <div className="flex min-h-96 flex-1 flex-col gap-4 pt-5">
       <PageHeading
         title={project.repository}
-        counts={`${lanes.length} lane${lanes.length === 1 ? "" : "s"}, ${itemCount} item${itemCount === 1 ? "" : "s"}`}
+        counts={countsLabel(lanes, showAll ? 0 : hidden)}
         className="px-4 md:px-5"
+        actions={
+          <BoardFilters
+            lanes={filters}
+            shown={shown}
+            onShownChange={showLane}
+            showAll={showAll}
+            onShowAllChange={setShowAll}
+            hidden={hidden}
+          />
+        }
       >
         {project.status === "needs-you" && <NeedsYouBadge />}
       </PageHeading>
@@ -247,7 +340,9 @@ export const ProjectBoard = ({
                     lane._tag === "WritableBoardLane"
                   }
                   pending={pending}
+                  readOnly={disabled}
                   moves={moves}
+                  stallOf={stallOf}
                   openRun={openRun}
                   onMove={moveItem}
                   repository={project.repository}
@@ -264,6 +359,7 @@ export const ProjectBoard = ({
               lane={active.lane}
               catalog={catalog}
               repository={project.repository}
+              stall={stallOf(active.item)}
             />
           )}
         </DragOverlay>

@@ -11,16 +11,22 @@ import { WorkerName } from "@usine/core/worker";
 import {
   AgentFailureView,
   AttemptView,
+  AwaitingApprovalView,
   BoardItemLink,
   BoardLaneId,
   BoardTaskView,
   BoardView,
+  CanceledAttemptView,
+  ClosedUnchangedView,
   FailedAttemptView,
   LabelView,
+  LoopView,
   ProjectView,
   ReadOnlyBoardLaneView,
   ReadyOverview,
+  RunFailedView,
   RunView,
+  StalledItemView,
   SucceededAttemptView,
   WritableBoardLaneView,
 } from "@usine/orchestrator/operator";
@@ -42,7 +48,7 @@ const link = (number: number, kind: "issue" | "pr", title: string) =>
 const attempt = (
   number: number,
   startedAt: string,
-  failure: string | null | "running",
+  failure: string | null | "running" | "canceled",
   endedAt: string | null = null,
 ) =>
   new AttemptView({
@@ -57,9 +63,11 @@ const attempt = (
     outcome:
       failure === "running"
         ? null
-        : failure === null
-          ? new SucceededAttemptView()
-          : new FailedAttemptView({ failure: new AgentFailureView({ message: failure }) }),
+        : failure === "canceled"
+          ? new CanceledAttemptView()
+          : failure === null
+            ? new SucceededAttemptView()
+            : new FailedAttemptView({ failure: new AgentFailureView({ message: failure }) }),
     endedAt,
     salvage: null,
   });
@@ -79,7 +87,7 @@ const run = (
     repository: boardRepository,
     agent: AgentName.make(loop === "review" ? "reviewer" : "developer"),
     state,
-    loopPaused: false,
+    loopPaused: loop === "review",
     openedAt: minutesAgo(minutes),
     task: `Work on #${item.number}.`,
     attempts,
@@ -91,14 +99,18 @@ const run = (
     canRetry: state === "Failed",
     canResolveFailure: state === "Failed",
     canCancel: state === "Waiting" || state === "Queued" || state === "Running",
-    canRunAgain: false,
+    canRunAgain: state === "Succeeded" || state === "Canceled",
   });
 
 const task = (
   members: readonly [BoardItemLink, ...ReadonlyArray<BoardItemLink>],
   labels: ReadonlyArray<string>,
   runs: ReadonlyArray<RunView> = [],
-  extra: { readonly conflicting?: boolean; readonly state?: BoardTaskView["state"] } = {},
+  extra: {
+    readonly conflicting?: boolean;
+    readonly state?: BoardTaskView["state"];
+    readonly loops?: ReadonlyArray<string>;
+  } = {},
 ) => {
   const current = members.at(-1) ?? members[0];
   const preferred =
@@ -113,6 +125,7 @@ const task = (
     run: preferred ?? null,
     needsYou: runs.some((run) => run.canApprove || run.canResolveFailure),
     conflicting: extra.conflicting ?? false,
+    loops: (extra.loops ?? []).map((loop) => LoopName.make(loop)),
   });
 };
 
@@ -141,8 +154,23 @@ const flaky = link(
   "issue",
   "Reader restore test is flaky on narrow viewports when the sidebar is collapsed and the transcript history spans several earlier pages",
 );
+const bump = link(40, "pr", "Bump vite from 7.1.3 to 7.1.4");
+const node = link(44, "pr", "Pin the Node version of the release workflow");
+const backlog = link(50, "issue", "Investigate the reader's scroll restore on Safari");
 
-/** A Board with every card shape: lane-only and overflowing labels, a linked PR, and open, waiting, failed, canceled and finished Runs. */
+const salvageRun = run("run-salvage", salvage, "implement", "Waiting", 3, []);
+const droppedRun = run("run-dropped", dropped, "implement", "Canceled", 1440, [
+  attempt(1, minutesAgo(1440), "canceled", minutesAgo(1430)),
+]);
+const pinnedRun = run("run-pinned", pinned, "review", "Failed", 95, [
+  attempt(1, minutesAgo(95), "The required check lint failed on the pinned commit", minutesAgo(80)),
+]);
+
+/**
+ * A Board with every card shape: lane-only and overflowing labels, a linked PR, and open, waiting,
+ * failed, canceled and finished Runs; an empty Merge lane; a dependabot pull request no Loop can
+ * match and one with an open Run; Done and Unmapped Tasks behind the header filters.
+ */
 const boardProject = () =>
   new ProjectView({
     repository: boardRepository,
@@ -166,6 +194,11 @@ const boardProject = () =>
         description: null,
       }),
       new LabelView({ name: GitHubLabelName.make("review"), color: "d93f0b", description: null }),
+      new LabelView({
+        name: GitHubLabelName.make("ready-to-merge"),
+        color: "0e8a16",
+        description: null,
+      }),
     ],
     preflightFindings: [],
     board: new BoardView({
@@ -174,18 +207,10 @@ const boardProject = () =>
         writable("Backlog", "backlog", [
           task([link(12, "issue", "Document the cycle budget reset")], ["backlog", "docs"]),
           task([flaky], ["backlog", "bug", "priority", "ci", "flaky"]),
-          task(
-            [dropped],
-            ["backlog"],
-            [run("run-dropped", dropped, "implement", "Canceled", 1440, [])],
-          ),
+          task([dropped], ["backlog"], [droppedRun]),
         ]),
         writable("Ready", "ready-for-agent", [
-          task(
-            [salvage],
-            ["ready-for-agent", "bug"],
-            [run("run-salvage", salvage, "implement", "Waiting", 3, [])],
-          ),
+          task([salvage], ["ready-for-agent", "bug"], [salvageRun], { loops: ["implement"] }),
         ]),
         writable("In progress", "in-progress", [
           task(
@@ -203,22 +228,19 @@ const boardProject = () =>
           ),
         ]),
         writable("Review", "review", [
-          task(
-            [pinned],
-            ["review"],
-            [
-              run("run-pinned", pinned, "review", "Failed", 95, [
-                attempt(
-                  1,
-                  minutesAgo(95),
-                  "The required check lint failed on the pinned commit",
-                  minutesAgo(80),
-                ),
-              ]),
-            ],
-            { conflicting: true },
-          ),
+          task([pinned], ["review"], [pinnedRun], { conflicting: true, loops: ["review"] }),
         ]),
+        writable("Merge", "ready-to-merge", []),
+        new ReadOnlyBoardLaneView({
+          id: BoardLaneId.make("authored:pull-requests"),
+          name: LaneName.make("Pull requests"),
+          sources: [new StateLaneSource({ state: "pr-open" })],
+          origin: "authored",
+          items: [
+            task([bump], []),
+            task([node], [], [run("run-node", node, "rebase", "Queued", 2, [])]),
+          ],
+        }),
         new ReadOnlyBoardLaneView({
           id: BoardLaneId.make("authored:done"),
           name: LaneName.make("Done"),
@@ -237,9 +259,43 @@ const boardProject = () =>
             ),
           ],
         }),
+        new ReadOnlyBoardLaneView({
+          id: BoardLaneId.make("fallback:unmapped"),
+          name: LaneName.make("Unmapped"),
+          sources: [],
+          origin: "fallback",
+          items: [task([backlog], [])],
+        }),
       ],
     }),
   });
 
+const loop = (name: string, paused: boolean) =>
+  new LoopView({
+    name: LoopName.make(name),
+    trigger: name === "implement" ? "issue" : "pr",
+    agent: AgentName.make(name === "review" ? "reviewer" : "developer"),
+    paused,
+  });
+
 export const boardOverview = () =>
-  new ReadyOverview({ projects: [boardProject()], loops: [], needsYou: [] });
+  new ReadyOverview({
+    projects: [boardProject()],
+    loops: [loop("implement", false), loop("review", true), loop("rebase", false)],
+    needsYou: [],
+  });
+
+const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView["reason"]) =>
+  new StalledItemView({
+    repository: boardRepository,
+    loop: LoopName.make(loopName),
+    item,
+    reason,
+  });
+
+/** The desk's Not moving list for the Board's Items, in the desk's order. */
+export const boardStalled = () => [
+  stalled("implement", salvage, new AwaitingApprovalView({ run: salvageRun })),
+  stalled("review", pinned, new RunFailedView({ run: pinnedRun })),
+  stalled("implement", dropped, new ClosedUnchangedView({ run: droppedRun })),
+];

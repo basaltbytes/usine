@@ -28,7 +28,7 @@ import { WorkerName } from "@usine/core/worker";
 import { AgentFile, InvalidAgent } from "@usine/config/agent";
 import { ConfigFileError, InstancePath } from "@usine/config/file";
 import { GitHubLabelName } from "@usine/config/label";
-import { IssueTrigger } from "@usine/config/trigger";
+import { IssueTrigger, PullRequestTrigger } from "@usine/config/trigger";
 import { LoadedInstance } from "@usine/config/instance";
 import { LoopFile, PromptTemplate, QuarantinedLoop } from "@usine/config/loop";
 import { LoopName } from "@usine/core/loop";
@@ -754,6 +754,66 @@ describe("Operator", () => {
             ],
           );
         }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
+      }),
+  );
+
+  it.effect(
+    "names on each Board card the Loops whose trigger matches its Items now, and renames them after a reload changes a trigger",
+    () =>
+      Effect.gen(function* () {
+        const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+        const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+        const reads = yield* Ref.make(0);
+        const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+        const issueLoop = (name: string, condition: string) =>
+          new LoopFile({
+            ...loop,
+            name: LoopName.make(name),
+            trigger: new IssueTrigger({ on: "issue", if: Source.make(condition) }),
+          });
+        const labelled = issueLoop(
+          "start-dev",
+          'item.labels.nodes.exists(label, label.name == "ready")',
+        );
+        const triage = issueLoop(
+          "triage",
+          'item.labels.nodes.exists(label, label.name == "triage")',
+        );
+        const pullRequests = new LoopFile({
+          ...loop,
+          name: LoopName.make("review-pr"),
+          trigger: new PullRequestTrigger({ on: "pr", if: Source.make("true") }),
+        });
+        const watched = new LoadedInstance({
+          ...instance,
+          loops: [loop, labelled, triage, pullRequests],
+        });
+        const reloaded = new LoadedInstance({
+          ...watched,
+          loops: [
+            loop,
+            labelled,
+            issueLoop("triage", 'item.labels.nodes.exists(label, label.name == "bug")'),
+            pullRequests,
+          ],
+        });
+        const cardLoops = (overview: ReadyOverview) =>
+          overview.projects[0]?.board.lanes
+            .flatMap((lane) => lane.items)
+            .find((item) => item.itemKey === itemKey)?.loops;
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          // The paused Loop still watches the Item; a pull-request Loop never matches an issue.
+          assert.deepStrictEqual(cardLoops(yield* operator.overview(watched)), [
+            loopName,
+            labelled.name,
+          ]);
+          assert.deepStrictEqual(cardLoops(yield* operator.overview(reloaded)), [
+            loopName,
+            labelled.name,
+            triage.name,
+          ]);
+        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision)));
       }),
   );
 

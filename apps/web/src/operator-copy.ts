@@ -68,6 +68,12 @@ export const elapsedLabel = (since: string, now: number = Date.now()): string =>
   return `${Math.floor(elapsed / 86_400_000)}d`;
 };
 
+/** How long ago `instant` was, as a phrase: `just now` or `12m ago`. */
+export const agoLabel = (instant: string, now: number): string => {
+  const elapsed = elapsedLabel(instant, now);
+  return elapsed === "now" ? "just now" : `${elapsed} ago`;
+};
+
 /** An instant as a local date and minute, such as `2026-10-18 17:27`. */
 export const timestampLabel = (instant: string): string => {
   const date = new Date(instant);
