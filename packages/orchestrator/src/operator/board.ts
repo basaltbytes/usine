@@ -25,13 +25,29 @@ export class BoardItemLink extends Schema.Class<BoardItemLink>("@usine/orchestra
   },
 ) {}
 
+/** A pull request of a Task that is open or merged; a closed, unmerged one is never named. */
+export class BoardPullRequestView extends Schema.Class<BoardPullRequestView>(
+  "@usine/orchestrator/BoardPullRequestView",
+)({
+  number: ItemNumber,
+  url: Schema.NonEmptyString,
+  state: Schema.Literals(["pr-open", "pr-merged"]),
+}) {}
+
 /** A Task projected from linked Items. The current Item determines the key, lane, labels, and move destination; the first issue supplies the Task title. */
 export class BoardTaskView extends Schema.Class<BoardTaskView>("@usine/orchestrator/BoardTaskView")(
   {
     ...BoardItemLink.fields,
     state: LaneItemState,
+    /** When GitHub last updated the current Item, as the poll stored it: an ISO 8601 UTC time. */
+    updatedAt: Schema.String,
     labels: Schema.Array(GitHubLabelName),
     items: Schema.Array(BoardItemLink).check(Schema.isNonEmpty()),
+    /**
+     * The Task's open pull request, the highest-numbered one when several are open; without
+     * one, its highest-numbered merged pull request; null when it has neither.
+     */
+    pullRequest: Schema.NullOr(BoardPullRequestView),
     /** Every saved Run for the visible Items, ordered from earliest to latest. */
     runs: Schema.Array(RunView),
     run: Schema.NullOr(RunView),

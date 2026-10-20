@@ -280,11 +280,13 @@ const card = (task: TaskView) => {
     title: task.title,
     url: current.url,
     state: current.state,
+    updatedAt: "2026-10-20T09:00:00Z",
     labels: current.labels,
     items: task.items.map(
       ({ itemKey, kind, number, title, url }) =>
         new BoardItemLink({ itemKey, kind, number, title, url }),
     ),
+    pullRequest: null,
     runs: [...task.runs].reverse(),
     run: task.runs[0] ?? null,
     needsYou: task.needsYou,

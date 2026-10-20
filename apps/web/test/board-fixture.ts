@@ -14,6 +14,7 @@ import {
   AwaitingApprovalView,
   BoardItemLink,
   BoardLaneId,
+  BoardPullRequestView,
   BoardTaskView,
   BoardView,
   CanceledAttemptView,
@@ -112,17 +113,25 @@ const task = (
     readonly conflicting?: boolean;
     readonly state?: BoardTaskView["state"];
     readonly loops?: ReadonlyArray<string>;
+    readonly updatedAt?: string;
   } = {},
 ) => {
   const current = members.at(-1) ?? members[0];
+  const state = extra.state ?? (current.kind === "pr" ? "pr-open" : "issue-open");
   const preferred =
     [...runs].reverse().find((run) => run.canApprove || run.canResolveFailure) ?? runs.at(-1);
   return new BoardTaskView({
     ...current,
     title: members[0].title,
-    state: extra.state ?? (current.kind === "pr" ? "pr-open" : "issue-open"),
+    state,
+    updatedAt: extra.updatedAt ?? minutesAgo(7 * 1440),
     labels: labels.map((label) => GitHubLabelName.make(label)),
     items: members,
+    // The current Item is the Task's newest pull request whenever it has one.
+    pullRequest:
+      current.kind === "pr" && (state === "pr-open" || state === "pr-merged")
+        ? new BoardPullRequestView({ number: current.number, url: current.url, state })
+        : null,
     runs,
     run: preferred ?? null,
     needsYou: runs.some((run) => run.canApprove || run.canResolveFailure),
@@ -150,6 +159,7 @@ const salvage = link(
 );
 const pinned = link(28, "pr", "Pin GitHub Actions to commit SHAs and add Dependabot for them");
 const shipped = link(5, "issue", "Show the salvage branch on failed Attempts");
+const shippedPr = link(6, "pr", "feat(web): show the salvage branch on failed Attempts");
 const dropped = link(18, "issue", "Cache the label catalog per repository");
 const flaky = link(
   15,
@@ -171,7 +181,8 @@ const pinnedRun = run("run-pinned", pinned, "review", "Failed", 95, [
 /**
  * A Board with every card shape: lane-only and overflowing labels, a linked PR, and open, waiting,
  * failed, canceled and finished Runs; an empty Merge lane; a dependabot pull request no Loop can
- * match and one with an open Run; Done and Unmapped lanes at the end.
+ * match and one with an open Run; Done, with an issue and its merged PR, and Unmapped, with an
+ * issue updated 10 minutes ago, at the end. Other Items were updated a week ago.
  */
 const boardProject = () =>
   new ProjectView({
@@ -246,18 +257,21 @@ const boardProject = () =>
         new ReadOnlyBoardLaneView({
           id: BoardLaneId.make("authored:done"),
           name: LaneName.make("Done"),
-          sources: [new StateLaneSource({ state: "issue-closed" })],
+          sources: [
+            new StateLaneSource({ state: "issue-closed" }),
+            new StateLaneSource({ state: "pr-merged" }),
+          ],
           origin: "authored",
           items: [
             task(
-              [shipped],
+              [shipped, shippedPr],
               [],
               [
                 run("run-shipped", shipped, "implement", "Succeeded", 2 * 1440, [
                   attempt(1, minutesAgo(2 * 1440), null, minutesAgo(2 * 1440 - 30)),
                 ]),
               ],
-              { state: "issue-closed" },
+              { state: "pr-merged" },
             ),
           ],
         }),
@@ -266,7 +280,7 @@ const boardProject = () =>
           name: LaneName.make("Unmapped"),
           sources: [],
           origin: "fallback",
-          items: [task([backlog], [])],
+          items: [task([backlog], [], [], { updatedAt: minutesAgo(10) })],
         }),
       ],
     }),

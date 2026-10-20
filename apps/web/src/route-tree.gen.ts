@@ -24,6 +24,7 @@ import { Route as ProjectsOwnerNameRouteImport } from './routes/projects/$owner/
 import { Route as ConfigurationRepositoriesOwnerNameRouteImport } from './routes/configuration/repositories/$owner/$name'
 import { Route as ProjectsOwnerNameIndexRouteImport } from './routes/projects/$owner/$name/index'
 import { Route as ProjectsOwnerNameRunsRunRouteImport } from './routes/projects/$owner/$name/runs/$run'
+import { Route as ProjectsOwnerNameTasksIndexRouteImport } from './routes/projects/$owner/$name/tasks/index'
 import { Route as ProjectsOwnerNameTasksNumberRouteImport } from './routes/projects/$owner/$name/tasks/$number'
 
 const IndexRoute = IndexRouteImport.update({
@@ -108,6 +109,12 @@ const ProjectsOwnerNameRunsRunRoute =
     path: '/runs/$run',
     getParentRoute: () => ProjectsOwnerNameRoute,
   } as any)
+const ProjectsOwnerNameTasksIndexRoute =
+  ProjectsOwnerNameTasksIndexRouteImport.update({
+    id: '/tasks/',
+    path: '/tasks/',
+    getParentRoute: () => ProjectsOwnerNameRoute,
+  } as any)
 const ProjectsOwnerNameTasksNumberRoute =
   ProjectsOwnerNameTasksNumberRouteImport.update({
     id: '/tasks/$number',
@@ -132,6 +139,7 @@ export interface FileRoutesByFullPath {
   '/projects/$owner/$name/': typeof ProjectsOwnerNameIndexRoute
   '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
   '/projects/$owner/$name/tasks/$number': typeof ProjectsOwnerNameTasksNumberRoute
+  '/projects/$owner/$name/tasks/': typeof ProjectsOwnerNameTasksIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -148,6 +156,7 @@ export interface FileRoutesByTo {
   '/projects/$owner/$name': typeof ProjectsOwnerNameIndexRoute
   '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
   '/projects/$owner/$name/tasks/$number': typeof ProjectsOwnerNameTasksNumberRoute
+  '/projects/$owner/$name/tasks': typeof ProjectsOwnerNameTasksIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -167,6 +176,7 @@ export interface FileRoutesById {
   '/projects/$owner/$name/': typeof ProjectsOwnerNameIndexRoute
   '/projects/$owner/$name/runs/$run': typeof ProjectsOwnerNameRunsRunRoute
   '/projects/$owner/$name/tasks/$number': typeof ProjectsOwnerNameTasksNumberRoute
+  '/projects/$owner/$name/tasks/': typeof ProjectsOwnerNameTasksIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -187,6 +197,7 @@ export interface FileRouteTypes {
     | '/projects/$owner/$name/'
     | '/projects/$owner/$name/runs/$run'
     | '/projects/$owner/$name/tasks/$number'
+    | '/projects/$owner/$name/tasks/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -203,6 +214,7 @@ export interface FileRouteTypes {
     | '/projects/$owner/$name'
     | '/projects/$owner/$name/runs/$run'
     | '/projects/$owner/$name/tasks/$number'
+    | '/projects/$owner/$name/tasks'
   id:
     | '__root__'
     | '/'
@@ -221,6 +233,7 @@ export interface FileRouteTypes {
     | '/projects/$owner/$name/'
     | '/projects/$owner/$name/runs/$run'
     | '/projects/$owner/$name/tasks/$number'
+    | '/projects/$owner/$name/tasks/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -336,6 +349,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ProjectsOwnerNameRunsRunRouteImport
       parentRoute: typeof ProjectsOwnerNameRoute
     }
+    '/projects/$owner/$name/tasks/': {
+      id: '/projects/$owner/$name/tasks/'
+      path: '/tasks'
+      fullPath: '/projects/$owner/$name/tasks/'
+      preLoaderRoute: typeof ProjectsOwnerNameTasksIndexRouteImport
+      parentRoute: typeof ProjectsOwnerNameRoute
+    }
     '/projects/$owner/$name/tasks/$number': {
       id: '/projects/$owner/$name/tasks/$number'
       path: '/tasks/$number'
@@ -380,12 +400,14 @@ interface ProjectsOwnerNameRouteChildren {
   ProjectsOwnerNameIndexRoute: typeof ProjectsOwnerNameIndexRoute
   ProjectsOwnerNameRunsRunRoute: typeof ProjectsOwnerNameRunsRunRoute
   ProjectsOwnerNameTasksNumberRoute: typeof ProjectsOwnerNameTasksNumberRoute
+  ProjectsOwnerNameTasksIndexRoute: typeof ProjectsOwnerNameTasksIndexRoute
 }
 
 const ProjectsOwnerNameRouteChildren: ProjectsOwnerNameRouteChildren = {
   ProjectsOwnerNameIndexRoute: ProjectsOwnerNameIndexRoute,
   ProjectsOwnerNameRunsRunRoute: ProjectsOwnerNameRunsRunRoute,
   ProjectsOwnerNameTasksNumberRoute: ProjectsOwnerNameTasksNumberRoute,
+  ProjectsOwnerNameTasksIndexRoute: ProjectsOwnerNameTasksIndexRoute,
 }
 
 const ProjectsOwnerNameRouteWithChildren =

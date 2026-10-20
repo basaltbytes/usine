@@ -2,7 +2,7 @@ import type { ItemKey } from "@usine/core/item";
 import type { LoopName } from "@usine/core/loop";
 import { canonicalRepositoryName, type RepositoryName } from "@usine/core/repository";
 import { Array as EffectArray, Option, Order, Schema } from "effect";
-import { BoardItemLink, BoardTaskView } from "../operator/board.ts";
+import { BoardItemLink, BoardPullRequestView, BoardTaskView } from "../operator/board.ts";
 import type { RunView } from "../operator/run.ts";
 import type { ProjectedItem } from "./items.ts";
 
@@ -104,6 +104,13 @@ export const taskCards = (
       );
     // An open Run controls the lane. Between stages, a PR takes over from its issue.
     const current = active?.item ?? prs[0]?.item ?? origin.item;
+    // Open pull requests sort first, so the first one that is open or merged is the open one
+    // or, without an open one, the newest merged one.
+    const [pullRequest = null] = prs.flatMap(({ item: { number, url, state } }) =>
+      state === "pr-open" || state === "pr-merged"
+        ? [new BoardPullRequestView({ number, url, state })]
+        : [],
+    );
     const preferred =
       history.find(({ run }) => run.canApprove || run.canResolveFailure) ?? active ?? history[0];
     cards.push(
@@ -111,8 +118,10 @@ export const taskCards = (
         ...itemLink(current),
         title: origin.item.title,
         state: current.state,
+        updatedAt: current.updatedAt,
         labels: current.labels,
         items: ordered.map(({ item }) => itemLink(item)),
+        pullRequest,
         runs: history.map(({ run }) => run).reverse(),
         run: preferred?.run ?? null,
         needsYou:

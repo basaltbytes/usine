@@ -38,7 +38,7 @@ repos:
           - state: pr-open
 ```
 
-Valid state sources are `issue-open`, `issue-closed`, `pr-open`, `pr-closed`, and `pr-merged`. Lane names and sources must be unique within the repository. Repositories without an authored map receive proposed lanes from the labels observed during GitHub polling.
+Valid state sources are `issue-open`, `issue-closed`, `pr-open`, `pr-closed`, and `pr-merged`. `issue-closed`, `pr-closed`, and `pr-merged` are settled states, as `isSettledItemState` reports: the Board places a closed issue or a closed or merged pull request by its state alone, whatever labels it still carries. Lane names and sources must be unique within the repository. Repositories without an authored map receive proposed lanes from the labels observed during GitHub polling.
 
 `workers` must contain at least one uniquely named worker. If the key is absent, the parser supplies one local worker named `local` with a concurrency limit of one. Set `kind` to `local` or `exe.dev` to select its executor, and set `max_concurrent_attempts` to control how many Attempts it can run at once.
 

@@ -25,6 +25,7 @@ import {
   ChildSessionBudgetFailureView,
   ClosedUnchangedView,
   HeldForOperatorView,
+  LoopPausedView,
   LoopView,
   QuestionFailureView,
   StalledItemView,
@@ -125,7 +126,9 @@ const itemWithRun = (state: "Failed" | "Succeeded", attempts: ReadonlyArray<Atte
       }),
     ],
     state: "issue-open",
+    updatedAt: "2026-10-20T09:00:00Z",
     labels: [],
+    pullRequest: null,
     runs: [run],
     run,
     needsYou: state === "Failed",
@@ -363,6 +366,15 @@ describe("Board card stall note", () => {
     run: canceledRun,
     needsYou: false,
   });
+  const pausedLink = issueLink(19, "Review the harvest of PR comments");
+  const paused = new BoardTaskView({
+    ...held,
+    ...pausedLink,
+    items: [pausedLink],
+    runs: [],
+    run: null,
+    needsYou: false,
+  });
   const render = (disabled: boolean) =>
     renderToStaticMarkup(
       <QueryClientProvider client={new QueryClient()}>
@@ -383,7 +395,7 @@ describe("Board card stall note", () => {
                       name: LaneName.make("Backlog"),
                       sources: [],
                       origin: "authored",
-                      items: [held, canceled],
+                      items: [held, canceled, paused],
                     }),
                   ],
                 }),
@@ -403,6 +415,12 @@ describe("Board card stall note", () => {
                 item: canceledLink,
                 reason: new ClosedUnchangedView({ run: canceledRun }),
               }),
+              new StalledItemView({
+                repository,
+                loop: LoopName.make("review-fix"),
+                item: pausedLink,
+                reason: new LoopPausedView(),
+              }),
             ]}
             disabled={disabled}
             openRun={() => {}}
@@ -418,6 +436,9 @@ describe("Board card stall note", () => {
     assert.notInclude(markup, ">Retry<");
     assert.match(markup, /start-dev <\/span>Canceled \d+d ago, unchanged since</u);
     assert.include(markup, ">Run again<");
+    // The paused Loop's fragment names it already, so no Loop name goes before it.
+    assert.include(markup, ">review-fix paused<");
+    assert.notInclude(markup, "review-fix </span>");
   });
 
   it("names the reason but offers no action while the factory needs setup", () => {

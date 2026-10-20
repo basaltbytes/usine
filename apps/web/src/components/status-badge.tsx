@@ -1,10 +1,13 @@
 import { cn } from "@/lib/utils";
 
-/** Run, Attempt, Project, and Loop states share one semantic tone scale (ADR 0015). A Loop that is
- * not paused is `live`, like the trigger streams in the sidebar. */
+/** Run, Attempt, Project, Loop, and Item states share one semantic tone scale (ADR 0015). A Loop
+ * that is not paused is `live`, like the trigger streams in the sidebar. A Merged Item reads as
+ * succeeded and a Closed one as canceled; an Open one keeps the neutral tone, since it says
+ * nothing about Runs. */
 const stateTone = (state: string): string => {
   switch (state) {
     case "Succeeded":
+    case "Merged":
     case "clear":
     case "live":
       return "text-run-succeeded";
@@ -20,6 +23,7 @@ const stateTone = (state: string): string => {
     case "Failed":
       return "text-run-failed";
     case "Canceled":
+    case "Closed":
     case "paused":
       return "text-run-canceled";
     default:

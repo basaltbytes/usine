@@ -40,6 +40,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { taskStall } from "../task/model.ts";
 import { DraggedCard, type LabelCatalog } from "./card.tsx";
 import { BoardColumn } from "./column.tsx";
 import { laneFlows } from "./flow.tsx";
@@ -220,10 +221,7 @@ export const ProjectBoard = ({
   );
   const flows = laneFlows(lanes, loops);
   const itemCount = lanes.reduce((total, lane) => total + lane.items.length, 0);
-  const stallOf = (task: BoardTaskView): StalledItemView | null => {
-    const keys = new Set(task.items.map(({ itemKey }) => itemKey));
-    return stalled.find(({ item }) => keys.has(item.itemKey)) ?? null;
-  };
+  const stallOf = (task: BoardTaskView): StalledItemView | null => taskStall(stalled, task);
   const catalog: LabelCatalog = new Map(project.labels.map((label) => [label.name, label]));
   const pending = disabled || isPending;
   const endDrag = () => {
