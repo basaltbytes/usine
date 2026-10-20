@@ -1,9 +1,11 @@
+import type { Worker as ConfigWorker } from "@usine/config/factory";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AttemptFailure } from "@usine/core/attempt/failure";
 import { AttemptOutcome } from "@usine/core/attempt/outcome";
 import { LoopName } from "@usine/core/loop";
 import * as RunState from "@usine/core/run/state";
 import { PullRequest } from "@usine/core/step/result";
+import { SshDestination, type WorkerName } from "@usine/core/worker";
 import { type RunSnapshot, type RunSummary, RunReader } from "@usine/engine/run-reader";
 import type { RunStoreError } from "@usine/engine/engine";
 import {
@@ -22,9 +24,12 @@ import {
   FailedAttemptView,
   type FailureView,
   InfraFailureView,
+  LocalWorkerAccess,
   QuestionFailureView,
   RunawayFailureView,
+  SshWorkerAccess,
   SucceededAttemptView,
+  type WorkerAccess,
 } from "./attempt.ts";
 import {
   FailedTranscriptView,
@@ -59,11 +64,41 @@ const attemptOutcomeView = (outcome: AttemptOutcome) =>
     Canceled: () => new CanceledAttemptView(),
   });
 
-const attemptView = (attempt: RunSnapshot["attempts"][number]): AttemptView => {
+/** How the operator reaches each Worker an instance's `usine.yaml` declares, by name. */
+export type WorkerAccesses = ReadonlyMap<WorkerName, WorkerAccess>;
+
+const workerAccess = (worker: ConfigWorker): WorkerAccess => {
+  switch (worker.kind) {
+    case "local":
+      return new LocalWorkerAccess();
+    case "ssh":
+      return new SshWorkerAccess({
+        destination: worker.destination,
+        port: Option.getOrNull(worker.port),
+      });
+    case "exe.dev":
+      // exe.dev names the VM after the Worker and serves it at `<vm>.exe.xyz`
+      // on the default port; `usine.yaml` holds no address for it.
+      return new SshWorkerAccess({
+        destination: SshDestination.make(`${worker.name}.exe.xyz`),
+        port: null,
+      });
+  }
+};
+
+/** Reads how the operator reaches each of `workers`, as `runView` reports it per Attempt. */
+export const workerAccesses = (workers: ReadonlyArray<ConfigWorker>): WorkerAccesses =>
+  new Map(workers.map((worker) => [worker.name, workerAccess(worker)]));
+
+const attemptView = (
+  attempt: RunSnapshot["attempts"][number],
+  workers: WorkerAccesses,
+): AttemptView => {
   return new AttemptView({
     id: attempt.id,
     number: attempt.number,
     worker: attempt.worker,
+    workerAccess: workers.get(attempt.worker) ?? null,
     brain: attempt.brain,
     task: attempt.task,
     agent: attempt.agent,
@@ -143,7 +178,15 @@ export const readUnrecordedEnds = Effect.fn("Operator.readUnrecordedEnds")(funct
   );
 });
 
-export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<LoopName>): RunView => {
+/**
+ * The operator's view of a saved Run: `pausedLoops` says whether its Loop is
+ * paused and `workers` how each Attempt's Worker is reached.
+ */
+export const runView = (
+  snapshot: RunSummary,
+  pausedLoops: ReadonlySet<LoopName>,
+  workers: WorkerAccesses,
+): RunView => {
   const actions = RunState.operatorActions(snapshot.run.state);
   const result = Option.getOrNull(snapshot.step.result);
   const pullRequest = result?.facts.find(
@@ -159,7 +202,7 @@ export const runView = (snapshot: RunSummary, pausedLoops: ReadonlySet<LoopName>
     loopPaused: pausedLoops.has(snapshot.run.loop),
     openedAt: DateTime.formatIso(snapshot.run.openedAt),
     task: snapshot.task,
-    attempts: snapshot.attempts.map(attemptView),
+    attempts: snapshot.attempts.map((attempt) => attemptView(attempt, workers)),
     approval: Option.match(snapshot.approval, {
       onNone: () => null,
       onSome: ({ approvedAt, source }) =>

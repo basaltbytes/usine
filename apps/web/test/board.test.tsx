@@ -36,6 +36,7 @@ import {
   RunView,
   SucceededAttemptView,
   WritableBoardLaneView,
+  LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Schema } from "effect";
@@ -62,6 +63,7 @@ const attempt = (number: number, message: string | null) =>
     id: AttemptId.make(`attempt-${number}`),
     number: AttemptNumber.make(number),
     worker: WorkerName.make("local"),
+    workerAccess: new LocalWorkerAccess(),
     brain,
     startedAt: `2026-09-01T12:00:0${number}.000Z`,
     outcome:

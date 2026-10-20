@@ -265,7 +265,7 @@ describe("local worker", () => {
             snapshot.step.result.value.facts.map((fact) => fact._tag),
             ["Commit"],
           );
-          assert.strictEqual(runView(snapshot, new Set()).pullRequestUrl, null);
+          assert.strictEqual(runView(snapshot, new Set(), new Map()).pullRequestUrl, null);
         }),
       ),
     LIVE_TEST_TIMEOUT,
@@ -302,7 +302,7 @@ describe("local worker", () => {
             [71],
           );
           assert.strictEqual(
-            runView(snapshot, new Set()).pullRequestUrl,
+            runView(snapshot, new Set(), new Map()).pullRequestUrl,
             "https://github.com/acme/demo/pull/71",
           );
         }),

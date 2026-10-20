@@ -30,6 +30,7 @@ import {
   StalledItemView,
   SucceededAttemptView,
   WritableBoardLaneView,
+  LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 
 // The browser test server answers lane writes for this repository only.
@@ -59,6 +60,7 @@ const attempt = (
     id: AttemptId.make(`attempt-${number}-${startedAt}`),
     number: AttemptNumber.make(number),
     worker: WorkerName.make("local"),
+    workerAccess: new LocalWorkerAccess(),
     brain: new BrainSpec({ harness: "codex", model: ModelId.make("gpt-5.6-sol"), effort: "high" }),
     startedAt,
     outcome:

@@ -21,7 +21,7 @@ import { type PreflightCheck, type WorkerPreflight, WorkerStatus } from "../work
 import { AttemptView } from "./attempt.ts";
 import { BoardItemLink } from "./board.ts";
 import { checkView, PreflightCheckView, WorkerSlotsView } from "./configuration.ts";
-import { runView } from "./projection.ts";
+import { runView, workerAccesses } from "./projection.ts";
 import { RunView } from "./run.ts";
 
 /** How many newest transcript rows of an Attempt in flight the desk reads for its activity and warnings. */
@@ -395,6 +395,7 @@ const makeDesk = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
+    const access = workerAccesses(instance.config.workers);
     const repositories = yield* Effect.forEach(
       instance.config.repos,
       (repository) =>
@@ -424,7 +425,10 @@ const makeDesk = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const runs = new Map(
-      [...summaries, ...history].map((summary) => [summary.run.id, runView(summary, paused)]),
+      [...summaries, ...history].map((summary) => [
+        summary.run.id,
+        runView(summary, paused, access),
+      ]),
     );
     const newestFirst = [...runs.values()].sort(
       (left, right) =>
@@ -496,7 +500,7 @@ const makeDesk = Effect.gen(function* () {
     const lastOutcomes = closed
       .filter((summary) => !replacedBeforeStart(summary))
       .map((summary) => {
-        const run = runView(summary, paused);
+        const run = runView(summary, paused, access);
         return new ClosedRunView({
           run,
           item: links.get(run.itemKey) ?? null,

@@ -21,21 +21,24 @@ import { ItemKey } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
-import { WorkerName } from "@usine/core/worker";
+import { SshDestination, SshPort, WorkerName } from "@usine/core/worker";
 import { TranscriptSequence } from "@usine/engine/transcript";
 import {
   AgentFailureView,
   AttemptView,
   FailedAttemptView,
   FailedTranscriptView,
+  LocalWorkerAccess,
   RunDetailView,
   RunView,
+  SshWorkerAccess,
   TranscriptEventView,
   TranscriptPageCursor,
+  type WorkerAccess,
 } from "@usine/orchestrator/operator";
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
-import { afterEach, beforeEach, expect, it } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { RunWorkspace } from "../src/run-page/workspace.tsx";
 import { ReaderBookmark, readerMemory } from "../src/run-transcript/reader/memory.ts";
@@ -69,6 +72,7 @@ const liveAttempt = new AttemptView({
   id: attemptId,
   number: AttemptNumber.make(1),
   worker: WorkerName.make("local"),
+  workerAccess: new LocalWorkerAccess(),
   brain: parent.brain,
   task: AttemptTask.make("Read the conversation"),
   agent: parent.agent,
@@ -169,6 +173,7 @@ afterEach(() => {
   flushSync(() => root.unmount());
   host.remove();
   queryClient.clear();
+  vi.restoreAllMocks();
 });
 
 it("reopens and cold-loads the same row offset without consuming activity received while closed", async () => {
@@ -708,9 +713,50 @@ it("addresses the composer to the parent until a live child is chosen in the out
   await expect.element(page.getByRole("button", { name: "Release child" })).toBeVisible();
 });
 
-it.each(["claude", "codex"] as const)(
-  "shows a finished %s child's saved session and copyable worker command",
-  async (harness) => {
+const usineWorker = SshDestination.make("usine-worker-1");
+const resumeCases: ReadonlyArray<{
+  readonly worker: string;
+  readonly harness: "claude" | "codex";
+  readonly access: WorkerAccess | null;
+  readonly facts: ReadonlyArray<string>;
+  readonly command: string;
+}> = [
+  {
+    worker: "local",
+    harness: "claude",
+    access: new LocalWorkerAccess(),
+    facts: ["Worktree /worker/Philippe's repo"],
+    command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
+  },
+  {
+    worker: "usine-worker-1",
+    harness: "codex",
+    access: new SshWorkerAccess({ destination: usineWorker, port: null }),
+    facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
+    command: String.raw`ssh -t usine-worker-1 'cd -- '\''/worker/Philippe'\''\'\'''\''s repo'\'' && codex resume -- '\''native-session'\'''`,
+  },
+  {
+    worker: "usine-worker-1",
+    harness: "claude",
+    access: new SshWorkerAccess({ destination: usineWorker, port: SshPort.make(2222) }),
+    facts: ["Worktree /worker/Philippe's repo on usine-worker-1"],
+    command: String.raw`ssh -t -p 2222 usine-worker-1 'cd -- '\''/worker/Philippe'\''\'\'''\''s repo'\'' && claude --resume '\''native-session'\'''`,
+  },
+  {
+    worker: "retired-worker",
+    harness: "claude",
+    access: null,
+    facts: [
+      "Worktree /worker/Philippe's repo",
+      "Worker retired-worker is no longer declared in usine.yaml",
+    ],
+    command: String.raw`cd -- '/worker/Philippe'\''s repo' && claude --resume 'native-session'`,
+  },
+];
+
+it.each(resumeCases)(
+  "gives a finished $harness child on $worker one copyable command for the operator's terminal",
+  async ({ worker, harness, access, facts, command }) => {
     const child = new ChildSession({
       id: AgentSessionId.make("saved-child"),
       parentId: parent.id,
@@ -721,20 +767,39 @@ it.each(["claude", "codex"] as const)(
       id: HarnessSessionId.make("native-session"),
       cwd: "/worker/Philippe's repo",
     });
-    mount([
-      record(1, new SessionStarted({ session: child, harnessSession: Option.some(saved) })),
-      record(2, new SessionFinished({ session: child })),
-    ]);
+    const copied: Array<string> = [];
+    vi.spyOn(navigator.clipboard, "writeText").mockImplementation(async (text) => {
+      copied.push(text);
+    });
+    mount(
+      [
+        record(1, new SessionStarted({ session: child, harnessSession: Option.some(saved) })),
+        record(2, new SessionFinished({ session: child })),
+      ],
+      runId,
+      undefined,
+      [new AttemptView({ ...liveAttempt, worker: WorkerName.make(worker), workerAccess: access })],
+    );
     await page.getByRole("button", { name: "Resume details for reviewer" }).click();
-    await expect.element(page.getByText("Harness session: native-session")).toBeVisible();
-    await expect.element(page.getByText("Worker worktree: /worker/Philippe's repo")).toBeVisible();
-    const command = harness === "claude" ? "claude --resume" : "codex resume --";
-    expect(document.body.textContent).toContain(`${command} 'native-session'`);
-    expect(document.body.textContent).toContain("cd -- '/worker/Philippe'\\''s repo'");
-    await expect.element(page.getByRole("button", { name: "Copy resume command" })).toBeEnabled();
+    await expect.element(page.getByText("Session native-session", { exact: true })).toBeVisible();
+    for (const fact of facts) {
+      await expect.element(page.getByText(fact, { exact: true })).toBeVisible();
+    }
+    await expect.element(page.getByText("Resume this session", { exact: true })).toBeVisible();
     await expect
-      .element(page.getByText(/Needs the worktree and the saved session files/))
+      .element(
+        page.getByText(
+          "Same harness login as the attempt. The worktree is removed at attempt cleanup",
+          { exact: true },
+        ),
+      )
       .toBeVisible();
+    // The command wraps in the popover instead of scrolling sideways.
+    const code = page.getByRole("dialog").element().querySelector("pre");
+    expect(code?.textContent).toBe(command);
+    expect(code?.scrollWidth).toBeLessThanOrEqual(code?.clientWidth ?? 0);
+    await page.getByRole("button", { name: "Copy command" }).click();
+    await expect.poll(() => copied).toEqual([command]);
   },
 );
 
@@ -825,11 +890,16 @@ it("shows that a Pi child has no saved harness session to resume", async () => {
     agent: AgentName.make("reviewer"),
     brain: new BrainSpec({ harness: "pi", model: ModelId.make("test-model"), effort: "high" }),
   });
-  mount([
-    record(1, new SessionStarted({ session: child })),
-    record(2, new SessionFinished({ session: child })),
-  ]);
+  mount(
+    [
+      record(1, new SessionStarted({ session: child })),
+      record(2, new SessionFinished({ session: child })),
+    ],
+    runId,
+    undefined,
+    [liveAttempt],
+  );
   await page.getByRole("button", { name: "Resume details for reviewer" }).click();
   await expect.element(page.getByText("No saved harness session")).toBeVisible();
-  expect(document.body.textContent).not.toContain("Resume on worker");
+  expect(document.body.textContent).not.toContain("Resume this session");
 });

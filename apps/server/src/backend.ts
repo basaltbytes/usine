@@ -96,7 +96,8 @@ export const liveBackendLayer = (
 ): Layer.Layer<FactoryBackend> =>
   Layer.succeed(FactoryBackend)({
     overview: Effect.flatMap(instances.get, operator.overview),
-    detail: operator.detail,
+    detail: (runId, request) =>
+      Effect.flatMap(instances.get, (instance) => operator.detail(instance, runId, request)),
     githubChanges: operator.githubChanges,
     approve: (runId) =>
       Effect.flatMap(instances.get, (instance) => operator.approve(instance, runId)),
@@ -146,7 +147,8 @@ export const needsSetupBackendLayer = (
   const fail = () => Effect.fail(unavailable);
   return Layer.succeed(FactoryBackend)({
     overview,
-    detail: observation.detail,
+    detail: (runId, request) =>
+      Effect.flatMap(instances.get, (instance) => observation.detail(instance, runId, request)),
     githubChanges: fail,
     approve: fail,
     resetCycleBudget: fail,

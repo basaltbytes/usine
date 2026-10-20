@@ -46,6 +46,7 @@ import {
   SucceededAttemptView,
   TranscriptEventView,
   UsageCostView,
+  LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { DateTime, Option, Schema } from "effect";
@@ -72,6 +73,7 @@ const attempt = (outcome: AttemptView["outcome"], salvage: AttemptView["salvage"
     id: attemptId,
     number: AttemptNumber.make(1),
     worker: WorkerName.make("local"),
+    workerAccess: new LocalWorkerAccess(),
     brain,
     task: AttemptTask.make("Fix issue 33."),
     agent: AgentName.make("developer"),

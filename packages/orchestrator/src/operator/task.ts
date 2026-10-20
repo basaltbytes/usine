@@ -29,7 +29,7 @@ import {
   BoardLaneId,
   BoardProjectNotFoundError,
 } from "./board.ts";
-import { runView } from "./projection.ts";
+import { runView, workerAccesses } from "./projection.ts";
 import { RunView } from "./run.ts";
 
 /** How many newest Items the Board, and so a Task's membership, considers; older ones drop off. */
@@ -159,6 +159,7 @@ const makeTaskReader = Effect.gen(function* () {
     );
     const summaries = yield* reader.forItems(stored.map(({ itemKey }) => itemKey));
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
+    const access = workerAccesses(instance.config.workers);
     const board = yield* projectBoard(
       managed,
       Option.match(labelProjection, {
@@ -166,7 +167,7 @@ const makeTaskReader = Effect.gen(function* () {
         onSome: ({ labels }) => labels.map(({ name }) => name),
       }),
       stored,
-      summaries.map((summary) => runView(summary, paused)),
+      summaries.map((summary) => runView(summary, paused, access)),
       asks.map(({ itemKey }) => itemKey),
     );
     const placed = board.lanes

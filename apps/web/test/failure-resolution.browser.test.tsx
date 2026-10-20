@@ -21,6 +21,7 @@ import {
   RunDetailView,
   RunFailureNeed,
   RunView,
+  LocalWorkerAccess,
 } from "@usine/orchestrator/operator";
 import { Schema } from "effect";
 import { flushSync } from "react-dom";
@@ -64,6 +65,7 @@ it("resolves a failure from Needs attention while retaining unrelated attention,
         id: attemptId,
         number: AttemptNumber.make(1),
         worker: WorkerName.make("local"),
+        workerAccess: new LocalWorkerAccess(),
         brain: new BrainSpec({ harness: "codex", model: ModelId.make("test"), effort: "high" }),
         task: AttemptTask.make("Complete the issue"),
         agent,
