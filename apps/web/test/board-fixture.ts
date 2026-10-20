@@ -372,12 +372,12 @@ export const boardOverview = () =>
     needsYou: [],
   });
 
-/** The Board after the operator resolved the failed review of the pinned pull request (#28), so
- * nothing about it waits on the operator. */
-/** `boardOverview()` with each card passed through `update`. */
-const boardOverviewWith = (update: (task: BoardTaskView) => BoardTaskView) => {
-  const overview = boardOverview();
-  return new ReadyOverview({
+/** `overview` with each Task `change` returns in place of the Task. */
+export const changeTasks = (
+  overview: ReadyOverview,
+  change: (task: BoardTaskView) => BoardTaskView,
+): ReadyOverview =>
+  new ReadyOverview({
     ...overview,
     projects: overview.projects.map(
       (project) =>
@@ -387,17 +387,18 @@ const boardOverviewWith = (update: (task: BoardTaskView) => BoardTaskView) => {
             ...project.board,
             lanes: project.board.lanes.map((lane) =>
               lane._tag === "WritableBoardLane"
-                ? new WritableBoardLaneView({ ...lane, items: lane.items.map(update) })
-                : new ReadOnlyBoardLaneView({ ...lane, items: lane.items.map(update) }),
+                ? new WritableBoardLaneView({ ...lane, items: lane.items.map(change) })
+                : new ReadOnlyBoardLaneView({ ...lane, items: lane.items.map(change) }),
             ),
           }),
         }),
     ),
   });
-};
 
+/** The Board after the operator resolved the failed review of the pinned pull request (#28), so
+ * nothing about it waits on the operator. */
 export const boardOverviewResolved = () =>
-  boardOverviewWith((task) => {
+  changeTasks(boardOverview(), (task) => {
     if (task.itemKey !== pinned.itemKey) return task;
     const runs = task.runs.map((run) => new RunView({ ...run, canResolveFailure: false }));
     return new BoardTaskView({ ...task, runs, run: null, needsYou: false });
@@ -408,7 +409,7 @@ export const boardOverviewResolved = () =>
  * has reported 6,000 tokens but no price yet, so the Claude plan's $1.25 is a lower bound.
  */
 export const boardOverviewUnpriced = () =>
-  boardOverviewWith((task) =>
+  changeTasks(boardOverview(), (task) =>
     task.itemKey !== redesignPr.itemKey
       ? task
       : new BoardTaskView({

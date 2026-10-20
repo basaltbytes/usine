@@ -1,15 +1,10 @@
 import { LoopName } from "@usine/core/loop";
 import {
   BoardTaskView,
-  BoardView,
   ClosedUnchangedView,
-  ProjectView,
   QueuedForWorkerView,
-  ReadOnlyBoardLaneView,
-  ReadyOverview,
   RunView,
   StalledItemView,
-  WritableBoardLaneView,
 } from "@usine/orchestrator/operator";
 import { Option } from "effect";
 import { assert, describe, it } from "vitest";
@@ -28,6 +23,7 @@ import {
   boardOverviewResolved,
   boardOverviewUnpriced,
   boardStalled,
+  changeTasks,
 } from "./board-fixture.ts";
 import { fullTask } from "./task-fixture.ts";
 
@@ -57,29 +53,6 @@ describe("Task page model", () => {
     assert.strictEqual(itemStateLine(merged, false), "Merged pull request #41");
   });
 });
-
-/** `overview` with each Task `change` returns in place of the Task. */
-const changeTasks = (
-  overview: ReadyOverview,
-  change: (task: BoardTaskView) => BoardTaskView,
-): ReadyOverview =>
-  new ReadyOverview({
-    ...overview,
-    projects: overview.projects.map(
-      (project) =>
-        new ProjectView({
-          ...project,
-          board: new BoardView({
-            ...project.board,
-            lanes: project.board.lanes.map((lane) =>
-              lane._tag === "WritableBoardLane"
-                ? new WritableBoardLaneView({ ...lane, items: lane.items.map(change) })
-                : new ReadOnlyBoardLaneView({ ...lane, items: lane.items.map(change) }),
-            ),
-          }),
-        }),
-    ),
-  });
 
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
