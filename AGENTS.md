@@ -1,6 +1,6 @@
 # usine
 
-An agent-agnostic software factory: an engine on which loops — trigger → agent-run automations authored as files in git — run against many repos from one headless orchestrator. Planning is complete (2026-08-21): the spec is `CONTEXT.md` + ADRs 0001–0019 in `docs/adr/`, indexed by the closed wayfinder map [#1](https://github.com/basaltbytes/usine/issues/1).
+usine runs loops against many repositories from one headless orchestrator. A loop is a file in git that names a trigger and the agent run it starts, with any coding agent harness. Planning is complete (2026-08-21): the spec is `CONTEXT.md` and ADRs 0001 to 0019 in `docs/adr/`, indexed by the closed wayfinder map [#1](https://github.com/basaltbytes/usine/issues/1).
 
 Read `CONTEXT.md` for the domain glossary before naming concepts.
 
@@ -18,13 +18,13 @@ Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/do
 
 ### Coding
 
-Before writing or reviewing code, load the `coding-guidelines` skill — the Basaltbytes charter every line of usine follows.
+Before writing or reviewing code, load the `coding-guidelines` skill, the Basaltbytes charter every line of usine follows.
 
-The monorepo is Effect v4 end to end — services, layers, typed errors, Schema at every boundary. Load the `effect-ts` skill alongside it whenever you touch TypeScript here.
+The monorepo is Effect v4 end to end: services, layers, typed errors, Schema at every boundary. Load the `effect-ts` skill alongside it whenever you touch TypeScript here.
 
 Standing rules:
 
-- Fix review findings in the PR under review: a logic flaw, stall risk, or architecture gap is a change request, never a note deferred to later — early packages set the precedent later agents copy.
+- Fix review findings in the PR under review: a logic flaw, stall risk, or architecture gap is a change request, never a note deferred to later. Early packages set the precedent later agents copy.
 - Everything shipped is observable and debuggable from day one: name spans with `Effect.fn`, annotate them with the domain ids, and emit structured `Effect.log*` at every decision point (skips, resets, backoffs, terminal outcomes) so absence of action is explainable from logs alone. Handle errors exhaustively in typed channels: never swallow one (log before `Effect.ignore`), isolate per-item failures so siblings continue, and reserve crashes for defects.
 - Cloudflare Workers/D1 is the first cloud target: package modules stay platform-free, Node adapters live behind their own subpath exports, and platform services stay in layer requirements (`@usine/engine/local-sqlite` and ADR 0020 are the precedent).
 - Files sharing a name prefix become a folder at creation, prefix dropped (`store/{store,codec,queries}.ts`).
@@ -34,4 +34,4 @@ Standing rules:
 - Give core branded schemas, their brands, and their exported types the same domain name (`RepositoryName`).
 - Document exported elements in plain language: what they represent, what arguments mean, and what callers can expect beyond the TypeScript signature. Keep implementation reasoning beside the code it explains, and link an ADR when it explains a rule.
 - Web UI is built from the shadcn registry on Tailwind tokens: read the "How to add UI" section of `apps/web/README.md` before touching `apps/web`.
-- Authored YAML surfaces (`usine.yaml`, loop/agent frontmatter) use snake_case keys; domain fields are camelCase. The rename happens once, at the parse boundary, via `Schema.encodeKeys` — file casing never leaks into domain types (`@usine/config`'s `Settings` is the precedent).
+- Authored YAML surfaces (`usine.yaml`, loop/agent frontmatter) use snake_case keys; domain fields are camelCase. The rename happens once, at the parse boundary, via `Schema.encodeKeys`, and file casing never leaks into domain types (`@usine/config`'s `Settings` is the precedent).
