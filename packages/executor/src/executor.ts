@@ -1,4 +1,4 @@
-import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
+import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import { Agent } from "@usine/core/agent";
 import { BrainSpec, Effort, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
@@ -289,10 +289,15 @@ export class CredentialProvider extends Context.Service<
 export class Executor extends Context.Service<
   Executor,
   {
-    /** Reconciles an old checkout before new Attempts start; records its salvage before releasing any work. */
+    /**
+     * Reconciles an old checkout before new Attempts start; records its salvage before releasing
+     * any work. For an open Attempt whose parent task failed before the orchestrator stopped, it
+     * first records the comments the Attempt posted on its Run's Item, harvested from the checkout
+     * with the Attempt's credential; a checkout or credential that is gone records none.
+     */
     readonly recover: <E>(
       attempt: AttemptRecovery,
-      record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
+      record: RecoverySink<E>,
     ) => Effect.Effect<void, E | ExecutorError>;
     /**
      * The kind of Worker this executor runs Attempts on. Each executor serves one

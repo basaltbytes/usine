@@ -1,7 +1,8 @@
-import { Schema } from "effect";
+import { type Effect, Schema } from "effect";
 import type { LoopPermissions } from "../loop.ts";
 import { CommitSha, safeSegment, type RepositoryName } from "../repository.ts";
 import type { RunId } from "../run/run.ts";
+import type { Comment } from "../step/result.ts";
 import type { WorkerName } from "../worker.ts";
 import type { AttemptId, AttemptNumber } from "./attempt.ts";
 
@@ -48,4 +49,15 @@ export interface AttemptRecovery {
   readonly succeeded: boolean;
   /** The Attempt has no outcome yet: an orchestrator restart may reattach it if its parent task is still live. */
   readonly open: boolean;
+}
+
+/**
+ * Where startup reconciliation records what a persisted Attempt left:
+ * `salvage` records what the executor preserved of its checkout, and
+ * `comments` the comments and reviews it posted on its Run's Item when its
+ * parent task failed and the orchestrator stopped before recording them.
+ */
+export interface RecoverySink<E> {
+  readonly salvage: (salvage: AttemptSalvage) => Effect.Effect<void, E>;
+  readonly comments: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, E>;
 }

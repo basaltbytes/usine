@@ -1,12 +1,12 @@
 import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
-import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
+import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import { harvestFacts, harvestPostedComments } from "@usine/core/step/harvest";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Deferred, Effect, Exit, Option, Schema, Scope } from "effect";
-import { durableSessionFor } from "../durable-session.ts";
+import { durableSessionFor, type PostedCommentsHarvest } from "../durable-session.ts";
 import {
   type AttemptWorkspace,
   CheckoutRequest,
@@ -96,24 +96,72 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
           ),
         );
 
+    const harvestCommand =
+      (operation: ExecutorOperation, worktree: string, access: RemoteAccess) =>
+      (command: "git" | "gh", args: ReadonlyArray<string>) =>
+        access.refresh
+          .pipe(
+            Effect.andThen(
+              commands.run(operation, access.shell, command, args, {
+                cwd: worktree,
+                environment: access.environment,
+                scrub: access.scrub,
+              }),
+            ),
+          )
+          .pipe(
+            Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
+          );
+
     const recover = Effect.fn(span("recover"))(function* <E>(
       attempt: AttemptRecovery,
-      record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
+      record: RecoverySink<E>,
     ) {
       yield* Effect.annotateCurrentSpan({ ...attempt });
       if (yield* session.awaitsReattach(attempt)) return;
       const { machine, checkouts } = yield* workerLeftovers(attempt.worker);
       const worktree = `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`;
+      const inspectCheckout = Effect.gen(function* () {
+        const inspected = yield* commands.inspect("cleanup", machine.shell, "test", [
+          "-d",
+          worktree,
+        ]);
+        if (inspected.exitCode === 1) return false;
+        if (inspected.exitCode !== 0)
+          return yield* executorError(
+            "Could not inspect recovery checkout",
+            new Error(inspected.stderr),
+          );
+        return true;
+      });
       // Every persisted Attempt is visited, and almost none left a checkout:
       // the Worker's one listing answers those without an SSH round trip.
-      if (!checkouts.has(worktree)) return;
-      const inspected = yield* commands.inspect("cleanup", machine.shell, "test", ["-d", worktree]);
-      if (inspected.exitCode === 1) return;
-      if (inspected.exitCode !== 0)
-        return yield* executorError(
-          "Could not inspect recovery checkout",
-          new Error(inspected.stderr),
-        );
+      const present = checkouts.has(worktree) && (yield* inspectCheckout);
+      yield* session.recoverPostedComments(
+        attempt,
+        present
+          ? Option.some<PostedCommentsHarvest>((spec) =>
+              Effect.scoped(
+                Effect.gen(function* () {
+                  const grant = yield* worker.grantFor(attempt.repository);
+                  const access = yield* grant.acquire(
+                    attempt.attemptId,
+                    attempt.worker,
+                    attempt.permissions,
+                    machine,
+                    "cleanup",
+                  );
+                  return yield* harvestPostedComments(
+                    spec,
+                    harvestCommand("cleanup", worktree, access),
+                  );
+                }),
+              ),
+            )
+          : Option.none(),
+        record.comments,
+      );
+      if (!present) return;
       const reconcile = (
         git: (args: ReadonlyArray<string>) => Effect.Effect<string, ExecutorError>,
       ) =>
@@ -125,7 +173,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
             cache: `${machine.workerDirectory}/repos/${cacheDirectoryName(attempt.repository)}`,
             git,
           },
-          record,
+          record.salvage,
         );
       if (attempt.succeeded || attempt.permissions === "read") {
         yield* stopChildren("cleanup", machine, worktree);
@@ -148,25 +196,8 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       );
     });
 
-    const harvestCommand =
-      (workspace: AttemptWorkspace, access: RemoteAccess) =>
-      (command: "git" | "gh", args: ReadonlyArray<string>) =>
-        access.refresh
-          .pipe(
-            Effect.andThen(
-              commands.run("launch", access.shell, command, args, {
-                cwd: workspace.worktree,
-                environment: access.environment,
-                scrub: access.scrub,
-              }),
-            ),
-          )
-          .pipe(
-            Effect.map((stdout) => (stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n"))),
-          );
-
     const harvest = (workspace: AttemptWorkspace, access: RemoteAccess) =>
-      harvestFacts(workspace.spec, harvestCommand(workspace, access)).pipe(
+      harvestFacts(workspace.spec, harvestCommand("launch", workspace.worktree, access)).pipe(
         Effect.mapError(
           (error) =>
             new InfraFailure({
@@ -430,7 +461,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                 harvest: harvest(prepared, access),
                 harvestComments: harvestPostedComments(
                   prepared.spec,
-                  harvestCommand(prepared, access),
+                  harvestCommand("launch", prepared.worktree, access),
                 ),
                 keepForReattach: provisioned.keepForReattach,
               });

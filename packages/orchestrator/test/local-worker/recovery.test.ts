@@ -20,6 +20,8 @@ const attempt = (worker: string, number: number) => ({
   open: false,
 });
 
+const ignored = { salvage: () => Effect.void, comments: () => Effect.void };
+
 const credentials = Layer.succeed(CredentialProvider)({
   issue: () => Effect.die("Absent checkouts must not acquire credentials"),
 });
@@ -60,7 +62,10 @@ describe("local checkout reconciliation", () => {
         yield* Effect.forEach(
           Array.from({ length: 1000 }, (_, index) => index),
           (index) =>
-            executor.recover(attempt("local", index), () => Effect.die("Unexpected salvage")),
+            executor.recover(attempt("local", index), {
+              salvage: () => Effect.die("Unexpected salvage"),
+              comments: () => Effect.die("Unexpected comments"),
+            }),
           { concurrency: 8, discard: true },
         );
       }).pipe(Effect.provide(executorLayer(root, observed)));
@@ -89,23 +94,19 @@ describe("local checkout reconciliation", () => {
       });
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
-        const first = yield* Effect.result(
-          executor.recover(attempt("broken", 1), () => Effect.void),
-        );
+        const first = yield* Effect.result(executor.recover(attempt("broken", 1), ignored));
         assert(Result.isFailure(first));
         assert.strictEqual(first.failure._tag, "ExecutorOperationError");
         yield* fs.remove(attempts);
         yield* fs.makeDirectory(attempts);
-        const second = yield* Effect.result(
-          executor.recover(attempt("broken", 2), () => Effect.void),
-        );
+        const second = yield* Effect.result(executor.recover(attempt("broken", 2), ignored));
         assert(Result.isFailure(second));
-        yield* executor.recover(attempt("healthy", 3), () => Effect.void);
+        yield* executor.recover(attempt("healthy", 3), ignored);
         assert.strictEqual(reads, 1);
       }).pipe(Effect.provide(executorLayer(root, observed)));
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
-        yield* executor.recover(attempt("broken", 1), () => Effect.void);
+        yield* executor.recover(attempt("broken", 1), ignored);
       }).pipe(Effect.provide(executorLayer(root, observed)));
       assert.strictEqual(reads, 2);
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

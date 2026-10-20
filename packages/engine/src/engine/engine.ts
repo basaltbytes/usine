@@ -259,7 +259,10 @@ const makeRunEngine = Effect.gen(function* () {
       reconcilable,
       (attempt) =>
         stepExecutor
-          .recover(attempt, (salvage) => store.recordSalvage(attempt.attemptId, salvage))
+          .recover(attempt, {
+            salvage: (salvage) => store.recordSalvage(attempt.attemptId, salvage),
+            comments: (comments) => store.recordComments(attempt.attemptId, comments),
+          })
           .pipe(
             Effect.tapError((error) =>
               Effect.logError("Attempt salvage reconciliation failed; work retained", {

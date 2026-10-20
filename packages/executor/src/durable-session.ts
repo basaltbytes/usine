@@ -3,6 +3,7 @@ import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
+import type { HarvestSpec } from "@usine/core/step/harvest";
 import type { Comment, StepResult, StepResultFact } from "@usine/core/step/result";
 import {
   type AttemptReport,
@@ -55,6 +56,15 @@ export interface DurableCheckout {
   /** Preserves the checkout when a restart needs to reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;
 }
+
+/**
+ * Collects the comments the Attempt that `spec` describes posted on its Item,
+ * in its checkout with a credential it acquires for the purpose. It fails only
+ * when that credential cannot be acquired.
+ */
+export type PostedCommentsHarvest = (
+  spec: HarvestSpec,
+) => Effect.Effect<ReadonlyArray<Comment>, ExecutorError>;
 
 export interface DurableSessionOptions {
   /** Bounds each cancellation stage: the parent task's abort, then the Attempt settling. */
@@ -124,6 +134,31 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       });
   });
 
+  /** Records `comments` through `record`; a failure is logged and never raised. */
+  const recordComments = Effect.fn("DurableSession.recordComments")(function* <E>(
+    attemptId: AttemptId,
+    comments: ReadonlyArray<Comment>,
+    record: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, E>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, comments: comments.length });
+    if (comments.length === 0) {
+      yield* Effect.logDebug("The Attempt posted no comment on its Item before it ended", {
+        attemptId,
+      });
+      return;
+    }
+    yield* record(comments).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning("Could not record the comments the Attempt posted before it ended", {
+          attemptId,
+          comments: comments.length,
+          message: String(error),
+        }),
+      ),
+      Effect.ignore,
+    );
+  });
+
   /**
    * Records the comments and reviews an Attempt that ended without success
    * posted on its Run's Item, once its parent task has stopped. A failure to
@@ -135,24 +170,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     io: AttemptChannel.Sink,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    const comments = yield* checkout.harvestComments;
-    if (comments.length === 0) {
-      yield* Effect.logDebug("The Attempt posted no comment on its Item before it ended", {
-        attemptId,
-      });
-      return;
-    }
-    yield* io.comments(comments).pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning("Could not record the comments the Attempt posted before it ended", {
-          attemptId,
-          comments: comments.length,
-          errorTag: error._tag,
-          message: error.message,
-        }),
-      ),
-      Effect.ignore,
-    );
+    yield* recordComments(attemptId, yield* checkout.harvestComments, io.comments);
   });
 
   const launch = Effect.fn("DurableSession.launch")(function* (
@@ -513,6 +531,78 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     return live;
   });
 
+  /**
+   * Records, during startup reconciliation, the comments and reviews an open
+   * Attempt posted on its Run's Item when durable storage holds its parent's
+   * failure. The Run closes such an Attempt from that failure without
+   * launching it again, so no launch recorded them. `harvest` collects them
+   * from the Attempt's checkout, and is none when the checkout is gone. Any
+   * other Attempt records nothing, and every failure is logged, never raised.
+   */
+  const recoverPostedComments = Effect.fn("DurableSession.recoverPostedComments")(function* <E>(
+    attempt: AttemptRecovery,
+    harvest: Option.Option<PostedCommentsHarvest>,
+    record: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, E>,
+  ) {
+    if (!attempt.open) return;
+    const { attemptId, worker } = attempt;
+    yield* Effect.annotateCurrentSpan({ attemptId, worker });
+    const finished = yield* runtime.finished(attemptId).pipe(Effect.result);
+    if (Result.isFailure(finished)) {
+      yield* Effect.logWarning(
+        "Could not read how the open Attempt's parent task ended; the comments it posted are not recorded",
+        { attemptId, worker, errorTag: finished.failure._tag, message: finished.failure.message },
+      );
+      return;
+    }
+    if (!Option.exists(finished.success, ({ _tag }) => _tag === "ParentFailed")) {
+      yield* Effect.logDebug(
+        "Durable storage holds no failure of the open Attempt's parent task; reconciliation records no comment",
+        {
+          attemptId,
+          worker,
+          finished: Option.match(finished.success, {
+            onNone: () => "none",
+            onSome: ({ _tag }) => _tag,
+          }),
+        },
+      );
+      return;
+    }
+    if (Option.isNone(harvest)) {
+      yield* Effect.logWarning(
+        "The open Attempt's parent task failed and its checkout is gone; the comments it posted are not recorded",
+        { attemptId, worker },
+      );
+      return;
+    }
+    const stored = yield* runtime.request(attemptId).pipe(Effect.result);
+    if (Result.isFailure(stored) || Option.isNone(stored.success)) {
+      yield* Effect.logWarning(
+        "The open Attempt's parent task failed and its durable request cannot be read; the comments it posted are not recorded",
+        {
+          attemptId,
+          worker,
+          message: Result.isFailure(stored) ? stored.failure.message : "no durable request",
+        },
+      );
+      return;
+    }
+    yield* Effect.logInfo(
+      "The open Attempt's parent task failed before this process recorded it; harvesting the comments it posted from its checkout",
+      { attemptId, worker },
+    );
+    const comments = yield* harvest.value(stored.success.value.spec).pipe(Effect.result);
+    if (Result.isFailure(comments)) {
+      yield* Effect.logWarning(
+        "Could not acquire a credential to harvest the open Attempt's comments; the comments it posted are not recorded",
+        { attemptId, worker, errorTag: comments.failure._tag, message: comments.failure.message },
+      );
+      return;
+    }
+    yield* recordComments(attemptId, comments.success, record);
+  });
+
   /** The request a reattached Attempt's parent task was created with; a missing one fails the reattachment. */
   const storedRequest = Effect.fn("DurableSession.storedRequest")(function* (attemptId: AttemptId) {
     yield* Effect.annotateCurrentSpan({ attemptId });
@@ -543,6 +633,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     isLive,
     outcome,
     awaitsReattach,
+    recoverPostedComments,
     storedRequest,
   } as const;
 });

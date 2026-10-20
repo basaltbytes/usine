@@ -196,12 +196,15 @@ describe("local worker salvage", () => {
               succeeded: false,
               open: false,
             },
-            (salvage) =>
-              Effect.gen(function* () {
-                assert(yield* fileSystem.exists(retained));
-                assert(salvage._tag === "Pushed");
-                recorded.push(salvage);
-              }),
+            {
+              salvage: (salvage) =>
+                Effect.gen(function* () {
+                  assert(yield* fileSystem.exists(retained));
+                  assert(salvage._tag === "Pushed");
+                  recorded.push(salvage);
+                }),
+              comments: () => Effect.void,
+            },
           );
           const recovered = recorded[0];
           assert(recovered !== undefined);

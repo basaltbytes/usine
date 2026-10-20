@@ -1,4 +1,4 @@
-import type { AttemptRecovery, AttemptSalvage } from "@usine/core/attempt/salvage";
+import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import { Agent } from "@usine/core/agent";
 import { ModelId } from "@usine/core/agent/brain";
 import { Attempt, AttemptTask, type AttemptId } from "@usine/core/attempt";
@@ -67,10 +67,15 @@ export class StepExecutor extends Context.Service<
     readonly outcome: (
       attemptId: AttemptId,
     ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
-    /** Reconciles an old checkout before new Attempts start; records its salvage before releasing any work. */
+    /**
+     * Reconciles an old checkout before new Attempts start; records its salvage before releasing
+     * any work. For an open Attempt whose parent task failed before the orchestrator stopped, it
+     * also records the comments the Attempt posted on its Run's Item if its checkout is still on
+     * the Worker.
+     */
     readonly recover: <E>(
       attempt: AttemptRecovery,
-      record: (salvage: AttemptSalvage) => Effect.Effect<void, E>,
+      record: RecoverySink<E>,
     ) => Effect.Effect<void, E | AttemptFailure>;
     /** Requests that the identified Attempt stop its current work. */
     readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;

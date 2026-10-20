@@ -552,7 +552,7 @@ describe("SSH Worker behind a Gateway", () => {
           succeeded: false,
           open: false,
         },
-        () => Effect.void,
+        { salvage: () => Effect.void, comments: () => Effect.void },
       );
       assert.deepStrictEqual(
         (yield* attachmentsInForce).map(({ id }) => id).sort(),
