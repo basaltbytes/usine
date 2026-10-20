@@ -238,6 +238,13 @@ export const taskDuration = (
     usage.durationMillis,
   );
 
+/**
+ * Whether part of a Task's usage in a pool with a dollar rate has no price yet, so its cost is a
+ * lower bound.
+ */
+export const costUnpriced = (usage: Pick<TaskUsageView, "pools">): boolean =>
+  usage.pools.some(({ unpriced }) => unpriced);
+
 /** What the listed Tasks took, added up, as the line under the Tasks list's heading says. */
 export interface TaskTotals {
   readonly runs: number;
@@ -247,6 +254,8 @@ export interface TaskTotals {
   readonly tokens: number;
   /** The priced Tasks' dollars, an estimate when any is; null when no Task has a price. */
   readonly cost: { readonly usd: number; readonly estimate: boolean } | null;
+  /** Whether a listed Task has usage with no price yet, so `cost` is a lower bound. */
+  readonly unpriced: boolean;
 }
 
 /** The runs, Attempt time at `now`, tokens, and dollars of every row, added up. */
@@ -257,6 +266,7 @@ export const taskTotals = (rows: ReadonlyArray<TaskRow>, now: number): TaskTotal
     durationMillis: rows.reduce((sum, { task }) => sum + taskDuration(task.usage, now), 0),
     unmeasured: rows.reduce((sum, { task }) => sum + task.usage.unmeasured, 0),
     tokens: rows.reduce((sum, { task }) => sum + task.usage.tokens, 0),
+    unpriced: rows.some(({ task }) => costUnpriced(task.usage)),
     cost:
       costs.length === 0
         ? null

@@ -817,7 +817,12 @@ describe("Operator", () => {
           assert.deepStrictEqual(
             {
               ...card.usage,
-              pools: card.usage.pools.map(({ pool, tokens }) => [pool, tokens]),
+              pools: card.usage.pools.map(({ pool, tokens, cost, unpriced }) => [
+                pool,
+                tokens,
+                cost?.usd ?? null,
+                unpriced,
+              ]),
               cost: card.usage.cost === null ? null : { ...card.usage.cost },
             },
             {
@@ -826,9 +831,9 @@ describe("Operator", () => {
               unmeasured: 0,
               tokens: 27_300,
               pools: [
-                ["apiKeys", 1_500],
-                ["claudePlan", 20_000],
-                ["chatgptPlan", 5_800],
+                ["apiKeys", 1_500, 0.75, false],
+                ["claudePlan", 20_000, 1.25, false],
+                ["chatgptPlan", 5_800, null, false],
               ],
               cost: { usd: 2, estimate: true },
             },

@@ -1039,6 +1039,7 @@ export {
   SessionUsageView,
   PoolUsageView,
   RunUsageView,
+  TaskPoolUsageView,
   TaskUsageView,
 } from "./usage.ts";
 export {

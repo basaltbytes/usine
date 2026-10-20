@@ -3,6 +3,7 @@ import type {
   PoolUsageView,
   RunUsageView,
   SessionUsageView,
+  TaskPoolUsageView,
   UsageCostView,
 } from "@usine/orchestrator/operator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -23,31 +24,50 @@ const sessionName = ({ session }: SessionUsageView) =>
   session._tag === "ParentSession" ? "Parent" : session.agent;
 
 const row = "grid grid-cols-[minmax(0,1fr)_auto_7rem] items-baseline gap-x-3 py-0.5";
+// Room for `at least` before a price, kept on every line so the token figures stay aligned.
+const lowerBoundRow = "grid grid-cols-[minmax(0,1fr)_auto_10rem] items-baseline gap-x-3 py-0.5";
+
+/**
+ * A pool's line: a Run's `PoolUsageView`, or a Task's `TaskPoolUsageView`, whose `unpriced` marks
+ * its price as a lower bound.
+ */
+type PoolLine = PoolUsageView | TaskPoolUsageView;
+
+const unpriced = (pool: PoolLine): boolean => "unpriced" in pool && pool.unpriced;
 
 /**
  * Tokens per billing pool, each with its price where the pool has a dollar rate. The ChatGPT plan
- * says it has no dollar rate instead of showing a price. The Run page and the Tasks list share it.
+ * says it has no dollar rate instead of showing a price, and a Task's pool with usage not priced
+ * yet says its price is `at least` that much. The Run page and the Tasks list share it.
  */
-export const PoolBreakdown = ({ pools }: { readonly pools: ReadonlyArray<PoolUsageView> }) => (
-  <section aria-label="Tokens per pool">
-    <h2 className="pb-1 text-sm font-medium text-foreground">Tokens per pool</h2>
-    {pools.map((pool) => (
-      <div key={pool.pool} className={row}>
-        <span className="truncate text-foreground">{poolLabel(pool.pool)}</span>
-        <span className="text-right font-mono text-foreground tabular-nums">
-          {count.format(pool.tokens)}
-        </span>
-        <span className="text-right">
-          {pool.pool === "chatgptPlan" ? (
-            <span className="text-muted-foreground">No dollar rate</span>
-          ) : (
-            <Cost cost={pool.cost} />
-          )}
-        </span>
-      </div>
-    ))}
-  </section>
-);
+export const PoolBreakdown = ({ pools }: { readonly pools: ReadonlyArray<PoolLine> }) => {
+  const lowerBound = pools.some((pool) => unpriced(pool) && pool.cost !== null);
+  return (
+    <section aria-label="Tokens per pool">
+      <h2 className="pb-1 text-sm font-medium text-foreground">Tokens per pool</h2>
+      {pools.map((pool) => (
+        <div key={pool.pool} className={lowerBound ? lowerBoundRow : row}>
+          <span className="truncate text-foreground">{poolLabel(pool.pool)}</span>
+          <span className="text-right font-mono text-foreground tabular-nums">
+            {count.format(pool.tokens)}
+          </span>
+          <span className="text-right">
+            {pool.pool === "chatgptPlan" ? (
+              <span className="text-muted-foreground">No dollar rate</span>
+            ) : (
+              <>
+                {unpriced(pool) && pool.cost !== null && (
+                  <span className="text-muted-foreground">at least </span>
+                )}
+                <Cost cost={pool.cost} />
+              </>
+            )}
+          </span>
+        </div>
+      ))}
+    </section>
+  );
+};
 
 /**
  * What the Run's Attempts used: tokens per billing pool with its price where

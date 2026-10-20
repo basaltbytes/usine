@@ -23,7 +23,12 @@ import {
   taskRows,
   taskTotals,
 } from "../src/task/model.ts";
-import { boardOverview, boardOverviewResolved, boardStalled } from "./board-fixture.ts";
+import {
+  boardOverview,
+  boardOverviewResolved,
+  boardOverviewUnpriced,
+  boardStalled,
+} from "./board-fixture.ts";
 import { fullTask } from "./task-fixture.ts";
 
 const runOf = (id: string) => {
@@ -219,5 +224,15 @@ describe("Tasks list model", () => {
     assert(totals.cost !== null);
     assert.closeTo(totals.cost.usd, 5.5, 1e-9);
     assert.isTrue(totals.cost.estimate);
+    assert.isFalse(totals.unpriced);
+  });
+
+  it("keeps the priced dollars and marks the totals a lower bound while a Run has no price yet", () => {
+    const totals = taskTotals(taskRows(lanes(boardOverviewUnpriced()), boardStalled()), Date.now());
+    assert.strictEqual(totals.tokens, 27_500 + 12_000 + 48_000);
+    assert(totals.cost !== null);
+    assert.closeTo(totals.cost.usd, 5.5, 1e-9);
+    assert.isTrue(totals.cost.estimate);
+    assert.isTrue(totals.unpriced);
   });
 });

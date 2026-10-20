@@ -54,6 +54,24 @@ export class RunUsageView extends Schema.Class<RunUsageView>("@usine/orchestrato
   sessions: Schema.Array(SessionUsageView),
 }) {}
 
+/** What a Task's Runs drew from one billing pool, added up over every session of every Run. */
+export class TaskPoolUsageView extends Schema.Class<TaskPoolUsageView>(
+  "@usine/orchestrator/TaskPoolUsageView",
+)({
+  pool: BillingPool,
+  tokens: TokenCount,
+  /**
+   * The dollars of the sessions the harness priced; null in the ChatGPT plan, and when no session
+   * in the pool has a price yet.
+   */
+  cost: Schema.NullOr(UsageCostView),
+  /**
+   * Whether a session in a pool with a dollar rate has no price, such as a Claude session before
+   * its first result, so `cost` is a lower bound. Always false in the ChatGPT plan.
+   */
+  unpriced: Schema.Boolean,
+}) {}
+
 /**
  * What usine's work on a Task took, over every Run on its Items: the Attempts' wall time, and the
  * tokens and dollars their sessions drew per billing pool.
@@ -69,12 +87,12 @@ export class TaskUsageView extends Schema.Class<TaskUsageView>("@usine/orchestra
     tokens: TokenCount,
     /**
      * Each pool summed over the Runs, in the order API keys, Claude plan, ChatGPT plan; a pool no
-     * Run used is absent. A pool's cost is null when any Run left it unpriced.
+     * Run used is absent.
      */
-    pools: Schema.Array(PoolUsageView),
+    pools: Schema.Array(TaskPoolUsageView),
     /**
-     * The priced pools' dollars added up, an estimate when the Claude plan's figure is among them;
-     * null when no pool has a price.
+     * The priced pools' dollars added up, an estimate when the Claude plan's figure is among them,
+     * and a lower bound when a pool is `unpriced`; null when no pool has a price.
      */
     cost: Schema.NullOr(UsageCostView),
   },
@@ -145,6 +163,11 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsageView => {
 /**
  * Adds up a Task's `runs`: their Attempts' time, and the tokens and dollars in `usage`, what
  * each Run's sessions drew. A Run absent from `usage` adds time but no tokens.
+ *
+ * Pools add up the Runs' sessions, not the Runs' pools: a Run's pool has no price while any of
+ * its sessions has none, and a Claude session has none until its first result. Summing the
+ * priced sessions keeps the dollars already spent on the Task while a Run is at work, and
+ * `unpriced` says the figure leaves some usage out.
  */
 export const taskUsage = (
   runs: ReadonlyArray<{
@@ -163,26 +186,22 @@ export const taskUsage = (
       else durationMillis += Math.max(0, Date.parse(endedAt) - Date.parse(startedAt));
     }
   }
-  const read = runs.flatMap(({ id }) => {
-    const run = usage.get(id);
-    return run === undefined ? [] : [run];
-  });
+  const sessions = runs.flatMap(({ id }) => usage.get(id)?.sessions ?? []);
   const pools = POOLS.flatMap((pool) => {
-    const members = read.flatMap(({ pools: runPools }) =>
-      runPools.filter((member) => member.pool === pool),
-    );
+    const members = sessions.filter((session) => session.pool === pool);
     if (members.length === 0) return [];
     const costs = members.flatMap(({ cost }) => (cost === null ? [] : [cost.usd]));
     return [
-      new PoolUsageView({
+      new TaskPoolUsageView({
         pool,
         tokens: TokenCount.make(members.reduce((sum, { tokens }) => sum + tokens, 0)),
         cost: priced(
           pool,
-          costs.length === members.length
-            ? Option.some(UsdAmount.make(costs.reduce((sum, usd) => sum + usd, 0)))
-            : Option.none(),
+          costs.length === 0
+            ? Option.none()
+            : Option.some(UsdAmount.make(costs.reduce((sum, usd) => sum + usd, 0))),
         ),
+        unpriced: pool !== "chatgptPlan" && costs.length < members.length,
       }),
     ];
   });
@@ -191,7 +210,7 @@ export const taskUsage = (
     durationMillis: Math.round(durationMillis),
     runningSince,
     unmeasured,
-    tokens: TokenCount.make(read.reduce((sum, { tokens }) => sum + tokens, 0)),
+    tokens: TokenCount.make(sessions.reduce((sum, { tokens }) => sum + tokens, 0)),
     pools,
     cost:
       costs.length === 0

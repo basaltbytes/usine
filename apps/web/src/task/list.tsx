@@ -35,6 +35,7 @@ import { projectParams } from "../overview.ts";
 import { PoolBreakdown } from "../run-page/usage.tsx";
 import { stallNamesLoop, stallSentence } from "../stall/copy.ts";
 import {
+  costUnpriced,
   itemStateLabel,
   runActivityAt,
   type TaskRow,
@@ -170,13 +171,25 @@ const TaskTime = ({ task, now }: { readonly task: BoardTaskView; readonly now: n
   );
 };
 
-/** Dollars, then `estimate` in muted text when the Claude plan's figure is among them. */
-const CostLabel = ({ cost }: { readonly cost: NonNullable<TaskTotals["cost"]> }) => (
+/** Dollars, then `estimate` in muted text when the Claude plan's figure is among them, after
+ * `at least` when part of the usage has no price yet. */
+const CostLabel = ({
+  cost,
+  unpriced,
+}: {
+  readonly cost: NonNullable<TaskTotals["cost"]>;
+  readonly unpriced: boolean;
+}) => (
   <>
+    {unpriced && <span className="font-sans text-muted-foreground">at least </span>}
     {usdLabel(cost.usd)}
     {cost.estimate && <span className="font-sans text-muted-foreground"> estimate</span>}
   </>
 );
+
+/** A cost as one phrase, such as `at least $2.00 estimate`. */
+const costWords = (cost: NonNullable<TaskTotals["cost"]>, unpriced: boolean): string =>
+  `${unpriced ? "at least " : ""}${usdLabel(cost.usd)}${cost.estimate ? " estimate" : ""}`;
 
 /** `children` opening, on hover or focus, the Task's tokens per billing pool. */
 const PoolHover = ({
@@ -266,9 +279,9 @@ const TaskListRow = ({
       {row.task.usage.cost !== null && (
         <PoolHover
           usage={row.task.usage}
-          label={`Cost: ${usdLabel(row.task.usage.cost.usd)}${row.task.usage.cost.estimate ? " estimate" : ""}. Show it per pool`}
+          label={`Cost: ${costWords(row.task.usage.cost, costUnpriced(row.task.usage))}. Show it per pool`}
         >
-          <CostLabel cost={row.task.usage.cost} />
+          <CostLabel cost={row.task.usage.cost} unpriced={costUnpriced(row.task.usage)} />
         </PoolHover>
       )}
     </TableCell>
@@ -282,9 +295,7 @@ const totalsLine = (totals: TaskTotals): string =>
     `${totals.runs} ${totals.runs === 1 ? "run" : "runs"}`,
     `${totals.unmeasured > 0 ? "at least " : ""}${durationLabel(totals.durationMillis)}`,
     `${tokensLabel(totals.tokens)} tokens`,
-    ...(totals.cost === null
-      ? []
-      : [`${usdLabel(totals.cost.usd)}${totals.cost.estimate ? " estimate" : ""}`]),
+    ...(totals.cost === null ? [] : [costWords(totals.cost, totals.unpriced)]),
   ].join(", ");
 
 /**

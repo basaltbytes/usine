@@ -23,7 +23,6 @@ import {
   FailedAttemptView,
   LabelView,
   LoopView,
-  PoolUsageView,
   ProjectView,
   ReadOnlyBoardLaneView,
   ReadyOverview,
@@ -31,6 +30,7 @@ import {
   RunView,
   StalledItemView,
   SucceededAttemptView,
+  TaskPoolUsageView,
   TaskUsageView,
   UsageCostView,
   WritableBoardLaneView,
@@ -114,25 +114,27 @@ const run = (
     canRunAgain: state === "Succeeded" || state === "Canceled",
   });
 
-/** What one billing pool drew: its tokens, and its dollars when it has a price. */
+/** What one billing pool drew: its tokens, its priced dollars, and whether some usage has no price. */
 const pool = (
-  name: PoolUsageView["pool"],
+  name: TaskPoolUsageView["pool"],
   tokens: number,
   usd: number | null = null,
-): PoolUsageView =>
-  new PoolUsageView({
+  unpriced = false,
+): TaskPoolUsageView =>
+  new TaskPoolUsageView({
     pool: name,
     tokens: TokenCount.make(tokens),
     cost:
       usd === null
         ? null
         : new UsageCostView({ usd: UsdAmount.make(usd), estimate: name === "claudePlan" }),
+    unpriced,
   });
 
 /** A Task's usage as the server adds it up: its Runs' Attempt time and the pools they drew from. */
 export const taskUsageOf = (
   runs: ReadonlyArray<RunView>,
-  pools: ReadonlyArray<PoolUsageView> = [],
+  pools: ReadonlyArray<TaskPoolUsageView> = [],
 ): TaskUsageView => {
   const attempts = runs.flatMap((candidate) => candidate.attempts);
   const priced = pools.flatMap(({ cost }) => (cost === null ? [] : [cost]));
@@ -170,7 +172,7 @@ const task = (
     readonly state?: BoardTaskView["state"];
     readonly loops?: ReadonlyArray<string>;
     /** The pools the Task's Runs drew from, summed over them. */
-    readonly pools?: ReadonlyArray<PoolUsageView>;
+    readonly pools?: ReadonlyArray<TaskPoolUsageView>;
   } = {},
 ) => {
   const current = members.at(-1) ?? members[0];
@@ -372,13 +374,9 @@ export const boardOverview = () =>
 
 /** The Board after the operator resolved the failed review of the pinned pull request (#28), so
  * nothing about it waits on the operator. */
-export const boardOverviewResolved = () => {
+/** `boardOverview()` with each card passed through `update`. */
+const boardOverviewWith = (update: (task: BoardTaskView) => BoardTaskView) => {
   const overview = boardOverview();
-  const resolve = (task: BoardTaskView) => {
-    if (task.itemKey !== pinned.itemKey) return task;
-    const runs = task.runs.map((run) => new RunView({ ...run, canResolveFailure: false }));
-    return new BoardTaskView({ ...task, runs, run: null, needsYou: false });
-  };
   return new ReadyOverview({
     ...overview,
     projects: overview.projects.map(
@@ -389,14 +387,38 @@ export const boardOverviewResolved = () => {
             ...project.board,
             lanes: project.board.lanes.map((lane) =>
               lane._tag === "WritableBoardLane"
-                ? new WritableBoardLaneView({ ...lane, items: lane.items.map(resolve) })
-                : new ReadOnlyBoardLaneView({ ...lane, items: lane.items.map(resolve) }),
+                ? new WritableBoardLaneView({ ...lane, items: lane.items.map(update) })
+                : new ReadOnlyBoardLaneView({ ...lane, items: lane.items.map(update) }),
             ),
           }),
         }),
     ),
   });
 };
+
+export const boardOverviewResolved = () =>
+  boardOverviewWith((task) => {
+    if (task.itemKey !== pinned.itemKey) return task;
+    const runs = task.runs.map((run) => new RunView({ ...run, canResolveFailure: false }));
+    return new BoardTaskView({ ...task, runs, run: null, needsYou: false });
+  });
+
+/**
+ * The Board with #9's implement Run on the Claude plan instead of the ChatGPT plan: its Attempt
+ * has reported 6,000 tokens but no price yet, so the Claude plan's $1.25 is a lower bound.
+ */
+export const boardOverviewUnpriced = () =>
+  boardOverviewWith((task) =>
+    task.itemKey !== redesignPr.itemKey
+      ? task
+      : new BoardTaskView({
+          ...task,
+          usage: taskUsageOf(task.runs, [
+            pool("apiKeys", 1_500, 0.75),
+            pool("claudePlan", 26_000, 1.25, true),
+          ]),
+        }),
+  );
 
 const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView["reason"]) =>
   new StalledItemView({

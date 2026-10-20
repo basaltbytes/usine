@@ -6,7 +6,12 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { page, userEvent } from "vitest/browser";
 import { routeTree } from "../src/route-tree.gen.ts";
-import { boardOverview, boardOverviewResolved, boardStalled } from "./board-fixture.ts";
+import {
+  boardOverview,
+  boardOverviewResolved,
+  boardOverviewUnpriced,
+  boardStalled,
+} from "./board-fixture.ts";
 import "../src/index.css";
 
 const list = "/projects/board-test/repo/tasks";
@@ -161,6 +166,31 @@ it("opens the tokens per pool, summed over the task's runs, from the tokens or t
 
   await redesign.getByRole("button", { name: "Cost: $2.00 estimate. Show it per pool" }).hover();
   await expect.element(pools).toHaveTextContent("Claude plan20,000$1.25 estimate");
+});
+
+it("keeps the priced dollars as a lower bound while a run has no price yet", async () => {
+  queryClient.setQueryData(["overview"], boardOverviewUnpriced());
+  await mount(list);
+  await expect
+    .element(
+      page.getByText("7 runs, 1 h 36 min, 87.5K tokens, at least $5.50 estimate", {
+        exact: true,
+      }),
+    )
+    .toBeVisible();
+  const redesign = rowOf(/Redesign the Board columns/u);
+  await expect
+    .element(redesign)
+    .toHaveTextContent(/#31open41 min27\.5Kat least \$2\.00 estimate$/u);
+  await redesign
+    .getByRole("button", { name: "Cost: at least $2.00 estimate. Show it per pool" })
+    .hover();
+  const pools = page.getByRole("region", { name: "Tokens per pool" });
+  await expect.element(pools).toHaveTextContent("API keys1,500$0.75");
+  await expect.element(pools).toHaveTextContent("Claude plan26,000at least $1.25 estimate");
+  // The price stays on one line beside the tokens.
+  const price = pools.getByText("at least", { exact: true }).element().parentElement;
+  expect(price?.getBoundingClientRect().height).toBeLessThan(24);
 });
 
 it("says Needs attention for a failure no stall explains, then the last run's outcome once it is resolved", async () => {
