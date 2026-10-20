@@ -32,6 +32,64 @@ import {
 
 const allowlisted = new Set<string>(SSH_ENVIRONMENT_ALLOWLIST);
 
+/** A second request on the same Worker, with its own Attempt and salvage ref. */
+const requestFor = (attempt: number) =>
+  new CheckoutRequest({
+    ...request,
+    attemptId: AttemptId.make(`remote-run/execute/${attempt}`),
+    salvageRef: SalvageRef.make(`usine/salvage/remote-run/${attempt}`),
+  });
+
+const isWorkerNotice = (payload: AttemptChannel.OutboundPayload) =>
+  payload._tag === "WorkerUnresponsive" || payload._tag === "WorkerResponsive";
+
+/**
+ * Parents for `attemptIds` that signal once they work and finish when told,
+ * with a transcript per Attempt.
+ */
+const workingAttempts = (attemptIds: ReadonlyArray<AttemptId>) =>
+  Effect.gen(function* () {
+    const outbound = new Map<AttemptId, Array<AttemptChannel.OutboundPayload>>();
+    const signals = new Map<
+      AttemptId,
+      { working: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
+    >();
+    for (const attemptId of attemptIds) {
+      outbound.set(attemptId, []);
+      signals.set(attemptId, {
+        working: yield* Deferred.make<void>(),
+        done: yield* Deferred.make<void>(),
+      });
+    }
+    const signalsOf = (attemptId: AttemptId) => {
+      const found = signals.get(attemptId);
+      assert(found !== undefined);
+      return found;
+    };
+    const parent: StubParent = (context) =>
+      Effect.suspend(() => {
+        const { working, done } = signalsOf(context.request.spec.attemptId);
+        return Deferred.succeed(working, undefined).pipe(
+          Effect.andThen(Deferred.await(done)),
+          Effect.andThen(completes(context)),
+        );
+      });
+    return {
+      parent,
+      signalsOf,
+      sinkFor: (attemptId: AttemptId) => ({
+        append: (_direction: AttemptChannel.Direction, envelope: AttemptChannel.Envelope) =>
+          Effect.sync(() => {
+            if (envelope._tag === "OutboundEnvelope")
+              outbound.get(attemptId)?.push(envelope.payload);
+          }),
+        salvage: () => Effect.void,
+        comments: () => Effect.void,
+      }),
+      noticesOf: (attemptId: AttemptId) => (outbound.get(attemptId) ?? []).filter(isWorkerNotice),
+    };
+  });
+
 describe("SSH Worker", () => {
   it.effect(
     "runs children on the machine with the token only in a private file, removed after the Attempt",
@@ -433,53 +491,11 @@ describe("SSH Worker", () => {
     () => {
       const machine = fakeMachine();
       const credentials = mintingProvider();
-      const second = new CheckoutRequest({
-        ...request,
-        attemptId: AttemptId.make("remote-run/execute/2"),
-        salvageRef: SalvageRef.make("usine/salvage/remote-run/2"),
-      });
+      const second = requestFor(2);
       const attempts = [request.attemptId, second.attemptId];
-      const outbound = new Map<AttemptId, Array<AttemptChannel.OutboundPayload>>();
-      const sinkFor = (attemptId: AttemptId) => {
-        const payloads: Array<AttemptChannel.OutboundPayload> = [];
-        outbound.set(attemptId, payloads);
-        return {
-          append: (_direction: AttemptChannel.Direction, envelope: AttemptChannel.Envelope) =>
-            Effect.sync(() => {
-              if (envelope._tag === "OutboundEnvelope") payloads.push(envelope.payload);
-            }),
-          salvage: () => Effect.void,
-          comments: () => Effect.void,
-        };
-      };
-      const noticesOf = (attemptId: AttemptId) =>
-        (outbound.get(attemptId) ?? []).filter(
-          (payload) => payload._tag === "WorkerUnresponsive" || payload._tag === "WorkerResponsive",
-        );
       const probes = () => machine.state.calls.filter(({ line }) => line === "exec 'true'").length;
       return Effect.gen(function* () {
-        const signals = new Map<
-          AttemptId,
-          { working: Deferred.Deferred<void>; done: Deferred.Deferred<void> }
-        >();
-        for (const attemptId of attempts)
-          signals.set(attemptId, {
-            working: yield* Deferred.make<void>(),
-            done: yield* Deferred.make<void>(),
-          });
-        const signalsOf = (attemptId: AttemptId) => {
-          const found = signals.get(attemptId);
-          assert(found !== undefined);
-          return found;
-        };
-        const parent: StubParent = (context) =>
-          Effect.suspend(() => {
-            const { working, done } = signalsOf(context.request.spec.attemptId);
-            return Deferred.succeed(working, undefined).pipe(
-              Effect.andThen(Deferred.await(done)),
-              Effect.andThen(completes(context)),
-            );
-          });
+        const { parent, signalsOf, sinkFor, noticesOf } = yield* workingAttempts(attempts);
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const first = yield* (yield* executor.prepare(request))
@@ -494,6 +510,8 @@ describe("SSH Worker", () => {
           const before = probes();
           yield* TestClock.adjust("1 minute");
           assert.strictEqual(probes(), before + 1, "one probe for both Attempts");
+          for (const attemptId of attempts)
+            assert.lengthOf(noticesOf(attemptId), 0, "nothing while the Worker answers");
 
           machine.state.stalled = true;
           yield* TestClock.adjust("1 minute");
@@ -523,6 +541,94 @@ describe("SSH Worker", () => {
           assert.strictEqual(probes(), afterBoth, "probing ends with the last Attempt");
         }).pipe(Effect.scoped, Effect.provide(runtime(machine, credentials, parent)));
       });
+    },
+  );
+
+  it.effect(
+    "tells an Attempt that joins while the Worker is silent at the next probe without an answer, and that the Worker answers again only after that",
+    () => {
+      const machine = fakeMachine();
+      const credentials = mintingProvider();
+      const logs = capturedLogs();
+      const second = requestFor(2);
+      const third = requestFor(3);
+      const attempts = [request.attemptId, second.attemptId, third.attemptId];
+      const tags = (notices: ReadonlyArray<AttemptChannel.OutboundPayload>) =>
+        notices.map(({ _tag }) => _tag);
+      return Effect.gen(function* () {
+        const { parent, signalsOf, sinkFor, noticesOf } = yield* workingAttempts(attempts);
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const launch = (checkout: CheckoutRequest) =>
+            Effect.gen(function* () {
+              machine.state.stalled = false;
+              const fiber = yield* (yield* executor.prepare(checkout))
+                .launch(sinkFor(checkout.attemptId))
+                .pipe(Effect.forkChild);
+              yield* Deferred.await(signalsOf(checkout.attemptId).working);
+              return fiber;
+            });
+          const silentProbe = Effect.gen(function* () {
+            machine.state.stalled = true;
+            yield* TestClock.adjust("1 minute");
+            yield* TestClock.adjust("45 seconds");
+          });
+
+          const first = yield* launch(request);
+          const launchedAt = DateTime.formatIso(yield* DateTime.now);
+          yield* silentProbe;
+          assert.deepStrictEqual(tags(noticesOf(request.attemptId)), ["WorkerUnresponsive"]);
+
+          const late = yield* launch(second);
+          assert.lengthOf(noticesOf(second.attemptId), 0, "joining reports nothing by itself");
+          yield* silentProbe;
+          const [told] = noticesOf(second.attemptId);
+          assert(told?._tag === "WorkerUnresponsive");
+          assert.strictEqual(DateTime.formatIso(told.lastAnsweredAt), launchedAt);
+          assert.strictEqual(told.reason, "No answer within 45 seconds");
+          assert.lengthOf(noticesOf(request.attemptId), 1, "the first Attempt is not told twice");
+
+          machine.state.stalled = false;
+          yield* TestClock.adjust("1 minute");
+          for (const attemptId of [request.attemptId, second.attemptId])
+            assert.deepStrictEqual(tags(noticesOf(attemptId)), [
+              "WorkerUnresponsive",
+              "WorkerResponsive",
+            ]);
+
+          yield* silentProbe;
+          const unheard = yield* launch(third);
+          yield* TestClock.adjust("1 minute");
+          assert.lengthOf(
+            noticesOf(third.attemptId),
+            0,
+            "an Attempt never told the Worker stopped answering does not hear it answers again",
+          );
+          for (const attemptId of [request.attemptId, second.attemptId])
+            assert.deepStrictEqual(tags(noticesOf(attemptId)), [
+              "WorkerUnresponsive",
+              "WorkerResponsive",
+              "WorkerUnresponsive",
+              "WorkerResponsive",
+            ]);
+
+          for (const attemptId of attempts)
+            yield* Deferred.succeed(signalsOf(attemptId).done, undefined);
+          for (const fiber of [first, late, unheard]) yield* Fiber.join(fiber);
+        }).pipe(
+          // A failed assertion would otherwise leave cleanup waiting on a stalled machine.
+          Effect.ensuring(Effect.sync(() => (machine.state.stalled = false))),
+          Effect.scoped,
+          Effect.provide(runtime(machine, credentials, parent)),
+        );
+
+        const joins = logs.lines.filter((line) =>
+          line.includes("liveness watch while the Worker does not answer"),
+        );
+        assert.lengthOf(joins, 2);
+        assert.include(joins[0], second.attemptId);
+        assert.include(joins[1], third.attemptId);
+      }).pipe(Effect.provide(logs.layer));
     },
   );
 
