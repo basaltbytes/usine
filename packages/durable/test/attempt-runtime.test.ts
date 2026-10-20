@@ -12,7 +12,7 @@ import {
   RunawayFailure,
 } from "@usine/core/attempt/failure";
 import { CommitSha } from "@usine/core/repository";
-import { Comment, Commit, StepResult } from "@usine/core/step/result";
+import { Commit, StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
 import { Context, DateTime, Effect, Exit, Fiber, Layer, Logger, Option, Result } from "effect";
 import {
@@ -599,7 +599,7 @@ describe("durable AttemptRuntime", () => {
   );
 
   it.live(
-    "succeeds an Attempt whose released parent reported a review it posted after the release",
+    "succeeds an Attempt whose released parent answered the release guidance with nothing harvested",
     () =>
       Effect.gen(function* () {
         const database = yield* temporaryDatabase;
@@ -627,16 +627,10 @@ describe("durable AttemptRuntime", () => {
           }).pipe(Effect.timeout("5 seconds"));
           yield* operator(new AttemptChannel.Release());
           const report = yield* Fiber.join(execution);
-          // The release guidance is the parent's last user turn, so its final answer counts as one to the operator.
-          assert.isTrue(report.answeredOperator);
-          const review = new Comment({
-            url: new URL("https://github.com/basaltbytes/usine/pull/176#pullrequestreview-1"),
-            kind: "review",
-            at: Option.none(),
-          });
+          assert.isFalse(report.answeredOperator);
           assert.deepStrictEqual(
-            harvestedResult(report, [review]),
-            Result.succeed(new StepResult({ message: report.message, facts: [review] })),
+            harvestedResult(report, []),
+            Result.succeed(new StepResult({ message: report.message, facts: [] })),
           );
         }).pipe(
           Effect.provide(
@@ -646,6 +640,60 @@ describe("durable AttemptRuntime", () => {
                 delegate("Review pull request 176"),
                 answer("The child drafted three findings; I will post them."),
                 answer("Posted the review with three findings on pull request 176."),
+              ],
+            }),
+          ),
+        );
+      }).pipe(Effect.scoped),
+  );
+
+  it.live(
+    "reports a released parent that answered an operator message sent after the release as answering the operator",
+    () =>
+      Effect.gen(function* () {
+        const database = yield* temporaryDatabase;
+        yield* Effect.gen(function* () {
+          const runtime = yield* AttemptRuntime;
+          const children = yield* StubChildren;
+          const request = attemptRequest("run/step/17");
+          const recording = recordingSink();
+          const operator = (action: AttemptChannel.OperatorAction) =>
+            runtime.intervene(
+              request.spec.attemptId,
+              new AttemptChannel.Intervention({
+                operator: "philippe",
+                target: new AttemptChannel.ParentTarget(),
+                action,
+              }),
+            );
+          const execution = yield* Effect.forkChild(runtime.execute(request, recording.sink));
+          const reviewer = yield* children.next;
+          yield* operator(new AttemptChannel.OperatorMessage({ message: "Is the review ready?" }));
+          yield* reviewer.reply("Drafted three findings.");
+          yield* Effect.gen(function* () {
+            while (!trace(recording.outbound()).includes("parent.SessionIdle"))
+              yield* Effect.sleep("20 millis");
+          }).pipe(Effect.timeout("5 seconds"));
+          yield* operator(new AttemptChannel.Release());
+          const poster = yield* children.next;
+          yield* operator(
+            new AttemptChannel.OperatorMessage({ message: "Which findings did you post?" }),
+          );
+          // Released while it delegates, so the parent's next answer ends the Attempt.
+          yield* operator(new AttemptChannel.Release());
+          yield* poster.reply("Posted the review.");
+          const report = yield* Fiber.join(execution);
+          assert.strictEqual(report.message, "Posted all three findings.");
+          assert.isTrue(report.answeredOperator);
+        }).pipe(
+          Effect.provide(
+            layer({
+              database,
+              parent: [
+                delegate("Review pull request 176"),
+                answer("The child drafted three findings; I will post them."),
+                delegate("Post the three findings as a review on pull request 176"),
+                answer("Posted all three findings."),
               ],
             }),
           ),

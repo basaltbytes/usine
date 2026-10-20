@@ -44,9 +44,10 @@ export class AttemptReport extends Schema.Class<AttemptReport>("@usine/durable/A
   /** The parent's final message, never empty. The executor records it as the message of the Attempt's StepResult. */
   message: Schema.NonEmptyString,
   /**
-   * The parent's last turn replied to operator input and delegated nothing
-   * after it, so the message may answer the operator rather than report the
-   * task. `harvestedResult` reads it; reports recorded before it existed decode as false.
+   * The parent's last turn replied to an operator message or a steer, not to
+   * the release guidance, and delegated nothing after it, so the message may
+   * answer the operator rather than report the task. `harvestedResult` reads
+   * it; reports recorded before it existed decode as false.
    */
   answeredOperator: Schema.Boolean.pipe(
     Schema.withDecodingDefaultKey(Effect.succeed(false)),
