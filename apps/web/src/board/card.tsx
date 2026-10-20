@@ -31,7 +31,7 @@ import {
 import { projectParams } from "../overview.ts";
 import { type RunActions, useRunAction } from "../run-actions.ts";
 import { StallAction } from "../stall/action.tsx";
-import { stallSentence } from "../stall/copy.ts";
+import { stallNamesLoop, stallSentence } from "../stall/copy.ts";
 import { type CardMoves, CardMenu } from "./card-menu.tsx";
 import type { BoardMoveProgress } from "./moves.ts";
 
@@ -221,7 +221,7 @@ const RetryButton = ({
   ) : null;
 
 /** Why the Task is stalled, as the overview page says it, with the one action that moves it again.
- * `named` puts the Loop first when no Run line on the card names it already. */
+ * `named` puts the Loop first when neither a Run line on the card nor the fragment names it. */
 const StallNote = ({
   stalled,
   named,
@@ -320,7 +320,10 @@ const CardFace = ({
         </FailureNote>
       )}
       {stall !== null && !onFailure && (
-        <StallNote stalled={stall} named={run === null || stallRun(stall)?.id !== run.id}>
+        <StallNote
+          stalled={stall}
+          named={(run === null || stallRun(stall)?.id !== run.id) && !stallNamesLoop(stall)}
+        >
           {stallAction}
         </StallNote>
       )}
