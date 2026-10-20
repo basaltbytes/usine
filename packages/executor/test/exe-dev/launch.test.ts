@@ -1,5 +1,6 @@
 import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
+import { githubSignature } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
@@ -249,6 +250,7 @@ describe("exe.dev launch", () => {
           [
             {
               html_url: comment,
+              body: `Fixed.\n\n${githubSignature(TEST_AGENT.name)}`,
               user: { login: "usine-test[bot]" },
               created_at: "2026-10-20T10:00:00Z",
               updated_at: "2026-10-20T10:00:00Z",

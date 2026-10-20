@@ -76,6 +76,8 @@ usine adds its own instructions after the persona and the task. You can't change
 
 Loops can rely on the signature. The `act-on-findings` example in [Loop files](/reference/configuration/loop-files/#more-examples) counts reviews whose body contains `usine agent: reviewer`.
 
+usine uses the signature to tell Attempts apart, because Agents write to GitHub as a shared bot login. An Attempt records a comment or review on its Item as its own only when the body ends with its Agent's signature. A comment without the signature, or with another Agent's signature, is not listed with the Attempt's comments on the Task page, and it does not count as the Attempt's work when the parent's last turn answered the operator.
+
 ## The roster
 
 Every valid Agent file is added to the roster. usine leaves out a file that fails validation and quarantines every Loop that references it, with the message `Unknown agent: <name>`. At startup and at each reload, usine logs each invalid Agent file as a warning with its file, stage, and message, and lists it in **Needs attention** as **Agent file not loaded**.

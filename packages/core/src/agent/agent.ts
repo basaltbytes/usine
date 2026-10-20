@@ -10,6 +10,14 @@ export const AgentName = Schema.String.check(
 
 export type AgentName = typeof AgentName.Type;
 
+/**
+ * The attribution line every GitHub comment, issue, pull request, or review an
+ * Agent writes ends with. The Attempt prompt asks the Agent to append it, and
+ * harvesting matches it to tell an Attempt's comments from those of other
+ * Agents writing as the same bot login.
+ */
+export const githubSignature = (agent: AgentName): string => `— usine agent: ${agent}`;
+
 /** Standing Markdown instructions for one Agent. */
 export const AgentPersona = Schema.String.check(
   Schema.isPattern(/\S/u, { message: "Expected a non-blank Agent persona" }),
