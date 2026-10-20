@@ -220,7 +220,7 @@ const RetryButton = ({
     </Button>
   ) : null;
 
-/** Why the Task is not moving, in the desk's words, with the one action that moves it again.
+/** Why the Task is stalled, as the overview page says it, with the one action that moves it again.
  * `named` puts the Loop first when no Run line on the card names it already. */
 const StallNote = ({
   stalled,
@@ -328,7 +328,7 @@ const CardFace = ({
         <p className="text-xs text-destructive wrap-anywhere">{actionError}</p>
       )}
       {item.conflicting && <p className="text-xs text-destructive">Conflicts with base</p>}
-      {unexplained && <p className="text-xs text-needs-you">Needs you</p>}
+      {unexplained && <p className="text-xs text-needs-you">Needs attention</p>}
     </div>
   );
 };

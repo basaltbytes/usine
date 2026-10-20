@@ -163,7 +163,7 @@ describe("Run header", () => {
     const markup = header(failed);
     assert.include(markup, "No pull request");
     assert.notInclude(markup, "/pull/");
-    assert.include(markup, "Failed after 2 Attempts");
+    assert.include(markup, "Failed after 2 attempts");
     assert.include(markup, "start-dev");
     assert.include(markup, "developer");
     assert.lengthOf(markup.match(/target="_blank"/gu) ?? [], 1);
@@ -375,7 +375,7 @@ describe("Attempt start", () => {
       ),
     ].map(([, reason]) => reason);
     assert.deepEqual(reasons, [
-      "From the Event",
+      "From the event",
       "Reattached after a restart",
       "Retried after an infrastructure failure",
       "Started again after a restart",
@@ -415,12 +415,12 @@ describe("salvage line", () => {
       />,
     );
     assert.include(markup, "/workers/local/attempts/run_execute_1");
-    assert.include(markup, "every startup");
+    assert.include(markup, "retried at each startup");
     assert.include(markup, "remote: Repository not found.");
   });
 
   it("says when no salvage branch exists", () => {
-    assert.include(renderToStaticMarkup(<SalvageLine salvage={null} />), "No salvage branch.");
+    assert.include(renderToStaticMarkup(<SalvageLine salvage={null} />), "No salvage branch");
   });
 });
 
@@ -429,8 +429,8 @@ describe("drawer summary", () => {
     renderToStaticMarkup(<RunSummary detail={detail(view, transcript)} />);
 
   it("states what an open Run waits for", () => {
-    assert.include(summary(run({ state: "Waiting", attempts: [] })), "Waits for your approval");
-    assert.include(summary(run({ state: "Queued", attempts: [] })), "waiting for a free Worker");
+    assert.include(summary(run({ state: "Waiting", attempts: [] })), "Waiting for approval");
+    assert.include(summary(run({ state: "Queued", attempts: [] })), "waiting for a free worker");
   });
 
   it("shows a failed Run's typed reason, message and salvage in one paragraph", () => {
@@ -468,7 +468,7 @@ describe("drawer summary", () => {
         ],
       }),
     );
-    assert.include(markup, "Question for you");
+    assert.include(markup, "Question from the agent");
     assert.include(markup, "Keep the old column?");
   });
 
@@ -480,7 +480,7 @@ describe("drawer summary", () => {
       run({ state: "Canceled", attempts: [attempt(new CanceledAttemptView())] }),
     );
     assert.include(canceled, "Canceled");
-    assert.include(canceled, "No salvage branch.");
+    assert.include(canceled, "No salvage branch");
   });
 
   it("shows a running Run's current activity and latest message, without the conversation", () => {
@@ -567,11 +567,8 @@ describe("drawer summary", () => {
         }),
       }),
     ]);
-    assert.include(
-      markup,
-      `Worker usine-worker-1 has not answered since ${clockLabel(lastAnsweredAt)}`,
-    );
-    assert.include(markup, "reviewer cannot reach its provider, 4 retries since");
+    assert.include(markup, `usine-worker-1 silent since ${clockLabel(lastAnsweredAt)}`);
+    assert.include(markup, "reviewer: provider unreachable, 4 retries since");
     assert.include(markup, "Reconnecting... waiting for network");
   });
 });
@@ -633,9 +630,9 @@ describe("Run approval", () => {
     const time = dayTimeLabel(openedAt);
     for (const render of [eventDocument, outline]) {
       const named = text(render(ranAgain(philippe)));
-      assert.include(named, `Run again by Philippe · ${time} · from Run 4f1c9e2a`);
+      assert.include(named, `Run again by Philippe · ${time} · from run 4f1c9e2a`);
       assert.include(render(ranAgain(philippe)), `dateTime="${openedAt}"`);
-      assert.include(text(render(ranAgain(Option.none()))), `Run again · ${time} · from Run`);
+      assert.include(text(render(ranAgain(Option.none()))), `Run again · ${time} · from run`);
       assert.include(
         text(render(new RunView({ ...ranAgain(philippe), approval: fromUi.approval }))),
         `Approved by Philippe · ${dayTimeLabel(approvedAt)} · from the UI`,

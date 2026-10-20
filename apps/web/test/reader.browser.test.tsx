@@ -308,7 +308,7 @@ it("bounds missing-row recovery and leaves unseen activity unread at its visible
       load,
     });
   show();
-  await expect.element(page.getByText(/saved place is outside the loaded history/)).toBeVisible();
+  await expect.element(page.getByText(/Saved place not in the loaded history/)).toBeVisible();
   expect(first).toBe(80);
   await expect
     .element(page.getByRole("button", { name: "21 new updates", exact: true }))
@@ -733,7 +733,7 @@ it.each(["claude", "codex"] as const)(
     expect(document.body.textContent).toContain("cd -- '/worker/Philippe'\\''s repo'");
     await expect.element(page.getByRole("button", { name: "Copy resume command" })).toBeEnabled();
     await expect
-      .element(page.getByText(/Requires its worktree and saved session files/))
+      .element(page.getByText(/Needs the worktree and the saved session files/))
       .toBeVisible();
   },
 );
@@ -830,6 +830,6 @@ it("shows that a Pi child has no saved harness session to resume", async () => {
     record(2, new SessionFinished({ session: child })),
   ]);
   await page.getByRole("button", { name: "Resume details for reviewer" }).click();
-  await expect.element(page.getByText("No saved harness session recorded.")).toBeVisible();
+  await expect.element(page.getByText("No saved harness session")).toBeVisible();
   expect(document.body.textContent).not.toContain("Resume on worker");
 });

@@ -34,7 +34,7 @@ export const RunAgainLine = ({
       </time>
       {" · "}
       <span className="whitespace-nowrap">
-        from Run <span className="font-mono text-xs">{from.slice(0, 8)}</span>
+        from run <span className="font-mono text-xs">{from.slice(0, 8)}</span>
       </span>
     </span>
   );

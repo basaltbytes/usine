@@ -30,7 +30,7 @@ const TaskNotFound = ({
 }) => (
   <BootScreen
     title="Task not found"
-    description={`#${number} is not among the newest Items on the ${repository} Board, which Tasks are made from.`}
+    description={`#${number} is not among the newest items on the ${repository} board`}
     tone="error"
     inPanel
   >
@@ -39,13 +39,13 @@ const TaskNotFound = ({
       nativeButton={false}
       render={<Link to="/projects/$owner/$name" params={projectParams(repository)} />}
     >
-      Back to the Board
+      Back to the board
     </Button>
   </BootScreen>
 );
 
 const TaskSkeleton = () => (
-  <div aria-busy="true" aria-label="Loading the Task" className="flex flex-col gap-8">
+  <div aria-busy="true" aria-label="Loading the task" className="flex flex-col gap-8">
     <div className="flex flex-col gap-2.5">
       <Skeleton className="h-7 w-2/3 max-w-xl" />
       <Skeleton className="h-4 w-1/2 max-w-sm" />
@@ -81,9 +81,7 @@ const TaskBody = ({
   const failure = task.isError && (
     <ErrorAlert
       className="max-w-3xl"
-      title={
-        task.data === undefined ? "The Task could not be read" : "The Task could not be refreshed"
-      }
+      title={task.data === undefined ? "Could not load the task" : "Could not refresh the task"}
       message={task.error.message}
     />
   );

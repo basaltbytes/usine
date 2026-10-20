@@ -56,11 +56,11 @@ const AgentRow = ({ agent }: { readonly agent: AgentFileView }) => {
       <TableCell className="hidden sm:table-cell">{agent.effort}</TableCell>
       <TableCell className="hidden font-mono text-xs lg:table-cell">
         {agent.resolvedParentModel ?? (
-          <span className="font-sans text-sm text-muted-foreground">Pi selects</span>
+          <span className="font-sans text-sm text-muted-foreground">Chosen by Pi</span>
         )}
       </TableCell>
       <TableCell className="hidden w-full whitespace-normal text-muted-foreground md:table-cell">
-        {agent.loops.length === 0 ? "No Loop" : agent.loops.join(", ")}
+        {agent.loops.length === 0 ? "No loop" : agent.loops.join(", ")}
       </TableCell>
     </OpeningRow>
   );
@@ -97,9 +97,9 @@ const InvalidAgentRow = ({ agent }: { readonly agent: InvalidAgentView }) => {
 export const AgentsList = ({ configuration }: { readonly configuration: ConfigurationView }) => (
   <ConfigurationPage title="Agents" counts={agentCounts(configuration)}>
     {configuration.agents.length === 0 && configuration.invalidAgents.length === 0 ? (
-      <Missing title="No Agents">
+      <Missing title="No agents">
         Add a Markdown file under <code>agents/</code> in the instance folder, then reload the
-        configuration. Every Loop names the Agent that runs it.
+        configuration.
       </Missing>
     ) : (
       <div className="-mx-2">
@@ -148,7 +148,7 @@ const AgentFacts = ({
     <Fact label="Effort">{agent.effort}</Fact>
     <Fact label="Parent model">
       {agent.resolvedParentModel === null ? (
-        <Unset>Pi selects it</Unset>
+        <Unset>Chosen by Pi</Unset>
       ) : (
         <code className="font-mono text-xs">{agent.resolvedParentModel}</code>
       )}
@@ -167,12 +167,12 @@ const AgentFacts = ({
           ? "Set in this file"
           : configuration.settings.parentEffort !== null
             ? "From settings.parent_effort"
-            : "The Agent's own effort"}
+            : "Same as effort"}
       </Source>
     </Fact>
     <Fact label="Loops">
       {agent.loops.length === 0 ? (
-        <Unset>No Loop names this Agent</Unset>
+        <Unset>No loop uses this agent</Unset>
       ) : (
         <ul className="flex flex-col gap-0.5">
           {agent.loops.map((loop) => (
@@ -206,7 +206,7 @@ export const AgentDetail = ({
     return (
       <ConfigurationPage title={agent.name} file={agent.file}>
         <DetailColumns facts={<AgentFacts agent={agent} configuration={configuration} />}>
-          <DetailSection title="Persona" aside="Given to the Agent with every task">
+          <DetailSection title="Persona" aside="Sent to the agent with every task">
             <Markdown className="max-w-[72ch] text-md">{agent.persona}</Markdown>
           </DetailSection>
         </DetailColumns>
@@ -218,16 +218,16 @@ export const AgentDetail = ({
       <ConfigurationPage title={invalid.name} marks={<NotLoaded />} file={invalid.file}>
         <FileError
           error={invalid.error}
-          consequence="The Agent is not in the roster, and every Loop that names it is quarantined."
+          consequence="Not in the roster; every loop that uses this agent is quarantined."
         />
       </ConfigurationPage>
     );
   return (
     <ConfigurationPage title={name}>
-      <Missing title="No Agent by this name">
+      <Missing title="No agent by this name">
         The configuration has no file <code>agents/{name}.md</code>.{" "}
         <Link to="/configuration/agents" className="text-primary hover:underline">
-          See every Agent
+          See all agents
         </Link>
         .
       </Missing>

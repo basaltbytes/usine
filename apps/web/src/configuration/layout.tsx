@@ -71,7 +71,7 @@ export const ConfigurationUnavailable = ({ error }: { readonly error: Error }) =
   const router = useRouter();
   return (
     <Page width="full">
-      <ErrorAlert title="The configuration could not be read" message={error.message} />
+      <ErrorAlert title="Could not load the configuration" message={error.message} />
       <div>
         <Button variant="outline" onClick={() => void router.invalidate()}>
           Try again

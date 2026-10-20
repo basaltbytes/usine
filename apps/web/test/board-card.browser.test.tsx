@@ -43,9 +43,8 @@ const Board = () => {
 };
 
 const lane = (name: string) => page.getByLabelText(`${name} lane`);
-const filters = () => page.getByRole("group", { name: "Board filters" });
-/** Done holds only closed Items, so it waits behind its header toggle. */
-const openDone = () => filters().getByRole("button", { name: "Done 1" }).click();
+/** Done holds only closed Items, so it opens folded into a rail. */
+const openDone = () => lane("Done").getByRole("button", { name: "Done 1" }).click();
 const actions = (number: number) =>
   page.getByRole("button", { name: `Actions for issue #${number}`, exact: true });
 const cardOf = (title: RegExp) => {
@@ -128,7 +127,7 @@ const laneNames = () =>
     section.getAttribute("aria-label"),
   );
 
-it("puts the lanes that accept moves first and keeps Done and Unmapped behind header toggles with their counts", async () => {
+it("puts the lanes that accept moves first, Done and Unmapped last, and folds them into rails", async () => {
   expect(laneNames()).toEqual([
     "Backlog lane",
     "Ready lane",
@@ -136,59 +135,38 @@ it("puts the lanes that accept moves first and keeps Done and Unmapped behind he
     "Review lane",
     "Merge lane",
     "Pull requests lane",
+    "Done lane",
+    "Unmapped lane",
   ]);
-  const done = filters().getByRole("button", { name: "Done 1" });
-  const unmapped = filters().getByRole("button", { name: "Unmapped 1" });
-  await expect.element(done).toHaveAttribute("aria-pressed", "false");
-  await expect.element(unmapped).toHaveAttribute("aria-pressed", "false");
+  await expect.element(page.getByText("8 lanes, 10 items", { exact: true })).toBeVisible();
+  // A pull request no Loop matches shows like any other Task.
+  await expect.element(lane("Pull requests").getByText(/^Bump vite/u)).toBeVisible();
+  const rail = lane("Done").getByRole("button", { name: "Done 1" });
+  await expect.element(rail).toHaveAttribute("aria-expanded", "false");
+  expect(lane("Done").element().getBoundingClientRect().width).toBeLessThanOrEqual(40);
   await openDone();
-  await expect.element(done).toHaveAttribute("aria-pressed", "true");
   await expect.element(lane("Done").getByText(/^Show the salvage branch/u)).toBeVisible();
-  // Unmapped exists to show what no lane routes, so it shows its Tasks no Loop can match.
-  await unmapped.click();
-  await expect.element(lane("Unmapped").getByText(/^Investigate the reader/u)).toBeVisible();
-  expect(laneNames().slice(-2)).toEqual(["Done lane", "Unmapped lane"]);
-  await done.click();
-  await expect.element(lane("Done")).not.toBeInTheDocument();
+  await lane("Done").getByRole("button", { name: "Fold Done", exact: true }).click();
+  await expect.element(lane("Done").getByRole("button", { name: "Done 1" })).toBeVisible();
 });
 
-it("hides the Items no Loop can match until Show all Items, and keeps one with an open Run", async () => {
-  const pullRequests = lane("Pull requests");
-  await expect.element(pullRequests.getByText(/^Pin the Node version/u)).toBeVisible();
-  await expect.element(pullRequests.getByText(/^Bump vite/u)).not.toBeInTheDocument();
-  await expect.element(page.getByText("6 lanes, 7 items, 1 hidden")).toBeVisible();
-  const showAll = filters().getByRole("button", { name: "Show all Items" });
-  await showAll.click();
-  await expect.element(showAll).toHaveAttribute("aria-pressed", "true");
-  await expect.element(pullRequests.getByText(/^Bump vite/u)).toBeVisible();
-  await expect.element(page.getByText("6 lanes, 8 items", { exact: true })).toBeVisible();
-});
-
-it("collapses an empty lane to a narrow column with its name, count, and label, and widens it under a drag", async () => {
+it("shows an empty lane at full width with its name, count, and labels", async () => {
   const merge = lane("Merge");
-  expect(merge.element().getBoundingClientRect().width).toBeLessThanOrEqual(40);
+  expect(merge.element().getBoundingClientRect().width).toBeGreaterThan(200);
   await expect.element(merge.getByRole("heading", { name: "Merge 0" })).toBeVisible();
   await expect.element(merge.getByText("ready-to-merge", { exact: true })).toBeVisible();
-  const card = cardOf(/^Pin GitHub Actions/u);
-  card.focus();
-  await userEvent.keyboard(" ");
-  await userEvent.keyboard("{ArrowRight}");
-  await expect.poll(() => merge.element().getBoundingClientRect().width).toBeGreaterThan(100);
-  await userEvent.keyboard("{Escape}");
-  await expect.poll(() => merge.element().getBoundingClientRect().width).toBeLessThanOrEqual(40);
+  await expect.element(merge.getByText("No tasks", { exact: true })).toBeVisible();
 });
 
-it("names why a card is not moving, as the desk does, with the one action that moves it again", async () => {
+it("names why a card is stalled, as the overview page does, with the one action that moves it again", async () => {
   const canceled = page.elementLocator(cardOf(/^Cache the label catalog/u));
   const note = canceled.element().querySelector("[data-slot=stall-note]");
-  expect(note?.textContent).toMatch(
-    /^implement Its Run was canceled \d+h ago and the Item has not changed since, so no Run opens\.Run again$/u,
-  );
+  expect(note?.textContent).toMatch(/^implement Canceled \d+h ago, unchanged sinceRun again$/u);
   await expect.element(canceled.getByRole("button", { name: "Run again" })).toBeVisible();
   // The Run line already names the Loop of a waiting Run.
   const waiting = page.elementLocator(cardOf(/^Retry salvage/u));
   expect(waiting.element().querySelector("[data-slot=stall-note] p")?.textContent).toBe(
-    "Its Run waits for your approval.",
+    "Waiting for approval",
   );
   await expect.element(waiting.getByRole("button", { name: "Approve" })).toBeVisible();
   // A failed Run keeps its failure note and Retry, without a second note.
@@ -295,9 +273,9 @@ it("draws the flow between adjacent authored label lanes, named after the Loops 
   expect(flow("Review")?.textContent).toBe("Flows to Mergereview paused");
   expect(flow("Review")?.classList).toContain("text-muted-foreground");
   expect(flow("Review")?.getAttribute("title")).toBe(
-    "Watching this lane: review (paused). Flows to Merge.",
+    "Loops matching this lane: review (paused). Flows to Merge",
   );
-  // Merge is empty and Pull requests read-only, so neither has a next bay to flow into.
+  // Pull requests is read-only, so neither Merge nor it has a next lane to flow into.
   expect(flow("Merge")).toBeNull();
   expect(flow("Pull requests")).toBeNull();
 });
@@ -307,7 +285,9 @@ it("leaves canceled and succeeded Runs off the card", async () => {
   for (const card of [cardOf(/^Cache the label catalog/u), cardOf(/^Show the salvage branch/u)]) {
     expect(card.querySelector("time")).toBeNull();
     expect(card.querySelector("[data-slot=state-mark]")).toBeNull();
-    expect(card.textContent).not.toMatch(/Canceled|Succeeded/u);
+    // A stall note may say how the Run ended; the card has no Run line for it.
+    const stall = card.querySelector("[data-slot=stall-note]")?.textContent ?? "";
+    expect(card.textContent?.replace(stall, "")).not.toMatch(/Canceled|Succeeded/u);
   }
 });
 
@@ -345,7 +325,7 @@ it("lists the current Run's applicable actions and moves the card through Move t
   await actions(7).click();
   expect(opened).toEqual([]);
   expect(await menuContents()).toEqual({
-    items: ["Open #7 on GitHub", "Open Run", "Approve", "Cancel Run", "Move to"],
+    items: ["Open #7 on GitHub", "Open run", "Approve", "Cancel run", "Move to"],
     separators: 3,
   });
   await expect
@@ -367,11 +347,11 @@ it("lists the current Run's applicable actions and moves the card through Move t
   await expect.element(lane("Ready").getByText(/^Retry salvage/u)).not.toBeInTheDocument();
 });
 
-it("offers Retry for a failed Run and Cancel Run alone for a running one", async () => {
+it("offers Retry for a failed Run and Cancel run alone for a running one", async () => {
   await page.getByRole("button", { name: "Actions for pull request #28", exact: true }).click();
   expect((await menuContents()).items).toEqual([
     "Open #28 on GitHub",
-    "Open Run",
+    "Open run",
     "Retry",
     "Move to",
   ]);
@@ -382,9 +362,9 @@ it("offers Retry for a failed Run and Cancel Run alone for a running one", async
   expect((await menuContents()).items).toEqual([
     "Open #9 on GitHub",
     "Open #31 on GitHub",
-    "Open Run",
+    "Open run",
     "Run history",
-    "Cancel Run",
+    "Cancel run",
     "Move to",
   ]);
 });

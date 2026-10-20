@@ -48,7 +48,7 @@ const LiveSummary = ({ detail }: { readonly detail: RunDetailView }) => {
   return (
     <div className="space-y-4">
       {chapter === undefined ? (
-        <p className="text-muted-foreground">The Attempt is starting on its Worker.</p>
+        <p className="text-muted-foreground">Attempt starting</p>
       ) : (
         <CurrentActivity chapter={chapter} />
       )}
@@ -90,22 +90,18 @@ export const RunSummary = ({ detail }: { readonly detail: RunDetailView }) => {
   const run = detail.run;
   switch (run.state) {
     case "Pending":
-      return <p className="text-muted-foreground">Opened; its Loop has not scheduled it yet.</p>;
+      return <p className="text-muted-foreground">Opened, not scheduled yet</p>;
     case "Waiting":
-      return (
-        <p className="text-muted-foreground">
-          Waits for your approval. Approve to start an Attempt, or cancel the Run.
-        </p>
-      );
+      return <p className="text-muted-foreground">Waiting for approval</p>;
     case "Queued":
-      return <p className="text-muted-foreground">Approved; waiting for a free Worker.</p>;
+      return <p className="text-muted-foreground">Approved, waiting for a free worker</p>;
     case "Running":
       return <LiveSummary detail={detail} />;
     case "Succeeded":
     case "Failed":
     case "Canceled":
       return Option.match(finalEnd(run), {
-        onNone: () => <p className="text-muted-foreground">No Attempt started.</p>,
+        onNone: () => <p className="text-muted-foreground">No attempt started</p>,
         onSome: (end) => <Outcome end={end} />,
       });
   }
@@ -147,7 +143,7 @@ export const RunDrawer = ({
           {run === undefined || detail.data === undefined ? (
             <>
               <SheetTitle>Loading…</SheetTitle>
-              <SheetDescription>Loading Run details…</SheetDescription>
+              <SheetDescription>Loading run…</SheetDescription>
             </>
           ) : (
             <>
@@ -190,7 +186,7 @@ export const RunDrawer = ({
               viewTransition
               className={buttonVariants({ variant: "outline" })}
             >
-              Open Run page
+              Open run page
             </Link>
           )}
         </div>
@@ -203,7 +199,7 @@ export const RunDrawer = ({
                   params={{ ...projectParams(run.repository), run: run.id }}
                   search={({ run: _run, ...rest }) => rest}
                   viewTransition
-                  aria-label="Open Run page"
+                  aria-label="Open run page"
                   className={cn(
                     buttonVariants({ variant: "ghost", size: "icon-sm" }),
                     "absolute top-4 right-11",
@@ -213,7 +209,7 @@ export const RunDrawer = ({
             >
               <ArrowsOutSimpleIcon aria-hidden="true" />
             </TooltipTrigger>
-            <TooltipContent side="bottom">Open Run page</TooltipContent>
+            <TooltipContent side="bottom">Open run page</TooltipContent>
           </Tooltip>
         )}
       </SheetContent>

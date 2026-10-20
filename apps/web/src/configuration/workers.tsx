@@ -118,9 +118,7 @@ export const WorkersList = ({ configuration }: { readonly configuration: Configu
   return (
     <ConfigurationPage title="Workers" counts={plural(configuration.workers.length, "worker")}>
       {!running && (
-        <p className="text-muted-foreground">
-          No Worker runs Attempts until the GitHub App is set up.
-        </p>
+        <p className="text-muted-foreground">No attempts run until the GitHub App is set up.</p>
       )}
       <div className="-mx-2">
         <Table>
@@ -144,9 +142,8 @@ export const WorkersList = ({ configuration }: { readonly configuration: Configu
         <ul className="flex flex-col gap-1 text-muted-foreground">
           {configuration.removedWorkers.map(({ name, running: attempts }) => (
             <li key={name}>
-              <span className="font-mono text-xs text-foreground">{name}</span> was removed by a
-              reload and still runs {plural(attempts, "Attempt")}; it leaves when{" "}
-              {attempts === 1 ? "it ends" : "they end"}.
+              <span className="font-mono text-xs text-foreground">{name}</span> removed by a reload,{" "}
+              {plural(attempts, "attempt")} still running
             </li>
           ))}
         </ul>
@@ -192,7 +189,7 @@ const WorkerFacts = ({ worker }: { readonly worker: WorkerConfigurationView }) =
   <div className="flex flex-col gap-6">
     <Facts>
       <Fact label="Kind">{workerKindLabel[worker.kind]}</Fact>
-      <Fact label="Max Attempts">
+      <Fact label="Max attempts">
         <span className="tabular-nums">{worker.maxConcurrentAttempts}</span>{" "}
         <Unset>at the same time</Unset>
       </Fact>
@@ -244,7 +241,7 @@ const WorkerFacts = ({ worker }: { readonly worker: WorkerConfigurationView }) =
           </Fact>
           <Fact label="LLM credentials">
             {worker.gateway.llmProviders.length === 0 ? (
-              <Unset>None; harnesses use their login on the Worker</Unset>
+              <Unset>None; each harness uses the login on the worker</Unset>
             ) : (
               worker.gateway.llmProviders.join(", ")
             )}
@@ -268,10 +265,10 @@ export const WorkerDetail = ({
   if (worker === undefined)
     return (
       <ConfigurationPage title={name}>
-        <Missing title="No Worker by this name">
-          <code>usine.yaml</code> declares no Worker {name}.{" "}
+        <Missing title="No worker by this name">
+          <code>usine.yaml</code> declares no worker {name}.{" "}
           <Link to="/configuration/workers" className="text-primary hover:underline">
-            See every Worker
+            See all workers
           </Link>
           .
         </Missing>
@@ -297,15 +294,13 @@ export const WorkerDetail = ({
     <ConfigurationPage
       title={worker.name}
       marks={
-        <span className="text-sm text-muted-foreground">{workerKindLabel[worker.kind]} Worker</span>
+        <span className="text-sm text-muted-foreground">{workerKindLabel[worker.kind]} worker</span>
       }
     >
       <DetailColumns facts={<WorkerFacts worker={worker} />}>
         <DetailSection title="Slots">
           {worker.slots === null ? (
-            <p className="text-muted-foreground">
-              This Worker runs no Attempt until the GitHub App is set up.
-            </p>
+            <p className="text-muted-foreground">No attempts run until the GitHub App is set up.</p>
           ) : (
             <div className="flex items-center gap-3">
               <SlotCells slots={worker.slots} />
@@ -315,12 +310,10 @@ export const WorkerDetail = ({
         </DetailSection>
         <DetailSection
           title="Preflight"
-          aside="At startup, and when a reload adds Workers, slots, or Agents with new brains"
+          aside="At startup, and when a reload adds workers, slots, or agents with new brains"
         >
           {checks.length === 0 ? (
-            <p className="text-muted-foreground">
-              No preflight has run on this Worker since usine up started.
-            </p>
+            <p className="text-muted-foreground">No preflight since usine up started.</p>
           ) : (
             <div className="-mx-2">
               <Table>

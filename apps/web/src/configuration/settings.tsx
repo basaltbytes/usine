@@ -33,7 +33,7 @@ const groups = (
       {
         key: "settings.max_children",
         value: mono(settings.maxChildren),
-        effect: "Child sessions one Attempt may start over its lifetime; the next one fails it.",
+        effect: "Child sessions one attempt may start; one more fails the attempt.",
       },
       {
         key: "settings.max_attempt_minutes",
@@ -41,8 +41,8 @@ const groups = (
           settings.maxAttemptMinutes === null ? unset("Not set") : mono(settings.maxAttemptMinutes),
         effect:
           settings.maxAttemptMinutes === null
-            ? "No wall-clock ceiling: an Attempt runs until it ends."
-            : "Minutes an Attempt may run before the runaway guard fails it.",
+            ? "No wall-clock ceiling."
+            : "Minutes an attempt may run before the runaway guard fails it.",
       },
       {
         key: "settings.max_attempt_tokens",
@@ -51,7 +51,7 @@ const groups = (
         effect:
           settings.maxAttemptTokens === null
             ? "No token ceiling."
-            : "Tokens, parent and children together, an Attempt may use before the runaway guard fails it.",
+            : "Tokens, parent and children together, an attempt may use before the runaway guard fails it.",
       },
     ],
   ],
@@ -63,16 +63,16 @@ const groups = (
         value: settings.parentModel === null ? unset("Not set") : mono(settings.parentModel),
         effect:
           settings.parentModel === null
-            ? "Pi selects the parent's model unless the Agent sets parent_model."
-            : "The parent's model when the Agent sets no parent_model.",
+            ? "Chosen by Pi unless the agent file sets parent_model."
+            : "Parent model when the agent file sets no parent_model.",
       },
       {
         key: "settings.parent_effort",
         value: settings.parentEffort === null ? unset("Not set") : mono(settings.parentEffort),
         effect:
           settings.parentEffort === null
-            ? "The parent runs at the Agent's parent_effort, else at the Agent's effort."
-            : "The parent's effort when the Agent sets no parent_effort.",
+            ? "parent_effort from the agent file, else effort."
+            : "Parent effort when the agent file sets no parent_effort.",
       },
     ],
   ],
@@ -84,7 +84,7 @@ const groups = (
         value: settings.operator === null ? unset("Not set") : mono(settings.operator),
         effect:
           settings.operator === null
-            ? "Approvals from the UI record no approver, and messages read local operator."
+            ? "Approvals from the UI record no approver; messages show as local operator."
             : "The GitHub login recorded on approvals and messages from the UI, and the only login that can answer an Ask.",
       },
     ],
@@ -96,7 +96,7 @@ const groups = (
         key: "webhooks.mode",
         value: mono(settings.webhooks),
         effect:
-          "Parsed and checked; this version of usine finds GitHub changes by polling alone. A change applies when usine up restarts.",
+          "Parsed and checked, not used: this version gets GitHub changes by polling only. A change applies when usine up restarts.",
       },
       ...(settings.webhooksPublicUrl === null
         ? []

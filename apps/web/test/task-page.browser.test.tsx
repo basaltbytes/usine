@@ -113,7 +113,7 @@ it("heads the page with the originating issue, its current pull request's state,
   await expect.element(page.getByText("In review", { exact: true })).toBeVisible();
   // The lane's own label is left out, as on the card.
   await expect.element(page.getByText("ui", { exact: true })).toBeVisible();
-  await expect.element(page.getByText("Needs you", { exact: true })).toBeVisible();
+  await expect.element(page.getByText("Needs attention", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Move pull request #42 to another lane" }).click();
   expect(await menuItems()).toEqual(["Backlog", "Ready"]);
@@ -160,7 +160,7 @@ it("offers only the actions that apply to each Run, and never a disabled button"
   await rowOf("fix-ci")
     .getByRole("button", { name: /^Actions for/u })
     .click();
-  expect(await menuItems()).toEqual(["Cancel Run"]);
+  expect(await menuItems()).toEqual(["Cancel run"]);
   await userEvent.keyboard("{Escape}");
 
   await expect.element(rowOf("start-dev").getByRole("button", { name: "Retry" })).toBeVisible();
@@ -212,13 +212,13 @@ it("lists the pull requests with their state and the comments the Runs posted", 
   const undated = comments
     .getByRole("row")
     .nth(1)
-    .getByTitle(/^Posted during the Attempt/u);
+    .getByTitle(/^Posted during the attempt/u);
   await expect.element(undated).toHaveAttribute("datetime", "2026-10-02T09:20:00.000Z");
 });
 
 it("explains how an Item without Runs, pull requests, or comments fills", async () => {
   await mount(12, 390);
-  await expect.element(page.getByText("No Runs yet")).toBeVisible();
+  await expect.element(page.getByText("No runs yet")).toBeVisible();
   await expect.element(page.getByText("No pull requests")).toBeVisible();
   await expect.element(page.getByText("No comments or reviews")).toBeVisible();
   await expect.element(page.getByText("Open issue", { exact: true })).toBeVisible();

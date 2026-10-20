@@ -159,7 +159,7 @@ export const LoopsList = ({
   <ConfigurationPage title="Loops" counts={loopCounts(configuration)}>
     {pause?.isError === true && <ErrorAlert message={pause.error.message} />}
     {configuration.loops.length === 0 && configuration.quarantinedLoops.length === 0 ? (
-      <Missing title="No Loops">
+      <Missing title="No loops">
         Add a Markdown file under <code>loops/</code> in the instance folder, then reload the
         configuration.
       </Missing>
@@ -244,7 +244,7 @@ const LoopFacts = ({
       <Fact label="Approval">{approvalLabel[loop.approval]}</Fact>
       <Fact label="Max cycles">
         <span className="tabular-nums">{loop.maxCycles}</span>{" "}
-        <Unset>Runs per Item before a reset</Unset>
+        <Unset>Runs per item before a reset</Unset>
       </Fact>
       <Fact label="Permissions">{permissionsLabel[loop.permissions]}</Fact>
       <Fact label="Step">
@@ -294,7 +294,7 @@ const LoadedLoop = ({
             <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
               <WarningIcon weight="fill" className="mt-0.5 size-3 shrink-0 text-warning" />
               <span>
-                The condition names {loop.undeclaredLabels.join(", ")}, which <code>labels</code> in{" "}
+                The condition uses {loop.undeclaredLabels.join(", ")}, which <code>labels</code> in{" "}
                 <code>usine.yaml</code> does not declare, so usine does not create{" "}
                 {loop.undeclaredLabels.length === 1 ? "it" : "them"} in the repositories.
               </span>
@@ -303,9 +303,7 @@ const LoadedLoop = ({
         </DetailSection>
         <DetailSection title="Selector">
           {loop.selector === null ? (
-            <p className="text-muted-foreground">
-              No selector, so the Loop applies to every registered repository.
-            </p>
+            <p className="text-muted-foreground">No selector: every registered repository</p>
           ) : (
             <Frontmatter entries={selectorEntries(loop.selector)} />
           )}
@@ -314,8 +312,8 @@ const LoadedLoop = ({
           title="Prompt"
           aside={
             expressions === 0
-              ? "Every Run receives it as written"
-              : `${plural(expressions, "outlined expression")} filled in from each Item`
+              ? "Same text for every run"
+              : `${plural(expressions, "outlined expression")} filled in from each item`
           }
         >
           <PromptMarkdown template={loop.prompt} />
@@ -343,18 +341,15 @@ export const LoopDetail = ({
   if (quarantined !== undefined)
     return (
       <ConfigurationPage title={quarantined.name} marks={<NotLoaded />} file={quarantined.file}>
-        <FileError
-          error={quarantined.error}
-          consequence="The Loop opens no Runs until the file loads."
-        />
+        <FileError error={quarantined.error} consequence="No runs until the file loads." />
       </ConfigurationPage>
     );
   return (
     <ConfigurationPage title={name}>
-      <Missing title="No Loop by this name">
+      <Missing title="No loop by this name">
         The configuration has no file <code>loops/{name}.md</code>.{" "}
         <Link to="/configuration/loops" className="text-primary hover:underline">
-          See every Loop
+          See all loops
         </Link>
         .
       </Missing>

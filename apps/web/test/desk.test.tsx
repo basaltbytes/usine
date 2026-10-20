@@ -38,27 +38,27 @@ const text = (html: string) =>
     .trim();
 
 describe("Desk", () => {
-  it("says nothing waits on the operator and when polling last checked", () => {
+  it("says nothing needs attention and when polling last checked", () => {
     const html = text(render(<DeskNeedsYou needs={[]} polls={desk.polls} now={now} />));
-    assert.include(html, "Needs you");
-    assert.include(html, "Nothing waits on you.");
+    assert.include(html, "Needs attention");
+    assert.include(html, "Nothing needs attention");
     assert.include(html, "Last checked 2m ago");
   });
 
-  it("lists the Needs you entries with their actions", () => {
+  it("lists the Needs attention entries with their actions", () => {
     const html = text(
       render(<DeskNeedsYou needs={overview.needsYou} polls={desk.polls} now={now} />),
     );
-    assert.include(html, "start-dev waits for approval");
-    assert.include(html, "start-dev asks a question");
+    assert.include(html, "start-dev: approval needed");
+    assert.include(html, "Question from start-dev");
     assert.include(html, "Cycle budget exhausted");
     assert.include(html, "Reset cycle budget");
-    assert.notInclude(html, "Nothing waits on you.");
+    assert.notInclude(html, "Nothing needs attention");
   });
 
-  it("says nothing is running and how many Worker slots are free", () => {
+  it("says nothing is running and how many worker slots are free", () => {
     const html = text(render(<RunningNow running={[]} workers={empty.workers} now={now} />));
-    assert.strictEqual(html, "Nothing is running. 3 of 3 Worker slots are free.");
+    assert.strictEqual(html, "Nothing running, 3 of 3 worker slots free");
   });
 
   it("lists each Attempt in flight with its Worker, last activity, and open warnings", () => {
@@ -67,19 +67,19 @@ describe("Desk", () => {
     assert.include(visible, "#403 Operator desk replaces the Projects home");
     assert.include(visible, "hz-worker-1");
     assert.include(visible, "1m ago");
-    assert.include(visible, "Worker local has not answered since");
-    assert.include(visible, "researcher cannot reach its provider, 27 retries since");
+    assert.include(visible, "local silent since");
+    assert.include(visible, "researcher: provider unreachable, 27 retries since");
     assert.include(html, 'href="/projects/basaltbytes/usine/runs/run-desk-403"');
   });
 
-  it("says every matched Item moves when none is stalled, or that no poll has matched any yet", () => {
+  it("says nothing is stalled, or that no poll has finished yet", () => {
     assert.strictEqual(
       text(render(<NotMoving stalled={[]} now={now} readOnly={false} polled />)),
-      "Every Item a Loop matches has an Attempt running on it.",
+      "Nothing stalled",
     );
     assert.strictEqual(
       text(render(<NotMoving stalled={[]} now={now} readOnly={false} polled={false} />)),
-      "Items are matched once the first poll finishes.",
+      "No poll has finished yet",
     );
   });
 
@@ -87,14 +87,14 @@ describe("Desk", () => {
     const html = render(<NotMoving stalled={desk.notMoving} now={now} readOnly={false} polled />);
     const visible = text(html);
     for (const sentence of [
-      "Its Run waits for your approval.",
-      "The Agent asked you a question. The Loop waits for your answer.",
-      "The Item used its cycle budget of 3 rounds. No Run opens until you reset it.",
-      "Its Run failed 3h ago: Agent failure. The Loop waits for a retry.",
-      "Its Run was canceled 9h ago and the Item has not changed since, so no Run opens.",
-      "review-fix is paused, so it opens no Run.",
-      "Its Run waits for a free Worker slot.",
-      "The Loop has not acted on the Item's current state yet. The next poll does.",
+      "Waiting for approval",
+      "Question from the agent",
+      "Cycle budget used, 3 rounds",
+      "Failed 3h ago: Agent failure",
+      "Canceled 9h ago, unchanged since",
+      "review-fix paused",
+      "Waiting for a free worker slot",
+      "Waiting for the next poll",
     ]) {
       assert.include(visible, sentence);
     }
@@ -119,11 +119,8 @@ describe("Desk", () => {
     assert.notInclude(html, "<button");
   });
 
-  it("says no Run has closed yet", () => {
-    assert.strictEqual(
-      text(render(<LastOutcomes outcomes={[]} now={now} />)),
-      "No Run has closed yet.",
-    );
+  it("says there are no recent runs", () => {
+    assert.strictEqual(text(render(<LastOutcomes outcomes={[]} now={now} />)), "No recent runs");
   });
 
   it("lists the Runs that closed last with their outcome and pull request", () => {

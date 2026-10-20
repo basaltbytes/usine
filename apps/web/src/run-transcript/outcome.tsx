@@ -30,18 +30,18 @@ const FailureNote = ({
 export const SalvageLine = ({ salvage }: { readonly salvage: AttemptSalvage | null }) => (
   <p className="text-xs text-muted-foreground wrap-anywhere">
     {salvage === null
-      ? "No salvage branch."
+      ? "No salvage branch"
       : Match.valueTags(salvage, {
           Pushed: ({ ref, commit }) => (
             <>
               Unfinished work pushed to <span className="font-mono">{ref}</span> at{" "}
-              <span className="font-mono">{commit.slice(0, 7)}</span>; a retry resumes from it.
+              <span className="font-mono">{commit.slice(0, 7)}</span>
             </>
           ),
           Retained: ({ path, message }) => (
             <>
-              Salvage incomplete; unfinished work stays at <span className="font-mono">{path}</span>{" "}
-              and is retried at every startup while its Worker is configured. Last error: {message}
+              Salvage incomplete: unfinished work at <span className="font-mono">{path}</span>,
+              retried at each startup while the worker is configured. Last error: {message}
             </>
           ),
         })}

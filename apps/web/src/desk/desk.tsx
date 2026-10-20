@@ -24,7 +24,7 @@ const NoProjects = () => {
   return (
     <section className="flex flex-col items-start gap-3">
       <div className="flex max-w-prose flex-col gap-1">
-        <h2 className="text-md font-medium">No Projects registered</h2>
+        <h2 className="text-md font-medium">No projects registered</h2>
         <p className="text-muted-foreground">
           Add each repository under <code>repos</code> in <code>usine.yaml</code>, then reload the
           configuration.
@@ -48,13 +48,13 @@ export const DeskNeedsYou = ({
 }) => (
   <DeskSection
     id="desk-needs-you"
-    title="Needs you"
+    title="Needs attention"
     count={needs.length}
     countTone="needs-you"
     note={lastCheckedLabel(polls, now) ?? undefined}
   >
     {needs.length === 0 ? (
-      <EmptyLine>Nothing waits on you.</EmptyLine>
+      <EmptyLine>Nothing needs attention</EmptyLine>
     ) : (
       <ul className="grid grid-cols-1 items-start gap-2.5 lg:grid-cols-2">
         {needs.map((need) => (
@@ -78,8 +78,8 @@ const LoadingBlock = ({ id, title }: { readonly id: string; readonly title: stri
 );
 
 /**
- * The page at `/`: Needs you, Running now, Not moving, and Last outcomes in reading order, then
- * the Workers in one line. Needs you comes from the overview; the other blocks from the desk.
+ * The Overview page at `/`: Needs attention, Running, Stalled, and Recent runs in reading order,
+ * then the Workers in one line. Needs attention comes from the overview; the other blocks from the desk.
  */
 export const Desk = () => {
   const { data: overview } = useSuspenseQuery(overviewQuery());
@@ -90,27 +90,27 @@ export const Desk = () => {
     <Page width="full">
       <div className="flex flex-col gap-9 pb-2">
         <PageHeading
-          title="Desk"
+          title="Overview"
           counts={desk.data === undefined ? undefined : deskCounts(desk.data)}
         />
         {overview.projects.length === 0 && <NoProjects />}
         <DeskNeedsYou needs={overview.needsYou} polls={desk.data?.polls ?? []} now={now} />
         {desk.data === undefined ? (
           desk.isError ? (
-            <ErrorAlert title="The desk could not be loaded" message={desk.error.message} />
+            <ErrorAlert title="Could not load the overview" message={desk.error.message} />
           ) : (
             <>
-              <LoadingBlock id="desk-running" title="Running now" />
-              <LoadingBlock id="desk-not-moving" title="Not moving" />
-              <LoadingBlock id="desk-outcomes" title="Last outcomes" />
+              <LoadingBlock id="desk-running" title="Running" />
+              <LoadingBlock id="desk-not-moving" title="Stalled" />
+              <LoadingBlock id="desk-outcomes" title="Recent runs" />
             </>
           )
         ) : (
           <>
-            <DeskSection id="desk-running" title="Running now" count={desk.data.running.length}>
+            <DeskSection id="desk-running" title="Running" count={desk.data.running.length}>
               <RunningNow running={desk.data.running} workers={desk.data.workers} now={now} />
             </DeskSection>
-            <DeskSection id="desk-not-moving" title="Not moving" count={desk.data.notMoving.length}>
+            <DeskSection id="desk-not-moving" title="Stalled" count={desk.data.notMoving.length}>
               <NotMoving
                 stalled={desk.data.notMoving}
                 now={now}
@@ -118,7 +118,7 @@ export const Desk = () => {
                 polled={desk.data.polls.some(({ polledAt }) => polledAt !== null)}
               />
             </DeskSection>
-            <DeskSection id="desk-outcomes" title="Last outcomes">
+            <DeskSection id="desk-outcomes" title="Recent runs">
               <LastOutcomes outcomes={desk.data.lastOutcomes} now={now} />
             </DeskSection>
             {desk.data.workers.length > 0 && <WorkersLine workers={desk.data.workers} now={now} />}

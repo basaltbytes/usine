@@ -93,7 +93,7 @@ describe("Loops page", () => {
     const page = text(
       await render(() => <LoopsList configuration={emptyConfiguration()} pause={null} />),
     );
-    assert.include(page, "No Loops");
+    assert.include(page, "No loops");
     assert.include(page, "loops/");
   });
 
@@ -111,16 +111,16 @@ describe("Loops page", () => {
       page,
       'if: item.labels.nodes.exists(label, label.name == "ready") && item.assignees.totalCount == 0',
     );
-    assert.include(page, "No selector, so the Loop applies to every registered repository.");
-    assert.include(page, "The condition names urgent");
+    assert.include(page, "No selector: every registered repository");
+    assert.include(page, "The condition uses urgent");
     assert.include(markup, 'href="/configuration/agents/developer"');
     assert.include(page, "codex · gpt-5.6-sol · high");
     assert.include(markup, 'href="/configuration/repositories/basaltbytes/site"');
     assert.include(page, "Required");
-    assert.include(page, "3 Runs per Item before a reset");
+    assert.include(page, "3 Runs per item before a reset");
     assert.include(page, "Write: push and merge");
     assert.include(page, "implement");
-    assert.include(page, "4 outlined expressions filled in from each Item");
+    assert.include(page, "4 outlined expressions filled in from each item");
     assert.strictEqual(markup.match(/<mark/gu)?.length, 4);
     assert.include(markup, "<strong>");
     assert.include(markup, "<code>pnpm test</code>");
@@ -135,7 +135,7 @@ describe("Loops page", () => {
     );
     assert.include(page, "tags: engine");
     assert.include(page, "Read: review and comment, no push");
-    assert.include(page, "Every Run receives it as written");
+    assert.include(page, "Same text for every run");
   });
 
   it("shows why a quarantined Loop did not load and how to recover", async () => {
@@ -144,9 +144,9 @@ describe("Loops page", () => {
         <LoopDetail name="ghost" configuration={configurationFixture()} pause={null} />
       )),
     );
-    assert.include(page, "It names something the configuration does not have");
+    assert.include(page, "References something missing from the configuration");
     assert.include(page, "Unknown agent: ghost");
-    assert.include(page, "The Loop opens no Runs until the file loads.");
+    assert.include(page, "No runs until the file loads.");
     assert.include(page, "Fix loops/ghost.md , then reload the configuration.");
   });
 
@@ -156,7 +156,7 @@ describe("Loops page", () => {
         <LoopDetail name="nope" configuration={configurationFixture()} pause={null} />
       )),
     );
-    assert.include(page, "No Loop by this name");
+    assert.include(page, "No loop by this name");
   });
 
   it("finds the expressions of a prompt template", () => {
@@ -194,12 +194,12 @@ describe("Agents page", () => {
       await render(() => <AgentDetail name="broken" configuration={configurationFixture()} />),
     );
     assert.include(page, "The frontmatter is not valid YAML");
-    assert.include(page, "every Loop that names it is quarantined");
+    assert.include(page, "every loop that uses this agent is quarantined");
   });
 
   it("says how to add an Agent when there is none", async () => {
     const page = text(await render(() => <AgentsList configuration={emptyConfiguration()} />));
-    assert.include(page, "No Agents");
+    assert.include(page, "No agents");
   });
 });
 
@@ -211,7 +211,7 @@ describe("Workers page", () => {
     assert.include(page, "usine@eu-1");
     assert.include(page, "Failed");
     assert.include(page, "Not checked");
-    assert.include(page, "spare was removed by a reload and still runs 1 Attempt");
+    assert.include(page, "spare removed by a reload, 1 attempt still running");
   });
 
   it("shows a Worker's slots and its last preflight per harness", async () => {
@@ -231,7 +231,7 @@ describe("Workers page", () => {
     );
     assert.include(page, "Read from USINE_GATEWAY_ADMIN_TOKEN");
     assert.include(page, "/srv/usine");
-    assert.include(page, "No preflight has run on this Worker since usine up started.");
+    assert.include(page, "No preflight since usine up started.");
   });
 
   it("says that no Worker runs Attempts in setup mode", async () => {
@@ -241,7 +241,7 @@ describe("Workers page", () => {
       workers: configuration.workers.map((worker) => ({ ...worker, slots: null })),
     };
     const page = text(await render(() => <WorkersList configuration={setup} />));
-    assert.include(page, "No Worker runs Attempts until the GitHub App is set up.");
+    assert.include(page, "No attempts run until the GitHub App is set up.");
   });
 });
 

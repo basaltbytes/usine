@@ -169,7 +169,7 @@ const pinnedRun = run("run-pinned", pinned, "review", "Failed", 95, [
 /**
  * A Board with every card shape: lane-only and overflowing labels, a linked PR, and open, waiting,
  * failed, canceled and finished Runs; an empty Merge lane; a dependabot pull request no Loop can
- * match and one with an open Run; Done and Unmapped Tasks behind the header filters.
+ * match and one with an open Run; Done and Unmapped lanes at the end.
  */
 const boardProject = () =>
   new ProjectView({
@@ -293,7 +293,7 @@ const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView[
     reason,
   });
 
-/** The desk's Not moving list for the Board's Items, in the desk's order. */
+/** The desk's stalled Items for the Board's Items, in the desk's order. */
 export const boardStalled = () => [
   stalled("implement", salvage, new AwaitingApprovalView({ run: salvageRun })),
   stalled("review", pinned, new RunFailedView({ run: pinnedRun })),

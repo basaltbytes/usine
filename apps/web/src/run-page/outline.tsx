@@ -73,9 +73,9 @@ const sessionStatus = (
   if (session.paused) return { text: "Paused", tone: "text-needs-you" };
   if (session.held)
     return session.idle
-      ? { text: "Held, waiting for you", tone: "text-needs-you" }
+      ? { text: "Held, waiting for input", tone: "text-needs-you" }
       : { text: "Held", tone: "text-run-active" };
-  if (session.idle) return { text: "Waiting for you", tone: "text-needs-you" };
+  if (session.idle) return { text: "Waiting for input", tone: "text-needs-you" };
   return { text: "Working", tone: "text-run-active", since: session.receivedAt };
 };
 

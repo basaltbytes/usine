@@ -21,7 +21,7 @@ export const RunPage = ({ runId }: { readonly runId: RunId }) => {
   if (detail.isError)
     return <ErrorAlert className="m-4 max-w-3xl md:m-5" message={detail.error.message} />;
   if (detail.data === undefined)
-    return <p className="px-4 py-5 text-muted-foreground md:px-5">Loading Run…</p>;
+    return <p className="px-4 py-5 text-muted-foreground md:px-5">Loading run…</p>;
   const run = detail.data.run;
   const item = runItem(run, overview, detail.data.eventPayload);
   const openRun = (opened: RunId) => {

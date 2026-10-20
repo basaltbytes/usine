@@ -7,7 +7,7 @@ sidebar:
 
 Each issue or pull request has a durable cycle budget. A Loop's `max_cycles` sets how many Runs it can open on that Item between operator resets; the default is three. Each Loop has its own count, so three review/fix rounds allow three reviews and three fixes. An Attempt retry uses the Run's existing reservation, and work canceled before its first Attempt gives its reservation back. Schedule Loops have no cycle budget.
 
-When a Loop has used its limit, its next matching Event opens an Ask in **Needs you** instead of a Run. The Ask shows the Item, the Loops involved, the admitted Runs, and the completed rounds. While it's open, no Loop can open a Run on that Item, a finishing Loop included. Runs that already have a reservation can finish. Changing labels or restarting the process doesn't reset the budget.
+When a Loop has used its limit, its next matching Event opens an Ask in **Needs attention** instead of a Run. The Ask shows the Item, the Loops involved, the admitted Runs, and the completed rounds. While it's open, no Loop can open a Run on that Item, a finishing Loop included. Runs that already have a reservation can finish. Changing labels or restarting the process doesn't reset the budget.
 
 After you inspect the Item, use **Reset cycle budget**. This starts a new allowance and requests a new poll; only active Loops that match the Item at that point can open work. A paused Loop stays paused. The Ask stays visible even when the Item's labels no longer match any Loop. Issue [#36](https://github.com/basaltbytes/usine/issues/36) tracks GitHub notifications and answers.
 
@@ -65,7 +65,7 @@ trigger:
 
 Its prompt tells the Agent to check out the PR branch (`{{ item.headRefName }}`), fix the findings, run the repository checks, push, and apply the “Fix pushed” labels. If the Agent can't complete the fix, it must leave the findings visible.
 
-When a finding needs a decision that only you can make, the Agent posts its question on the PR and ends its answer with `[usine:question]`. The Run fails with `QuestionFailure`, and **Needs you** shows the question. The Loop then holds the PR: polling sees the Agent's own comment and opens no Run for it, so the question costs one Attempt and one round of the budget, not three. The Loop acts on the PR again when you push a commit or comment on the PR, when you remove and add the Loop's label, when you **Retry** or **Edit and retry** the Run with your answer, or when you **Mark answered** in the Run drawer. A blocker the Agent reports with `[usine:blocked]` holds the PR the same way, and **Mark resolved** releases it.
+When a finding needs a decision that only you can make, the Agent posts its question on the PR and ends its answer with `[usine:question]`. The Run fails with `QuestionFailure`, and **Needs attention** shows the question. The Loop then holds the PR: polling sees the Agent's own comment and opens no Run for it, so the question costs one Attempt and one round of the budget, not three. The Loop acts on the PR again when you push a commit or comment on the PR, when you remove and add the Loop's label, when you **Retry** or **Edit and retry** the Run with your answer, or when you **Mark answered** in the Run drawer. A blocker the Agent reports with `[usine:blocked]` holds the PR the same way, and **Mark resolved** releases it.
 
 `loops/finish-pr.md` runs only after a clean review:
 

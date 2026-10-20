@@ -113,7 +113,7 @@ export const CardMenu = ({
       content: (
         <>
           {run !== null && (
-            <DropdownMenuItem onClick={() => openRun(run.id)}>Open Run</DropdownMenuItem>
+            <DropdownMenuItem onClick={() => openRun(run.id)}>Open run</DropdownMenuItem>
           )}
           {past.length > 0 && <RunHistory runs={past} openRun={openRun} />}
         </>
@@ -196,7 +196,7 @@ export const CardMenu = ({
             <AlertDialogHeader>
               <AlertDialogTitle>Cancel {run.loop}?</AlertDialogTitle>
               <AlertDialogDescription>
-                The Run on {subject} stops, including any Attempt in progress.
+                The run on {subject} stops, including any attempt in progress.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>

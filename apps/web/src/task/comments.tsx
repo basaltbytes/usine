@@ -15,7 +15,7 @@ const commentTime = (comment: TaskView["comments"][number]) => {
   if (comment.attemptEndedAt !== null)
     return {
       at: comment.attemptEndedAt,
-      title: `Posted during the Attempt that ended ${timestampLabel(comment.attemptEndedAt)}`,
+      title: `Posted during the attempt that ended ${timestampLabel(comment.attemptEndedAt)}`,
     };
   return null;
 };
@@ -36,8 +36,7 @@ export const TaskComments = ({ task }: { readonly task: TaskView }) => {
       />
       {task.comments.length === 0 ? (
         <SectionEmpty title="No comments or reviews">
-          The comments and reviews an Agent posts on this Task's Items show here once its Attempt
-          ends.
+          Comments and reviews an agent posts on the task's items appear here after the attempt ends
         </SectionEmpty>
       ) : (
         <div className="-mx-2">

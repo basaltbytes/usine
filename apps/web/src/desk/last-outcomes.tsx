@@ -63,7 +63,7 @@ export const LastOutcomes = ({
   readonly now: number;
 }) =>
   outcomes.length === 0 ? (
-    <EmptyLine>No Run has closed yet.</EmptyLine>
+    <EmptyLine>No recent runs</EmptyLine>
   ) : (
     <div className="-mx-2">
       <Table>

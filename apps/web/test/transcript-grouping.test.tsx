@@ -653,9 +653,9 @@ it("renders a held child from session state when its activity is outside the loa
     );
 
   const reachable = outline([held, record(4, new SessionIdle({ session: child }))]);
-  assert.include(reachable, "Held, waiting for you");
+  assert.include(reachable, "Held, waiting for input");
   assert.include(reachable, 'aria-label="Resume details for developer"');
-  assert.notInclude(outline([]), "Held, waiting for you");
+  assert.notInclude(outline([]), "Held, waiting for input");
   assert.notInclude(outline([]), "Resume details for developer");
 });
 
@@ -749,7 +749,7 @@ it("shows a message to a working child queued in the child's section until the c
   };
 
   assert.deepStrictEqual(queuedOf(working), ["child"]);
-  assert.include(render(working), "Queued until the child finishes its current step");
+  assert.include(render(working), "Queued until the child&#x27;s current step ends");
   assert.deepStrictEqual(queuedOf([...working, applied(6, false)]), [null]);
   assert.notInclude(render([...working, applied(6, false)]), "Queued until");
 });

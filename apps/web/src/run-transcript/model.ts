@@ -177,15 +177,15 @@ const sessionEntries = (
           event._tag === "ProviderRetrying"
             ? {
                 kind: "status",
-                label: `${group.session.agent} cannot reach its provider`,
+                label: `${group.session.agent}: provider unreachable`,
                 detail: event.message,
                 format: "plain",
                 tone: "warning",
               }
             : {
                 kind: "status",
-                label: `${group.session.agent} reached its provider again`,
-                detail: `After ${retriesLabel(event.retries)}.`,
+                label: `${group.session.agent}: provider reachable again`,
+                detail: `After ${retriesLabel(event.retries)}`,
                 format: "plain",
                 tone: "plain",
               },
@@ -211,8 +211,8 @@ const sessionEntries = (
       }),
       SessionIdle: (): NoticeContent => ({
         kind: "status",
-        label: `${group.session.agent} is waiting`,
-        detail: "The session remains open for operator input.",
+        label: `${group.session.agent} idle`,
+        detail: "Session open for operator input",
         format: "plain",
         tone: "plain",
       }),
@@ -333,14 +333,14 @@ export const projectTranscript = (
           Cancel: (): NoticeContent => ({
             kind: "status",
             label: "Cancel requested",
-            detail: "The Attempt is stopping.",
+            detail: "Attempt stopping",
             format: "plain",
             tone: "plain",
           }),
           Interrupted: (): NoticeContent => ({
             kind: "status",
             label: "Interrupted",
-            detail: "The Attempt's parent acknowledged the interrupt.",
+            detail: "Acknowledged by the parent session",
             format: "plain",
             tone: "plain",
           }),
@@ -354,7 +354,7 @@ export const projectTranscript = (
           Interrupt: (): NoticeContent => ({
             kind: "status",
             label: "Interrupt requested",
-            detail: "The operator asked the Attempt to stop.",
+            detail: "Sent by the operator",
             format: "plain",
             tone: "plain",
           }),
@@ -368,21 +368,21 @@ export const projectTranscript = (
           Release: (): NoticeContent => ({
             kind: "status",
             label: "Released",
-            detail: "The operator released the held child.",
+            detail: "Held child released by the operator",
             format: "plain",
             tone: "plain",
           }),
           WorkerUnresponsive: ({ worker, lastAnsweredAt, reason }): NoticeContent => ({
             kind: "status",
-            label: `Worker ${worker} stopped answering`,
-            detail: `It last answered at ${clockLabel(DateTime.formatIso(lastAnsweredAt))}. ${reason}`,
+            label: `${worker} silent since ${clockLabel(DateTime.formatIso(lastAnsweredAt))}`,
+            detail: reason,
             format: "plain",
             tone: "warning",
           }),
           WorkerResponsive: ({ worker, lastAnsweredAt }): NoticeContent => ({
             kind: "status",
-            label: `Worker ${worker} answers again`,
-            detail: `It did not answer for ${durationLabel(
+            label: `${worker} answering again`,
+            detail: `Silent for ${durationLabel(
               Date.parse(record.receivedAt) - DateTime.toEpochMillis(lastAnsweredAt),
             )}`,
             format: "plain",
@@ -437,8 +437,8 @@ export const projectTranscript = (
 /** Describes observed session activity without assuming unrecorded thinking or success. */
 export const sessionActivityLabel = (session: TranscriptSession): string => {
   if (session.status !== "Live") return session.status;
-  if (session.paused) return "Paused · send a message to resume";
-  if (session.held) return session.idle ? "Held · waiting for you" : "Held · working";
+  if (session.paused) return "Paused";
+  if (session.held) return session.idle ? "Held · waiting for input" : "Held · working";
   if (session.idle) return "Waiting for operator input";
   const tool = [...session.entries]
     .reverse()

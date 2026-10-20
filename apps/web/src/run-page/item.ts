@@ -85,7 +85,7 @@ export const runItem = (
 /** Two lines naming what started the Run, for the outline. */
 export const eventPreview = (loop: string, payload: Schema.Json): string =>
   Option.match(eventItem(payload), {
-    onNone: () => `${loop} opened this Run.`,
+    onNone: () => `Opened by ${loop}`,
     onSome: ({ kind, number, state, labels }) =>
       `${loop} matched ${kind.toLowerCase()} #${number}: ${state.toLowerCase()}${
         labels.length === 0 ? "" : `, labelled ${labels.join(", ")}`

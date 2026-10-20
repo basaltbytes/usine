@@ -57,7 +57,7 @@ export const EventDocument = ({
           onNone: () => (
             <>
               <p className="mt-2 text-md">
-                {detail.run.loop} opened this Run on {detail.run.repository}.
+                Opened by {detail.run.loop} on {detail.run.repository}
               </p>
               <RunAgainLine run={detail.run} className="mt-2 block text-sm" />
               <ApprovalLine approval={detail.run.approval} className="mt-2 block text-sm" />

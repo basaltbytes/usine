@@ -219,7 +219,7 @@ const Row = ({ row, speaker }: { readonly row: ChapterRow; readonly speaker: str
     BoardMove: ({ move }) => (
       <ReaderLine gutter={<Gutter receivedAt={move.at} />}>
         <p className="text-xs leading-[1.4rem] wrap-anywhere text-muted-foreground">
-          You moved it from {move.fromLane} to {move.toLane} on the Board
+          You moved it from {move.fromLane} to {move.toLane} on the board
         </p>
       </ReaderLine>
     ),
@@ -371,7 +371,7 @@ const AttemptMeta = ({
             }
           >
             <CaretRightIcon aria-hidden="true" />
-            Task used by this Attempt
+            Task used by this attempt
           </CollapsibleTrigger>
           <CollapsibleContent className="pt-1">
             <Markdown className="text-sm">{attempt.task}</Markdown>
@@ -436,7 +436,7 @@ const ChapterView = ({
       {rows.length === 0 && cursor === undefined && !chapter.live && (
         <MessageScrollerItem messageId={`empty:${chapter.attemptId}`} className="mt-4">
           <ReaderLine>
-            <p className="text-xs text-muted-foreground">No activity was recorded.</p>
+            <p className="text-xs text-muted-foreground">No activity recorded</p>
           </ReaderLine>
         </MessageScrollerItem>
       )}
@@ -477,7 +477,7 @@ export const Transcript = ({
     return (
       <MessageScrollerItem messageId="empty">
         <ReaderLine>
-          <p className="text-xs text-muted-foreground">No Attempt has started.</p>
+          <p className="text-xs text-muted-foreground">No attempt started</p>
         </ReaderLine>
       </MessageScrollerItem>
     );

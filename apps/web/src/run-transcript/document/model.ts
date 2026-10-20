@@ -391,13 +391,13 @@ const chapterRows = (
           _tag: "Note",
           ...at,
           speaker,
-          text: `Reached its provider again after ${retriesLabel(event.retries)}`,
+          text: `Provider reachable again after ${retriesLabel(event.retries)}`,
           tone: "plain",
           connectivity: null,
         });
         continue;
       }
-      const text = `Cannot reach its provider, ${retriesLabel(event.retries)} so far. ${event.message}`;
+      const text = `Provider unreachable, ${retriesLabel(event.retries)} so far. ${event.message}`;
       const streak = retrying.get(origin.session.id);
       const folded = streak === undefined ? undefined : rows[streak];
       // Consecutive retries of one session read as one line that keeps the latest report.

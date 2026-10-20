@@ -28,3 +28,7 @@ The audit of 2026-10-20 found the Board built around everything GitHub holds. Fi
 - A Task no Loop can match is hidden until **Show all Items**: no Loop's trigger matches one of its Items now, its current Item carries no label an authored lane uses, it has no open Run, and nothing about it waits in Needs you. The orchestrator evaluates the triggers with `LoopMatches`, the evaluation the poll runs, so the Board and the poll cannot disagree about a match.
 - The arrow between two authored lanes names the Loops whose trigger matches a Task of the left lane, with or without an open Run ([#345](https://github.com/basaltbytes/usine/issues/345)), since an arrow that names only Loops at work is blank whenever nothing runs.
 - A card on the desk's Not moving list carries the desk's reason and action. The Board reads the desk view for it instead of computing reasons a second time.
+
+## 2026-10-20, later: every lane in one row again
+
+The operator used the second pass on the live Board the same day and rejected three of its changes: empty lanes collapsed to narrow columns, Done and Unmapped behind header toggles, and Tasks no Loop can match hidden by default. The Board went back to every lane in one row, an empty lane at full width, Done and Unmapped last as rails, and every Task the overview returns. The arrows that name the matching Loops and the stall reasons on cards stayed.

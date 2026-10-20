@@ -102,7 +102,7 @@ export const reloadRefusalLead = (error: OperatorHttpError["error"] | undefined)
     case "RestartRequiredError":
       return "This change applies only when usine up restarts.";
     case "ReloadPreflightError":
-      return "A Worker failed preflight for what the reload adds.";
+      return "A worker failed preflight for what the reload adds.";
     default:
       return null;
   }

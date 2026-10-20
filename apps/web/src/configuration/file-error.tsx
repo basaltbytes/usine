@@ -5,9 +5,9 @@ const stageLabel = {
   read: "The file could not be read",
   yaml: "The frontmatter is not valid YAML",
   frontmatter: "The frontmatter block is missing or not closed",
-  schema: "A frontmatter field has a value the file format does not accept",
+  schema: "A frontmatter field has an invalid value",
   expression: "An expression does not check",
-  reference: "It names something the configuration does not have",
+  reference: "References something missing from the configuration",
 } satisfies Record<FileStage, string>;
 
 /** Why an authored file did not load: the parse stage that refused it, the parser's message, and

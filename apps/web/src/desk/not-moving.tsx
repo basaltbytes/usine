@@ -73,13 +73,7 @@ export const NotMoving = ({
 }) => {
   const narrow = useIsMobile();
   if (stalled.length === 0)
-    return (
-      <EmptyLine>
-        {polled
-          ? "Every Item a Loop matches has an Attempt running on it."
-          : "Items are matched once the first poll finishes."}
-      </EmptyLine>
-    );
+    return <EmptyLine>{polled ? "Nothing stalled" : "No poll has finished yet"}</EmptyLine>;
   return (
     <div className="-mx-2">
       <Table>
