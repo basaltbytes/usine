@@ -631,6 +631,7 @@ describe("durable AttemptRuntime", () => {
           const review = new Comment({
             url: new URL("https://github.com/basaltbytes/usine/pull/176#pullrequestreview-1"),
             kind: "review",
+            at: Option.none(),
           });
           assert.deepStrictEqual(
             harvestedResult(report, [review]),

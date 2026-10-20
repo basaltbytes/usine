@@ -25,10 +25,15 @@ export class PullRequest extends Schema.TaggedClass<PullRequest>("StepResult/Pul
 export const CommentKind = Schema.Literals(["issue-comment", "review", "review-comment"]);
 export type CommentKind = typeof CommentKind.Type;
 
-/** A GitHub comment or review the agent created or updated on the Run's Item during the Attempt. */
+/**
+ * A GitHub comment or review the agent created or updated on the Run's Item during the Attempt.
+ * `at` is when GitHub says it was posted: a comment's creation, a review's submission. None for a
+ * comment harvested before these times were recorded.
+ */
 export class Comment extends Schema.TaggedClass<Comment>("StepResult/Comment")("Comment", {
   url: Schema.URLFromString,
   kind: CommentKind,
+  at: Schema.OptionFromOptionalKey(Schema.DateTimeUtcFromString),
 }) {}
 
 /** A commit or GitHub artifact recorded as an outcome of the Agent's work. */

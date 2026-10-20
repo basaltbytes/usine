@@ -240,6 +240,7 @@ const runs = [
           new Comment({
             url: new URL(`https://github.com/${repository}/issues/40#issuecomment-1`),
             kind: "issue-comment",
+            at: Option.none(),
           }),
         ],
       }),
@@ -290,10 +291,12 @@ const runs = [
           new Comment({
             url: new URL(`${pullUrl(41)}#pullrequestreview-7`),
             kind: "review",
+            at: Option.some(DateTime.makeUnsafe("2026-10-04T09:05:00.000Z")),
           }),
           new Comment({
             url: new URL(`${pullUrl(41)}#discussion_r8`),
             kind: "review-comment",
+            at: Option.none(),
           }),
         ],
       }),
@@ -436,12 +439,18 @@ describe("Task view", () => {
       );
       assert.strictEqual(task.runs[0]?.runAgain?.from, "run-fix");
       assert.isTrue(task.needsYou);
+      // A comment carries GitHub's time when the harvest recorded one, and its Attempt's end always.
       assert.deepStrictEqual(
-        task.comments.map(({ runId, kind, at: postedAt }) => [runId, kind, postedAt]),
+        task.comments.map(({ runId, kind, postedAt, attemptEndedAt }) => [
+          runId,
+          kind,
+          postedAt,
+          attemptEndedAt,
+        ]),
         [
-          ["run-review", "review", "2026-10-04T09:12:00.000Z"],
-          ["run-review", "review-comment", "2026-10-04T09:12:00.000Z"],
-          ["run-plan", "issue-comment", "2026-10-02T09:20:00.000Z"],
+          ["run-review", "review", "2026-10-04T09:05:00.000Z", "2026-10-04T09:12:00.000Z"],
+          ["run-review", "review-comment", null, "2026-10-04T09:12:00.000Z"],
+          ["run-plan", "issue-comment", null, "2026-10-02T09:20:00.000Z"],
         ],
       );
       // Run histories come from every Item the Board considers, not the overview's recent window.

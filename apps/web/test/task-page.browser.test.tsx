@@ -206,6 +206,14 @@ it("lists the pull requests with their state and the comments the Runs posted", 
   await expect
     .element(review.getByRole("link", { name: "review-pr" }))
     .toHaveAttribute("href", `/projects/${taskRepository}/runs/run-review`);
+  // A comment is dated by when GitHub says it was posted, else by its Attempt's end.
+  const posted = review.getByTitle(/^Posted 2026-10-04 /u);
+  await expect.element(posted).toHaveAttribute("datetime", "2026-10-04T09:05:00.000Z");
+  const undated = comments
+    .getByRole("row")
+    .nth(1)
+    .getByTitle(/^Posted during the Attempt/u);
+  await expect.element(undated).toHaveAttribute("datetime", "2026-10-02T09:20:00.000Z");
 });
 
 it("explains how an Item without Runs, pull requests, or comments fills", async () => {

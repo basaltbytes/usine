@@ -239,7 +239,8 @@ const task = new TaskView({
       runId,
       kind: "issue-comment",
       url: "https://github.com/basaltbytes/usine/issues/31#issuecomment-1",
-      at: "2026-09-01T12:30:00.000Z",
+      postedAt: "2026-09-01T12:20:00.000Z",
+      attemptEndedAt: "2026-09-01T12:30:00.000Z",
     }),
   ],
 });

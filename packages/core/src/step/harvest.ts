@@ -70,8 +70,9 @@ const Author = Schema.NullOr(Schema.Struct({ login: Schema.String }));
 const IssueCommentResponse = Schema.Struct({
   url: Schema.URLFromString,
   user: Author,
+  createdAt: Schema.DateTimeUtcFromString,
   updatedAt: Schema.DateTimeUtcFromString,
-}).pipe(Schema.encodeKeys({ url: "html_url", updatedAt: "updated_at" }));
+}).pipe(Schema.encodeKeys({ url: "html_url", createdAt: "created_at", updatedAt: "updated_at" }));
 const decodeIssueCommentPages = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(Schema.Array(IssueCommentResponse))),
 );
@@ -88,11 +89,13 @@ const decodeReviewPages = Schema.decodeUnknownEffect(
 const ReviewCommentResponse = Schema.Struct({
   url: Schema.URLFromString,
   user: Author,
+  createdAt: Schema.DateTimeUtcFromString,
   updatedAt: Schema.DateTimeUtcFromString,
   reviewId: Schema.NullOr(Schema.Int),
 }).pipe(
   Schema.encodeKeys({
     url: "html_url",
+    createdAt: "created_at",
     updatedAt: "updated_at",
     reviewId: "pull_request_review_id",
   }),
@@ -320,8 +323,10 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
   );
   const issueComments = conversation
     .flat()
-    .flatMap(({ url, user, updatedAt }) =>
-      written(user, updatedAt) ? [new Comment({ url, kind: "issue-comment" })] : [],
+    .flatMap(({ url, user, createdAt, updatedAt }) =>
+      written(user, updatedAt)
+        ? [new Comment({ url, kind: "issue-comment", at: Option.some(createdAt) })]
+        : [],
     );
   const submitted = reviews
     .flat()
@@ -330,14 +335,14 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
       submittedAt !== undefined &&
       submittedAt !== null &&
       written(user, submittedAt)
-        ? [new Comment({ url, kind: "review" })]
+        ? [new Comment({ url, kind: "review", at: Option.some(submittedAt) })]
         : [],
     );
   const reviewComments = diffComments
     .flat()
-    .flatMap(({ url, user, updatedAt, reviewId }) =>
+    .flatMap(({ url, user, createdAt, updatedAt, reviewId }) =>
       (reviewId === null || !pending.has(reviewId)) && written(user, updatedAt)
-        ? [new Comment({ url, kind: "review-comment" })]
+        ? [new Comment({ url, kind: "review-comment", at: Option.some(createdAt) })]
         : [],
     );
   yield* Effect.logInfo("Collected the comments and reviews the Attempt posted on its Item", {

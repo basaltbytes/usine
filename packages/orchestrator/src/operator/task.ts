@@ -52,8 +52,9 @@ export class TaskLaneView extends Schema.Class<TaskLaneView>("@usine/orchestrato
 
 /**
  * A comment or review an Attempt posted on its Run's Item, from the Run's harvested
- * `Comment` facts. Only a succeeded Attempt records facts, so `at` is when that Attempt
- * ended; null for an Attempt closed before end times were recorded.
+ * `Comment` facts. `postedAt` is when GitHub says it was posted, null for a comment harvested
+ * before those times were recorded; `attemptEndedAt` is when the Attempt that recorded it
+ * ended, null for an Attempt closed before end times were recorded.
  */
 export class TaskCommentView extends Schema.Class<TaskCommentView>(
   "@usine/orchestrator/TaskCommentView",
@@ -61,7 +62,8 @@ export class TaskCommentView extends Schema.Class<TaskCommentView>(
   runId: RunId,
   kind: CommentKind,
   url: Schema.String,
-  at: Schema.NullOr(Schema.String),
+  postedAt: Schema.NullOr(Schema.String),
+  attemptEndedAt: Schema.NullOr(Schema.String),
 }) {}
 
 /**
@@ -94,15 +96,21 @@ const harvestedComments = (summary: RunSummary): ReadonlyArray<TaskCommentView> 
     onSome: ({ facts }) => facts.filter((fact): fact is Comment => fact._tag === "Comment"),
   });
   if (facts.length === 0) return [];
-  const at = EffectArray.findLast(summary.attempts, (attempt) =>
+  const attemptEndedAt = EffectArray.findLast(summary.attempts, (attempt) =>
     Option.exists(attempt.outcome, ({ _tag }) => _tag === "Succeeded"),
   ).pipe(
     Option.flatMap(({ endedAt }) => endedAt),
     Option.match({ onNone: () => null, onSome: DateTime.formatIso }),
   );
   return facts.map(
-    ({ kind, url }) =>
-      new TaskCommentView({ runId: summary.run.id, kind, url: url.toString(), at }),
+    ({ kind, url, at }) =>
+      new TaskCommentView({
+        runId: summary.run.id,
+        kind,
+        url: url.toString(),
+        postedAt: Option.match(at, { onNone: () => null, onSome: DateTime.formatIso }),
+        attemptEndedAt,
+      }),
   );
 };
 

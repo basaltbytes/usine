@@ -71,6 +71,7 @@ describe("attempt channel", () => {
             new Comment({
               url: new URL("https://github.com/acme/demo/pull/71#issuecomment-1"),
               kind: "issue-comment",
+              at: Option.some(DateTime.makeUnsafe("2026-08-30T11:58:00Z")),
             }),
           ],
         }),
@@ -83,6 +84,13 @@ describe("attempt channel", () => {
     });
 
     assert.deepStrictEqual(decoded, envelope);
+  });
+
+  it("decodes a Comment fact stored without its time as none", () => {
+    const stored = { _tag: "Comment", url: "https://github.com/acme/demo/pull/71", kind: "review" };
+    const comment = Schema.decodeUnknownSync(Comment)(stored);
+    assert.isTrue(Option.isNone(comment.at));
+    assert.deepStrictEqual(Schema.encodeSync(Comment)(comment), stored);
   });
 
   it("round-trips a child-session budget failure through JSON", () => {
