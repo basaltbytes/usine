@@ -2,6 +2,9 @@ import {
   AgentSession,
   AgentSessionEvent,
   AgentSessionId,
+  ProviderRecovered,
+  ProviderRetries,
+  ProviderRetrying,
   SessionFinished,
   SessionTokensUpdated,
   TokenCount,
@@ -199,8 +202,10 @@ const sessionEventFrom = (
 /**
  * Subscribes the Pi SDK's synchronous listener to one session channel.
  * Normalized events reach the queue on the SDK's own tick so none can trail
- * the prompt's resolution; operational events with no normalized shape (retry
- * backoffs, compactions) are logged so a silent wait stays explainable.
+ * the prompt's resolution. Pi's provider retries become `ProviderRetrying` and
+ * `ProviderRecovered`, counted per turn: the count restarts when Pi settles a
+ * prompt (`agent_settled`). Compactions have no normalized shape and are logged
+ * so a silent wait stays explainable.
  */
 export const subscribePiSession = (
   piSession: PiSession,
@@ -212,41 +217,69 @@ export const subscribePiSession = (
     const log = Effect.runForkWith(context);
     let lastText: string | undefined;
     let total: SessionUsage = { totalTokens: TokenCount.make(0), costUsd: Option.none() };
+    // Provider retries Pi reported in the current turn, and whether the last one is unanswered.
+    let retries = 0;
+    let retrying = false;
+    const offer = (sessionEvent: AgentSessionEvent) => {
+      if (!Queue.offerUnsafe(channel.events, sessionEvent)) {
+        log(
+          Effect.logWarning("Dropped a Pi session event after the terminal transition", {
+            event: sessionEvent._tag,
+            sessionId: session.id,
+          }),
+        );
+      }
+    };
     const unsubscribe = piSession.subscribe((event) => {
       if (event.type === "message_end") {
         const usage = piMessageUsage(event.message);
         if (Option.isSome(usage)) {
           total = addUsage(total, usage.value);
-          if (!Queue.offerUnsafe(channel.events, new SessionTokensUpdated({ session, ...total }))) {
-            log(
-              Effect.logWarning("Dropped Pi usage after the terminal transition", {
-                sessionId: session.id,
-              }),
-            );
-          }
+          offer(new SessionTokensUpdated({ session, ...total }));
         }
       }
       if (event.type === "auto_retry_start") {
+        retries += 1;
+        retrying = true;
+        const message = event.errorMessage || "Unknown error";
         log(
-          Effect.logWarning("Pi session is backing off before a retry", {
+          Effect.logWarning("Pi session cannot reach its provider and will retry", {
             attempt: event.attempt,
             delayMillis: event.delayMs,
-            errorMessage: event.errorMessage,
             maxAttempts: event.maxAttempts,
+            message,
+            retries,
             sessionId: session.id,
           }),
         );
+        offer(new ProviderRetrying({ session, message, retries: ProviderRetries.make(retries) }));
         return;
       }
       if (event.type === "auto_retry_end") {
+        if (event.success && retrying) {
+          retrying = false;
+          log(
+            Effect.logInfo("Pi session reached its provider again", {
+              retries,
+              sessionId: session.id,
+            }),
+          );
+          offer(new ProviderRecovered({ session, retries: ProviderRetries.make(retries) }));
+          return;
+        }
         log(
-          Effect.logInfo("Pi session finished retrying", {
+          Effect.logInfo("Pi session stopped retrying its provider", {
             attempt: event.attempt,
             finalError: event.finalError,
             sessionId: session.id,
             success: event.success,
           }),
         );
+        return;
+      }
+      if (event.type === "agent_settled") {
+        retries = 0;
+        retrying = false;
         return;
       }
       if (event.type === "compaction_start" || event.type === "compaction_end") {
@@ -262,14 +295,7 @@ export const subscribePiSession = (
       const sessionEvent = sessionEventFrom(event, session);
       if (sessionEvent === undefined) return;
       if (sessionEvent._tag === "TextOutput") lastText = sessionEvent.text;
-      if (!Queue.offerUnsafe(channel.events, sessionEvent)) {
-        log(
-          Effect.logWarning("Dropped a Pi session event after the terminal transition", {
-            event: sessionEvent._tag,
-            sessionId: session.id,
-          }),
-        );
-      }
+      offer(sessionEvent);
     });
     channel.onTerminal(unsubscribe);
     return { lastText: () => lastText, unsubscribe };

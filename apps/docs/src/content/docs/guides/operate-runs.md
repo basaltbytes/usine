@@ -249,7 +249,7 @@ At 80% of a ceiling the parent gets one warning. At 100% the Attempt stops with 
 When an Attempt's Worker stops answering, or one of its children can't reach its model provider, the Run page's conversation shows a yellow line and the orchestrator logs a warning. Nothing stops the Attempt: it keeps running until it finishes, you cancel it, or a ceiling you set trips.
 
 - **\<worker\> silent since \<time\>**: while Attempts run on an `ssh` or `exe.dev` Worker, usine runs `true` on the Worker's machine over a new SSH connection every minute, one probe for all of them, and this probe got no answer within 45 seconds. The line appears in the conversation of every Attempt on that Worker. The line says when the Worker last answered and what the probe saw. **\<worker\> answering again** follows when a probe gets through.
-- **Provider unreachable**: a Codex child reported `Reconnecting...`, or a Claude Code child reported an API retry. A child's consecutive retries share one line, with the count so far and the harness's latest message. **Provider reachable again** follows when the child's turn goes on.
+- **Provider unreachable**: a Codex child reported `Reconnecting...`, or a Claude Code or Pi child reported an API retry. A child's consecutive retries share one line, with the count so far and the harness's latest message. **Provider reachable again** follows when the child's turn goes on.
 
 While a warning is open, the current activity at the end of the conversation and in the Run drawer says what hasn't answered and since when. Needs attention doesn't list these warnings.
 

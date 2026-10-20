@@ -8,7 +8,7 @@ import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentSessionId, ChildSession } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { Effect, Fiber, Layer, Option, Queue, Stream } from "effect";
+import { Effect, Fiber, Layer, Logger, Option, Queue, Stream } from "effect";
 import {
   AgentResultError,
   ChildRequest,
@@ -259,14 +259,7 @@ describe("Pi child backend", () => {
         prompt = value;
         // Operational SDK events with no normalized shape are logged and
         // skipped; they must never enter the queue or break the bridge.
-        publish({
-          type: "auto_retry_start",
-          attempt: 1,
-          maxAttempts: 3,
-          delayMs: 250,
-          errorMessage: "overloaded",
-        });
-        publish({ type: "auto_retry_end", success: true, attempt: 1 });
+        publish({ type: "compaction_start", reason: "threshold" });
         publish({
           type: "message_end",
           message: fauxAssistantMessage("Pi child done."),
@@ -321,6 +314,93 @@ describe("Pi child backend", () => {
           ["SessionStarted", "SessionTokensUpdated", "TextOutput", "SessionFinished"],
         );
       }).pipe(Effect.provide(piChildBackendLayer), Effect.provide(sdk)),
+    );
+  });
+
+  it.effect("reports each provider retry of a turn and the recovery when Pi gets an answer", () => {
+    const listeners: Array<(event: PiSessionEvent) => void> = [];
+    const publish = (event: PiSessionEvent) => {
+      for (const listener of listeners) listener(event);
+    };
+    const retry = (attempt: number, errorMessage: string): PiSessionEvent => ({
+      type: "auto_retry_start",
+      attempt,
+      maxAttempts: 3,
+      delayMs: 2_000,
+      errorMessage,
+    });
+    const session: PiSession = {
+      abort: () => Promise.resolve(),
+      dispose: () => undefined,
+      messages: [],
+      prompt: () => {
+        publish(retry(1, "terminated"));
+        publish(retry(2, "429 Too Many Requests"));
+        publish({ type: "message_end", message: fauxAssistantMessage("Pi child done.") });
+        publish({ type: "auto_retry_end", success: true, attempt: 2 });
+        publish({ type: "agent_settled", aborted: false });
+        // The next turn counts from 1 again, and a retry Pi gives up on records no recovery.
+        publish(retry(1, "terminated"));
+        publish({ type: "auto_retry_end", success: false, attempt: 1, finalError: "terminated" });
+        publish({ type: "agent_settled", aborted: false });
+        return Promise.resolve();
+      },
+      steer: () => Promise.resolve(),
+      subscribe: (found) => {
+        listeners.push(found);
+        return () => undefined;
+      },
+    };
+    const sdk = Layer.succeed(PiSdk)({
+      start: () =>
+        Promise.resolve({
+          _tag: "Started",
+          model: childRequest.session.brain.model,
+          pool: "apiKeys",
+          session,
+        }),
+    });
+    const warnings: Array<string> = [];
+    const logger = Logger.make<unknown, void>(({ logLevel, message }) => {
+      if (logLevel === "Warn") warnings.push(JSON.stringify(message));
+    });
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const running = yield* (yield* PiChildBackend).launch(childRequest);
+        const [events] = yield* Effect.all([Stream.runCollect(running.events), running.result]);
+        assert.deepStrictEqual(
+          events.map((event) => event._tag),
+          [
+            "SessionStarted",
+            "ProviderRetrying",
+            "ProviderRetrying",
+            "SessionTokensUpdated",
+            "TextOutput",
+            "ProviderRecovered",
+            "ProviderRetrying",
+            "SessionFinished",
+          ],
+        );
+        assert.deepStrictEqual(
+          events.flatMap((event) =>
+            event._tag === "ProviderRetrying" ? [[event.message, event.retries]] : [],
+          ),
+          [
+            ["terminated", 1],
+            ["429 Too Many Requests", 2],
+            ["terminated", 1],
+          ],
+        );
+        const recovered = events.find((event) => event._tag === "ProviderRecovered");
+        assert(recovered?._tag === "ProviderRecovered");
+        assert.strictEqual(recovered.retries, 2);
+        const retries = warnings.filter((line) => line.includes("cannot reach its provider"));
+        assert.lengthOf(retries, 3, "one warning per provider retry");
+      }).pipe(
+        Effect.provide(piChildBackendLayer),
+        Effect.provide(sdk),
+        Effect.provide(Logger.layer([logger])),
+      ),
     );
   });
 
