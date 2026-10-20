@@ -20,7 +20,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 ## Configuration
 
 - [#40][]: the Configuration section reads every Loop, Agent, Worker, repository, and setting, but the UI has no configuration form or raw editor, and the surgical YAML writer has no production caller ([writer.ts][]).
-- [#387][]: a reload resizes, adds, and removes Workers, but refuses a new SSH Worker, because the SSH executor sets up its Workers and Gateway forwards when `usine up` starts ([ssh.ts][]); a removed SSH Worker's forward stays open until `usine up` stops.
 - [#388][]: Needs attention offers Discard leftovers for a Worker a reload removed while its Attempts still run, and the action does nothing until they end.
 
 ## Triggers and polling
@@ -113,7 +112,6 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [harvest.ts:135]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/step/harvest.ts#L135
 [worker-engine.ts:13]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/worker-engine.ts#L13
 [scheduler.ts:76]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/scheduler.ts#L76
-[ssh.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/ssh.ts
 [#35]: https://github.com/basaltbytes/usine/issues/35
 [#36]: https://github.com/basaltbytes/usine/issues/36
 [#37]: https://github.com/basaltbytes/usine/issues/37
@@ -161,5 +159,4 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#270]: https://github.com/basaltbytes/usine/issues/270
 [#277]: https://github.com/basaltbytes/usine/issues/277
 [#279]: https://github.com/basaltbytes/usine/issues/279
-[#387]: https://github.com/basaltbytes/usine/issues/387
 [#388]: https://github.com/basaltbytes/usine/issues/388

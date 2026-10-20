@@ -161,7 +161,7 @@ const yamlKey = (field: string): string =>
  * `max_concurrent_attempts`, whose value differs between `before` and
  * `after`; only `kind` when the kind differs.
  */
-export const changedWorkerSettings = (
+const changedWorkerSettings = (
   before: ConfigWorker,
   after: ConfigWorker,
 ): ReadonlyArray<string> => {

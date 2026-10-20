@@ -90,11 +90,12 @@ const EnvironmentVariableName = Schema.String.check(
  * the Host alias the Worker's `ProxyJump` names; the executor opens its own
  * forward through it to the admin API at `adminPort` on the Gateway's
  * loopback interface, 7070 by default as on the Gateway. The admin token is
- * read at startup from the orchestrator's environment variable
- * `adminTokenEnv`, so it is never in the file. `llmProviders` names the
- * providers whose credential the Gateway holds. A harness whose provider is
- * not listed uses the operator's login on the Worker and reaches the provider
- * through the Gateway's forward proxy; Codex always does.
+ * read from the orchestrator's environment variable `adminTokenEnv` when
+ * `usine up` starts or a reload adds the Worker, so it is never in the file.
+ * `llmProviders` names the providers whose credential the Gateway holds. A
+ * harness whose provider is not listed uses the operator's login on the
+ * Worker and reaches the provider through the Gateway's forward proxy; Codex
+ * always does.
  */
 export class WorkerGateway extends Schema.Class<WorkerGateway>("@usine/config/WorkerGateway")({
   domain: GatewayDomain,

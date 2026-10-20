@@ -1,41 +1,21 @@
-import type { SshCommand } from "@usine/agents/child-host";
-import { type RepositoryName, safeSegment } from "@usine/core/repository";
+import type { RepositoryName } from "@usine/core/repository";
 import type { WorkerName } from "@usine/core/worker";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
-import { Effect, Layer, Option } from "effect";
+import { Context, Effect, Layer, Option } from "effect";
 import type { HttpClient } from "effect/unstable/http";
 import { ChildProcessSpawner } from "effect/unstable/process";
-import { type CredentialProvider, Executor, WorkerCapabilityError } from "../executor.ts";
+import { type CredentialProvider, Executor } from "../executor.ts";
 import { agentsHarnessProbe } from "../harness-preflight.ts";
 import { DEFAULT_SSH, remoteCommandsFor } from "../remote/commands.ts";
 import type { RemoteGrant } from "../remote/machine.ts";
 import { remoteExecutorFor } from "../remote/remote.ts";
 import { sshCredentialsFor } from "./credentials.ts";
-import { gatewayAdminFor } from "./gateway/admin.ts";
 import { gatewayAttachmentsFor } from "./gateway/attachments.ts";
 import { gatewayRepositoryUrl } from "./gateway/environment.ts";
-import { type GatewayForward, gatewayForwardFor } from "./gateway/forward.ts";
 import { gatewayHarnessProbe } from "./gateway/preflight.ts";
-import type {
-  SshExecutorOptions,
-  SshMachine,
-  SshWorkerAddress,
-  SshWorkerGateway,
-} from "./model.ts";
+import type { SshExecutorOptions, SshMachine } from "./model.ts";
 import { sshPreflightFor } from "./preflight.ts";
-
-/** The SSH client for one Worker: the shared options, then its own port and key. */
-const sshCommandFor = (base: SshCommand, address: SshWorkerAddress): SshCommand => ({
-  command: base.command,
-  args: [
-    ...base.args,
-    ...Option.match(address.port, { onNone: () => [], onSome: (port) => ["-p", String(port)] }),
-    ...Option.match(address.identityFile, {
-      onNone: () => [],
-      onSome: (file) => ["-i", file, "-o", "IdentitiesOnly=yes"],
-    }),
-  ],
-});
+import { sshMachinesFor, SshWorkers } from "./workers.ts";
 
 const makeSshExecutor = (options: SshExecutorOptions) =>
   Effect.gen(function* () {
@@ -44,54 +24,9 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
     const base = options.ssh ?? DEFAULT_SSH;
     if (new Set(options.workers.map(({ name }) => name)).size !== options.workers.length)
       return yield* Effect.die(new Error("SshExecutorOptions.workers contains duplicate names"));
-    const forwards = new Map<string, GatewayForward>();
-    const forwardTo = Effect.fn("SshExecutor.forwardTo")(function* (settings: SshWorkerGateway) {
-      const key = `${settings.destination} ${String(settings.adminPort)}`;
-      const existing = forwards.get(key);
-      if (existing !== undefined) return existing;
-      const forward = yield* gatewayForwardFor(
-        spawner,
-        commands.shellFor(base, settings.destination),
-        settings.destination,
-        settings.adminPort,
-      );
-      forwards.set(key, forward);
-      return forward;
-    });
-    const machines = new Map(
-      yield* Effect.forEach(options.workers, (address) =>
-        Effect.gen(function* () {
-          const gateway = yield* Effect.transposeOption(
-            Option.map(address.gateway, (settings) =>
-              Effect.gen(function* () {
-                const forward = yield* forwardTo(settings);
-                const admin = yield* gatewayAdminFor(address.name, settings, forward);
-                return { settings, forward, admin };
-              }),
-            ),
-          );
-          const machine: SshMachine = {
-            address,
-            gateway,
-            shell: commands.shellFor(sshCommandFor(base, address), address.destination),
-            workerDirectory: `${address.root}/workers/${safeSegment(address.name)}`,
-          };
-          return [address.name, machine] as const;
-        }),
-      ),
-    );
-
-    const machineFor = Effect.fn("SshExecutor.machineFor")(function* (worker: WorkerName) {
-      const machine = machines.get(worker);
-      if (machine === undefined)
-        return yield* new WorkerCapabilityError({
-          worker,
-          capability: "machine",
-          message: `No SSH Worker named ${worker} is configured`,
-          cause: new Error("SSH Worker address missing"),
-        });
-      return machine;
-    });
+    const { machineFor, workers } = yield* sshMachinesFor(base, commands);
+    // Distinct names cannot clash with a Worker added before them.
+    yield* Effect.forEach(options.workers, workers.addWorker, { discard: true }).pipe(Effect.orDie);
 
     // The checks export nothing on the machine: a child's harness login lives
     // there, or at the Gateway in front of it.
@@ -137,7 +72,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
           }),
       } satisfies RemoteGrant<SshMachine>);
 
-    return yield* remoteExecutorFor<SshMachine>({
+    const executor = yield* remoteExecutorFor<SshMachine>({
       kind: "ssh",
       spanPrefix: "SshExecutor",
       label: "SSH",
@@ -157,6 +92,7 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
       // events, not just a local pipe.
       interruptGrace: options.interruptGrace ?? "10 seconds",
     });
+    return Context.make(Executor, executor).pipe(Context.add(SshWorkers, workers));
   });
 
 /**
@@ -166,22 +102,24 @@ const makeSshExecutor = (options: SshExecutorOptions) =>
  * Worker without a Gateway gets the Attempt's single-repository GitHub token
  * written beside its checkout (ADR 0026); a Worker behind a Gateway gets no
  * token, only a caller token for the attachment the executor makes on the
- * Gateway's admin API through `HttpClient` (ADR 0027). The executor opens
- * its own SSH forward to each Gateway's admin API when the layer is built,
- * reopens it whenever its SSH client exits, and closes it with the layer. An
+ * Gateway's admin API through `HttpClient` (ADR 0027). It starts with the
+ * Workers of `options`, and `SshWorkers` adds and removes Workers while it
+ * runs. The executor opens its own SSH forward to a Gateway's admin API with
+ * the first Worker behind that Gateway, reopens it whenever its SSH client
+ * exits, and closes it with the last Worker behind it or with the layer. An
  * orchestrator restart reattaches a live Attempt to its checkout. Requires
  * Node; worker contracts are platform-free.
  */
 export const layer = (
   options: SshExecutorOptions,
 ): Layer.Layer<
-  Executor,
+  Executor | SshWorkers,
   never,
   | AttemptRuntime
   | CredentialProvider
   | ChildProcessSpawner.ChildProcessSpawner
   | HttpClient.HttpClient
-> => Layer.effect(Executor, makeSshExecutor(options));
+> => Layer.effectContext(makeSshExecutor(options));
 
 export type {
   SshExecutorOptions,
@@ -189,3 +127,4 @@ export type {
   SshWorkerAddress,
   SshWorkerGateway,
 } from "./model.ts";
+export { SshWorkers } from "./workers.ts";

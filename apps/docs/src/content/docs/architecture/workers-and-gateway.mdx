@@ -8,7 +8,7 @@ sidebar:
 import { FileTree, Steps, TabItem, Tabs } from "@astrojs/starlight/components";
 
 :::note
-This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with the executor's own forward to the Gateway's admin API from [#249][] (2026-10-19) and the handling of a refused GitHub token from [#431][] (2026-10-20).
+This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with the executor's own forward to the Gateway's admin API from [#249][] (2026-10-19), the handling of a refused GitHub token from [#431][] (2026-10-20), and SSH Workers that a reload adds or removes from [#387][] (2026-10-20).
 :::
 
 A Worker is the machine where an Attempt's checkout is and where its children run. The Pi parent always runs in the orchestrator. The operating recipes (creating machines, logging in to the harnesses, the SSH configuration, deleting) are in [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) and [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md); this page explains what the code does.
@@ -133,7 +133,7 @@ The clone URL is `http://git.<domain>/<owner>/<repo>.git` ([gateway/environment.
 
 #### The forward to the admin API
 
-The admin API listens on the Gateway's loopback interface only. When its layer is built, the SSH executor opens one forward to each Gateway, which the Workers behind that Gateway share ([gateway/forward.ts][]):
+The admin API listens on the Gateway's loopback interface only. The SSH executor opens one forward to each Gateway, named by its `destination` and `admin_port`, when the first Worker behind it is added, at startup or by a reload. The Workers behind that Gateway share it ([gateway/forward.ts][], [ssh/workers.ts][]):
 
 ```sh
 ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -N \
@@ -150,9 +150,18 @@ ssh -o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -N \
 | the client exits                                                        | starts another client after a pause of 1, 2, 4 seconds and so on, at most one minute         | `The forward to the Gateway's admin API exited; reopening it after a pause`, with ssh's error output |
 | a client exits before the line, or no line comes within 30 seconds      | the same, with the pause doubled                                                             | `Could not open the forward to the Gateway's admin API; trying again after a pause`                  |
 | an admin request finds the forward closed, or gets no answer through it | ends the client or the pause, starts another client at once, and sends the request once more | `A Gateway admin request did not get through; reopening the forward and sending it once more`        |
-| the executor's layer closes                                             | ends the client                                                                              | `Closed the forward to the Gateway's admin API with the executor`                                    |
+| the last Worker behind the Gateway is removed                           | ends the client                                                                              | `Closed the forward to the Gateway's admin API`                                                      |
+| the executor's layer closes                                             | ends the client                                                                              | `Closed the forward to the Gateway's admin API`                                                      |
 
-A request that fails a second time fails as it did before the forward: an attach fails the Attempt with `CredentialUnavailableError`, and a renewal is tried again 30 seconds later. While the forward is closed, the error says since when, for example `the forward through usine-gateway is closed since 2026-10-19T08:12:03.000Z: ssh: connect to host 203.0.113.7 port 22: Connection timed out`. While the forward opens but the admin API does not answer, as when the `usine-gateway` service is stopped, the error and the warning say since when it has answered no request, for example `the admin API through usine-gateway has not answered since 2026-10-19T08:12:03.000Z: no answer (TransportError)`, and the warning has `unansweredSince`. The time is kept per Gateway and cleared by the next answered request. The executor keeps reopening the forward for as long as it runs.
+A request that fails a second time fails as it did before the forward: an attach fails the Attempt with `CredentialUnavailableError`, and a renewal is tried again 30 seconds later. While the forward is closed, the error says since when, for example `the forward through usine-gateway is closed since 2026-10-19T08:12:03.000Z: ssh: connect to host 203.0.113.7 port 22: Connection timed out`. While the forward opens but the admin API does not answer, as when the `usine-gateway` service is stopped, the error and the warning say since when it has answered no request, for example `the admin API through usine-gateway has not answered since 2026-10-19T08:12:03.000Z: no answer (TransportError)`, and the warning has `unansweredSince`. The time is kept per Gateway and cleared by the next answered request. The executor keeps reopening the forward for as long as a Worker behind the Gateway remains.
+
+#### Workers a reload adds or removes
+
+`SshWorkers` holds the SSH executor's machines ([ssh/workers.ts][]). It starts with the Workers in `usine.yaml`, and the scheduler changes it on each reload ([scheduler.ts][], [orchestrator/src/ssh.ts][]):
+
+- A Worker the reload adds: the orchestrator reads its Gateway's admin token, `addWorker` gives the executor its machine, and preflight runs on it. Behind a Gateway that another Worker uses, it shares that Gateway's forward; behind a new Gateway, the executor opens a forward to it. If the variable named by `admin_token_env` is unset, or the preflight fails, the reload is refused with `ReloadPreflightError` and the Worker is removed again.
+- A Worker the reload removes stays with the executor until its last Attempt ends, because the Attempt's credential renewals and cleanup use its machine and its Gateway's forward. Then `removeWorker` takes it away, and closes the forward when it was the last Worker behind that Gateway.
+- A Worker the reload adds back while its Attempts still run keeps the machine it has when its settings are the same. With other settings `addWorker` fails with a `machine` capability error, and the reload is refused until those Attempts end.
 
 ### Shared by every remote kind
 
@@ -498,7 +507,7 @@ No token goes through the orchestrator: each repository needs a persistent exe.d
   </TabItem>
 </Tabs>
 
-The orchestrator reads the Gateway's admin token once at startup, from the environment variable named by `admin_token_env`. If the variable is unset, startup stops with a `gateway` capability error ([orchestrator/src/ssh.ts:27][]). The executor opens the SSH forward to the admin API itself; see [the forward to the admin API](#the-forward-to-the-admin-api).
+The orchestrator reads the Gateway's admin token from the environment variable named by `admin_token_env`: at startup for the Workers in `usine.yaml`, and for a Worker a reload adds, at that reload. If the variable is unset, startup stops with a `gateway` capability error ([orchestrator/src/ssh.ts:27][]), and a reload is refused with `ReloadPreflightError` carrying the same kind of error. A running process does not see variables set after it started, so the variable must be in the environment `usine up` starts with. The executor opens the SSH forward to the admin API itself; see [the forward to the admin API](#the-forward-to-the-admin-api).
 
 ## Harness logins on the Worker
 
@@ -618,6 +627,9 @@ A Worker behind the Gateway has no time source ([#254][]), and you must apply in
 [gateway/environment.ts:42]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L42
 [gateway/environment.ts:88]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/environment.ts#L88
 [gateway/forward.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/gateway/forward.ts
+[ssh/workers.ts]: https://github.com/basaltbytes/usine/blob/main/packages/executor/src/ssh/workers.ts
+[scheduler.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/scheduler.ts
+[orchestrator/src/ssh.ts]: https://github.com/basaltbytes/usine/blob/main/packages/orchestrator/src/ssh.ts
 [gateway/preflight.ts:47]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/preflight.ts#L47
 [gateway/preflight.ts:162]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/ssh/gateway/preflight.ts#L162
 [exe-dev.ts]: https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/executor/src/exe-dev/exe-dev.ts
@@ -657,3 +669,4 @@ A Worker behind the Gateway has no time source ([#254][]), and you must apply in
 [#269]: https://github.com/basaltbytes/usine/issues/269
 [#270]: https://github.com/basaltbytes/usine/issues/270
 [#431]: https://github.com/basaltbytes/usine/issues/431
+[#387]: https://github.com/basaltbytes/usine/issues/387

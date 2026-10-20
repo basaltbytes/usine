@@ -14,7 +14,9 @@ import { type WorkerKind, WorkerName } from "@usine/core/worker";
 import { Submission } from "@usine/engine/engine";
 import { StepExecutor } from "@usine/engine/step-executor";
 import { Executor, ExecutorOperationError, WorkerCapabilityError } from "@usine/executor";
+import { type SshWorkerAddress, SshWorkers } from "@usine/executor/ssh";
 import {
+  ConfigProvider,
   Context,
   DateTime,
   Effect,
@@ -24,10 +26,13 @@ import {
   Logger,
   Option,
   type Path,
+  Redacted,
   Schema,
 } from "effect";
 import { CurrentInstance } from "../src/current-instance/current-instance.ts";
+import { ReloadPreflightRefusal, reloadRefusal } from "../src/operator/http.ts";
 import { stepExecutorLayer } from "../src/scheduler.ts";
+import { sshStepExecutorLayer } from "../src/ssh.ts";
 import { WorkerStatus } from "../src/worker-status.ts";
 import { fixedConfigLayer } from "./support/current-instance.ts";
 import { testAppLayer } from "./support/github-app.ts";
@@ -135,51 +140,55 @@ const withWorkers = <A, E>(
     return yield* test(root).pipe(Effect.provide(reloadableInstanceLayer(root)));
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer));
 
-/**
- * Starts the scheduler on the current instance with an executor of `kind`
- * whose preflight records `worker xN: model` for each check and fails for the
- * Workers in `failing`, as on a machine without enough memory.
- */
+/** Starts the scheduler on the current instance with a `recordingExecutor`. */
 const startScheduler = (
   preflighted: Array<string>,
   options: {
     readonly kind?: WorkerKind;
     readonly failing?: ReadonlyArray<string>;
-    readonly startupWorkersOnly?: boolean;
   } = {},
 ) =>
   Effect.gen(function* () {
     const { config, agents } = yield* (yield* CurrentInstance).get;
-    const executor = Layer.succeed(Executor)({
-      kind: options.kind ?? "local",
-      recover: unused,
-      isLive: unused,
-      outcome: unused,
-      prepare: unused,
-      cancel: unused,
-      intervene: unused,
-      preflight: (worker, brains, maxConcurrentAttempts) =>
-        Effect.gen(function* () {
-          preflighted.push(
-            `${worker} x${maxConcurrentAttempts}: ${brains.map(({ model }) => model).join(",")}`,
-          );
-          if (options.failing?.includes(worker) === true)
-            return yield* new WorkerCapabilityError({
-              worker,
-              capability: "memory",
-              message: "The machine has 2 GiB of memory, less than 1.5 GiB per Attempt.",
-              cause: "MemTotal: 2097152 kB",
-            });
-        }),
-    });
     const context = yield* Layer.build(
       stepExecutorLayer(
         config,
         agents.map(({ agent }) => agent.brain),
-        { startupWorkersOnly: options.startupWorkersOnly === true },
-      ).pipe(Layer.provide(executor), Layer.provide(testAppLayer)),
+      ).pipe(Layer.provide(recordingExecutor(preflighted, options)), Layer.provide(testAppLayer)),
     );
     return Context.get(context, StepExecutor);
+  });
+
+/**
+ * An executor of `kind` whose preflight records `worker xN: model` for each
+ * check and fails for the Workers in `failing`, as on a machine without
+ * enough memory.
+ */
+const recordingExecutor = (
+  preflighted: Array<string>,
+  options: { readonly kind?: WorkerKind; readonly failing?: ReadonlyArray<string> },
+) =>
+  Layer.succeed(Executor)({
+    kind: options.kind ?? "local",
+    recover: unused,
+    isLive: unused,
+    outcome: unused,
+    prepare: unused,
+    cancel: unused,
+    intervene: unused,
+    preflight: (worker, brains, maxConcurrentAttempts) =>
+      Effect.gen(function* () {
+        preflighted.push(
+          `${worker} x${maxConcurrentAttempts}: ${brains.map(({ model }) => model).join(",")}`,
+        );
+        if (options.failing?.includes(worker) === true)
+          return yield* new WorkerCapabilityError({
+            worker,
+            capability: "memory",
+            message: "The machine has 2 GiB of memory, less than 1.5 GiB per Attempt.",
+            cause: "MemTotal: 2097152 kB",
+          });
+      }),
   });
 
 const submission = (agent: Agent, second: number) =>
@@ -443,15 +452,12 @@ describe("Worker scheduler on reload", () => {
     ),
   );
 
-  it.live("resizes an SSH Worker on reload, and refuses one re-pointed or added", () =>
+  it.live("resizes an SSH Worker on reload, and refuses one re-pointed", () =>
     withWorkers(sshWorker("build-1", 1), (root) =>
       Effect.gen(function* () {
         const instances = yield* CurrentInstance;
         const preflighted: Array<string> = [];
-        const scheduler = yield* startScheduler(preflighted, {
-          kind: "ssh",
-          startupWorkersOnly: true,
-        });
+        const scheduler = yield* startScheduler(preflighted, { kind: "ssh" });
 
         yield* writeInstanceFiles(root, [
           ["usine.yaml", usineYaml(sshWorker("build-1", 1, "usine@203.0.113.10"))],
@@ -461,14 +467,6 @@ describe("Worker scheduler on reload", () => {
         assert.deepStrictEqual(repointed.fields, ["workers.build-1.destination"]);
         assert.include(repointed.message, "Worker build-1 changed its destination");
 
-        yield* writeInstanceFiles(root, [
-          ["usine.yaml", usineYaml(`${sshWorker("build-1", 1)}${sshWorker("build-2", 1)}`)],
-        ]);
-        const added = yield* Effect.flip(instances.reload);
-        assert(added._tag === "RestartRequiredError", added._tag);
-        assert.deepStrictEqual(added.fields, ["workers.build-2"]);
-        assert.include(added.message, "runs only the Workers usine up started with");
-
         preflighted.length = 0;
         yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(sshWorker("build-1", 3))]]);
         const resized = yield* instances.reload;
@@ -477,6 +475,231 @@ describe("Worker scheduler on reload", () => {
         assert.deepStrictEqual(yield* scheduler.workers, [WorkerName.make("build-1")]);
       }).pipe(Effect.scoped),
     ),
+  );
+});
+
+/** An SSH Worker behind the Gateway `usine-gateway`, whose admin token is in the variable `tokenEnv`. */
+const gatewaySshWorker = (
+  name: string,
+  max: number,
+  tokenEnv: string,
+) => `${sshWorker(name, max)}    gateway:
+      domain: gw.test
+      destination: usine-gateway
+      admin_token_env: ${tokenEnv}
+`;
+
+/**
+ * Starts the SSH scheduler on the current instance over a `recordingExecutor`
+ * of kind `ssh` that records its preflights in `events`, and executor Workers
+ * that record each addition and removal there too, keeping each added address
+ * in `added`. `environment` is the orchestrator's environment, read when the
+ * scheduler reads it.
+ */
+const startSshScheduler = (
+  events: Array<string>,
+  options: {
+    readonly added?: Array<SshWorkerAddress>;
+    readonly environment?: Record<string, string>;
+    readonly failing?: ReadonlyArray<string>;
+  } = {},
+) =>
+  Effect.gen(function* () {
+    const { config, agents } = yield* (yield* CurrentInstance).get;
+    const machines = Layer.succeed(SshWorkers)({
+      addWorker: (address) =>
+        Effect.sync(() => {
+          events.push(`add ${address.name}`);
+          options.added?.push(address);
+        }),
+      removeWorker: (worker) =>
+        Effect.sync(() => {
+          events.push(`remove ${worker}`);
+        }),
+    });
+    const context = yield* Layer.build(
+      sshStepExecutorLayer(
+        config,
+        agents.map(({ agent }) => agent.brain),
+      ).pipe(
+        Layer.provide(recordingExecutor(events, { kind: "ssh", failing: options.failing ?? [] })),
+        Layer.provide(machines),
+        Layer.provide(testAppLayer),
+        Layer.provide(
+          ConfigProvider.layer(ConfigProvider.fromEnv({ env: options.environment ?? {} })),
+        ),
+      ),
+    );
+    return Context.get(context, StepExecutor);
+  });
+
+const build1 = WorkerName.make("build-1");
+const build2 = WorkerName.make("build-2");
+const build3 = WorkerName.make("build-3");
+const TOKEN_ENV = "USINE_TEST_GATEWAY_TWO_TOKEN";
+
+describe("SSH Workers on reload", () => {
+  it.live(
+    "adds an SSH Worker to the executor before its preflight, with its Gateway's admin token read at the reload",
+    () =>
+      withWorkers(sshWorker("build-1", 1), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const events: Array<string> = [];
+          const added: Array<SshWorkerAddress> = [];
+          const environment: Record<string, string> = {};
+          const scheduler = yield* startSshScheduler(events, { added, environment });
+          const agent = yield* developer;
+          yield* scheduler.reserve(submission(agent, 1));
+          const waiting = yield* Effect.forkChild(scheduler.reserve(submission(agent, 2)));
+          events.length = 0;
+
+          environment[TOKEN_ENV] = "admin-token-set-after-startup";
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              usineYaml(`${sshWorker("build-1", 1)}${gatewaySshWorker("build-2", 1, TOKEN_ENV)}`),
+            ],
+          ]);
+          const report = yield* instances.reload;
+          assert.deepStrictEqual(report.workers.added, [build2]);
+          assert.deepStrictEqual(events, ["add build-2", "build-2 x1: gpt-5.6-sol"]);
+          const [address] = added;
+          assert(address !== undefined && Option.isSome(address.gateway));
+          assert.strictEqual(address.gateway.value.destination, "usine-gateway");
+          assert.strictEqual(
+            Redacted.value(address.gateway.value.adminToken),
+            "admin-token-set-after-startup",
+          );
+          assert.strictEqual((yield* leaseOf(waiting)).worker, build2);
+        }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.live(
+    "refuses a reload whose new SSH Worker's admin token variable is unset, naming the variable",
+    () =>
+      withWorkers(sshWorker("build-1", 1), (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const running = yield* instances.get;
+          const events: Array<string> = [];
+          const scheduler = yield* startSshScheduler(events);
+          events.length = 0;
+
+          yield* writeInstanceFiles(root, [
+            [
+              "usine.yaml",
+              usineYaml(`${sshWorker("build-1", 1)}${gatewaySshWorker("build-2", 1, TOKEN_ENV)}`),
+            ],
+          ]);
+          const failure = yield* Effect.flip(instances.reload);
+          assert(failure._tag === "ReloadPreflightError", failure._tag);
+          assert.deepStrictEqual(failure.workers, [build2]);
+          assert(failure.cause._tag === "WorkerCapabilityError", failure.cause._tag);
+          assert.strictEqual(failure.cause.capability, "gateway");
+          assert.strictEqual(
+            failure.cause.message,
+            "SSH Worker build-2's Gateway admin token is missing: USINE_TEST_GATEWAY_TWO_TOKEN is not set in the orchestrator's environment. A running process does not see variables set after it started, so set USINE_TEST_GATEWAY_TWO_TOKEN and restart usine up, or set admin_token_env to a variable usine up already has",
+          );
+          const refusal = reloadRefusal(failure, failure.message);
+          assert(refusal instanceof ReloadPreflightRefusal);
+          assert.deepStrictEqual(refusal.cause, {
+            _tag: "WorkerCapabilityError",
+            worker: build2,
+            capability: "gateway",
+            message: failure.cause.message,
+          });
+          assert.notInclude(events, "add build-2");
+          assert(
+            !events.some((event) => event.startsWith("build-2 x")),
+            "no preflight without the token",
+          );
+          assert.strictEqual(yield* instances.get, running);
+          assert.deepStrictEqual(yield* scheduler.workers, [build1]);
+        }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.live("takes an added SSH Worker away from the executor again when its preflight fails", () =>
+    withWorkers(sshWorker("build-1", 1), (root) =>
+      Effect.gen(function* () {
+        const instances = yield* CurrentInstance;
+        const events: Array<string> = [];
+        const scheduler = yield* startSshScheduler(events, {
+          environment: { [TOKEN_ENV]: "admin-token" },
+          failing: ["build-2"],
+        });
+        events.length = 0;
+
+        yield* writeInstanceFiles(root, [
+          [
+            "usine.yaml",
+            usineYaml(`${sshWorker("build-1", 1)}${gatewaySshWorker("build-2", 1, TOKEN_ENV)}`),
+          ],
+        ]);
+        const failure = yield* Effect.flip(instances.reload);
+        assert(failure._tag === "ReloadPreflightError", failure._tag);
+        assert.include(failure.message, "less than 1.5 GiB per Attempt");
+        assert.deepStrictEqual(events, [
+          "add build-2",
+          "build-2 x1: gpt-5.6-sol",
+          "remove build-2",
+        ]);
+        assert.deepStrictEqual(yield* scheduler.workers, [build1]);
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.live("takes a removed SSH Worker away from the executor once its last Attempt ends", () =>
+    withWorkers(
+      `${sshWorker("build-1", 1)}${sshWorker("build-2", 1)}${sshWorker("build-3", 1)}`,
+      (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const events: Array<string> = [];
+          const scheduler = yield* startSshScheduler(events);
+          const agent = yield* developer;
+          const onFirst = yield* scheduler.reserve(submission(agent, 1));
+          const onSecond = yield* scheduler.reserve(submission(agent, 2));
+          assert.deepStrictEqual([onFirst.worker, onSecond.worker], [build1, build2]);
+          events.length = 0;
+
+          yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(sshWorker("build-1", 1))]]);
+          const report = yield* instances.reload;
+          assert.deepStrictEqual(report.workers.removed, [build2, build3]);
+          assert.deepStrictEqual(events, ["remove build-3"], "build-3 runs no Attempt");
+          yield* onSecond.release;
+          assert.deepStrictEqual(events, ["remove build-3", "remove build-2"]);
+        }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.live(
+    "keeps an SSH Worker with the executor when a reload adds it back while its Attempt runs",
+    () =>
+      withWorkers(`${sshWorker("build-1", 1)}${sshWorker("build-2", 1)}`, (root) =>
+        Effect.gen(function* () {
+          const instances = yield* CurrentInstance;
+          const events: Array<string> = [];
+          const scheduler = yield* startSshScheduler(events);
+          const agent = yield* developer;
+          yield* scheduler.reserve(submission(agent, 1));
+          const onSecond = yield* scheduler.reserve(submission(agent, 2));
+          assert.strictEqual(onSecond.worker, build2);
+          events.length = 0;
+
+          yield* writeInstanceFiles(root, [["usine.yaml", usineYaml(sshWorker("build-1", 1))]]);
+          yield* instances.reload;
+          yield* writeInstanceFiles(root, [
+            ["usine.yaml", usineYaml(`${sshWorker("build-1", 1)}${sshWorker("build-2", 1)}`)],
+          ]);
+          yield* instances.reload;
+          yield* onSecond.release;
+          assert.deepStrictEqual(events, ["add build-2", "build-2 x1: gpt-5.6-sol"]);
+          assert.deepStrictEqual(yield* scheduler.workers, [build1, build2]);
+        }).pipe(Effect.scoped),
+      ),
   );
 });
 
