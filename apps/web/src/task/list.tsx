@@ -62,7 +62,7 @@ const LastRun = ({ run, now }: { readonly run: RunView; readonly now: number }) 
       <time
         dateTime={at}
         title={timestampLabel(at)}
-        className="shrink-0 text-xs text-muted-foreground tabular-nums"
+        className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums"
       >
         {agoLabel(at, now)}
       </time>
