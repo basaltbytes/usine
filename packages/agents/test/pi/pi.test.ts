@@ -19,17 +19,17 @@ import {
   UnknownModelError,
   WorkingDirectory,
   type OnDelivery,
-} from "@usine/agents/runtime";
-import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
+} from "../../src/runtime.ts";
+import { LocalProcess, RemoteShell } from "../../src/child-host/child-host.ts";
+import { piChildBackendLayer } from "../../src/pi/pi.ts";
 import {
+  environmentBashTool,
   PiSdk,
-  piChildBackendLayer,
   type PiSession,
   type PiSessionEvent,
   type PiStartOptions,
   type PiStartResult,
-} from "@usine/agents/pi";
-import { environmentBashTool } from "../../src/pi/sdk.ts";
+} from "../../src/pi/sdk.ts";
 import { resolvePiPool } from "../../src/pi/authentication.ts";
 
 /** Ignores whether a queued operator message is read; the test does not observe it. */
