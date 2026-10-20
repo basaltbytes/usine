@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import type { LaneItemState, LaneName } from "@usine/config/board";
+import { isSettledItemState, type LaneItemState, type LaneName } from "@usine/config/board";
 import type { RepositoryName } from "@usine/core/repository";
 import type {
   BoardPullRequestView,
@@ -25,7 +25,6 @@ import { agoLabel, timestampLabel } from "../operator-copy.ts";
 import { projectParams } from "../overview.ts";
 import { stallNamesLoop, stallSentence } from "../stall/copy.ts";
 import {
-  isClosedItem,
   itemStateLabel,
   runActivityAt,
   type TaskRow,
@@ -173,7 +172,7 @@ export const TaskList = ({
 }) => {
   const now = useNow(30_000);
   const rows = taskRows(project.board.lanes);
-  const open = rows.filter(({ task }) => !isClosedItem(task.state));
+  const open = rows.filter(({ task }) => !isSettledItemState(task.state));
   const done = rows.length - open.length;
   const shown = showDone ? rows : open;
   return (

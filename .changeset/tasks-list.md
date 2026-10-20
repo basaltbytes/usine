@@ -1,7 +1,10 @@
 ---
+"@usine/config": minor
 "@usine/orchestrator": minor
 "@usine/server": patch
 ---
+
+`@usine/config/board` exports `isSettledItemState`, true for `issue-closed`, `pr-closed`, and `pr-merged`. The Board projection in `@usine/orchestrator` places settled Items with it, and the web UI's Done lanes and Done toggle read the same rule.
 
 `BoardTaskView` in `@usine/orchestrator/operator` carries `updatedAt`, when GitHub last updated the Task's current Item as the poll stored it, and `pullRequest`, a `BoardPullRequestView` with the number, URL, and state of the Task's open pull request or, without one, its newest merged pull request, or null when it has neither. Code that constructs `BoardTaskView` passes both.
 

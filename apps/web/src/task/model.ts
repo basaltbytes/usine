@@ -55,12 +55,6 @@ export const itemStateLine = (
   return `${itemStateLabel(item.state)} ${kind}${origin ? "" : ` #${item.number}`}`;
 };
 
-const CLOSED_STATES = new Set<LaneItemState>(["issue-closed", "pr-closed", "pr-merged"]);
-
-/** Whether an Item is closed: a closed issue, or a closed or merged pull request. A Task whose
- * current Item is closed is done, and a lane that holds only closed Items is a Done lane. */
-export const isClosedItem = (state: LaneItemState): boolean => CLOSED_STATES.has(state);
-
 /** When a Run was last at work: its last Attempt's end, that Attempt's start while it runs or
  * when no end was recorded, or when the Run opened before any Attempt started. */
 export const runActivityAt = (run: Pick<RunView, "attempts" | "openedAt">): string => {

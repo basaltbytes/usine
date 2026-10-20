@@ -20,6 +20,19 @@ export const LaneItemState = Schema.Literals([
 
 export type LaneItemState = typeof LaneItemState.Type;
 
+const SETTLED_ITEM_STATES: ReadonlySet<LaneItemState> = new Set([
+  "issue-closed",
+  "pr-closed",
+  "pr-merged",
+]);
+
+/**
+ * Whether an Item in `state` is settled: a closed issue, or a closed or merged pull request.
+ * The Board places a settled Item by its state alone, whatever labels it still carries, and a
+ * lane whose sources are all settled states holds finished work.
+ */
+export const isSettledItemState = (state: LaneItemState): boolean => SETTLED_ITEM_STATES.has(state);
+
 /** Places Items with this GitHub label in the lane; Board moves can write the label. */
 export class LabelLaneSource extends Schema.Class<LabelLaneSource>("@usine/config/LabelLaneSource")(
   {
