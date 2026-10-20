@@ -40,15 +40,9 @@ import { GitHubItemKey } from "@usine/orchestrator/polling-triggers";
 import { Schema } from "effect";
 import { renderToStaticMarkup } from "react-dom/server";
 import { assert, describe, it } from "vitest";
-import {
-  laneUnder,
-  orderLanes,
-  ProjectBoard,
-  runsWithoutCard,
-  shownLanes,
-} from "../src/board/board.tsx";
+import { laneUnder, orderLanes, ProjectBoard, runsWithoutCard } from "../src/board/board.tsx";
 import { cardLabels, currentRun, itemFailure, runLineSince } from "../src/board/card.tsx";
-import { isFilterLane } from "../src/board/filters.tsx";
+import { foldsByDefault } from "../src/board/column.tsx";
 import { laneFlows } from "../src/board/flow.tsx";
 import { elapsedLabel, failureMessage, needCopy, timestampLabel } from "../src/operator-copy.ts";
 import { WithRouter } from "./memory-router.tsx";
@@ -281,95 +275,12 @@ describe("Board lane order", () => {
     );
   });
 
-  it("moves the fallback lane and lanes of closed Items out of the lane row into header filters", () => {
-    assert.isTrue(isFilterLane(readOnly("unmapped", "fallback")));
-    assert.isTrue(isFilterLane(readOnly("done", "authored", ["issue-closed", "pr-merged"])));
-    assert.isFalse(isFilterLane(readOnly("pull-requests", "authored", ["pr-open", "pr-merged"])));
-    assert.isFalse(isFilterLane(readOnly("backlog", "authored")));
-    assert.isFalse(isFilterLane(writable("ready")));
-  });
-});
-
-describe("Board filters", () => {
-  const base = itemWithRun("Succeeded", [attempt(1, null)]);
-  const taskAt = (number: number, fields: Partial<BoardTaskView>) => {
-    const member = issueLink(number, `Task ${number}`);
-    return new BoardTaskView({
-      ...base,
-      ...member,
-      items: [member],
-      labels: [],
-      runs: [],
-      run: null,
-      needsYou: false,
-      loops: [],
-      ...fields,
-    });
-  };
-  const queued = new RunView({ ...runOnItem("Succeeded", []), state: "Queued", canCancel: true });
-  const watched = taskAt(1, { loops: [LoopName.make("start-dev")] });
-  const labelled = taskAt(2, { labels: [GitHubLabelName.make("Ready-For-Agent")] });
-  const dependabot = taskAt(3, { labels: [GitHubLabelName.make("dependencies")] });
-  const running = taskAt(4, { runs: [queued], run: queued });
-  const blocked = taskAt(5, { needsYou: true });
-  const moving = taskAt(6, {});
-  const unrouted = taskAt(7, {});
-  const lanes = [
-    new WritableBoardLaneView({
-      id: BoardLaneId.make("authored:Ready"),
-      name: LaneName.make("Ready"),
-      sources: [new LabelLaneSource({ label: GitHubLabelName.make("ready-for-agent") })],
-      labels: [GitHubLabelName.make("ready-for-agent")],
-      origin: "authored",
-      items: [watched, labelled, moving],
-    }),
-    new ReadOnlyBoardLaneView({
-      id: BoardLaneId.make("authored:Pull requests"),
-      name: LaneName.make("Pull requests"),
-      sources: [new StateLaneSource({ state: "pr-open" })],
-      origin: "authored",
-      items: [dependabot, running, blocked],
-    }),
-    new ReadOnlyBoardLaneView({
-      id: BoardLaneId.make("fallback:unmapped"),
-      name: LaneName.make("Unmapped"),
-      sources: [],
-      origin: "fallback",
-      items: [unrouted],
-    }),
-  ];
-  const numbers = (shown: ReturnType<typeof shownLanes>) =>
-    shown.lanes.map(({ name, items }) => [name, items.map(({ number }) => number)]);
-
-  it("hides the Items no Loop can match, never one with an open Run, a Needs you entry, or a move in flight", () => {
-    const filtered = shownLanes(
-      lanes,
-      [{ itemKey: moving.itemKey, toLane: BoardLaneId.make("authored:Ready"), phase: "saving" }],
-      { shown: new Set(), showAll: false },
-    );
-    assert.deepStrictEqual(numbers(filtered), [
-      ["Ready", [1, 2, 6]],
-      ["Pull requests", [4, 5]],
-    ]);
-    assert.strictEqual(filtered.hidden, 1);
-    assert.deepStrictEqual(
-      filtered.filterLanes.map(({ name }) => name),
-      ["Unmapped"],
-    );
-    const all = shownLanes(lanes, [], { shown: new Set(), showAll: true });
-    assert.deepStrictEqual(numbers(all), [
-      ["Ready", [1, 2, 6]],
-      ["Pull requests", [3, 4, 5]],
-    ]);
-    assert.strictEqual(all.hidden, 0);
-  });
-
-  it("shows a toggled filter lane after the row with every Task it holds", () => {
-    const shown = shownLanes(lanes, [], {
-      shown: new Set([BoardLaneId.make("fallback:unmapped")]),
-      showAll: false,
-    });
-    assert.deepStrictEqual(numbers(shown).at(-1), ["Unmapped", [7]]);
+  it("folds the fallback lane and lanes of closed Items until the operator opens them", () => {
+    assert.isTrue(foldsByDefault(readOnly("unmapped", "fallback")));
+    assert.isTrue(foldsByDefault(readOnly("done", "authored", ["issue-closed", "pr-merged"])));
+    assert.isFalse(foldsByDefault(readOnly("pull-requests", "authored", ["pr-open", "pr-merged"])));
+    assert.isFalse(foldsByDefault(readOnly("backlog", "authored")));
+    assert.isFalse(foldsByDefault(writable("ready")));
   });
 });
 

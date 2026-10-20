@@ -267,8 +267,6 @@ it("shows move progress even when the destination has no labels or Run details t
   await respond(singleDestination);
   await queryClient.refetchQueries({ queryKey: ["overview"] });
   await expect.element(lane("In progress")).not.toBeInTheDocument();
-  // A fallback lane waits behind its header toggle.
-  await page.getByRole("button", { name: "Backlog 2" }).click();
   await move(1, "Ready");
   await expectMovable(2, true);
   await expect.element(lane("Ready").getByRole("status")).toHaveTextContent("Saved on GitHub");
@@ -292,18 +290,16 @@ it("keeps a saved destination when the project is reopened before GitHub is obse
   await expect.element(taskIn("Ready")).toBeVisible();
 });
 
-it("takes a keyboard drop on a collapsed empty lane before a lane with cards, widening it under the drag", async () => {
+it("takes a keyboard drop on an empty lane before a lane with cards", async () => {
   await respond(overview(["Backlog", "In progress"]));
   await queryClient.refetchQueries({ queryKey: ["overview"] });
   await expect.element(taskIn("In progress", 2)).toBeVisible();
-  const ready = lane("Ready");
-  expect(ready.element().getBoundingClientRect().width).toBeLessThanOrEqual(40);
   const card = taskIn("Backlog").element().closest("[data-slot=card]");
   if (!(card instanceof HTMLElement)) throw new Error("No card for Task 1");
   card.focus();
   await userEvent.keyboard(" ");
   await userEvent.keyboard("{ArrowRight}");
-  await expect.poll(() => ready.element().getBoundingClientRect().width).toBeGreaterThan(100);
+  await expect.poll(() => lane("Ready").element().classList.contains("bg-muted/40")).toBe(true);
   await userEvent.keyboard(" ");
   await expect.element(taskIn("Ready")).toBeVisible();
   await expect.element(lane("Ready").getByRole("status")).toHaveTextContent("Saved on GitHub");

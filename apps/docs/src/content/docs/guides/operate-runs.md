@@ -42,12 +42,7 @@ A card whose task is on the desk's **Not moving** list says why in one line, wit
 
 The arrow between two authored label lanes names the Loops whose `if:` matches a task in the left lane now, whether or not they have a Run there, with `paused` after a paused Loop. It is blue while one of those Loops has a `Queued` or `Running` Run on the lane's tasks, and orange while their open Runs all wait for your approval. An arrow without a name means no Loop picks up work from that lane.
 
-A lane without a task collapses to a narrow column with its name, its count, and its labels. Dragging a card over it widens it, and you can drop the card there as in any lane.
-
-The header keeps three filters, all off when you open the Board:
-
-- **Show all Items** brings back the tasks that no Loop can act on, such as dependabot pull requests when your Loops select by labels those pull requests never carry. While it is off, the Board shows a task only when a Loop's `if:` matches one of its Items now, its current Item carries a label of an authored lane, one of its Runs is open, it needs you, or you are moving it. The heading counts the tasks it hides.
-- **Done** and **Unmapped**, each with its count, show the lane of closed Items and the lane of Items no lane routes, after the other lanes. They show every task they hold, so **Unmapped** is where you find an issue to drag into a lane.
+Every lane is in one row, empty or not: the lanes you can drag cards into first, then the read-only lanes, with **Done**, the lane of closed Items, and **Unmapped**, the lane of Items no lane routes, last. Done and Unmapped open folded into narrow rails with their name and count; select a rail to open the lane, and fold it again from its heading. **Unmapped** is where you find an issue to drag into a lane.
 
 Clicking a card opens its task page at `/projects/<owner>/<name>/tasks/<number>`, whether or not the task has a Run. The number is the task's originating issue, or its first pull request when it has no issue; the number of any of its Items opens the same page. The page shows:
 

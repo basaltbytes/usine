@@ -169,7 +169,7 @@ const pinnedRun = run("run-pinned", pinned, "review", "Failed", 95, [
 /**
  * A Board with every card shape: lane-only and overflowing labels, a linked PR, and open, waiting,
  * failed, canceled and finished Runs; an empty Merge lane; a dependabot pull request no Loop can
- * match and one with an open Run; Done and Unmapped Tasks behind the header filters.
+ * match and one with an open Run; Done and Unmapped lanes at the end.
  */
 const boardProject = () =>
   new ProjectView({
