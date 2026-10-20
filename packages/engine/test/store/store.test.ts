@@ -11,7 +11,7 @@ import {
   SessionIdle,
   TextOutput,
 } from "@usine/core/agent/session";
-import { AttemptId, AttemptTask } from "@usine/core/attempt";
+import { type Attempt, AttemptId, AttemptTask } from "@usine/core/attempt";
 import { SalvagePushed, SalvageRef, SalvageRetained } from "@usine/core/attempt/salvage";
 import { CommitSha } from "@usine/core/repository";
 import * as AttemptChannel from "@usine/core/attempt/channel";
@@ -24,7 +24,7 @@ import { OperatorLogin } from "@usine/core/operator";
 import { RunId } from "@usine/core/run";
 import { ApprovalSource, RunApproval } from "@usine/core/run/approval";
 import { StepName } from "@usine/core/step";
-import { StepResult } from "@usine/core/step/result";
+import { Comment, StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 
 import { DateTime, Effect, FileSystem, Layer, Option, Result, Schema } from "effect";
@@ -163,6 +163,75 @@ describe("run store", () => {
           }).pipe(Effect.provide(services)),
         );
       }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("lists the settled Runs that closed last, whenever they opened", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fs.makeTempDirectoryScoped({ prefix: "usine-closed-runs-" }),
+      );
+      yield* Effect.gen(function* () {
+        const store = yield* RunStore;
+        const reader = yield* RunReader;
+        const claim = (name: string) => {
+          const runId = RunId.make(name);
+          return store
+            .recordAndClaim(
+              new Submission({
+                ...lifecycleSubmission,
+                event: new Event({
+                  ...lifecycleSubmission.event,
+                  id: EventId.make(name),
+                  dedupKey: DedupKey.make(`${name}/revision`),
+                }),
+                itemKey: ItemKey.make(name),
+              }),
+              runId,
+            )
+            .pipe(
+              Effect.as(runId),
+              Effect.tap(() => Effect.sleep("5 millis")),
+            );
+        };
+        const begin = (runId: RunId) =>
+          store
+            .beginAttempt(runId, WorkerName.make("local"), Option.none())
+            .pipe(
+              Effect.flatMap((started) =>
+                started._tag === "AttemptStarted"
+                  ? Effect.succeed(started.execution.attempt)
+                  : Effect.die(`Run ${runId} did not start`),
+              ),
+            );
+        const finish = (attempt: Attempt) =>
+          store
+            .finishAttempt(attempt, Result.succeed(new StepResult({ message: "Done", facts: [] })))
+            .pipe(Effect.tap(() => Effect.sleep("5 millis")));
+
+        // The Run that opened first closes last, as a Run retried hours later does.
+        const old = yield* claim("opened-first");
+        const oldAttempt = yield* begin(old);
+        const middle = yield* claim("opened-second");
+        yield* finish(yield* begin(middle));
+        const newest = yield* claim("opened-third");
+        yield* finish(yield* begin(newest));
+        yield* finish(oldAttempt);
+
+        assert.deepStrictEqual(
+          (yield* reader.closed({ limit: 2 })).map(({ run }) => run.id),
+          [old, newest],
+        );
+        // Ordered by opening, the same window misses the Run that closed last.
+        assert.deepStrictEqual(
+          (yield* reader.list({ closedLimit: 2 })).map(({ run }) => run.id),
+          [newest, middle],
+        );
+      }).pipe(
+        Effect.provide(Layer.mergeAll(RunStore.layer, RunReader.layer)),
+        Effect.provide(localSqliteLayer(directory)),
+      );
+    }).pipe(Effect.provide(NodeServices.layer)),
   );
 
   it.live(
@@ -1103,6 +1172,37 @@ describe("cursor store", () => {
           );
         }),
       ),
+  );
+
+  it.live("records the comments an Attempt posted before it failed, on that Attempt", () =>
+    withRunStore(
+      Effect.gen(function* () {
+        const store = yield* RunStore;
+        const runId = RunId.make("commented");
+        yield* store.recordAndClaim(lifecycleSubmission, runId);
+        const started = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(started._tag === "AttemptStarted");
+        const review = new Comment({
+          url: new URL("https://github.com/basaltbytes/usine/pull/71#pullrequestreview-9"),
+          kind: "review",
+          at: Option.some(DateTime.makeUnsafe("2026-10-20T10:00:00.000Z")),
+        });
+        yield* store.recordComments(started.execution.attempt.id, [review]);
+        yield* store.finishAttempt(
+          started.execution.attempt,
+          Result.fail(new AgentFailure({ message: "Checks failed" })),
+        );
+        yield* store.retry(runId);
+        const retried = yield* store.beginAttempt(runId, WorkerName.make("local"), Option.none());
+        assert(retried._tag === "AttemptStarted");
+
+        const attempts = (yield* store.snapshot(runId)).attempts;
+        assert.deepStrictEqual(attempts[0]?.comments, [review]);
+        // An Attempt with nothing recorded, like every Attempt before comments were, reads none.
+        assert.deepStrictEqual(attempts[1]?.comments, []);
+        assert(Option.isNone((yield* store.snapshot(runId)).step.result));
+      }),
+    ),
   );
 });
 

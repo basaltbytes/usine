@@ -4,7 +4,7 @@ import { Effort, ModelId } from "../agent/brain.ts";
 import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
 import { AttemptId, AttemptTask } from "./attempt.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
-import { StepResult } from "../step/result.ts";
+import { type Comment, StepResult } from "../step/result.ts";
 import { BotLogin, WorkerName } from "../worker.ts";
 import { AttemptFailure } from "./failure.ts";
 import { AttemptSalvage, SalvagePushed } from "./salvage.ts";
@@ -269,7 +269,7 @@ export class InboundEnvelope extends Schema.TaggedClass<InboundEnvelope>(
 export const Envelope = Schema.Union([OutboundEnvelope, InboundEnvelope]);
 export type Envelope = typeof Envelope.Type;
 
-/** Where a channel consumer persists envelopes and the executor's salvage record. */
+/** Where a channel consumer persists envelopes and the executor's records of an Attempt that ended without success. */
 export interface Sink {
   readonly append: (
     direction: Direction,
@@ -277,6 +277,8 @@ export interface Sink {
   ) => Effect.Effect<void, AttemptFailure>;
   /** Records what the executor preserved of the workspace after the Attempt ended without success. */
   readonly salvage: (salvage: AttemptSalvage) => Effect.Effect<void, AttemptFailure>;
+  /** Records the comments and reviews the Attempt posted on its Run's Item before it ended without success. */
+  readonly comments: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, AttemptFailure>;
 }
 
 /** How far one outbound channel has legally progressed. */

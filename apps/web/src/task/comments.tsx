@@ -7,9 +7,22 @@ import { projectParams } from "../overview.ts";
 import { commentKindLabel, itemReference } from "./model.ts";
 import { linkedRow, rowLink, SectionEmpty, SectionHeading } from "./section.tsx";
 
+/** When a comment was posted, or, for one harvested before GitHub's times were recorded, when its
+ * Attempt ended; null when neither is known. */
+const commentTime = (comment: TaskView["comments"][number]) => {
+  if (comment.postedAt !== null)
+    return { at: comment.postedAt, title: `Posted ${timestampLabel(comment.postedAt)}` };
+  if (comment.attemptEndedAt !== null)
+    return {
+      at: comment.attemptEndedAt,
+      title: `Posted during the Attempt that ended ${timestampLabel(comment.attemptEndedAt)}`,
+    };
+  return null;
+};
+
 /**
  * The comments and reviews the Task's Runs posted on GitHub, newest Run first: what it is and on
- * which Item, the Run that posted it, and when that Run's Attempt ended. Each opens on GitHub.
+ * which Item, the Run that posted it, and when it was posted. Each opens on GitHub.
  */
 export const TaskComments = ({ task }: { readonly task: TaskView }) => {
   const runs = new Map(task.runs.map((run) => [run.id, run]));
@@ -24,7 +37,7 @@ export const TaskComments = ({ task }: { readonly task: TaskView }) => {
       {task.comments.length === 0 ? (
         <SectionEmpty title="No comments or reviews">
           The comments and reviews an Agent posts on this Task's Items show here once its Attempt
-          succeeds.
+          ends.
         </SectionEmpty>
       ) : (
         <div className="-mx-2">
@@ -33,6 +46,7 @@ export const TaskComments = ({ task }: { readonly task: TaskView }) => {
               {task.comments.map((comment) => {
                 const run = runs.get(comment.runId);
                 const item = run === undefined ? undefined : items.get(run.itemKey);
+                const time = commentTime(comment);
                 return (
                   <TableRow key={comment.url} className={linkedRow}>
                     <TableCell className="w-full py-3 whitespace-normal">
@@ -67,13 +81,13 @@ export const TaskComments = ({ task }: { readonly task: TaskView }) => {
                       )}
                     </TableCell>
                     <TableCell className="py-3 text-right">
-                      {comment.at !== null && (
+                      {time !== null && (
                         <time
-                          dateTime={comment.at}
-                          title={`Posted during the Attempt that ended ${timestampLabel(comment.at)}`}
+                          dateTime={time.at}
+                          title={time.title}
                           className="font-mono text-xs text-muted-foreground tabular-nums"
                         >
-                          {dayTimeLabel(comment.at)}
+                          {dayTimeLabel(time.at)}
                         </time>
                       )}
                     </TableCell>

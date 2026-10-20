@@ -22,6 +22,9 @@ export default mergeConfig(
         },
         {
           extends: true,
+          // A cache an earlier tree built passes the optimizer's hash check without a dependency these
+          // tests import, and the bundle it then starts mid-run reloads the page under the test files.
+          optimizeDeps: { force: true },
           test: {
             name: "browser",
             include: ["test/**/*.browser.test.tsx"],
@@ -85,7 +88,7 @@ export default mergeConfig(
                   before: string,
                   after: string,
                   report: string,
-                  rejection: string,
+                  rejections: ReadonlyArray<{ readonly status: number; readonly body: string }>,
                   configurationBefore: string,
                   configurationAfter: string,
                 ) => {
@@ -105,10 +108,11 @@ export default mergeConfig(
                   );
                   await page.route("**/api/instance/reload", (route) => {
                     reloads += 1;
+                    const rejection = rejections[Math.min(reloads - 2, rejections.length - 1)];
                     return route.fulfill(
-                      reloads === 1
+                      reloads === 1 || rejection === undefined
                         ? { contentType: "application/json", body: report }
-                        : { status: 422, contentType: "application/json", body: rejection },
+                        : { contentType: "application/json", ...rejection },
                     );
                   });
                 },

@@ -51,9 +51,11 @@ export class TaskLaneView extends Schema.Class<TaskLaneView>("@usine/orchestrato
 }) {}
 
 /**
- * A comment or review an Attempt posted on its Run's Item, from the Run's harvested
- * `Comment` facts. Only a succeeded Attempt records facts, so `at` is when that Attempt
- * ended; null for an Attempt closed before end times were recorded.
+ * A comment or review an Attempt posted on its Run's Item: a `Comment` fact of the Run's Step
+ * result, or one an Attempt recorded when it ended without success. `postedAt` is when GitHub
+ * says it was posted, null for a comment harvested before those times were recorded;
+ * `attemptEndedAt` is when the Attempt that recorded it ended, null for an Attempt closed before
+ * end times were recorded.
  */
 export class TaskCommentView extends Schema.Class<TaskCommentView>(
   "@usine/orchestrator/TaskCommentView",
@@ -61,7 +63,8 @@ export class TaskCommentView extends Schema.Class<TaskCommentView>(
   runId: RunId,
   kind: CommentKind,
   url: Schema.String,
-  at: Schema.NullOr(Schema.String),
+  postedAt: Schema.NullOr(Schema.String),
+  attemptEndedAt: Schema.NullOr(Schema.String),
 }) {}
 
 /**
@@ -82,27 +85,43 @@ export class TaskView extends Schema.Class<TaskView>("@usine/orchestrator/TaskVi
   items: Schema.NonEmptyArray(TaskItemView),
   /** Every saved Run on the Task's Items, newest first. */
   runs: Schema.Array(RunView),
-  /** The harvested comments and reviews of those Runs, newest Run first. */
+  /** The harvested comments and reviews of those Runs, newest Run first, and newest first within a Run. */
   comments: Schema.Array(TaskCommentView),
 }) {}
 
 export type TaskReadError = RunStoreError | BoardProjectNotFoundError | BoardItemNotFoundError;
 
+const isoOrNull = Option.match({ onNone: () => null, onSome: DateTime.formatIso });
+
+/**
+ * The comments and reviews a Run's Attempts posted: a succeeded Attempt's from the Step
+ * result's facts, a failed or canceled Attempt's from what the Attempt recorded. Newest first;
+ * a comment two Attempts recorded, such as one the later Attempt edited, appears once.
+ */
 const harvestedComments = (summary: RunSummary): ReadonlyArray<TaskCommentView> => {
-  const facts = Option.match(summary.step.result, {
-    onNone: () => [],
-    onSome: ({ facts }) => facts.filter((fact): fact is Comment => fact._tag === "Comment"),
-  });
-  if (facts.length === 0) return [];
-  const at = EffectArray.findLast(summary.attempts, (attempt) =>
+  const view = (comment: Comment, endedAt: Option.Option<DateTime.Utc>) =>
+    new TaskCommentView({
+      runId: summary.run.id,
+      kind: comment.kind,
+      url: comment.url.toString(),
+      postedAt: isoOrNull(comment.at),
+      attemptEndedAt: isoOrNull(endedAt),
+    });
+  const succeededEnd = EffectArray.findLast(summary.attempts, (attempt) =>
     Option.exists(attempt.outcome, ({ _tag }) => _tag === "Succeeded"),
-  ).pipe(
-    Option.flatMap(({ endedAt }) => endedAt),
-    Option.match({ onNone: () => null, onSome: DateTime.formatIso }),
+  ).pipe(Option.flatMap(({ endedAt }) => endedAt));
+  const delivered = Option.match(summary.step.result, {
+    onNone: () => [],
+    onSome: ({ facts }) =>
+      facts.flatMap((fact) => (fact._tag === "Comment" ? [view(fact, succeededEnd)] : [])),
+  });
+  const unsuccessful = summary.attempts.flatMap((attempt) =>
+    attempt.comments.map((comment) => view(comment, attempt.endedAt)),
   );
-  return facts.map(
-    ({ kind, url }) =>
-      new TaskCommentView({ runId: summary.run.id, kind, url: url.toString(), at }),
+  const time = ({ postedAt, attemptEndedAt }: TaskCommentView) => postedAt ?? attemptEndedAt ?? "";
+  return EffectArray.dedupeWith(
+    [...delivered, ...unsuccessful].sort((a, b) => time(b).localeCompare(time(a))),
+    (a, b) => a.url === b.url,
   );
 };
 

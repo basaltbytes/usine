@@ -344,14 +344,18 @@ const testLayer = (
     intervene: () => Effect.void,
     runAgain: () => Effect.die("unused"),
   },
+  /** Receives the Attempt of each token-report query, in the order they ran. */
+  usageQueries: Array<AttemptId> = [],
 ) => {
   const readTranscript = (query: TranscriptQuery) =>
     Effect.succeed(
       Match.valueTags(query, {
         TranscriptAllQuery: () => transcript,
         TranscriptSessionsQuery: () => [],
-        TranscriptUsageQuery: ({ attemptId: attempt }) =>
-          usageReports.filter((entry) => entry.attemptId === attempt),
+        TranscriptUsageQuery: ({ attemptId: attempt }) => {
+          usageQueries.push(attempt);
+          return usageReports.filter((entry) => entry.attemptId === attempt);
+        },
         TranscriptTailQuery: ({ after, limit }) =>
           transcript.filter((entry) => entry.sequence > after).slice(0, limit),
         TranscriptPageQuery: ({ before, limit }) => {
@@ -387,6 +391,7 @@ const testLayer = (
         Effect.andThen(Effect.yieldNow),
         Effect.as([runSnapshot]),
       ),
+    closed: () => Effect.succeed([]),
     forItems: () => Effect.succeed([runSnapshot]),
     revision: () => Ref.get(projectionRevision),
     transcript: readTranscript,
@@ -710,6 +715,7 @@ describe("Operator", () => {
           run: new Run({ ...snapshot.run, state: new RunState.Running() }),
           attempts: [failed, running],
         });
+        const usageQueries: Array<AttemptId> = [];
         yield* Effect.gen(function* () {
           const detail = yield* (yield* Operator).detail(runId);
           assert.strictEqual(detail.worker, "usine-worker-1");
@@ -753,7 +759,25 @@ describe("Operator", () => {
               [retryAttemptId, "codex-child", 5_000, null],
             ],
           );
-        }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
+
+          // The ended Attempt's reports are read once; the running one's on every poll.
+          const again = yield* (yield* Operator).detail(runId);
+          assert.strictEqual(again.usage.tokens, 27_300);
+          assert.deepStrictEqual(usageQueries, [attemptId, retryAttemptId, retryAttemptId]);
+        }).pipe(
+          Effect.provide(
+            testLayer(
+              approved,
+              moved,
+              reads,
+              revision,
+              current,
+              undefined,
+              undefined,
+              usageQueries,
+            ),
+          ),
+        );
       }),
   );
 

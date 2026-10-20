@@ -3,9 +3,10 @@ import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
+import { BotLogin } from "@usine/core/worker";
 import { type AttemptRequest, AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { completes, type StubParent, StubStorage } from "@usine/durable/testing";
-import { Deferred, Effect, Fiber, Layer, Option } from "effect";
+import { Deferred, Effect, Fiber, Layer, Option, Result } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
@@ -27,6 +28,7 @@ const recording = () => {
   const transcript: Array<[AttemptChannel.Direction, AttemptChannel.Envelope]> = [];
   const sink: AttemptChannel.Sink = {
     salvage: () => Effect.void,
+    comments: () => Effect.void,
     append: (direction, envelope) =>
       Effect.sync(() => {
         transcript.push([direction, envelope]);
@@ -223,6 +225,61 @@ describe("exe.dev launch", () => {
     },
   );
 
+  it.effect(
+    "records the comments an Attempt posted on its Item when it fails, not when it succeeds",
+    () => {
+      const comment = "https://github.com/acme/demo/issues/42#issuecomment-7";
+      const recorded: Array<ReadonlyArray<string>> = [];
+      const sink: AttemptChannel.Sink = {
+        append: () => Effect.void,
+        salvage: () => Effect.void,
+        comments: (comments) =>
+          Effect.sync(
+            () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
+          ),
+      };
+      const onItem = new CheckoutRequest({
+        ...request,
+        payload: { number: 42, url: "https://github.com/acme/demo/issues/42" },
+        botLogin: Option.some(BotLogin.make("usine-test[bot]")),
+      });
+      const attempt = (parent: StubParent) => {
+        const ssh = fakeSsh();
+        ssh.state.issueComments = JSON.stringify([
+          [
+            {
+              html_url: comment,
+              user: { login: "usine-test[bot]" },
+              created_at: "2026-10-20T10:00:00Z",
+              updated_at: "2026-10-20T10:00:00Z",
+            },
+          ],
+        ]);
+        return Effect.gen(function* () {
+          const executor = yield* Executor;
+          const prepared = yield* executor.prepare(onItem);
+          return yield* prepared.launch(sink).pipe(Effect.result);
+        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, parent)));
+      };
+      return Effect.gen(function* () {
+        const failed = yield* attempt(fails);
+        assert(Result.isFailure(failed) && failed.failure._tag === "InfraFailure");
+        assert.deepStrictEqual(recorded, [["issue-comment " + comment]]);
+
+        // A succeeded Attempt's comments are facts of its result, so nothing is recorded apart.
+        const succeeded = yield* attempt(completes);
+        assert(Result.isSuccess(succeeded));
+        assert.deepStrictEqual(
+          succeeded.success.facts.flatMap((fact) =>
+            fact._tag === "Comment" ? [fact.url.href] : [],
+          ),
+          [comment],
+        );
+        assert.strictEqual(recorded.length, 1);
+      });
+    },
+  );
+
   it.effect("concurrent cancellation waits for salvage and preserves the launch failure", () => {
     const ssh = fakeSsh();
     ssh.state.salvage = "dirty";
@@ -235,6 +292,7 @@ describe("exe.dev launch", () => {
       const launch = yield* prepared
         .launch({
           ...recording().sink,
+          comments: () => Effect.void,
           salvage: () =>
             Deferred.succeed(recordingSalvage, undefined).pipe(
               Effect.andThen(Deferred.await(finishSalvage)),

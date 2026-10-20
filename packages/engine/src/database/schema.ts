@@ -237,6 +237,8 @@ export const attempts = snakeCase.table(
     startJson: text({ mode: "json" }).$type<unknown>(),
     /** When an orchestrator restart last reattached the Attempt; null if none did. */
     reattachedAt: text(),
+    /** The comments and reviews an Attempt that ended without success posted on its Item; null when none were recorded. */
+    commentsJson: text({ mode: "json" }).$type<unknown>(),
   },
   (table) => [
     check("usine_attempts_number", sql`${table.attemptNumber} >= 1`),

@@ -7,7 +7,7 @@ import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
-import { harvestFacts } from "@usine/core/step/harvest";
+import { harvestFacts, harvestPostedComments } from "@usine/core/step/harvest";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
   Effect,
@@ -312,12 +312,13 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       TURBO_CACHE_DIR: path.join(workersRoot, workspace.worker, "turbo"),
     });
 
-    const harvest = (
-      workspace: AttemptWorkspace,
-      credential: Effect.Success<ReturnType<typeof credentials>>,
-      environment: Record<string, string>,
-    ) =>
-      harvestFacts(workspace.spec, (command, args) =>
+    const harvestCommand =
+      (
+        workspace: AttemptWorkspace,
+        credential: Effect.Success<ReturnType<typeof credentials>>,
+        environment: Record<string, string>,
+      ) =>
+      (command: "git" | "gh", args: ReadonlyArray<string>) =>
         Effect.gen(function* () {
           yield* credential.refresh();
           const result = yield* collectCommand(spawner, "launch", command, args, {
@@ -331,8 +332,14 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             stderr: credential.scrub(result.stderr),
           });
           return stdout === "" ? [] : stdout.replace(/\n$/u, "").split("\n");
-        }),
-      ).pipe(
+        });
+
+    const harvest = (
+      workspace: AttemptWorkspace,
+      credential: Effect.Success<ReturnType<typeof credentials>>,
+      environment: Record<string, string>,
+    ) =>
+      harvestFacts(workspace.spec, harvestCommand(workspace, credential, environment)).pipe(
         Effect.mapError(
           (error) =>
             new InfraFailure({
@@ -449,6 +456,10 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
             host: new LocalProcess(),
             environment,
             harvest: harvest(prepared.workspace, credential, environment),
+            harvestComments: harvestPostedComments(
+              prepared.workspace.spec,
+              harvestCommand(prepared.workspace, credential, environment),
+            ),
             keepForReattach: prepared.keepForReattach,
           }),
         salvaged: prepared.salvaged,

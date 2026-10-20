@@ -87,7 +87,7 @@ import {
   RosterAgentNotFoundError,
 } from "./run.ts";
 import { readTranscript, readUnrecordedEnds, runDuration, runView } from "./projection.ts";
-import { readRunUsage } from "./usage.ts";
+import { RunUsageReader } from "./usage.ts";
 import {
   RunGitHubChanges,
   type RunGitHubChangesError,
@@ -134,6 +134,7 @@ const makeOperatorObservation = Effect.gen(function* () {
   const schedules = yield* ScheduleTriggers;
   const loopMatches = yield* LoopMatches;
   const cache = yield* SynchronizedRef.make(Option.none<CachedOverview>());
+  const usageReader = yield* RunUsageReader;
 
   const projectOverview = Effect.fn("Operator.projectOverview")(function* (
     instance: LoadedInstance,
@@ -441,7 +442,7 @@ const makeOperatorObservation = Effect.gen(function* () {
           (attempt) => reader.transcript(new TranscriptSessionsQuery({ attemptId: attempt.id })),
           { concurrency: "unbounded" },
         ),
-        readRunUsage(reader, snapshot),
+        usageReader.read(snapshot),
         readUnrecordedEnds(reader, snapshot),
       ],
       { concurrency: "unbounded" },
@@ -501,7 +502,9 @@ export class OperatorObservation extends Context.Service<
   }
 >()("@usine/orchestrator/OperatorObservation") {
   static readonly layer = Layer.effect(OperatorObservation, makeOperatorObservation).pipe(
-    Layer.provide(Layer.mergeAll(TaskReader.layer, OperatorDesk.layer, LoopMatches.layer)),
+    Layer.provide(
+      Layer.mergeAll(TaskReader.layer, OperatorDesk.layer, LoopMatches.layer, RunUsageReader.layer),
+    ),
   );
 }
 

@@ -39,7 +39,7 @@ import {
 } from "./support.ts";
 
 const allowlisted = new Set<string>(SSH_ENVIRONMENT_ALLOWLIST);
-const sink = { append: () => Effect.void, salvage: () => Effect.void };
+const sink = { append: () => Effect.void, salvage: () => Effect.void, comments: () => Effect.void };
 
 /** The caller token a child host sends to the machine. */
 const callerTokenOf = (request: AttemptRequest | undefined): string => {
@@ -472,6 +472,7 @@ describe("SSH Worker behind a Gateway", () => {
       yield* prepared
         .launch({
           append: () => Effect.void,
+          comments: () => Effect.void,
           salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
         })
         .pipe(Effect.flip);

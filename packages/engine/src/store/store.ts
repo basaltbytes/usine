@@ -12,7 +12,7 @@ import { RunAgain } from "@usine/core/run/again";
 import { ApprovalSource } from "@usine/core/run/approval";
 import { WorkerName } from "@usine/core/worker";
 import * as RunState from "@usine/core/run/state";
-import { StepResult } from "@usine/core/step/result";
+import { type Comment, StepResult } from "@usine/core/step/result";
 import { Context, Crypto, DateTime, Effect, Layer, Match, Option, Result, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import {
@@ -524,6 +524,23 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("record attempt salvage"));
 
+  const recordComments = Effect.fn("RunStore.recordComments")(function* (
+    attemptId: AttemptId,
+    comments: ReadonlyArray<Comment>,
+  ) {
+    yield* Effect.annotateCurrentSpan({ attemptId, comments: comments.length });
+    yield* database.transaction((transaction) =>
+      queriesFor(transaction).recordComments(attemptId, comments),
+    );
+    yield* Effect.logInfo(
+      "Recorded the comments an Attempt posted before it ended without success",
+      {
+        attemptId,
+        comments: comments.map(({ kind, url }) => `${kind} ${url.href}`),
+      },
+    );
+  }, persistence("record attempt comments"));
+
   const discardLeftovers = Effect.fn("RunStore.discardLeftovers")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
     const discardedAt = yield* DateTime.now;
@@ -896,6 +913,7 @@ const makeRunStore = Effect.gen(function* () {
     recordAndClaim,
     salvageCandidates: queries.salvageCandidates().pipe(persistence("list salvage candidates")),
     recordSalvage,
+    recordComments,
     discardLeftovers,
     submission: (runId: RunId) =>
       queries.eventRouteByRun(runId).pipe(
@@ -995,6 +1013,11 @@ export class RunStore extends Context.Service<
     readonly recordSalvage: (
       attemptId: AttemptId,
       salvage: AttemptSalvage,
+    ) => Effect.Effect<void, RunStoreError>;
+    /** Records the comments and reviews an Attempt posted on its Run's Item before it ended without success. */
+    readonly recordComments: (
+      attemptId: AttemptId,
+      comments: ReadonlyArray<Comment>,
     ) => Effect.Effect<void, RunStoreError>;
     /** Every persisted Attempt startup reconciliation visits: all of them except those whose leftovers were discarded. */
     readonly salvageCandidates: Effect.Effect<ReadonlyArray<AttemptRecovery>, RunStoreError>;

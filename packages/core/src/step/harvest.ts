@@ -70,8 +70,9 @@ const Author = Schema.NullOr(Schema.Struct({ login: Schema.String }));
 const IssueCommentResponse = Schema.Struct({
   url: Schema.URLFromString,
   user: Author,
+  createdAt: Schema.DateTimeUtcFromString,
   updatedAt: Schema.DateTimeUtcFromString,
-}).pipe(Schema.encodeKeys({ url: "html_url", updatedAt: "updated_at" }));
+}).pipe(Schema.encodeKeys({ url: "html_url", createdAt: "created_at", updatedAt: "updated_at" }));
 const decodeIssueCommentPages = Schema.decodeUnknownEffect(
   Schema.fromJsonString(Schema.Array(Schema.Array(IssueCommentResponse))),
 );
@@ -88,11 +89,13 @@ const decodeReviewPages = Schema.decodeUnknownEffect(
 const ReviewCommentResponse = Schema.Struct({
   url: Schema.URLFromString,
   user: Author,
+  createdAt: Schema.DateTimeUtcFromString,
   updatedAt: Schema.DateTimeUtcFromString,
   reviewId: Schema.NullOr(Schema.Int),
 }).pipe(
   Schema.encodeKeys({
     url: "html_url",
+    createdAt: "created_at",
     updatedAt: "updated_at",
     reviewId: "pull_request_review_id",
   }),
@@ -320,8 +323,10 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
   );
   const issueComments = conversation
     .flat()
-    .flatMap(({ url, user, updatedAt }) =>
-      written(user, updatedAt) ? [new Comment({ url, kind: "issue-comment" })] : [],
+    .flatMap(({ url, user, createdAt, updatedAt }) =>
+      written(user, updatedAt)
+        ? [new Comment({ url, kind: "issue-comment", at: Option.some(createdAt) })]
+        : [],
     );
   const submitted = reviews
     .flat()
@@ -330,14 +335,14 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
       submittedAt !== undefined &&
       submittedAt !== null &&
       written(user, submittedAt)
-        ? [new Comment({ url, kind: "review" })]
+        ? [new Comment({ url, kind: "review", at: Option.some(submittedAt) })]
         : [],
     );
   const reviewComments = diffComments
     .flat()
-    .flatMap(({ url, user, updatedAt, reviewId }) =>
+    .flatMap(({ url, user, createdAt, updatedAt, reviewId }) =>
       (reviewId === null || !pending.has(reviewId)) && written(user, updatedAt)
-        ? [new Comment({ url, kind: "review-comment" })]
+        ? [new Comment({ url, kind: "review-comment", at: Option.some(createdAt) })]
         : [],
     );
   yield* Effect.logInfo("Collected the comments and reviews the Attempt posted on its Item", {
@@ -357,19 +362,21 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
 /**
  * GitHub discovery is read-only enrichment of a finished Attempt: a failure or
  * a ten-second stall records nothing it looked for and keeps the other facts.
+ * `retaining` says what the Attempt keeps, for the warning.
  */
 const enrichment = <A, E extends { readonly _tag: string; readonly message: string }>(
   spec: HarvestSpec,
   subject: "Pull request" | "Comment",
   discovery: Effect.Effect<ReadonlyArray<A>, E>,
+  retaining = "retaining the completed agent result",
 ) =>
   discovery.pipe(
     Effect.timeout("10 seconds"),
     Effect.catch((error) =>
       Effect.logWarning(
         error._tag === "TimeoutError"
-          ? `${subject} discovery timed out; retaining the completed agent result`
-          : `${subject} discovery failed; retaining the completed agent result`,
+          ? `${subject} discovery timed out; ${retaining}`
+          : `${subject} discovery failed; ${retaining}`,
         {
           attemptId: spec.attemptId,
           repository: spec.repository,
@@ -401,4 +408,23 @@ export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
   const comments = yield* enrichment(spec, "Comment", harvestComments(spec, run));
   const facts: ReadonlyArray<StepResultFact> = [...commits, ...pullRequests, ...comments];
   return facts;
+});
+
+/**
+ * The comments and reviews an Attempt that ended without success posted on its
+ * Run's Item, found as `harvestFacts` finds them. Its commits and pull requests
+ * are not collected, since the Attempt delivered no result. A GitHub failure or
+ * a ten-second stall records none and never fails.
+ */
+export const harvestPostedComments = Effect.fn("StepResult.harvestPostedComments")(function* <
+  E extends { readonly _tag: string; readonly message: string },
+>(spec: HarvestSpec, run: HarvestCommand<E>) {
+  yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
+  const comments: ReadonlyArray<Comment> = yield* enrichment(
+    spec,
+    "Comment",
+    harvestComments(spec, run),
+    "the Attempt that ended without success records no comment",
+  );
+  return comments;
 });

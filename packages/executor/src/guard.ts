@@ -191,6 +191,7 @@ export const attemptGuard = (
         if (Option.isSome(clock)) yield* clock.value.observe(envelope);
       }),
       salvage: io.salvage,
+      comments: io.comments,
     };
     return {
       sink,

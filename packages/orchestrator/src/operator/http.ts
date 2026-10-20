@@ -1,15 +1,19 @@
+import { FileStage, InstancePath } from "@usine/config/file";
 import { AttemptId } from "@usine/core/attempt";
 import { AgentName } from "@usine/core/agent";
 import { CycleBudgetAskId } from "@usine/core/cycle-budget";
 import { ItemNumber } from "@usine/core/item";
 import { LoopName } from "@usine/core/loop";
+import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { WorkerName } from "@usine/core/worker";
 import { RunAgainResult } from "@usine/engine/engine";
 import { TranscriptSequence } from "@usine/engine/transcript";
-import { Record, Schema, SchemaTransformation } from "effect";
+import { ExecutorOperation, WorkerCapability } from "@usine/executor";
+import { Match, Record, Schema, SchemaTransformation } from "effect";
 import { HttpApi, HttpApiEndpoint, HttpApiGroup, HttpApiMiddleware } from "effect/unstable/httpapi";
-import { InstanceReload } from "../current-instance/changes.ts";
+import { InstanceReload, RestartBlock } from "../current-instance/changes.ts";
+import type { InstanceReloadError } from "../current-instance/current-instance.ts";
 import { BoardLaneId } from "./board.ts";
 import {
   ColdTranscriptRequest,
@@ -86,6 +90,118 @@ export class OperatorHttpPolicy extends HttpApiMiddleware.Service<OperatorHttpPo
   { error: errors },
 ) {}
 
+/**
+ * The Worker preflight failure behind a refused reload: the Worker capability
+ * that is missing, the Worker operation that failed, or the repository whose
+ * credential could not be obtained. What the check observed stays on the server.
+ */
+export const ReloadPreflightFailure = Schema.Union([
+  Schema.TaggedStruct("WorkerCapabilityError", {
+    worker: WorkerName,
+    capability: WorkerCapability,
+    message: Schema.String,
+  }),
+  Schema.TaggedStruct("ExecutorOperationError", {
+    operation: ExecutorOperation,
+    message: Schema.String,
+  }),
+  Schema.TaggedStruct("CredentialUnavailableError", {
+    repository: RepositoryName,
+    message: Schema.String,
+  }),
+]);
+export type ReloadPreflightFailure = typeof ReloadPreflightFailure.Type;
+
+/**
+ * A reload refused because `usine.yaml` changed in a way only a restart of
+ * `usine up` applies. It keeps the operator envelope's `error` and `message`.
+ */
+export class RestartRequiredRefusal extends Schema.Error<RestartRequiredRefusal>(
+  "@usine/orchestrator/RestartRequiredRefusal",
+)(
+  {
+    error: Schema.Literal("RestartRequiredError"),
+    message: Schema.String,
+    /** The `usine.yaml` blocks the changed fields belong to. */
+    blocks: Schema.NonEmptyArray(RestartBlock),
+    /** The changed fields, as paths into `usine.yaml` such as `webhooks` or `workers.build-1.destination`. */
+    fields: Schema.NonEmptyArray(Schema.NonEmptyString),
+  },
+  { httpApiStatus: 409 },
+) {}
+
+/**
+ * A reload refused because Worker preflight failed for the Agents and Workers
+ * it adds. It keeps the operator envelope's `error` and `message`.
+ */
+export class ReloadPreflightRefusal extends Schema.Error<ReloadPreflightRefusal>(
+  "@usine/orchestrator/ReloadPreflightRefusal",
+)(
+  {
+    error: Schema.Literal("ReloadPreflightError"),
+    message: Schema.String,
+    /** The reloaded Agents whose brains preflight checked on every Worker. */
+    agents: Schema.Array(AgentName),
+    /** The Workers the reload adds or gives more slots, which preflight checked. */
+    workers: Schema.Array(WorkerName),
+    cause: ReloadPreflightFailure,
+  },
+  { httpApiStatus: 409 },
+) {}
+
+/**
+ * A reload refused because `usine.yaml`, or a file it depends on, could not be
+ * loaded. It keeps the operator envelope's `error` and `message`.
+ */
+export class FactoryConfigRefusal extends Schema.Error<FactoryConfigRefusal>(
+  "@usine/orchestrator/FactoryConfigRefusal",
+)(
+  {
+    error: Schema.Literal("FactoryConfigError"),
+    message: Schema.String,
+    file: InstancePath,
+    stage: FileStage,
+  },
+  { httpApiStatus: 422 },
+) {}
+
+/** Why a reload kept the running instance, with the fields, Agents, Workers, or file it names. */
+export type ReloadRefusal = RestartRequiredRefusal | ReloadPreflightRefusal | FactoryConfigRefusal;
+
+/** The refusal the reload endpoint answers for `error`, with `message` for the operator. */
+export const reloadRefusal = (error: InstanceReloadError, message: string): ReloadRefusal =>
+  Match.valueTags(error, {
+    RestartRequiredError: ({ _tag, blocks, fields }) =>
+      new RestartRequiredRefusal({ error: _tag, message, blocks, fields }),
+    ReloadPreflightError: ({ _tag, agents, workers, cause }) =>
+      new ReloadPreflightRefusal({
+        error: _tag,
+        message,
+        agents,
+        workers,
+        cause: Match.valueTags(cause, {
+          WorkerCapabilityError: (failure) => ({
+            _tag: failure._tag,
+            worker: failure.worker,
+            capability: failure.capability,
+            message: failure.message,
+          }),
+          ExecutorOperationError: (failure) => ({
+            _tag: failure._tag,
+            operation: failure.operation,
+            message: failure.message,
+          }),
+          CredentialUnavailableError: (failure) => ({
+            _tag: failure._tag,
+            repository: failure.repository,
+            message: failure.message,
+          }),
+        }),
+      }),
+    FactoryConfigError: ({ _tag, file, stage }) =>
+      new FactoryConfigRefusal({ error: _tag, message, file, stage }),
+  });
+
 const absent = Schema.optionalKey(Schema.Never);
 // URLSearchParams.get previously selected the first occurrence of a query key.
 // Preserve that convention when HttpApi supplies repeated keys as arrays.
@@ -155,7 +271,8 @@ const loopParams = { loop: LoopName };
  * clients derive URLs, request codecs, successful responses, and typed failures
  * from this contract. Action acknowledgement means the request was accepted;
  * subsequent observation reports execution and GitHub polling progress. A
- * reload of the instance folder answers with what it changed, and running a
+ * reload of the instance folder answers with what it changed, or with its
+ * refusal and the fields, Agents, Workers, or file that refusal names; running a
  * Run again with the new Run or the cycle-budget Ask that blocked it. The
  * configuration read returns the instance folder as parsed, with its runtime
  * state.
@@ -240,7 +357,10 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         params: loopParams,
         success: acknowledged,
       }),
-      HttpApiEndpoint.post("reload", "/api/instance/reload", { success: InstanceReload }),
+      HttpApiEndpoint.post("reload", "/api/instance/reload", {
+        success: InstanceReload,
+        error: [RestartRequiredRefusal, ReloadPreflightRefusal, FactoryConfigRefusal],
+      }),
     )
     .add(
       HttpApiEndpoint.get("task", "/api/projects/:owner/:repository/tasks/:item", {

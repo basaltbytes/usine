@@ -52,7 +52,11 @@ describe("SSH Worker", () => {
         yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
         const prepared = yield* executor.prepare(request);
         assert.strictEqual(prepared.workspace.worktree, WORKTREE);
-        yield* prepared.launch({ append: () => Effect.void, salvage: () => Effect.void });
+        yield* prepared.launch({
+          append: () => Effect.void,
+          salvage: () => Effect.void,
+          comments: () => Effect.void,
+        });
 
         assert(given !== undefined && given.host instanceof RemoteShell);
         assert.strictEqual(given.host.destination, DESTINATION);
@@ -126,7 +130,11 @@ describe("SSH Worker", () => {
         credentials.minted.at(-1),
         "the machine has the token minted last",
       );
-      yield* prepared.launch({ append: () => Effect.void, salvage: () => Effect.void });
+      yield* prepared.launch({
+        append: () => Effect.void,
+        salvage: () => Effect.void,
+        comments: () => Effect.void,
+      });
       const released = machine.state.calls.length;
       yield* TestClock.adjust("2 hours");
       assert.strictEqual(machine.state.calls.length, released);
@@ -163,6 +171,7 @@ describe("SSH Worker", () => {
       const failure = yield* prepared
         .launch({
           append: () => Effect.void,
+          comments: () => Effect.void,
           salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
         })
         .pipe(Effect.flip);
@@ -199,6 +208,7 @@ describe("SSH Worker", () => {
         yield* prepared
           .launch({
             append: () => Effect.void,
+            comments: () => Effect.void,
             salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
           })
           .pipe(Effect.flip);
@@ -297,7 +307,11 @@ describe("SSH Worker", () => {
       const machine = fakeMachine();
       const credentials = mintingProvider();
       const storage = new StubStorage();
-      const sink = { append: () => Effect.void, salvage: () => Effect.void };
+      const sink = {
+        append: () => Effect.void,
+        salvage: () => Effect.void,
+        comments: () => Effect.void,
+      };
       return Effect.gen(function* () {
         const started = yield* Deferred.make<void>();
         const working: StubParent = () =>
@@ -352,6 +366,7 @@ describe("SSH Worker", () => {
             if (envelope._tag === "OutboundEnvelope") outbound.push(envelope.payload);
           }),
         salvage: () => Effect.void,
+        comments: () => Effect.void,
       };
       const notices = () =>
         outbound.filter(
@@ -434,6 +449,7 @@ describe("SSH Worker", () => {
               if (envelope._tag === "OutboundEnvelope") payloads.push(envelope.payload);
             }),
           salvage: () => Effect.void,
+          comments: () => Effect.void,
         };
       };
       const noticesOf = (attemptId: AttemptId) =>

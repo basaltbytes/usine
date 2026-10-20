@@ -168,6 +168,7 @@ describe("local worker salvage", () => {
                     Effect.fail(
                       new InfraFailure({ message: "channel unavailable", cause: "outage" }),
                     ),
+                  comments: () => Effect.void,
                   salvage: () =>
                     Effect.gen(function* () {
                       assert(yield* fileSystem.exists(worktree).pipe(Effect.orDie));

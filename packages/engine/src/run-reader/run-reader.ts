@@ -49,6 +49,9 @@ const makeRunReader = Effect.gen(function* () {
   const list = Effect.fn("RunReader.list")((options: { readonly closedLimit: number }) =>
     queries.runSummaries(options.closedLimit).pipe(persistence("list runs")),
   );
+  const closed = Effect.fn("RunReader.closed")((options: { readonly limit: number }) =>
+    queries.closedRunSummaries(options.limit).pipe(persistence("list closed runs")),
+  );
   const revision = Effect.fn("RunReader.revision")(() =>
     queries.revision().pipe(persistence("read projection revision")),
   );
@@ -69,6 +72,7 @@ const makeRunReader = Effect.gen(function* () {
     inspect,
     evidence,
     list,
+    closed,
     forItems,
     revision,
     transcript,
@@ -88,6 +92,14 @@ export class RunReader extends Context.Service<
     /** Every open Run plus the newest `closedLimit` settled ones, newest first. */
     readonly list: (options: {
       readonly closedLimit: number;
+    }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
+    /**
+     * The `limit` settled Runs that closed last, newest close first, whenever they opened. A
+     * Run closed when its last Attempt ended, or started for one closed before end times were
+     * recorded; a Run canceled before any Attempt closed when it opened.
+     */
+    readonly closed: (options: {
+      readonly limit: number;
     }) => Effect.Effect<ReadonlyArray<RunSummary>, RunStoreError>;
     /** Every saved Run for the supplied Items, newest first, including all their Attempts. */
     readonly forItems: (

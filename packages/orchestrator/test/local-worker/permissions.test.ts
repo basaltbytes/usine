@@ -124,7 +124,11 @@ describe("local worker Loop permissions", () => {
               Effect.gen(function* () {
                 const prepared = yield* executor.prepare(request(permissions));
                 const exit = yield* Effect.exit(
-                  prepared.launch({ append: () => Effect.void, salvage: () => Effect.void }),
+                  prepared.launch({
+                    append: () => Effect.void,
+                    salvage: () => Effect.void,
+                    comments: () => Effect.void,
+                  }),
                 );
                 assert(Exit.isFailure(exit));
                 return prepared.workspace.worktree;

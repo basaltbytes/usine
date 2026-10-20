@@ -35,7 +35,7 @@ export const permissionsLabel = {
 
 type Capability = Exclude<Extract<PreflightCheckView, { _tag: "Failed" }>["capability"], null>;
 
-const capabilityLabel = {
+export const capabilityLabel = {
   machine: "machine",
   toolchain: "toolchain",
   memory: "memory",

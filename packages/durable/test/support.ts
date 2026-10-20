@@ -81,6 +81,7 @@ export const recordingSink = () => {
         recorded.push({ direction, envelope });
       }),
     salvage: () => Effect.void,
+    comments: () => Effect.void,
   };
   const outbound = () =>
     recorded.flatMap(({ direction, envelope }) =>

@@ -28,8 +28,8 @@ import { RunView } from "./run.ts";
 const RECENT_TRANSCRIPT_ROWS = 200;
 /** How many closed Runs Last outcomes lists. */
 const LAST_OUTCOMES = 10;
-/** How many newest settled Runs the desk reads to find the ones that closed last. */
-const SETTLED_RUNS_READ = 100;
+/** How many settled Runs that closed last the desk reads, before leaving out those replaced before starting. */
+const CLOSED_RUNS_READ = 100;
 /** How many newest Items of each repository the desk matches against the Loops, as many as a Board shows. */
 const DESK_ITEMS = 500;
 
@@ -382,9 +382,10 @@ const makeDesk = Effect.gen(function* () {
   });
 
   const desk = Effect.fn("Operator.desk")(function* (instance: LoadedInstance) {
-    const [summaries, states, asks, slots, preflights, latestPoll] = yield* Effect.all(
+    const [summaries, closed, states, asks, slots, preflights, latestPoll] = yield* Effect.all(
       [
-        reader.list({ closedLimit: SETTLED_RUNS_READ }),
+        reader.list({ closedLimit: 0 }),
+        reader.closed({ limit: CLOSED_RUNS_READ }),
         controls.states,
         budgets.asks(),
         workerStatus.slots,
@@ -492,19 +493,16 @@ const makeDesk = Effect.gen(function* () {
       { concurrency: 4 },
     );
 
-    const replaced = new Set(
-      [...summaries, ...history].filter(replacedBeforeStart).map((summary) => summary.run.id),
-    );
-    const lastOutcomes = newestFirst
-      .filter(
-        (run) =>
-          (run.state === "Succeeded" || run.state === "Failed" || run.state === "Canceled") &&
-          !replaced.has(run.id),
-      )
-      .map(
-        (run) =>
-          new ClosedRunView({ run, item: links.get(run.itemKey) ?? null, closedAt: closedAt(run) }),
-      )
+    const lastOutcomes = closed
+      .filter((summary) => !replacedBeforeStart(summary))
+      .map((summary) => {
+        const run = runView(summary, paused);
+        return new ClosedRunView({
+          run,
+          item: links.get(run.itemKey) ?? null,
+          closedAt: closedAt(run),
+        });
+      })
       .sort((left, right) => right.closedAt.localeCompare(left.closedAt))
       .slice(0, LAST_OUTCOMES);
 

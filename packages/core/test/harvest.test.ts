@@ -160,11 +160,13 @@ describe("harvesting an Attempt's facts", () => {
                 {
                   html_url: conversation,
                   user: { login: BOT },
+                  created_at: "2026-10-19T12:01:00Z",
                   updated_at: "2026-10-19T12:04:00Z",
                 },
                 {
                   html_url: "https://github.com/acme/demo/pull/71#issuecomment-12",
                   user: { login: "octocat" },
+                  created_at: "2026-10-19T12:05:00Z",
                   updated_at: "2026-10-19T12:05:00Z",
                 },
               ),
@@ -207,12 +209,14 @@ describe("harvesting an Attempt's facts", () => {
                 {
                   html_url: reply,
                   user: { login: BOT },
+                  created_at: "2026-10-19T12:02:00Z",
                   updated_at: "2026-10-19T12:06:00Z",
                   pull_request_review_id: 21,
                 },
                 {
                   html_url: "https://github.com/acme/demo/pull/71#discussion_r32",
                   user: { login: BOT },
+                  created_at: "2026-10-19T12:08:00Z",
                   updated_at: "2026-10-19T12:08:00Z",
                   pull_request_review_id: 22,
                 },
@@ -226,6 +230,17 @@ describe("harvesting an Attempt's facts", () => {
           ["review", review],
           ["review-comment", reply],
         ]);
+        // A comment is dated by its creation, even when the Attempt edited it later; a review by its submission.
+        assert.deepStrictEqual(
+          facts.flatMap((fact) =>
+            fact._tag === "Comment" ? [Option.map(fact.at, DateTime.formatIso)] : [],
+          ),
+          [
+            Option.some("2026-10-19T12:01:00.000Z"),
+            Option.some("2026-10-19T12:06:00.000Z"),
+            Option.some("2026-10-19T12:02:00.000Z"),
+          ],
+        );
         assert.strictEqual(facts[0]?._tag, "Commit");
         assert.deepStrictEqual(warnings, []);
       }),
@@ -240,7 +255,12 @@ describe("harvesting an Attempt's facts", () => {
         [
           [
             ISSUE_COMMENTS,
-            pages({ html_url: comment, user: { login: BOT }, updated_at: "2026-10-19T12:04:00Z" }),
+            pages({
+              html_url: comment,
+              user: { login: BOT },
+              created_at: "2026-10-19T12:01:00Z",
+              updated_at: "2026-10-19T12:04:00Z",
+            }),
           ],
         ],
         itemRun("issues/12"),
@@ -266,10 +286,16 @@ describe("harvesting an Attempt's facts", () => {
             [
               ISSUE_COMMENTS,
               pages(
-                { html_url: comment, user: { login: integration }, updated_at: SINCE },
+                {
+                  html_url: comment,
+                  user: { login: integration },
+                  created_at: SINCE,
+                  updated_at: SINCE,
+                },
                 {
                   html_url: "https://github.com/acme/demo/issues/12#issuecomment-43",
                   user: { login: BOT },
+                  created_at: SINCE,
                   updated_at: SINCE,
                 },
               ),

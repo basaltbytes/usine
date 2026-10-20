@@ -5,10 +5,11 @@ import {
   TokenCount,
   UsdAmount,
 } from "@usine/core/agent/session";
-import { AttemptId } from "@usine/core/attempt";
-import type { RunReader, RunSnapshot } from "@usine/engine/run-reader";
+import { type Attempt, AttemptId } from "@usine/core/attempt";
+import type { RunStoreError } from "@usine/engine/engine";
+import { RunReader, type RunSnapshot } from "@usine/engine/run-reader";
 import { type TranscriptEntry, TranscriptUsageQuery } from "@usine/engine/transcript";
-import { Effect, Option, Schema } from "effect";
+import { Context, Effect, Layer, Option, Schema } from "effect";
 
 /**
  * Dollars a harness priced usage at. `estimate` marks the Claude plan's figure,
@@ -113,22 +114,43 @@ const runUsage = (reports: ReadonlyArray<TranscriptEntry>): RunUsageView => {
   });
 };
 
-/** Reads every Attempt's highest token report per session and sums them for the Run. */
-export const readRunUsage = Effect.fn("Operator.readRunUsage")(function* (
-  runs: RunReader["Service"],
-  snapshot: RunSnapshot,
-) {
-  yield* Effect.annotateCurrentSpan({ runId: snapshot.run.id });
-  const reports = yield* Effect.forEach(
-    snapshot.attempts,
-    (attempt) => runs.transcript(new TranscriptUsageQuery({ attemptId: attempt.id })),
-    { concurrency: 4 },
-  );
-  const usage = runUsage(reports.flat());
-  yield* Effect.logDebug("Read Run usage", {
-    runId: snapshot.run.id,
-    sessions: usage.sessions.length,
-    tokens: usage.tokens,
+const makeRunUsageReader = Effect.gen(function* () {
+  const runs = yield* RunReader;
+  const ended = yield* Effect.sync(() => new Map<AttemptId, ReadonlyArray<TranscriptEntry>>());
+
+  const attemptReports = Effect.fn("RunUsageReader.attemptReports")(function* (attempt: Attempt) {
+    const cached = ended.get(attempt.id);
+    if (cached !== undefined) return { reports: cached, read: false };
+    const reports = yield* runs.transcript(new TranscriptUsageQuery({ attemptId: attempt.id }));
+    if (Option.isSome(attempt.outcome)) ended.set(attempt.id, reports);
+    return { reports, read: true };
   });
-  return usage;
+
+  const read = Effect.fn("RunUsageReader.read")(function* (snapshot: RunSnapshot) {
+    yield* Effect.annotateCurrentSpan({ runId: snapshot.run.id });
+    const attempts = yield* Effect.forEach(snapshot.attempts, attemptReports, { concurrency: 4 });
+    const usage = runUsage(attempts.flatMap(({ reports }) => reports));
+    yield* Effect.logDebug("Read Run usage", {
+      runId: snapshot.run.id,
+      sessions: usage.sessions.length,
+      tokens: usage.tokens,
+      attemptsRead: attempts.filter(({ read: queried }) => queried).length,
+      attemptsCached: attempts.filter(({ read: queried }) => !queried).length,
+    });
+    return usage;
+  });
+
+  return { read };
 });
+
+/**
+ * Reads a Run's usage: every Attempt's highest token report per session, summed for the Run.
+ * An Attempt with an outcome gets no more reports, so its reports are read once and kept for
+ * the life of the process; an Attempt in flight is read on every call.
+ */
+export class RunUsageReader extends Context.Service<
+  RunUsageReader,
+  { readonly read: (snapshot: RunSnapshot) => Effect.Effect<RunUsageView, RunStoreError> }
+>()("@usine/orchestrator/RunUsageReader") {
+  static readonly layer = Layer.effect(RunUsageReader, makeRunUsageReader);
+}

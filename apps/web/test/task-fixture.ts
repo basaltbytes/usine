@@ -237,13 +237,15 @@ export const fullTask = () =>
         runId: RunId.make("run-review"),
         kind: "review",
         url: `${merged.url}#pullrequestreview-7`,
-        at: "2026-10-04T09:12:00.000Z",
+        postedAt: "2026-10-04T09:05:00.000Z",
+        attemptEndedAt: "2026-10-04T09:12:00.000Z",
       }),
       new TaskCommentView({
         runId: RunId.make("run-plan"),
         kind: "issue-comment",
         url: `${issue.url}#issuecomment-1`,
-        at: "2026-10-02T09:20:00.000Z",
+        postedAt: null,
+        attemptEndedAt: "2026-10-02T09:20:00.000Z",
       }),
     ],
   });

@@ -145,6 +145,7 @@ describe("local worker runaway guard", () => {
             .execute(freshExecution(RunId.make("wall-clock-run"), attemptId), {
               append: () => Effect.void,
               salvage: () => Effect.void,
+              comments: () => Effect.void,
             })
             .pipe(Effect.forkChild);
           yield* Deferred.await(started);
