@@ -685,13 +685,12 @@ it("lets Space on the viewport resume following a paused reader at latest", asyn
   expect(bookmark()?.position._tag).toBe("Latest");
 });
 
-const swipeUp = () => {
-  const element = viewport();
+const swipe = (element: Element, fromY: number, toY: number) => {
   const touches = (clientY: number) => [
     new Touch({ identifier: 1, target: element, clientX: 300, clientY }),
   ];
-  element.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: touches(400) }));
-  element.dispatchEvent(new TouchEvent("touchmove", { bubbles: true, touches: touches(300) }));
+  element.dispatchEvent(new TouchEvent("touchstart", { bubbles: true, touches: touches(fromY) }));
+  element.dispatchEvent(new TouchEvent("touchmove", { bubbles: true, touches: touches(toY) }));
   element.dispatchEvent(new TouchEvent("touchend", { bubbles: true }));
 };
 
@@ -702,7 +701,7 @@ it.each(["End", "Space", "ArrowDown", "PageDown", "wheel", "swipe"] as const)(
     await expect.poll(atLatest).toBeLessThan(9);
     await ownScrollEnded();
     if (input === "wheel") await userEvent.wheel(viewport(), { delta: { y: 100 } });
-    else if (input === "swipe") swipeUp();
+    else if (input === "swipe") swipe(viewport(), 400, 300);
     else {
       viewport().focus();
       await userEvent.keyboard(input === "Space" ? " " : `{${input}}`);
@@ -711,6 +710,79 @@ it.each(["End", "Space", "ArrowDown", "PageDown", "wheel", "swipe"] as const)(
     await expect.poll(atLatest).toBeLessThan(9);
   },
 );
+
+const longRead = [
+  record(
+    46,
+    new ToolStarted({ session: parent, callId: "long", tool: "read", input: { path: "long.ts" } }),
+  ),
+  record(
+    47,
+    new ToolFinished({
+      session: parent,
+      callId: "long",
+      tool: "read",
+      output: Array.from({ length: 100 }, (_, line) => `source line ${line}`).join("\n"),
+      isError: false,
+    }),
+  ),
+];
+// Opening the read pauses the reader, as any inspection does.
+const openLongOutput = async () => {
+  // Tall enough to show the whole output at the latest row, so hovering it scrolls nothing.
+  host.style.height = "800px";
+  mount([...events, ...longRead]);
+  await openBurst(1);
+  await page.getByRole("button", { name: /long.ts.*Completed/ }).click();
+  const result = host.querySelector(
+    `[data-transcript-id='${JSON.stringify([attemptId, parent.id, "long"])}:result'] pre`,
+  );
+  if (result?.parentElement == null) throw new Error("Missing tool output");
+  return result.parentElement;
+};
+const followLongOutput = async () => {
+  const output = await openLongOutput();
+  await page.getByRole("button", { name: "Jump to latest", exact: true }).click();
+  await expect.poll(atLatest).toBeLessThan(9);
+  await ownScrollEnded();
+  return output;
+};
+
+it.each(["wheel", "swipe"] as const)(
+  "keeps following when a %s scrolls a tool output at the latest row",
+  async (input) => {
+    const output = await followLongOutput();
+    const end = output.scrollHeight - output.clientHeight;
+    output.scrollTop = end;
+    if (input === "wheel") {
+      await userEvent.wheel(output, { delta: { y: -100 } });
+      await expect.poll(() => output.scrollTop).toBeLessThan(end);
+    } else swipe(output, 300, 400);
+    mount([...events, ...longRead, message(48)]);
+    await expect.poll(atLatest).toBeLessThan(9);
+  },
+);
+
+it("stops following when a wheel turn up scrolls the conversation at the latest row", async () => {
+  await followLongOutput();
+  await userEvent.wheel(page.getByRole("status", { name: "Current activity" }), {
+    delta: { y: -100 },
+  });
+  await expect.poll(atLatest).toBeGreaterThan(50);
+  mount([...events, ...longRead, message(48)]);
+  await expect
+    .element(page.getByRole("button", { name: "1 new update", exact: true }))
+    .toBeVisible();
+});
+
+it("resumes following when a wheel turn past a tool output's end reaches the latest row", async () => {
+  const output = await openLongOutput();
+  output.scrollTop = output.scrollHeight;
+  await userEvent.wheel(output, { delta: { y: 800 } });
+  await expect.poll(atLatest).toBeLessThan(9);
+  mount([...events, ...longRead, message(48)]);
+  await expect.poll(atLatest).toBeLessThan(9);
+});
 
 it("scrolls the reader to a checkpoint chosen in the outline and stops following", async () => {
   mount(events, runId, undefined, [liveAttempt]);
