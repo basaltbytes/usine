@@ -150,7 +150,7 @@ The persisted sequence of one attempt's activity, made of the attempt channel me
 _Avoid_: log, session history, output
 
 **Preflight**:
-The executor's verify-only readiness check of a worker: the toolchain, enough memory for the worker's concurrent attempts, each rostered harness and the harness login where children run on the worker, and attached credentials. It fails with typed capability errors and never installs anything: making a worker ready is out-of-band.
+The executor's verify-only readiness check of a worker: the toolchain, enough memory for the worker's concurrent attempts, each rostered harness and the harness login where children run on the worker, and the worker's long-lived credentials, such as exe.dev's GitHub integrations. It fails with typed capability errors and never installs anything: making a worker ready is out-of-band. Local and SSH workers have no long-lived GitHub credential: each attempt's installation token is minted when the attempt is prepared, and a refusal there stops the attempt before launch.
 _Avoid_: bootstrap, provisioning (the out-of-band act), health check
 
 **Gateway**:

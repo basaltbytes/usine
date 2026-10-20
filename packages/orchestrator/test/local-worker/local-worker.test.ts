@@ -17,6 +17,8 @@ import { WorkerName } from "@usine/core/worker";
 import {
   CheckoutRequest,
   CredentialProvider,
+  CredentialUnavailableError,
+  type CredentialUnavailableReason,
   Executor,
   ExecutorError,
   ExecutorOperationError,
@@ -88,6 +90,27 @@ const harnessUnavailable: HarnessProbe = (brain) =>
       harness: brain.harness,
       capability: "login",
       message: "Worker login expired",
+    }),
+  );
+
+/** Fails every mint for the Attempt's repository with `reason` and `message`. */
+const failingCredentials = (reason: CredentialUnavailableReason, message: string) =>
+  Layer.succeed(CredentialProvider)({
+    issue: (repository) =>
+      Effect.fail(
+        new CredentialUnavailableError({ repository, reason, message, cause: new Error(message) }),
+      ),
+  });
+
+/** The tag and message of each Attempt's failure, in Attempt order. */
+const attemptFailures = (attempts: ReadonlyArray<Attempt>) =>
+  attempts.map((attempt) =>
+    Option.match(attempt.outcome, {
+      onNone: () => ["open"],
+      onSome: (outcome) =>
+        outcome._tag === "Failed"
+          ? [outcome.failure._tag, "message" in outcome.failure ? outcome.failure.message : ""]
+          : [outcome._tag],
     }),
   );
 
@@ -247,6 +270,50 @@ describe("local worker", () => {
             assert(!(yield* fs.exists(`${instance}/.usine/workers`)));
           }),
       ),
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "fails once, without an automatic retry, when GitHub refuses the Attempt's token",
+    () => {
+      const refusal =
+        "Could not mint a worker token for acme/demo: GitHub rejected the request with status 422: The permissions requested are not granted to this installation.";
+      return withLocalEngine(
+        { credentials: failingCredentials("refused", refusal) },
+        ({ engine, instance }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert(accepted._tag === "Claimed");
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            assert.deepStrictEqual(attemptFailures(snapshot.attempts), [["AgentFailure", refusal]]);
+            const fs = yield* FileSystem.FileSystem;
+            assert(!(yield* fs.exists(`${instance}/.usine/workers/local/attempts`)));
+          }),
+      );
+    },
+    LIVE_TEST_TIMEOUT,
+  );
+
+  it.live(
+    "retries as an infrastructure failure when GitHub cannot be reached for the token",
+    () => {
+      const outage =
+        "Could not mint a worker token for acme/demo: The request to GitHub could not be sent";
+      return withLocalEngine(
+        { credentials: failingCredentials("unreachable", outage) },
+        ({ engine }) =>
+          Effect.gen(function* () {
+            const accepted = yield* engine.submit(submission(1));
+            assert(accepted._tag === "Claimed");
+            const snapshot = yield* waitFor(engine, accepted.runId, "Failed");
+            assert.deepStrictEqual(attemptFailures(snapshot.attempts), [
+              ["InfraFailure", outage],
+              ["InfraFailure", outage],
+              ["InfraFailure", outage],
+            ]);
+          }),
+      );
+    },
     LIVE_TEST_TIMEOUT,
   );
 

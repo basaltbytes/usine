@@ -13,7 +13,14 @@ import {
 } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { appJwtSigner } from "./jwt.ts";
-import { API_ROOT, authorized, invalidResponse, statusError, transportError } from "./http.ts";
+import {
+  API_ROOT,
+  authorized,
+  invalidResponse,
+  statusError,
+  transportError,
+  withGitHubReason,
+} from "./http.ts";
 import { type AppAuthenticationError, GitHubCredentials } from "./credentials.ts";
 import {
   AppPermissionError,
@@ -149,7 +156,10 @@ export class GitHubApp extends Context.Service<
             .execute(request)
             .pipe(Effect.mapError((error) => transportError(operation, error)));
           if (response.status < 200 || response.status >= 300) {
-            return yield* statusError(operation, response, yield* Clock.currentTimeMillis);
+            const failure = statusError(operation, response, yield* Clock.currentTimeMillis);
+            if (failure._tag === "GitHubRateLimitError") return yield* failure;
+            const explained = yield* withGitHubReason(failure, response);
+            return yield* explained;
           }
           return yield* HttpClientResponse.schemaBodyJson(schema)(response).pipe(
             Effect.mapError((error) => invalidResponse(operation, error.message)),
@@ -363,4 +373,5 @@ export {
   GitHubRateLimitError,
   InvalidGitHubResponseError,
   GitHubAppError,
+  isRefusal,
 } from "./error.ts";

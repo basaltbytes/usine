@@ -1,4 +1,4 @@
-import { Schema } from "effect";
+import { Match, Option, Schema } from "effect";
 import { InstallationDiscoveryError } from "./installation.ts";
 import { AppPermissionError } from "./access.ts";
 
@@ -68,3 +68,22 @@ export const GitHubAppError = Schema.Union([
   InvalidGitHubResponseError,
 ]);
 export type GitHubAppError = typeof GitHubAppError.Type;
+
+/**
+ * Whether GitHub gave a definite answer that sending the request again does
+ * not change: the App has no usable installation, the installation lacks a
+ * required permission, or GitHub answered with a 4xx status other than 408
+ * and 429, such as 422 for a permission the installation does not grant or
+ * 403 for a suspended installation. A request that could not be sent, a
+ * server error, a rate limit, and a response that breaks GitHub's API
+ * contract are not refusals.
+ */
+export const isRefusal = (error: GitHubAppError): boolean =>
+  Match.valueTags(error, {
+    InstallationDiscoveryError: () => true,
+    AppPermissionError: () => true,
+    GitHubApiError: ({ status }) =>
+      Option.exists(status, (code) => code >= 400 && code < 500 && code !== 408 && code !== 429),
+    GitHubRateLimitError: () => false,
+    InvalidGitHubResponseError: () => false,
+  });

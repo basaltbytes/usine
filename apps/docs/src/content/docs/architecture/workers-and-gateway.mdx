@@ -8,7 +8,7 @@ sidebar:
 import { FileTree, Steps, TabItem, Tabs } from "@astrojs/starlight/components";
 
 :::note
-This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with the executor's own forward to the Gateway's admin API from [#249][] (2026-10-19).
+This page describes commit [`7c0c3d3`](https://github.com/basaltbytes/usine/tree/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9) of basaltbytes/usine as it was on 2026-10-16, with the executor's own forward to the Gateway's admin API from [#249][] (2026-10-19) and the handling of a refused GitHub token from [#431][] (2026-10-20).
 :::
 
 A Worker is the machine where an Attempt's checkout is and where its children run. The Pi parent always runs in the orchestrator. The operating recipes (creating machines, logging in to the harnesses, the SSH configuration, deleting) are in [`infra/hetzner/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/README.md) and [`infra/hetzner/gateway/README.md`](https://github.com/basaltbytes/usine/blob/main/infra/hetzner/gateway/README.md); this page explains what the code does.
@@ -197,7 +197,7 @@ flowchart TD
 | ssh                | SSH connects (`true`); `root` is a writable directory; `git --version`; each brain over SSH; Pi is refused on a remote machine                                                                                                                                                                                                                                                                                                                                                                                  | [ssh/preflight.ts:31][]                                   |
 | ssh with a Gateway | The checks above, plus: the executor's forward to the admin API opens, or the error gives the `ssh` command to run to see why; the admin API accepts the admin token; sshd accepts the variables that contain the caller token; `curl http://git.<domain>/` from the machine is refused because it has no caller token; for each harness that uses its login on the machine, the login's hosts respond through the forward proxy; only the Claude Code binary is checked when the Gateway has the Anthropic key | [gateway/preflight.ts:47][], [gateway/preflight.ts:162][] |
 
-Local and direct SSH preflight don't check the GitHub credential. Only the exe.dev preflight raises the `credentials` capability ([exe-dev/preflight.ts:123][], [#278][]).
+Only exe.dev Workers have long-lived GitHub credentials: their GitHub integrations. Their preflight tests each integration and fails with the `credentials` capability when one isn't ready ([exe-dev/preflight.ts:123][]). Local and SSH Workers have no long-lived GitHub credential: `prepare` mints each Attempt's token from the GitHub App before the checkout. When GitHub refuses the mint, because the installation doesn't cover the repository, lacks a permission, or is suspended, the Attempt fails once with GitHub's reason and isn't retried ([#431][]). When GitHub can't be reached or rate-limits the request, the Attempt fails with a retryable `InfraFailure`.
 
 ## The Hetzner Gateway VM
 
@@ -656,4 +656,4 @@ A Worker behind the Gateway has no time source ([#254][]), and you must apply in
 [#264]: https://github.com/basaltbytes/usine/issues/264
 [#269]: https://github.com/basaltbytes/usine/issues/269
 [#270]: https://github.com/basaltbytes/usine/issues/270
-[#278]: https://github.com/basaltbytes/usine/issues/278
+[#431]: https://github.com/basaltbytes/usine/issues/431

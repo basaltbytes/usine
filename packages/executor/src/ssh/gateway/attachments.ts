@@ -192,7 +192,12 @@ export const gatewayAttachmentsFor = Effect.fn("SshExecutor.gatewayAttachmentsFo
         }).pipe(
           Effect.mapError(
             (cause) =>
-              new CredentialUnavailableError({ repository, message: cause.message, cause }),
+              new CredentialUnavailableError({
+                repository,
+                reason: "unreachable",
+                message: cause.message,
+                cause,
+              }),
           ),
         );
         yield* Ref.set(attached, Option.some({ id: answer.attachment.id, credential }));

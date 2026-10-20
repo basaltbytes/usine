@@ -1,8 +1,21 @@
 import type { RepositoryName } from "@usine/core/repository";
-import { CredentialProvider, CredentialUnavailableError, WorkerCredential } from "@usine/executor";
-import { GitHubApp, CoveredProject } from "@usine/github/github-app";
+import {
+  CredentialProvider,
+  CredentialUnavailableError,
+  type CredentialUnavailableReason,
+  WorkerCredential,
+} from "@usine/executor";
+import {
+  CoveredProject,
+  GitHubApp,
+  type GitHubAppError,
+  isRefusal,
+} from "@usine/github/github-app";
 import { Effect, Layer, Option, SynchronizedRef } from "effect";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
+
+const reasonOf = (cause: GitHubAppError): CredentialUnavailableReason =>
+  isRefusal(cause) ? "refused" : "unreachable";
 
 /**
  * Mints renewable single-repository GitHub App tokens for each Attempt, at
@@ -10,6 +23,9 @@ import { CurrentInstance } from "./current-instance/current-instance.ts";
  * access is discovered on the first mint and cached, so a GitHub outage cannot
  * block startup. A repository added to the installation, or to the current
  * instance's registry by a reload, is found by the refresh that follows a miss.
+ * When GitHub refuses, as for a repository the installation does not cover,
+ * the credential error is `refused` and its message carries GitHub's reason;
+ * an outage or a rate limit gives an `unreachable` one.
  */
 export const gitHubCredentialLayer: Layer.Layer<
   CredentialProvider,
@@ -39,7 +55,8 @@ export const gitHubCredentialLayer: Layer.Layer<
           (cause) =>
             new CredentialUnavailableError({
               repository,
-              message: "Could not discover GitHub App repository access",
+              reason: reasonOf(cause),
+              message: `Could not discover GitHub App repository access: ${cause.message}`,
               cause,
             }),
         ),
@@ -72,6 +89,7 @@ export const gitHubCredentialLayer: Layer.Layer<
       if (Option.isNone(project)) {
         return yield* new CredentialUnavailableError({
           repository,
+          reason: "refused",
           message: `GitHub App installation does not cover ${repository}`,
           cause: new Error("no project access after refresh"),
         });
@@ -89,7 +107,8 @@ export const gitHubCredentialLayer: Layer.Layer<
               (cause) =>
                 new CredentialUnavailableError({
                   repository,
-                  message: `Could not mint a worker token for ${repository}`,
+                  reason: reasonOf(cause),
+                  message: `Could not mint a worker token for ${repository}: ${cause.message}`,
                   cause,
                 }),
             ),
