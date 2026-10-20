@@ -182,7 +182,7 @@ export const RunDrawer = ({
             <Link
               to="/projects/$owner/$name/runs/$run"
               params={{ ...projectParams(run.repository), run: run.id }}
-              search={({ run: _run, ...rest }) => rest}
+              search={{}}
               viewTransition
               className={buttonVariants({ variant: "outline" })}
             >
@@ -197,7 +197,7 @@ export const RunDrawer = ({
                 <Link
                   to="/projects/$owner/$name/runs/$run"
                   params={{ ...projectParams(run.repository), run: run.id }}
-                  search={({ run: _run, ...rest }) => rest}
+                  search={{}}
                   viewTransition
                   aria-label="Open run page"
                   className={cn(

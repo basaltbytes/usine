@@ -12,7 +12,7 @@ import {
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { Schema } from "effect";
-import { AppSidebar } from "@/components/app-sidebar";
+import { AppSidebar, type OperatorView } from "@/components/app-sidebar";
 import { BootScreen } from "@/components/boot-screen";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -55,17 +55,18 @@ const Unreachable = ({ error }: { readonly error: Error }) => {
 };
 
 const Crumbs = ({
+  view,
   project,
   runId,
   task,
 }: {
+  readonly view: OperatorView;
   readonly project: RepositoryName | undefined;
   readonly runId: RunId | undefined;
   /** The Item number of the Task page being shown. */
   readonly task: string | undefined;
 }) => {
-  const matchRoute = useMatchRoute();
-  if (matchRoute({ to: "/configuration", fuzzy: true }) !== false) return <ConfigurationCrumbs />;
+  if (view === "configuration") return <ConfigurationCrumbs />;
   if (project === undefined)
     return (
       <BreadcrumbItem>
@@ -75,7 +76,7 @@ const Crumbs = ({
   return (
     <>
       <BreadcrumbItem>
-        {runId === undefined && task === undefined ? (
+        {view === "board" ? (
           <BreadcrumbPage>{project}</BreadcrumbPage>
         ) : (
           <BreadcrumbLink
@@ -85,6 +86,22 @@ const Crumbs = ({
           </BreadcrumbLink>
         )}
       </BreadcrumbItem>
+      {view === "tasks" && (
+        <>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
+            {task === undefined ? (
+              <BreadcrumbPage>Tasks</BreadcrumbPage>
+            ) : (
+              <BreadcrumbLink
+                render={<Link to="/projects/$owner/$name/tasks" params={projectParams(project)} />}
+              >
+                Tasks
+              </BreadcrumbLink>
+            )}
+          </BreadcrumbItem>
+        </>
+      )}
       {runId !== undefined && (
         <>
           <BreadcrumbSeparator />
@@ -100,7 +117,7 @@ const Crumbs = ({
           <BreadcrumbSeparator />
           <BreadcrumbItem>
             <BreadcrumbPage>
-              Task <span className="font-mono text-xs">#{task}</span>
+              <span className="font-mono text-xs">#{task}</span>
             </BreadcrumbPage>
           </BreadcrumbItem>
         </>
@@ -118,12 +135,16 @@ const Shell = () => {
   const matchRoute = useMatchRoute();
   const project = params.repository;
   const atDesk = matchRoute({ to: "/" }) !== false;
-  const view =
+  const view: OperatorView =
     matchRoute({ to: "/configuration", fuzzy: true }) !== false
       ? "configuration"
       : atDesk
         ? "desk"
-        : "projects";
+        : matchRoute({ to: "/projects/$owner/$name/tasks", fuzzy: true }) !== false
+          ? "tasks"
+          : matchRoute({ to: "/projects/$owner/$name" }) !== false
+            ? "board"
+            : "project";
   const closeRun = () => void navigate({ to: ".", search: ({ run: _run, ...rest }) => rest });
   // Remember the last opened Run so the Sheet stays mounted for its exit transition.
   const [shownRun, setShownRun] = useState(run);
@@ -144,7 +165,7 @@ const Shell = () => {
           <SidebarTrigger className="text-muted-foreground hover:text-foreground" />
           <Breadcrumb>
             <BreadcrumbList>
-              <Crumbs project={project} runId={params.run} task={params.number} />
+              <Crumbs view={view} project={project} runId={params.run} task={params.number} />
             </BreadcrumbList>
           </Breadcrumb>
         </header>

@@ -1,6 +1,8 @@
-import type { LaneItemState } from "@usine/config/board";
+import type { LaneItemState, LaneName } from "@usine/config/board";
+import type { LoopName } from "@usine/core/loop";
 import type { CommentKind } from "@usine/core/step/result";
 import type {
+  BoardLaneView,
   BoardTaskView,
   FailureView,
   RunView,
@@ -75,6 +77,42 @@ export const taskStall = (
   const keys = new Set(task.items.map(({ itemKey }) => itemKey));
   return stalled.find(({ item }) => keys.has(item.itemKey)) ?? null;
 };
+
+/** The number that addresses a Task's page: its originating Item's, the first of its Items. */
+export const taskNumber = (task: Pick<BoardTaskView, "items" | "number">): string =>
+  String(task.items[0]?.number ?? task.number);
+
+/** A Task as a row of the Tasks list: the Task, the lane it sits in, and when it was last active. */
+export interface TaskRow {
+  readonly task: BoardTaskView;
+  readonly lane: LaneName;
+  /** When its last Run was last at work or, for a Task without Runs, when GitHub last updated
+   * its current Item. */
+  readonly activeAt: string;
+}
+
+/** Every Task of the lanes as a Tasks list row, the most recently active first; of two Tasks
+ * active at the same time, the one with the higher current Item number comes first. */
+export const taskRows = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<TaskRow> =>
+  lanes
+    .flatMap(({ name, items }) =>
+      items.map((task) => {
+        const last = task.runs.at(-1);
+        return {
+          task,
+          lane: name,
+          activeAt: last === undefined ? task.updatedAt : runActivityAt(last),
+        };
+      }),
+    )
+    .sort(
+      (a, b) => Date.parse(b.activeAt) - Date.parse(a.activeAt) || b.task.number - a.task.number,
+    );
+
+/** The Loops that ran on a Task, each named once, in the order they first ran. */
+export const taskLoops = (task: Pick<BoardTaskView, "runs">): ReadonlyArray<LoopName> => [
+  ...new Set(task.runs.map(({ loop }) => loop)),
+];
 
 /** An Item's state as GitHub names it: Open, Closed, or Merged. */
 export const itemStateLabel = (state: LaneItemState): string => {

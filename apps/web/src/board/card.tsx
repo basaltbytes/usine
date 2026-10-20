@@ -32,6 +32,7 @@ import { projectParams } from "../overview.ts";
 import { type RunActions, useRunAction } from "../run-actions.ts";
 import { StallAction } from "../stall/action.tsx";
 import { stallNamesLoop, stallSentence } from "../stall/copy.ts";
+import { taskNumber } from "../task/model.ts";
 import { type CardMoves, CardMenu } from "./card-menu.tsx";
 import type { BoardMoveProgress } from "./moves.ts";
 
@@ -174,10 +175,7 @@ const CardTitle = ({
   <h3 className="text-sm/snug font-medium text-card-foreground" title={item.title}>
     <Link
       to="/projects/$owner/$name/tasks/$number"
-      params={{
-        ...projectParams(repository),
-        number: String(item.items[0]?.number ?? item.number),
-      }}
+      params={{ ...projectParams(repository), number: taskNumber(item) }}
       draggable={false}
       className={titleClass}
     >

@@ -13,12 +13,17 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import { ConfigurationMenu } from "../configuration/layout.tsx";
 import { projectParams } from "../overview.ts";
 
-export type OperatorView = "desk" | "projects" | "configuration";
+/** What the work panel shows: Overview, a Project's Board, its Tasks list or one of its Task
+ * pages, another page of a Project such as a Run page, or the Configuration section. */
+export type OperatorView = "desk" | "board" | "tasks" | "project" | "configuration";
 
 export const AppSidebar = ({
   projects,
@@ -78,14 +83,16 @@ export const AppSidebar = ({
           <SidebarMenu>
             {projects.map((entry) => {
               const count = needsYou.get(entry.repository) ?? 0;
+              const params = projectParams(entry.repository);
+              const current = project === entry.repository;
               return (
                 <SidebarMenuItem key={entry.repository}>
+                  {/* Board or Tasks is the active row on their pages; the Project's own row is
+                      active on its other pages, such as a Run page. */}
                   <SidebarMenuButton
-                    isActive={project === entry.repository}
+                    isActive={current && view === "project"}
                     className={cn(count > 0 && "pr-8")}
-                    render={
-                      <Link to="/projects/$owner/$name" params={projectParams(entry.repository)} />
-                    }
+                    render={<Link to="/projects/$owner/$name" params={params} />}
                   >
                     <span>{entry.repository}</span>
                   </SidebarMenuButton>
@@ -95,6 +102,24 @@ export const AppSidebar = ({
                       <span className="sr-only"> need attention</span>
                     </SidebarMenuBadge>
                   )}
+                  <SidebarMenuSub>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        isActive={current && view === "board"}
+                        render={<Link to="/projects/$owner/$name" params={params} />}
+                      >
+                        <span>Board</span>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                    <SidebarMenuSubItem>
+                      <SidebarMenuSubButton
+                        isActive={current && view === "tasks"}
+                        render={<Link to="/projects/$owner/$name/tasks" params={params} />}
+                      >
+                        <span>Tasks</span>
+                      </SidebarMenuSubButton>
+                    </SidebarMenuSubItem>
+                  </SidebarMenuSub>
                 </SidebarMenuItem>
               );
             })}
