@@ -1,21 +1,7 @@
-import { createFileRoute, Link, notFound } from "@tanstack/react-router";
+import { createFileRoute, notFound } from "@tanstack/react-router";
 import { RepositoryName } from "@usine/core/repository";
-import { BootScreen } from "@/components/boot-screen";
-import { Button } from "@/components/ui/button";
+import { ProjectNotFound } from "@/components/project-not-found";
 import { overviewQuery } from "../../../overview.ts";
-
-const ProjectNotFound = () => (
-  <BootScreen
-    title="Project not found"
-    description="This repository is not registered with the running usine."
-    tone="error"
-    inPanel
-  >
-    <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
-      Back to Overview
-    </Button>
-  </BootScreen>
-);
 
 export const Route = createFileRoute("/projects/$owner/$name")({
   params: {

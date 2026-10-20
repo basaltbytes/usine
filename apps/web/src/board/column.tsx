@@ -1,7 +1,6 @@
 import { useDroppable } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { ArrowsInLineHorizontalIcon } from "@phosphor-icons/react";
-import type { LaneItemState } from "@usine/config/board";
 import type { RepositoryName } from "@usine/core/repository";
 import type { RunId } from "@usine/core/run";
 import type { BoardLaneView, BoardTaskView, StalledItemView } from "@usine/orchestrator/operator";
@@ -10,18 +9,17 @@ import { LabelBadge } from "@/components/label-badge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { isClosedItem } from "../task/model.ts";
 import { BoardCard, type LabelCatalog } from "./card.tsx";
 import { FlowArrow, type LaneFlow } from "./flow.tsx";
 import type { BoardMoveProgress } from "./moves.ts";
-
-const CLOSED_STATES = new Set<LaneItemState>(["issue-closed", "pr-closed", "pr-merged"]);
 
 /** Whether a lane opens folded into a rail: the fallback lane of unrouted Items, and lanes that
  * hold only closed Items. Neither holds work in flight. */
 export const foldsByDefault = (lane: BoardLaneView): boolean =>
   lane.origin === "fallback" ||
   (lane.sources.length > 0 &&
-    lane.sources.every((source) => "state" in source && CLOSED_STATES.has(source.state)));
+    lane.sources.every((source) => "state" in source && isClosedItem(source.state)));
 
 /** The labels and Item states that route Items to the lane, labels in their GitHub colors. */
 const LaneSources = ({

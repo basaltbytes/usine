@@ -1,7 +1,6 @@
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { BootScreen } from "@/components/boot-screen";
-import { Button } from "@/components/ui/button";
+import { createFileRoute } from "@tanstack/react-router";
+import { ProjectNotFound } from "@/components/project-not-found";
 import { ProjectBoard } from "../../../../board/board.tsx";
 import { deskQuery } from "../../../../desk/query.ts";
 import { overviewQuery } from "../../../../overview.ts";
@@ -14,18 +13,7 @@ const BoardRoute = () => {
   const openRun = useOpenRun();
   const project = data.projects.find((candidate) => candidate.repository === repository);
   // A live refetch can drop the project after the loader admitted it.
-  if (project === undefined)
-    return (
-      <BootScreen
-        title="Project not found"
-        description="This repository is not registered with the running usine."
-        tone="error"
-      >
-        <Button variant="outline" nativeButton={false} render={<Link to="/" />}>
-          Back to Overview
-        </Button>
-      </BootScreen>
-    );
+  if (project === undefined) return <ProjectNotFound />;
   return (
     <ProjectBoard
       project={project}

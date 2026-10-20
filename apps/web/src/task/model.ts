@@ -1,6 +1,12 @@
 import type { LaneItemState } from "@usine/config/board";
 import type { CommentKind } from "@usine/core/step/result";
-import type { FailureView, RunView, TaskItemView } from "@usine/orchestrator/operator";
+import type {
+  BoardTaskView,
+  FailureView,
+  RunView,
+  StalledItemView,
+  TaskItemView,
+} from "@usine/orchestrator/operator";
 import { Option } from "effect";
 
 /**
@@ -45,6 +51,29 @@ export const itemStateLine = (
 ): string => {
   const kind = item.kind === "pr" ? "pull request" : "issue";
   return `${itemStateLabel(item.state)} ${kind}${origin ? "" : ` #${item.number}`}`;
+};
+
+const CLOSED_STATES = new Set<LaneItemState>(["issue-closed", "pr-closed", "pr-merged"]);
+
+/** Whether an Item is closed: a closed issue, or a closed or merged pull request. A Task whose
+ * current Item is closed is done, and a lane that holds only closed Items is a Done lane. */
+export const isClosedItem = (state: LaneItemState): boolean => CLOSED_STATES.has(state);
+
+/** When a Run was last at work: its last Attempt's end, that Attempt's start while it runs or
+ * when no end was recorded, or when the Run opened before any Attempt started. */
+export const runActivityAt = (run: Pick<RunView, "attempts" | "openedAt">): string => {
+  const last = run.attempts.at(-1);
+  return last?.endedAt ?? last?.startedAt ?? run.openedAt;
+};
+
+/** The stall of a Task: the first entry of the desk's stalled list that is about one of the
+ * Task's Items, or null when none is. */
+export const taskStall = (
+  stalled: ReadonlyArray<StalledItemView>,
+  task: Pick<BoardTaskView, "items">,
+): StalledItemView | null => {
+  const keys = new Set(task.items.map(({ itemKey }) => itemKey));
+  return stalled.find(({ item }) => keys.has(item.itemKey)) ?? null;
 };
 
 /** An Item's state as GitHub names it: Open, Closed, or Merged. */
