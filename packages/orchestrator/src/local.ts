@@ -13,7 +13,8 @@ import { stepExecutorLayer } from "./scheduler.ts";
  * bot login each Attempt records, the `TriggerCondition` that re-checks queued
  * Events, the `AttemptRuntime` that runs each Attempt's Pi parent in this
  * process, and the `CurrentInstance` whose settings each Attempt reads. The runtime is built first, so durable storage is open and
- * its tasks resumed before the engine recovers Runs.
+ * its tasks resumed before the engine recovers Runs. It also provides the
+ * `WorkerStatus` of its Workers.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,
@@ -25,5 +26,5 @@ export const layer = (
     Layer.provide(NodeServices.layer),
   );
   const stepExecutor = stepExecutorLayer(config, brains).pipe(Layer.provide(executor));
-  return localEngineLayer(instanceDirectory).pipe(Layer.provide(stepExecutor));
+  return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));
 };

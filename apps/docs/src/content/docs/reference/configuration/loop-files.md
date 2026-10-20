@@ -137,7 +137,7 @@ selector:
 
 ### `approval`
 
-With `required`, each new Run waits for the operator to approve it in the UI before its first Attempt. usine records the Approval as an Event. With the default `none`, Runs start without an Approval ([`ApprovalRequirement`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/loop.ts#L9)).
+With `required`, each new Run waits for the operator to approve it in the UI before its first Attempt. The Loop's page under **Configuration** > **Loops** shows every field of the file as usine parsed it, its prompt with each `{{ }}` expression outlined, or the error that quarantined it. usine records the Approval as an Event. With the default `none`, Runs start without an Approval ([`ApprovalRequirement`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/core/src/loop.ts#L9)).
 
 ### `step`
 

@@ -9,7 +9,7 @@ import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubCredentials } from "@usine/github/github-app";
 import { loadLocalCredentials } from "@usine/github/local-secrets";
 import { CurrentInstance } from "@usine/orchestrator/current-instance";
-import { Operator, OperatorObservation } from "@usine/orchestrator/operator";
+import { Operator, OperatorConfiguration, OperatorObservation } from "@usine/orchestrator/operator";
 import { Orchestrator } from "@usine/orchestrator/orchestrator";
 import { operatorObservationLayer, runtimeLayer } from "@usine/orchestrator/runtime";
 import {
@@ -138,6 +138,7 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
           instances,
           error._tag,
           Context.get(observationContext, OperatorObservation),
+          Context.get(observationContext, OperatorConfiguration),
         );
         return yield* serve({ backend, webRoot, port, url, openSetupPage: true });
       }
@@ -158,7 +159,11 @@ export const up = (port: Port, allowVolatileInstance: boolean) =>
           drain: engine.drain(),
           running: Effect.raceFirst(
             serve({
-              backend: liveBackendLayer(instances, operator),
+              backend: liveBackendLayer(
+                instances,
+                operator,
+                Context.get(context, OperatorConfiguration),
+              ),
               webRoot,
               port,
               url,

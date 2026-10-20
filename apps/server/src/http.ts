@@ -219,6 +219,8 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
         return yield* fromBackend((backend) => backend.task(repository, params.item));
       }),
     ),
+    .handle("reload", () => fromBackend((backend) => backend.reload))
+    .handle("configuration", () => fromBackend((backend) => backend.configuration)),
 );
 
 export const apiRoutes = HttpApiBuilder.layer(OperatorApi).pipe(

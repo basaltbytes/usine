@@ -77,7 +77,8 @@ export const sshWorkerAddressesOf = Effect.fn("Orchestrator.sshWorkerAddressesOf
  * resumed before Run recovery, and the `CurrentInstance` whose settings each
  * Attempt reads. Gateway admin APIs are called with `fetch`. The SSH executor
  * reaches only the Workers in `options`, so a reload can resize or remove
- * them but adds no other Worker.
+ * them but adds no other Worker. It also provides the `WorkerStatus` of its
+ * Workers.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,
@@ -92,5 +93,5 @@ export const layer = (
   const stepExecutor = stepExecutorLayer(config, brains, { startupWorkersOnly: true }).pipe(
     Layer.provide(executor),
   );
-  return localEngineLayer(instanceDirectory).pipe(Layer.provide(stepExecutor));
+  return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));
 };

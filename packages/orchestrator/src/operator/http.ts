@@ -20,6 +20,7 @@ import { FactoryOverview } from "./overview.ts";
 import { RunDetailView, EditAndRetry, SessionIntervention } from "./run.ts";
 import { RunGitHubChangesView } from "./github-changes.ts";
 import { TaskView } from "./task.ts";
+import { ConfigurationView } from "./configuration.ts";
 
 const errorStatuses = {
   SchemaError: 400,
@@ -154,7 +155,9 @@ const loopParams = { loop: LoopName };
  * from this contract. Action acknowledgement means the request was accepted;
  * subsequent observation reports execution and GitHub polling progress. A
  * reload of the instance folder answers with what it changed, and running a
- * Run again with the new Run or the cycle-budget Ask that blocked it.
+ * Run again with the new Run or the cycle-budget Ask that blocked it. The
+ * configuration read returns the instance folder as parsed, with its runtime
+ * state.
  *
  * This capability is platform-free (ADRs 0012 and 0020). Library consumers can
  * continue using Operator directly without an HTTP server or client.
@@ -248,5 +251,6 @@ export const OperatorApi = HttpApi.make("OperatorApi").add(
         success: TaskView,
       }),
     )
+    .add(HttpApiEndpoint.get("configuration", "/api/configuration", { success: ConfigurationView }))
     .middleware(OperatorHttpPolicy),
 );

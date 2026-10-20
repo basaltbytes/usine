@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button";
 import { api } from "../api.ts";
 import { reloadSummary } from "../operator-copy.ts";
 
-type ConfigurationReload = UseMutationResult<InstanceReload, Error, void>;
+export type ConfigurationReload = UseMutationResult<InstanceReload, Error, void>;
 
-/** Loads the instance folder again, then refreshes the overview and the Agent roster. */
+/** Loads the instance folder again, then refreshes the overview, the Agent roster, and the
+ * configuration, whose Worker preflights a refused reload can change too. */
 export const useReloadConfiguration = (): ConfigurationReload => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -19,6 +20,7 @@ export const useReloadConfiguration = (): ConfigurationReload => {
         queryClient.invalidateQueries({ queryKey: ["overview"] }),
         queryClient.invalidateQueries({ queryKey: ["agents"] }),
       ]),
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["configuration"] }),
   });
 };
 

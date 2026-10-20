@@ -13,13 +13,13 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 
 ## Onboarding, distribution, CLI
 
-- [#41][]: there is no `create-usine` scaffolder, no GitHub App manifest flow, and no Workers page with preflight on demand; without credentials `usine up` only shows a notice ([up.ts:122][]).
+- [#41][]: there is no `create-usine` scaffolder, no GitHub App manifest flow, and no preflight on demand: the Workers page shows only the last preflight, from startup or a reload; without credentials `usine up` only shows a notice ([up.ts:122][]).
 - [#154][]: the CLI has `up`, `backup`, and `export-run` only, with no `status`, `stop`, `restart`, or `upgrade` ([cli.ts:23][]).
 - [#233][]: npm installs of usine packages pull `@effect/platform-node-shared` 4.0.4, which needs `effect` ^4.0.4.
 
 ## Configuration
 
-- [#40][]: the UI has no configuration form or raw editor, and the surgical YAML writer has no production caller ([writer.ts][]).
+- [#40][]: the Configuration section reads every Loop, Agent, Worker, repository, and setting, but the UI has no configuration form or raw editor, and the surgical YAML writer has no production caller ([writer.ts][]).
 - [#387][]: a reload resizes, adds, and removes Workers, but refuses a new SSH Worker, because the SSH executor sets up its Workers and Gateway forwards when `usine up` starts ([ssh.ts][]); a removed SSH Worker's forward stays open until `usine up` stops.
 - [#388][]: Needs you offers Discard leftovers for a Worker a reload removed while its Attempts still run, and the action does nothing until they end.
 

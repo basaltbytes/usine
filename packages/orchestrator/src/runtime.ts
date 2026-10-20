@@ -16,17 +16,29 @@ import { gitHubCredentialLayer } from "./credentials.ts";
 import { CurrentInstance } from "./current-instance/current-instance.ts";
 import { idleTriggersLayer } from "./idle-triggers.ts";
 import { LabelReconciler } from "./label-reconciler.ts";
+import { OperatorConfiguration } from "./operator/configuration.ts";
 import { Operator, OperatorObservation } from "./operator/operator.ts";
 import { Orchestrator } from "./orchestrator.ts";
 import { PollingTriggers } from "./polling-triggers.ts";
 import { ScheduleTriggers } from "./schedule-triggers.ts";
 import { triggerConditionLayer } from "./trigger-condition.ts";
 import { workerEngineLayer } from "./worker-engine.ts";
+import { WorkerStatus } from "./worker-status.ts";
 
-/** A read-only operator composition for when trigger credentials are not available yet. */
+/**
+ * A read-only operator composition for when trigger credentials are not
+ * available yet: the observation and the configuration read, with no Worker
+ * running Attempts.
+ */
 export const operatorObservationLayer = (instanceDirectory: InstanceDirectory) =>
-  OperatorObservation.layer.pipe(
-    Layer.provide(Layer.mergeAll(localObservationLayer(instanceDirectory), idleTriggersLayer)),
+  Layer.mergeAll(OperatorObservation.layer, OperatorConfiguration.layer).pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        localObservationLayer(instanceDirectory),
+        idleTriggersLayer,
+        WorkerStatus.idle,
+      ),
+    ),
   );
 
 /**
@@ -98,8 +110,10 @@ export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
   const triggers = Layer.mergeAll(PollingTriggers.layer, ScheduleTriggers.layer).pipe(
     Layer.provide(dependencies),
   );
-  const services = Layer.mergeAll(Operator.layer, Orchestrator.layer).pipe(
-    Layer.provide(Layer.mergeAll(dependencies, triggers, itemHistory)),
-  );
+  const services = Layer.mergeAll(
+    Operator.layer,
+    OperatorConfiguration.layer,
+    Orchestrator.layer,
+  ).pipe(Layer.provide(Layer.mergeAll(dependencies, triggers, itemHistory)));
   return Layer.mergeAll(dependencies, triggers, services);
 };

@@ -15,7 +15,8 @@ import { stepExecutorLayer } from "./scheduler.ts";
  * `TriggerCondition` that re-checks queued Events, the
  * `AttemptRuntime` that runs each Attempt's Pi parent in this process, built
  * before the engine so durable storage is resumed before Run recovery, and the
- * `CurrentInstance` whose settings each Attempt reads.
+ * `CurrentInstance` whose settings each Attempt reads. It also provides the
+ * `WorkerStatus` of its Workers.
  */
 export const layer = (
   instanceDirectory: InstanceDirectory,
@@ -25,5 +26,5 @@ export const layer = (
 ) => {
   const executor = exeDevExecutorLayer(options).pipe(Layer.provide(NodeServices.layer));
   const stepExecutor = stepExecutorLayer(config, brains).pipe(Layer.provide(executor));
-  return localEngineLayer(instanceDirectory).pipe(Layer.provide(stepExecutor));
+  return localEngineLayer(instanceDirectory).pipe(Layer.provideMerge(stepExecutor));
 };
