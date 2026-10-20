@@ -72,6 +72,11 @@ export const taskStall = (
   return stalled.find(({ item }) => keys.has(item.itemKey)) ?? null;
 };
 
+/** The Run a stall reason names, or null when the reason is about the Loop or the Item alone, as
+ * a paused Loop, a used-up cycle budget, or a coming poll are. */
+export const stallRun = ({ reason }: Pick<StalledItemView, "reason">): RunView | null =>
+  "run" in reason ? reason.run : null;
+
 /** The number that addresses a Task's page: its originating Item's, the first of its Items. */
 export const taskNumber = (task: Pick<BoardTaskView, "items" | "number">): string =>
   String(task.items[0]?.number ?? task.number);
