@@ -218,8 +218,7 @@ const handlers = HttpApiBuilder.group(OperatorApi, "operator", (routes) =>
         yield* Effect.annotateCurrentSpan({ repository, item: params.item });
         return yield* fromBackend((backend) => backend.task(repository, params.item));
       }),
-    ),
-    .handle("reload", () => fromBackend((backend) => backend.reload))
+    )
     .handle("configuration", () => fromBackend((backend) => backend.configuration)),
 );
 
