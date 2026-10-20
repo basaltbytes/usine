@@ -99,6 +99,7 @@ const layerWith = (
   );
 
 const failingGitHub: GitHubPolling["Service"] = {
+  missingIssues: () => Effect.succeed([]),
   changes: () => Effect.die("unused"),
   labels: () => Effect.die("unused"),
   snapshot: () =>

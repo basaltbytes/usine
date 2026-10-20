@@ -84,6 +84,7 @@ import {
   inertGitHubLabelWriterLayer,
   inertLabelReconcilerLayer,
   itemProjectionWriterLayer,
+  itemProjectionReaderLayer,
   loopControlLayer,
   memoryCursorStore,
   pollingTestLayer,
@@ -242,6 +243,7 @@ describe("PollingTriggers", () => {
       let state = "OPEN";
       let snapshots = 0;
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
         changes: (repository, cursor) =>
           Effect.succeed(
@@ -360,6 +362,7 @@ describe("PollingTriggers", () => {
       let gone = false;
       let fetches = 0;
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
         changes: (repository, cursor) =>
           Effect.succeed(
@@ -469,6 +472,7 @@ describe("PollingTriggers", () => {
       const remote = { head: "a", labels: ["review-passed"] };
       let snapshots = 0;
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
         changes: (repository, cursor) =>
           Effect.succeed(
@@ -585,6 +589,7 @@ describe("PollingTriggers", () => {
     () => {
       let changeRequests = 0;
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         changes: (_repository, cursor) =>
           Effect.gen(function* () {
             changeRequests += 1;
@@ -626,6 +631,7 @@ describe("PollingTriggers", () => {
   it.effect("keeps a GitHub rate-limit backoff when a reload arrives during it", () => {
     let changeRequests = 0;
     const github: GitHubPolling["Service"] = {
+      missingIssues: () => Effect.succeed([]),
       changes: () =>
         Effect.suspend(() => {
           changeRequests += 1;
@@ -667,6 +673,7 @@ describe("PollingTriggers", () => {
     () => {
       const polled: Array<string> = [];
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         changes: (repository, cursor) =>
           Effect.sync(() => {
             polled.push(repository);
@@ -716,6 +723,7 @@ describe("PollingTriggers", () => {
         const loop = issueLoop("paused-issues");
         const payload = issuePayload(["ready"]);
         const github: GitHubPolling["Service"] = {
+          missingIssues: () => Effect.succeed([]),
           changes: (_repository, cursor) =>
             Effect.succeed(
               new RepositoryChanges({
@@ -764,6 +772,7 @@ describe("PollingTriggers", () => {
 
   it.effect("turns a rate-limited label catalog into a backoff, not a failed cycle", () => {
     const github: GitHubPolling["Service"] = {
+      missingIssues: () => Effect.succeed([]),
       changes: (_repository, cursor) =>
         Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
       labels: () =>
@@ -812,6 +821,7 @@ describe("PollingTriggers", () => {
             ? Ref.update(ref, (values) => [...values, value])
             : Effect.void;
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         changes: (repository, cursor) =>
           Effect.gen(function* () {
             yield* recordFor(repository, cursorsSeen)(cursor.entityTag);
@@ -930,6 +940,7 @@ describe("PollingTriggers", () => {
           updatedAt: DateTime.makeUnsafe("2026-08-30T20:00:00Z"),
         });
         const github: GitHubPolling["Service"] = {
+          missingIssues: () => Effect.succeed([]),
           changes: (repository, cursor) =>
             Effect.gen(function* () {
               yield* Ref.update(seenCursors, (values) => [...values, cursor]);
@@ -1129,6 +1140,7 @@ describe("PollingTriggers", () => {
     });
     let failing = true;
     const github: GitHubPolling["Service"] = {
+      missingIssues: () => Effect.succeed([]),
       changes: (repository, cursor) =>
         repository === "basaltbytes/failing" && failing
           ? Effect.fail(
@@ -1187,6 +1199,7 @@ describe("PollingTriggers", () => {
           noCycleBudgets,
           cursors,
           itemProjectionWriterLayer,
+          itemProjectionReaderLayer,
           repositoryLabelProjectionReaderLayer,
           repositoryLabelProjectionWriterLayer,
           inertGitHubLabelWriterLayer,
@@ -1252,6 +1265,7 @@ describe("PollingTriggers", () => {
       const allowRevoke = yield* Deferred.make<void, EnginePersistenceError>();
       let phase: "baseline" | "interrupted" | "recovered" = "baseline";
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () => Effect.succeed(emptyLabelCatalog),
         changes: (repository, cursor) =>
           Effect.sync(() => {
@@ -1327,6 +1341,7 @@ describe("PollingTriggers", () => {
                 }),
               markGone: () => Effect.die("no Item goes missing in this test"),
             }),
+            itemProjectionReaderLayer,
             repositoryLabelProjectionReaderLayer,
             repositoryLabelProjectionWriterLayer,
             inertLabelReconcilerLayer,
@@ -1432,6 +1447,7 @@ describe("PollingTriggers", () => {
           : Effect.succeed(`Rendered ${loop.name}.`),
     });
     const github: GitHubPolling["Service"] = {
+      missingIssues: () => Effect.succeed([]),
       changes: (_repository, cursor) =>
         Effect.succeed(
           new RepositoryChanges({
@@ -1461,6 +1477,7 @@ describe("PollingTriggers", () => {
           noCycleBudgets,
           cursors,
           itemProjectionWriterLayer,
+          itemProjectionReaderLayer,
           repositoryLabelProjectionReaderLayer,
           repositoryLabelProjectionWriterLayer,
           inertGitHubLabelWriterLayer,
@@ -1523,6 +1540,7 @@ describe("PollingTriggers", () => {
           `${(repository.endsWith("one") ? "a" : "b").repeat(32)}${String(number).repeat(16)}`,
         );
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         changes: (_repository, cursor) =>
           Effect.succeed(
             new RepositoryChanges({
@@ -1582,6 +1600,7 @@ describe("PollingTriggers", () => {
         const open = new Set([28]);
         const updatedAt = DateTime.makeUnsafe("2026-08-30T20:00:00Z");
         const github: GitHubPolling["Service"] = {
+          missingIssues: () => Effect.succeed([]),
           labels: () => Effect.succeed(emptyLabelCatalog),
           changes: (_repository, cursor) =>
             Effect.succeed(

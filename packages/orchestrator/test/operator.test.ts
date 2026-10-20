@@ -406,6 +406,7 @@ const testLayer = (
     unpause: () => Effect.succeed(new LoopRuntimeState({ loop: loopName, paused: false })),
   });
   const itemReader = Layer.succeed(ItemProjectionReader)({
+    openIssues: () => Effect.die("the operator does not check open issues"),
     list: () =>
       Effect.succeed([
         new ItemProjection({

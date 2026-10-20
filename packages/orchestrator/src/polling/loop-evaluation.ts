@@ -9,7 +9,6 @@ import { RunEngine, type SubmissionResult } from "@usine/engine/engine";
 import { gitHubItemKey, type ObservedItem } from "./repository-sync.ts";
 import { ExpressionEngine, type ExpressionError } from "@usine/expression/expression-engine";
 import { InvalidGitHubResponseError } from "@usine/github/github-app";
-import type { ChangedItem } from "@usine/github/polling";
 import { DateTime, Effect, Option, Result, Schema } from "effect";
 import {
   DEFAULT_BRANCH_REVISION,
@@ -193,20 +192,20 @@ export const evaluateItem = Effect.fn("PollingTriggers.evaluateItem")(function* 
 });
 
 /**
- * Revokes the unstarted Runs of an Item GitHub no longer has, for each of the
- * repository's active Loops on the Item's stream, as `evaluateItem` does for
- * an Item that stops matching; running Attempts continue. Returns how many
- * Runs it revoked.
+ * Revokes the unstarted Runs of the issue or pull request `number` that GitHub
+ * no longer has, for each of the repository's active Loops on `stream`, as
+ * `evaluateItem` does for an Item that stops matching; running Attempts
+ * continue. Returns how many Runs it revoked.
  */
 export const revokeMissingItem = Effect.fn("PollingTriggers.revokeMissingItem")(function* (
   repository: ManagedRepo,
   resolved: ReadonlyArray<ResolvedLoop>,
-  item: ChangedItem,
+  stream: "issue" | "pr",
+  number: number,
 ) {
-  yield* Effect.annotateCurrentSpan({ repository: repository.name, item: item.number });
+  yield* Effect.annotateCurrentSpan({ repository: repository.name, item: number });
   const runs = yield* RunEngine;
-  const stream = item._tag === "ChangedIssue" ? "issue" : "pr";
-  const itemKey = gitHubItemKey(repository.name, item.number);
+  const itemKey = gitHubItemKey(repository.name, number);
   let revokedRuns = 0;
   for (const { agent, loop } of resolved.filter(({ loop }) => loop.trigger.on === stream)) {
     const revoked = yield* runs.revoke(loop.name, itemKey);
@@ -216,7 +215,7 @@ export const revokeMissingItem = Effect.fn("PollingTriggers.revokeMissingItem")(
         repository: repository.name,
         loop: loop.name,
         agent: agent.name,
-        item: item.number,
+        item: number,
         runIds: revoked.join(", "),
       });
     }

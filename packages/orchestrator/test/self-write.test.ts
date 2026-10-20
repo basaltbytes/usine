@@ -138,6 +138,7 @@ describe("Board self-writes", () => {
           let writeFailure: Option.Option<GitHubAppError> = Option.none();
           let changeRequests = 0;
           const github: GitHubPolling["Service"] = {
+            missingIssues: () => Effect.succeed([]),
             changes: (_repository, cursor) =>
               Effect.gen(function* () {
                 changeRequests += 1;

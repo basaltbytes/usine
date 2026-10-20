@@ -1,6 +1,6 @@
 import { type ItemKey, ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
-import { and, desc, eq, isNull, sql } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { Context, DateTime, Effect, Layer, Option, Schema } from "effect";
 import { RunDatabase } from "../database/database.ts";
 import { itemProjections } from "../database/schema.ts";
@@ -18,6 +18,7 @@ const ItemProjectionRow = Schema.Struct({
 });
 
 const decodeRows = Schema.decodeUnknownEffect(Schema.Array(ItemProjectionRow));
+const decodeNumbers = Schema.decodeUnknownEffect(Schema.Array(ItemNumber));
 const encodePayload = Schema.encodeSync(Schema.JsonObject);
 const encodeGoneAt = Schema.encodeSync(ItemProjectionRow.fields.goneAt);
 
@@ -58,6 +59,25 @@ const makeReader = Effect.gen(function* () {
         (row) => new ItemProjection(row),
       );
     }, persistence("list Item projections")),
+    openIssues: Effect.fn("ItemProjectionReader.openIssues")(function* (
+      repository: RepositoryName,
+    ) {
+      yield* Effect.annotateCurrentSpan({ repository });
+      const rows = yield* database
+        .select({ number: itemProjections.itemNumber })
+        .from(itemProjections)
+        .where(
+          and(
+            eq(itemProjections.repository, repository),
+            eq(itemProjections.source, "issue"),
+            isNull(itemProjections.goneAt),
+            sql`json_extract(${itemProjections.payloadJson}, '$.state') = 'OPEN'`,
+          ),
+        )
+        .orderBy(asc(itemProjections.itemNumber))
+        .execute();
+      return yield* decodeNumbers(rows.map(({ number }) => number));
+    }, persistence("list open issue projections")),
   } as const;
 });
 
@@ -144,6 +164,13 @@ export class ItemProjectionReader extends Context.Service<
       repository: RepositoryName,
       options: ItemProjectionListOptions,
     ) => Effect.Effect<ReadonlyArray<ItemProjection>, EnginePersistenceError>;
+    /**
+     * The numbers of `repository`'s issue projections whose last payload is
+     * open and that are not marked gone, lowest first, however many there are.
+     */
+    readonly openIssues: (
+      repository: RepositoryName,
+    ) => Effect.Effect<ReadonlyArray<ItemNumber>, EnginePersistenceError>;
   }
 >()("@usine/engine/ItemProjectionReader") {
   static readonly layer = Layer.effect(ItemProjectionReader, makeReader);
