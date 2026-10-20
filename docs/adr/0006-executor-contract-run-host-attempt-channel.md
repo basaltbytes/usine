@@ -75,3 +75,9 @@ The scheduler sets the bot login when it builds the Attempt's `CheckoutRequest`,
 The Run reader (#353) reads the same writes from the Item's timeline with the App's token. The harvest does not reuse that query: it runs in the executor with the Attempt's credential, and the timeline can trail a write by seconds, while the harvest runs right after the parent's last turn.
 
 Comments count as delivered work for the rule ADR 0018 added on 2026-10-19: an Attempt whose parent's last turn answered the operator fails only when the harvest holds no commit, pull request, or comment. A released parent whose deliverable is a review or a comment on the Item therefore succeeds (#382).
+
+## Amendment (2026-10-20, #387): a reload adds SSH Workers
+
+The SSH executor now holds its machines in a reference that the scheduler changes on each reload, through `SshWorkers` beside the `Executor`, so a reload adds an SSH Worker as it adds a local one. A new Worker joins the executor before its preflight, because the preflight runs on its machine and through its Gateway's forward, and leaves it again when the reload is refused. Each forward to a Gateway's admin API has its own scope: the first Worker behind the Gateway opens it and the last one closes it. A removed Worker stays with the executor until its last Attempt ends, because that Attempt's credential renewals, detach, and cleanup still use its machine and the forward.
+
+The admin token of a new Worker's Gateway is read at the reload that adds it, the first moment the Worker is known. An unset variable refuses the reload rather than adding a Worker that cannot attach a token: a running process does not see variables set after it started, so the refusal says to set the variable and restart, or to name one the process has. The changed settings of a running Worker still refuse the reload, for the reason above: its running Attempts use the machine and the forward it had.

@@ -244,8 +244,8 @@ A reload ([CLI](/reference/configuration/cli/#reload)) applies these `workers` c
 | --- | --- |
 | A Worker's `max_concurrent_attempts` goes up | Runs Preflight on the Worker with the new count and every rostered harness, then its new slots take waiting Runs at once. |
 | A Worker's `max_concurrent_attempts` goes down | The Worker starts no new Attempt until it runs fewer Attempts than the new count. Running Attempts finish, and each extra slot retires when its Attempt ends. |
-| A new Worker | Runs Preflight on it with every rostered harness; it takes Attempts once that passes. A new `ssh` Worker needs a restart, except one `usine up` started with and a reload removed, added back with the same keys. |
-| A removed Worker | It starts no new Attempt, and its running Attempts finish. Its leftovers can be discarded from Needs attention once the last one ends. An `ssh` Worker's Gateway forward stays open until `usine up` stops. |
+| A new Worker | Runs Preflight on it with every rostered harness; it takes Attempts once that passes. For an `ssh` Worker behind a Gateway, the reload reads the variable named by `admin_token_env` first, and refuses the reload with `ReloadPreflightError` when it's unset. |
+| A removed Worker | It starts no new Attempt, and its running Attempts finish. Its leftovers can be discarded from Needs attention once the last one ends. Then the forward to an `ssh` Worker's Gateway closes, unless another Worker is behind that Gateway. |
 
 A failed Preflight refuses the whole reload with `ReloadPreflightError`. These changes need a restart, and the reload refuses them with `RestartRequiredError`, which names the field, such as `workers.worker-2.destination`:
 
@@ -304,7 +304,7 @@ A Worker behind a Gateway has no GitHub token on its machine. The executor attac
 | `admin_token_env` | string | required | Name of the orchestrator's environment variable that contains the admin token. The file never contains the token itself. |
 | `llm_providers` | list | `[]` | Providers whose credential is stored on the Gateway. The only value is `anthropic` (Claude Code). |
 
-`usine up` reads the variable named by `admin_token_env` at startup. When it's unset, startup fails with a `gateway` capability error that includes the Worker and variable names ([`sshWorkerAddressesOf`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/ssh.ts#L27)).
+`usine up` reads the variable named by `admin_token_env` at startup, and for a Worker a reload adds, at that reload. When it's unset, startup fails with a `gateway` capability error that includes the Worker and variable names ([`sshWorkerAddressesOf`](https://github.com/basaltbytes/usine/blob/7c0c3d3696123d11e3d5b9cc3d27e18bb21e84e9/packages/orchestrator/src/ssh.ts#L27)), and a reload is refused with `ReloadPreflightError` carrying that error. A running process doesn't see variables set after it started, so set the variable before `usine up` starts.
 
 A harness whose provider isn't in `llm_providers` uses the operator's login on the Worker and connects to its provider through the Gateway's forward proxy. Codex always works this way.
 

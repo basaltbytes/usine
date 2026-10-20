@@ -255,7 +255,7 @@ While a warning is open, the current activity at the end of the conversation and
 
 ## Reload the configuration
 
-Select **Reload configuration** on any **Configuration** page to apply edits to Loops, Agents, and `usine.yaml` without stopping the orchestrator. `POST /api/instance/reload` and `SIGHUP` do the same. Running Attempts continue, and an open Run keeps the Agent it was opened with, also when you retry it. **Edit and retry** offers the Agents of the reloaded roster. New Runs use the new configuration. Changes to `workers` or `webhooks` still need a restart. [Run a factory](/guides/#change-the-configuration) describes what a reload applies.
+Select **Reload configuration** on any **Configuration** page to apply edits to Loops, Agents, and `usine.yaml` without stopping the orchestrator. `POST /api/instance/reload` and `SIGHUP` do the same. Running Attempts continue, and an open Run keeps the Agent it was opened with, also when you retry it. **Edit and retry** offers the Agents of the reloaded roster. New Runs use the new configuration. Some `workers` changes and any `webhooks` change still need a restart. [Run a factory](/guides/#change-the-configuration) describes what a reload applies.
 
 ## Restarts
 
