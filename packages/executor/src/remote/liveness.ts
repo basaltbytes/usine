@@ -28,6 +28,8 @@ type Liveness =
       readonly lastAnsweredAt: DateTime.Utc;
       /** Probes in a row that got no answer. */
       readonly unanswered: number;
+      /** What the last probe saw. */
+      readonly reason: string;
       /** The Attempts told that the Worker stopped answering; only they hear that it answers again. */
       readonly told: ReadonlySet<AttemptId>;
     };
@@ -54,9 +56,9 @@ const reportTo = (
  * The liveness after a probe at `now` while the Attempts `watching` run on
  * the Worker, and the notice for their transcripts. Every Attempt not yet
  * told hears that the Worker stopped answering at the first probe that gets
- * no answer, so one that joins while the Worker is silent hears it at the
- * next probe that still gets none. When the Worker answers again, only the
- * Attempts told that it stopped hear so.
+ * no answer; one that joins while the Worker is silent is told as it joins
+ * (`joinSilent`). When the Worker answers again, only the Attempts told that
+ * it stopped hear so.
  */
 const observe = (
   worker: WorkerName,
@@ -82,6 +84,7 @@ const observe = (
       _tag: "Silent",
       lastAnsweredAt: liveness.lastAnsweredAt,
       unanswered: liveness._tag === "Silent" ? liveness.unanswered + 1 : 1,
+      reason: probe.reason,
       told: new Set(watching),
     },
     report: reportTo(
@@ -94,6 +97,26 @@ const observe = (
     ),
   };
 };
+
+/**
+ * The liveness once `attemptId` joins the watch, and the notice for its
+ * transcript: while the Worker is silent, an Attempt not yet told hears that
+ * it stopped answering, with what the last probe saw.
+ */
+const joinSilent = (worker: WorkerName, liveness: Liveness, attemptId: AttemptId): Observation =>
+  liveness._tag === "Answering" || liveness.told.has(attemptId)
+    ? { liveness, report: Option.none() }
+    : {
+        liveness: { ...liveness, told: new Set([...liveness.told, attemptId]) },
+        report: reportTo(
+          new WorkerUnresponsive({
+            worker,
+            lastAnsweredAt: liveness.lastAnsweredAt,
+            reason: liveness.reason,
+          }),
+          [attemptId],
+        ),
+      };
 
 const lastLine = (text: string): string =>
   text
@@ -125,19 +148,24 @@ export interface WorkerWatches {
    * SSH connection every minute, and reports through the `report` of every
    * Attempt on the Worker and a log line when the machine stops answering
    * and when it answers again. An Attempt that joins while the machine does
-   * not answer hears so at the next probe that still gets no answer, and
-   * hears that the machine answers again only after it heard that it
-   * stopped. It never stops or fails an Attempt, whatever the Worker does
-   * (ADR 0013).
+   * not answer hears so as it joins, and hears that the machine answers
+   * again only after it heard that it stopped. It never stops or fails an
+   * Attempt, whatever the Worker does (ADR 0013).
    */
   readonly watch: (watch: WorkerWatch) => Effect.Effect<void, never, Scope.Scope>;
 }
 
-/** Probes one Worker every minute until interrupted, keeps what it saw in `liveness`, and reports to the Attempts `watchers` returns at each probe. */
+/**
+ * Probes one Worker every minute until interrupted, keeps what it saw in
+ * `liveness`, and reports to the Attempts `watchers` returns at each probe.
+ * It holds `lock` from reading `liveness` to the last report, as joins do, so
+ * each Attempt gets its notices in the order the watch decided them.
+ */
 const watchWorker = (
   commands: RemoteCommands,
   worker: WorkerName,
   machineShell: RemoteShell,
+  lock: Semaphore.Semaphore,
   liveness: Ref.Ref<Liveness>,
   watchers: () => ReadonlyArray<WorkerWatcher>,
 ): Effect.Effect<never> =>
@@ -174,53 +202,58 @@ const watchWorker = (
       Effect.catch((error) => Effect.succeed<Probe>({ _tag: "Unanswered", reason: error.message })),
     );
 
+    const decide = (result: Probe) =>
+      Effect.gen(function* () {
+        const watching = watchers();
+        const attemptIds = watching.map(({ attemptId }) => attemptId);
+        const previous = yield* Ref.get(liveness);
+        const next = observe(worker, previous, result, yield* DateTime.now, attemptIds);
+        yield* Ref.set(liveness, next.liveness);
+        const fields = {
+          worker,
+          host,
+          attemptIds,
+          notifiedAttemptIds: Option.match(next.report, {
+            onNone: () => [],
+            onSome: ({ attemptIds }) => attemptIds,
+          }),
+          lastAnsweredAt: DateTime.formatIso(previous.lastAnsweredAt),
+        };
+        yield* Match.valueTags(result, {
+          Answered: () =>
+            previous._tag === "Silent"
+              ? Effect.logInfo("The Worker answers again", {
+                  ...fields,
+                  unansweredProbes: previous.unanswered,
+                })
+              : Effect.logDebug("The Worker answered its liveness probe", fields),
+          Unanswered: ({ reason }) =>
+            Effect.logWarning(
+              previous._tag === "Silent"
+                ? "The Worker still does not answer"
+                : "The Worker stopped answering",
+              {
+                ...fields,
+                unansweredProbes: previous._tag === "Silent" ? previous.unanswered + 1 : 1,
+                reason,
+              },
+            ),
+        });
+        if (Option.isSome(next.report)) {
+          const { notice, attemptIds: notified } = next.report.value;
+          yield* Effect.forEach(
+            watching.filter(({ attemptId }) => notified.includes(attemptId)),
+            ({ report }) => report(notice),
+            { discard: true },
+          );
+        }
+      });
+
     // The watch outlives the Attempt whose launch started it, so each probe is its own trace.
     const check = Effect.fn("RemoteExecutor.probeWorker", { root: true })(function* () {
       yield* Effect.annotateCurrentSpan({ worker, host });
       const result = yield* probe;
-      const watching = watchers();
-      const attemptIds = watching.map(({ attemptId }) => attemptId);
-      const previous = yield* Ref.get(liveness);
-      const next = observe(worker, previous, result, yield* DateTime.now, attemptIds);
-      yield* Ref.set(liveness, next.liveness);
-      const fields = {
-        worker,
-        host,
-        attemptIds,
-        notifiedAttemptIds: Option.match(next.report, {
-          onNone: () => [],
-          onSome: ({ attemptIds }) => attemptIds,
-        }),
-        lastAnsweredAt: DateTime.formatIso(previous.lastAnsweredAt),
-      };
-      yield* Match.valueTags(result, {
-        Answered: () =>
-          previous._tag === "Silent"
-            ? Effect.logInfo("The Worker answers again", {
-                ...fields,
-                unansweredProbes: previous.unanswered,
-              })
-            : Effect.logDebug("The Worker answered its liveness probe", fields),
-        Unanswered: ({ reason }) =>
-          Effect.logWarning(
-            previous._tag === "Silent"
-              ? "The Worker still does not answer"
-              : "The Worker stopped answering",
-            {
-              ...fields,
-              unansweredProbes: previous._tag === "Silent" ? previous.unanswered + 1 : 1,
-              reason,
-            },
-          ),
-      });
-      if (Option.isSome(next.report)) {
-        const { notice, attemptIds: notified } = next.report.value;
-        yield* Effect.forEach(
-          watching.filter(({ attemptId }) => notified.includes(attemptId)),
-          ({ report }) => report(notice),
-          { discard: true },
-        );
-      }
+      yield* Semaphore.withPermit(lock, decide(result));
     });
 
     return yield* Effect.sleep(PROBE_INTERVAL).pipe(Effect.andThen(check()), Effect.forever);
@@ -256,25 +289,40 @@ export const workerWatchesFor = (
             existing.watchers.set(watch.attemptId, watch);
             const current = yield* Ref.get(existing.liveness);
             const joined = { ...fields, attempts: existing.watchers.size };
-            return yield* current._tag === "Silent"
-              ? Effect.logInfo(
-                  "The Attempt joins its Worker's liveness watch while the Worker does not answer; the next probe without an answer tells it",
-                  {
-                    ...joined,
-                    lastAnsweredAt: DateTime.formatIso(current.lastAnsweredAt),
-                    unansweredProbes: current.unanswered,
-                  },
-                )
-              : Effect.logDebug("The Attempt joins its Worker's liveness watch", joined);
+            if (current._tag === "Answering")
+              return yield* Effect.logDebug(
+                "The Attempt joins its Worker's liveness watch",
+                joined,
+              );
+            const next = joinSilent(watch.worker, current, watch.attemptId);
+            yield* Ref.set(existing.liveness, next.liveness);
+            yield* Effect.logInfo(
+              Option.isSome(next.report)
+                ? "The Attempt joins its Worker's liveness watch while the Worker does not answer, and is told so"
+                : "The Attempt joins its Worker's liveness watch while the Worker does not answer; it was told so already",
+              {
+                ...joined,
+                lastAnsweredAt: DateTime.formatIso(current.lastAnsweredAt),
+                unansweredProbes: current.unanswered,
+                reason: current.reason,
+              },
+            );
+            if (Option.isSome(next.report)) yield* watch.report(next.report.value.notice);
+            return;
           }
           const liveness = yield* Ref.make<Liveness>({
             _tag: "Answering",
             lastAnsweredAt: yield* DateTime.now,
           });
           const watchers = new Map<AttemptId, WorkerWatcher>([[watch.attemptId, watch]]);
-          const fiber = yield* watchWorker(commands, watch.worker, watch.shell, liveness, () => [
-            ...watchers.values(),
-          ]).pipe(Effect.forkIn(scope));
+          const fiber = yield* watchWorker(
+            commands,
+            watch.worker,
+            watch.shell,
+            lock,
+            liveness,
+            () => [...watchers.values()],
+          ).pipe(Effect.forkIn(scope));
           watched.set(watch.worker, { liveness, watchers, fiber });
           yield* Effect.logDebug("Watching the Worker while Attempts run on it", {
             ...fields,

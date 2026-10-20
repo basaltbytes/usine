@@ -60,6 +60,8 @@ export interface AttemptHub {
   readonly childInputs: Set<number>;
   parent: Option.Option<ConversationId>;
   channel: Option.Option<AttachedChannel>;
+  /** Worker notices that arrived before the parent started, which the relay sends right after `Started`. */
+  early: ReadonlyArray<AttemptChannel.WorkerNotice>;
   /**
    * Completed with the request of the `execute` call relaying this Attempt, and
    * replaced when it detaches. Its child host and environment are never
@@ -68,16 +70,45 @@ export interface AttemptHub {
   attached: Deferred.Deferred<AttemptRequest>;
 }
 
+/**
+ * The Worker notices to keep for a relay that cannot send them yet, once
+ * `notice` arrives after `kept`. Only the Worker's latest state matters, so
+ * this keeps the latest notice, and the `WorkerUnresponsive` before a
+ * `WorkerResponsive` so the transcript still says the Worker stopped before
+ * it says the Worker answers again.
+ */
+export const keepNotice = (
+  kept: ReadonlyArray<AttemptChannel.WorkerNotice>,
+  notice: AttemptChannel.WorkerNotice,
+): ReadonlyArray<AttemptChannel.WorkerNotice> => {
+  const previous = kept.at(-1);
+  return notice._tag === "WorkerResponsive" && previous?._tag === "WorkerUnresponsive"
+    ? [previous, notice]
+    : [notice];
+};
+
+/** What `AttemptHubs.notice` did with a Worker notice. */
+export type NoticeRouting =
+  | { readonly _tag: "Queued" }
+  | { readonly _tag: "Kept"; readonly kept: ReadonlyArray<AttemptChannel.WorkerNotice> };
+
 export interface AttemptHubs {
-  /** The Attempt's hub, created on first use. */
+  /** The Attempt's hub, created on first use with the Worker notices kept for it as its early notices. */
   readonly hub: (attemptId: AttemptId, taskId: TaskId) => Effect.Effect<AttemptHub>;
   readonly find: (attemptId: AttemptId) => Option.Option<AttemptHub>;
   /** Routes the parent conversation's entries to the hub from now on. */
   readonly bindParent: (hub: AttemptHub, parent: ConversationId) => void;
   /** Queues one session event that no parent entry stands for, a child's or the parent's own, behind everything that happened before it. */
   readonly event: (hub: AttemptHub, event: AgentSessionEvent) => Effect.Effect<void>;
-  /** Queues one notice about the Attempt's Worker behind everything that happened before it. */
-  readonly notice: (hub: AttemptHub, notice: AttemptChannel.WorkerNotice) => Effect.Effect<void>;
+  /**
+   * Queues one notice about the Attempt's Worker behind everything that
+   * happened before it. While the Attempt has no hub in this process, the
+   * notice is kept with `keepNotice` until the hub is created.
+   */
+  readonly notice: (
+    attemptId: AttemptId,
+    notice: AttemptChannel.WorkerNotice,
+  ) => Effect.Effect<NoticeRouting>;
   /** Queues the report of whether a child read an operator input it had queued. */
   readonly delivery: (hub: AttemptHub, delivery: ChildDelivery) => Effect.Effect<void>;
   /** Routes commits to hubs: parent entries in order, task and record changes as wake-ups; wakes every hub after a reopen or the stop. */
@@ -89,6 +120,8 @@ export const attemptHubs = Effect.gen(function* () {
   const byAttempt = new Map<string, AttemptHub>();
   const byTask = new Map<number, AttemptHub>();
   const byParent = new Map<number, AttemptHub>();
+  /** Worker notices for Attempts that have no hub yet. */
+  const early = new Map<string, ReadonlyArray<AttemptChannel.WorkerNotice>>();
 
   const bindParent = (hub: AttemptHub, parent: ConversationId) => {
     if (Option.isSome(hub.parent)) return;
@@ -103,21 +136,32 @@ export const attemptHubs = Effect.gen(function* () {
       Effect.gen(function* () {
         const existing = byAttempt.get(attemptId);
         if (existing !== undefined) return existing;
+        const queue = yield* Queue.unbounded<RelayItem>();
+        const emission = yield* Semaphore.make(1);
+        const routing = yield* Semaphore.make(1);
+        const attached = yield* Deferred.make<AttemptRequest>();
+        // No yield until the hub is registered, so `notice` either keeps a notice the hub starts with or queues it.
         const created: AttemptHub = {
           attemptId,
           taskId,
-          queue: yield* Queue.unbounded<RelayItem>(),
-          emission: yield* Semaphore.make(1),
-          routing: yield* Semaphore.make(1),
+          queue,
+          emission,
+          routing,
           children: new Map(),
           childInputs: new Set(),
           parent: Option.none(),
           channel: Option.none(),
-          attached: yield* Deferred.make<AttemptRequest>(),
+          early: early.get(attemptId) ?? [],
+          attached,
         };
+        early.delete(attemptId);
         byAttempt.set(attemptId, created);
         byTask.set(taskId, created);
-        yield* Effect.logDebug("Tracking the Attempt in this process", { attemptId, taskId });
+        yield* Effect.logDebug("Tracking the Attempt in this process", {
+          attemptId,
+          taskId,
+          earlyNotices: created.early.map(({ _tag }) => _tag),
+        });
         return created;
       }),
     );
@@ -169,8 +213,17 @@ export const attemptHubs = Effect.gen(function* () {
     bindParent,
     event: (target, event) =>
       Queue.offer(target.queue, { _tag: "Event", event }).pipe(Effect.asVoid),
-    notice: (target, notice) =>
-      Queue.offer(target.queue, { _tag: "Notice", notice }).pipe(Effect.asVoid),
+    notice: (attemptId, notice) =>
+      Effect.sync((): NoticeRouting => {
+        const target = byAttempt.get(attemptId);
+        if (target !== undefined) {
+          Queue.offerUnsafe(target.queue, { _tag: "Notice", notice });
+          return { _tag: "Queued" };
+        }
+        const kept = keepNotice(early.get(attemptId) ?? [], notice);
+        early.set(attemptId, kept);
+        return { _tag: "Kept", kept };
+      }),
     delivery: (target, delivery) => Queue.offer(target.queue, delivery).pipe(Effect.asVoid),
     listener,
   } satisfies AttemptHubs;
