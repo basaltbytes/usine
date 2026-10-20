@@ -1,5 +1,7 @@
 import { assert, describe, it } from "@effect/vitest";
 import { Data, DateTime, Effect, Logger, Option } from "effect";
+import { Agent, AgentName, AgentPersona } from "../src/agent/agent.ts";
+import { BrainSpec, ModelId } from "../src/agent/brain.ts";
 import { AttemptId } from "../src/attempt/attempt.ts";
 import { CommitSha, RepositoryName, RepositoryRevision } from "../src/repository.ts";
 import { type HarvestSpec, harvestFacts } from "../src/step/harvest.ts";
@@ -18,6 +20,17 @@ const spec: HarvestSpec = {
   payload: { tick: { scheduledAt: "2026-10-19T12:00:00Z" } },
   preparedAt: Option.some(DateTime.makeUnsafe("2026-10-19T12:00:00.250Z")),
   botLogin: Option.some(BotLogin.make("usine-test[bot]")),
+  agent: new Agent({
+    name: AgentName.make("developer"),
+    brain: new BrainSpec({
+      harness: "claude",
+      model: ModelId.make("claude-sonnet-4-6"),
+      effort: "high",
+    }),
+    parentModel: Option.none(),
+    parentEffort: Option.none(),
+    persona: AgentPersona.make("Implement the issue."),
+  }),
 };
 
 class CommandFailed extends Data.TaggedError("CommandFailed")<{ readonly message: string }> {}
@@ -72,6 +85,8 @@ const VIEWER = "gh api graphql -f query=query { viewer { login } }";
 const ISSUE_COMMENTS = `gh api repos/acme/demo/issues/12/comments?since=${SINCE}&per_page=100 --paginate --slurp`;
 const pages = (...items: ReadonlyArray<object>): Answer =>
   Effect.succeed([JSON.stringify([items])]);
+/** A body the Attempt's Agent signed as its prompt asks, ending with a newline as `gh` bodies often do. */
+const signed = (text: string) => `${text}\n\n— usine agent: developer\n`;
 const comments = (facts: ReadonlyArray<StepResultFact>) =>
   facts.flatMap((fact) => (fact._tag === "Comment" ? [[fact.kind, fact.url.href]] : []));
 
@@ -159,12 +174,14 @@ describe("harvesting an Attempt's facts", () => {
               pages(
                 {
                   html_url: conversation,
+                  body: signed("Done."),
                   user: { login: BOT },
                   created_at: "2026-10-19T12:01:00Z",
                   updated_at: "2026-10-19T12:04:00Z",
                 },
                 {
                   html_url: "https://github.com/acme/demo/pull/71#issuecomment-12",
+                  body: signed("Done."),
                   user: { login: "octocat" },
                   created_at: "2026-10-19T12:05:00Z",
                   updated_at: "2026-10-19T12:05:00Z",
@@ -177,6 +194,7 @@ describe("harvesting an Attempt's facts", () => {
                 {
                   id: 20,
                   html_url: "https://github.com/acme/demo/pull/71#pullrequestreview-20",
+                  body: signed("Done."),
                   user: { login: BOT },
                   state: "COMMENTED",
                   submitted_at: "2026-10-18T09:00:00Z",
@@ -184,6 +202,7 @@ describe("harvesting an Attempt's facts", () => {
                 {
                   id: 21,
                   html_url: review,
+                  body: signed("Done."),
                   user: { login: BOT },
                   state: "COMMENTED",
                   submitted_at: "2026-10-19T12:06:00Z",
@@ -191,12 +210,14 @@ describe("harvesting an Attempt's facts", () => {
                 {
                   id: 22,
                   html_url: "https://github.com/acme/demo/pull/71#pullrequestreview-22",
+                  body: signed("Done."),
                   user: { login: BOT },
                   state: "PENDING",
                 },
                 {
                   id: 23,
                   html_url: "https://github.com/acme/demo/pull/71#pullrequestreview-23",
+                  body: signed("Done."),
                   user: null,
                   state: "COMMENTED",
                   submitted_at: "2026-10-19T12:07:00Z",
@@ -208,6 +229,7 @@ describe("harvesting an Attempt's facts", () => {
               pages(
                 {
                   html_url: reply,
+                  body: signed("Done."),
                   user: { login: BOT },
                   created_at: "2026-10-19T12:02:00Z",
                   updated_at: "2026-10-19T12:06:00Z",
@@ -215,6 +237,7 @@ describe("harvesting an Attempt's facts", () => {
                 },
                 {
                   html_url: "https://github.com/acme/demo/pull/71#discussion_r32",
+                  body: signed("Done."),
                   user: { login: BOT },
                   created_at: "2026-10-19T12:08:00Z",
                   updated_at: "2026-10-19T12:08:00Z",
@@ -246,6 +269,99 @@ describe("harvesting an Attempt's facts", () => {
       }),
   );
 
+  it.effect(
+    "records only the comments and reviews that end with the Attempt's Agent's signature",
+    () =>
+      Effect.gen(function* () {
+        const at = { created_at: "2026-10-19T12:01:00Z", updated_at: "2026-10-19T12:01:00Z" };
+        const submitted = { state: "COMMENTED", submitted_at: "2026-10-19T12:01:00Z" };
+        const url = (anchor: string) => `https://github.com/acme/demo/pull/71#${anchor}`;
+        // Another Loop's Attempt on the same pull request writes as the same bot login.
+        const reviewer = (text: string) => `${text}\n\n— usine agent: reviewer`;
+        const { facts } = yield* harvest(
+          [],
+          NEVER_ASKED,
+          [
+            [
+              `gh api repos/acme/demo/issues/71/comments?since=${SINCE}&per_page=100 --paginate --slurp`,
+              pages(
+                {
+                  html_url: url("issuecomment-11"),
+                  body: signed("Fixed."),
+                  user: { login: BOT },
+                  ...at,
+                },
+                {
+                  html_url: url("issuecomment-12"),
+                  body: reviewer("Found two issues."),
+                  user: { login: BOT },
+                  ...at,
+                },
+                { html_url: url("issuecomment-13"), body: "Fixed.", user: { login: BOT }, ...at },
+                {
+                  html_url: url("issuecomment-14"),
+                  body: "— usine agent: developer\n\nwrote the above.",
+                  user: { login: BOT },
+                  ...at,
+                },
+              ),
+            ],
+            [
+              "gh api repos/acme/demo/pulls/71/reviews?per_page=100 --paginate --slurp",
+              pages(
+                {
+                  id: 21,
+                  html_url: url("pullrequestreview-21"),
+                  body: signed("Replied."),
+                  user: { login: BOT },
+                  ...submitted,
+                },
+                {
+                  id: 22,
+                  html_url: url("pullrequestreview-22"),
+                  body: reviewer("Two findings."),
+                  user: { login: BOT },
+                  ...submitted,
+                },
+                {
+                  id: 23,
+                  html_url: url("pullrequestreview-23"),
+                  body: "",
+                  user: { login: BOT },
+                  ...submitted,
+                },
+              ),
+            ],
+            [
+              `gh api repos/acme/demo/pulls/71/comments?since=${SINCE}&per_page=100 --paginate --slurp`,
+              pages(
+                {
+                  html_url: url("discussion_r31"),
+                  body: signed("Renamed."),
+                  user: { login: BOT },
+                  pull_request_review_id: 21,
+                  ...at,
+                },
+                {
+                  html_url: url("discussion_r32"),
+                  body: reviewer("P1: rename this."),
+                  user: { login: BOT },
+                  pull_request_review_id: 22,
+                  ...at,
+                },
+              ),
+            ],
+          ],
+          itemRun("pull/71"),
+        );
+        assert.deepStrictEqual(comments(facts), [
+          ["issue-comment", url("issuecomment-11")],
+          ["review", url("pullrequestreview-21")],
+          ["review-comment", url("discussion_r31")],
+        ]);
+      }),
+  );
+
   it.effect("reads only the conversation of an issue", () =>
     Effect.gen(function* () {
       const comment = "https://github.com/acme/demo/issues/12#issuecomment-41";
@@ -257,6 +373,7 @@ describe("harvesting an Attempt's facts", () => {
             ISSUE_COMMENTS,
             pages({
               html_url: comment,
+              body: signed("Done."),
               user: { login: BOT },
               created_at: "2026-10-19T12:01:00Z",
               updated_at: "2026-10-19T12:04:00Z",
@@ -288,12 +405,14 @@ describe("harvesting an Attempt's facts", () => {
               pages(
                 {
                   html_url: comment,
+                  body: signed("Done."),
                   user: { login: integration },
                   created_at: SINCE,
                   updated_at: SINCE,
                 },
                 {
                   html_url: "https://github.com/acme/demo/issues/12#issuecomment-43",
+                  body: signed("Done."),
                   user: { login: BOT },
                   created_at: SINCE,
                   updated_at: SINCE,
