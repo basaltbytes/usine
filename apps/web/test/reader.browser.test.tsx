@@ -1,4 +1,4 @@
-import { Option } from "effect";
+import { Option, Schema } from "effect";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
@@ -30,6 +30,7 @@ import {
   FailedTranscriptView,
   LocalWorkerAccess,
   RunDetailView,
+  RunGitHubChangesView,
   RunView,
   SshWorkerAccess,
   TranscriptEventView,
@@ -39,10 +40,16 @@ import {
 import { createRoot, type Root } from "react-dom/client";
 import { flushSync } from "react-dom";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { page, userEvent } from "vitest/browser";
+import { commands, page, userEvent } from "vitest/browser";
 import { RunWorkspace } from "../src/run-page/workspace.tsx";
 import { ReaderBookmark, readerMemory } from "../src/run-transcript/reader/memory.ts";
 import "../src/index.css";
+
+declare module "vitest/browser" {
+  interface BrowserCommands {
+    githubChangesResponse: (body: string) => Promise<void>;
+  }
+}
 
 const runId = RunId.make("reader-test");
 const attemptId = AttemptId.make("attempt");
@@ -160,9 +167,34 @@ const atLatest = () => viewport().scrollHeight - viewport().clientHeight - viewp
 const bookmark = () => readerMemory(() => localStorage).read(runId, Date.now());
 const burst = (calls: number) =>
   page.getByRole("button", { name: new RegExp(`${calls} tool calls?$`, "u") });
+// The reader scrolls itself to the latest row after mounting, and an opened burst panel grows over
+// a CSS transition; positions read before either ends do not hold.
+const openBurst = async (calls: number) => {
+  await expect.poll(() => viewport().hasAttribute("data-autoscrolling")).toBe(false);
+  await burst(calls).click();
+  await expect
+    .poll(() => {
+      const panel = document.getElementById(
+        burst(calls).element().getAttribute("aria-controls") ?? "",
+      );
+      return (
+        panel !== null &&
+        !panel.hasAttribute("data-starting-style") &&
+        panel.getAnimations().length === 0
+      );
+    })
+    .toBe(true);
+};
 
 beforeEach(async () => {
   await page.viewport(1280, 800);
+  // Unanswered, the GitHub changes request fails, and a second later its retry adds an error line
+  // above the reader that shrinks it mid-test.
+  await commands.githubChangesResponse(
+    JSON.stringify(
+      Schema.encodeSync(RunGitHubChangesView)(new RunGitHubChangesView({ attempts: [] })),
+    ),
+  );
   localStorage.clear();
   queryClient = new QueryClient();
   host = document.createElement("div");
@@ -234,7 +266,7 @@ it("keeps inspected burst and tool disclosures isolated by Run across remounts",
     ...events.slice(4),
   ];
   mount(tools);
-  await burst(2).click();
+  await openBurst(2);
   await page.getByRole("button", { name: /first.ts.*Completed/ }).click();
   await expect.element(page.getByText("first contents", { exact: true })).toBeVisible();
   close();
@@ -410,7 +442,7 @@ it("restores inside a child tool result after its burst gains an earlier member"
   ];
   const initial = [...events.slice(0, 15), ...tools, ...events.slice(19)];
   mount(initial);
-  await burst(2).click();
+  await openBurst(2);
   await page.getByRole("button", { name: /child.ts.*Completed/ }).click();
   const output = () => {
     const resultId = `${JSON.stringify([attemptId, child.id, "child-a"])}:result`;
@@ -454,7 +486,7 @@ it("continues following when an inspected tool is collapsed after jumping to lat
   );
   const initial = [...events, started];
   mount(initial);
-  await burst(1).click();
+  await openBurst(1);
   await page.getByRole("button", { name: /latest.ts.*Running/ }).click();
   await page.getByRole("button", { name: "Jump to latest", exact: true }).click();
   await page.getByRole("button", { name: /latest.ts.*Running/ }).click();
@@ -594,7 +626,7 @@ it.each(["pointer", "Space"] as const)(
     );
     const initial = [...events, started];
     mount(initial);
-    await burst(1).click();
+    await openBurst(1);
     const tool = page.getByRole("button", { name: /paused.ts.*Running/ });
     await tool.click();
     await expect.element(tool).toHaveAttribute("aria-expanded", "true");
@@ -633,7 +665,7 @@ it("lets Space on the viewport resume following a paused reader at latest", asyn
   );
   const initial = [...events, started];
   mount(initial);
-  await burst(1).click();
+  await openBurst(1);
   const tool = page.getByRole("button", { name: /paused.ts.*Running/ });
   await tool.click();
   await tool.click();

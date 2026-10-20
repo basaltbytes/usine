@@ -152,6 +152,12 @@ export default mergeConfig(
                   });
                 },
                 recordedInterventions: async ({ page }) => interventionRequests.get(page) ?? [],
+                githubChangesResponse: async ({ page }, body: string) => {
+                  await page.unroute("**/api/runs/*/github-changes");
+                  await page.route("**/api/runs/*/github-changes", (route) =>
+                    route.fulfill({ contentType: "application/json", body }),
+                  );
+                },
                 delayBoardMove: async ({ page }) => {
                   let receive: (route: Route) => void;
                   const request = new Promise<Route>((resolve) => {
