@@ -1,17 +1,25 @@
 import { DateTime, Effect, Option, Schema } from "effect";
+import { githubSignature } from "../agent/agent.ts";
 import type { RunSpec } from "../attempt/channel.ts";
 import { ItemNumber } from "../item.ts";
 import { CommitSha, RepositoryRevision } from "../repository.ts";
-import { Comment, Commit, PullRequest, type StepResultFact } from "./result.ts";
+import { Comment, type CommentKind, Commit, PullRequest, type StepResultFact } from "./result.ts";
 
 /**
  * The part of an Attempt's RunSpec that harvesting reads: where its checkout
- * started, what it was given, when the Worker prepared it, and the bot login
- * it writes to GitHub as.
+ * started, what it was given, when the Worker prepared it, the bot login it
+ * writes to GitHub as, and the Agent whose signature its comments end with.
  */
 export type HarvestSpec = Pick<
   RunSpec,
-  "attemptId" | "repository" | "revision" | "baseCommit" | "payload" | "preparedAt" | "botLogin"
+  | "attemptId"
+  | "repository"
+  | "revision"
+  | "baseCommit"
+  | "payload"
+  | "preparedAt"
+  | "botLogin"
+  | "agent"
 >;
 
 /**
@@ -67,9 +75,12 @@ const decodeViewer = Schema.decodeUnknownEffect(
 );
 
 const Author = Schema.NullOr(Schema.Struct({ login: Schema.String }));
+// GitHub's schema makes an issue comment's body optional and a review's or a
+// review comment's body required; a review submitted without text has "".
 const IssueCommentResponse = Schema.Struct({
   url: Schema.URLFromString,
   user: Author,
+  body: Schema.optionalKey(Schema.String),
   createdAt: Schema.DateTimeUtcFromString,
   updatedAt: Schema.DateTimeUtcFromString,
 }).pipe(Schema.encodeKeys({ url: "html_url", createdAt: "created_at", updatedAt: "updated_at" }));
@@ -80,6 +91,7 @@ const ReviewResponse = Schema.Struct({
   id: Schema.Int,
   url: Schema.URLFromString,
   user: Author,
+  body: Schema.String,
   state: Schema.String,
   submittedAt: Schema.optionalKey(Schema.NullOr(Schema.DateTimeUtcFromString)),
 }).pipe(Schema.encodeKeys({ url: "html_url", submittedAt: "submitted_at" }));
@@ -89,6 +101,7 @@ const decodeReviewPages = Schema.decodeUnknownEffect(
 const ReviewCommentResponse = Schema.Struct({
   url: Schema.URLFromString,
   user: Author,
+  body: Schema.String,
   createdAt: Schema.DateTimeUtcFromString,
   updatedAt: Schema.DateTimeUtcFromString,
   reviewId: Schema.NullOr(Schema.Int),
@@ -248,8 +261,9 @@ const credentialLogin = Effect.fn("StepResult.credentialLogin")(function* <E>(
  * The comments and reviews the Attempt posted on its Run's Item: the Item's
  * conversation comments and, on a pull request, its submitted reviews and
  * their diff comments, written by the RunSpec's bot login, or else by the
- * login GitHub reports for the Attempt's credential, and created or updated
- * since the Worker prepared the checkout.
+ * login GitHub reports for the Attempt's credential, created or updated since
+ * the Worker prepared the checkout, and ending with the Attempt's Agent's
+ * signature.
  */
 const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
   spec: HarvestSpec,
@@ -279,7 +293,12 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
     ? { login: spec.botLogin.value, source: "run-spec" }
     : yield* credentialLogin(spec, number, run);
   const { login } = author;
-  yield* Effect.annotateCurrentSpan({ item: number, author: login, authorSource: author.source });
+  yield* Effect.annotateCurrentSpan({
+    item: number,
+    author: login,
+    authorSource: author.source,
+    agent: spec.agent.name,
+  });
   const list = (path: string) => [
     "api",
     `repos/${spec.repository}/${path}`,
@@ -321,42 +340,66 @@ const harvestComments = Effect.fn("StepResult.harvestComments")(function* <E>(
   const pending = new Set(
     reviews.flat().flatMap(({ id, state }) => (state === "PENDING" ? [id] : [])),
   );
-  const issueComments = conversation
-    .flat()
-    .flatMap(({ url, user, createdAt, updatedAt }) =>
+  // What the login wrote since preparation, each with its body.
+  const candidates = [
+    ...conversation.flat().flatMap(({ url, user, body, createdAt, updatedAt }) =>
       written(user, updatedAt)
-        ? [new Comment({ url, kind: "issue-comment", at: Option.some(createdAt) })]
+        ? [
+            {
+              body,
+              fact: new Comment({ url, kind: "issue-comment", at: Option.some(createdAt) }),
+            },
+          ]
         : [],
-    );
-  const submitted = reviews
-    .flat()
-    .flatMap(({ url, user, state, submittedAt }) =>
-      state !== "PENDING" &&
-      submittedAt !== undefined &&
-      submittedAt !== null &&
-      written(user, submittedAt)
-        ? [new Comment({ url, kind: "review", at: Option.some(submittedAt) })]
-        : [],
-    );
-  const reviewComments = diffComments
-    .flat()
-    .flatMap(({ url, user, createdAt, updatedAt, reviewId }) =>
+    ),
+    ...reviews
+      .flat()
+      .flatMap(({ url, user, body, state, submittedAt }) =>
+        state !== "PENDING" &&
+        submittedAt !== undefined &&
+        submittedAt !== null &&
+        written(user, submittedAt)
+          ? [{ body, fact: new Comment({ url, kind: "review", at: Option.some(submittedAt) }) }]
+          : [],
+      ),
+    ...diffComments.flat().flatMap(({ url, user, body, createdAt, updatedAt, reviewId }) =>
       (reviewId === null || !pending.has(reviewId)) && written(user, updatedAt)
-        ? [new Comment({ url, kind: "review-comment", at: Option.some(createdAt) })]
+        ? [
+            {
+              body,
+              fact: new Comment({ url, kind: "review-comment", at: Option.some(createdAt) }),
+            },
+          ]
         : [],
-    );
+    ),
+  ];
+  // All Attempts that write as one bot login share it, such as two Loops' Runs
+  // on one pull request, so the login alone does not tell their comments apart.
+  // The Attempt prompt asks the Agent to end each comment and review with its
+  // signature, and only those that do are the Attempt's. Two concurrent
+  // Attempts of one Agent on one Item still sign alike (#429). A body often
+  // ends with a newline, so trailing whitespace is ignored.
+  const signature = githubSignature(spec.agent.name);
+  const posted = candidates.flatMap(({ body, fact }) =>
+    body !== undefined && body.trimEnd().endsWith(signature) ? [fact] : [],
+  );
+  const counted = (kind: CommentKind) => posted.filter((comment) => comment.kind === kind).length;
   yield* Effect.logInfo("Collected the comments and reviews the Attempt posted on its Item", {
     attemptId: spec.attemptId,
     repository: spec.repository,
     item: number,
     author: login,
     authorSource: author.source,
+    agent: spec.agent.name,
     since: sinceParameter,
-    issueComments: issueComments.length,
-    reviews: submitted.length,
-    reviewComments: reviewComments.length,
+    issueComments: counted("issue-comment"),
+    reviews: counted("review"),
+    reviewComments: counted("review-comment"),
+    // Written by the login since preparation without the Agent's signature:
+    // another Agent's, or one this Agent left unsigned.
+    unsigned: candidates.length - posted.length,
   });
-  return [...issueComments, ...submitted, ...reviewComments];
+  return posted;
 });
 
 /**
@@ -394,7 +437,8 @@ const enrichment = <A, E extends { readonly _tag: string; readonly message: stri
  * remote branch or pull request ref points at was never pushed, so it has no
  * pull request and GitHub is not asked. Comments are those GitHub lists for
  * the bot login the Attempt writes as, the factory's App or a Worker's GitHub
- * integration, since the Worker prepared the checkout. Both GitHub discoveries
+ * integration, since the Worker prepared the checkout, that end with the
+ * signature of the Attempt's Agent (`githubSignature`). Both GitHub discoveries
  * are read-only enrichment, so a GitHub failure or a ten-second stall keeps
  * the commits and records none of what it looked for rather than failing
  * completed work.

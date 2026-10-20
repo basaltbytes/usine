@@ -9,7 +9,7 @@ Import each domain concept from its owning subpath. Identities, records, and ope
 | `@usine/core/event` | `Event`, `EventId`, `DedupKey` |
 | `@usine/core/run`, `@usine/core/run/state` | `Run`, `RunId`; the run state machine as a tagged union with typestate transitions (`RunState.start`, `RunState.supersede`, ...) |
 | `@usine/core/step`, `@usine/core/step/result` | `Step`, `StepName`; `StepResult` and its facts (`Commit`, `PullRequest`, `Comment`) |
-| `@usine/core/step/harvest` | `harvestFacts`, `HarvestError`: the commits and pull requests an Attempt's checkout holds once its agent finished, and the comments and reviews the Attempt posted on its Run's Item, read through a caller-supplied `git`/`gh` runner |
+| `@usine/core/step/harvest` | `harvestFacts`, `harvestPostedComments`, `HarvestError`: the commits and pull requests an Attempt's checkout holds once its agent finished, and the comments and reviews the Attempt posted on its Run's Item (written by its bot login and ending with its Agent's signature), read through a caller-supplied `git`/`gh` runner |
 | `@usine/core/attempt` | `Attempt`, `AttemptId`, `AttemptNumber`, `AttemptTask`, `shouldAutoRetry` |
 | `@usine/core/attempt/outcome` | `AttemptSucceeded`, `AttemptFailed`, `AttemptCanceled`, `AttemptOutcome` |
 | `@usine/core/attempt/failure` | `InfraFailure`, `DefectFailure`, `AgentFailure`, `RunawayFailure`, `ChildSessionBudgetFailure`, `AttemptFailure`, `isAutoRetryableFailure` |

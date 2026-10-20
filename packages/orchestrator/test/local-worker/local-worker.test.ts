@@ -1,6 +1,7 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
 import { Settings, UsineConfig } from "@usine/config/factory";
+import { githubSignature } from "@usine/core/agent";
 import { HarnessUnavailableError } from "@usine/core/agent/capability";
 import { ChildSessionBudget } from "@usine/core/agent/session";
 import { Attempt, AttemptNumber, AttemptTask, AttemptId } from "@usine/core/attempt";
@@ -139,6 +140,7 @@ const reviewedParent: StubParent = ({ request }) =>
       JSON.stringify({
         id: 81,
         html_url: REVIEW_URL,
+        body: `No findings.\n\n${githubSignature(request.spec.agent.name)}`,
         user: { login: "usine-test[bot]" },
         state: "COMMENTED",
         submitted_at: DateTime.formatIso(yield* DateTime.now),
