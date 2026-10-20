@@ -39,7 +39,7 @@ Success means the operator hands issue-to-PR work to agents and spends attention
 
 ## Capabilities and Constraints
 
-- Terminology follows `CONTEXT.md`: Project, Board, Lane, Task, Item, Loop, Agent, Run, Attempt, Event, Worker, Needs attention. UI copy and docs use these terms and avoid the listed alternatives.
+- Terminology follows `CONTEXT.md`: project, board, lane, task, item, loop, agent, run, attempt, event, worker, Needs attention. UI copy and docs use these terms and avoid the listed alternatives. UI copy follows the Voice section of `apps/web/DESIGN.md`, and docs use plain language.
 - Interventions: Approve, Retry, Edit and retry, Cancel Run, Pause session, message a parent or child, Hold and Release child, Mark resolved, Mark answered, Reset cycle budget, Pause a Loop.
 - The Run drawer links the pull request a Run produced; there is no reconstructed diff view.
 - Proposed and state-only lanes are read-only. Moves need lanes authored in `repos[].lanes`; usine never deletes a label.
