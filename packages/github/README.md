@@ -96,6 +96,7 @@ Pass a `CoveredProject` and the Attempt's Loop permission level to `GitHubApp.wo
 
 Change-detection results distinguish `nextPollAt`, the earliest next conditional poll, from `backoffUntil`, a request delay caused by `Retry-After` or rate-limit pressure. Self-write Hints can fetch an Item snapshot during the normal poll interval while respecting request backoff.
 - `snapshot(repository, item)` fetches the issue or pull-request payload through GraphQL and computes its SHA-256 content hash. The stored payload retains timestamps, while the hash excludes timestamp fields at every nesting level.
+- `missingIssues(repository, numbers)` returns the issue numbers the repository no longer has, deleted or transferred. It sends one GraphQL request per 50 numbers, with an aliased `issue(number:)` field for each, and an issue that comes back null counts as missing.
 
 The REST cursor overlaps its watermark by five seconds. Repeated items are expected; the engine's permanent Event ledger owns deduplication. Provide `GitHubPollingLayer` with `GitHubApp`, an Effect HTTP client, and `Crypto.Crypto`. The package root remains platform-free.
 

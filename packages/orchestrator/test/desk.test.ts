@@ -428,7 +428,10 @@ const deskLayer = (polls: ReadonlyArray<RepositoryPoll>) => {
         schedules,
         slots,
         Layer.succeed(CycleBudgets)({ ...emptyCycleBudgets, asks: () => Effect.succeed([ask]) }),
-        Layer.succeed(ItemProjectionReader)({ list: () => Effect.succeed(items) }),
+        Layer.succeed(ItemProjectionReader)({
+          list: () => Effect.succeed(items),
+          openIssues: () => Effect.die("the desk does not check open issues"),
+        }),
         loopControlLayer([new LoopRuntimeState({ loop: review.name, paused: true })]),
         repositoryLabelProjectionReaderLayer,
         MarcbachmannCelLayer,

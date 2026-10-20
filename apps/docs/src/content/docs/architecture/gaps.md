@@ -27,7 +27,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 
 - [#37][]: usine parses `webhooks.mode` but never reads it, there is no `POST /webhooks/github`, and Board moves are the only Hint source ([operator.ts:556][]).
 - [#158][]: every poll fetches every known open pull request again, instead of only after the base branch changes ([polling.ts:222][]).
-- [#391][]: a deleted or transferred issue that has no queued Event stays in an open lane on the Board, because the poll cursor does not keep open issues and change detection lists only the Items the repository still has.
 
 ## Asks and notifications
 
@@ -167,4 +166,3 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#279]: https://github.com/basaltbytes/usine/issues/279
 [#387]: https://github.com/basaltbytes/usine/issues/387
 [#388]: https://github.com/basaltbytes/usine/issues/388
-[#391]: https://github.com/basaltbytes/usine/issues/391

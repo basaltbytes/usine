@@ -72,6 +72,7 @@ describe("cycle reset polling", () => {
           }),
       };
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
         snapshot: () => Effect.die("no Items on this page"),
@@ -178,6 +179,7 @@ it.live(
         closedByPullRequestsReferences: { totalCount: 0, nodes: [] },
       });
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ labels: [], entityTag: Option.none() })),
         changes: () =>

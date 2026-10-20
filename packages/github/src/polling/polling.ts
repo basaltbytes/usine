@@ -1,6 +1,17 @@
 import { canonicalContent } from "./content.ts";
+import { ItemNumber } from "@usine/core/item";
 import { RepositoryName, splitRepositoryName } from "@usine/core/repository";
-import { Clock, Context, Crypto, DateTime, Effect, Layer, Option, Schema } from "effect";
+import {
+  Array as Arr,
+  Clock,
+  Context,
+  Crypto,
+  DateTime,
+  Effect,
+  Layer,
+  Option,
+  Schema,
+} from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
 import { GitHubApp } from "../github-app.ts";
 import { queryGraphql } from "../graphql.ts";
@@ -40,7 +51,7 @@ import {
   RepositoryLabelsNotModified,
   RepositoryLabelName,
 } from "./labels.ts";
-import { ISSUE_PAYLOAD_QUERY, PULL_REQUEST_PAYLOAD_QUERY } from "./queries.ts";
+import { ISSUE_PAYLOAD_QUERY, PULL_REQUEST_PAYLOAD_QUERY, issuesPresentQuery } from "./queries.ts";
 
 const WATERMARK_OVERLAP_MS = 5_000;
 const RATE_LIMIT_PRESSURE_THRESHOLD = 100;
@@ -48,6 +59,8 @@ const RATE_LIMIT_PRESSURE_THRESHOLD = 100;
 const MAX_CHANGE_PAGES = 10;
 /** Caps one repository's label walk so a pathological catalog cannot run unbounded. */
 const MAX_LABEL_PAGES = 100;
+/** How many issue numbers one `missingIssues` GraphQL request asks about. */
+const ISSUES_PER_PRESENCE_CHECK = 50;
 
 const RestChangedItem = Schema.Struct({
   number: Schema.Int.check(Schema.isGreaterThanOrEqualTo(1)),
@@ -80,6 +93,18 @@ const PullRequestData = Schema.Struct({
     Schema.Struct({ pullRequest: Schema.OptionFromNullOr(PullRequestPayload) }),
   ),
 });
+const IssuePresence = Schema.NullOr(Schema.Struct({ number: Schema.Int }));
+/** The answer to `issuesPresentQuery(count)`: every alias from `i0` to `i<count - 1>` must be present. */
+const issuesPresentData = (count: number) =>
+  Schema.Struct({
+    repository: Schema.OptionFromNullOr(
+      Schema.Struct(
+        Object.fromEntries(
+          Array.from({ length: count }, (_, index) => [`i${index}`, IssuePresence] as const),
+        ),
+      ),
+    ),
+  });
 
 type Headers = HttpClientResponse.HttpClientResponse["headers"];
 
@@ -189,6 +214,17 @@ export class GitHubPolling extends Context.Service<
       repository: RepositoryName,
       item: ChangedItem,
     ) => Effect.Effect<PayloadSnapshot, GitHubAppError | GitHubItemNotFoundError>;
+    /**
+     * Returns the issue numbers among `numbers` that the repository no longer
+     * has: deleted, transferred, or out of the App's reach. Asks GitHub in
+     * GraphQL requests of 50 numbers each, one after another, and sends none
+     * for an empty list. A repository that comes back null fails with
+     * `InvalidGitHubResponseError`, since it says nothing about its issues.
+     */
+    readonly missingIssues: (
+      repository: RepositoryName,
+      numbers: ReadonlyArray<ItemNumber>,
+    ) => Effect.Effect<ReadonlyArray<ItemNumber>, GitHubAppError>;
   }
 >()("@usine/github/GitHubPolling") {
   static readonly layer: Layer.Layer<
@@ -485,7 +521,43 @@ export class GitHubPolling extends Context.Service<
           }),
       );
 
-      return { changes, labels, snapshot };
+      const missingIssues = Effect.fn("GitHubPolling.missingIssues")(function* (
+        repository: RepositoryName,
+        numbers: ReadonlyArray<ItemNumber>,
+      ) {
+        yield* Effect.annotateCurrentSpan({ repository, issues: numbers.length });
+        const { name, owner } = splitRepositoryName(repository);
+        const missing = yield* Effect.forEach(
+          Arr.chunksOf(numbers, ISSUES_PER_PRESENCE_CHECK),
+          (chunk) =>
+            Effect.gen(function* () {
+              const token = yield* app.installationToken();
+              const data = yield* queryGraphql(
+                http,
+                token,
+                "find-missing-issues",
+                issuesPresentQuery(chunk.length),
+                {
+                  owner,
+                  name,
+                  ...Object.fromEntries(chunk.map((number, index) => [`n${index}`, number])),
+                },
+                issuesPresentData(chunk.length),
+              );
+              if (Option.isNone(data.repository)) {
+                return yield* invalidResponse(
+                  "find-missing-issues",
+                  `repository ${repository} came back null: deleted, renamed, or access lost`,
+                );
+              }
+              const issues = data.repository.value;
+              return chunk.filter((_, index) => issues[`i${index}`] === null);
+            }),
+        );
+        return missing.flat();
+      });
+
+      return { changes, labels, snapshot, missingIssues };
     }),
   );
 }

@@ -3,7 +3,7 @@ import { ConfigParser } from "@usine/config/parser";
 import { CursorStore } from "@usine/engine/cursor";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { RunEngine } from "@usine/engine/engine";
-import { ItemProjectionWriter } from "@usine/engine/item-projection";
+import { ItemProjectionReader, ItemProjectionWriter } from "@usine/engine/item-projection";
 import { LoopControl, type LoopRuntimeState } from "@usine/engine/loop-control";
 import { TriggerCondition } from "@usine/engine/trigger-condition";
 import {
@@ -21,6 +21,13 @@ export const itemProjectionWriterLayer = Layer.succeed(ItemProjectionWriter)({
   upsert: () => Effect.succeed(true),
   markGone: () => Effect.succeed(true),
 });
+
+const noItemProjections: ItemProjectionReader["Service"] = {
+  list: () => Effect.succeed([]),
+  openIssues: () => Effect.succeed([]),
+};
+
+export const itemProjectionReaderLayer = Layer.succeed(ItemProjectionReader)(noItemProjections);
 
 /** A queued Event always keeps its turn: the engine's pre-check behavior. */
 export const alwaysHoldsLayer = Layer.succeed(TriggerCondition)({
@@ -95,6 +102,7 @@ export const pollingTestLayer = (
   labelProjections: RepositoryLabelProjectionReader["Service"] = noRepositoryLabelProjections,
   cursorStore: CursorStore["Service"] = forgetfulCursorStore,
   cycleBudgets: CycleBudgets["Service"] = emptyCycleBudgets,
+  itemProjections: ItemProjectionReader["Service"] = noItemProjections,
 ) => {
   const cursors = Layer.succeed(CursorStore)(cursorStore);
   const expressions = Layer.succeed(ExpressionEngine)({
@@ -127,6 +135,7 @@ export const pollingTestLayer = (
     cursors,
     expressions,
     itemProjectionWriterLayer,
+    Layer.succeed(ItemProjectionReader)(itemProjections),
     repositoryLabelProjectionWriterLayer,
     Layer.succeed(RepositoryLabelProjectionReader)(labelProjections),
     reconciler,

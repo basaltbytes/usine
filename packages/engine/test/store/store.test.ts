@@ -970,6 +970,56 @@ describe("Item projections", () => {
       }).pipe(Effect.provide(services));
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  it.live("lists the open issues of one repository that are not marked gone", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const directory = InstanceDirectory.make(
+        yield* fileSystem.makeTempDirectoryScoped({ prefix: "usine-item-projection-open-" }),
+      );
+      const repository = RepositoryName.make("basaltbytes/usine");
+      const projection = (
+        source: "issue" | "pr",
+        number: number,
+        state: string,
+        owner: RepositoryName = repository,
+      ) =>
+        new ItemProjection({
+          itemKey: ItemKey.make(`github:${owner}:${number}`),
+          repository: owner,
+          source: ItemProjectionSource.make(source),
+          number: ItemNumber.make(number),
+          contentHash: ItemContentHash.make(`content-${number}`),
+          payload: { number, state },
+        });
+      const services = Layer.mergeAll(ItemProjectionReader.layer, ItemProjectionWriter.layer).pipe(
+        Layer.provide(localSqliteLayer(directory)),
+      );
+
+      yield* Effect.gen(function* () {
+        const reader = yield* ItemProjectionReader;
+        const writer = yield* ItemProjectionWriter;
+        for (const stored of [
+          projection("issue", 28, "OPEN"),
+          projection("issue", 12, "OPEN"),
+          projection("issue", 29, "CLOSED"),
+          projection("pr", 30, "OPEN"),
+          projection("issue", 31, "OPEN"),
+          projection("issue", 32, "OPEN", RepositoryName.make("basaltbytes/other")),
+        ]) {
+          yield* writer.upsert(stored);
+        }
+        yield* writer.markGone(
+          ItemKey.make(`github:${repository}:31`),
+          DateTime.makeUnsafe("2026-10-20T12:00:00Z"),
+        );
+        assert.deepStrictEqual(yield* reader.openIssues(repository), [
+          ItemNumber.make(12),
+          ItemNumber.make(28),
+        ]);
+      }).pipe(Effect.provide(services));
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });
 
 describe("repository label projections", () => {

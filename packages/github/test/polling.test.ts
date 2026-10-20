@@ -1,5 +1,6 @@
 import { NodeServices } from "@effect/platform-node";
 import { assert, describe, it } from "@effect/vitest";
+import { ItemNumber } from "@usine/core/item";
 import { RepositoryName } from "@usine/core/repository";
 import { Clock, DateTime, Effect, Layer, Option, Redacted, Schema } from "effect";
 import { HttpClient, HttpClientRequest, HttpClientResponse } from "effect/unstable/http";
@@ -499,6 +500,58 @@ describe("GitHubPolling", () => {
       assert.strictEqual((yield* fetch)._tag, "GitHubItemNotFoundError");
       // A null repository is not evidence about the Item.
       assert.strictEqual((yield* fetch)._tag, "InvalidGitHubResponseError");
+    }).pipe(Effect.provide(pollingLayer(client)));
+  });
+
+  it.effect("asks about 60 issues in two requests and returns the ones that come back null", () => {
+    const PresenceRequest = Schema.Struct({
+      query: Schema.String,
+      variables: Schema.Record(Schema.String, Schema.Union([Schema.String, Schema.Int])),
+    });
+    const gone = new Set([7, 55]);
+    const asked: Array<ReadonlyArray<number>> = [];
+    const client = HttpClient.make((request) =>
+      Effect.sync(() => {
+        assert.strictEqual(request.body._tag, "Uint8Array");
+        if (request.body._tag !== "Uint8Array") return assert.fail("missing JSON body");
+        const { query, variables } = Schema.decodeUnknownSync(PresenceRequest)(
+          JSON.parse(new TextDecoder().decode(request.body.body)),
+        );
+        const numbers = Object.entries(variables).flatMap(([name, value]) =>
+          /^n\d+$/u.test(name) ? [Schema.decodeUnknownSync(Schema.Int)(value)] : [],
+        );
+        asked.push(numbers);
+        assert.include(query, `i${numbers.length - 1}: issue(number: $n${numbers.length - 1})`);
+        return response(request, {
+          data: {
+            repository: Object.fromEntries(
+              numbers.map((number, index) => [`i${index}`, gone.has(number) ? null : { number }]),
+            ),
+          },
+          errors: numbers
+            .filter((number) => gone.has(number))
+            .map((number) => ({
+              type: "NOT_FOUND",
+              message: `Could not resolve to an Issue with the number of ${number}.`,
+            })),
+        });
+      }),
+    );
+
+    return Effect.gen(function* () {
+      const polling = yield* GitHubPolling;
+      const numbers = Array.from({ length: 60 }, (_, index) => ItemNumber.make(index + 1));
+      assert.deepStrictEqual(yield* polling.missingIssues(repository, numbers), [
+        ItemNumber.make(7),
+        ItemNumber.make(55),
+      ]);
+      assert.deepStrictEqual(
+        asked.map((chunk) => chunk.length),
+        [50, 10],
+      );
+      assert.deepStrictEqual(asked.flat(), numbers);
+      assert.deepStrictEqual(yield* polling.missingIssues(repository, []), []);
+      assert.strictEqual(asked.length, 2);
     }).pipe(Effect.provide(pollingLayer(client)));
   });
 

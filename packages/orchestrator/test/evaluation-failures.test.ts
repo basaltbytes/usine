@@ -37,6 +37,7 @@ import {
   inertGitHubLabelWriterLayer,
   inertLabelReconcilerLayer,
   itemProjectionWriterLayer,
+  itemProjectionReaderLayer,
   loopControlLayer,
   memoryCursorStore,
   noCycleBudgets,
@@ -179,6 +180,7 @@ const processLayer = (github: GitHubPolling["Service"], cursors: CursorStore["Se
         noCycleBudgets,
         Layer.succeed(CursorStore)(cursors),
         itemProjectionWriterLayer,
+        itemProjectionReaderLayer,
         repositoryLabelProjectionReaderLayer,
         repositoryLabelProjectionWriterLayer,
         inertGitHubLabelWriterLayer,
@@ -221,6 +223,7 @@ describe("Loop evaluation failures", () => {
         const fetched: Array<number> = [];
         const logs = capturedLogs();
         const github: GitHubPolling["Service"] = {
+          missingIssues: () => Effect.succeed([]),
           labels: () =>
             Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
           changes: changesOnce([
@@ -276,6 +279,7 @@ describe("Loop evaluation failures", () => {
       let contentHash = "a";
       let fetches = 0;
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
         changes: changesOnce([new ChangedPullRequest({ number: 12, updatedAt })]),
@@ -324,6 +328,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       const fetched: Array<number> = [];
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
         changes: changesOnce([new ChangedIssue({ number: 28, updatedAt })]),
@@ -374,6 +379,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       const fetched: Array<number> = [];
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
         changes: changesOnce([new ChangedIssue({ number: 28, updatedAt })]),
@@ -418,6 +424,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       let deleted = false;
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
         changes: changesOnce([new ChangedIssue({ number: 28, updatedAt })]),
@@ -463,6 +470,7 @@ describe("Loop evaluation failures", () => {
       const cursors = memoryCursorStore();
       let deleted = false;
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels: () =>
           Effect.succeed(new RepositoryLabelCatalog({ entityTag: Option.none(), labels: [] })),
         changes: changesOnce([new ChangedIssue({ number: 28, updatedAt })]),

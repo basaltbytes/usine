@@ -64,6 +64,7 @@ describe("Polling self-write Hints", () => {
   it.effect("extends an in-flight wait when another writer reports a later retry deadline", () => {
     let snapshots = 0;
     const github: GitHubPolling["Service"] = {
+      missingIssues: () => Effect.succeed([]),
       labels,
       changes: (_repository, cursor) =>
         Effect.succeed(new RepositoryNotModified({ cursor, nextPollAt: Option.none() })),
@@ -96,6 +97,7 @@ describe("Polling self-write Hints", () => {
     let requests = 0;
     let snapshots = 0;
     const github: GitHubPolling["Service"] = {
+      missingIssues: () => Effect.succeed([]),
       labels,
       changes: (_repository, cursor) =>
         Effect.gen(function* () {
@@ -139,6 +141,7 @@ describe("Polling self-write Hints", () => {
       let snapshots = 0;
       const until = DateTime.makeUnsafe(90_000);
       const github: GitHubPolling["Service"] = {
+        missingIssues: () => Effect.succeed([]),
         labels,
         changes: (_repository, cursor) =>
           Effect.suspend(() => {
@@ -189,6 +192,7 @@ describe("Polling self-write Hints", () => {
         let requests = 0;
         let snapshots = 0;
         const github: GitHubPolling["Service"] = {
+          missingIssues: () => Effect.succeed([]),
           labels,
           changes: (_repository, cursor) =>
             Effect.sync(() => {

@@ -250,14 +250,15 @@ export const observeItem = Effect.fn("PollingTriggers.observeItem")(function* (
 });
 
 /**
- * Records in an Item's Board projection that GitHub no longer has it, so its
- * card leaves the open lanes. True when this marked a stored projection.
+ * Records in the Board projection of Item `number` that GitHub no longer has
+ * it, so its card leaves the open lanes. True when this marked a stored
+ * projection.
  */
 export const markItemGone = Effect.fn("PollingTriggers.markItemGone")(function* (
   repository: RepositoryName,
-  changed: ChangedItem,
+  number: number,
 ) {
-  yield* Effect.annotateCurrentSpan({ repository, item: changed.number });
+  yield* Effect.annotateCurrentSpan({ repository, item: number });
   const items = yield* ItemProjectionWriter;
-  return yield* items.markGone(gitHubItemKey(repository, changed.number), yield* DateTime.now);
+  return yield* items.markGone(gitHubItemKey(repository, number), yield* DateTime.now);
 });

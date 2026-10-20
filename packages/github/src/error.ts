@@ -10,6 +10,7 @@ export const GitHubOperation = Schema.Literals([
   "fetch-issue-snapshot",
   "fetch-item-timeline",
   "fetch-pull-request-snapshot",
+  "find-missing-issues",
   "list-installation-repositories",
   "list-repository-labels",
   "mint-installation-token",

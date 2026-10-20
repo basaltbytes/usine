@@ -11,7 +11,7 @@ import {
   type EnginePersistenceError,
   type SubmissionResult,
 } from "@usine/engine/engine";
-import { ItemProjectionWriter } from "@usine/engine/item-projection";
+import { ItemProjectionReader, ItemProjectionWriter } from "@usine/engine/item-projection";
 import { LoopControl } from "@usine/engine/loop-control";
 import {
   RepositoryLabelProjectionReader,
@@ -60,6 +60,7 @@ import {
 import { evaluateItem, revokeMissingItem } from "./loop-evaluation.ts";
 import { markItemGone, observeItem, synchronizeLabels } from "./repository-sync.ts";
 import { ItemHints, type ItemHint } from "./hints.ts";
+import { checkOpenIssues, NO_OPEN_ISSUE_CHECK, OPEN_ISSUE_CHECK_INTERVAL } from "./open-issues.ts";
 
 /** GitHub tolerates a handful of parallel REST and GraphQL calls per token. */
 const REPOSITORY_CONCURRENCY = 4;
@@ -156,9 +157,11 @@ export class PollingTriggers extends Context.Service<
      * from the previous cycle's, fetches those failing Items again, changed
      * or not. An open pull request or failing Item that only the cursor kept
      * and that GitHub no longer has is dropped from the cursor with a warning,
-     * and its unstarted Runs are revoked. Repository failures are reported
-     * while siblings continue; failure to read Loop runtime state fails the
-     * whole cycle.
+     * and its unstarted Runs are revoked. At most once every 10 minutes per
+     * repository, the cycle also asks GitHub whether it still has each issue
+     * stored as open, and marks gone the ones it no longer has, revoking their
+     * unstarted Runs. Repository failures are reported while siblings
+     * continue; failure to read Loop runtime state fails the whole cycle.
      */
     readonly poll: (instance: LoadedInstance) => Effect.Effect<PollCycle, EnginePersistenceError>;
     /** Nudges an authoritative Item fetch after a self-write, retaining any request backoff from the writer. Pending duplicates coalesce; polling repairs loss. */
@@ -198,6 +201,8 @@ export class PollingTriggers extends Context.Service<
         instance: Option.none(),
         repositories: new Set(),
       });
+      // When each repository's open issues were last checked against GitHub.
+      const openIssueChecks = yield* Ref.make<ReadonlyMap<CursorKey, number>>(new Map());
 
       const emptyCursor = (watches: ReadonlyArray<WatchKey>) =>
         new StoredPollCursor({
@@ -232,6 +237,28 @@ export class PollingTriggers extends Context.Service<
       ) {
         yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
         yield* cursors.write(cursorKey(watched.repository), StoredPollCursor, cursor);
+      });
+
+      /** Checks the repository's open issues unless the last check started less than 10 minutes ago. */
+      const checkOpenIssuesWhenDue = Effect.fn("PollingTriggers.checkOpenIssuesWhenDue")(function* (
+        watched: WatchedRepository,
+      ) {
+        yield* Effect.annotateCurrentSpan({ repository: watched.repository.name });
+        const key = cursorKey(watched.repository);
+        const now = yield* Clock.currentTimeMillis;
+        const lastCheck = (yield* Ref.get(openIssueChecks)).get(key);
+        if (
+          lastCheck !== undefined &&
+          now - lastCheck < Duration.toMillis(OPEN_ISSUE_CHECK_INTERVAL)
+        ) {
+          yield* Effect.logDebug("Open issues were checked less than 10 minutes ago; skipped", {
+            repository: watched.repository.name,
+            lastCheckedAt: DateTime.formatIso(DateTime.makeUnsafe(lastCheck)),
+          });
+          return NO_OPEN_ISSUE_CHECK;
+        }
+        yield* Ref.update(openIssueChecks, (checks) => new Map(checks).set(key, now));
+        return yield* checkOpenIssues(watched.repository, watched.loops);
       });
 
       const pollRepository = Effect.fn("PollingTriggers.pollRepository")(function* (
@@ -345,9 +372,13 @@ export class PollingTriggers extends Context.Service<
                     const revokedRuns = yield* revokeMissingItem(
                       watched.repository,
                       watched.loops,
-                      item,
+                      item._tag === "ChangedIssue" ? "issue" : "pr",
+                      item.number,
                     );
-                    const projectionMarkedGone = yield* markItemGone(watched.repository.name, item);
+                    const projectionMarkedGone = yield* markItemGone(
+                      watched.repository.name,
+                      item.number,
+                    );
                     yield* Effect.logWarning(
                       "GitHub no longer has an Item the poll cursor kept; it is dropped from the cursor",
                       {
@@ -376,6 +407,8 @@ export class PollingTriggers extends Context.Service<
             0,
           );
           const itemCycles = observed.map(({ cycle }) => cycle);
+          const openIssueCheck = yield* checkOpenIssuesWhenDue(watched);
+          yield* hints.defer(openIssueCheck.nextPollAt);
           // An Item the cycle did not fetch keeps its recorded failures.
           const failingItems = [
             ...stored.failingItems.filter(({ number }) => !items.has(number)),
@@ -415,16 +448,17 @@ export class PollingTriggers extends Context.Service<
             submissions: itemCycles.flatMap(({ submissions }) => submissions),
             revokedRuns: itemCycles.reduce(
               (sum, cycle) => sum + cycle.revokedRuns,
-              missingRevokedRuns,
+              missingRevokedRuns + openIssueCheck.revokedRuns,
             ),
             failures: [
               ...preflight.failures,
+              ...openIssueCheck.failures,
               ...failingItems.flatMap((failing) =>
                 failingItemPollFailures(watched.repository.name, failing),
               ),
             ],
             preflightFindings: preflight.preflightFindings,
-            nextPollAt,
+            nextPollAt: latestPollAt([nextPollAt, openIssueCheck.nextPollAt]),
           } satisfies RepositoryCycle;
         }).pipe(
           Effect.mapError((error): InterruptedRepositoryCycle => ({
@@ -452,6 +486,7 @@ export class PollingTriggers extends Context.Service<
           CycleBudgets,
           ExpressionEngine,
           GitHubPolling,
+          ItemProjectionReader,
           ItemProjectionWriter,
           LabelReconciler,
           RepositoryLabelProjectionReader,

@@ -43,6 +43,8 @@ Each cycle first refreshes the complete label catalog in every managed repositor
 
 After label preflight, the cycle asks `GitHubPolling` for changed items, fetches one payload snapshot per changed item, updates the durable Item projection, and evaluates each stream-matching loop's CEL `if:` expression against that snapshot. A match renders every `{{ CEL expression }}` in the loop body, resolves the named agent and effective parent model, then stores that immutable execution context with the Event. The Event identity covers the loop, canonical repository, item number, and timestamp-free content hash. An unmatch revokes pending or approval-waiting work for that loop and item. Repositories without matching loops are still polled for their Board projection.
 
+Change detection never lists an issue that was deleted or transferred, so at most once every 10 minutes per repository the cycle asks `GitHubPolling.missingIssues` about every issue stored as open. Each one GitHub no longer has is marked gone, so its Board card leaves the open lanes, and its pending or approval-waiting work is revoked. A failed check is logged and reported on the cycle, and the next one waits the same 10 minutes.
+
 A loop whose `if:` or prompt fails to evaluate on an item affects only that loop and item: the other loops and items continue and the cursor advances. The cursor records the failing item, so every cycle reports the failure with the loop and item until the loop evaluates on it, and the error is logged once per loop, item, and content hash. The first cycle of a new process, and the first cycle after the instance changes, fetches the failing items again, so a loop fixed before a restart or a reload evaluates them without waiting for a change.
 
 Polling cursors live in the engine's `CursorStore`. When a loop starts watching a repository or its trigger expression changes, the orchestrator discards that repository's efficiency cursor and performs a cold poll, while the permanent Event ledger absorbs repeated state.
@@ -51,7 +53,7 @@ Before opening a queued Event's Run, the orchestrator re-checks its trigger agai
 
 PR-triggered Attempts fetch and check out the immutable `headRefOid` saved in their Event payload. A later push creates a new Event with its new head commit. Issue and schedule Attempts use the repository's default branch.
 
-`PollingTriggers.layer` requires `CursorStore`, `LoopControl`, `RunEngine`, `ConfigParser`, `ExpressionEngine`, `GitHubPolling`, the repository-label projection reader/writer, and `LabelReconciler`. `LabelReconciler.layer` in turn requires `GitHubLabelWriter`. The engine's local SQLite layer supplies the engine services:
+`PollingTriggers.layer` requires `CursorStore`, `LoopControl`, `RunEngine`, `ConfigParser`, `ExpressionEngine`, `GitHubPolling`, the Item and repository-label projection readers and writers, and `LabelReconciler`. `LabelReconciler.layer` in turn requires `GitHubLabelWriter`. The engine's local SQLite layer supplies the engine services:
 
 ```ts
 import { Layer } from "effect"

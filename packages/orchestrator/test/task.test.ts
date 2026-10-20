@@ -376,7 +376,10 @@ const observation = (requested: Ref.Ref<ReadonlyArray<string>>) => {
     unpause: () => Effect.die("unused"),
     states: Effect.succeed([]),
   });
-  const itemReader = Layer.succeed(ItemProjectionReader)({ list: () => Effect.succeed(items) });
+  const itemReader = Layer.succeed(ItemProjectionReader)({
+    list: () => Effect.succeed(items),
+    openIssues: () => Effect.die("the Task read does not check open issues"),
+  });
   const labels = Layer.succeed(RepositoryLabelProjectionReader)({
     get: () => Effect.succeed(Option.none()),
   });
