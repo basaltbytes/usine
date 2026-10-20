@@ -1,14 +1,16 @@
 import { Link } from "@tanstack/react-router";
-import { isSettledItemState, type LaneItemState, type LaneName } from "@usine/config/board";
 import type { RepositoryName } from "@usine/core/repository";
 import type {
   BoardPullRequestView,
+  BoardTaskView,
   ProjectView,
   RunView,
   StalledItemView,
 } from "@usine/orchestrator/operator";
+import { Match } from "effect";
+import { Fragment } from "react";
 import { Page, PageHeading } from "@/components/page";
-import { StatusBadge } from "@/components/status-badge";
+import { StateMark, StatusBadge } from "@/components/status-badge";
 import {
   Table,
   TableBody,
@@ -17,7 +19,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Toggle } from "@/components/ui/toggle";
 import { useNow } from "@/hooks/use-now";
 import { cn } from "@/lib/utils";
 import { EmptyLine, ItemTitle } from "../desk/section.tsx";
@@ -28,10 +29,11 @@ import {
   itemStateLabel,
   runActivityAt,
   type TaskRow,
+  taskCounts,
   taskLoops,
-  taskRows,
   taskNumber,
-  taskStall,
+  taskOrigin,
+  taskRows,
 } from "./model.ts";
 import { linkedRow, rowLink } from "./section.tsx";
 
@@ -39,24 +41,86 @@ const pullRequestLink =
   "relative z-10 rounded-sm font-mono text-xs text-primary underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring/70 focus-visible:outline-solid";
 
 // The columns follow the table's own width, since the sidebar beside a mid-size window leaves
-// less room than a phone held sideways. Loops and Pull request need 56rem; below 42rem, State
-// and Last run fold under the title, so the table never scrolls sideways.
+// less room than a phone held sideways. Runs and Pull request need 56rem, so they drop on phones
+// and beside the sidebar on mid-size windows. Status and Last run keep a minimum width that grows
+// with the table, from 28rem, and wrap past it; from 36rem Last run stays on one line. On a
+// phone both wrap, so the table never scrolls sideways.
 const WIDE_COLUMN = "hidden @4xl:table-cell";
-const MID_COLUMN = "hidden @2xl:table-cell";
+const STATUS_COLUMN = "whitespace-normal @md:min-w-40 @xl:min-w-52";
+const LAST_RUN_COLUMN = "whitespace-normal @md:min-w-28 @xl:whitespace-nowrap";
 
-/** The current Item's state as a mark and word, then the lane in subtext0. */
-const ItemState = ({ state, lane }: { readonly state: LaneItemState; readonly lane: LaneName }) => (
-  <span className="flex h-5 min-w-0 items-center gap-2">
-    <StatusBadge state={itemStateLabel(state)} />
-    <span className="truncate text-xs text-muted-foreground">{lane}</span>
-  </span>
-);
+/** The tone of a stall's state mark: the state of the Run its reason names, or what holds it. */
+const stallTone = ({ reason }: StalledItemView): string =>
+  Match.valueTags(reason, {
+    AwaitingApproval: () => "Waiting",
+    HeldForOperator: () => "needs-you",
+    CycleBudgetUsedUp: () => "needs-you",
+    RunFailed: () => "Failed",
+    ClosedUnchanged: ({ run }) => run.state,
+    LoopPaused: () => "paused",
+    QueuedForWorker: ({ run }) => run.state,
+    AwaitingPoll: () => "Pending",
+  });
+
+/** A Task's status: the state that gives its mark's tone, and its words. A stall's Loop goes
+ * first when neither the fragment nor the last Run names it. */
+const statusLine = (
+  { task, last, status }: TaskRow,
+  now: number,
+): { readonly state: string; readonly words: string } =>
+  Match.valueTags(status, {
+    Running: ({ run }) => ({ state: "Running", words: `Running ${run.loop}` }),
+    AwaitingApproval: () => ({ state: "Waiting", words: "Waiting for approval" }),
+    Queued: ({ run }) => ({ state: run.state, words: run.state }),
+    Stalled: ({ stall }) => ({
+      state: stallTone(stall),
+      words: `${last.loop !== stall.loop && !stallNamesLoop(stall) ? `${stall.loop} ` : ""}${stallSentence(stall, now)}`,
+    }),
+    NeedsAttention: () => ({ state: "needs-you", words: "Needs attention" }),
+    Done: () => ({ state: itemStateLabel(task.state), words: "Done" }),
+    Ended: ({ run }) => ({ state: run.state, words: run.state }),
+  });
+
+/** The status's mark and words on the row's 20px line; the mark stays on the first line when
+ * the words wrap. */
+const Status = ({ row, now }: { readonly row: TaskRow; readonly now: number }) => {
+  const { state, words } = statusLine(row, now);
+  return (
+    <span className="flex items-start gap-1.5 text-xs/5 font-medium">
+      <StateMark state={state} className="mt-1.75" />
+      {words}
+    </span>
+  );
+};
+
+/** The Loops in the order they first ran, each after the mark of its last Run's state, then the
+ * Run count. */
+const Runs = ({ task }: { readonly task: BoardTaskView }) => {
+  const loops = taskLoops(task);
+  return (
+    <span className="flex min-w-0 items-baseline gap-2">
+      <span className="truncate" title={loops.map(({ loop }) => loop).join(" · ")}>
+        {loops.map(({ loop, state }, index) => (
+          <Fragment key={loop}>
+            {index > 0 && <span className="text-muted-foreground"> · </span>}
+            <StateMark state={state} className="mr-1.5 align-middle" />
+            {loop}
+            <span className="sr-only"> {state}</span>
+          </Fragment>
+        ))}
+      </span>
+      <span className="shrink-0 font-mono text-xs text-muted-foreground tabular-nums">
+        {task.runs.length}
+      </span>
+    </span>
+  );
+};
 
 /** The last Run's Loop, its state, and when it was last at work, such as `12m ago`. */
 const LastRun = ({ run, now }: { readonly run: RunView; readonly now: number }) => {
   const at = runActivityAt(run);
   return (
-    <span className="flex min-w-0 items-center gap-2">
+    <span className="flex min-w-0 flex-wrap items-center gap-x-2 @xl:flex-nowrap">
       <span className="truncate">{run.loop}</span>
       <StatusBadge state={run.state} />
       <time
@@ -70,147 +134,90 @@ const LastRun = ({ run, now }: { readonly run: RunView; readonly now: number }) 
   );
 };
 
-/** Why the Task is stalled, as Overview and the Board card say it; the stalled Loop goes first
- * when neither the last Run nor the fragment names it. */
-const StallLine = ({
-  stall,
-  lastLoop,
-  now,
-}: {
-  readonly stall: StalledItemView;
-  readonly lastLoop: RunView["loop"] | undefined;
-  readonly now: number;
-}) => (
-  <p className="mt-0.5 text-xs whitespace-normal text-muted-foreground">
-    {lastLoop !== stall.loop && !stallNamesLoop(stall) && (
-      <span className="font-medium text-foreground">{stall.loop} </span>
-    )}
-    {stallSentence(stall, now)}
-  </p>
-);
-
-/** The open pull request as a link, or the merged one with its state. */
+/** The pull request's number as a link, then whether it is open or merged. */
 const PullRequest = ({ pullRequest }: { readonly pullRequest: BoardPullRequestView }) => (
-  <span className="inline-flex items-baseline gap-2">
+  <span className="inline-flex items-baseline gap-1.5">
     <a href={pullRequest.url} target="_blank" rel="noreferrer" className={pullRequestLink}>
       #{pullRequest.number}
     </a>
-    {pullRequest.state === "pr-merged" && (
-      <span className="text-xs text-muted-foreground">Merged</span>
-    )}
+    <span className="text-xs text-muted-foreground">
+      {pullRequest.state === "pr-merged" ? "merged" : "open"}
+    </span>
   </span>
 );
 
 const TaskListRow = ({
-  row: { task, lane },
+  row,
   repository,
-  stall,
   now,
 }: {
   readonly row: TaskRow;
   readonly repository: RepositoryName;
-  readonly stall: StalledItemView | null;
   readonly now: number;
-}) => {
-  const loops = taskLoops(task).join(", ");
-  const last = task.runs.at(-1);
-  const lastRun = (
-    <>
-      {last !== undefined && <LastRun run={last} now={now} />}
-      {stall !== null && <StallLine stall={stall} lastLoop={last?.loop} now={now} />}
-    </>
-  );
-  return (
-    <TableRow className={linkedRow}>
-      <TableCell className="w-full max-w-0 py-3 align-top">
-        <Link
-          data-row-link
-          to="/projects/$owner/$name/tasks/$number"
-          params={{ ...projectParams(repository), number: taskNumber(task) }}
-          className={cn("block min-w-0", rowLink)}
-        >
-          <ItemTitle item={task} />
-        </Link>
-        <div className="mt-1 flex flex-col gap-0.5 @2xl:hidden">
-          <ItemState state={task.state} lane={lane} />
-          {lastRun}
-        </div>
-      </TableCell>
-      <TableCell className={cn("py-3 align-top", MID_COLUMN)}>
-        <ItemState state={task.state} lane={lane} />
-      </TableCell>
-      <TableCell className={cn("max-w-48 py-3 align-top", WIDE_COLUMN)}>
-        <p className="truncate" title={loops}>
-          {loops}
-        </p>
-      </TableCell>
-      <TableCell className="py-3 text-right align-top tabular-nums">{task.runs.length}</TableCell>
-      <TableCell className={cn("min-w-56 py-3 align-top", MID_COLUMN)}>{lastRun}</TableCell>
-      <TableCell className={cn("py-3 text-right align-top", WIDE_COLUMN)}>
-        {task.pullRequest !== null && <PullRequest pullRequest={task.pullRequest} />}
-      </TableCell>
-    </TableRow>
-  );
-};
+}) => (
+  <TableRow className={linkedRow}>
+    <TableCell className="w-full max-w-0 py-3 align-top">
+      <Link
+        data-row-link
+        to="/projects/$owner/$name/tasks/$number"
+        params={{ ...projectParams(repository), number: taskNumber(row.task) }}
+        className={cn("block min-w-0", rowLink)}
+      >
+        <ItemTitle item={taskOrigin(row.task)} />
+      </Link>
+    </TableCell>
+    <TableCell className={cn("py-3 align-top", STATUS_COLUMN)}>
+      <Status row={row} now={now} />
+    </TableCell>
+    <TableCell className={cn("max-w-56 py-3 align-top", WIDE_COLUMN)}>
+      <Runs task={row.task} />
+    </TableCell>
+    <TableCell className={cn("py-3 align-top", LAST_RUN_COLUMN)}>
+      <LastRun run={row.last} now={now} />
+    </TableCell>
+    <TableCell className={cn("py-3 text-right align-top", WIDE_COLUMN)}>
+      {row.task.pullRequest !== null && <PullRequest pullRequest={row.task.pullRequest} />}
+    </TableCell>
+  </TableRow>
+);
 
 /**
- * A Project's Tasks as rows, the most recently active first: the open ones, and with `showDone`
- * also those whose current Item is closed, as the Done lanes hold them. `stalled` is the desk's
- * list of stalled Items, whose reason a stalled Task's row shows; `onShowDone` answers the Done
- * toggle.
+ * The Tasks of a Project that usine ran at least once, as rows: those in flight first, then the
+ * rest, as `taskRows` orders them. `stalled` is the desk's list of stalled Items, whose reason a
+ * stalled Task's status shows.
  */
 export const TaskList = ({
   project,
   stalled,
-  showDone,
-  onShowDone,
 }: {
   readonly project: ProjectView;
   readonly stalled: ReadonlyArray<StalledItemView>;
-  readonly showDone: boolean;
-  readonly onShowDone: (show: boolean) => void;
 }) => {
   const now = useNow(30_000);
-  const rows = taskRows(project.board.lanes);
-  const open = rows.filter(({ task }) => !isSettledItemState(task.state));
-  const done = rows.length - open.length;
-  const shown = showDone ? rows : open;
+  const rows = taskRows(project.board.lanes, stalled);
   return (
     <Page width="full">
-      <PageHeading
-        title="Tasks"
-        counts={rows.length === 0 ? undefined : `${open.length} open, ${done} done`}
-        actions={
-          done === 0 ? undefined : (
-            <Toggle variant="outline" pressed={showDone} onPressedChange={onShowDone}>
-              Done
-              <span className="text-muted-foreground tabular-nums">{done}</span>
-            </Toggle>
-          )
-        }
-      />
-      {shown.length === 0 ? (
-        <EmptyLine>{rows.length === 0 ? "No tasks" : "No open tasks"}</EmptyLine>
+      <PageHeading title="Tasks" counts={taskCounts(rows)} />
+      {rows.length === 0 ? (
+        <EmptyLine>No runs yet</EmptyLine>
       ) : (
         <div className="@container -mx-2">
           <Table aria-label={`${project.repository} tasks`}>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
                 <TableHead>Task</TableHead>
-                <TableHead className={MID_COLUMN}>State</TableHead>
-                <TableHead className={WIDE_COLUMN}>Loops</TableHead>
-                <TableHead className="text-right">Runs</TableHead>
-                <TableHead className={MID_COLUMN}>Last run</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead className={WIDE_COLUMN}>Runs</TableHead>
+                <TableHead>Last run</TableHead>
                 <TableHead className={cn("text-right", WIDE_COLUMN)}>Pull request</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {shown.map((row) => (
+              {rows.map((row) => (
                 <TaskListRow
                   key={row.task.itemKey}
                   row={row}
                   repository={project.repository}
-                  stall={taskStall(stalled, row.task)}
                   now={now}
                 />
               ))}

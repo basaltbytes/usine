@@ -301,6 +301,34 @@ export const boardOverview = () =>
     needsYou: [],
   });
 
+/** The Board after the operator resolved the failed review of the pinned pull request (#28), so
+ * nothing about it waits on the operator. */
+export const boardOverviewResolved = () => {
+  const overview = boardOverview();
+  const resolve = (task: BoardTaskView) => {
+    if (task.itemKey !== pinned.itemKey) return task;
+    const runs = task.runs.map((run) => new RunView({ ...run, canResolveFailure: false }));
+    return new BoardTaskView({ ...task, runs, run: null, needsYou: false });
+  };
+  return new ReadyOverview({
+    ...overview,
+    projects: overview.projects.map(
+      (project) =>
+        new ProjectView({
+          ...project,
+          board: new BoardView({
+            ...project.board,
+            lanes: project.board.lanes.map((lane) =>
+              lane._tag === "WritableBoardLane"
+                ? new WritableBoardLaneView({ ...lane, items: lane.items.map(resolve) })
+                : new ReadOnlyBoardLaneView({ ...lane, items: lane.items.map(resolve) }),
+            ),
+          }),
+        }),
+    ),
+  });
+};
+
 const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView["reason"]) =>
   new StalledItemView({
     repository: boardRepository,
