@@ -292,7 +292,10 @@ it("keeps a saved destination when the project is reopened before GitHub is obse
   await expect.element(taskIn("Ready")).toBeVisible();
 });
 
-it("takes a drop on a collapsed empty lane, which widens under the drag", async () => {
+it("takes a keyboard drop on a collapsed empty lane before a lane with cards, widening it under the drag", async () => {
+  await respond(overview(["Backlog", "In progress"]));
+  await queryClient.refetchQueries({ queryKey: ["overview"] });
+  await expect.element(taskIn("In progress", 2)).toBeVisible();
   const ready = lane("Ready");
   expect(ready.element().getBoundingClientRect().width).toBeLessThanOrEqual(40);
   const card = taskIn("Backlog").element().closest("[data-slot=card]");

@@ -5,6 +5,7 @@ import {
   type DragOverEvent,
   DragOverlay,
   type DragStartEvent,
+  type KeyboardCoordinateGetter,
   KeyboardSensor,
   PointerSensor,
   pointerWithin,
@@ -62,11 +63,42 @@ export const laneUnder = (
   lanes.find((lane) => lane.items.some(({ itemKey }) => itemKey === over));
 
 /** The lane under the pointer wins; corner distance would hand a tall empty lane's drop to the
- * cards of the lane next to it. Intersection is the fallback for keyboard moves. */
+ * cards of the lane next to it. A keyboard drag has no pointer, so the dragged card's top-left
+ * corner stands in for it; intersection is the last fallback. */
 const dropCollision: CollisionDetection = (args) => {
   const within = pointerWithin(args);
-  return within.length > 0 ? within : rectIntersection(args);
+  if (within.length > 0) return within;
+  if (args.pointerCoordinates === null) {
+    const corner = pointerWithin({
+      ...args,
+      pointerCoordinates: { x: args.collisionRect.left + 1, y: args.collisionRect.top + 1 },
+    });
+    if (corner.length > 0) return corner;
+  }
+  return rectIntersection(args);
 };
+
+/** Left and Right move a keyboard drag to the top of the nearest lane that takes drops on that
+ * side, a collapsed one included; Up and Down move it between cards as sortable lists do. */
+const laneKeyboardCoordinates =
+  (lanes: ReadonlyArray<BoardLaneView>): KeyboardCoordinateGetter =>
+  (event, args) => {
+    const right = event.code === "ArrowRight";
+    if (!right && event.code !== "ArrowLeft") return sortableKeyboardCoordinates(event, args);
+    event.preventDefault();
+    const { collisionRect, droppableRects, droppableContainers } = args.context;
+    if (collisionRect === null) return undefined;
+    const ids = new Set<UniqueIdentifier>(lanes.map(({ id }) => id));
+    const [next] = droppableContainers
+      .getEnabled()
+      .flatMap(({ id }) => {
+        const rect = droppableRects.get(id);
+        return rect !== undefined && ids.has(id) ? [rect] : [];
+      })
+      .filter(({ left }) => (right ? left > collisionRect.left : left < collisionRect.left))
+      .sort((a, b) => (right ? a.left - b.left : b.left - a.left));
+    return next === undefined ? undefined : { x: next.left, y: next.top };
+  };
 
 /** Shows a move in its target lane while the label write and the next poll are in flight. */
 const applyMove = (
@@ -234,10 +266,6 @@ export const ProjectBoard = ({
   const [shown, setShown] = useState<ReadonlySet<BoardLaneId>>(new Set());
   const [showAll, setShowAll] = useState(false);
   const { moves, moveItem, isPending, error } = useBoardMoves(project);
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  );
   const uncarded = runsWithoutCard(project);
   const {
     lanes,
@@ -247,6 +275,10 @@ export const ProjectBoard = ({
     shown,
     showAll,
   });
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: laneKeyboardCoordinates(lanes) }),
+  );
   const flows = laneFlows(lanes, loops);
   const stallOf = (task: BoardTaskView): StalledItemView | null => {
     const keys = new Set(task.items.map(({ itemKey }) => itemKey));
