@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useMatchRoute } from "@tanstack/react-router";
 import type { RepositoryName } from "@usine/core/repository";
 import type { ProjectView } from "@usine/orchestrator/operator";
 import {
@@ -24,6 +24,16 @@ import { projectParams } from "../overview.ts";
 /** What the work panel shows: Overview, a Project's Board, its Tasks list or one of its Task
  * pages, another page of a Project such as a Run page, or the Configuration section. */
 export type OperatorView = "desk" | "board" | "tasks" | "project" | "configuration";
+
+/** The page the work panel shows, from the matched route. */
+export const useOperatorView = (): OperatorView => {
+  const matchRoute = useMatchRoute();
+  if (matchRoute({ to: "/configuration", fuzzy: true }) !== false) return "configuration";
+  if (matchRoute({ to: "/" }) !== false) return "desk";
+  if (matchRoute({ to: "/projects/$owner/$name/tasks", fuzzy: true }) !== false) return "tasks";
+  if (matchRoute({ to: "/projects/$owner/$name" }) !== false) return "board";
+  return "project";
+};
 
 export const AppSidebar = ({
   projects,

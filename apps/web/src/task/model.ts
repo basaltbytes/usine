@@ -82,32 +82,25 @@ export const taskStall = (
 export const taskNumber = (task: Pick<BoardTaskView, "items" | "number">): string =>
   String(task.items[0]?.number ?? task.number);
 
-/** A Task as a row of the Tasks list: the Task, the lane it sits in, and when it was last active. */
+/** A Task as a row of the Tasks list, with the lane it sits in. */
 export interface TaskRow {
   readonly task: BoardTaskView;
   readonly lane: LaneName;
-  /** When its last Run was last at work or, for a Task without Runs, when GitHub last updated
-   * its current Item. */
-  readonly activeAt: string;
 }
+
+/** When a Task was last active: when its last Run was last at work or, for a Task without Runs,
+ * when GitHub last updated its current Item. */
+const activeAt = ({ runs, updatedAt }: BoardTaskView): number => {
+  const last = runs.at(-1);
+  return Date.parse(last === undefined ? updatedAt : runActivityAt(last));
+};
 
 /** Every Task of the lanes as a Tasks list row, the most recently active first; of two Tasks
  * active at the same time, the one with the higher current Item number comes first. */
 export const taskRows = (lanes: ReadonlyArray<BoardLaneView>): ReadonlyArray<TaskRow> =>
   lanes
-    .flatMap(({ name, items }) =>
-      items.map((task) => {
-        const last = task.runs.at(-1);
-        return {
-          task,
-          lane: name,
-          activeAt: last === undefined ? task.updatedAt : runActivityAt(last),
-        };
-      }),
-    )
-    .sort(
-      (a, b) => Date.parse(b.activeAt) - Date.parse(a.activeAt) || b.task.number - a.task.number,
-    );
+    .flatMap(({ name, items }) => items.map((task) => ({ task, lane: name })))
+    .sort((a, b) => activeAt(b.task) - activeAt(a.task) || b.task.number - a.task.number);
 
 /** The Loops that ran on a Task, each named once, in the order they first ran. */
 export const taskLoops = (task: Pick<BoardTaskView, "runs">): ReadonlyArray<LoopName> => [

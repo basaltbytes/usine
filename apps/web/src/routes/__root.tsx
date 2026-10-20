@@ -4,7 +4,6 @@ import {
   createRootRouteWithContext,
   Link,
   Outlet,
-  useMatchRoute,
   useNavigate,
   useParams,
   useRouter,
@@ -12,7 +11,7 @@ import {
 import { RepositoryName } from "@usine/core/repository";
 import { RunId } from "@usine/core/run";
 import { Schema } from "effect";
-import { AppSidebar, type OperatorView } from "@/components/app-sidebar";
+import { AppSidebar, type OperatorView, useOperatorView } from "@/components/app-sidebar";
 import { BootScreen } from "@/components/boot-screen";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -132,19 +131,8 @@ const Shell = () => {
   // Plain useNavigate resolves "." against the current route; Route.useNavigate would pin it to "/".
   const navigate = useNavigate();
   const params = useParams({ strict: false });
-  const matchRoute = useMatchRoute();
   const project = params.repository;
-  const atDesk = matchRoute({ to: "/" }) !== false;
-  const view: OperatorView =
-    matchRoute({ to: "/configuration", fuzzy: true }) !== false
-      ? "configuration"
-      : atDesk
-        ? "desk"
-        : matchRoute({ to: "/projects/$owner/$name/tasks", fuzzy: true }) !== false
-          ? "tasks"
-          : matchRoute({ to: "/projects/$owner/$name" }) !== false
-            ? "board"
-            : "project";
+  const view = useOperatorView();
   const closeRun = () => void navigate({ to: ".", search: ({ run: _run, ...rest }) => rest });
   // Remember the last opened Run so the Sheet stays mounted for its exit transition.
   const [shownRun, setShownRun] = useState(run);
@@ -185,7 +173,7 @@ const Shell = () => {
             </Alert>
           )}
           {/* The Overview page lists Needs attention as its first block. */}
-          {!atDesk && <NeedsYou needs={data.needsYou} compact={params.run !== undefined} />}
+          {view !== "desk" && <NeedsYou needs={data.needsYou} compact={params.run !== undefined} />}
           <Outlet />
         </div>
         {shownRun !== undefined && (
