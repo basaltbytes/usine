@@ -1,10 +1,20 @@
 // Packs every published workspace package, installs the tarballs with npm into an
-// empty project, and imports each entry point from there, as a consumer would.
+// empty project, and imports each entry point from there, as a consumer would. It
+// also fails when an installed @earendil-works package is not at a version
+// pnpm-lock.yaml resolves for the workspace.
 // Usage: node scripts/check-packed-install.mjs [scratch-directory]
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 
 const repository = resolve(import.meta.dirname, "..");
 const scratch = resolve(process.argv[2] ?? mkdtempSync(join(tmpdir(), "usine-packed-install-")));
@@ -74,8 +84,67 @@ process.exitCode = failed === 0 ? 0 : 1;
 
 const imported = passes("node", ["--input-type=module", "--eval", importAll]);
 const started = passes(join(project, "node_modules", ".bin", "usine"), ["--version"]);
-if (!imported || !started) {
+
+const lockfile = readFileSync(join(repository, "pnpm-lock.yaml"), "utf8");
+const lockedPackages = lockfile.slice(
+  lockfile.indexOf("\npackages:\n"),
+  lockfile.indexOf("\nsnapshots:\n"),
+);
+const locked = new Map();
+for (const [, name, version] of lockedPackages.matchAll(
+  /^ {2}'(@earendil-works\/[^@']+)@([^'(]+)':$/gm,
+)) {
+  locked.set(name, [...(locked.get(name) ?? []), version]);
+}
+
+const installed = [];
+const collect = (modules) => {
+  for (const entry of readdirSync(modules, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const names = entry.name.startsWith("@")
+      ? readdirSync(join(modules, entry.name)).map((name) => `${entry.name}/${name}`)
+      : [entry.name];
+    for (const name of names) {
+      const directory = join(modules, name);
+      if (name.startsWith("@earendil-works/")) {
+        const { version } = JSON.parse(readFileSync(join(directory, "package.json"), "utf8"));
+        installed.push({ name, version, path: relative(project, directory) });
+      }
+      if (existsSync(join(directory, "node_modules"))) collect(join(directory, "node_modules"));
+    }
+  }
+};
+collect(join(project, "node_modules"));
+
+const drift = locked.size === 0 ? ["pnpm-lock.yaml resolves no @earendil-works package."] : [];
+for (const name of new Set(installed.map((copy) => copy.name))) {
+  const copies = installed.filter((copy) => copy.name === name);
+  const expected = locked.get(name);
+  for (const { version, path } of copies) {
+    if (expected === undefined) {
+      drift.push(
+        `${name} ${version} is installed at ${path}, but pnpm-lock.yaml does not resolve it.`,
+      );
+    } else if (!expected.includes(version)) {
+      drift.push(
+        `${name} ${version} is installed at ${path}, but pnpm-lock.yaml resolves ${expected.join(" or ")}.`,
+      );
+    }
+  }
+  const versions = [...new Set(copies.map((copy) => copy.version))];
+  if (versions.length > 1) {
+    drift.push(`${name} is installed more than once, at ${versions.join(" and ")}.`);
+  }
+}
+for (const line of drift) console.error(`DRIFT   ${line}`);
+if (drift.length === 0) {
+  console.log(`ok      ${installed.length} @earendil-works packages match pnpm-lock.yaml`);
+}
+
+if (!imported || !started || drift.length > 0) {
   console.error("A plain npm install of the packed packages is broken.");
   process.exit(1);
 }
-console.log("Every entry point loads from a plain npm install of the packed packages.");
+console.log(
+  "Every entry point loads from a plain npm install of the packed packages, and its @earendil-works packages match pnpm-lock.yaml.",
+);
