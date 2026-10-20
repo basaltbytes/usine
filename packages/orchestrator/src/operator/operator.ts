@@ -931,6 +931,7 @@ export {
   BoardLaneId,
   BoardLaneOrigin,
   BoardItemLink,
+  BoardPullRequestView,
   BoardTaskView,
   WritableBoardLaneView,
   ReadOnlyBoardLaneView,

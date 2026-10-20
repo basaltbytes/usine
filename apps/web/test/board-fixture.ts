@@ -14,6 +14,7 @@ import {
   AwaitingApprovalView,
   BoardItemLink,
   BoardLaneId,
+  BoardPullRequestView,
   BoardTaskView,
   BoardView,
   CanceledAttemptView,
@@ -110,17 +111,25 @@ const task = (
     readonly conflicting?: boolean;
     readonly state?: BoardTaskView["state"];
     readonly loops?: ReadonlyArray<string>;
+    readonly updatedAt?: string;
   } = {},
 ) => {
   const current = members.at(-1) ?? members[0];
+  const state = extra.state ?? (current.kind === "pr" ? "pr-open" : "issue-open");
   const preferred =
     [...runs].reverse().find((run) => run.canApprove || run.canResolveFailure) ?? runs.at(-1);
   return new BoardTaskView({
     ...current,
     title: members[0].title,
-    state: extra.state ?? (current.kind === "pr" ? "pr-open" : "issue-open"),
+    state,
+    updatedAt: extra.updatedAt ?? minutesAgo(7 * 1440),
     labels: labels.map((label) => GitHubLabelName.make(label)),
     items: members,
+    // The current Item is the Task's newest pull request whenever it has one.
+    pullRequest:
+      current.kind === "pr" && (state === "pr-open" || state === "pr-merged")
+        ? new BoardPullRequestView({ number: current.number, url: current.url, state })
+        : null,
     runs,
     run: preferred ?? null,
     needsYou: runs.some((run) => run.canApprove || run.canResolveFailure),

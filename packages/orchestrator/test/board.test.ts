@@ -18,6 +18,7 @@ import {
   BoardTaskView,
   BoardItemLink,
   BoardLaneId,
+  BoardPullRequestView,
   BoardView,
   ReadOnlyBoardLaneView,
   WritableBoardLaneView,
@@ -253,11 +254,14 @@ describe("Board projection", () => {
       });
       const before = yield* projectBoard(managed, [], [open], []);
       assert.strictEqual(before.lanes[1]?.items[0]?.itemKey, open.itemKey);
+      assert.strictEqual(before.lanes[1]?.items[0]?.pullRequest?.state, "pr-open");
       const board = yield* projectBoard(managed, [], [gone], []);
       assert.deepStrictEqual(board.lanes[0]?.items, []);
       assert.deepStrictEqual(board.lanes[1]?.items, []);
       assert.strictEqual(board.lanes[2]?.items[0]?.itemKey, gone.itemKey);
       assert.strictEqual(board.lanes[2]?.items[0]?.state, "pr-closed");
+      // A pull request closed without merging is not the Task's pull request.
+      assert.strictEqual(board.lanes[2]?.items[0]?.pullRequest, null);
     }),
   );
 
@@ -393,6 +397,16 @@ describe("Board projection", () => {
         assert.deepStrictEqual(card.loops, [develop, reviewLoop]);
         assert.strictEqual(card.title, "Board lanes");
         assert.strictEqual(card.itemKey, pr.itemKey);
+        // The update time is the current pull request's, not the originating issue's.
+        assert.strictEqual(card.updatedAt, "2026-09-03T08:00:00Z");
+        assert.deepStrictEqual(
+          card.pullRequest,
+          new BoardPullRequestView({
+            number: ItemNumber.make(98),
+            url: "https://github.com/basaltbytes/usine/pull/98",
+            state: "pr-open",
+          }),
+        );
         assert.deepStrictEqual(
           card.items.map(({ number }) => number),
           [33, 98],
@@ -489,6 +503,7 @@ describe("Board projection", () => {
           [33, 34, 98],
         );
         assert.strictEqual(card.itemKey, mergedPullRequest.itemKey);
+        assert.strictEqual(card.pullRequest?.state, "pr-merged");
         assert.deepStrictEqual(
           card.runs.map(({ id }) => id),
           [development.id, companion.id, reviewRun.id],
@@ -505,6 +520,7 @@ describe("Board projection", () => {
       title: "Board lanes",
       url: "https://github.com/basaltbytes/usine/issues/33",
       state: "issue-open",
+      updatedAt: "2026-09-01T12:00:00Z",
       items: [
         new BoardItemLink({
           itemKey,
@@ -515,6 +531,7 @@ describe("Board projection", () => {
         }),
       ],
       labels: [bug],
+      pullRequest: null,
       runs: [],
       run: null,
       needsYou: false,
