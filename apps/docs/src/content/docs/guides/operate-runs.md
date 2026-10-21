@@ -210,7 +210,7 @@ For a Claude Code or Codex child, the terminal icon beside the child in the outl
 
 ## Needs attention
 
-**Needs attention**, first on Overview and at the top of every other page, lists what is waiting for you. Selecting an entry about a Run opens its drawer.
+**Needs attention**, first on Overview and at the top of every other page, lists what is waiting for you. Selecting an entry about a Run opens its drawer. While you approve or cancel a waiting Run from any page, its entry's buttons are disabled and show the action in progress, such as **Approving…**. An entry about a Run leaves as soon as usine accepts an action on that Run. If the Run had already moved on, for example because you approved it in the drawer first, the entry's **Approve** shows no error and the entry leaves when the page refreshes; the drawer and the Run page say why usine refused the action.
 
 | Entry                                  | Meaning                                                                                                              |
 | -------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
