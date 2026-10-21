@@ -20,7 +20,6 @@ What the code doesn't do yet, or does badly, grouped by area. The issue numbers 
 ## Configuration
 
 - [#40][]: the Configuration section reads every Loop, Agent, Worker, repository, and setting, but the UI has no configuration form or raw editor, and the surgical YAML writer has no production caller ([writer.ts][]).
-- [#388][]: Needs attention offers Discard leftovers for a Worker a reload removed while its Attempts still run, and the action does nothing until they end.
 
 ## Triggers and polling
 
@@ -157,4 +156,3 @@ See [The dogfood instance's Loops](/architecture/loops-shipped/) for the Loop fi
 [#270]: https://github.com/basaltbytes/usine/issues/270
 [#277]: https://github.com/basaltbytes/usine/issues/277
 [#279]: https://github.com/basaltbytes/usine/issues/279
-[#388]: https://github.com/basaltbytes/usine/issues/388
