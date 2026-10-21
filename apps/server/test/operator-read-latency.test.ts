@@ -214,15 +214,11 @@ describe("operator read latency", () => {
         const reads = yield* OperatorObservation;
         // The running factory's backend; the reads it serves are the Operator's observation.
         const operator = yield* Effect.provide(
-          Effect.gen(function* () {
-            return yield* Operator;
-          }),
+          Operator,
           Layer.mock(Operator)({ overview: reads.overview, desk: reads.desk }),
         );
         const configuration = yield* Effect.provide(
-          Effect.gen(function* () {
-            return yield* OperatorConfiguration;
-          }),
+          OperatorConfiguration,
           Layer.mock(OperatorConfiguration)({}),
         );
         const backend = liveBackendLayer(

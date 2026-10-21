@@ -531,7 +531,7 @@ const unexpectedResult = (source: Source, expected: string) => () =>
 const isBooleanType = (resultType: string): boolean => resultType === "bool";
 const decodeScalar = Schema.decodeUnknownEffect(Scalar);
 
-const makeExpressionEngine = Effect.sync(() => {
+const makeExpressionEngine = () => {
   const runtimes = celRuntimes();
 
   const checkBoolean = Effect.fn("ExpressionEngine.checkBoolean")(
@@ -580,7 +580,7 @@ const makeExpressionEngine = Effect.sync(() => {
     contexts: ReadonlyArray<Schema.JsonObject>,
   ) {
     yield* Effect.annotateCurrentSpan({ contexts: contexts.length });
-    yield* checkExpected(runtimes, source, environment, isBooleanType, "bool");
+    yield* checkBoolean(source, environment);
     return contexts.map((context) => booleanOn(source, environment, context));
   });
 
@@ -604,7 +604,7 @@ const makeExpressionEngine = Effect.sync(() => {
     evaluateBooleanEach,
     evaluateScalar,
   });
-});
+};
 
 /**
  * Provides {@link ExpressionEngine} on `@marcbachmann/cel-js`, pinned to 8.0.0 as
@@ -632,4 +632,4 @@ const makeExpressionEngine = Effect.sync(() => {
  * evaluation. Declare such values as `int`. A `uint` result fails
  * `evaluateScalar` (see {@link Scalar}).
  */
-export const MarcbachmannCelLayer = Layer.effect(ExpressionEngine, makeExpressionEngine);
+export const MarcbachmannCelLayer = Layer.sync(ExpressionEngine)(makeExpressionEngine);
