@@ -1,9 +1,15 @@
 import { assert, describe, it } from "@effect/vitest";
 import { SessionTokensUpdated, TokenCount } from "@usine/core/agent/session";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import type { AttemptFailure } from "@usine/core/attempt/failure";
-import { type StubParent, type StubParentContext, StubStorage } from "@usine/durable/testing";
-import { Deferred, type Duration, Effect, Fiber, Option } from "effect";
+import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { AttemptRuntime } from "@usine/durable/attempt-runtime";
+import {
+  type StubParent,
+  type StubParentContext,
+  StubStorage,
+  completes,
+} from "@usine/durable/testing";
+import { Deferred, type Duration, Effect, Fiber, Layer, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import { ATTEMPT_ID, TEST_AGENT, WORKER, fakeSsh, recording, request, runtime } from "./support.ts";
@@ -128,4 +134,121 @@ describe("exe.dev ceilings across a restart", () => {
       },
     );
   }
+
+  /** The stub runtime when durable storage cannot read the unsupervised time the earlier guards recorded. */
+  const unreadableTime = (stub: Layer.Layer<AttemptRuntime>) =>
+    Layer.effect(
+      AttemptRuntime,
+      Effect.map(AttemptRuntime, (runtime) =>
+        AttemptRuntime.of({
+          ...runtime,
+          unsupervised: () =>
+            new InfraFailure({ message: "Read failed", cause: "storage unavailable" }),
+        }),
+      ),
+    ).pipe(Layer.provide(stub));
+
+  /** What a reattachment cannot read, and the ceiling of the earlier run that recorded it. */
+  const unreadable = [
+    {
+      part: "transcript",
+      ceilings: { maxAttemptTokens: Option.some(100) },
+      // A finished child's 80 tokens and the warning they brought are in the transcript only.
+      first: ({ emit, session }: StubParentContext) =>
+        emit(
+          new AttemptChannel.SessionEvent({
+            event: new SessionTokensUpdated({ session, totalTokens: TokenCount.make(80) }),
+          }),
+        ),
+      transcriptFails: true,
+      wrap: (stub: Layer.Layer<AttemptRuntime>) => stub,
+    },
+    {
+      part: "unsupervised time",
+      ceilings: { maxAttemptMinutes: Option.some(1) },
+      first: () => Effect.void,
+      transcriptFails: false,
+      wrap: unreadableTime,
+    },
+  ] as const;
+
+  for (const { part, ceilings, first, transcriptFails, wrap } of unreadable) {
+    it.effect(
+      `fails a reattachment whose ${part} cannot be read, after stopping its parent task, and records its salvage`,
+      () => {
+        const ssh = fakeSsh();
+        ssh.state.salvage = "dirty";
+        const storage = new StubStorage();
+        const { transcript, sink } = recording();
+        const checkout = new CheckoutRequest({ ...request, ...ceilings });
+        return Effect.gen(function* () {
+          yield* stopAfter(ssh, storage, checkout, sink, "40 seconds", first);
+          const steers = () =>
+            transcript.filter(
+              ([, envelope]) =>
+                envelope._tag === "InboundEnvelope" && envelope.payload._tag === "Steer",
+            ).length;
+          const warned = steers();
+          // Each salvage records the parent task's state then: none may write to the checkout.
+          const salvaged: Array<string> = [];
+          yield* Effect.gen(function* () {
+            const executor = yield* Executor;
+            yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+            const prepared = yield* executor.prepare(
+              new CheckoutRequest({ ...checkout, reattach: true }),
+            );
+            const failure = yield* prepared
+              .launch({
+                ...sink,
+                transcript: transcriptFails
+                  ? new InfraFailure({ message: "Read failed", cause: "storage unavailable" })
+                  : sink.transcript,
+                salvage: (salvage) =>
+                  Effect.sync(() => {
+                    salvaged.push(`${salvage._tag} ${storage.tasks.get(ATTEMPT_ID)?.state._tag}`);
+                  }),
+              })
+              .pipe(Effect.flip);
+            assert(failure._tag === "InfraFailure");
+            assert.strictEqual(
+              failure.message,
+              `Could not read the reattached Attempt's ${part}, which its runaway guard resumes from`,
+            );
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(runtime(ssh.layer, () => Effect.never, storage, wrap)),
+          );
+          assert.strictEqual(storage.tasks.get(ATTEMPT_ID)?.state._tag, "canceled");
+          assert.deepStrictEqual(salvaged, ["Pushed canceled"]);
+          assert.strictEqual(steers(), warned, "no warning is sent again");
+        });
+      },
+    );
+  }
+
+  it.effect("reattaches an Attempt without reading the unsupervised time no ceiling uses", () => {
+    const ssh = fakeSsh();
+    const storage = new StubStorage();
+    const { sink } = recording();
+    const tokens = new CheckoutRequest({
+      ...request,
+      maxAttemptMinutes: Option.none(),
+      maxAttemptTokens: Option.some(100),
+    });
+    return Effect.gen(function* () {
+      yield* stopAfter(ssh, storage, tokens, sink, "40 seconds");
+      yield* Effect.gen(function* () {
+        const executor = yield* Executor;
+        yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
+        const prepared = yield* executor.prepare(
+          new CheckoutRequest({ ...tokens, reattach: true }),
+        );
+        const result = yield* prepared.launch(sink);
+        assert.strictEqual(result.message, `Completed: ${request.task}`);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(runtime(ssh.layer, completes, storage, unreadableTime)),
+      );
+    });
+  });
 });

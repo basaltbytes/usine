@@ -452,24 +452,45 @@ describe("Attempt guard", () => {
   );
 
   it.effect(
-    "keeps the time recorded every 30 seconds when the orchestrator dies without recording more",
+    "trips an Attempt whose orchestrator dies within the 30 seconds of its clock each crash may lose",
     () =>
       Effect.gen(function* () {
         const ceilings = { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() };
-        const before = yield* setup(ceilings);
-        yield* before.started;
-        yield* TestClock.adjust("50 seconds");
-        assert.strictEqual(before.warnings.length, 1);
-        yield* before.crash;
-        // The 20 seconds after the record at 30 seconds are lost with the process.
-        const after = yield* setup(ceilings, { attempt: before.attempt });
-        yield* TestClock.adjust("29 seconds");
-        assert.strictEqual(after.result.pollUnsafe(), undefined);
-        yield* TestClock.adjust("1 second");
-        const outcome = yield* Fiber.join(after.result);
+        // The guard records its time every 30 seconds and at a clean stop, so a
+        // crash loses at most the 30 seconds since its last record (#178).
+        const tolerance = 30;
+        // One process dies after its record at 30 seconds, the next before its first.
+        const crashes = [50, 25];
+        const attempt = durableAttempt();
+        const warnings: Array<string> = [];
+        for (const seconds of crashes) {
+          const run = yield* setup(ceilings, { attempt });
+          yield* TestClock.adjust(`${seconds} seconds`);
+          assert.strictEqual(run.result.pollUnsafe(), undefined);
+          warnings.push(...run.warnings);
+          yield* run.crash;
+        }
+        const last = yield* setup(ceilings, { attempt });
+        let ran = 0;
+        while (last.result.pollUnsafe() === undefined && ran < 600) {
+          yield* TestClock.adjust("1 second");
+          ran += 1;
+        }
+        assert.notStrictEqual(last.result.pollUnsafe(), undefined, "the guard tripped");
+        const outcome = yield* Fiber.join(last.result);
         assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
         assert.strictEqual(outcome.failure.ceiling, "wall-clock");
-        assert.deepStrictEqual(after.warnings, []);
+        const total = crashes.reduce((sum, seconds) => sum + seconds, ran);
+        assert.isAtLeast(total, 60, "a crash never shortens the ceiling");
+        assert.isAtMost(
+          total,
+          60 + crashes.length * tolerance,
+          "each crash loses at most the time since the guard's last record",
+        );
+        assert.deepStrictEqual(
+          [...warnings, ...last.warnings],
+          ["0.8 of 1 minutes used by this Attempt; commit and push your work now."],
+        );
       }),
   );
 });

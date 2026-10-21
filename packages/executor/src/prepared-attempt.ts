@@ -5,7 +5,7 @@ import {
   InfraFailure,
   type RunawayCeiling,
 } from "@usine/core/attempt/failure";
-import { Deferred, type Duration, Effect, Exit, Fiber, Ref, Scope } from "effect";
+import { Cause, Deferred, type Duration, Effect, Exit, Fiber, Ref, Scope } from "effect";
 import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor.ts";
 import { attemptGuard, type AttemptGuardSeed } from "./guard.ts";
 import type { ProvisionedWorktree } from "./provision.ts";
@@ -38,7 +38,9 @@ interface OwnedAttempt {
  * `registered` completes once the launch registered the Attempt's live session, so
  * `stop` and `intervene` reach it. `guardSeed` gives what the Attempt's guard goes
  * on from, and `recordUnsupervised` keeps the unsupervised time the guard counted
- * for the seed of the Attempt's reattachment.
+ * for the seed of the Attempt's reattachment. When `guardSeed` fails, as for a
+ * reattachment whose seed cannot be read, the launch releases the Attempt's
+ * resources, recording its salvage, and fails with that failure.
  */
 export const preparedAttemptsFor = (
   stop: (attemptId: AttemptId, reason: AttemptStop) => Effect.Effect<boolean, ExecutorError>,
@@ -47,7 +49,10 @@ export const preparedAttemptsFor = (
     intervention: AttemptChannel.Intervention,
   ) => Effect.Effect<void, AttemptFailure>,
   registered: (attemptId: AttemptId) => Effect.Effect<void>,
-  guardSeed: (request: CheckoutRequest, io: AttemptChannel.Sink) => Effect.Effect<AttemptGuardSeed>,
+  guardSeed: (
+    request: CheckoutRequest,
+    io: AttemptChannel.Sink,
+  ) => Effect.Effect<AttemptGuardSeed, InfraFailure>,
   recordUnsupervised: (
     attemptId: AttemptId,
     unsupervised: Duration.Duration,
@@ -109,6 +114,10 @@ export const preparedAttemptsFor = (
             Effect.onError((cause) => release(Exit.failCause(cause))),
           );
 
+          /** Releases the Attempt's resources, then fails when its salvage could not be recorded. */
+          const releaseSalvaged = (exit: Exit.Exit<unknown, unknown>) =>
+            release(exit).pipe(Effect.andThen(Effect.asVoid(prepared.salvaged)));
+
           return {
             workspace: prepared.workspace,
             launch: Effect.fn("PreparedAttempt.launch")(function* (io) {
@@ -121,7 +130,24 @@ export const preparedAttemptsFor = (
                   cause: new Error("prepared Attempt is no longer available"),
                 });
               }
-              const seed = yield* guardSeed(request, io);
+              // A seed that cannot be read ends the Attempt before its launch: its
+              // checkout is salvaged and the salvage recorded, so the Run's next
+              // Attempt starts from it. The Attempt fails with the seed's failure
+              // first, then any salvage that could not be recorded. An interrupt,
+              // as when this process stops, leaves the checkout to the owner's scope.
+              const seed = yield* guardSeed(request, io).pipe(
+                Effect.onExit((exit) =>
+                  Exit.isSuccess(exit) || Cause.hasInterruptsOnly(exit.cause)
+                    ? Effect.void
+                    : Effect.logWarning(
+                        "The Attempt's runaway guard cannot start; releasing its checkout without launching it",
+                        { attemptId },
+                      ).pipe(
+                        Effect.andThen(prepared.recordSalvage(io.salvage)),
+                        Effect.andThen(releaseSalvaged(exit)),
+                      ),
+                ),
+              );
               const guard = yield* attemptGuard(
                 {
                   attemptId,
@@ -169,11 +195,7 @@ export const preparedAttemptsFor = (
                 Effect.forkIn(Effect.raceFirst(prepared.launch(guard.sink), tripped), scope),
                 Fiber.join,
                 Fiber.interrupt,
-              ).pipe(
-                Effect.onExit((exit) =>
-                  release(exit).pipe(Effect.andThen(Effect.asVoid(prepared.salvaged))),
-                ),
-              );
+              ).pipe(Effect.onExit((exit) => releaseSalvaged(exit)));
             }),
           } satisfies PreparedAttempt;
         }),

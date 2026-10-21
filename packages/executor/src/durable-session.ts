@@ -1,7 +1,12 @@
 import type { ChildHost } from "@usine/agents/child-host";
 import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
+import {
+  AgentFailure,
+  type AttemptFailure,
+  InfraFailure,
+  RunawayFailure,
+} from "@usine/core/attempt/failure";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { AttemptWindowsRead, HarvestSpec } from "@usine/core/step/harvest";
 import type { Comment, StepResult, StepResultFact } from "@usine/core/step/result";
@@ -468,38 +473,62 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   });
 
   /**
+   * Fails the reattachment of `attemptId` when `read`, one `part` of what its
+   * runaway guard goes on from, fails after the store's retries. Starting that
+   * part over would grant the Attempt a fresh allowance (#178), so its parent
+   * task is stopped and the reattachment fails with an `InfraFailure` naming
+   * `part`. The launch then salvages the checkout, and the Run's next Attempt
+   * starts from that salvage. A stop that cannot be confirmed is logged.
+   */
+  const seedPart =
+    (attemptId: AttemptId, part: string) =>
+    <A>(read: Effect.Effect<A, AttemptFailure>): Effect.Effect<A, InfraFailure> =>
+      read.pipe(
+        Effect.catch((error) =>
+          Effect.gen(function* () {
+            yield* Effect.logError(
+              `Could not read the reattached Attempt's ${part}; the reattachment fails instead of starting its runaway guard over`,
+              { attemptId, part, errorTag: error._tag, message: error.message },
+            );
+            yield* stopTask(attemptId, `its runaway guard cannot read the Attempt's ${part}`).pipe(
+              Effect.ignore,
+            );
+            return yield* new InfraFailure({
+              message: `Could not read the reattached Attempt's ${part}, which its runaway guard resumes from`,
+              cause: error,
+            });
+          }),
+        ),
+      );
+
+  /**
    * What the guard of the Attempt `request` describes goes on from: for a
-   * reattached Attempt, the unsupervised time its earlier guards recorded
-   * with its durable record, and what its transcript, read through `io`,
-   * recorded before the restart; for a fresh one, nothing. Each part that
-   * cannot be read is logged and starts over rather than fail the
-   * reattachment, which would leave its parent task unobserved.
+   * reattached Attempt, what its transcript, read through `io`, recorded
+   * before the restart, and the unsupervised time its earlier guards recorded
+   * with its durable record; for a fresh one, nothing. A reattachment reads
+   * only what its armed ceilings use: the transcript for either ceiling, the
+   * unsupervised time for the wall clock. Fails with an `InfraFailure`, once
+   * the parent task is stopped, when one of them cannot be read.
    */
   const guardSeedFor = Effect.fn("DurableSession.guardSeed")(function* (
     request: CheckoutRequest,
     io: AttemptChannel.Sink,
   ) {
     const attemptId = request.attemptId;
-    yield* Effect.annotateCurrentSpan({ attemptId, reattach: request.reattach });
+    const wallClock = Option.isSome(request.maxAttemptMinutes);
+    const armed = wallClock || Option.isSome(request.maxAttemptTokens);
+    yield* Effect.annotateCurrentSpan({ attemptId, reattach: request.reattach, armed });
     if (!request.reattach) return guardSeed([], Duration.zero);
-    const transcript = yield* io.transcript.pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning(
-          "Could not read the reattached Attempt's transcript; its token count, Holds, and warnings start over",
-          { attemptId, errorTag: error._tag, message: error.message },
-        ),
-      ),
-      Effect.orElseSucceed((): ReadonlyArray<AttemptChannel.Envelope> => []),
-    );
-    const recorded = yield* runtime.unsupervised(attemptId).pipe(
-      Effect.tapError((error) =>
-        Effect.logWarning(
-          "Could not read the reattached Attempt's unsupervised time; its wall clock starts over",
-          { attemptId, errorTag: error._tag, message: error.message },
-        ),
-      ),
-      Effect.orElseSucceed(() => Option.none<Duration.Duration>()),
-    );
+    if (!armed) {
+      yield* Effect.logDebug("The reattached Attempt arms no ceiling; its guard resumes nothing", {
+        attemptId,
+      });
+      return guardSeed([], Duration.zero);
+    }
+    const transcript = yield* io.transcript.pipe(seedPart(attemptId, "transcript"));
+    const recorded = wallClock
+      ? yield* runtime.unsupervised(attemptId).pipe(seedPart(attemptId, "unsupervised time"))
+      : Option.none<Duration.Duration>();
     const seed = guardSeed(
       transcript,
       Option.getOrElse(recorded, () => Duration.zero),

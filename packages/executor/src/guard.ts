@@ -9,8 +9,9 @@ const WARNING_FRACTION = 0.8;
 
 /**
  * How often a guard with a wall-clock ceiling records the unsupervised time
- * it counted while that time grows: an orchestrator that stops without
- * shutting down loses at most this much of it.
+ * it counted while that time grows: each orchestrator that stops without
+ * shutting down loses at most this much of it. That tolerance is accepted
+ * (#178): exact accounting across a crash would need a durable write per tick.
  */
 const RECORD_INTERVAL = Duration.seconds(30);
 
