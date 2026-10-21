@@ -20,6 +20,7 @@ import {
   Context,
   DateTime,
   Deferred,
+  Duration,
   Effect,
   Exit,
   Fiber,
@@ -118,6 +119,10 @@ describe("durable AttemptRuntime", () => {
         assert.deepStrictEqual(child.request.host, new LocalProcess());
         assert.match(child.request.prompt, /Fix the flaky test/u);
         assert.isTrue(yield* runtime.isLive(request.spec.attemptId));
+        assert.isTrue(Option.isNone(yield* runtime.unsupervised(request.spec.attemptId)));
+        yield* runtime.recordUnsupervised(request.spec.attemptId, Duration.seconds(42));
+        // A shorter time, as an earlier record that commits late, leaves the kept one.
+        yield* runtime.recordUnsupervised(request.spec.attemptId, Duration.seconds(30));
         yield* runtime.notify(
           request.spec.attemptId,
           new AttemptChannel.WorkerResponsive({ worker: request.worker, lastAnsweredAt }),
@@ -170,15 +175,24 @@ describe("durable AttemptRuntime", () => {
           }),
         ),
       );
-      // A restarted orchestrator still reads the report, then the harvested result once recorded.
+      // A restarted orchestrator still reads the report, then the harvested result once
+      // recorded, and the unsupervised time the Attempt's guard kept.
       const attemptId = attemptRequest("run/step/1").spec.attemptId;
       const harvested = new StepResult({ message: "Fixed it.", facts: [] });
       const finished = yield* Effect.gen(function* () {
         const runtime = yield* AttemptRuntime;
         const reported = yield* runtime.finished(attemptId);
         yield* runtime.recordResult(attemptId, harvested);
-        return { reported, recorded: yield* runtime.finished(attemptId) };
+        return {
+          reported,
+          recorded: yield* runtime.finished(attemptId),
+          unsupervised: yield* runtime.unsupervised(attemptId),
+        };
       }).pipe(Effect.provide(layer({ database, parent: [] })));
+      assert.deepStrictEqual(
+        Option.map(finished.unsupervised, Duration.toMillis),
+        Option.some(42_000),
+      );
       assert.deepStrictEqual(
         finished.reported,
         Option.some(

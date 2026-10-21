@@ -1,14 +1,17 @@
 import { assert, describe, it } from "@effect/vitest";
-import { TextOutput } from "@usine/core/agent/session";
-import * as AttemptChannel from "@usine/core/attempt/channel";
+import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { type StubParent, StubStorage } from "@usine/durable/testing";
 import { Deferred, type Duration, Effect, Fiber, Option } from "effect";
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import { ATTEMPT_ID, TEST_AGENT, WORKER, fakeSsh, recording, request, runtime } from "./support.ts";
 
-/** Runs `checkout` in one orchestrator process whose parent reports activity `after` into the Attempt, then stops that process. */
-const stopAfterActivity = (
+/**
+ * Runs `checkout` in one orchestrator process whose parent works quietly,
+ * sending nothing into the transcript, then stops that process `after` the
+ * parent started.
+ */
+const stopAfter = (
   ssh: ReturnType<typeof fakeSsh>,
   storage: StubStorage,
   checkout: CheckoutRequest,
@@ -17,20 +20,8 @@ const stopAfterActivity = (
 ) =>
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>();
-    const reported = yield* Deferred.make<void>();
-    const reportsLate: StubParent = ({ emit, session }) =>
-      Deferred.succeed(started, undefined).pipe(
-        Effect.andThen(Effect.sleep(after)),
-        Effect.andThen(
-          emit(
-            new AttemptChannel.SessionEvent({
-              event: new TextOutput({ session, text: "Still working" }),
-            }),
-          ),
-        ),
-        Effect.andThen(Deferred.succeed(reported, undefined)),
-        Effect.andThen(Effect.never),
-      );
+    const quiet: StubParent = () =>
+      Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never));
     yield* Effect.gen(function* () {
       const executor = yield* Executor;
       yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
@@ -38,29 +29,30 @@ const stopAfterActivity = (
       const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
       yield* Deferred.await(started);
       yield* TestClock.adjust(after);
-      yield* Deferred.await(reported);
       yield* Fiber.interrupt(launch);
-    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, reportsLate, storage)));
+    }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, quiet, storage)));
   });
 
 describe("exe.dev ceilings across a restart", () => {
   it.effect(
-    "resumes a reattached Attempt's wall clock from its transcript and stops its parent task when it trips",
+    "resumes a reattached Attempt's wall clock from the time it ran before each restart and stops its parent task when it trips",
     () => {
       const ssh = fakeSsh();
       const storage = new StubStorage();
       const minute = new CheckoutRequest({ ...request, maxAttemptMinutes: Option.some(1) });
+      const reattach = new CheckoutRequest({ ...minute, reattach: true });
       const { transcript, sink } = recording();
       return Effect.gen(function* () {
-        // The parent reports activity 42 of its 60 seconds in, then the process stops.
-        yield* stopAfterActivity(ssh, storage, minute, sink, "42 seconds");
+        // The parent works quietly for 30 of its 60 seconds, then the process stops.
+        yield* stopAfter(ssh, storage, minute, sink, "30 seconds");
+        yield* TestClock.adjust("10 minutes");
+        // Reattached, it works 12 more seconds, then the process stops again.
+        yield* stopAfter(ssh, storage, reattach, sink, "12 seconds");
         yield* TestClock.adjust("10 minutes");
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           yield* executor.preflight(WORKER, [TEST_AGENT.brain], 1);
-          const prepared = yield* executor.prepare(
-            new CheckoutRequest({ ...minute, reattach: true }),
-          );
+          const prepared = yield* executor.prepare(reattach);
           const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
           // One second at a time, so the guard arms its next timer after the warning.
           for (let second = 0; second < 17; second += 1) yield* TestClock.adjust("1 second");
@@ -84,14 +76,14 @@ describe("exe.dev ceilings across a restart", () => {
   );
 
   it.effect(
-    "trips a reattached Attempt whose transcript spent its lowered time ceiling and stops its parent task",
+    "trips a reattached Attempt whose earlier run spent its lowered time ceiling and stops its parent task",
     () => {
       const ssh = fakeSsh();
       const storage = new StubStorage();
       const { sink } = recording();
       return Effect.gen(function* () {
         const twoMinutes = new CheckoutRequest({ ...request, maxAttemptMinutes: Option.some(2) });
-        yield* stopAfterActivity(ssh, storage, twoMinutes, sink, "70 seconds");
+        yield* stopAfter(ssh, storage, twoMinutes, sink, "70 seconds");
         // The operator lowered the ceiling to one minute before the restart.
         yield* Effect.gen(function* () {
           const executor = yield* Executor;

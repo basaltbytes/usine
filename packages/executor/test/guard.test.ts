@@ -12,14 +12,9 @@ import { AttemptId } from "@usine/core/attempt";
 import { recording } from "./exe-dev/support.ts";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
-import { DateTime, Deferred, Effect, Fiber, Option, Queue, Result } from "effect";
+import { DateTime, Deferred, Duration, Effect, Fiber, Option, Queue, Result } from "effect";
 import { TestClock } from "effect/testing";
-import {
-  type AttemptGuardLimits,
-  type AttemptGuardSeed,
-  attemptGuard,
-  guardSeed,
-} from "../src/guard.ts";
+import { type AttemptGuardLimits, attemptGuard, guardSeed } from "../src/guard.ts";
 
 const child = (id: string) =>
   new ChildSession({
@@ -33,21 +28,56 @@ const second = child("second");
 const attemptId = AttemptId.make("guarded");
 
 /**
- * Arms a guard over a sink that records every envelope, as the transcript
- * does, and runs it until a ceiling trips. Each warning is recorded as the
- * steer the durable runtime appends for it. `seed` resumes a guard from what
- * an earlier one recorded, as a reattachment after a restart does.
+ * What one Attempt keeps across orchestrator restarts: the transcript its
+ * sink records, and the unsupervised time its guards record, of which the
+ * longest is kept, as its durable record does. `seed` reads both back, as
+ * the durable session does for a reattachment.
+ */
+const durableAttempt = () => {
+  const { sink } = recording();
+  const recorded: Array<number> = [];
+  let writable = true;
+  return {
+    sink,
+    recordUnsupervised: (unsupervised: Duration.Duration) =>
+      Effect.sync(() => {
+        if (writable) recorded.push(Duration.toMillis(unsupervised));
+      }),
+    seed: Effect.map(sink.transcript, (transcript) =>
+      guardSeed(transcript, Duration.millis(Math.max(0, ...recorded))),
+    ),
+    /** Runs `stop` as a process that dies: nothing it records on the way out is kept. */
+    dying: <A, E, R>(stop: Effect.Effect<A, E, R>) =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          writable = false;
+        }),
+        () => stop,
+        () =>
+          Effect.sync(() => {
+            writable = true;
+          }),
+      ),
+  };
+};
+
+/**
+ * Arms a guard over the transcript and records of `attempt`, a fresh one by
+ * default, and runs it until a ceiling trips. Each warning is recorded as the
+ * steer the durable runtime appends for it. The guard goes on from what the
+ * earlier guards of `attempt` left, as a reattachment after a restart does.
  */
 const setup = (
   ceilings: Pick<AttemptGuardLimits, "maxAttemptMinutes" | "maxAttemptTokens">,
   options: {
     readonly warnFails?: boolean;
-    readonly seed?: AttemptGuardSeed;
+    readonly attempt?: ReturnType<typeof durableAttempt>;
   } = {},
 ) =>
   Effect.gen(function* () {
     const warnings: Array<string> = [];
-    const { sink: io } = recording();
+    const durable = options.attempt ?? durableAttempt();
+    const io = durable.sink;
     const finished = yield* Deferred.make<void>();
     const inputs = yield* Queue.make<{
       readonly envelope: AttemptChannel.OutboundEnvelope;
@@ -77,9 +107,10 @@ const setup = (
               return yield* new AgentFailure({ message: "no live channel" });
             }
           }),
+        recordUnsupervised: durable.recordUnsupervised,
       },
       io,
-      options.seed ?? guardSeed([]),
+      yield* durable.seed,
     );
     const attempt = Effect.raceFirst(
       Effect.forever(
@@ -138,12 +169,22 @@ const setup = (
     const started = emit(
       new AttemptChannel.Started({ parentModel: ModelId.make("openai/parent") }),
     );
-    /** Stops this guard as an orchestrator restart does, and gives the seed its transcript leaves. */
-    const restart = Fiber.interrupt(result).pipe(
-      Effect.andThen(io.transcript),
-      Effect.map(guardSeed),
-    );
-    return { result, emit, hold, usage, started, restart, warnings, finished };
+    /** Stops this guard as an orchestrator that shuts down does. */
+    const stop = Fiber.interrupt(result);
+    /** Stops this guard as an orchestrator that dies does. */
+    const crash = durable.dying(stop);
+    return {
+      attempt: durable,
+      result,
+      emit,
+      hold,
+      usage,
+      started,
+      stop,
+      crash,
+      warnings,
+      finished,
+    };
   });
 
 describe("Attempt guard", () => {
@@ -248,10 +289,10 @@ describe("Attempt guard", () => {
         yield* TestClock.adjust("12 seconds");
         // 42 of the 60 unsupervised seconds are spent when the operator holds the parent again.
         yield* before.hold("parent", true);
-        const seed = yield* before.restart;
+        yield* before.stop;
         // Nothing runs the Attempt while the orchestrator is down.
         yield* TestClock.adjust("10 minutes");
-        const after = yield* setup(ceilings, { seed });
+        const after = yield* setup(ceilings, { attempt: before.attempt });
         yield* TestClock.adjust("1 hour");
         assert.strictEqual(after.result.pollUnsafe(), undefined, "the Hold outlives the restart");
         yield* after.hold("parent", false);
@@ -278,7 +319,8 @@ describe("Attempt guard", () => {
       yield* before.emit(
         new AttemptChannel.SessionEvent({ event: new SessionFinished({ session: first }) }),
       );
-      const after = yield* setup(ceilings, { seed: yield* before.restart });
+      yield* before.stop;
+      const after = yield* setup(ceilings, { attempt: before.attempt });
       yield* after.usage(second, 30);
       assert.deepStrictEqual(after.warnings, [
         "90 of 100 tokens used by this Attempt; commit and push your work now.",
@@ -300,7 +342,8 @@ describe("Attempt guard", () => {
         "0.8 of 1 minutes used by this Attempt; commit and push your work now.",
         "85 of 100 tokens used by this Attempt; commit and push your work now.",
       ]);
-      const after = yield* setup(ceilings, { seed: yield* before.restart });
+      yield* before.stop;
+      const after = yield* setup(ceilings, { attempt: before.attempt });
       yield* after.usage(second, 5);
       yield* TestClock.adjust("9 seconds");
       assert.strictEqual(after.result.pollUnsafe(), undefined);
@@ -311,5 +354,61 @@ describe("Attempt guard", () => {
       assert.strictEqual(outcome.failure.ceiling, "wall-clock");
       assert.deepStrictEqual(after.warnings, []);
     }),
+  );
+  it.effect(
+    "counts the quiet time before each restart and none of the time the orchestrator was down",
+    () =>
+      Effect.gen(function* () {
+        const ceilings = { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() };
+        const firstRun = yield* setup(ceilings);
+        yield* firstRun.started;
+        // The parent works quietly: nothing reaches the transcript before the orchestrator stops.
+        yield* TestClock.adjust("20 seconds");
+        yield* firstRun.stop;
+        yield* TestClock.adjust("10 minutes");
+        const secondRun = yield* setup(ceilings, { attempt: firstRun.attempt });
+        yield* TestClock.adjust("2 seconds");
+        yield* secondRun.usage(first, 10);
+        yield* TestClock.adjust("20 seconds");
+        yield* secondRun.stop;
+        // The ten minutes of the first restart lie between recorded envelopes now.
+        yield* TestClock.adjust("10 minutes");
+        const thirdRun = yield* setup(ceilings, { attempt: firstRun.attempt });
+        // 42 of the 60 unsupervised seconds are spent.
+        yield* TestClock.adjust("5 seconds");
+        assert.deepStrictEqual(thirdRun.warnings, []);
+        yield* TestClock.adjust("1 second");
+        assert.deepStrictEqual(thirdRun.warnings, [
+          "0.8 of 1 minutes used by this Attempt; commit and push your work now.",
+        ]);
+        yield* TestClock.adjust("11 seconds");
+        assert.strictEqual(thirdRun.result.pollUnsafe(), undefined);
+        yield* TestClock.adjust("1 second");
+        const outcome = yield* Fiber.join(thirdRun.result);
+        assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
+        assert.strictEqual(outcome.failure.ceiling, "wall-clock");
+      }),
+  );
+
+  it.effect(
+    "keeps the time recorded every 30 seconds when the orchestrator dies without recording more",
+    () =>
+      Effect.gen(function* () {
+        const ceilings = { maxAttemptMinutes: Option.some(1), maxAttemptTokens: Option.none() };
+        const before = yield* setup(ceilings);
+        yield* before.started;
+        yield* TestClock.adjust("50 seconds");
+        assert.strictEqual(before.warnings.length, 1);
+        yield* before.crash;
+        // The 20 seconds after the record at 30 seconds are lost with the process.
+        const after = yield* setup(ceilings, { attempt: before.attempt });
+        yield* TestClock.adjust("29 seconds");
+        assert.strictEqual(after.result.pollUnsafe(), undefined);
+        yield* TestClock.adjust("1 second");
+        const outcome = yield* Fiber.join(after.result);
+        assert(Result.isFailure(outcome) && outcome.failure._tag === "RunawayFailure");
+        assert.strictEqual(outcome.failure.ceiling, "wall-clock");
+        assert.deepStrictEqual(after.warnings, []);
+      }),
   );
 });

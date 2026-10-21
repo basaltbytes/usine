@@ -42,6 +42,7 @@ import {
   Context,
   DateTime,
   Deferred,
+  Duration,
   Effect,
   Layer,
   Option,
@@ -323,6 +324,12 @@ export class StubStorage {
    * the executor canceled an Attempt.
    */
   readonly tasks = new Map<AttemptId, StubTask>();
+  /**
+   * The unsupervised time each Attempt's runaway guards kept with
+   * `recordUnsupervised`, as the Attempt's durable record keeps it, by
+   * Attempt id. Tests read it to check what a restart keeps.
+   */
+  readonly unsupervised = new Map<AttemptId, Duration.Duration>();
 }
 
 /** Completes at once with `Completed: <task>`. */
@@ -347,7 +354,9 @@ export const worksFor =
  * state: interrupting `execute` (a stopped process) or a failing parent leaves
  * the task live until someone cancels it, so tests see whether the executor
  * stopped it. A completed task keeps its report, which a later `execute`
- * returns and `finished` reports until `recordResult` replaces it.
+ * returns and `finished` reports until `recordResult` replaces it. The
+ * unsupervised time `recordUnsupervised` keeps goes to `storage`, which
+ * `unsupervised` reads back.
  */
 export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = completes) =>
   Layer.effect(
@@ -469,6 +478,13 @@ export const stubAttemptRuntime = (storage: StubStorage, parent: StubParent = co
             const state = storage.tasks.get(attemptId)?.state;
             if (state?._tag === "finished") state.result = Option.some(result);
           }),
+        recordUnsupervised: (attemptId, unsupervised) =>
+          Effect.sync(() => {
+            const kept = storage.unsupervised.get(attemptId) ?? Duration.zero;
+            storage.unsupervised.set(attemptId, Duration.max(kept, unsupervised));
+          }),
+        unsupervised: (attemptId) =>
+          Effect.sync(() => Option.fromNullishOr(storage.unsupervised.get(attemptId))),
         request: (attemptId) =>
           Effect.sync(() =>
             Option.map(

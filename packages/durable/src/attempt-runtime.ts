@@ -4,7 +4,7 @@ import { AttemptId } from "@usine/core/attempt";
 import { AgentFailure, AttemptFailure } from "@usine/core/attempt/failure";
 import { StepResult, type StepResultFact } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
-import { Context, Effect, type Option, Result, Schema } from "effect";
+import { Context, type Duration, Effect, type Option, Result, Schema } from "effect";
 
 /**
  * What durable storage keeps of an Attempt's request: what identifies its
@@ -143,6 +143,24 @@ export class AttemptRuntime extends Context.Service<
       attemptId: AttemptId,
       result: StepResult,
     ) => Effect.Effect<void, AttemptFailure>;
+    /**
+     * Keeps with the Attempt's durable record the unsupervised time its
+     * runaway guard has counted, so the guard of a reattachment after an
+     * orchestrator restart goes on from it (#178). The kept time never goes
+     * back: a shorter time than the one kept leaves it as it is.
+     */
+    readonly recordUnsupervised: (
+      attemptId: AttemptId,
+      unsupervised: Duration.Duration,
+    ) => Effect.Effect<void, AttemptFailure>;
+    /**
+     * The unsupervised time the Attempt's runaway guards kept with
+     * `recordUnsupervised`; none when they kept none, as for an Attempt that
+     * ran without a wall-clock ceiling.
+     */
+    readonly unsupervised: (
+      attemptId: AttemptId,
+    ) => Effect.Effect<Option.Option<Duration.Duration>, AttemptFailure>;
     /** The request the Attempt's task was created with, read back for a reattachment; none when the Attempt has no task. */
     readonly request: (
       attemptId: AttemptId,

@@ -469,11 +469,11 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
 
   /**
    * What the guard of the Attempt `request` describes goes on from: for a
-   * reattached Attempt, what its transcript, read through `io`, recorded
-   * before the restart, and for a fresh one the empty transcript it starts
-   * with. A transcript that cannot be read is logged, and the guard then
-   * starts over rather than fail the reattachment, which would leave its
-   * parent task unobserved.
+   * reattached Attempt, the unsupervised time its earlier guards recorded
+   * with its durable record, and what its transcript, read through `io`,
+   * recorded before the restart; for a fresh one, nothing. Each part that
+   * cannot be read is logged and starts over rather than fail the
+   * reattachment, which would leave its parent task unobserved.
    */
   const guardSeedFor = Effect.fn("DurableSession.guardSeed")(function* (
     request: CheckoutRequest,
@@ -481,20 +481,34 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
   ) {
     const attemptId = request.attemptId;
     yield* Effect.annotateCurrentSpan({ attemptId, reattach: request.reattach });
-    if (!request.reattach) return guardSeed([]);
-    const transcript = yield* io.transcript.pipe(Effect.result);
-    if (Result.isFailure(transcript)) {
-      yield* Effect.logWarning(
-        "Could not read the reattached Attempt's transcript; its ceilings start over",
-        { attemptId, errorTag: transcript.failure._tag, message: transcript.failure.message },
-      );
-      return guardSeed([]);
-    }
-    const seed = guardSeed(transcript.success);
-    yield* Effect.logInfo("Resuming the reattached Attempt's ceilings from its transcript", {
+    if (!request.reattach) return guardSeed([], Duration.zero);
+    const transcript = yield* io.transcript.pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          "Could not read the reattached Attempt's transcript; its token count, Holds, and warnings start over",
+          { attemptId, errorTag: error._tag, message: error.message },
+        ),
+      ),
+      Effect.orElseSucceed((): ReadonlyArray<AttemptChannel.Envelope> => []),
+    );
+    const recorded = yield* runtime.unsupervised(attemptId).pipe(
+      Effect.tapError((error) =>
+        Effect.logWarning(
+          "Could not read the reattached Attempt's unsupervised time; its wall clock starts over",
+          { attemptId, errorTag: error._tag, message: error.message },
+        ),
+      ),
+      Effect.orElseSucceed(() => Option.none<Duration.Duration>()),
+    );
+    const seed = guardSeed(
+      transcript,
+      Option.getOrElse(recorded, () => Duration.zero),
+    );
+    yield* Effect.logInfo("Resuming the reattached Attempt's ceilings", {
       attemptId,
-      envelopes: transcript.success.length,
+      envelopes: transcript.length,
       tokens: [...seed.tokens.values()].reduce((sum, value) => sum + value, 0),
+      unsupervisedRecorded: Option.isSome(recorded),
       unsupervisedMinutes: Math.round(Duration.toMillis(seed.unsupervised) / 6_000) / 10,
       parentHeld: seed.parentHeld,
       warned: [...seed.warned],
@@ -507,6 +521,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     intervene,
     (attemptId) => Deferred.await(registration(attemptId)),
     guardSeedFor,
+    runtime.recordUnsupervised,
   );
 
   /**

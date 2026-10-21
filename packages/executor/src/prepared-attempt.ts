@@ -5,7 +5,7 @@ import {
   InfraFailure,
   type RunawayCeiling,
 } from "@usine/core/attempt/failure";
-import { Deferred, Effect, Exit, Fiber, Ref, Scope } from "effect";
+import { Deferred, type Duration, Effect, Exit, Fiber, Ref, Scope } from "effect";
 import type { CheckoutRequest, ExecutorError, PreparedAttempt } from "./executor.ts";
 import { attemptGuard, type AttemptGuardSeed } from "./guard.ts";
 import type { ProvisionedWorktree } from "./provision.ts";
@@ -36,8 +36,9 @@ interface OwnedAttempt {
  * launch. Without a live session, cancellation releases the Attempt directly. `cancel`,
  * a failed `prepare`, and `launch` each return only after the Attempt's resources are released.
  * `registered` completes once the launch registered the Attempt's live session, so
- * `stop` and `intervene` reach it, and `guardSeed` gives what the Attempt's guard
- * goes on from, read through its sink.
+ * `stop` and `intervene` reach it. `guardSeed` gives what the Attempt's guard goes
+ * on from, and `recordUnsupervised` keeps the unsupervised time the guard counted
+ * for the seed of the Attempt's reattachment.
  */
 export const preparedAttemptsFor = (
   stop: (attemptId: AttemptId, reason: AttemptStop) => Effect.Effect<boolean, ExecutorError>,
@@ -47,6 +48,10 @@ export const preparedAttemptsFor = (
   ) => Effect.Effect<void, AttemptFailure>,
   registered: (attemptId: AttemptId) => Effect.Effect<void>,
   guardSeed: (request: CheckoutRequest, io: AttemptChannel.Sink) => Effect.Effect<AttemptGuardSeed>,
+  recordUnsupervised: (
+    attemptId: AttemptId,
+    unsupervised: Duration.Duration,
+  ) => Effect.Effect<void, AttemptFailure>,
 ) =>
   Effect.sync(() => {
     const attempts = new Map<AttemptId, OwnedAttempt>();
@@ -131,6 +136,7 @@ export const preparedAttemptsFor = (
                         action: new AttemptChannel.Steer({ message }),
                       }),
                     ),
+                  recordUnsupervised: (unsupervised) => recordUnsupervised(attemptId, unsupervised),
                 },
                 io,
                 seed,
