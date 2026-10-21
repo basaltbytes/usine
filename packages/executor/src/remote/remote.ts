@@ -124,7 +124,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       record: RecoverySink<E>,
     ) {
       yield* Effect.annotateCurrentSpan({ ...attempt });
-      if (yield* session.awaitsReattach(attempt)) return;
+      yield* session.stopForRecovery(attempt);
       const { machine, checkouts } = yield* workerLeftovers(attempt.worker);
       const worktree = `${machine.workerDirectory}/attempts/${safeSegment(attempt.attemptId)}`;
       const inspectCheckout = Effect.gen(function* () {

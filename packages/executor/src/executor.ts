@@ -291,9 +291,14 @@ export class Executor extends Context.Service<
   {
     /**
      * Reconciles an old checkout before new Attempts start; records its salvage before releasing
-     * any work. For an open Attempt whose parent task failed before the orchestrator stopped, it
-     * first records the comments the Attempt posted on its Run's Item, harvested from the checkout
-     * with the Attempt's credential; a checkout or credential that is gone records none.
+     * any work. The orchestrator calls it only for an Attempt that no Run reattaches, so it first
+     * stops the Attempt's parent task if durable storage still holds it live, and reconciles the
+     * checkout of an open Attempt even when `isLive` reports it. When that task cannot be confirmed
+     * stopped, it fails with a `cancel` `ExecutorOperationError` and leaves the checkout in place,
+     * since the task may still write to it. For an open Attempt whose parent
+     * task failed before the orchestrator stopped, it first records the comments the Attempt
+     * posted on its Run's Item, harvested from the checkout with the Attempt's credential; a
+     * checkout or credential that is gone records none.
      */
     readonly recover: <E>(
       attempt: AttemptRecovery,
@@ -338,8 +343,9 @@ export class Executor extends Context.Service<
     ) => Effect.Effect<PreparedAttempt, ExecutorError, Scope.Scope>;
     /**
      * Stops preparation and releases partial resources, or cancels the live
-     * parent task with a grace period before forced termination. A canceled prepared Attempt
-     * cannot launch. Repeated cancellation after release is a no-op.
+     * parent task with a grace period before forced termination, including one that outlived a
+     * restart and was not reattached. Fails when that parent task cannot be confirmed stopped. A
+     * canceled prepared Attempt cannot launch. Repeated cancellation after release is a no-op.
      */
     readonly cancel: (attemptId: AttemptId) => Effect.Effect<void, ExecutorError>;
     /** Delivers an attributed operator action to the active Attempt's live session. */

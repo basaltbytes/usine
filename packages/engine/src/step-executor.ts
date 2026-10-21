@@ -40,17 +40,30 @@ export interface WorkerLease {
   readonly release: Effect.Effect<void>;
 }
 
+/**
+ * What the engine gives one execution: the Attempt's channel sink, and
+ * `checkoutAcquired`, which the executor runs once preparation holds the
+ * Attempt's checkout, before it launches the Attempt. From then on the
+ * executor salvages and releases that checkout when the Attempt ends. Until
+ * then the engine still owns a checkout a restart kept for the Attempt's
+ * reattachment: a cancel, or an execution that fails first, has the engine
+ * reconcile it through `StepExecutor.recover` (#180).
+ */
+export interface ExecutionSink extends AttemptChannel.Sink {
+  readonly checkoutAcquired: Effect.Effect<void>;
+}
+
 /** Runs one Attempt on a Worker: reserve capacity, execute the step, interrupt on cancel. */
 export class StepExecutor extends Context.Service<
   StepExecutor,
   {
     /**
      * The Workers this executor runs Attempts on now: the configured ones, and
-     * a Worker a reload removed until its last Attempt ends. Startup
-     * reconciliation does not call `recover` for an Attempt recorded on any
-     * other Worker: its checkout stays where it is until that Worker is
-     * configured again or the operator discards its leftovers, which the
-     * engine refuses for a Worker in this list.
+     * a Worker a reload removed until its last Attempt ends. The engine does
+     * not call `recover` for an Attempt recorded on any other Worker: its
+     * checkout stays where it is until that Worker is configured again or the
+     * operator discards its leftovers, which the engine refuses for a Worker
+     * in this list.
      */
     readonly workers: Effect.Effect<ReadonlyArray<WorkerName>>;
     /**
@@ -69,15 +82,24 @@ export class StepExecutor extends Context.Service<
     ) => Effect.Effect<Option.Option<Result.Result<StepResult, AttemptFailure>>, AttemptFailure>;
     /**
      * Reconciles an old checkout before new Attempts start; records its salvage before releasing
-     * any work. For an open Attempt whose parent task failed before the orchestrator stopped, it
-     * also records the comments the Attempt posted on its Run's Item if its checkout is still on
-     * the Worker.
+     * any work. The engine calls it only for an Attempt that no Run reattaches: at startup for
+     * every persisted Attempt except an open one whose parent task `isLive` reports live or whose
+     * liveness cannot be read, and for that one when its Run closes the Attempt before an
+     * execution ran `checkoutAcquired` for it, once `interrupt` confirmed that its parent task
+     * stopped. It stops the Attempt's parent task first if that task is still live, and fails,
+     * leaving the checkout, when it cannot confirm the stop. It reconciles the checkout whatever
+     * `isLive` reports. For an open Attempt whose parent task failed with no launch to record it,
+     * it also records the comments the Attempt posted on its Run's Item if its checkout is still
+     * on the Worker.
      */
     readonly recover: <E>(
       attempt: AttemptRecovery,
       record: RecoverySink<E>,
     ) => Effect.Effect<void, E | AttemptFailure>;
-    /** Requests that the identified Attempt stop its current work. */
+    /**
+     * Stops the identified Attempt's current work, including a parent task that outlived a restart
+     * and was not reattached. Fails when that parent task cannot be confirmed stopped.
+     */
     readonly interrupt: (attemptId: AttemptId) => Effect.Effect<void, AttemptFailure>;
     /** Sends a nonterminal operator action to a live session in the identified Attempt. */
     readonly intervene: (
@@ -86,10 +108,14 @@ export class StepExecutor extends Context.Service<
     ) => Effect.Effect<void, AttemptFailure>;
     /** Waits for Worker capacity; the returned lease must be released after execution or cancellation. */
     readonly reserve: (submission: Submission) => Effect.Effect<WorkerLease, AttemptFailure>;
-    /** Runs the reserved Attempt, or reattaches to it when `execution.reattach` is set, recording channel activity through `io`, and waits for its result. */
+    /**
+     * Runs the reserved Attempt, or reattaches to it when `execution.reattach` is set, recording
+     * channel activity through `io`, and waits for its result. It runs `io.checkoutAcquired` once
+     * preparation holds the Attempt's checkout, and never when preparation fails.
+     */
     readonly execute: (
       execution: StepExecution,
-      io: AttemptChannel.Sink,
+      io: ExecutionSink,
     ) => Effect.Effect<StepResult, AttemptFailure>;
   }
 >()("@usine/engine/StepExecutor") {}

@@ -132,6 +132,10 @@ const makeRunEngine = Effect.gen(function* () {
       ? yield* stepExecutor.interrupt(outcome.openAttempt.value).pipe(Effect.result)
       : Result.succeed(undefined);
     yield* driver.stop(runId);
+    // A restart may have kept the Attempt's checkout for a reattachment whose
+    // execution had not acquired it; no execution will now.
+    if (Option.isSome(outcome.openAttempt))
+      yield* driver.reconcileCheckout(outcome.openAttempt.value);
     yield* driver.continueWithNewest(runId);
     if (Option.isSome(outcome.openAttempt) && Result.isFailure(handshake)) {
       return yield* new AttemptCancellationError({
@@ -239,46 +243,7 @@ const makeRunEngine = Effect.gen(function* () {
 
   // Startup reconciliation belongs in this memoized layer: a combinator such as
   // `Layer.tap` runs again for every service the engine is provided to.
-  const recoverWorkspaces = Effect.fn("RunEngine.recoverWorkspaces")(function* () {
-    const configured = new Set(yield* stepExecutor.workers);
-    const candidates = yield* store.salvageCandidates;
-    const reconcilable = candidates.filter(({ worker }) => configured.has(worker));
-    const unconfigured = candidates.filter(({ worker }) => !configured.has(worker));
-    if (unconfigured.length > 0) {
-      yield* Effect.logWarning(
-        "Attempts recorded on Workers that are not configured were not reconciled; their checkouts stay until those Workers are configured again or their leftovers are discarded",
-        {
-          attempts: unconfigured.length,
-          workers: [...new Set(unconfigured.map(({ worker }) => worker))].sort().join(","),
-        },
-      );
-    }
-    // Before Run recovery can admit a retry, publish and durably record any
-    // work left by its predecessor. Failed recovery keeps the checkout on disk.
-    yield* Effect.forEach(
-      reconcilable,
-      (attempt) =>
-        stepExecutor
-          .recover(attempt, {
-            salvage: (salvage) => store.recordSalvage(attempt.attemptId, salvage),
-            comments: (comments) => store.recordComments(attempt.attemptId, comments),
-            windows: store.attemptWindows(attempt.attemptId),
-          })
-          .pipe(
-            Effect.tapError((error) =>
-              Effect.logError("Attempt salvage reconciliation failed; work retained", {
-                attemptId: attempt.attemptId,
-                worker: attempt.worker,
-                message: String(error),
-              }),
-            ),
-            Effect.ignore,
-          ),
-      { discard: true },
-    );
-  });
-
-  yield* recoverWorkspaces();
+  yield* driver.recoverWorkspaces();
   yield* driver.reconcile();
   const interval = yield* ReconcileInterval;
   yield* Effect.sleep(interval).pipe(

@@ -133,22 +133,28 @@ const parentFailed = (stub: Layer.Layer<AttemptRuntime>) =>
     ),
   ).pipe(Layer.provide(stub));
 
+/**
+ * The stub runtime when durable storage cannot record a harvested result: the
+ * parent's report stays unharvested (`ParentReported`), so `isLive` keeps
+ * returning true after the parent finished.
+ */
+const failingResultWrite = (stub: Layer.Layer<AttemptRuntime>) =>
+  Layer.effect(
+    AttemptRuntime,
+    Effect.map(AttemptRuntime, (runtime) =>
+      AttemptRuntime.of({
+        ...runtime,
+        recordResult: () =>
+          new InfraFailure({ message: "Result write failed", cause: "storage unavailable" }),
+      }),
+    ),
+  ).pipe(Layer.provide(stub));
+
 describe("exe.dev launch", () => {
   it.effect("keeps a completed checkout when its harvested result could not be stored", () => {
     const ssh = fakeSsh();
     const storage = new StubStorage();
     const { transcript, sink } = recording();
-    const failingResultWrite = (stub: Layer.Layer<AttemptRuntime>) =>
-      Layer.effect(
-        AttemptRuntime,
-        Effect.map(AttemptRuntime, (runtime) =>
-          AttemptRuntime.of({
-            ...runtime,
-            recordResult: () =>
-              new InfraFailure({ message: "Result write failed", cause: "storage unavailable" }),
-          }),
-        ),
-      ).pipe(Layer.provide(stub));
     return Effect.gen(function* () {
       yield* Effect.gen(function* () {
         const executor = yield* Executor;
@@ -185,6 +191,114 @@ describe("exe.dev launch", () => {
       );
     });
   });
+
+  it.effect(
+    "salvages the checkout of an open Attempt its Run does not reattach, though its parent's report was not harvested",
+    () => {
+      const ssh = fakeSsh();
+      const storage = new StubStorage();
+      return Effect.gen(function* () {
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const prepared = yield* executor.prepare(request);
+          yield* prepared.launch(recording().sink);
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(runtime(ssh.layer, completes, storage, failingResultWrite)),
+        );
+        // After the restart the Run closes the Attempt without reattaching it,
+        // for instance when it cannot read whether the parent task is live.
+        ssh.state.salvage = "dirty";
+        const salvaged: Array<string> = [];
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          assert.isTrue(yield* executor.isLive(ATTEMPT_ID), "the report awaits its harvest");
+          yield* executor.recover(openAttempt, {
+            salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
+            comments: () => Effect.die("A parent that reported posted no comment to recover"),
+            windows: aloneOnItem(),
+          });
+        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, fails, storage)));
+        assert.deepStrictEqual(salvaged, ["Pushed"]);
+        assert(
+          ssh.state.commands.map(remoteLine).some((line) => line.includes("'worktree' 'remove'")),
+        );
+      });
+    },
+  );
+
+  it.effect(
+    "cancels the parent task of an open Attempt its Run does not reattach, then salvages its checkout",
+    () => {
+      const ssh = fakeSsh();
+      const storage = new StubStorage();
+      return Effect.gen(function* () {
+        yield* stopMidAttempt(ssh, storage);
+        ssh.state.salvage = "dirty";
+        const salvaged: Array<string> = [];
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          assert.isTrue(yield* executor.isLive(ATTEMPT_ID), "the parent task outlived the restart");
+          yield* executor.recover(openAttempt, {
+            salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
+            comments: () => Effect.die("A canceled parent posted no comment to recover"),
+            windows: aloneOnItem(),
+          });
+          assert.isFalse(yield* executor.isLive(ATTEMPT_ID));
+        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, completes, storage)));
+        assert.deepStrictEqual(salvaged, ["Pushed"]);
+      });
+    },
+  );
+
+  it.effect(
+    "keeps the checkout of an open Attempt whose parent task it cannot confirm stopped",
+    () => {
+      const ssh = fakeSsh();
+      const storage = new StubStorage();
+      // The parent task outlived the restart, and durable storage cannot cancel it.
+      const failingCancel = (stub: Layer.Layer<AttemptRuntime>) =>
+        Layer.effect(
+          AttemptRuntime,
+          Effect.map(AttemptRuntime, (runtime) =>
+            AttemptRuntime.of({
+              ...runtime,
+              cancel: () =>
+                new InfraFailure({ message: "Cancel failed", cause: "storage unavailable" }),
+            }),
+          ),
+        ).pipe(Layer.provide(stub));
+      return Effect.gen(function* () {
+        yield* stopMidAttempt(ssh, storage);
+        ssh.state.salvage = "dirty";
+        const salvaged: Array<string> = [];
+        yield* Effect.gen(function* () {
+          const executor = yield* Executor;
+          const recovered = yield* executor
+            .recover(openAttempt, {
+              salvage: (salvage) => Effect.sync(() => void salvaged.push(salvage._tag)),
+              comments: () => Effect.die("A parent that may still run has no comment recovered"),
+              windows: aloneOnItem(),
+            })
+            .pipe(Effect.flip);
+          assert(recovered._tag === "ExecutorOperationError");
+          assert.strictEqual(recovered.operation, "cancel");
+          const canceled = yield* executor.cancel(ATTEMPT_ID).pipe(Effect.flip);
+          assert(canceled._tag === "ExecutorOperationError");
+          assert.strictEqual(canceled.operation, "cancel");
+          assert.isTrue(yield* executor.isLive(ATTEMPT_ID), "the parent task may still run");
+        }).pipe(
+          Effect.scoped,
+          Effect.provide(runtime(ssh.layer, completes, storage, failingCancel)),
+        );
+        assert.deepStrictEqual(salvaged, []);
+        assert(
+          !ssh.state.commands.map(remoteLine).some((line) => line.includes("'worktree' 'remove'")),
+          "the checkout stays while its parent task may still write to it",
+        );
+      });
+    },
+  );
 
   it.effect(
     "runs the parent in this process with the VM as the child host, then harvests and cleans up over SSH",

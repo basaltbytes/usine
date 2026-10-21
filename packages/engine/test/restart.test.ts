@@ -1,8 +1,11 @@
 import { assert, describe, it } from "@effect/vitest";
-import type { AttemptId } from "@usine/core/attempt";
-import { AgentFailure, InfraFailure } from "@usine/core/attempt/failure";
+import type { Attempt, AttemptId } from "@usine/core/attempt";
+import { AgentFailure, type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
+import { type AttemptRecovery, SalvagePushed } from "@usine/core/attempt/salvage";
 import type { InstanceDirectory } from "@usine/core/instance";
-import { Comment } from "@usine/core/step/result";
+import { CommitSha } from "@usine/core/repository";
+import type { RunId } from "@usine/core/run";
+import { Comment, type StepResult } from "@usine/core/step/result";
 import { WorkerName } from "@usine/core/worker";
 import {
   Context,
@@ -18,8 +21,8 @@ import {
   Schedule,
   Scope,
 } from "effect";
-import { RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
-import { runIdFor } from "../src/engine/submission.ts";
+import { ReconcileInterval, RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
+import { runIdFor, type Submission } from "../src/engine/submission.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
 import {
@@ -74,6 +77,126 @@ const recordingExecutor = (
     reserve: () => Effect.never,
     execute: () => Effect.die("no Attempt starts after the restart"),
   });
+
+/** Starts the first Attempt of each submission, then stops the runtime while their parent tasks run. */
+const stopDuringAttempts = (directory: InstanceDirectory, submissions: ReadonlyArray<Submission>) =>
+  Effect.gen(function* () {
+    const plans = yield* Ref.make<ReadonlyArray<AttemptPlan>>(submissions.map(() => Effect.never));
+    const scope = yield* Scope.make();
+    const engine = Context.get(
+      yield* Scope.provide(Layer.build(engineLayer(directory, executorLayer(plans))), scope),
+      RunEngine,
+    );
+    const running = yield* Effect.forEach(submissions, (pending) =>
+      Effect.gen(function* () {
+        const accepted = yield* engine.submit(pending);
+        assert(accepted._tag === "Claimed");
+        const started = yield* waitFor(
+          engine,
+          accepted.runId,
+          ({ attempts }) => attempts.length === 1,
+        );
+        return started.attempts;
+      }),
+    );
+    yield* Scope.close(scope, Exit.void);
+    return running.flat();
+  });
+
+/**
+ * The executor of the restarted runtime, whose parent tasks `live` holds and
+ * whose liveness cannot be read for the Attempts in `unreadable`. As the real
+ * one does, `recover` and `interrupt` stop a parent task, and fail without
+ * touching the checkout when that task cannot be stopped, which `refused`
+ * records for the Attempts in `unstoppable`; `recover` reconciles the
+ * checkout whatever `isLive` reports. Every checkout it reconciles becomes a
+ * pushed salvage, and an open Attempt whose parent failed records the comment
+ * it posted. Runs wait for a Worker until `slot` opens; an Attempt then
+ * records what it resumes from. The reattachment of an Attempt in `stalled`
+ * never acquires its checkout, as when the scheduler awaits the settings or
+ * the bot login before preparing it, and one in `unprepared` fails first, as
+ * when its credential cannot be issued.
+ */
+const restartedExecutor = Effect.fn("test.restartedExecutor")(function* (
+  live: ReadonlyArray<Attempt>,
+) {
+  const state = {
+    live: yield* Ref.make<ReadonlySet<AttemptId>>(new Set(live.map(({ id }) => id))),
+    unreadable: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
+    unstoppable: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
+    refused: yield* Ref.make<ReadonlyArray<AttemptId>>([]),
+    stored: yield* Ref.make<ReadonlyMap<AttemptId, Result.Result<StepResult, AttemptFailure>>>(
+      new Map(),
+    ),
+    reconciled: yield* Ref.make<ReadonlyArray<AttemptRecovery>>([]),
+    resumed: yield* Ref.make<ReadonlyMap<RunId, Option.Option<SalvagePushed>>>(new Map()),
+    stalled: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
+    unprepared: yield* Ref.make<ReadonlySet<AttemptId>>(new Set()),
+    slot: yield* Deferred.make<void>(),
+  };
+  const stop = (attemptId: AttemptId) =>
+    Effect.gen(function* () {
+      if ((yield* Ref.get(state.unstoppable)).has(attemptId)) {
+        yield* Ref.update(state.refused, (ids) => [...ids, attemptId]);
+        return yield* new InfraFailure({
+          message: "Could not cancel the parent task",
+          cause: "storage unavailable",
+        });
+      }
+      yield* Ref.update(state.live, (ids) => new Set([...ids].filter((id) => id !== attemptId)));
+    });
+  const executor = Layer.succeed(StepExecutor)({
+    workers: Effect.succeed([WorkerName.make("local")]),
+    isLive: (attemptId) =>
+      Effect.gen(function* () {
+        if ((yield* Ref.get(state.unreadable)).has(attemptId))
+          return yield* new InfraFailure({
+            message: "Could not read the parent task",
+            cause: "storage unavailable",
+          });
+        return (yield* Ref.get(state.live)).has(attemptId);
+      }),
+    outcome: (attemptId) =>
+      Ref.get(state.stored).pipe(
+        Effect.map((results) => Option.fromUndefinedOr(results.get(attemptId))),
+      ),
+    recover: (attempt, record) =>
+      Effect.gen(function* () {
+        yield* stop(attempt.attemptId);
+        yield* Ref.update(state.reconciled, (seen) => [...seen, attempt]);
+        const stored = (yield* Ref.get(state.stored)).get(attempt.attemptId);
+        if (attempt.open && stored !== undefined && Result.isFailure(stored))
+          yield* record.comments([
+            new Comment({ url: new URL(POSTED_COMMENT), kind: "issue-comment", at: Option.none() }),
+          ]);
+        yield* record.salvage(
+          new SalvagePushed({ ref: attempt.ref, commit: CommitSha.make("a".repeat(40)) }),
+        );
+      }),
+    intervene: () => Effect.void,
+    interrupt: stop,
+    reserve: () =>
+      Deferred.await(state.slot).pipe(
+        Effect.as({ worker: WorkerName.make("local"), release: Effect.void }),
+      ),
+    execute: (execution, io) =>
+      Effect.gen(function* () {
+        const { id } = execution.attempt;
+        yield* Ref.update(state.resumed, (seen) =>
+          new Map(seen).set(execution.run.id, execution.resume),
+        );
+        if ((yield* Ref.get(state.stalled)).has(id)) return yield* Effect.never;
+        if ((yield* Ref.get(state.unprepared)).has(id))
+          return yield* new InfraFailure({
+            message: "The reattached Attempt's credential could not be issued",
+            cause: "credential unavailable",
+          });
+        yield* io.checkoutAcquired;
+        return stepResult("resumed from the salvage");
+      }),
+  });
+  return { ...state, executor };
+});
 
 describe("engine restart", () => {
   it.live("keeps an approval wait parked when the runtime restarts", () =>
@@ -333,6 +456,155 @@ describe("engine restart", () => {
           assert.deepStrictEqual(success.attempts[0]?.comments, []);
           assert.strictEqual(yield* Ref.get(executions), 2);
           yield* Scope.close(secondScope, Exit.void);
+        }),
+      ),
+  );
+
+  it.live(
+    "reconciles the checkout a restart kept for an Attempt that no execution acquires, before the next Attempt starts",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const [gone, failed, unread, unprepared] = yield* stopDuringAttempts(directory, [
+            submission({ number: 20, item: "kept-then-gone" }),
+            submission({ number: 21, item: "kept-then-failed" }),
+            submission({ number: 23, item: "kept-then-unread" }),
+            submission({ number: 24, item: "kept-then-unprepared" }),
+          ]);
+          assert(
+            gone !== undefined &&
+              failed !== undefined &&
+              unread !== undefined &&
+              unprepared !== undefined,
+          );
+          const worker = yield* restartedExecutor([gone, failed, unread, unprepared]);
+          const scope = yield* Scope.make();
+          const engine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope).pipe(
+              Effect.provideService(ReconcileInterval, "50 millis"),
+            ),
+            RunEngine,
+          );
+          assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
+
+          // Before the Runs get a Worker, one parent task is gone and another
+          // failed. The third still runs, but its Run cannot read that, and
+          // its parent task cannot be stopped yet. The fourth Run reattaches
+          // its Attempt, whose execution fails before it acquires the checkout.
+          yield* Ref.set(worker.live, new Set([unread.id, unprepared.id]));
+          yield* Ref.set(worker.unprepared, new Set([unprepared.id]));
+          yield* Ref.set(worker.unreadable, new Set([unread.id]));
+          yield* Ref.set(worker.unstoppable, new Set([unread.id]));
+          yield* Ref.set(
+            worker.stored,
+            new Map([[failed.id, Result.fail(new AgentFailure({ message: "failed unattached" }))]]),
+          );
+          yield* Deferred.succeed(worker.slot, undefined);
+
+          // While its parent task may still write to the checkout, the Run
+          // reconciles nothing and starts no next Attempt. The next reconcile
+          // drives the Run again, and it tries the stop once more.
+          const [refused, waiting] = yield* Effect.repeat(
+            Effect.all([Ref.get(worker.refused), engine.inspect(unread.runId)]),
+            {
+              until: ([ids, { attempts }]) => ids.length >= 2 || attempts.length > 1,
+              schedule: Schedule.spaced("10 millis"),
+            },
+          );
+          assert.deepStrictEqual(refused.slice(0, 2), [unread.id, unread.id]);
+          assert.deepStrictEqual(
+            waiting.attempts.map(({ outcome, salvage }) => [outcome, salvage]),
+            [[Option.none(), Option.none()]],
+          );
+          assert(
+            !(yield* Ref.get(worker.reconciled)).some(({ attemptId }) => attemptId === unread.id),
+          );
+          yield* Ref.set(worker.unstoppable, new Set());
+
+          for (const kept of [gone, unread, unprepared]) {
+            const resumed = yield* waitFor(
+              engine,
+              kept.runId,
+              ({ run }) => run.state._tag === "Succeeded",
+            );
+            const [interrupted] = resumed.attempts;
+            assert(interrupted !== undefined && Option.isSome(interrupted.salvage));
+            assert(interrupted.salvage.value._tag === "Pushed");
+            assert.deepStrictEqual(
+              (yield* Ref.get(worker.resumed)).get(kept.runId),
+              Option.some(interrupted.salvage.value),
+            );
+          }
+          const stopped = yield* waitFor(
+            engine,
+            failed.runId,
+            ({ run }) => run.state._tag === "Failed",
+          );
+          assert.deepStrictEqual(
+            stopped.attempts.map(({ salvage }) => Option.map(salvage, ({ _tag }) => _tag)),
+            [Option.some("Pushed")],
+          );
+          assert.deepStrictEqual(
+            stopped.attempts[0]?.comments.map(({ url }) => url.href),
+            [POSTED_COMMENT],
+          );
+          yield* Scope.close(scope, Exit.void);
+        }),
+      ),
+  );
+
+  it.live(
+    "reconciles the checkout a restart kept for an Attempt whose Run is canceled before an execution acquires it",
+    () =>
+      withInstance((directory) =>
+        Effect.gen(function* () {
+          const [waiting, preparing] = yield* stopDuringAttempts(directory, [
+            submission({ number: 22, item: "kept-then-canceled" }),
+            submission({ number: 25, item: "kept-then-canceled-while-preparing" }),
+          ]);
+          assert(waiting !== undefined && preparing !== undefined);
+          // Until `slot` opens, the restarted Runs get no Worker, so their Attempts await their reattachment.
+          const worker = yield* restartedExecutor([waiting, preparing]);
+          const scope = yield* Scope.make();
+          const engine = Context.get(
+            yield* Scope.provide(Layer.build(engineLayer(directory, worker.executor)), scope),
+            RunEngine,
+          );
+          assert.deepStrictEqual(yield* Ref.get(worker.reconciled), []);
+          const canceledWithSalvage = (runId: RunId) =>
+            Effect.gen(function* () {
+              yield* engine.cancel(runId);
+              const canceled = yield* engine.inspect(runId);
+              assert.strictEqual(canceled.run.state._tag, "Canceled");
+              assert.deepStrictEqual(
+                canceled.attempts.map(({ outcome, salvage }) => [
+                  Option.map(outcome, ({ _tag }) => _tag),
+                  Option.map(salvage, ({ _tag }) => _tag),
+                ]),
+                [[Option.some("Canceled"), Option.some("Pushed")]],
+              );
+            });
+
+          yield* canceledWithSalvage(waiting.runId);
+          assert.deepStrictEqual(
+            (yield* Ref.get(worker.reconciled)).map(({ attemptId }) => attemptId),
+            [waiting.id],
+          );
+
+          // The other Run gets a Worker and reattaches its Attempt, whose
+          // execution has not acquired the checkout when the Run is canceled.
+          yield* Ref.set(worker.stalled, new Set([preparing.id]));
+          yield* Deferred.succeed(worker.slot, undefined);
+          yield* Effect.repeat(Ref.get(worker.resumed), {
+            until: (seen) => seen.has(preparing.runId),
+            schedule: Schedule.spaced("10 millis"),
+          });
+          yield* canceledWithSalvage(preparing.runId);
+          assert.deepStrictEqual(
+            (yield* Ref.get(worker.reconciled)).map(({ attemptId }) => attemptId),
+            [waiting.id, preparing.id],
+          );
+          yield* Scope.close(scope, Exit.void);
         }),
       ),
   );

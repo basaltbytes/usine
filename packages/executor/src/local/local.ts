@@ -256,7 +256,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       record: RecoverySink<E>,
     ) {
       yield* Effect.annotateCurrentSpan({ ...attempt, host: "local" });
-      if (yield* session.awaitsReattach(attempt)) return;
+      yield* session.stopForRecovery(attempt);
       const root = path.join(workersRoot, attempt.worker);
       const worktree = path.join(root, "attempts", safeSegment(attempt.attemptId));
       const present =
