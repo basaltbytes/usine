@@ -15,7 +15,19 @@ import {
 import { CommitSha } from "@usine/core/repository";
 import { Commit, StepResult } from "@usine/core/step/result";
 import { LocalProcess, RemoteShell } from "@usine/agents/child-host";
-import { Context, DateTime, Effect, Exit, Fiber, Layer, Logger, Option, Result } from "effect";
+import { ChildBackend } from "@usine/agents/runtime";
+import {
+  Context,
+  DateTime,
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  Layer,
+  Logger,
+  Option,
+  Result,
+} from "effect";
 import {
   AttemptReport,
   AttemptRequest,
@@ -914,6 +926,44 @@ describe("durable AttemptRuntime", () => {
         assert.isFalse(yield* runtime.isLive(request.spec.attemptId));
         assert.deepStrictEqual(yield* runtime.finished(request.spec.attemptId), Option.none());
       }).pipe(Effect.provide(layer({ database, parent: [delegate("Fix the flaky test")] })));
+    }).pipe(Effect.scoped),
+  );
+
+  it.live("abandons a child launch that has not returned when the Attempt is canceled", () =>
+    Effect.gen(function* () {
+      const database = yield* temporaryDatabase;
+      const launching = yield* Deferred.make<void>();
+      const abandoned = yield* Deferred.make<void>();
+      // A launch still waiting to open its harness, as a Claude child waits out a retry delay
+      // after it lost the Worker's login refresh lock.
+      const backend = Layer.succeed(ChildBackend)({
+        launch: () =>
+          Deferred.succeed(launching, undefined).pipe(
+            Effect.andThen(Effect.never),
+            Effect.onInterrupt(() => Deferred.succeed(abandoned, undefined)),
+          ),
+      });
+      const services = attemptRuntimeLayer.pipe(
+        Layer.provideMerge(
+          durableHarnessLayer({
+            ...fauxParent([delegate("Fix the flaky test")]),
+            openStorage: Effect.tryPromise({
+              try: () => openNodeSqliteStorage(database),
+              catch: (cause) => durableError("open the durable storage", cause),
+            }),
+          }),
+        ),
+        Layer.provideMerge(backend),
+      );
+      yield* Effect.gen(function* () {
+        const runtime = yield* AttemptRuntime;
+        const request = attemptRequest("run/step/42");
+        const execution = yield* Effect.forkChild(runtime.execute(request, recordingSink().sink));
+        yield* Deferred.await(launching).pipe(Effect.timeout("5 seconds"));
+        yield* runtime.cancel(request.spec.attemptId);
+        yield* Deferred.await(abandoned).pipe(Effect.timeout("5 seconds"));
+        assert(Exit.isFailure(yield* Fiber.await(execution)));
+      }).pipe(Effect.provide(services));
     }).pipe(Effect.scoped),
   );
 

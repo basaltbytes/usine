@@ -165,9 +165,21 @@ export const subagentTool = (services: ExtensionServices) => {
       taskExcerpt: excerpt,
     });
     // The child's own logs, including its fibers', name the Attempt: this tool runs outside it.
-    const child = yield* services.backend
-      .launch(childRequest)
-      .pipe(Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker }));
+    // A launch can wait out retry delays before it starts the child, so an abort interrupts it
+    // there and the tool's scope closes whatever it opened.
+    const child = yield* Effect.raceFirst(
+      services.backend
+        .launch(childRequest)
+        .pipe(Effect.annotateLogs({ attemptId: spec.attemptId, worker: request.worker })),
+      aborted(context, session.id).pipe(
+        Effect.tap(() =>
+          Effect.logInfo("Abandoning the child launch of an aborted tool call", {
+            sessionId: session.id,
+          }),
+        ),
+        Effect.andThen(Effect.interrupt),
+      ),
+    );
     yield* register(hub, child);
     yield* Effect.addFinalizer((exit) =>
       Exit.isFailure(exit)

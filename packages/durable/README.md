@@ -44,7 +44,7 @@ A child is not resumed after a restart. Its tool call settles as interrupted wit
 
 `AttemptReport.answeredOperator` says the parent's last turn replied to an operator message or a steer, not to the release guidance, without delegating after it. `harvestedResult(report, facts)` builds the Attempt's `StepResult`, and fails with an `AgentFailure` for such a report when the checkout holds no facts.
 
-`cancel(attemptId)` aborts the task bottom-up, children first, waits until it is terminal, and makes `execute` end with `Interrupted`.
+`cancel(attemptId)` aborts the task bottom-up, children first, waits until it is terminal, and makes `execute` end with `Interrupted`. A child whose launch has not returned, such as a Claude child waiting to launch again, stops there and starts no process.
 
 ## Recovery from a poisoned Session or a stuck step
 

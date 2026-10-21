@@ -505,6 +505,15 @@ const makeClaudeChild = Effect.gen(function* () {
     return yield* Effect.gen(function* () {
       const input = new AsyncInput();
       const query = sdk.open(input, options);
+      const output = yield* Queue.make<Schema.Json, SessionOperationError | Cause.Done>();
+      yield* Effect.forkScoped(
+        Stream.fromAsyncIterable(query, (cause) =>
+          operationError("stream", request, "Claude output stream failed", cause),
+        ).pipe(Stream.runIntoQueue(output)),
+      );
+      // Scope finalizers run newest first, so this one closes the query before the scope stops the
+      // output reader. Stopping the reader waits for its pending read, and while Claude keeps a
+      // session open after a failed turn, only closing the query ends that read.
       yield* Effect.addFinalizer(() =>
         Effect.sync(() => {
           input.end();
@@ -524,12 +533,6 @@ const makeClaudeChild = Effect.gen(function* () {
         });
       }
       input.offer(userMessage(request.prompt));
-      const output = yield* Queue.make<Schema.Json, SessionOperationError | Cause.Done>();
-      yield* Effect.forkScoped(
-        Stream.fromAsyncIterable(query, (cause) =>
-          operationError("stream", request, "Claude output stream failed", cause),
-        ).pipe(Stream.runIntoQueue(output)),
-      );
       const read: Array<Schema.Json> = [];
       const login = Option.getOrElse(
         yield* checkLogin(output, read).pipe(Effect.timeoutOption(LOGIN_WINDOW)),

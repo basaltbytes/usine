@@ -123,15 +123,24 @@ const loginContended: ReadonlyArray<Schema.Json> = [
   { type: "result", subtype: "success", is_error: true, result: LOGIN_ERROR, modelUsage: {} },
 ];
 
-/** A Claude SDK whose first `contended` launches lose the login refresh lock and whose later ones finish the task. */
+/**
+ * A Claude SDK whose first `contended` launches lose the login refresh lock and whose later ones
+ * finish the task. Like Claude Code's streaming-input sessions, a launch that lost the lock waits
+ * for its next user message, so its output stays open until the launch is closed.
+ */
 const loginRace = (contended: number) => {
   const launches: Array<{ closed: boolean }> = [];
   const sdk = Layer.succeed(ClaudeSdk)({
     open: () => {
       const launch = { closed: false };
       launches.push(launch);
+      const lostLock = launches.length <= contended;
+      let endOutput = () => {};
+      const outputEnded = new Promise<void>((resolve) => {
+        endOutput = resolve;
+      });
       const query = scripted(
-        launches.length <= contended
+        lostLock
           ? loginContended
           : [
               {
@@ -147,6 +156,12 @@ const loginRace = (contended: number) => {
         ...query,
         close: () => {
           launch.closed = true;
+          endOutput();
+        },
+        // An async generator, like the live SDK's, cannot return while it waits for a message.
+        async *[Symbol.asyncIterator]() {
+          yield* query;
+          if (lostLock) await outputEnded;
         },
       };
     },
@@ -227,6 +242,19 @@ describe("Claude child backend", () => {
         Effect.provide(logs.layer),
         Effect.scoped,
       );
+    }),
+  );
+
+  it.effect("opens no other Claude process once a launch waiting to retry is interrupted", () =>
+    Effect.gen(function* () {
+      const { launches, sdk } = loginRace(Number.POSITIVE_INFINITY);
+      yield* Effect.gen(function* () {
+        const launching = yield* Effect.forkChild((yield* ChildBackend).launch(request()));
+        while (launches[0]?.closed !== true) yield* Effect.yieldNow;
+        yield* Fiber.interrupt(launching);
+        yield* TestClock.adjust("2 minutes");
+        assert.lengthOf(launches, 1, "the canceled child starts no retry");
+      }).pipe(Effect.provide(claudeChild), Effect.provide(sdk), Effect.scoped);
     }),
   );
 

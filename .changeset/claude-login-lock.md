@@ -14,4 +14,4 @@ A Claude child that ends its first turn with `Failed to refresh OAuth token: ano
 
 `@usine/executor` exports `claudeLoginLockLayer` from its root. The preflight's Claude check holds the Worker's lock until it returns, and the local, exe.dev, and SSH layers require `ClaudeLoginLock`. Provide one `claudeLoginLockLayer` to the executor and to the Attempt runtime.
 
-`@usine/durable/live`'s `layer` requires `ClaudeLoginLock`, and the `subagent` tool passes the Attempt's Worker to each child. `@usine/orchestrator`'s Worker compositions require `ClaudeLoginLock`, and `runtimeLayer` provides one instance to the Attempt runtime and the executor.
+`@usine/durable/live`'s `layer` requires `ClaudeLoginLock`, and the `subagent` tool passes the Attempt's Worker to each child. Aborting the tool call or canceling the Attempt while a child's launch waits to retry stops the launch before it starts another Claude process. `@usine/orchestrator`'s Worker compositions require `ClaudeLoginLock`, and `runtimeLayer` provides one instance to the Attempt runtime and the executor.
