@@ -9,6 +9,7 @@ import {
   TokenCount,
 } from "@usine/core/agent/session";
 import { AttemptId } from "@usine/core/attempt";
+import { aloneOnItem } from "./exe-dev/support.ts";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure } from "@usine/core/attempt/failure";
 import { DateTime, Deferred, Effect, Fiber, Option, Queue, Result } from "effect";
@@ -54,7 +55,7 @@ const setup = (
         append: () => Effect.void,
         salvage: () => Effect.void,
         comments: () => Effect.void,
-        overlapping: Effect.succeed([]),
+        windows: aloneOnItem(attemptId),
       },
     );
     const attempt = Effect.raceFirst(

@@ -9,9 +9,9 @@ import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
 import {
+  type AttemptWindowsRead,
   harvestFacts,
   harvestPostedComments,
-  type OverlappingWindows,
 } from "@usine/core/step/harvest";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
@@ -265,7 +265,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* session.recoverPostedComments(
         attempt,
         present
-          ? Option.some<PostedCommentsHarvest>((spec, overlapping) =>
+          ? Option.some<PostedCommentsHarvest>((spec, windows) =>
               Effect.scoped(
                 Effect.gen(function* () {
                   const credential = yield* credentials(
@@ -277,7 +277,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
                   return yield* harvestPostedComments(
                     spec,
                     harvestCommand("cleanup", worktree, credential, credential.environment),
-                    overlapping,
+                    windows,
                   );
                 }),
               ),
@@ -370,12 +370,12 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       workspace: AttemptWorkspace,
       credential: Effect.Success<ReturnType<typeof credentials>>,
       environment: Record<string, string>,
-      overlapping: OverlappingWindows<AttemptFailure>,
+      windows: AttemptWindowsRead<AttemptFailure>,
     ) =>
       harvestFacts(
         workspace.spec,
         harvestCommand("launch", workspace.worktree, credential, environment),
-        overlapping,
+        windows,
       ).pipe(
         Effect.mapError(
           (error) =>
@@ -497,13 +497,12 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
           session.launch(prepared.workspace, io, {
             host: new LocalProcess(),
             environment,
-            harvest: (overlapping) =>
-              harvest(prepared.workspace, credential, environment, overlapping),
-            harvestComments: (overlapping) =>
+            harvest: (windows) => harvest(prepared.workspace, credential, environment, windows),
+            harvestComments: (windows) =>
               harvestPostedComments(
                 prepared.workspace.spec,
                 harvestCommand("launch", prepared.workspace.worktree, credential, environment),
-                overlapping,
+                windows,
               ),
             keepForReattach: prepared.keepForReattach,
           }),

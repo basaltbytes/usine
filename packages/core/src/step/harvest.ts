@@ -1,6 +1,6 @@
 import { DateTime, Effect, Option, Schema } from "effect";
 import { githubSignature } from "../agent/agent.ts";
-import { type AttemptWindow, windowHolds } from "../attempt/attempt.ts";
+import { type AttemptWindow, AttemptWindows, windowHolds } from "../attempt/attempt.ts";
 import type { RunSpec } from "../attempt/channel.ts";
 import { ItemNumber } from "../item.ts";
 import { CommitSha, RepositoryRevision } from "../repository.ts";
@@ -24,13 +24,15 @@ export type HarvestSpec = Pick<
 >;
 
 /**
- * Reads, from the orchestrator's records, the windows of the other Attempts
- * of the harvested Attempt's Agent that overlap its own on its Run's Item.
- * The harvest runs it once GitHub has listed the Attempt's comments, so it
- * reads every Attempt that could have posted one of them, including one that
- * started while the harvest ran.
+ * Reads, from the orchestrator's records, the harvested Attempt's own window
+ * on its Run's Item and the windows of the other Attempts of its Agent that
+ * overlap it there. The harvest runs it once GitHub has listed the Attempt's
+ * comments, so it reads every Attempt that could have posted one of them,
+ * including one that started while the harvest ran, and the end the
+ * orchestrator recorded for this Attempt when it closed it before the
+ * harvest, as a cancel does.
  */
-export type OverlappingWindows<W> = Effect.Effect<ReadonlyArray<AttemptWindow>, W>;
+export type AttemptWindowsRead<W> = Effect.Effect<AttemptWindows, W>;
 
 /**
  * Runs one read-only `git` or `gh` command in the Attempt's checkout and returns
@@ -44,8 +46,9 @@ export type HarvestCommand<E> = (
 /**
  * The harvest could not use what it read: git or GitHub answered a harvesting
  * command with output that is not a valid result (`git`, `github`), or the
- * windows of the Agent's other Attempts on the Item could not be read
- * (`windows`), so the Attempt's comments cannot be told from theirs.
+ * Attempt's own window and those of its Agent's other Attempts on the Item
+ * could not be read (`windows`), so the Attempt's comments cannot be told
+ * from theirs.
  */
 export class HarvestError extends Schema.TaggedError<HarvestError>("@usine/core/HarvestError")(
   "HarvestError",
@@ -280,7 +283,7 @@ interface Posted {
 
 /**
  * What GitHub lists on a Run's Item for the Attempt's bot login, before the
- * windows of the Agent's other Attempts are read: `signed`, the comments and
+ * Attempt windows on the Item are read: `signed`, the comments and
  * reviews the login posted since the Worker prepared the checkout and ended
  * with the Agent's signature; `unsigned`, how many it posted then without that
  * signature; and `edited`, how many comments it posted before then and edited
@@ -448,18 +451,38 @@ const listComments = Effect.fn("StepResult.listComments")(function* <E>(
 });
 
 /**
+ * `window` for a log line: its start and end as an ISO interval, ending
+ * `open` while its Attempt runs, or `unrecorded` for an Attempt that ended
+ * before end times were recorded.
+ */
+const describeWindow = (window: Option.Option<AttemptWindow>) =>
+  Option.match(window, {
+    onNone: () => "unrecorded",
+    onSome: ({ startedAt, endedAt }) => {
+      const end = Option.match(endedAt, { onNone: () => "open", onSome: DateTime.formatIso });
+      return `${DateTime.formatIso(startedAt)}/${end}`;
+    },
+  });
+
+/**
  * The comments and reviews in `listing` that are the Attempt's: those whose
- * time none of the windows `overlapping` reads holds. Two Attempts of one
- * Agent open on one Item at once sign alike, so a comment posted while another
- * of them was open could be either's and is neither's (#429), the rule the Run
- * reader applies to the App's changes. The windows are read only once GitHub
- * has listed the comments, and not at all when none is signed. A read that
- * fails is a `HarvestError` at the `windows` stage.
+ * time the Attempt's own window holds and none of the windows of its Agent's
+ * other Attempts on the Item does, both read through `windows` (#429). The
+ * listing starts at preparation, but the orchestrator can close the Attempt
+ * before the harvest, as a cancel does before its executor stops, and a
+ * comment posted after that end is not the Attempt's. An Attempt of the Agent
+ * that started after that end does not overlap this one, so only the own
+ * window leaves its comments out. Two Attempts of one Agent open on one Item
+ * at once sign alike, so a comment posted while another of them was open
+ * could be either's and is neither's, the rule the Run reader applies to the
+ * App's changes. The windows are read only once GitHub has listed the
+ * comments, and not at all when none is signed. A read that fails is a
+ * `HarvestError` at the `windows` stage.
  */
 const attributeComments = Effect.fn("StepResult.attributeComments")(function* <W>(
   spec: HarvestSpec,
   listing: Listing,
-  overlapping: OverlappingWindows<W>,
+  windows: AttemptWindowsRead<W>,
 ) {
   yield* Effect.annotateCurrentSpan({
     attemptId: spec.attemptId,
@@ -468,27 +491,47 @@ const attributeComments = Effect.fn("StepResult.attributeComments")(function* <W
   });
   // An Attempt that posted a listed comment had started before GitHub listed
   // it, so a read made now has its window, even when it started while this
-  // harvest ran. A read made before the listing could miss it.
-  const windows: ReadonlyArray<AttemptWindow> =
+  // harvest ran, and so does the end the orchestrator recorded for this
+  // Attempt before the harvest. A read made before the listing could miss them.
+  const { own, overlapping } =
     listing.signed.length === 0
-      ? []
-      : yield* overlapping.pipe(
+      ? new AttemptWindows({ own: Option.none(), overlapping: [] })
+      : yield* windows.pipe(
           Effect.mapError(
             (cause) =>
               new HarvestError({
                 stage: "windows",
-                message: "Could not read the windows of the Agent's other Attempts on the Item",
+                message:
+                  "Could not read the Attempt's window and those of the Agent's other Attempts on the Item",
                 cause,
               }),
           ),
         );
   const placed = listing.signed.map(({ at, fact }) => ({
+    at,
     fact,
-    others: windows.filter((window) => windowHolds(window, at)),
+    inside: Option.exists(own, (window) => windowHolds(window, at)),
+    others: overlapping.filter((window) => windowHolds(window, at)),
   }));
-  const posted = placed.flatMap(({ fact, others }) => (others.length === 0 ? [fact] : []));
+  const outside = placed.filter(({ inside }) => !inside);
+  const ambiguous = placed.filter(({ inside, others }) => inside && others.length > 0);
+  const posted = placed.flatMap(({ inside, others, fact }) =>
+    inside && others.length === 0 ? [fact] : [],
+  );
   yield* Effect.forEach(
-    placed.filter(({ others }) => others.length > 0),
+    outside,
+    ({ at, fact }) =>
+      Effect.logInfo("Left out a comment posted outside the Attempt's own window on the Item", {
+        attemptId: spec.attemptId,
+        window: describeWindow(own),
+        postedAt: DateTime.formatIso(at),
+        comment: fact.url.href,
+        kind: fact.kind,
+      }),
+    { discard: true },
+  );
+  yield* Effect.forEach(
+    ambiguous,
     ({ fact, others }) =>
       Effect.logInfo(
         "Left out a comment that another open Attempt of the Agent on the Item could have posted",
@@ -518,10 +561,13 @@ const attributeComments = Effect.fn("StepResult.attributeComments")(function* <W
     unsigned: listing.unsigned,
     // Posted by the login before preparation and edited since: not posted by this Attempt.
     edited: listing.edited,
+    // Signed, but posted outside the Attempt's own window: after a cancel
+    // ended it, such as by an Attempt of the Agent that started since.
+    outside: outside.length,
     // Signed, but posted while another Attempt of the Agent was open on the Item.
-    ambiguous: listing.signed.length - posted.length,
+    ambiguous: ambiguous.length,
     // The windows read, none when no listed comment was signed.
-    overlapping: windows.map(({ attemptId }) => attemptId),
+    overlapping: overlapping.map(({ attemptId }) => attemptId),
   });
   return posted;
 });
@@ -558,30 +604,31 @@ const enrichment = <A, E extends { readonly _tag: string; readonly message: stri
 
 /**
  * The comments and reviews the Attempt posted on its Run's Item
- * (`listComments`) that no other Attempt of its Agent open on the Item could
- * have posted (`attributeComments`). Listing them is GitHub discovery
- * (`enrichment`), and the `HarvestError` this fails with is a failure to read
- * the windows. `retaining` says what the Attempt keeps when the discovery fails.
+ * (`listComments`) inside its own window, which no other Attempt of its Agent
+ * open on the Item could have posted (`attributeComments`). Listing them is
+ * GitHub discovery (`enrichment`), and the `HarvestError` this fails with is
+ * a failure to read the windows. `retaining` says what the Attempt keeps when
+ * the discovery fails.
  */
 const harvestComments = <E extends { readonly _tag: string; readonly message: string }, W>(
   spec: HarvestSpec,
   run: HarvestCommand<E>,
-  overlapping: OverlappingWindows<W>,
+  windows: AttemptWindowsRead<W>,
   retaining?: string,
 ) =>
   enrichment(spec, "Comment", listComments(spec, run), Option.none<Listing>(), retaining).pipe(
     Effect.flatMap(
       Option.match({
         onNone: () => Effect.succeed<ReadonlyArray<Comment>>([]),
-        onSome: (listing) => attributeComments(spec, listing, overlapping),
+        onSome: (listing) => attributeComments(spec, listing, windows),
       }),
     ),
   );
 
-/** Warns that the windows of the Agent's other Attempts could not be read, and what the harvest does without them. */
+/** Warns that the Attempt windows on the Item could not be read, and what the harvest does without them. */
 const windowsUnread = (spec: HarvestSpec, outcome: string) => (error: HarvestError) =>
   Effect.logWarning(
-    `Could not read the windows of the Agent's other Attempts on the Item, so the Attempt's comments cannot be told from theirs; ${outcome}`,
+    `Could not read the Attempt's window and those of the Agent's other Attempts on the Item, so the Attempt's comments cannot be told from theirs; ${outcome}`,
     {
       attemptId: spec.attemptId,
       repository: spec.repository,
@@ -597,22 +644,24 @@ const windowsUnread = (spec: HarvestSpec, outcome: string) => (error: HarvestErr
  * pull request and GitHub is not asked. Comments are those GitHub lists for
  * the bot login the Attempt writes as, the factory's App or a Worker's GitHub
  * integration, posted since the Worker prepared the checkout, that end with
- * the signature of the Attempt's Agent (`githubSignature`), leaving out those
- * posted in a window `overlapping` reads, which could be another Attempt's of
- * that Agent. Both GitHub discoveries are read-only enrichment, so a GitHub
- * failure or a ten-second stall keeps the commits and records none of what it
- * looked for rather than failing completed work. Windows that cannot be read
+ * the signature of the Attempt's Agent (`githubSignature`). Of those it keeps
+ * the ones posted inside the Attempt's own window that `windows` reads, and
+ * in none of the windows of the Agent's other Attempts on the Item it reads
+ * with it, since those could be another Attempt's of that Agent. Both GitHub
+ * discoveries are read-only enrichment, so a GitHub failure or a ten-second
+ * stall keeps the commits and records none of what it looked for rather than
+ * failing completed work. Windows that cannot be read
  * fail the harvest, as an invalid git result does, since its comments cannot
  * be told from the other Attempts'.
  */
 export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
   E extends { readonly _tag: string; readonly message: string },
   W,
->(spec: HarvestSpec, run: HarvestCommand<E>, overlapping: OverlappingWindows<W>) {
+>(spec: HarvestSpec, run: HarvestCommand<E>, windows: AttemptWindowsRead<W>) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
   const commits = yield* harvestCommits(spec, run);
   const pullRequests = yield* enrichment(spec, "Pull request", harvestPullRequests(spec, run), []);
-  const comments = yield* harvestComments(spec, run, overlapping).pipe(
+  const comments = yield* harvestComments(spec, run, windows).pipe(
     Effect.tapError(windowsUnread(spec, "the harvest fails")),
   );
   const facts: ReadonlyArray<StepResultFact> = [...commits, ...pullRequests, ...comments];
@@ -623,21 +672,16 @@ export const harvestFacts = Effect.fn("StepResult.harvest")(function* <
  * The comments and reviews an Attempt that ended without success posted on its
  * Run's Item, found as `harvestFacts` finds them. Its commits and pull requests
  * are not collected, since the Attempt delivered no result. A GitHub failure, a
- * ten-second stall, or windows `overlapping` cannot read records none and
+ * ten-second stall, or windows that `windows` cannot read records none and
  * never fails.
  */
 export const harvestPostedComments = Effect.fn("StepResult.harvestPostedComments")(function* <
   E extends { readonly _tag: string; readonly message: string },
   W,
->(spec: HarvestSpec, run: HarvestCommand<E>, overlapping: OverlappingWindows<W>) {
+>(spec: HarvestSpec, run: HarvestCommand<E>, windows: AttemptWindowsRead<W>) {
   yield* Effect.annotateCurrentSpan({ attemptId: spec.attemptId, repository: spec.repository });
   const outcome = "the Attempt that ended without success records no comment";
-  const comments: ReadonlyArray<Comment> = yield* harvestComments(
-    spec,
-    run,
-    overlapping,
-    outcome,
-  ).pipe(
+  const comments: ReadonlyArray<Comment> = yield* harvestComments(spec, run, windows, outcome).pipe(
     Effect.catch((error) =>
       windowsUnread(spec, outcome)(error).pipe(Effect.as<ReadonlyArray<Comment>>([])),
     ),

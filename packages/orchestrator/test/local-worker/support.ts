@@ -2,8 +2,7 @@ import { NodeServices } from "@effect/platform-node";
 import { UsineConfig } from "@usine/config/factory";
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import type { AttemptId } from "@usine/core/attempt";
-import { AttemptTask } from "@usine/core/attempt";
+import { type AttemptId, AttemptTask, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import { Event, DedupKey, EventId } from "@usine/core/event";
 import { InstanceDirectory } from "@usine/core/instance";
 import { ItemKey } from "@usine/core/item";
@@ -24,6 +23,21 @@ import { stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { fixedConfigLayer } from "../support/current-instance.ts";
 import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
+
+/**
+ * Reads the windows of `attemptId` running alone on its Run's Item: its own,
+ * open since before any time a test clock or GitHub fixture gives, and no
+ * other Attempt of its Agent there, so the harvest keeps every signed comment.
+ */
+export const aloneOnItem = (attemptId: AttemptId) =>
+  Effect.succeed(
+    new AttemptWindows({
+      own: Option.some(
+        new AttemptWindow({ attemptId, startedAt: DateTime.makeUnsafe(0), endedAt: Option.none() }),
+      ),
+      overlapping: [],
+    }),
+  );
 
 export const TOKEN = "one-attempt-test-token";
 // Each live transition crosses real git worktree and child-process boundaries.

@@ -3,7 +3,14 @@ import { SshDestination, WorkerName } from "@usine/core/worker";
 import { Effect } from "effect";
 import { Executor } from "../../../src/executor.ts";
 import { SshWorkers } from "../../../src/ssh/ssh.ts";
-import { WORKER, capturedLogs, fakeMachine, mintingProvider, request } from "../support.ts";
+import {
+  aloneOnItem,
+  WORKER,
+  capturedLogs,
+  fakeMachine,
+  mintingProvider,
+  request,
+} from "../support.ts";
 import {
   attachmentsInForce,
   eventually,
@@ -16,7 +23,7 @@ const sink = {
   append: () => Effect.void,
   salvage: () => Effect.void,
   comments: () => Effect.void,
-  overlapping: Effect.succeed([]),
+  windows: aloneOnItem(),
 };
 const SECOND = WorkerName.make("eu-two");
 const THIRD = WorkerName.make("eu-three");

@@ -1279,7 +1279,7 @@ describe("cursor store", () => {
 
   // Two Loops' Runs of one Agent on one Item sign their comments alike (#429).
   it.effect(
-    "gives an Attempt the windows of its Agent's other Attempts on its Item that overlap its own",
+    "gives an Attempt its own window and the windows of its Agent's other Attempts on its Item that overlap it",
     () =>
       withRunStore(
         Effect.gen(function* () {
@@ -1317,14 +1317,20 @@ describe("cursor store", () => {
               attempt,
               Result.fail(new AgentFailure({ message: "Checks failed" })),
             );
-          const overlapping = (attempt: Attempt) =>
-            store
-              .overlappingWindows(attempt.id)
-              .pipe(
-                Effect.map((windows) =>
-                  windows.map(({ attemptId, endedAt }) => [attemptId, Option.isSome(endedAt)]),
-                ),
-              );
+          // Each window as its Attempt id and whether it has ended.
+          const windows = (attempt: Attempt) =>
+            store.attemptWindows(attempt.id).pipe(
+              Effect.map(({ own, overlapping }) => ({
+                own: Option.map(own, ({ attemptId, endedAt }) => [
+                  attemptId,
+                  Option.isSome(endedAt),
+                ]),
+                overlapping: overlapping.map(({ attemptId, endedAt }) => [
+                  attemptId,
+                  Option.isSome(endedAt),
+                ]),
+              })),
+            );
 
           const fix = yield* claim("fix", "fix", "pull-71");
           const ended = yield* begin(fix);
@@ -1345,12 +1351,28 @@ describe("cursor store", () => {
           yield* begin(yield* claim("elsewhere", "fix", "issue-12"));
 
           // The first fix Attempt ended a second before either started.
-          assert.deepStrictEqual(yield* overlapping(retried), [[triage.id, false]]);
-          assert.deepStrictEqual(yield* overlapping(triage), [[retried.id, false]]);
-          assert.deepStrictEqual(yield* overlapping(ended), []);
+          assert.deepStrictEqual(yield* windows(retried), {
+            own: Option.some([retried.id, false]),
+            overlapping: [[triage.id, false]],
+          });
+          assert.deepStrictEqual(yield* windows(triage), {
+            own: Option.some([triage.id, false]),
+            overlapping: [[retried.id, false]],
+          });
+          assert.deepStrictEqual(yield* windows(ended), {
+            own: Option.some([ended.id, true]),
+            overlapping: [],
+          });
           yield* TestClock.adjust("1 second");
           yield* fail(triage);
-          assert.deepStrictEqual(yield* overlapping(retried), [[triage.id, true]]);
+          assert.deepStrictEqual(yield* windows(retried), {
+            own: Option.some([retried.id, false]),
+            overlapping: [[triage.id, true]],
+          });
+          assert.deepStrictEqual(yield* windows(triage), {
+            own: Option.some([triage.id, true]),
+            overlapping: [[retried.id, false]],
+          });
         }),
       ),
   );

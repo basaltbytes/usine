@@ -1,7 +1,7 @@
 import { Agent, AgentPersona, AgentName } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { ChildSessionBudget } from "@usine/core/agent/session";
-import { AttemptTask, AttemptId } from "@usine/core/attempt";
+import { AttemptTask, AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import { SalvageRef } from "@usine/core/attempt/salvage";
 import { LoopName } from "@usine/core/loop";
@@ -17,11 +17,26 @@ import {
 import { CheckoutRequest, claudeLoginLockLayer } from "../../src/executor.ts";
 import { layer as exeDevLayer } from "../../src/exe-dev/exe-dev.ts";
 import { GitHubIntegration, IntegrationName } from "../../src/exe-dev/model.ts";
-import { Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
+import { DateTime, Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 import type { StandardCommand } from "effect/unstable/process/ChildProcess";
 
 export const ATTEMPT_ID = AttemptId.make("remote-run/execute/1");
+
+/**
+ * Reads the windows of `attemptId` running alone on its Run's Item: its own,
+ * open since before any time a test clock or GitHub fixture gives, and no
+ * other Attempt of its Agent there, so the harvest keeps every signed comment.
+ */
+export const aloneOnItem = (attemptId: AttemptId = ATTEMPT_ID) =>
+  Effect.succeed(
+    new AttemptWindows({
+      own: Option.some(
+        new AttemptWindow({ attemptId, startedAt: DateTime.makeUnsafe(0), endedAt: Option.none() }),
+      ),
+      overlapping: [],
+    }),
+  );
 export const WORKER = WorkerName.make("remote-one");
 const REPOSITORY = RepositoryName.make("acme/demo");
 // The brand already rejects whitespace and a leading dash; the characters it

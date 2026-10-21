@@ -14,6 +14,7 @@ import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../../src/executor.ts";
 import { SSH_ENVIRONMENT_ALLOWLIST } from "../../../src/remote/commands.ts";
 import {
+  aloneOnItem,
   GIT_DIRECTORY,
   TEST_AGENT,
   TOKEN_PREFIX,
@@ -43,7 +44,7 @@ const sink = {
   append: () => Effect.void,
   salvage: () => Effect.void,
   comments: () => Effect.void,
-  overlapping: Effect.succeed([]),
+  windows: aloneOnItem(),
 };
 
 /** The caller token a child host sends to the machine. */
@@ -478,7 +479,7 @@ describe("SSH Worker behind a Gateway", () => {
         .launch({
           append: () => Effect.void,
           comments: () => Effect.void,
-          overlapping: Effect.succeed([]),
+          windows: aloneOnItem(),
           salvage: (salvage) => Effect.sync(() => void recorded.push(salvage)),
         })
         .pipe(Effect.flip);
@@ -561,7 +562,7 @@ describe("SSH Worker behind a Gateway", () => {
         {
           salvage: () => Effect.void,
           comments: () => Effect.void,
-          overlapping: Effect.succeed([]),
+          windows: aloneOnItem(),
         },
       );
       assert.deepStrictEqual(

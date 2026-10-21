@@ -351,9 +351,9 @@ export class RunDriver extends Context.Service<
               store.recordSalvage(started.execution.attempt.id, salvage).pipe(asAttemptFailure),
             comments: (comments) =>
               store.recordComments(started.execution.attempt.id, comments).pipe(asAttemptFailure),
-            overlapping: store
-              .overlappingWindows(started.execution.attempt.id)
-              .pipe(retryingStore(runId, "read the overlapping Attempts"), asAttemptFailure),
+            windows: store
+              .attemptWindows(started.execution.attempt.id)
+              .pipe(retryingStore(runId, "read the Attempt windows"), asAttemptFailure),
           })
           .pipe(
             Effect.catchDefect((defect) =>

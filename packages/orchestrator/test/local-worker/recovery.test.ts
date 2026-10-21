@@ -23,7 +23,7 @@ const attempt = (worker: string, number: number) => ({
 const ignored = {
   salvage: () => Effect.void,
   comments: () => Effect.void,
-  overlapping: Effect.succeed([]),
+  windows: Effect.die("A closed Attempt's comments are never harvested"),
 };
 
 const credentials = Layer.succeed(CredentialProvider)({
@@ -70,7 +70,7 @@ describe("local checkout reconciliation", () => {
             executor.recover(attempt("local", index), {
               salvage: () => Effect.die("Unexpected salvage"),
               comments: () => Effect.die("Unexpected comments"),
-              overlapping: Effect.succeed([]),
+              windows: Effect.die("Unexpected windows read"),
             }),
           { concurrency: 8, discard: true },
         );

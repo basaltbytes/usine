@@ -2,7 +2,7 @@ import { assert, describe, it } from "@effect/vitest";
 import { CHILD_KILL_SCRIPT, RemoteShell } from "@usine/agents/child-host";
 import { githubSignature } from "@usine/core/agent";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
-import { AttemptId, AttemptWindow } from "@usine/core/attempt";
+import { AttemptId, AttemptWindow, AttemptWindows } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery } from "@usine/core/attempt/salvage";
@@ -13,6 +13,7 @@ import { DateTime, Deferred, Effect, Fiber, Layer, Logger, Option, Result } from
 import { TestClock } from "effect/testing";
 import { CheckoutRequest, Executor } from "../../src/executor.ts";
 import {
+  aloneOnItem,
   ATTEMPT_ID,
   SSH_ENVIRONMENT_ALLOWLIST,
   TEST_AGENT,
@@ -32,7 +33,7 @@ const recording = () => {
   const sink: AttemptChannel.Sink = {
     salvage: () => Effect.void,
     comments: () => Effect.void,
-    overlapping: Effect.succeed([]),
+    windows: aloneOnItem(),
     append: (direction, envelope) =>
       Effect.sync(() => {
         transcript.push([direction, envelope]);
@@ -315,7 +316,9 @@ describe("exe.dev launch", () => {
             Effect.sync(
               () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
             ),
-          overlapping: Effect.sync(() => [...opened]),
+          windows: aloneOnItem().pipe(
+            Effect.map(({ own }) => new AttemptWindows({ own, overlapping: [...opened] })),
+          ),
         };
         // The other Attempt opens on the Item while the harvest lists its
         // comments, so only a harvest that reads the windows after GitHub
@@ -346,6 +349,50 @@ describe("exe.dev launch", () => {
     },
   );
 
+  it.effect(
+    "records only the comments a canceled Attempt posted before the orchestrator ended its window",
+    () => {
+      const ssh = fakeSsh();
+      postSignedComment(ssh);
+      const started = Deferred.makeUnsafe<void>();
+      const recorded: Array<string> = [];
+      // The orchestrator ends the Attempt's window at 10:05 when the operator
+      // cancels it, then stops its executor, which harvests the comments.
+      // `SHARED`, posted at 10:07, could be an Attempt's of the same Agent
+      // that started after the cancel, so no window overlaps this one.
+      const sink: AttemptChannel.Sink = {
+        append: () => Effect.void,
+        salvage: () => Effect.void,
+        comments: (comments) =>
+          Effect.sync(
+            () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
+          ),
+        windows: Effect.succeed(
+          new AttemptWindows({
+            own: Option.some(
+              new AttemptWindow({
+                attemptId: ATTEMPT_ID,
+                startedAt: DateTime.makeUnsafe(0),
+                endedAt: Option.some(DateTime.makeUnsafe("2026-10-20T10:05:00Z")),
+              }),
+            ),
+            overlapping: [],
+          }),
+        ),
+      };
+      return Effect.gen(function* () {
+        const executor = yield* Executor;
+        const prepared = yield* executor.prepare(onItem);
+        const launch = yield* prepared.launch(sink).pipe(Effect.forkChild);
+        yield* Deferred.await(started);
+        yield* executor.cancel(ATTEMPT_ID);
+        const failure = yield* Fiber.join(launch).pipe(Effect.flip);
+        assert.strictEqual(failure._tag, "AgentFailure");
+        assert.deepStrictEqual(recorded, [`issue-comment ${COMMENT}`]);
+      }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, working(started))));
+    },
+  );
+
   it.effect("concurrent cancellation waits for salvage and preserves the launch failure", () => {
     const ssh = fakeSsh();
     ssh.state.salvage = "dirty";
@@ -359,7 +406,7 @@ describe("exe.dev launch", () => {
         .launch({
           ...recording().sink,
           comments: () => Effect.void,
-          overlapping: Effect.succeed([]),
+          windows: aloneOnItem(),
           salvage: () =>
             Deferred.succeed(recordingSalvage, undefined).pipe(
               Effect.andThen(Deferred.await(finishSalvage)),
@@ -608,7 +655,9 @@ describe("exe.dev launch", () => {
               Effect.sync(
                 () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
               ),
-            overlapping: Effect.sync(() => [...opened]),
+            windows: aloneOnItem().pipe(
+              Effect.map(({ own }) => new AttemptWindows({ own, overlapping: [...opened] })),
+            ),
           });
           // The Run closes the Attempt from the stored failure without launching it again.
           const outcome = yield* executor.outcome(ATTEMPT_ID);
@@ -652,7 +701,7 @@ describe("exe.dev launch", () => {
           yield* executor.recover(openAttempt, {
             salvage: () => Effect.die("A checkout that is gone has no salvage"),
             comments: (comments) => Effect.sync(() => void recorded.push(...comments)),
-            overlapping: Effect.succeed([]),
+            windows: aloneOnItem(),
           });
         }).pipe(
           Effect.scoped,

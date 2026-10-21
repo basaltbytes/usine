@@ -66,6 +66,7 @@ import { testAppLayer } from "../support/github-app.ts";
 import { alwaysHoldsLayer } from "../support/polling.ts";
 import { runView } from "../../src/operator/projection.ts";
 import {
+  aloneOnItem,
   LIVE_TEST_TIMEOUT,
   STATE_POLL_ATTEMPTS,
   TOKEN,
@@ -474,7 +475,7 @@ describe("local worker", () => {
               append: () => Effect.void,
               salvage: () => Effect.void,
               comments: () => Effect.void,
-              overlapping: Effect.succeed([]),
+              windows: aloneOnItem(AttemptId.make("cleanup-budget-run/execute/1")),
             })
             .pipe(Effect.forkChild);
           yield* Deferred.await(cleanupStarted);
@@ -691,7 +692,7 @@ describe("local worker", () => {
               append: () => Effect.void,
               salvage: () => Effect.void,
               comments: () => Effect.void,
-              overlapping: Effect.succeed([]),
+              windows: aloneOnItem(AttemptId.make("unlaunched/run/2")),
             })
             .pipe(Effect.flip);
           assert.strictEqual(reused._tag, "InfraFailure");
@@ -968,7 +969,7 @@ describe("local worker", () => {
                   append: () => Effect.void,
                   salvage: () => Effect.void,
                   comments: () => Effect.void,
-                  overlapping: Effect.succeed([]),
+                  windows: aloneOnItem(AttemptId.make(`bot-login-${kind}/execute/1`)),
                 },
               )
               .pipe(Effect.flip);

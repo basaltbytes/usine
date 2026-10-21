@@ -2,7 +2,7 @@ import { Effect, Option, Result, Schema } from "effect";
 import { Agent } from "../agent/agent.ts";
 import { Effort, ModelId } from "../agent/brain.ts";
 import { AgentSessionEvent, AgentSessionId, ChildSessionBudget } from "../agent/session.ts";
-import { AttemptId, AttemptTask, type AttemptWindow } from "./attempt.ts";
+import { AttemptId, AttemptTask, type AttemptWindows } from "./attempt.ts";
 import { RepositoryName, CommitSha, RepositoryRevision } from "../repository.ts";
 import { type Comment, StepResult } from "../step/result.ts";
 import { BotLogin, WorkerName } from "../worker.ts";
@@ -284,12 +284,14 @@ export interface Sink {
   /** Records the comments and reviews the Attempt posted on its Run's Item before it ended without success. */
   readonly comments: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, AttemptFailure>;
   /**
-   * The windows of the other Attempts of the Attempt's Agent that overlap its
-   * own on its Run's Item. The harvest reads them once GitHub has listed the
-   * Attempt's comments, so they include Attempts that started after it, even
-   * while the harvest ran, and leaves out a comment posted in one.
+   * The Attempt's own window on its Run's Item and the windows of the other
+   * Attempts of its Agent that overlap it there. The harvest reads them once
+   * GitHub has listed the Attempt's comments, so they include Attempts that
+   * started after it, even while the harvest ran, and the end recorded when
+   * the Attempt was closed before its harvest, as on a cancel. It keeps only a
+   * comment posted inside the own window and in none of the others.
    */
-  readonly overlapping: Effect.Effect<ReadonlyArray<AttemptWindow>, AttemptFailure>;
+  readonly windows: Effect.Effect<AttemptWindows, AttemptFailure>;
 }
 
 /** How far one outbound channel has legally progressed. */

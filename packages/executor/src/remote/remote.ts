@@ -5,9 +5,9 @@ import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import {
+  type AttemptWindowsRead,
   harvestFacts,
   harvestPostedComments,
-  type OverlappingWindows,
 } from "@usine/core/step/harvest";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Deferred, Effect, Exit, Option, Schema, Scope } from "effect";
@@ -146,7 +146,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       yield* session.recoverPostedComments(
         attempt,
         present
-          ? Option.some<PostedCommentsHarvest>((spec, overlapping) =>
+          ? Option.some<PostedCommentsHarvest>((spec, windows) =>
               Effect.scoped(
                 Effect.gen(function* () {
                   const grant = yield* worker.grantFor(attempt.repository);
@@ -160,7 +160,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                   return yield* harvestPostedComments(
                     spec,
                     harvestCommand("cleanup", worktree, access),
-                    overlapping,
+                    windows,
                   );
                 }),
               ),
@@ -206,12 +206,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     const harvest = (
       workspace: AttemptWorkspace,
       access: RemoteAccess,
-      overlapping: OverlappingWindows<AttemptFailure>,
+      windows: AttemptWindowsRead<AttemptFailure>,
     ) =>
       harvestFacts(
         workspace.spec,
         harvestCommand("launch", workspace.worktree, access),
-        overlapping,
+        windows,
       ).pipe(
         Effect.mapError(
           (error) =>
@@ -474,12 +474,12 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
               return yield* session.launch(prepared, io, {
                 host: access.shell,
                 environment: withGitHooks(access.environment, provisioned.gitHooks),
-                harvest: (overlapping) => harvest(prepared, access, overlapping),
-                harvestComments: (overlapping) =>
+                harvest: (windows) => harvest(prepared, access, windows),
+                harvestComments: (windows) =>
                   harvestPostedComments(
                     prepared.spec,
                     harvestCommand("launch", prepared.worktree, access),
-                    overlapping,
+                    windows,
                   ),
                 keepForReattach: provisioned.keepForReattach,
               });

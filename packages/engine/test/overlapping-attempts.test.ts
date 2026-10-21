@@ -1,8 +1,19 @@
 import { assert, describe, it } from "@effect/vitest";
-import type { AttemptId, AttemptWindow } from "@usine/core/attempt";
+import type { AttemptId, AttemptWindows } from "@usine/core/attempt";
 import { LoopName } from "@usine/core/loop";
 import { WorkerName } from "@usine/core/worker";
-import { Context, Deferred, Effect, Exit, Layer, Option, Ref, Schedule, Scope } from "effect";
+import {
+  Context,
+  DateTime,
+  Deferred,
+  Effect,
+  Exit,
+  Layer,
+  Option,
+  Ref,
+  Schedule,
+  Scope,
+} from "effect";
 import { RunEngine } from "../src/engine/engine.ts";
 import { Submission } from "../src/engine/submission.ts";
 import { StepExecutor } from "../src/step-executor.ts";
@@ -15,6 +26,7 @@ const onPullRequest = (number: number, loop: string) =>
 const executorWith = (
   execute: StepExecutor["Service"]["execute"],
   recover: StepExecutor["Service"]["recover"] = () => Effect.void,
+  interrupt: StepExecutor["Service"]["interrupt"] = () => Effect.void,
 ) =>
   Layer.succeed(StepExecutor)({
     workers: Effect.succeed([WorkerName.make("local")]),
@@ -22,23 +34,23 @@ const executorWith = (
     outcome: () => Effect.succeed(Option.none()),
     recover,
     intervene: () => Effect.void,
-    interrupt: () => Effect.void,
+    interrupt,
     reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
     execute,
   });
 
-describe("the windows of an Attempt's overlapping Attempts", () => {
+describe("an Attempt's windows", () => {
   it.live("reach its harvest when it runs, including an Attempt that started after it", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         const reviewStarted = yield* Deferred.make<void>();
         const fixHarvested = yield* Deferred.make<void>();
         const read = yield* Ref.make(new Map<AttemptId, ReadonlyArray<AttemptId>>());
-        const harvest = (attemptId: AttemptId, windows: ReadonlyArray<AttemptWindow>) =>
+        const harvest = (attemptId: AttemptId, windows: AttemptWindows) =>
           Ref.update(read, (seen) =>
             new Map(seen).set(
               attemptId,
-              windows.map((window) => window.attemptId),
+              windows.overlapping.map((window) => window.attemptId),
             ),
           );
         const executor = executorWith((execution, io) =>
@@ -48,7 +60,7 @@ describe("the windows of an Attempt's overlapping Attempts", () => {
               yield* Deferred.succeed(reviewStarted, undefined);
               yield* Deferred.await(fixHarvested);
             } else yield* Deferred.await(reviewStarted);
-            yield* harvest(execution.attempt.id, yield* io.overlapping);
+            yield* harvest(execution.attempt.id, yield* io.windows);
             if (execution.run.loop === "fix") yield* Deferred.succeed(fixHarvested, undefined);
             return stepResult("Harvested");
           }),
@@ -78,6 +90,50 @@ describe("the windows of an Attempt's overlapping Attempts", () => {
               [reviewAttempt.id, [fixAttempt.id]],
             ]),
           );
+        }).pipe(Effect.provide(engineLayer(directory, executor)));
+      }),
+    ),
+  );
+
+  it.live("show a canceled Attempt's harvest that its window ended at the cancel", () =>
+    withInstance((directory) =>
+      Effect.gen(function* () {
+        // The executor harvests a canceled Attempt while the engine stops it,
+        // as the durable session does once the parent task has stopped.
+        const stopping = yield* Deferred.make<void>();
+        const harvested = yield* Deferred.make<AttemptWindows>();
+        const started = yield* Deferred.make<void>();
+        const executor = executorWith(
+          (_, io) =>
+            Deferred.succeed(started, undefined).pipe(
+              Effect.andThen(Deferred.await(stopping)),
+              Effect.andThen(io.windows),
+              Effect.flatMap((windows) => Deferred.succeed(harvested, windows)),
+              Effect.andThen(Effect.never),
+            ),
+          () => Effect.void,
+          () =>
+            Deferred.succeed(stopping, undefined).pipe(
+              Effect.andThen(Effect.asVoid(Deferred.await(harvested))),
+            ),
+        );
+        yield* Effect.gen(function* () {
+          const engine = yield* RunEngine;
+          const fix = yield* engine.submit(onPullRequest(2, "fix"));
+          assert(fix._tag === "Claimed");
+          yield* Deferred.await(started);
+          yield* engine.cancel(fix.runId);
+          const [canceled] = (yield* engine.inspect(fix.runId)).attempts;
+          assert(canceled !== undefined && Option.isSome(canceled.endedAt));
+          const { own, overlapping } = yield* Deferred.await(harvested);
+          assert.deepStrictEqual(
+            Option.map(own, ({ attemptId, endedAt }) => [
+              attemptId,
+              Option.map(endedAt, DateTime.toEpochMillis),
+            ]),
+            Option.some([canceled.id, Option.some(DateTime.toEpochMillis(canceled.endedAt.value))]),
+          );
+          assert.deepStrictEqual(overlapping, []);
         }).pipe(Effect.provide(engineLayer(directory, executor)));
       }),
     ),
@@ -115,12 +171,12 @@ describe("the windows of an Attempt's overlapping Attempts", () => {
             () => Effect.never,
             (attempt, record) =>
               attempt.open
-                ? record.overlapping.pipe(
+                ? record.windows.pipe(
                     Effect.flatMap((windows) =>
                       Ref.update(read, (seen) =>
                         new Map(seen).set(
                           attempt.attemptId,
-                          windows.map((window) => window.attemptId),
+                          windows.overlapping.map((window) => window.attemptId),
                         ),
                       ),
                     ),

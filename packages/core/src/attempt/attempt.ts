@@ -130,6 +130,21 @@ export const windowsOverlap = (left: AttemptWindow, right: AttemptWindow): boole
   reaches(left, opening(right)) && reaches(right, opening(left));
 
 /**
+ * The windows on a Run's Item that tell one Attempt's writes there from
+ * those of its Agent's other Attempts, as the orchestrator's records hold
+ * them when read. `own` is the Attempt's window (`windowOf`): none for an
+ * Attempt that ended before end times were recorded, and closed for one the
+ * orchestrator closed, such as on a cancel, before its executor finished.
+ * `overlapping` holds the windows of the Agent's other Attempts on the Item
+ * that overlap it (`windowsOverlap`). A write is the Attempt's only when its
+ * own window holds the time and none of the overlapping ones do.
+ */
+export class AttemptWindows extends Schema.Class<AttemptWindows>("AttemptWindows")({
+  own: Schema.Option(AttemptWindow),
+  overlapping: Schema.Array(AttemptWindow),
+}) {}
+
+/**
  * The auto-retry law: only an infra failure retries, and only while the attempt
  * number is below `maxAutoAttempts` (ADR 0002).
  * `number` is the failed try's position; `maxAutoAttempts` includes the first try.
