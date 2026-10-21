@@ -565,6 +565,12 @@ const makeRunStore = Effect.gen(function* () {
     );
   }, persistence("discard Attempt leftovers"));
 
+  const openAttempts = Effect.fn("RunStore.openAttempts")(function* (worker: WorkerName) {
+    yield* Effect.annotateCurrentSpan({ worker });
+    const counted = yield* queriesFor(database).attemptCountsByWorker();
+    return counted.find((count) => count.worker === worker)?.running ?? 0;
+  }, persistence("count open Attempts"));
+
   const finishAttempt = Effect.fn("RunStore.finishAttempt")(function* (
     attempt: Attempt,
     result: Result.Result<StepResult, AttemptFailure>,
@@ -935,6 +941,7 @@ const makeRunStore = Effect.gen(function* () {
     recordComments,
     attemptWindows,
     discardLeftovers,
+    openAttempts,
     submission: (runId: RunId) =>
       queries.eventRouteByRun(runId).pipe(
         Effect.flatMap((routes) =>
@@ -1055,6 +1062,8 @@ export class RunStore extends Context.Service<
     ) => Effect.Effect<Option.Option<AttemptRecovery>, RunStoreError>;
     /** Marks every Attempt recorded on `worker` whose leftovers are not discarded yet, so reconciliation skips them; returns how many it marked. */
     readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
+    /** How many Attempts recorded on `worker` have no outcome yet, leaving out those whose leftovers were discarded. */
+    readonly openAttempts: (worker: WorkerName) => Effect.Effect<number, RunStoreError>;
     /**
      * Resolves attention for the current failed Attempt atomically; stale requests
      * are rejected. True when this ended the hold of the Attempt's question or

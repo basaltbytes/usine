@@ -24,6 +24,7 @@ import { WorkerName } from "@usine/core/worker";
 import { WorkerCapabilityError } from "@usine/executor";
 import {
   Claimed,
+  LeftoversDiscardRejectedError,
   RunNotFoundError,
   RunOperationRejectedError,
   RunRetryBlockedError,
@@ -496,7 +497,8 @@ describe("operator HTTP API", () => {
           }),
         ),
       cancel: () => Effect.void,
-      discardLeftovers: () => Effect.void,
+      discardLeftovers: (worker) =>
+        Effect.fail(new LeftoversDiscardRejectedError({ worker, running: 2 })),
       moveBoardItem: (move) =>
         move.toLane === "proposed:ready"
           ? Effect.fail(
@@ -556,6 +558,17 @@ describe("operator HTTP API", () => {
       assert.deepStrictEqual(await blocked.json(), {
         error: "RunRetryBlockedError",
         message: `Cannot retry Run ${runId}: Run run-open of Loop fix-ci is open on the same Item. Retry after it closes, or cancel it first.`,
+      });
+
+      const running = await rejectingApp.handler(
+        new Request("http://localhost/api/workers/usine-worker-2/discard-leftovers", {
+          method: "POST",
+        }),
+      );
+      assert.strictEqual(running.status, 409);
+      assert.deepStrictEqual(await running.json(), {
+        error: "LeftoversDiscardRejectedError",
+        message: "2 attempts still run on usine-worker-2; discard its leftovers once they end.",
       });
 
       const edit = JSON.stringify({ task: "Look again", agent: agentName });

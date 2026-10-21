@@ -21,7 +21,12 @@ import {
   Schedule,
   Scope,
 } from "effect";
-import { ReconcileInterval, RunEngine, RunEngineShutdown } from "../src/engine/engine.ts";
+import {
+  LeftoversDiscardRejectedError,
+  ReconcileInterval,
+  RunEngine,
+  RunEngineShutdown,
+} from "../src/engine/engine.ts";
 import { runIdFor, type Submission } from "../src/engine/submission.ts";
 import { RunReader } from "../src/run-reader/run-reader.ts";
 import { StepExecutor } from "../src/step-executor.ts";
@@ -661,7 +666,13 @@ describe("engine restart", () => {
             [["local", 1, 0]],
           );
           // A configured Worker's Attempts stay reconciled at every start.
-          assert.strictEqual(yield* engine.discardLeftovers(WorkerName.make("usine-worker-1")), 0);
+          assert.deepStrictEqual(
+            yield* Effect.flip(engine.discardLeftovers(WorkerName.make("usine-worker-1"))),
+            new LeftoversDiscardRejectedError({
+              worker: WorkerName.make("usine-worker-1"),
+              running: 0,
+            }),
+          );
           assert.strictEqual(yield* engine.discardLeftovers(WorkerName.make("local")), 1);
           assert.deepStrictEqual(yield* reader.attemptsByWorker(), []);
           yield* Scope.close(firstScope, Exit.void);
@@ -678,27 +689,30 @@ describe("engine restart", () => {
       ),
   );
 
-  it.live("counts the Attempts a Worker still runs apart from those that ended", () =>
+  it.live("counts the Attempts a Worker still runs and keeps their leftovers until they end", () =>
     withInstance((directory) =>
       Effect.gen(function* () {
         yield* deliverOneAttempt(directory, 50);
         yield* stopDuringAttempts(directory, [submission({ number: 51, item: "still-running" })]);
         const recovered = yield* Ref.make<ReadonlyArray<AttemptId>>([]);
-        // The restarted Run gets no Worker, so its Attempt stays open on `local`.
+        // The restarted Run gets no Worker, so its Attempt stays open on `local`,
+        // which the executor keeps running as it keeps a removed Worker.
         const scope = yield* Scope.make();
         const context = yield* Scope.provide(
           Layer.build(engineLayer(directory, recordingExecutor(["local"], recovered))),
           scope,
         );
+        const engine = Context.get(context, RunEngine);
         const reader = Context.get(context, RunReader);
-        assert.deepStrictEqual(
-          (yield* reader.attemptsByWorker()).map(({ worker, attempts, running }) => [
-            worker,
-            attempts,
-            running,
-          ]),
-          [["local", 2, 1]],
+        const counts = Effect.map(reader.attemptsByWorker(), (counted) =>
+          counted.map(({ worker, attempts, running }) => [worker, attempts, running]),
         );
+        assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
+        assert.deepStrictEqual(
+          yield* Effect.flip(engine.discardLeftovers(WorkerName.make("local"))),
+          new LeftoversDiscardRejectedError({ worker: WorkerName.make("local"), running: 1 }),
+        );
+        assert.deepStrictEqual(yield* counts, [["local", 2, 1]]);
         yield* Scope.close(scope, Exit.void);
       }),
     ),

@@ -30,6 +30,11 @@ const operatorFailure = (error: BackendError) => {
         return `Cycle budget Ask ${error.askId} is no longer awaiting this answer.`;
       case "TranscriptAttemptNotFoundError":
         return `Attempt ${error.attemptId} does not belong to Run ${error.runId}.`;
+      case "LeftoversDiscardRejectedError":
+        // No open Attempt: the Worker is declared again, or its last Attempt is ending.
+        if (error.running === 0)
+          return `${error.worker} is in usine.yaml or an attempt on it is ending. Nothing was discarded.`;
+        return `${error.running} ${error.running === 1 ? "attempt still runs" : "attempts still run"} on ${error.worker}; discard its leftovers once they end.`;
       case "BackendUnavailableError":
       case "RunRetryBlockedError":
       case "RunInterventionRejectedError":

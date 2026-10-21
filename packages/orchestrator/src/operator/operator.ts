@@ -21,6 +21,7 @@ import {
   type RunAgainResult,
   RunEngine,
   type EnginePersistenceError,
+  type LeftoversDiscardRejectedError,
   type RunEngineError,
   RunOperationRejectedError,
   type RunStoreError,
@@ -117,6 +118,7 @@ export type OperatorError =
   | LoopNotFoundError
   | RosterAgentNotFoundError
   | RunEngineError
+  | LeftoversDiscardRejectedError
   | TranscriptAttemptNotFoundError
   | BoardMoveError
   | CycleBudgetResetRejectedError
@@ -980,7 +982,8 @@ export class Operator extends Context.Service<
     /**
      * Answers an `UnconfiguredWorkerNeed`: startup stops reconciling the
      * Attempts recorded on `worker` and whatever they left stays on it. A
-     * Worker `usine.yaml` declares is left unchanged.
+     * Worker `usine.yaml` declares, or a removed one that still runs Attempts,
+     * is left unchanged and the request fails with `LeftoversDiscardRejectedError`.
      */
     readonly discardLeftovers: (worker: WorkerName) => Effect.Effect<void, OperatorError>;
     /**
