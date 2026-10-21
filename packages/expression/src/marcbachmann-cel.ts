@@ -5,7 +5,7 @@ import {
   TypeError as CelTypeError,
   parse,
 } from "@marcbachmann/cel-js";
-import { Effect, Layer, Option, Schema } from "effect";
+import { Effect, Layer, Option, Predicate, Schema } from "effect";
 import { type Environment, type ObjectType, TypeReference } from "./environment.ts";
 import {
   ExpressionEngine,
@@ -275,16 +275,21 @@ const makeEnvironment = (descriptor: Environment, purpose: EnvironmentPurpose): 
   return environment;
 };
 
+/**
+ * Tells a JSON object from an array, `null`, or another primitive. The context
+ * is already `Schema.Json`, so a shallow test is enough.
+ * `Schema.is(Schema.JsonObject)` would validate each nested object's whole
+ * subtree again at every level of the walk, for every Loop and Item the
+ * overview and desk evaluate (#464).
+ */
+const isJsonObject = (value: Schema.Json): value is Schema.JsonObject => Predicate.isObject(value);
+
 const normalizeValue = (
   value: Schema.Json,
   type: TypeReference,
   objectTypes: ReadonlyMap<string, ObjectType>,
 ): RuntimeValue => {
-  if (
-    (type === "int" || type === "uint") &&
-    Schema.is(Schema.Number)(value) &&
-    Number.isInteger(value)
-  ) {
+  if ((type === "int" || type === "uint") && Predicate.isNumber(value) && Number.isInteger(value)) {
     return BigInt(value);
   }
   if (type.startsWith("list<") && type.endsWith(">") && Array.isArray(value)) {
@@ -292,7 +297,7 @@ const normalizeValue = (
     return value.map((item) => normalizeValue(item, itemType, objectTypes));
   }
   const objectType = objectTypes.get(type);
-  if (objectType !== undefined && Schema.is(Schema.JsonObject)(value)) {
+  if (objectType !== undefined && isJsonObject(value)) {
     const absentNullable = objectType.fields
       .filter((field) => field.nullable && !Object.hasOwn(value, field.name))
       .map((field) => [field.name, null] as const);
@@ -323,7 +328,37 @@ const normalizeContext = (context: Schema.JsonObject, descriptor: Environment): 
   );
 };
 
+/** Returns the cel-js environment built from a descriptor for one purpose, building it the first time it is asked for. */
+type CelEnvironments = (descriptor: Environment, purpose: EnvironmentPurpose) => CelEnvironment;
+
+/**
+ * Builds each descriptor's cel-js environment once per purpose. Building one
+ * clones cel-js's whole function registry and registers every payload type,
+ * which costs far more than checking or evaluating an expression, and the
+ * operator's overview and desk evaluate every Loop's trigger on every Board
+ * Item each time they are read (#464). A built environment keeps nothing from
+ * one check or evaluation to the next beyond the overload lookups its
+ * registry memoizes, so one serves every later call. A build that throws is
+ * not kept, and the next call tries again. Descriptors are
+ * immutable, and the trigger environments are module constants, so they are
+ * the keys; a descriptor no caller keeps is released with its environments.
+ */
+const celEnvironments = (): CelEnvironments => {
+  const built = {
+    check: new WeakMap<Environment, CelEnvironment>(),
+    evaluate: new WeakMap<Environment, CelEnvironment>(),
+  };
+  return (descriptor, purpose) => {
+    const existing = built[purpose].get(descriptor);
+    if (existing !== undefined) return existing;
+    const environment = makeEnvironment(descriptor, purpose);
+    built[purpose].set(descriptor, environment);
+    return environment;
+  };
+};
+
 const checkExpected = (
+  environments: CelEnvironments,
   source: Source,
   environment: Environment,
   accepts: (resultType: string) => boolean,
@@ -331,7 +366,7 @@ const checkExpected = (
 ): Effect.Effect<void, ExpressionCheckError> =>
   Effect.gen(function* () {
     const result = yield* Effect.try({
-      try: () => makeEnvironment(environment, "check").check(source),
+      try: () => environments(environment, "check").check(source),
       catch: (cause) =>
         new ExpressionCheckError({
           source,
@@ -353,6 +388,7 @@ const checkExpected = (
   });
 
 const evaluateRaw = (
+  environments: CelEnvironments,
   source: Source,
   environment: Environment,
   context: Schema.JsonObject,
@@ -361,7 +397,7 @@ const evaluateRaw = (
     try: () =>
       // SAFETY: CEL evaluates to the same value vocabulary the context is built
       // from, and every caller decodes the expected result type before use.
-      makeEnvironment(environment, "evaluate").evaluate(
+      environments(environment, "evaluate").evaluate(
         source,
         normalizeContext(context, environment),
       ) as RuntimeValue,
@@ -378,51 +414,73 @@ const unexpectedResult = (source: Source, expected: string) => () =>
     message: `CEL evaluation returned a value that is not ${expected}`,
   });
 
-const checkBoolean = Effect.fn("ExpressionEngine.checkBoolean")(
-  (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
-    checkExpected(source, environment, (resultType) => resultType === "bool", "bool"),
-);
-
-const checkScalar = Effect.fn("ExpressionEngine.checkScalar")(
-  (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
-    checkExpected(
-      source,
-      environment,
-      (resultType) => acceptedScalarTypes.has(resultType),
-      "a scalar value",
-    ),
-);
-
 const decodeBoolean = Schema.decodeUnknownEffect(Schema.Boolean);
 const decodeScalar = Schema.decodeUnknownEffect(Scalar);
 
-const evaluateBoolean = Effect.fn("ExpressionEngine.evaluateBoolean")(function* (
-  source: Source,
-  environment: Environment,
-  context: Schema.JsonObject,
-) {
-  yield* checkBoolean(source, environment);
-  const value = yield* evaluateRaw(source, environment, context);
-  return yield* decodeBoolean(value).pipe(Effect.mapError(unexpectedResult(source, "a boolean")));
-});
+const makeExpressionEngine = Effect.sync(() => {
+  const environments = celEnvironments();
 
-const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
-  source: Source,
-  environment: Environment,
-  context: Schema.JsonObject,
-) {
-  yield* checkScalar(source, environment);
-  const value = yield* evaluateRaw(source, environment, context);
-  return yield* decodeScalar(value).pipe(
-    Effect.mapError(unexpectedResult(source, "a scalar value")),
+  const checkBoolean = Effect.fn("ExpressionEngine.checkBoolean")(
+    (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
+      checkExpected(
+        environments,
+        source,
+        environment,
+        (resultType) => resultType === "bool",
+        "bool",
+      ),
   );
+
+  const checkScalar = Effect.fn("ExpressionEngine.checkScalar")(
+    (source: Source, environment: Environment): Effect.Effect<void, ExpressionCheckError> =>
+      checkExpected(
+        environments,
+        source,
+        environment,
+        (resultType) => acceptedScalarTypes.has(resultType),
+        "a scalar value",
+      ),
+  );
+
+  const evaluateBoolean = Effect.fn("ExpressionEngine.evaluateBoolean")(function* (
+    source: Source,
+    environment: Environment,
+    context: Schema.JsonObject,
+  ) {
+    yield* checkBoolean(source, environment);
+    const value = yield* evaluateRaw(environments, source, environment, context);
+    return yield* decodeBoolean(value).pipe(Effect.mapError(unexpectedResult(source, "a boolean")));
+  });
+
+  const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
+    source: Source,
+    environment: Environment,
+    context: Schema.JsonObject,
+  ) {
+    yield* checkScalar(source, environment);
+    const value = yield* evaluateRaw(environments, source, environment, context);
+    return yield* decodeScalar(value).pipe(
+      Effect.mapError(unexpectedResult(source, "a scalar value")),
+    );
+  });
+
+  return ExpressionEngine.of({
+    relatedStringLiterals,
+    checkBoolean,
+    checkScalar,
+    evaluateBoolean,
+    evaluateScalar,
+  });
 });
 
 /**
  * Provides {@link ExpressionEngine} on `@marcbachmann/cel-js`, pinned to 8.0.0 as
  * the CEL seam requires
  * ([ADR 0004](../../../docs/adr/0004-loop-files-markdown-cel-frontmatter.md)).
- * The layer has no requirements. Before evaluation it converts JSON integers to
+ * The layer has no requirements. Each built layer sets up the cel-js
+ * environment of an {@link Environment} once for checking and once for
+ * evaluation, the first time an expression needs it, and reuses it for every
+ * later call with the same descriptor. Before evaluation it converts JSON integers to
  * `bigint` where the {@link Environment} declares `int`: on a variable, on a
  * field of a declared object type, or as the item type of a `list<T>`, at any
  * depth. It also reads absent nullable fields of declared object types as
@@ -439,10 +497,4 @@ const evaluateScalar = Effect.fn("ExpressionEngine.evaluateScalar")(function* (
  * evaluation. Declare such values as `int`. A `uint` result fails
  * `evaluateScalar` (see {@link Scalar}).
  */
-export const MarcbachmannCelLayer = Layer.succeed(ExpressionEngine, {
-  relatedStringLiterals,
-  checkBoolean,
-  checkScalar,
-  evaluateBoolean,
-  evaluateScalar,
-});
+export const MarcbachmannCelLayer = Layer.effect(ExpressionEngine, makeExpressionEngine);
