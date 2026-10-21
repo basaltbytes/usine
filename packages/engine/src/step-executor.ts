@@ -117,6 +117,16 @@ export class StepExecutor extends Context.Service<
       worker: Option.Option<WorkerName>,
     ) => Effect.Effect<WorkerLease, AttemptFailure>;
     /**
+     * Takes a slot of `worker` at once for an Attempt that already runs there, without waiting:
+     * the slot counts that Attempt even when none is free, so the Worker then runs more Attempts
+     * than it has slots, and takes no new one until enough of them end. At startup, before any
+     * Run reserves, the engine occupies a slot for each open Attempt whose parent task may have
+     * outlived the restart, so no new Attempt takes that slot while the Attempt's Run decides
+     * whether to reattach it (#177). The engine occupies only a Worker `workers` lists. The
+     * returned lease must be released when the Attempt ends or its Run does not reattach it.
+     */
+    readonly occupy: (worker: WorkerName) => Effect.Effect<WorkerLease>;
+    /**
      * Runs the reserved Attempt, or reattaches to it when `execution.reattach` is set, recording
      * channel activity through `io`, and waits for its result. It runs `io.checkoutAcquired` once
      * preparation holds the Attempt's checkout, and never when preparation fails.

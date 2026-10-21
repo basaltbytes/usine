@@ -32,7 +32,9 @@ const without = (ids: ReadonlySet<AttemptId>, attemptId: AttemptId): ReadonlySet
  * execution's executor. `reconcile` reconciles it, once its parent task is
  * confirmed stopped, when the Run closes the Attempt before that hand-off:
  * without reattaching it, after a reattachment that failed first, or on a
- * cancel (#180). `RunDriver` exposes both steps to the engine.
+ * cancel (#180). `atStartup` returns the open Attempts whose checkout it
+ * kept, for `RunDriver` to occupy their slots. `RunDriver` exposes both steps
+ * to the engine.
  */
 export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   store: RunStore["Service"],
@@ -65,7 +67,8 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
   /**
    * Keeps the checkout of an open Attempt whose parent task is live for its
    * Run, and reconciles any other. One whose liveness cannot be read is kept
-   * too: its Run reads it again before it decides.
+   * too: its Run reads it again before it decides. Returns whether it kept
+   * the checkout.
    */
   const recoverOpen = Effect.fn("CheckoutRecovery.recoverOpen")(function* (
     attempt: AttemptRecovery,
@@ -73,7 +76,10 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     const fields = { attemptId: attempt.attemptId, worker: attempt.worker };
     yield* Effect.annotateCurrentSpan(fields);
     const live = yield* executor.isLive(attempt.attemptId).pipe(Effect.result);
-    if (Result.isSuccess(live) && !live.success) return yield* recover(attempt);
+    if (Result.isSuccess(live) && !live.success) {
+      yield* recover(attempt);
+      return false;
+    }
     if (Result.isFailure(live))
       yield* Effect.logWarning(
         "Could not read whether an open Attempt's parent task is live; its checkout stays for its Run to decide",
@@ -85,8 +91,10 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
         fields,
       );
     yield* Ref.update(kept, (ids) => new Set(ids).add(attempt.attemptId));
+    return true;
   });
 
+  /** Reconciles every persisted Attempt on a configured Worker, and returns the open ones whose checkout it kept. */
   const atStartup = Effect.fn("CheckoutRecovery.atStartup")(function* () {
     const configured = new Set(yield* executor.workers);
     const candidates = yield* store.salvageCandidates;
@@ -103,10 +111,8 @@ export const checkoutRecoveryFor = Effect.fn("CheckoutRecovery.for")(function* (
     }
     // Before Run recovery can admit a retry, publish and durably record any
     // work left by its predecessor. Failed recovery keeps the checkout on disk.
-    yield* Effect.forEach(
-      reconcilable,
-      (attempt) => (attempt.open ? recoverOpen(attempt) : recover(attempt)),
-      { discard: true },
+    return yield* Effect.filter(reconcilable, (attempt) =>
+      attempt.open ? recoverOpen(attempt) : recover(attempt).pipe(Effect.as(false)),
     );
   });
 

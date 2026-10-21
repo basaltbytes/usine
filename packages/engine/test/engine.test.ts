@@ -78,6 +78,7 @@ describe("durable run engine", () => {
             recover: () => Effect.void,
             intervene: () => Effect.void,
             interrupt: () => Effect.void,
+            occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
             reserve: () =>
               Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
             execute: (execution) =>
@@ -162,6 +163,7 @@ describe("durable run engine", () => {
           isLive: () => Effect.succeed(false),
           outcome: () => Effect.succeed(Option.none()),
           recover: () => Effect.void,
+          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
           execute: () => Deferred.succeed(started, undefined).pipe(Effect.andThen(Effect.never)),
           interrupt: () => Effect.void,
@@ -742,6 +744,7 @@ describe("durable run engine", () => {
           recover: () => Effect.void,
           intervene: () => Effect.void,
           interrupt: () => Effect.void,
+          occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
           reserve: () =>
             Deferred.succeed(reserveEntered, undefined).pipe(
               Effect.andThen(Effect.never),

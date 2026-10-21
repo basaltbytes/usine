@@ -211,7 +211,9 @@ const anyWorker: ExecutorWorkers = { add: () => Effect.void, remove: () => Effec
  * Schedules Attempts FIFO over the Workers and adapts the Executor to the
  * engine's StepExecutor port. A reservation that names a Worker, as a Run
  * that reattaches an open Attempt makes, takes a slot of that Worker only,
- * and goes before the reservations that name none (#177). It starts with the
+ * and goes before the reservations that name none (#177). An Attempt that
+ * already runs on a Worker, as one a restart found live, occupies a slot of
+ * it at once, even past its slots. It starts with the
  * Workers in `config`, each preflighted with `brains` and the current roster
  * before the layer is ready, and registers with the current instance, so a
  * reload can resize, add, and remove Workers. A reload preflights each Worker
@@ -496,6 +498,38 @@ export const stepExecutorLayer = (
       );
       yield* Effect.forkScoped(dispatch);
 
+      const occupy: StepExecutor["Service"]["occupy"] = Effect.fn("WorkerScheduler.occupy")(
+        function* (worker) {
+          yield* Effect.annotateCurrentSpan({ worker });
+          // The Attempt runs on the Worker whether or not a slot is free, so the
+          // slot counts it at once; one beyond the Worker's slots retires when an
+          // Attempt there ends, as after a reload that lowers them.
+          const slots = yield* TxRef.modify(
+            pool,
+            (current) => [current.get(worker), withLeased(current, worker, 1)] as const,
+          );
+          if (slots === undefined) {
+            yield* Effect.logWarning(
+              "An Attempt already runs on a Worker the scheduler does not have; it occupies no slot, and that Worker takes no new Attempt",
+              { worker },
+            );
+            return { worker, release: Effect.void } satisfies WorkerLease;
+          }
+          const fields = { worker, running: slots.leased + 1, slots: slots.capacity };
+          if (slots.leased < slots.capacity)
+            yield* Effect.logInfo(
+              "An Attempt that already runs on the Worker occupies a slot",
+              fields,
+            );
+          else
+            yield* Effect.logWarning(
+              "An Attempt that already runs on the Worker occupies a slot beyond its max_concurrent_attempts; the Worker takes no new Attempt until enough of its Attempts end",
+              fields,
+            );
+          return yield* makeLease(worker);
+        },
+      );
+
       const reserve: StepExecutor["Service"]["reserve"] = Effect.fn("WorkerScheduler.reserve")(
         function* (submission, worker) {
           const run = { loop: submission.loop, itemKey: submission.itemKey };
@@ -649,6 +683,7 @@ export const stepExecutorLayer = (
         isLive: executor.isLive,
         outcome: executor.outcome,
         reserve,
+        occupy,
         intervene: executor.intervene,
         recover: (attempt, record) =>
           executor

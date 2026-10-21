@@ -319,6 +319,69 @@ describe("Worker scheduler reservations that name a Worker", () => {
   );
 });
 
+describe("Worker scheduler slots occupied by Attempts that already run", () => {
+  it.live(
+    "count at once, even past max_concurrent_attempts, and take slots from new Attempts until enough end",
+    () =>
+      withWorkers(
+        localWorkers([
+          ["local", 1],
+          ["spare", 1],
+        ]),
+        () =>
+          Effect.gen(function* () {
+            const lines: Array<ReadonlyArray<unknown>> = [];
+            const scheduler = yield* startScheduler([]);
+            const agent = yield* developer;
+            const first = yield* scheduler.occupy(local);
+            const second = yield* scheduler.occupy(local).pipe(Effect.withLogger(logsIn(lines)));
+            assert.deepStrictEqual(
+              logged(
+                lines,
+                "An Attempt that already runs on the Worker occupies a slot beyond its max_concurrent_attempts; the Worker takes no new Attempt until enough of its Attempts end",
+              ),
+              [{ worker: local, running: 2, slots: 1 }],
+            );
+            const onLocal = yield* Effect.forkChild(
+              scheduler.reserve(submission(agent, 1), Option.some(local)),
+            );
+            yield* assertWaiting(onLocal, "two Attempts run on local's one slot");
+            const fresh = yield* scheduler.reserve(submission(agent, 2), Option.none());
+            assert.strictEqual(fresh.worker, spare);
+            yield* first.release;
+            yield* assertWaiting(onLocal, "the first Attempt's slot retired");
+            yield* second.release;
+            assert.strictEqual((yield* leaseOf(onLocal)).worker, local);
+          }).pipe(Effect.scoped),
+      ),
+  );
+
+  it.live("occupy no slot of a Worker the scheduler does not have, and warn", () =>
+    withWorkers(localWorkers([["local", 1]]), () =>
+      Effect.gen(function* () {
+        const lines: Array<ReadonlyArray<unknown>> = [];
+        const scheduler = yield* startScheduler([]);
+        const gone = WorkerName.make("gone");
+        const lease = yield* scheduler.occupy(gone).pipe(Effect.withLogger(logsIn(lines)));
+        assert.deepStrictEqual(
+          logged(
+            lines,
+            "An Attempt already runs on a Worker the scheduler does not have; it occupies no slot, and that Worker takes no new Attempt",
+          ),
+          [{ worker: gone }],
+        );
+        yield* lease.release;
+        assert.deepStrictEqual(yield* scheduler.workers, [local]);
+        const agent = yield* developer;
+        assert.strictEqual(
+          (yield* scheduler.reserve(submission(agent, 1), Option.none())).worker,
+          local,
+        );
+      }).pipe(Effect.scoped),
+    ),
+  );
+});
+
 describe("Worker scheduler on reload", () => {
   it.live("a reload that raises max_concurrent_attempts admits a waiting Run at once", () =>
     withWorkers(localWorkers([["local", 1]]), (root) =>

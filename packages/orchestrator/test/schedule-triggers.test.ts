@@ -183,6 +183,7 @@ const runtimeLayer = (directory: InstanceDirectory) => {
     recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
+    occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
     reserve: () => Effect.die("an approval-gated test run must not reserve a worker"),
     execute: () => Effect.die("an approval-gated test run must not start an Attempt"),
   });

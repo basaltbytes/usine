@@ -59,6 +59,7 @@ export const executorLayer = (plans: Ref.Ref<ReadonlyArray<AttemptPlan>>) =>
     recover: () => Effect.void,
     intervene: () => Effect.void,
     interrupt: () => Effect.void,
+    occupy: (worker) => Effect.succeed({ worker, release: Effect.void }),
     reserve: () => Effect.succeed({ worker: WorkerName.make("local"), release: Effect.void }),
     execute: () =>
       Ref.modify(plans, (remaining) => {
