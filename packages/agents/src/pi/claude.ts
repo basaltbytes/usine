@@ -446,6 +446,7 @@ const makeClaudeChild = Effect.gen(function* () {
    * every other Claude launch and preflight on the Worker.
    */
   const holdLogin = Effect.fn("ClaudeChildBackend.holdLogin")(function* (request: ChildRequest) {
+    yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
     const held = yield* Deferred.make<void>();
     const released = yield* Deferred.make<void>();
     yield* Effect.forkScoped(
@@ -501,6 +502,7 @@ const makeClaudeChild = Effect.gen(function* () {
     request: ChildRequest,
     options: ClaudeQueryOptions,
   ) {
+    yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
     const release = yield* holdLogin(request);
     return yield* Effect.gen(function* () {
       const input = new AsyncInput();
@@ -559,6 +561,7 @@ const makeClaudeChild = Effect.gen(function* () {
     options: ClaudeQueryOptions,
     scope: Scope.Scope,
   ) {
+    yield* Effect.annotateCurrentSpan({ sessionId: request.session.id, worker: request.worker });
     for (let retry = 0; ; retry += 1) {
       const launchScope = yield* Scope.fork(scope);
       const opened = yield* launchOnce(request, options).pipe(Scope.provide(launchScope));
