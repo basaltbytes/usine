@@ -406,7 +406,8 @@ export const boardOverviewResolved = () =>
 
 /**
  * The Board with #9's implement Run on the Claude plan instead of the ChatGPT plan: its Attempt
- * has reported 6,000 tokens but no price yet, so the Claude plan's $1.25 is a lower bound.
+ * has reported 6,000 tokens but no price yet, so the Claude plan's $9.20, and the Task's $9.95,
+ * are lower bounds.
  */
 export const boardOverviewUnpriced = () =>
   changeTasks(boardOverview(), (task) =>
@@ -416,10 +417,26 @@ export const boardOverviewUnpriced = () =>
           ...task,
           usage: taskUsageOf(task.runs, [
             pool("apiKeys", 1_500, 0.75),
-            pool("claudePlan", 26_000, 1.25, true),
+            pool("claudePlan", 26_000, 9.2, true),
           ]),
         }),
   );
+
+/** The Board with #18's canceled Attempt ended before end times were recorded, so the Task's
+ * attempt time is unknown. */
+export const boardOverviewUntimed = () =>
+  changeTasks(boardOverview(), (task) => {
+    if (task.itemKey !== dropped.itemKey) return task;
+    const untimed = run("run-dropped", dropped, "implement", "Canceled", 1440, [
+      attempt(1, minutesAgo(1440), "canceled"),
+    ]);
+    return new BoardTaskView({
+      ...task,
+      runs: [untimed],
+      run: untimed,
+      usage: taskUsageOf([untimed]),
+    });
+  });
 
 /** The package each Task that ran documents in `boardOverviewDocumented`, by originating Item. */
 const documentedPackages = new Map([
@@ -434,7 +451,8 @@ const documentedPackages = new Map([
 /**
  * The Board with each Task that ran titled after one of the TSDoc issues, such as `Document the
  * public API of @usine/orchestrator in TSDoc`: titles that read alike up to the package near
- * their end.
+ * their end. The merged Task (#5) has wide figures: its Run finished 28 minutes ago after 1 h 21
+ * min of attempts, and $12.62 on the Claude plan with a session not priced yet.
  */
 export const boardOverviewDocumented = () =>
   changeTasks(boardOverview(), (task) => {
@@ -442,10 +460,18 @@ export const boardOverviewDocumented = () =>
     const name = origin === undefined ? undefined : documentedPackages.get(origin.number);
     if (origin === undefined || name === undefined) return task;
     const title = `Document the public API of @usine/${name} in TSDoc`;
+    const items = [new BoardItemLink({ ...origin, title }), ...others];
+    if (task.itemKey !== shippedPr.itemKey) return new BoardTaskView({ ...task, title, items });
+    const finished = run("run-shipped", shipped, "implement", "Succeeded", 109, [
+      attempt(1, minutesAgo(109), null, minutesAgo(28)),
+    ]);
     return new BoardTaskView({
       ...task,
       title,
-      items: [new BoardItemLink({ ...origin, title }), ...others],
+      items,
+      runs: [finished],
+      run: finished,
+      usage: taskUsageOf([finished], [pool("claudePlan", 1_284_000, 12.62, true)]),
     });
   });
 

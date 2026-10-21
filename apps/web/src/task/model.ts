@@ -12,6 +12,7 @@ import type {
   TaskUsageView,
 } from "@usine/orchestrator/operator";
 import { Match, Option } from "effect";
+import { durationLabel, tokensLabel, usdLabel } from "../operator-copy.ts";
 
 /**
  * How long a Run's Attempts ran, added up: each ended Attempt from its start to its end, and a
@@ -133,7 +134,7 @@ type TaskStatus =
 /** A Task usine ran at least once, as a row of the Tasks list. */
 export interface TaskRow {
   readonly task: BoardTaskView;
-  /** The Task's latest Run, which the Last run column shows. */
+  /** The Task's latest Run, whose last activity the Status column's time gives. */
   readonly last: RunView;
   readonly status: TaskStatus;
 }
@@ -307,9 +308,9 @@ export interface TaskTotals {
   /** Ended Attempts with no recorded end, which `durationMillis` leaves out. */
   readonly unmeasured: number;
   readonly tokens: number;
-  /** The priced Tasks' dollars, an estimate when any is; null when no Task has a price. */
-  readonly cost: { readonly usd: number; readonly estimate: boolean } | null;
-  /** Whether a listed Task has usage with no price yet, so `cost` is a lower bound. */
+  /** The priced Tasks' dollars; null when no Task has a price. */
+  readonly usd: number | null;
+  /** Whether a listed Task has usage with no price yet, so `usd` is a lower bound. */
   readonly unpriced: boolean;
 }
 
@@ -322,15 +323,49 @@ export const taskTotals = (rows: ReadonlyArray<TaskRow>, now: number): TaskTotal
     unmeasured: rows.reduce((sum, { task }) => sum + task.usage.unmeasured, 0),
     tokens: rows.reduce((sum, { task }) => sum + task.usage.tokens, 0),
     unpriced: rows.some(({ task }) => costUnpriced(task.usage)),
-    cost:
-      costs.length === 0
-        ? null
-        : {
-            usd: costs.reduce((sum, { usd }) => sum + usd, 0),
-            estimate: costs.some(({ estimate }) => estimate),
-          },
+    usd: costs.length === 0 ? null : costs.reduce((sum, { usd }) => sum + usd, 0),
   };
 };
+
+/** Why an elapsed time marked `*` is lower than the real one. */
+export const untimedNote = "Some attempts have no recorded timing; the real figure is higher";
+
+/** Why an estimated cost marked `*` is lower than the real one. */
+export const unpricedNote = "Some sessions have no price yet; the real figure is higher";
+
+/**
+ * A figure of the line under the Tasks list's heading and the words after it, such as `12 h 8 min`
+ * and `elapsed`. `lowerBound` says why the real figure is higher, null when the figure is whole.
+ */
+export interface TotalsFigure {
+  readonly figure: string;
+  readonly words: string;
+  readonly lowerBound: string | null;
+}
+
+/**
+ * The figures of the line under the Tasks list's heading, which reads
+ * `197 runs, 12 h 8 min* elapsed, 127.5M tokens, $134.34* estimated` with a `*` after each lower
+ * bound; the cost is left out when no Task has a price.
+ */
+export const totalsFigures = (totals: TaskTotals): ReadonlyArray<TotalsFigure> => [
+  { figure: String(totals.runs), words: totals.runs === 1 ? "run" : "runs", lowerBound: null },
+  {
+    figure: durationLabel(totals.durationMillis),
+    words: "elapsed",
+    lowerBound: totals.unmeasured > 0 ? untimedNote : null,
+  },
+  { figure: tokensLabel(totals.tokens), words: "tokens", lowerBound: null },
+  ...(totals.usd === null
+    ? []
+    : [
+        {
+          figure: usdLabel(totals.usd),
+          words: "estimated",
+          lowerBound: totals.unpriced ? unpricedNote : null,
+        },
+      ]),
+];
 
 /** A Loop that ran on a Task, with the state of its last Run there. */
 export interface TaskLoop {
