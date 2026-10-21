@@ -16,6 +16,7 @@ import { Run, RunId } from "@usine/core/run";
 import { Step } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import {
+  claudeLoginLockLayer,
   CheckoutRequest,
   CredentialProvider,
   CredentialUnavailableError,
@@ -208,6 +209,7 @@ const withGitHubEngine = <A, E, R>(
     }).pipe(
       Layer.provide(credentialLayer),
       Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+      Layer.provide(claudeLoginLockLayer),
       Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, github)),
       Layer.provide(NodeServices.layer),
     );
@@ -240,6 +242,7 @@ describe("local worker", () => {
         }).pipe(
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(fixedConfigLayer(config)),
           Layer.provide(testAppLayer),
@@ -416,6 +419,7 @@ describe("local worker", () => {
             }),
           ),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, delayedCleanup)),
         );
         const budgetConfig = new UsineConfig({
@@ -544,6 +548,7 @@ describe("local worker", () => {
                       : Effect.succeed(workerCredential(credential)),
                 }),
                 stubAttemptRuntime(new StubStorage()),
+                claudeLoginLockLayer,
                 Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, controlledSpawner),
               ),
             ),
@@ -622,7 +627,11 @@ describe("local worker", () => {
           instanceDirectory: InstanceDirectory.make(root),
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
-        }).pipe(Layer.provide(credentials), Layer.provide(stubAttemptRuntime(new StubStorage())));
+        }).pipe(
+          Layer.provide(credentials),
+          Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
+        );
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           const request = new CheckoutRequest({
@@ -742,6 +751,7 @@ describe("local worker", () => {
         }).pipe(
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(fixedConfigLayer(config)),
           Layer.provide(testAppLayer),

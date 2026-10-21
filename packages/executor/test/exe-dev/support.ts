@@ -14,7 +14,7 @@ import {
   stubAttemptRuntime,
   StubStorage,
 } from "@usine/durable/testing";
-import { CheckoutRequest } from "../../src/executor.ts";
+import { CheckoutRequest, claudeLoginLockLayer } from "../../src/executor.ts";
 import { layer as exeDevLayer } from "../../src/exe-dev/exe-dev.ts";
 import { GitHubIntegration, IntegrationName } from "../../src/exe-dev/model.ts";
 import { Deferred, Effect, Layer, Option, Ref, Sink, Stream } from "effect";
@@ -318,4 +318,8 @@ export const runtime = (
     githubIntegrations: [integration],
     // The cancellation tests advance the TestClock by exactly this much.
     interruptGrace: "2 seconds",
-  }).pipe(Layer.provide(sshLayer), Layer.provide(wrap(stubAttemptRuntime(storage, parent))));
+  }).pipe(
+    Layer.provide(sshLayer),
+    Layer.provide(wrap(stubAttemptRuntime(storage, parent))),
+    Layer.provide(claudeLoginLockLayer),
+  );

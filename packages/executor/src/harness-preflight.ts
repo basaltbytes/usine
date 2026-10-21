@@ -1,5 +1,6 @@
 import type { ChildHost } from "@usine/agents/child-host";
 import { preflight } from "@usine/agents/preflight";
+import type { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { HarnessReadiness } from "@usine/core/agent/capability";
 import type { WorkerName } from "@usine/core/worker";
@@ -16,16 +17,27 @@ export type HarnessProbe = (
   brain: BrainSpec,
 ) => Effect.Effect<HarnessReadiness, ExecutorOperationError | WorkerCapabilityError>;
 
-/** Checks each distinct brain through `probe` and turns an unavailable harness into a capability error. */
+/**
+ * Checks each distinct brain through `probe` and turns an unavailable harness
+ * into a capability error. A Claude check holds `worker`'s lock in `logins`
+ * until it returns, so two Attempts preparing on one Worker never refresh its
+ * Claude login at the same time, nor while a Claude child starts there (#453).
+ */
 export const verifyHarnessReadiness = Effect.fn("Executor.verifyHarnessReadiness")(function* (
   worker: WorkerName,
   brains: ReadonlyArray<BrainSpec>,
   probe: HarnessProbe,
+  logins: ClaudeLoginLock["Service"],
 ) {
   yield* Effect.annotateCurrentSpan({ worker });
   const distinct = Arr.dedupe(brains);
   for (const brain of distinct) {
-    const result = yield* probe(brain);
+    const result = yield* brain.harness === "claude"
+      ? Effect.logDebug("Checking Claude under the Worker's Claude login lock", {
+          worker,
+          model: brain.model,
+        }).pipe(Effect.andThen(logins.withLock(worker)(probe(brain))))
+      : probe(brain);
     if (result._tag === "HarnessUnavailableError")
       return yield* new WorkerCapabilityError({
         worker,

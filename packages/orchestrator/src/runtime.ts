@@ -4,6 +4,7 @@ import { ConfigParser } from "@usine/config/parser";
 import type { InstanceDirectory } from "@usine/core/instance";
 import { layer as durableAttemptRuntimeLayer } from "@usine/durable/live";
 import { observationLayer as localObservationLayer } from "@usine/engine/local-sqlite";
+import { claudeLoginLockLayer } from "@usine/executor";
 import { MarcbachmannCelLayer } from "@usine/expression/marcbachmann-cel";
 import { GitHubApp } from "@usine/github/github-app";
 import { GitHubItemHistory } from "@usine/github/item-history";
@@ -66,7 +67,10 @@ export const runtimeLayer = (instanceDirectory: InstanceDirectory) => {
     Layer.provide(polling),
     Layer.provide(MarcbachmannCelLayer),
   );
+  // One lock per Worker on its Claude login, shared by the executor's preflight
+  // and the Attempts' Claude children: the engine receives it with the runtime.
   const attemptRuntime = durableAttemptRuntimeLayer(instanceDirectory).pipe(
+    Layer.provideMerge(claudeLoginLockLayer),
     Layer.provide(NodeServices.layer),
   );
   const engine = Layer.unwrap(

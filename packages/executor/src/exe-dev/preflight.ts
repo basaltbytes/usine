@@ -1,4 +1,5 @@
 import type { RemoteShell } from "@usine/agents/child-host";
+import { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import { SshDestination, WorkerName } from "@usine/core/worker";
 import { Effect, Ref, Schema } from "effect";
@@ -35,6 +36,7 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
   commands: ExeDevCommands,
 ) {
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const logins = yield* ClaudeLoginLock;
   const workers = yield* Ref.make(new Map<WorkerName, VmState>());
 
   /** Checks a brain on the VM, where the Attempt's children run; the checks export nothing there. */
@@ -122,7 +124,12 @@ export const preflightFor = Effect.fn("ExeDevExecutor.preflightFor")(function* (
       commands.remote("preflight", vm.sshDest, "cat", ["/proc/meminfo"]),
     );
 
-    yield* verifyHarnessReadiness(worker, brains, harnessProbe(commands.childHost(vm.sshDest)));
+    yield* verifyHarnessReadiness(
+      worker,
+      brains,
+      harnessProbe(commands.childHost(vm.sshDest)),
+      logins,
+    );
 
     for (const integration of options.githubIntegrations) {
       yield* asCapability(

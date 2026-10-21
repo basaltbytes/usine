@@ -1,3 +1,4 @@
+import type { ClaudeLoginLock } from "@usine/agents/runtime";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import type { WorkerName } from "@usine/core/worker";
 import { Effect, Option } from "effect";
@@ -28,12 +29,13 @@ const capabilityError = (
  * to it, the configured root is a writable directory, Git runs, its memory
  * carries its concurrent Attempts, the Gateway in front of it answers and is
  * reachable from it when it has one, and each rostered brain is ready where
- * the Attempt's children run.
+ * the Attempt's children run, a Claude brain under the Worker's lock in `logins`.
  */
 export const sshPreflightFor = (
   commands: RemoteCommands,
   machineFor: (worker: WorkerName) => Effect.Effect<SshMachine, ExecutorError>,
   harnessProbe: (machine: SshMachine) => HarnessProbe,
+  logins: ClaudeLoginLock["Service"],
 ) =>
   Effect.fn("SshExecutor.preflight")(function* (
     worker: WorkerName,
@@ -99,7 +101,7 @@ export const sshPreflightFor = (
 
     if (Option.isSome(machine.gateway))
       yield* verifyGateway(commands, worker, machine, machine.gateway.value);
-    yield* verifyHarnessReadiness(worker, brains, harnessProbe(machine));
+    yield* verifyHarnessReadiness(worker, brains, harnessProbe(machine), logins);
     yield* Effect.logInfo("SSH Worker preflight verified", {
       worker,
       host,

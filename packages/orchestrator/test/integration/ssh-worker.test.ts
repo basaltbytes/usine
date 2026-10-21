@@ -16,7 +16,12 @@ import { StepName } from "@usine/core/step";
 import { WorkerName } from "@usine/core/worker";
 import { type StubParent, stubAttemptRuntime, StubStorage } from "@usine/durable/testing";
 import { RunEngine, Submission } from "@usine/engine/engine";
-import { CredentialProvider, CredentialUnavailableError, Executor } from "@usine/executor";
+import {
+  claudeLoginLockLayer,
+  CredentialProvider,
+  CredentialUnavailableError,
+  Executor,
+} from "@usine/executor";
 import { layer as sshExecutorLayer } from "@usine/executor/ssh";
 import { GatewayAdminApi } from "@usine/gateway/admin";
 import { GitHubApp } from "@usine/github/github-app";
@@ -269,6 +274,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(fixedConfigLayer(config)),
           Layer.provide(app),
         );
@@ -384,6 +390,7 @@ describe.skipIf(destination === undefined)("live SSH Worker", () => {
         }).pipe(
           Layer.provide(unused),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(NodeServices.layer),
           Layer.provide(FetchHttpClient.layer),
         );
@@ -640,6 +647,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
           Layer.provide(gitHubCredentialLayer.pipe(Layer.provide(app))),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(stubAttemptRuntime(new StubStorage(), parent)),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(fixedConfigLayer(config)),
           Layer.provide(app),
         );
@@ -732,6 +740,7 @@ describe.skipIf(gatewayDestination === undefined)("live SSH Worker behind a Gate
         }).pipe(
           Layer.provide(unused),
           Layer.provide(stubAttemptRuntime(new StubStorage())),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(NodeServices.layer),
           Layer.provide(FetchHttpClient.layer),
         );

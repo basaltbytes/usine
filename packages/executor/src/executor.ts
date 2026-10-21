@@ -349,3 +349,5 @@ export class Executor extends Context.Service<
     ) => Effect.Effect<void, AttemptFailure>;
   }
 >()("@usine/executor/Executor") {}
+
+export { claudeLoginLockLayer } from "./claude-login-lock.ts";

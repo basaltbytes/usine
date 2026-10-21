@@ -30,6 +30,7 @@ import {
   testAgent,
   waitFor,
 } from "./support.ts";
+import { claudeLoginLockLayer } from "@usine/executor";
 
 /** One fresh Attempt of a Run, as the engine hands it to the StepExecutor. */
 const freshExecution = (runId: RunId, attemptId: AttemptId) => {
@@ -97,6 +98,7 @@ describe("local worker runaway guard", () => {
         }).pipe(
           Layer.provide(credentialLayer),
           Layer.provide(stubAttemptRuntime(storage, spender)),
+          Layer.provide(claudeLoginLockLayer),
           Layer.provide(alwaysHoldsLayer),
           Layer.provide(fixedConfigLayer(ceiling)),
           Layer.provide(testAppLayer),
@@ -133,7 +135,11 @@ describe("local worker runaway guard", () => {
           instanceDirectory: InstanceDirectory.make(root),
           repositoryUrl: () => remote,
           harnessReadiness: harnessReady,
-        }).pipe(Layer.provide(credentialLayer), Layer.provide(stubAttemptRuntime(storage, idle)));
+        }).pipe(
+          Layer.provide(credentialLayer),
+          Layer.provide(stubAttemptRuntime(storage, idle)),
+          Layer.provide(claudeLoginLockLayer),
+        );
         const ceiling = new UsineConfig({
           ...config,
           settings: new Settings({ ...config.settings, maxAttemptMinutes: Option.some(1) }),
