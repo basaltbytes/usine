@@ -8,6 +8,7 @@ import { page, userEvent } from "vitest/browser";
 import { routeTree } from "../src/route-tree.gen.ts";
 import {
   boardOverview,
+  boardOverviewDocumented,
   boardOverviewResolved,
   boardOverviewUnpriced,
   boardStalled,
@@ -265,6 +266,26 @@ it("shows Board and Tasks under the project in the sidebar, the open page's row 
   await expect.poll(() => router.state.location.pathname).toBe("/projects/board-test/repo");
   await expect.element(sidebarLink("Board")).toHaveAttribute("data-active");
   await expect.element(sidebarLink("Tasks")).not.toHaveAttribute("data-active");
+});
+
+it("keeps every title on one line beside all the columns, the long statuses wrapping instead", async () => {
+  queryClient.setQueryData(["overview"], boardOverviewDocumented());
+  await mount(list);
+  expect(columns()).toHaveLength(8);
+  // The titles read alike up to the package near their end, so each one shows in full.
+  const titles = table()
+    .getByTitle(/^Document the public API of @usine\//u)
+    .elements();
+  expect(titles).toHaveLength(6);
+  for (const title of titles) expect(title.scrollWidth).toBeLessThanOrEqual(title.clientWidth);
+  // The canceled task's stall reason wraps past its first 20px line beside its whole title.
+  const status = rowOf(/@usine\/github/u)
+    .getByRole("cell")
+    .nth(1)
+    .element().firstElementChild;
+  expect(status?.getBoundingClientRect().height).toBeGreaterThanOrEqual(40);
+  const container = table().element().parentElement;
+  expect(container?.scrollWidth).toBeLessThanOrEqual(container?.clientWidth ?? 0);
 });
 
 it("drops Runs and Pull request beside the sidebar on a mid-size window", async () => {

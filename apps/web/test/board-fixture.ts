@@ -421,6 +421,34 @@ export const boardOverviewUnpriced = () =>
         }),
   );
 
+/** The package each Task that ran documents in `boardOverviewDocumented`, by originating Item. */
+const documentedPackages = new Map([
+  [9, "core"],
+  [7, "agents"],
+  [44, "engine"],
+  [28, "orchestrator"],
+  [18, "github"],
+  [5, "config"],
+]);
+
+/**
+ * The Board with each Task that ran titled after one of the TSDoc issues, such as `Document the
+ * public API of @usine/orchestrator in TSDoc`: titles that read alike up to the package near
+ * their end.
+ */
+export const boardOverviewDocumented = () =>
+  changeTasks(boardOverview(), (task) => {
+    const [origin, ...others] = task.items;
+    const name = origin === undefined ? undefined : documentedPackages.get(origin.number);
+    if (origin === undefined || name === undefined) return task;
+    const title = `Document the public API of @usine/${name} in TSDoc`;
+    return new BoardTaskView({
+      ...task,
+      title,
+      items: [new BoardItemLink({ ...origin, title }), ...others],
+    });
+  });
+
 const stalled = (loopName: string, item: BoardItemLink, reason: StalledItemView["reason"]) =>
   new StalledItemView({
     repository: boardRepository,
