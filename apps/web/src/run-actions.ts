@@ -1,4 +1,10 @@
-import { type MutationKey, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  type MutationKey,
+  type MutationState,
+  useMutation,
+  useMutationState,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { type AttemptId, AttemptTask } from "@usine/core/attempt";
 import type { RunId } from "@usine/core/run";
 import {
@@ -14,6 +20,15 @@ import { api } from "./api.ts";
 export type RunActionRequest =
   | { readonly action: "approve" | "retry" | "cancel" }
   | { readonly action: "resolveFailure"; readonly attemptId: AttemptId };
+
+/** One Run action as a screen sends it. */
+interface RunActionVariables {
+  readonly runId: RunId;
+  readonly request: RunActionRequest;
+}
+
+// Files every screen's Run actions in the mutation cache, so any screen can see one in flight.
+const runActionKey = ["run-action"] as const;
 
 /** `overview` without its Needs you entries about `runId`, which an action on that Run answered. */
 const withoutRunNeeds = (overview: FactoryOverview, runId: RunId): FactoryOverview => {
@@ -35,19 +50,15 @@ const useRefreshRun = () => {
 
 /**
  * Sends Run actions from any screen. Success drops the Run's Needs you entries from the cached
- * overview at once, then refreshes the overview, the desk, and that Run's detail.
+ * overview at once, then refreshes the overview, the desk, and that Run's detail; the request
+ * stays pending until that refresh lands, for `usePendingRunAction` too.
  */
 export const useRunAction = () => {
   const queryClient = useQueryClient();
   const refresh = useRefreshRun();
   return useMutation({
-    mutationFn: ({
-      runId,
-      request,
-    }: {
-      readonly runId: RunId;
-      readonly request: RunActionRequest;
-    }) =>
+    mutationKey: runActionKey,
+    mutationFn: ({ runId, request }: RunActionVariables) =>
       api((client) =>
         request.action === "resolveFailure"
           ? client.resolveFailure({ params: { runId }, payload: { attemptId: request.attemptId } })
@@ -67,6 +78,18 @@ export const useRunAction = () => {
 
 /** The pending state and last error of a screen's Run actions. */
 export type RunActions = ReturnType<typeof useRunAction>;
+
+/**
+ * The action that any screen is sending on Run `runId` through `useRunAction`, until the refresh
+ * after it lands; undefined while none is. The latest wins when several are pending.
+ */
+export const usePendingRunAction = (runId: RunId): RunActionRequest["action"] | undefined =>
+  useMutationState<MutationState<unknown, Error, RunActionVariables>>({
+    filters: { mutationKey: runActionKey, status: "pending" },
+    select: ({ state }) => state,
+  })
+    .filter(({ variables }) => variables?.runId === runId)
+    .at(-1)?.variables?.request.action;
 
 /** Running `run` again with the task and Agent it ran with, as Run again does without the editor. */
 export const unchangedRunAgain = (run: RunView) => ({

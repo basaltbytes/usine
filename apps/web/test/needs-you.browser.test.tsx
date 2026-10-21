@@ -152,22 +152,36 @@ const needs = page.getByRole("region", { name: "Needs attention", includeHidden:
 const entry = (title: string) =>
   needs.getByRole("listitem", { includeHidden: true }).filter({ hasText: title });
 
-it("drops the Run's approval from Needs attention when the drawer's approve returns, before the slow overview refresh", async () => {
+it("holds the Run's approval in Needs attention while the drawer approves it, and drops it when the approve returns, before the slow overview refresh", async () => {
+  const held = entry("#367 Approve from the drawer");
   await needs
     .getByRole("button", { name: /start-dev: approval needed.*#367/, includeHidden: true })
     .click();
   await page.getByRole("dialog").getByRole("button", { name: "Approve", exact: true }).click();
+  await expect
+    .element(held.getByRole("button", { name: "Approving…", includeHidden: true }))
+    .toBeDisabled();
+  await expect
+    .element(held.getByRole("button", { name: "Cancel run", includeHidden: true }))
+    .toBeDisabled();
+  await expect
+    .element(
+      entry("#12 Wait for the operator").getByRole("button", {
+        name: "Approve",
+        exact: true,
+        includeHidden: true,
+      }),
+    )
+    .toBeEnabled();
   await commands.answerApproval(200, '{"ok":true}');
   // Well within the 5 s the overview refresh takes, which is still on its way.
-  await expect
-    .element(entry("#367 Approve from the drawer"), { timeout: 2_000 })
-    .not.toBeInTheDocument();
+  await expect.element(held, { timeout: 2_000 }).not.toBeInTheDocument();
   expect(queryClient.getQueryState(["overview"])?.fetchStatus).toBe("fetching");
   await expect.element(entry("#12 Wait for the operator")).toBeInTheDocument();
   await expect
     .poll(() => queryClient.getQueryState(["overview"])?.fetchStatus, { timeout: 10_000 })
     .toBe("idle");
   expect(await commands.lateOverviewRequests()).toBe(1);
-  await expect.element(entry("#367 Approve from the drawer")).not.toBeInTheDocument();
+  await expect.element(held).not.toBeInTheDocument();
   await expect.element(entry("#12 Wait for the operator")).toBeInTheDocument();
 });
