@@ -285,8 +285,9 @@ export interface Sink {
   readonly comments: (comments: ReadonlyArray<Comment>) => Effect.Effect<void, AttemptFailure>;
   /**
    * The windows of the other Attempts of the Attempt's Agent that overlap its
-   * own on its Run's Item, read when the harvest runs, so they include Attempts
-   * that started after it. The harvest leaves out a comment posted in one.
+   * own on its Run's Item. The harvest reads them once GitHub has listed the
+   * Attempt's comments, so they include Attempts that started after it, even
+   * while the harvest ran, and leaves out a comment posted in one.
    */
   readonly overlapping: Effect.Effect<ReadonlyArray<AttemptWindow>, AttemptFailure>;
 }

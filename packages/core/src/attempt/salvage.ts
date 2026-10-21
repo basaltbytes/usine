@@ -57,8 +57,8 @@ export interface AttemptRecovery {
  * `comments` the comments and reviews it posted on its Run's Item when its
  * parent task failed and the orchestrator stopped before recording them.
  * `overlapping` reads the windows of the other Attempts of its Agent that
- * overlap its own on that Item: the harvest of those comments leaves out one
- * posted in such a window.
+ * overlap its own on that Item: the harvest of those comments reads them once
+ * GitHub has listed the comments, and leaves out one posted in such a window.
  */
 export interface RecoverySink<E> {
   readonly salvage: (salvage: AttemptSalvage) => Effect.Effect<void, E>;

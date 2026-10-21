@@ -78,6 +78,8 @@ interface FakeSshState {
   resumeFailure?: "lookup" | "fetch" | "decode";
   /** GitHub's `--slurp` pages for the conversation comments of Item 42. */
   issueComments: string;
+  /** Runs each time `gh` lists the conversation comments of Item 42, before it answers. */
+  onIssueComments: () => void;
 }
 
 const oneShotHandle = (stdout: string, exitCode: number, stderr = "") => {
@@ -141,6 +143,7 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
     salvage: "clean",
     salvageCommitted: false,
     issueComments: "[[]]",
+    onIssueComments: () => {},
   };
   const service = ChildProcessSpawner.make(
     Effect.fn("FakeSsh.spawn")(function* (command) {
@@ -204,8 +207,10 @@ export const fakeSsh = (sweepMode: SweepMode = "valid") => {
         );
       }
       if (line.startsWith("exec 'sh' '-c'")) return oneShotHandle("no-children\n", 0);
-      if (line.includes("&& exec 'gh' 'api' 'repos/acme/demo/issues/42/comments?"))
+      if (line.includes("&& exec 'gh' 'api' 'repos/acme/demo/issues/42/comments?")) {
+        state.onIssueComments();
         return oneShotHandle(state.issueComments, 0);
+      }
       // Harvest: no new commits and an unchanged detached HEAD.
       if (line.startsWith("cd ") && line.includes("&& exec 'git' 'log'"))
         return oneShotHandle("", 0);

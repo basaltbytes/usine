@@ -315,17 +315,17 @@ describe("exe.dev launch", () => {
             Effect.sync(
               () => void recorded.push(comments.map(({ kind, url }) => kind + " " + url.href)),
             ),
-          overlapping: Effect.sync(() => opened),
+          overlapping: Effect.sync(() => [...opened]),
         };
-        // The other Attempt opens on the Item while this one works, so only a
-        // harvest that reads the windows after the parent finished leaves `SHARED` out.
-        const joined: StubParent = (context) =>
-          Effect.sync(() => void opened.push(OTHER_ATTEMPT)).pipe(Effect.andThen(parent(context)));
+        // The other Attempt opens on the Item while the harvest lists its
+        // comments, so only a harvest that reads the windows after GitHub
+        // answered leaves `SHARED` out.
+        ssh.state.onIssueComments = () => void opened.push(OTHER_ATTEMPT);
         return Effect.gen(function* () {
           const executor = yield* Executor;
           const prepared = yield* executor.prepare(onItem);
           return yield* prepared.launch(sink).pipe(Effect.result);
-        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, joined)));
+        }).pipe(Effect.scoped, Effect.provide(runtime(ssh.layer, parent)));
       };
       return Effect.gen(function* () {
         const failed = yield* attempt(fails);
@@ -597,6 +597,9 @@ describe("exe.dev launch", () => {
         const restart = ssh.state.commands.length;
         const recorded: Array<string> = [];
         const salvaged: Array<string> = [];
+        // The other Attempt opens on the Item while the recovery lists its comments.
+        const opened: Array<AttemptWindow> = [];
+        ssh.state.onIssueComments = () => void opened.push(OTHER_ATTEMPT);
         yield* Effect.gen(function* () {
           const executor = yield* Executor;
           yield* executor.recover(openAttempt, {
@@ -605,7 +608,7 @@ describe("exe.dev launch", () => {
               Effect.sync(
                 () => void recorded.push(...comments.map(({ kind, url }) => `${kind} ${url.href}`)),
               ),
-            overlapping: Effect.succeed([OTHER_ATTEMPT]),
+            overlapping: Effect.sync(() => [...opened]),
           });
           // The Run closes the Attempt from the stored failure without launching it again.
           const outcome = yield* executor.outcome(ATTEMPT_ID);

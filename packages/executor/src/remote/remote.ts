@@ -1,11 +1,14 @@
 import { CHILD_KILL_SCRIPT } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
-import type { AttemptWindow } from "@usine/core/attempt";
 import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, AttemptSalvage, RecoverySink } from "@usine/core/attempt/salvage";
 import type * as AttemptChannel from "@usine/core/attempt/channel";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
-import { harvestFacts, harvestPostedComments } from "@usine/core/step/harvest";
+import {
+  harvestFacts,
+  harvestPostedComments,
+  type OverlappingWindows,
+} from "@usine/core/step/harvest";
 import { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import { Deferred, Effect, Exit, Option, Schema, Scope } from "effect";
 import { durableSessionFor, type PostedCommentsHarvest } from "../durable-session.ts";
@@ -143,7 +146,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
       yield* session.recoverPostedComments(
         attempt,
         present
-          ? Option.some<PostedCommentsHarvest>((spec) =>
+          ? Option.some<PostedCommentsHarvest>((spec, overlapping) =>
               Effect.scoped(
                 Effect.gen(function* () {
                   const grant = yield* worker.grantFor(attempt.repository);
@@ -157,6 +160,7 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                   return yield* harvestPostedComments(
                     spec,
                     harvestCommand("cleanup", worktree, access),
+                    overlapping,
                   );
                 }),
               ),
@@ -202,16 +206,17 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
     const harvest = (
       workspace: AttemptWorkspace,
       access: RemoteAccess,
-      overlapping: ReadonlyArray<AttemptWindow>,
+      overlapping: OverlappingWindows<AttemptFailure>,
     ) =>
       harvestFacts(
-        { ...workspace.spec, overlapping },
+        workspace.spec,
         harvestCommand("launch", workspace.worktree, access),
+        overlapping,
       ).pipe(
         Effect.mapError(
           (error) =>
             new InfraFailure({
-              message: `Could not collect the Attempt's commits: ${error.message}`,
+              message: `Could not harvest the Attempt's checkout: ${error.message}`,
               cause: error,
             }),
         ),
@@ -472,8 +477,9 @@ export const remoteExecutorFor = <M extends RemoteMachine>(worker: RemoteWorker<
                 harvest: (overlapping) => harvest(prepared, access, overlapping),
                 harvestComments: (overlapping) =>
                   harvestPostedComments(
-                    { ...prepared.spec, overlapping },
+                    prepared.spec,
                     harvestCommand("launch", prepared.worktree, access),
+                    overlapping,
                   ),
                 keepForReattach: provisioned.keepForReattach,
               });

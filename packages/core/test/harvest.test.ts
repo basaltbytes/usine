@@ -4,7 +4,12 @@ import { Agent, AgentName, AgentPersona } from "../src/agent/agent.ts";
 import { BrainSpec, ModelId } from "../src/agent/brain.ts";
 import { AttemptId, AttemptWindow } from "../src/attempt/attempt.ts";
 import { CommitSha, RepositoryName, RepositoryRevision } from "../src/repository.ts";
-import { type HarvestSpec, harvestFacts } from "../src/step/harvest.ts";
+import {
+  type HarvestSpec,
+  harvestFacts,
+  harvestPostedComments,
+  type OverlappingWindows,
+} from "../src/step/harvest.ts";
 import type { StepResultFact } from "../src/step/result.ts";
 import { BotLogin } from "../src/worker.ts";
 
@@ -31,7 +36,6 @@ const spec: HarvestSpec = {
     parentEffort: Option.none(),
     persona: AgentPersona.make("Implement the issue."),
   }),
-  overlapping: [],
 };
 
 class CommandFailed extends Data.TaggedError("CommandFailed")<{ readonly message: string }> {}
@@ -44,14 +48,16 @@ const PULL_REQUESTS = `gh api repos/acme/demo/commits/${HEAD}/pulls?per_page=100
  * Harvests a checkout whose agent committed `HEAD` on top of the base, with
  * `remoteRefs` as the remote's branch and pull request refs, `pullRequests`
  * as GitHub's answer for the final commit, and `github` answering the other
- * GitHub commands for `harvested`. Returns the facts, the commands run, the
- * log lines at warning level or above, and the info log messages.
+ * GitHub commands for `harvested`, and `overlapping` reading the windows of
+ * the Agent's other Attempts on the Item. Returns the facts, the commands run,
+ * the log lines at warning level or above, and the info log messages.
  */
 const harvest = (
   remoteRefs: ReadonlyArray<string>,
   pullRequests: Answer,
   github: ReadonlyArray<readonly [string, Answer]> = [],
   harvested: HarvestSpec = spec,
+  overlapping: OverlappingWindows<CommandFailed> = Effect.succeed([]),
 ) => {
   const commands: Array<string> = [];
   const warnings: Array<string> = [];
@@ -64,11 +70,15 @@ const harvest = (
     [PULL_REQUESTS, pullRequests],
     ...github,
   ]);
-  return harvestFacts(harvested, (command, args) => {
-    const line = [command, ...args].join(" ");
-    commands.push(line);
-    return answers.get(line) ?? Effect.die(`unexpected command ${line}`);
-  }).pipe(
+  return harvestFacts(
+    harvested,
+    (command, args) => {
+      const line = [command, ...args].join(" ");
+      commands.push(line);
+      return answers.get(line) ?? Effect.die(`unexpected command ${line}`);
+    },
+    overlapping,
+  ).pipe(
     Effect.map((facts) => ({ facts, commands, warnings, infos })),
     Effect.provide(
       Logger.layer([
@@ -413,17 +423,24 @@ describe("harvesting an Attempt's facts", () => {
           ],
         ];
 
-        const fixed = yield* harvest([], NEVER_ASKED, listed(SINCE), {
-          ...itemRun("pull/71"),
-          attemptId: fix,
-          overlapping: [window(docs, "2026-10-19T12:05:00.700Z", null)],
-        });
-        const documented = yield* harvest([], NEVER_ASKED, listed("2026-10-19T12:05:01Z"), {
-          ...itemRun("pull/71"),
-          attemptId: docs,
-          preparedAt: Option.some(DateTime.makeUnsafe("2026-10-19T12:05:01.250Z")),
-          overlapping: [window(fix, "2026-10-19T12:00:00.100Z", "2026-10-19T12:10:00.000Z")],
-        });
+        const fixed = yield* harvest(
+          [],
+          NEVER_ASKED,
+          listed(SINCE),
+          { ...itemRun("pull/71"), attemptId: fix },
+          Effect.succeed([window(docs, "2026-10-19T12:05:00.700Z", null)]),
+        );
+        const documented = yield* harvest(
+          [],
+          NEVER_ASKED,
+          listed("2026-10-19T12:05:01Z"),
+          {
+            ...itemRun("pull/71"),
+            attemptId: docs,
+            preparedAt: Option.some(DateTime.makeUnsafe("2026-10-19T12:05:01.250Z")),
+          },
+          Effect.succeed([window(fix, "2026-10-19T12:00:00.100Z", "2026-10-19T12:10:00.000Z")]),
+        );
 
         // The 12:07 comment falls in both windows, so neither Attempt records
         // it. The comment edited at 12:07 was posted before either window
@@ -450,6 +467,94 @@ describe("harvesting an Attempt's facts", () => {
             kind: "issue-comment",
           },
         ]);
+      }),
+  );
+
+  it.effect(
+    "reads the windows once GitHub has listed the comments, so an Attempt that started during the harvest counts",
+    () =>
+      Effect.gen(function* () {
+        // The docs Attempt of the developer Agent starts on pull request 71
+        // while the fix Attempt's harvest runs, and posts before GitHub answers.
+        const docs = new AttemptWindow({
+          attemptId: AttemptId.make("docs/implement/1"),
+          startedAt: DateTime.makeUnsafe("2026-10-19T12:10:01Z"),
+          endedAt: Option.none(),
+        });
+        const open: Array<AttemptWindow> = [];
+        const comment = "https://github.com/acme/demo/pull/71#issuecomment-5";
+        const { facts, infos } = yield* harvest(
+          [],
+          NEVER_ASKED,
+          [
+            [
+              `gh api repos/acme/demo/issues/71/comments?since=${SINCE}&per_page=100 --paginate --slurp`,
+              Effect.sync(() => void open.push(docs)).pipe(
+                Effect.andThen(
+                  pages({
+                    html_url: comment,
+                    body: signed("Done."),
+                    user: { login: BOT },
+                    created_at: "2026-10-19T12:10:03Z",
+                    updated_at: "2026-10-19T12:10:03Z",
+                  }),
+                ),
+              ),
+            ],
+            ["gh api repos/acme/demo/pulls/71/reviews?per_page=100 --paginate --slurp", pages()],
+            [
+              `gh api repos/acme/demo/pulls/71/comments?since=${SINCE}&per_page=100 --paginate --slurp`,
+              pages(),
+            ],
+          ],
+          itemRun("pull/71"),
+          Effect.sync(() => [...open]),
+        );
+        assert.deepStrictEqual(comments(facts), []);
+        assert.deepInclude(infos, [
+          "Left out a comment that another open Attempt of the Agent on the Item could have posted",
+          {
+            attemptId: spec.attemptId,
+            overlapping: [docs.attemptId],
+            comment,
+            kind: "issue-comment",
+          },
+        ]);
+      }),
+  );
+
+  it.effect(
+    "fails a finished Attempt's harvest, and records no comment of an unsuccessful one, when the windows cannot be read",
+    () =>
+      Effect.gen(function* () {
+        const listed: ReadonlyArray<readonly [string, Answer]> = [
+          [
+            ISSUE_COMMENTS,
+            pages({
+              html_url: "https://github.com/acme/demo/issues/12#issuecomment-44",
+              body: signed("Done."),
+              user: { login: BOT },
+              created_at: "2026-10-19T12:01:00Z",
+              updated_at: "2026-10-19T12:01:00Z",
+            }),
+          ],
+        ];
+        const unread = Effect.fail(
+          new CommandFailed({ message: "the run tables are unavailable" }),
+        );
+        const error = yield* harvest([], NEVER_ASKED, listed, itemRun("issues/12"), unread).pipe(
+          Effect.flip,
+        );
+        assert(error._tag === "HarvestError" && error.stage === "windows");
+
+        const answers = new Map(listed);
+        const posted = yield* harvestPostedComments(
+          itemRun("issues/12"),
+          (command, args) =>
+            answers.get([command, ...args].join(" ")) ?? Effect.die("unexpected command"),
+          unread,
+        );
+        assert.deepStrictEqual(posted, []);
       }),
   );
 

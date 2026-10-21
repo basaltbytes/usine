@@ -1,9 +1,9 @@
 import type { ChildHost } from "@usine/agents/child-host";
-import type { AttemptId, AttemptWindow } from "@usine/core/attempt";
+import type { AttemptId } from "@usine/core/attempt";
 import * as AttemptChannel from "@usine/core/attempt/channel";
 import { AgentFailure, type AttemptFailure, RunawayFailure } from "@usine/core/attempt/failure";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
-import type { HarvestSpec } from "@usine/core/step/harvest";
+import type { HarvestSpec, OverlappingWindows } from "@usine/core/step/harvest";
 import type { Comment, StepResult, StepResultFact } from "@usine/core/step/result";
 import {
   type AttemptReport,
@@ -51,18 +51,19 @@ export interface DurableCheckout {
   readonly environment: Record<string, string>;
   /**
    * Collects the commits and pull requests the checkout holds and the comments
-   * the Attempt posted on its Item outside the `overlapping` windows of its
-   * Agent's other Attempts there.
+   * the Attempt posted on its Item, leaving out those posted in a window of
+   * its Agent's other Attempts there, which `overlapping` reads once GitHub
+   * has listed the comments. Fails when the windows cannot be read.
    */
   readonly harvest: (
-    overlapping: ReadonlyArray<AttemptWindow>,
+    overlapping: OverlappingWindows<AttemptFailure>,
   ) => Effect.Effect<ReadonlyArray<StepResultFact>, AttemptFailure>;
   /**
    * Collects only the comments, as `harvest` does, for an Attempt that ended
-   * without success; none when GitHub fails.
+   * without success; none when GitHub fails or the windows cannot be read.
    */
   readonly harvestComments: (
-    overlapping: ReadonlyArray<AttemptWindow>,
+    overlapping: OverlappingWindows<AttemptFailure>,
   ) => Effect.Effect<ReadonlyArray<Comment>>;
   /** Preserves the checkout when a restart needs to reattach the parent or repeat an unrecorded harvest. */
   readonly keepForReattach: Effect.Effect<void>;
@@ -70,11 +71,13 @@ export interface DurableCheckout {
 
 /**
  * Collects the comments the Attempt that `spec` describes posted on its Item,
- * in its checkout with a credential it acquires for the purpose. It fails only
- * when that credential cannot be acquired.
+ * in its checkout with a credential it acquires for the purpose, leaving out
+ * those posted in a window `overlapping` reads, as `DurableCheckout` does. It
+ * fails only when that credential cannot be acquired.
  */
-export type PostedCommentsHarvest = (
+export type PostedCommentsHarvest = <W>(
   spec: HarvestSpec,
+  overlapping: OverlappingWindows<W>,
 ) => Effect.Effect<ReadonlyArray<Comment>, ExecutorError>;
 
 export interface DurableSessionOptions {
@@ -172,10 +175,11 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
 
   /**
    * Records the comments and reviews an Attempt that ended without success
-   * posted on its Run's Item, once its parent task has stopped. When the
-   * windows of its Agent's other Attempts on the Item cannot be read, its
-   * comments cannot be told from theirs and none is recorded. A failure is
-   * logged and never changes how the Attempt ended.
+   * posted on its Run's Item, once its parent task has stopped. The harvest
+   * reads the windows of its Agent's other Attempts on the Item through
+   * `io.overlapping` once GitHub has listed the comments, and records none
+   * when they cannot be read, since its comments cannot be told from theirs.
+   * A failure is logged and never changes how the Attempt ended.
    */
   const recordPostedComments = Effect.fn("DurableSession.recordPostedComments")(function* (
     attemptId: AttemptId,
@@ -183,19 +187,7 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
     io: AttemptChannel.Sink,
   ) {
     yield* Effect.annotateCurrentSpan({ attemptId });
-    const overlapping = yield* io.overlapping.pipe(Effect.result);
-    if (Result.isFailure(overlapping)) {
-      yield* Effect.logWarning(
-        "Could not read the windows of the Agent's other Attempts on the Item; the comments the Attempt posted are not recorded",
-        { attemptId, errorTag: overlapping.failure._tag, message: overlapping.failure.message },
-      );
-      return;
-    }
-    yield* recordComments(
-      attemptId,
-      yield* checkout.harvestComments(overlapping.success),
-      io.comments,
-    );
+    yield* recordComments(attemptId, yield* checkout.harvestComments(io.overlapping), io.comments);
   });
 
   const launch = Effect.fn("DurableSession.launch")(function* (
@@ -247,11 +239,13 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       )
         return yield* new AgentFailure({ message: "The Attempt's parent task was canceled" });
       const report = yield* executed;
-      // Read now, not at preparation: an Attempt of the Agent that started on
-      // the Item after this one overlaps it too (#429). Without them the
-      // harvest cannot tell this Attempt's comments from that one's, so a read
-      // that fails fails the Attempt, as a failing harvest command does.
-      const facts = yield* checkout.harvest(yield* io.overlapping);
+      // The harvest reads the windows once GitHub has listed the comments, not
+      // at preparation or before it starts: an Attempt of the Agent that
+      // starts on the Item later, even while the harvest runs, overlaps this
+      // one too (#429). Without them the harvest cannot tell this Attempt's
+      // comments from that one's, so a read that fails fails the Attempt, as
+      // an invalid git result does.
+      const facts = yield* checkout.harvest(io.overlapping);
       const harvested = harvestedResult(report, facts);
       if (Result.isFailure(harvested)) {
         yield* Effect.logWarning(
@@ -566,8 +560,9 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
    * failure. The Run closes such an Attempt from that failure without
    * launching it again, so no launch recorded them. `harvest` collects them
    * from the Attempt's checkout, and is none when the checkout is gone; it
-   * leaves out those posted in the windows `record.overlapping` reads, as a
-   * launch does. Any other Attempt records nothing, and every failure is
+   * leaves out those posted in the windows `record.overlapping` reads once
+   * GitHub has listed them, as a launch does, and records none when they
+   * cannot be read. Any other Attempt records nothing, and every failure is
    * logged, never raised.
    */
   const recoverPostedComments = Effect.fn("DurableSession.recoverPostedComments")(function* <E>(
@@ -619,20 +614,12 @@ export const durableSessionFor = Effect.fn("DurableSession.for")(function* (
       );
       return;
     }
-    const overlapping = yield* record.overlapping.pipe(Effect.result);
-    if (Result.isFailure(overlapping)) {
-      yield* Effect.logWarning(
-        "The open Attempt's parent task failed and the windows of its Agent's other Attempts on the Item cannot be read; the comments it posted are not recorded",
-        { attemptId, worker, message: String(overlapping.failure) },
-      );
-      return;
-    }
     yield* Effect.logInfo(
       "The open Attempt's parent task failed before this process recorded it; harvesting the comments it posted from its checkout",
-      { attemptId, worker, overlapping: overlapping.success.map((window) => window.attemptId) },
+      { attemptId, worker },
     );
     const comments = yield* harvest
-      .value({ ...stored.success.value.spec, overlapping: overlapping.success })
+      .value(stored.success.value.spec, record.overlapping)
       .pipe(Effect.result);
     if (Result.isFailure(comments)) {
       yield* Effect.logWarning(

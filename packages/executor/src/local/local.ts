@@ -2,14 +2,17 @@ import { workerLeftoversFor } from "./leftovers.ts";
 import { localCredentialsFor } from "./credentials.ts";
 import { LocalProcess } from "@usine/agents/child-host";
 import { ClaudeLoginLock } from "@usine/agents/runtime";
-import type { AttemptWindow } from "@usine/core/attempt";
 import type { AttemptRecovery, RecoverySink } from "@usine/core/attempt/salvage";
 import type { BrainSpec } from "@usine/core/agent/brain";
 import * as AttemptChannel from "@usine/core/attempt/channel";
-import { InfraFailure } from "@usine/core/attempt/failure";
+import { type AttemptFailure, InfraFailure } from "@usine/core/attempt/failure";
 import { RepositoryName, safeSegment } from "@usine/core/repository";
 import { InstanceDirectory } from "@usine/core/instance";
-import { harvestFacts, harvestPostedComments } from "@usine/core/step/harvest";
+import {
+  harvestFacts,
+  harvestPostedComments,
+  type OverlappingWindows,
+} from "@usine/core/step/harvest";
 import type { AttemptRuntime } from "@usine/durable/attempt-runtime";
 import {
   Effect,
@@ -262,7 +265,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       yield* session.recoverPostedComments(
         attempt,
         present
-          ? Option.some<PostedCommentsHarvest>((spec) =>
+          ? Option.some<PostedCommentsHarvest>((spec, overlapping) =>
               Effect.scoped(
                 Effect.gen(function* () {
                   const credential = yield* credentials(
@@ -274,6 +277,7 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
                   return yield* harvestPostedComments(
                     spec,
                     harvestCommand("cleanup", worktree, credential, credential.environment),
+                    overlapping,
                   );
                 }),
               ),
@@ -366,16 +370,17 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
       workspace: AttemptWorkspace,
       credential: Effect.Success<ReturnType<typeof credentials>>,
       environment: Record<string, string>,
-      overlapping: ReadonlyArray<AttemptWindow>,
+      overlapping: OverlappingWindows<AttemptFailure>,
     ) =>
       harvestFacts(
-        { ...workspace.spec, overlapping },
+        workspace.spec,
         harvestCommand("launch", workspace.worktree, credential, environment),
+        overlapping,
       ).pipe(
         Effect.mapError(
           (error) =>
             new InfraFailure({
-              message: `Could not collect the Attempt's commits: ${error.message}`,
+              message: `Could not harvest the Attempt's checkout: ${error.message}`,
               cause: error,
             }),
         ),
@@ -496,8 +501,9 @@ const makeLocalExecutor = (options: LocalExecutorOptions) =>
               harvest(prepared.workspace, credential, environment, overlapping),
             harvestComments: (overlapping) =>
               harvestPostedComments(
-                { ...prepared.workspace.spec, overlapping },
+                prepared.workspace.spec,
                 harvestCommand("launch", prepared.workspace.worktree, credential, environment),
+                overlapping,
               ),
             keepForReattach: prepared.keepForReattach,
           }),
