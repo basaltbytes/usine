@@ -7,7 +7,7 @@ import {
   CycleLimit,
   LoopCycleCount,
 } from "@usine/core/cycle-budget";
-import { BoardMoves } from "@usine/engine/board-moves";
+import { type BoardMoveRecord, BoardMoves } from "@usine/engine/board-moves";
 import { CycleBudgets } from "@usine/engine/cycle-budget";
 import { BrainSpec, ModelId } from "@usine/core/agent/brain";
 import { AgentName, Agent, AgentPersona } from "@usine/core/agent";
@@ -59,6 +59,7 @@ import {
 import { LoopControl, LoopRuntimeState } from "@usine/engine/loop-control";
 import {
   ProjectionRevision,
+  RunEvent,
   RunSnapshot,
   RunReader,
   WorkerAttempts,
@@ -357,6 +358,8 @@ const testLayer = (
   usageQueries: Array<AttemptId> = [],
   /** Token reports a test adds as its Attempts work on; the usage query returns them too. */
   laterReports: ReadonlyArray<TranscriptEntry> = [],
+  /** Receives each Board move the operator records, in order. */
+  recordedMoves: Array<BoardMoveRecord> = [],
 ) => {
   const readTranscript = (query: TranscriptQuery) =>
     Effect.succeed(
@@ -404,7 +407,12 @@ const testLayer = (
       ),
     closed: () => Effect.succeed([]),
     forItems: () => Effect.succeed([runSnapshot]),
-    events: () => Effect.die("unused"),
+    events: (runIds) =>
+      Effect.succeed(
+        runIds.includes(runSnapshot.run.id)
+          ? [new RunEvent({ runId: runSnapshot.run.id, event: runSnapshot.event })]
+          : [],
+      ),
     revision: () => Ref.get(projectionRevision),
     transcript: readTranscript,
     attemptsByWorker: () =>
@@ -537,7 +545,7 @@ const testLayer = (
     appChanges: () => Effect.die("unused"),
   });
   const boardMoves = Layer.succeed(BoardMoves)({
-    record: () => Effect.void,
+    record: (move) => Effect.sync(() => recordedMoves.push(move)),
     onItem: () => Effect.die("unused"),
   });
   const dependencies = Layer.mergeAll(
@@ -660,6 +668,68 @@ describe("Operator", () => {
           ],
         );
       }).pipe(Effect.provide(testLayer(approved, moved, reads, revision, current)));
+    }),
+  );
+
+  it.effect("keeps a running Run's card in the lane its Event's labels routed to", () =>
+    Effect.gen(function* () {
+      const approved = yield* Ref.make<ReadonlyArray<RecordedApproval>>([]);
+      const moved = yield* Ref.make<ItemLabelMutation | null>(null);
+      const reads = yield* Ref.make(0);
+      const revision = yield* Ref.make(Option.some(ProjectionRevision.make(1)));
+      // Issue #31 carries `ready` now; its Run was triggered while it carried `ready-for-review`.
+      const triggered = new Event({
+        ...snapshot.event,
+        payload: { number: 31, labels: { totalCount: 1, nodes: [{ name: "ready-for-review" }] } },
+      });
+      const laneOf = (overview: ReadyOverview): string | undefined =>
+        overview.projects[0]?.board.lanes.find(({ items }) =>
+          items.some((item) => item.itemKey === itemKey),
+        )?.name;
+      for (const [state, lane] of [
+        [new RunState.Running(), "In review"],
+        [new RunState.Waiting(), "Ready"],
+      ] as const) {
+        const current = new RunSnapshot({
+          ...snapshot,
+          event: triggered,
+          run: new Run({ ...snapshot.run, state }),
+        });
+        const recordedMoves: Array<BoardMoveRecord> = [];
+        yield* Effect.gen(function* () {
+          const operator = yield* Operator;
+          assert.strictEqual(laneOf(yield* operator.overview(instance)), lane);
+          // A move records the lane the Board showed the card in.
+          const toLane = lane === "Ready" ? "In review" : "Ready";
+          yield* operator.moveBoardItem(
+            instance,
+            new BoardMove({
+              repository,
+              item: CoreItemNumber.make(31),
+              toLane: BoardLaneId.make(`authored:${toLane}`),
+            }),
+          );
+          assert.deepStrictEqual(
+            recordedMoves.map(({ fromLane, toLane: recordedTo }) => [fromLane, recordedTo]),
+            [[lane, toLane]],
+          );
+        }).pipe(
+          Effect.provide(
+            testLayer(
+              approved,
+              moved,
+              reads,
+              revision,
+              current,
+              noCycleBudgets,
+              undefined,
+              [],
+              [],
+              recordedMoves,
+            ),
+          ),
+        );
+      }
     }),
   );
 

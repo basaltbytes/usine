@@ -29,7 +29,7 @@ import {
   BoardLaneId,
   BoardProjectNotFoundError,
 } from "./board.ts";
-import { runView, workerAccesses } from "./projection.ts";
+import { readRunningEvents, runView, workerAccesses } from "./projection.ts";
 import { RunView } from "./run.ts";
 
 /** How many newest Items the Board, and so a Task's membership, considers; older ones drop off. */
@@ -44,7 +44,7 @@ export class TaskItemView extends Schema.Class<TaskItemView>("@usine/orchestrato
   conflicting: Schema.Boolean,
 }) {}
 
-/** The Board lane a Task sits in, placed by its current Item. */
+/** The Board lane a Task sits in: its current Item's, or the one its running Run was triggered from. */
 export class TaskLaneView extends Schema.Class<TaskLaneView>("@usine/orchestrator/TaskLaneView")({
   id: BoardLaneId,
   name: LaneName,
@@ -76,7 +76,10 @@ export class TaskView extends Schema.Class<TaskView>("@usine/orchestrator/TaskVi
   repository: RepositoryName,
   number: ItemNumber,
   title: Schema.String,
-  /** The Item whose labels and state place the Task in its lane, and whose labels a Board move changes. */
+  /**
+   * The Item whose labels and state place the Task in its lane, unless its running Run keeps it in
+   * the lane that Run was triggered from, and whose labels a Board move changes.
+   */
   current: ItemKey,
   lane: TaskLaneView,
   /** A Run on one of its Items waits for approval or a failure decision, or an Item used up its cycle budget. */
@@ -158,6 +161,7 @@ const makeTaskReader = Effect.gen(function* () {
       { concurrency: "unbounded" },
     );
     const summaries = yield* reader.forItems(stored.map(({ itemKey }) => itemKey));
+    const runEvents = yield* readRunningEvents(reader, summaries);
     const paused = new Set(states.filter((state) => state.paused).map((state) => state.loop));
     const access = workerAccesses(instance.config.workers);
     const board = yield* projectBoard(
@@ -169,6 +173,9 @@ const makeTaskReader = Effect.gen(function* () {
       stored,
       summaries.map((summary) => runView(summary, paused, access)),
       asks.map(({ itemKey }) => itemKey),
+      new Map(),
+      new Map(),
+      runEvents,
     );
     const placed = board.lanes
       .flatMap((lane) => lane.items.map((task) => ({ lane, task })))

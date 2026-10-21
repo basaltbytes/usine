@@ -91,6 +91,7 @@ import {
   RosterAgentNotFoundError,
 } from "./run.ts";
 import {
+  readRunningEvents,
   readTranscript,
   readUnrecordedEnds,
   runDuration,
@@ -112,6 +113,7 @@ export type BoardMoveError =
   | BoardLaneReadOnlyError
   | BoardProjectNotFoundError
   | EnginePersistenceError
+  | RunStoreError
   | GitHubAppError;
 export type OperatorError =
   | LoopNotFoundError
@@ -246,17 +248,23 @@ const makeOperatorObservation = Effect.gen(function* () {
             (a, b) => b.openedAt.localeCompare(a.openedAt) || b.id.localeCompare(a.id),
           );
           // The Runs on the Board's Items, whose usage the Task cards add up. The reader keeps
-          // ended Attempts' reports, so only Attempts at work are read again.
-          const runUsage = new Map(
-            yield* Effect.forEach(
-              history,
-              (summary) =>
-                usageReader
-                  .read(summary)
-                  .pipe(Effect.map((usage) => [summary.run.id, usage] as const)),
-              { concurrency: 4 },
-            ),
+          // ended Attempts' reports, so only Attempts at work are read again. A running Run's
+          // Event says which lane its card stays in while its Agent changes the labels.
+          const [usages, runEvents] = yield* Effect.all(
+            [
+              Effect.forEach(
+                history,
+                (summary) =>
+                  usageReader
+                    .read(summary)
+                    .pipe(Effect.map((usage) => [summary.run.id, usage] as const)),
+                { concurrency: 4 },
+              ),
+              readRunningEvents(reader, history),
+            ] as const,
+            { concurrency: "unbounded" },
           );
+          const runUsage = new Map(usages);
           yield* Effect.logDebug("Read the usage of the Board's Runs", {
             repository: name,
             runs: runUsage.size,
@@ -273,6 +281,7 @@ const makeOperatorObservation = Effect.gen(function* () {
             cycleAsks.map(({ itemKey }) => itemKey),
             itemLoops,
             runUsage,
+            runEvents,
           );
           const working = history.filter(({ attempts }) =>
             attempts.some(({ outcome }) => Option.isNone(outcome)),
@@ -639,6 +648,7 @@ const makeOperator = Effect.gen(function* () {
   const items = yield* ItemProjectionReader;
   const repositoryLabels = yield* RepositoryLabelProjectionReader;
   const github = yield* GitHubItemWriter;
+  const reader = yield* RunReader;
   const boardMoves = yield* BoardMoves;
   const polling = yield* PollingTriggers;
   const githubChanges = yield* RunGitHubChanges;
@@ -819,6 +829,11 @@ const makeOperator = Effect.gen(function* () {
         ] as const,
         { concurrency: "unbounded" },
       );
+      // The Items' Runs place each card as the Board shows it, so the move records the lane
+      // the card left, also while a running Run keeps it in the lane it was triggered from.
+      const summaries = yield* reader.forItems(storedItems.map(({ itemKey }) => itemKey));
+      const runEvents = yield* readRunningEvents(reader, summaries);
+      const access = workerAccesses(instance.config.workers);
       const board = yield* projectBoard(
         repository,
         Option.match(labelProjection, {
@@ -826,7 +841,12 @@ const makeOperator = Effect.gen(function* () {
           onSome: ({ labels }) => labels.map(({ name }) => name),
         }),
         storedItems,
+        // Placement reads no pause state, so these views leave every Loop unpaused.
+        summaries.map((summary) => runView(summary, new Set(), access)),
         [],
+        new Map(),
+        new Map(),
+        runEvents,
       );
       const source = board.lanes.find(({ items: laneItems }) =>
         laneItems.some(({ items }) => items.some(({ number }) => number === move.item)),
