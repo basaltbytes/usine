@@ -42,6 +42,7 @@ import { plainRetry, type RetryRequest } from "../engine/retry.ts";
 import { StepExecution } from "../step-executor.ts";
 import { TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import { attemptWindowQueries } from "./attempt-windows.ts";
+import { leftoverQueries } from "./leftovers.ts";
 import { persistence, submissionFromRow } from "./codec.ts";
 import { queriesFor, type QueuedEvents } from "./queries.ts";
 import {
@@ -561,14 +562,13 @@ const makeRunStore = Effect.gen(function* () {
     yield* Effect.annotateCurrentSpan({ worker });
     const discardedAt = yield* DateTime.now;
     return yield* database.transaction((transaction) =>
-      queriesFor(transaction).discardLeftovers(worker, discardedAt),
+      leftoverQueries(transaction).discardLeftovers(worker, discardedAt),
     );
   }, persistence("discard Attempt leftovers"));
 
   const openAttempts = Effect.fn("RunStore.openAttempts")(function* (worker: WorkerName) {
     yield* Effect.annotateCurrentSpan({ worker });
-    const counted = yield* queriesFor(database).attemptCountsByWorker();
-    return counted.find((count) => count.worker === worker)?.running ?? 0;
+    return yield* leftoverQueries(database).openAttempts(worker);
   }, persistence("count open Attempts"));
 
   const finishAttempt = Effect.fn("RunStore.finishAttempt")(function* (

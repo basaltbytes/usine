@@ -13,6 +13,7 @@ import {
 import { TranscriptAllQuery, TranscriptEntry, TranscriptQuery } from "../transcript.ts";
 import type { RunStoreError } from "../engine/error.ts";
 import { persistence } from "../store/codec.ts";
+import { leftoverQueries } from "../store/leftovers.ts";
 import { queriesFor } from "../store/queries.ts";
 
 const makeRunReader = Effect.gen(function* () {
@@ -62,7 +63,7 @@ const makeRunReader = Effect.gen(function* () {
     queries.transcript(query).pipe(persistence("read Attempt transcript")),
   );
   const attemptsByWorker = Effect.fn("RunReader.attemptsByWorker")(() =>
-    queries.attemptCountsByWorker().pipe(persistence("count Attempts by Worker")),
+    leftoverQueries(database).attemptCountsByWorker().pipe(persistence("count Attempts by Worker")),
   );
   const sightings = Effect.fn("RunReader.sightings")((itemKeys: ReadonlyArray<ItemKey>) =>
     queries.loopItems.sightings(itemKeys).pipe(persistence("read Loop sightings")),
